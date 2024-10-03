@@ -1,6 +1,6 @@
-# config/constants_and_names.py
+# constants_and_names.py
 
-import os
+import posixpath
 from datetime import datetime
 import boto3
 from botocore.exceptions import ClientError
@@ -36,54 +36,52 @@ sample_tile_id = '{tile_id}'
 # 2. Dataset Configurations
 # ---------------------------------------------------
 
-# TODO update working version paths
-
 datasets = {
     'osm': {
         'roads': {
-            's3_raw': os.path.join(project_dir, raw_dir, 'roads', 'osm_roads', 'roads_by_tile'),
-            's3_processed_base': os.path.join(project_dir, processed_dir, 'osm_roads_density'),
-            's3_processed_small': os.path.join(project_dir, processed_dir, 'osm_roads_density', '4000_pixels', today_date),
-            's3_processed': os.path.join(project_dir, processed_dir, 'osm_roads_density', today_date),
-            'local_processed': os.path.join(local_temp_dir, 'osm_roads_density', today_date),
-            # 'working_version': os.path.join(project_dir, processed_dir, 'osm_roads_density', 'working_version') # note this needs to be updated
+            's3_raw': posixpath.join(project_dir, raw_dir, 'roads', 'osm_roads', 'roads_by_tile'),
+            's3_processed_base': posixpath.join(project_dir, processed_dir, 'osm_roads_density'),
+            's3_processed_small': posixpath.join(project_dir, processed_dir, 'osm_roads_density', '4000_pixels', today_date),
+            's3_processed': posixpath.join(project_dir, processed_dir, 'osm_roads_density', today_date),
+            'local_processed': posixpath.join(local_temp_dir, 'osm_roads_density', today_date),
+            'working_version': posixpath.join(project_dir, processed_dir, 'osm_roads_density', '40000_pixels', '20240925')
         },
         'canals': {
-            's3_raw': os.path.join(project_dir, raw_dir, 'roads', 'osm_roads', 'canals_by_tile'),
-            's3_processed_base': os.path.join(project_dir, processed_dir, 'osm_canals_density'),
-            's3_processed_small': os.path.join(project_dir, processed_dir, 'osm_canals_density', '4000_pixels', today_date),
-            's3_processed': os.path.join(project_dir, processed_dir, 'osm_canals_density', today_date),
-            'local_processed': os.path.join(local_temp_dir, 'osm_canals_density', today_date),
-            # 'working_version': os.path.join(project_dir, processed_dir, 'osm_canals_density', '20240822')
+            's3_raw': posixpath.join(project_dir, raw_dir, 'roads', 'osm_roads', 'canals_by_tile'),
+            's3_processed_base': posixpath.join(project_dir, processed_dir, 'osm_canals_density'),
+            's3_processed_small': posixpath.join(project_dir, processed_dir, 'osm_canals_density', '4000_pixels', today_date),
+            's3_processed': posixpath.join(project_dir, processed_dir, 'osm_canals_density', today_date),
+            'local_processed': posixpath.join(local_temp_dir, 'osm_canals_density', today_date),
+            'working_version': posixpath.join(project_dir, processed_dir, 'osm_canals_density', '40000_pixels', '20240822')
         }
     },
     'grip': {
         'roads': {
-            's3_raw': os.path.join(project_dir, raw_dir, 'roads', 'grip_roads', 'roads_by_tile'),
-            's3_processed_base': os.path.join(project_dir, processed_dir, 'grip_density'),
-            's3_processed_small': os.path.join(project_dir, processed_dir, 'grip_density', '4000_pixels', today_date),
-            's3_processed': os.path.join(project_dir, processed_dir, 'grip_density', today_date),
-            'local_processed': os.path.join(local_temp_dir, 'grip_density', today_date),
-            # 'working_version': os.path.join(project_dir, processed_dir, 'grip_density', '20240822') #note this needs to be updated
+            's3_raw': posixpath.join(project_dir, raw_dir, 'roads', 'grip_roads', 'roads_by_tile'),
+            's3_processed_base': posixpath.join(project_dir, processed_dir, 'grip_density'),
+            's3_processed_small': posixpath.join(project_dir, processed_dir, 'grip_density', '4000_pixels', today_date),
+            's3_processed': posixpath.join(project_dir, processed_dir, 'grip_density', today_date),
+            'local_processed': posixpath.join(local_temp_dir, 'grip_density', today_date),
+            'working_version': posixpath.join(project_dir, processed_dir, 'grip_density', '40000_pixels', '20240925')
         }
     },
     'engert': {
-        's3_raw': os.path.join(project_dir, raw_dir, 'roads', 'engert_roads', 'engert_asiapac_ghrdens_1km_resample_30m.tif'),
-        's3_processed_base': os.path.join(project_dir, processed_dir, 'engert_density', '30m'),
-        's3_processed': os.path.join(project_dir, processed_dir, 'engert_density', '30m', today_date),
-        'local_processed': os.path.join(local_temp_dir, 'engert_density', today_date),
-        'working_version': os.path.join(project_dir, processed_dir, 'engert_density', '30m', '20240925')
+        's3_raw': posixpath.join(project_dir, raw_dir, 'roads', 'engert_roads', 'engert_asiapac_ghrdens_1km_resample_30m.tif'),
+        's3_processed_base': posixpath.join(project_dir, processed_dir, 'engert_density', '30m'),
+        's3_processed': posixpath.join(project_dir, processed_dir, 'engert_density', '30m', today_date),
+        'local_processed': posixpath.join(local_temp_dir, 'engert_density', today_date),
+        'working_version': posixpath.join(project_dir, processed_dir, 'engert_density', '30m', '20240925')
     },
     'dadap': {
-        's3_raw': os.path.join(project_dir, raw_dir, 'canals', 'Dadap_SEA_Drainage', 'canal_length_data', 'canal_length_1km_resample_30m.tif'),
-        's3_processed_base': os.path.join(project_dir, processed_dir, 'dadap_density', '30m'),
-        's3_processed': os.path.join(project_dir, processed_dir, 'dadap_density', '30m', today_date),
-        'local_processed': os.path.join(local_temp_dir, 'dadap_density', today_date),
-        'working_version': os.path.join(project_dir, processed_dir, 'dadap_density', '30m', '20240925')
+        's3_raw': posixpath.join(project_dir, raw_dir, 'canals', 'Dadap_SEA_Drainage', 'canal_length_data', 'canal_length_1km_resample_30m.tif'),
+        's3_processed_base': posixpath.join(project_dir, processed_dir, 'dadap_density', '30m'),
+        's3_processed': posixpath.join(project_dir, processed_dir, 'dadap_density', '30m', today_date),
+        'local_processed': posixpath.join(local_temp_dir, 'dadap_density', today_date),
+        'working_version': posixpath.join(project_dir, processed_dir, 'dadap_density', '30m', '20240925')
     },
     'planted_forest_type': {
-        's3_processed_base': os.path.join('climate', 'carbon_model', 'other_emissions_inputs', 'plantation_type', 'SDPTv2', '20230911'),
-        # 'working_version': os.path.join('climate', 'carbon_model', 'other_emissions_inputs', 'plantation_type', 'SDPTv2', 'working_version')
+        's3_processed_base': posixpath.join('climate', 'carbon_model', 'other_emissions_inputs', 'plantation_type', 'SDPTv2', '20230911'),
+        'working_version': posixpath.join('climate', 'carbon_model', 'other_emissions_inputs', 'plantation_type', 'SDPTv2', '20230911')
     }
     # Add other datasets as needed
 }
@@ -125,16 +123,15 @@ file_patterns = {
 
 # Prepare download dictionary using 'working_version' paths
 download_dict = {
-    # f"{file_patterns['land_cover']}_2020": f"{lc_uri}/composite/2020/raw/{sample_tile_id}.tif",
-    # # file_patterns['planted_forest_type_layer']: f"s3://{s3_bucket_name}/{datasets['planted_forest_type']['working_version']}/{sample_tile_id}_plantation_type_oilpalm_woodfiber_other.tif",
-    # file_patterns['peat']: f"s3://{s3_bucket_name}/{peat_tiles_prefix_1km}{sample_tile_id}{peat_pattern}",
-    # file_patterns['dadap']: f"s3://{s3_bucket_name}/{datasets['dadap']['working_version']}/dadap_{sample_tile_id}.tif",
-    # file_patterns['engert']: f"s3://{s3_bucket_name}/{datasets['engert']['working_version']}/engert_{sample_tile_id}.tif",
-    # file_patterns['grip']: f"s3://{s3_bucket_name}/{datasets['grip']['working_version']}/grip_density_{sample_tile_id}.tif",
-    # file_patterns['osm_roads']: f"s3://{s3_bucket_name}/{datasets['osm']['roads']['working_version']}/roads_density_{sample_tile_id}.tif",
-    # file_patterns['osm_canals']: f"s3://{s3_bucket_name}/{datasets['osm']['canals']['working_version']}/canals_density_{sample_tile_id}.tif"
+    f"{file_patterns['land_cover']}_2020": f"{lc_uri}/composite/2020/raw/{sample_tile_id}.tif",
+    file_patterns['peat']: f"s3://{s3_bucket_name}/{posixpath.join(peat_tiles_prefix_1km, sample_tile_id + peat_pattern)}",
+    file_patterns['dadap']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['dadap']['working_version'], f'dadap_{sample_tile_id}.tif')}",
+    file_patterns['engert']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['engert']['working_version'], f'engert_{sample_tile_id}.tif')}",
+    file_patterns['grip']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['grip']['roads']['working_version'], f'{sample_tile_id}_grip_density.tif')}",
+    file_patterns['osm_roads']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['osm']['roads']['working_version'], f'{sample_tile_id}_osm_roads_density.tif')}",
+    file_patterns['osm_canals']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['osm']['canals']['working_version'], f'{sample_tile_id}_osm_canals_density.tif')}",
+    file_patterns['planted_forest_type_layer']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['planted_forest_type']['working_version'], f'{sample_tile_id}_plantation_type_oilpalm_woodfiber_other.tif')}",
 }
-
 
 ### Miscellaneous
 
@@ -148,7 +145,6 @@ tree_threshold = 5
 
 # Converts tonnes to megatonnes
 t_to_Mt = 10**-3
-
 
 # ---------------------------------------------------
 # 5. Helper Functions
