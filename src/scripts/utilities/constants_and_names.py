@@ -13,10 +13,16 @@ from botocore.exceptions import ClientError
 s3_bucket_name = 'gfw2-data'
 s3_region_name = 'us-east-1'
 
+short_bucket_prefix = 'gfw2-data'
+full_bucket_prefix = "s3://" + s3_bucket_name
+
 # Project Directories
 project_dir = 'climate/AFOLU_flux_model/organic_soils'
 raw_dir = 'inputs/raw'
 processed_dir = 'inputs/processed'
+
+
+tile_id_pattern = r"[0-9]{2}[A-Z][_][0-9]{3}[A-Z]"
 
 # Local Directories
 local_root = 'C:/GIS/Data/Global'  # Adjust as needed for your local environment
@@ -27,6 +33,7 @@ today_date = datetime.today().strftime('%Y%m%d')
 
 # File Patterns
 peat_pattern = '_peat_mask_processed.tif'
+peat_tiles_prefix = 'climate/AFOLU_flux_model/organic_soils/inputs/raw/soils/GFW_Global_Peatlands'
 peat_tiles_prefix_1km = 'climate/AFOLU_flux_model/organic_soils/inputs/processed/peat_mask/1km/'
 
 # Sample Tile ID Placeholder
@@ -91,7 +98,9 @@ datasets = {
 # ---------------------------------------------------
 
 # Land Cover URI
-lc_uri = 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/inputs/LC'
+# lc_uri = 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/inputs/LC'
+
+lc_uri = 'climate/AFOLU_flux_model/LULUCF/outputs/IPCC_basic_classes/2020/40000_pixels/20240205'
 
 # IPCC Codes
 ipcc_codes = {
@@ -123,8 +132,8 @@ file_patterns = {
 
 # Prepare download dictionary using 'working_version' paths
 download_dict = {
-    f"{file_patterns['land_cover']}_2020": f"{lc_uri}/composite/2020/raw/{sample_tile_id}.tif",
-    file_patterns['peat']: f"s3://{s3_bucket_name}/{posixpath.join(peat_tiles_prefix_1km, sample_tile_id + peat_pattern)}",
+    file_patterns['land_cover']: f's3://{s3_bucket_name}/{posixpath.join(lc_uri, f"{sample_tile_id}.tif")}',
+    file_patterns['peat']: f's3://{s3_bucket_name}/{posixpath.join(peat_tiles_prefix, f"{sample_tile_id}.tif")}',
     file_patterns['dadap']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['dadap']['working_version'], f'dadap_{sample_tile_id}.tif')}",
     file_patterns['engert']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['engert']['working_version'], f'engert_{sample_tile_id}.tif')}",
     file_patterns['grip']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['grip']['roads']['working_version'], f'{sample_tile_id}_grip_density.tif')}",
