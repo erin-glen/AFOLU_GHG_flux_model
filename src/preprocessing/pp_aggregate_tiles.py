@@ -27,7 +27,7 @@ It also allows testing for a specific tile ID and processing specific datasets.
 # ----------------------------- Logging Setup -----------------------------
 
 # Set up general logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Suppress specific warnings
 warnings.filterwarnings('ignore', 'Geometry is in a geographic CRS. Results from', UserWarning)
@@ -66,14 +66,13 @@ def extract_tile_id_from_filename(filename):
     else:
         return None
 
-def list_tile_ids(bucket, prefix, pattern):
+def list_tile_ids(bucket, prefix):
     """
-    List all tile IDs in a specified S3 directory matching a given pattern.
+    List all tile IDs in a specified S3 directory.
 
     Args:
         bucket (str): The S3 bucket name.
         prefix (str): The prefix path in the S3 bucket.
-        pattern (str): Regex pattern to match tile IDs.
 
     Returns:
         list: List of tile IDs.
@@ -82,26 +81,29 @@ def list_tile_ids(bucket, prefix, pattern):
     keys = []
     tile_ids = set()
     try:
-        logging.info(f"Listing files in s3://{bucket}/{prefix} with pattern '{pattern}'")
+        logging.info(f"Listing files in s3://{bucket}/{prefix}")
         paginator = s3_client.get_paginator('list_objects_v2')
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for obj in page.get('Contents', []):
-                keys.append(obj['Key'])
+                key = obj['Key']
+                if not key.endswith('/'):  # Ignore directory placeholders
+                    keys.append(key)
 
         logging.info(f"Retrieved {len(keys)} keys from S3")
 
         # Extract tile IDs from filenames
         for key in keys:
             filename = os.path.basename(key)
-            logging.debug(f"Processing filename: {filename}")
-            match = re.match(pattern, filename)
-            if match:
-                tile_ids.add(match.group(1))
-            else:
-                logging.debug(f"No match for filename: {filename}")
+            logging.debug(f"Processing filename: '{filename}'")
+
+            # Extract the first 8 characters as the tile ID
+            tile_id = filename[:8]
+            tile_ids.add(tile_id)
+            logging.debug(f"Extracted tile ID: {tile_id}")
     except Exception as e:
         logging.error(f"Error listing files in s3://{bucket}/{prefix}: {e}")
     return list(tile_ids)
+
 
 # ----------------------------- GDAL Hansenize Functions -----------------------------
 
@@ -305,7 +307,6 @@ def process_all_tiles(s3_in_folder, s3_out_folder, tile_id=None, no_upload=False
     logging.info(f"Processing tiles in {s3_in_folder}")
 
     s3_bucket_name = cn.s3_bucket_name
-    prefix = s3_in_folder
 
     # Correctly extract the dataset name from the folder path
     s3_path_parts = s3_in_folder.strip('/').split('/')
@@ -321,11 +322,8 @@ def process_all_tiles(s3_in_folder, s3_out_folder, tile_id=None, no_upload=False
 
     logging.info(f"Dataset name: {dataset_name}")
 
-    # Adjust the pattern to match your filenames
-    pattern = rf"(\d{{2}}[NS]_\d{{3}}[EW])_.*_{dataset_name}\.tif"
-
     # List all tile IDs
-    tile_ids = list_tile_ids(s3_bucket_name, prefix, pattern=pattern)
+    tile_ids = list_tile_ids(s3_bucket_name, s3_in_folder)
 
     if not tile_ids:
         logging.error("No tile IDs found to process.")
@@ -346,6 +344,7 @@ def process_all_tiles(s3_in_folder, s3_out_folder, tile_id=None, no_upload=False
     # Compute the tasks
     logging.info(f"Computing {len(tasks)} tasks")
     dask.compute(*tasks)
+
 
 # ----------------------------- Main Function -----------------------------
 
@@ -423,7 +422,7 @@ if __name__ == "__main__":
         run_local = True
         no_upload = False
         tile_id = '00N_110E'  # Set a default tile ID for testing
-        dataset = 'osm_roads_density'  # Specify a dataset to process
+        dataset = 'grip_density'  # Specify a dataset to process
 
         main(date=date, run_local=run_local, no_upload=no_upload, tile_id=tile_id, dataset=dataset)
     else:
@@ -451,6 +450,7 @@ Example Command-Line Usages:
 
 5. Run for a specific tile across all datasets:
 
+   python pp_aggregate_tiles.py --tile_id 00N_110E
    python pp_aggregate_tiles.py --tile_id 00N_110E
 
 """
