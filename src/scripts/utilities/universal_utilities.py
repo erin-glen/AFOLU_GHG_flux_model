@@ -23,8 +23,10 @@ from io import BytesIO
 from osgeo import gdal
 
 # Project imports
-from . import constants_and_names as cn
-from . import log_utilities as lu
+from src.scripts.utilities import constants_and_names as cn
+from src.scripts.utilities import universal_utilities as uu
+from src.scripts.utilities import log_utilities as lu
+from src.scripts.utilities import numba_utilities as nu
 
 # Time in Eastern US timezone as a string
 def timestr():
@@ -209,33 +211,46 @@ def prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels
 
 
 # Checks if tiles exist at all
+# universal_utilities.py
+
 def check_for_tile(download_dict, is_final, logger):
+    """
+    Checks if any of the datasets in download_dict have the tile present in S3.
+
+    Args:
+        download_dict (dict): Dictionary with dataset names as keys and [file_path, data_type] as values.
+        is_final (bool): Flag indicating if this is the final run.
+        logger (Logger): Logger object for logging.
+
+    Returns:
+        bool: True if at least one tile exists, False otherwise.
+    """
     s3 = boto3.client('s3')
 
-    i = 0
+    for value in download_dict.values():
+        # Extract the S3 key
+        s3_key = value[0][len("s3://gfw2-data/"):]  # Adjust if the bucket name differs
 
-    while i < len(list(download_dict.values())):
+        # Extract the tile_id using the tile_id_pattern
+        tile_id_matches = re.findall(cn.tile_id_pattern, value[0])
+        if not tile_id_matches:
+            logger.warning(f"No tile_id found in the file path: {value[0]}")
+            continue  # Skip if no tile_id is found
 
-        # Tile path and name in s3, without s3://gfw2-data/ (hence, [len(cn.full_bucket_prefix)+1:])
-        # [0] is to select the s3 path element of the list in the dictionary value (as opposed to the datatype, which is [1]
-        s3_key = list(download_dict.values())[i][0][len(cn.full_bucket_prefix)+1:]
+        tile_id = tile_id_matches[0]  # Get the first match
 
-        tile_id = re.findall(cn.tile_id_pattern, list(download_dict.values())[i][0])[0]  # Extracts the tile_id from the s3 path
-
-        # Breaks the loop if the tile exists. No need to keep checking other tiles because one exists.
+        # Check if the object exists in S3
         try:
             s3.head_object(Bucket='gfw2-data', Key=s3_key)
+            logger.info(f"Tile id {tile_id} exists for dataset. Proceeding.")
+            return True  # If at least one tile exists, return True
+        except s3.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                logger.info(f"Tile id {tile_id} does not exist for dataset. Continuing.")
+            else:
+                logger.error(f"Error checking S3 for tile_id {tile_id}: {e}")
 
-            lu.print_and_log(f"Tile id {tile_id} exists for some inputs. Proceeding: {timestr()} ", is_final, logger)
-
-            return True
-        except:
-            pass
-
-        i += 1
-
-    lu.print_and_log(f"Tile id {tile_id} does not exist. Skipping chunk: {timestr()}", is_final, logger)
-
+    logger.info("No tile IDs found to process.")
     return False
 
 
@@ -706,98 +721,77 @@ def calculate_chunk_stats(all_stats, stage):
 # input to a datatype, and all the burned area years have the same datatype, so this doesn't actually
 # mis-assign any of the burned area years to the wrong datatype.
 # From https://chatgpt.com/share/e/9a7bf947-1c32-4898-ba6b-3b932a5220c1
+
 def first_file_name_in_s3_folder(download_dict):
-
-
-    # # Configures S3 client with increased retries; retries can max out for global analyses
-    # s3_config = Config(
-    #     retries={
-    #         'max_attempts': 10,  # Increases the number of retry attempts
-    #         'mode': 'standard'
-    #     }
-    # )
-    # s3_client = boto3.client("s3", config=s3_config)  # Uses the configured client with more retries
-
     s3_client = boto3.client("s3")
-
-    # Initializes the dictionary to hold the first file paths
     first_tiles = {}
-
-    # Iterates over the download_dict items
+    sample_tile_id = '00N_110E'  # Use a valid sample tile ID
     for key, folder_path in download_dict.items():
-
+        # Replace {tile_id} with sample_tile_id
+        folder_path = folder_path.replace('{tile_id}', sample_tile_id)
         # Splits the path to get the directory part
         dir_path = os.path.dirname(folder_path)
-
-        # Drops the s3://gfw2-data/ prefix and adds "/" to the end
-        dir_path = dir_path[len(cn.full_bucket_prefix)+1:] + "/"
-
+        # Drops the s3:// prefix
+        dir_path = dir_path[len('s3://'):]
+        # Extract bucket and prefix
+        bucket, prefix = dir_path.split('/', 1)
+        prefix += '/'  # Ensure prefix ends with '/'
+        print(f"Looking for files in bucket: {bucket}, prefix: {prefix}")
         # Lists metadata for everything in the bucket
-        response = s3_client.list_objects_v2(Bucket=cn.short_bucket_prefix, Prefix=dir_path, Delimiter='/')
-
+        response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
         # Checks if the folder contains any files
         if 'Contents' in response and len(response['Contents']) > 0:
-            # Uses the first file in the folder (index 0 instead of 1)
-            first_tiles[key] = cn.full_bucket_prefix + "/" + response['Contents'][1]['Key']
+            # Uses the first file in the folder (index 0)
+            first_file_key = response['Contents'][0]['Key']
+            first_tiles[key] = f"s3://{bucket}/{first_file_key}"
+            print(f"Found file for {key}: {first_tiles[key]}")
         else:
             first_tiles[key] = None  # In case no files are found
-
+            print(f"No files found for {key} in {folder_path}")
     return first_tiles
 
+def add_file_type_to_dict(first_tiles):
+    download_dict_with_data_types = {}
+    for key, file_path in first_tiles.items():
+        if file_path is None:
+            print(f"No file found for {key}. Skipping...")
+            continue
+        try:
+            dtype = get_dtype_from_s3(file_path)
+            if dtype is None:
+                print(f"Could not determine data type for {key}. Skipping...")
+                continue
+            download_dict_with_data_types[key] = [file_path, dtype]
+            print(f"Key: {key}, Data Type: {dtype}")
+        except Exception as e:
+            print(f"Error getting data type for {key}: {e}")
+    return download_dict_with_data_types
 
-# Gets the datatype of a raster in s3.
-# This seems much faster than the rasterio version that ChatGPT suggested later in the chat.
-# From https://chatgpt.com/share/e/a48c768d-0331-43da-9fc6-ef8a84af586c
 def get_dtype_from_s3(file_path):
-
-    # Constructs the /vsis3/ path
+    if file_path is None:
+        print("File path is None. Cannot determine data type.")
+        return None
     vsis3_path = f'/vsis3/{file_path[len("s3://"):]}'
-    # print(f"Attempting to open: {vsis3_path}")
-
     dataset = gdal.Open(vsis3_path)
     if dataset:
-        # print(f"Opened file: {vsis3_path}")
         band = dataset.GetRasterBand(1)
         data_type = gdal.GetDataTypeName(band.DataType)
-        # print(f"Data type: {data_type}")
         return data_type
     else:
         raise ValueError(f"Could not open file {vsis3_path}")
 
 
-# Creates a dictionary of inputs where the keys are the dataset names and the values are a list with the first
-# tile of the dataset in s3 and the datatype,
-# e.g., {'land_cover_2000': ['s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/composite/2000/raw/00N_010E.tif', 'Byte'],
-# 'agc_2000': ['s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/40000_pixels/20240821/00N_010E__AGC_density_MgC_ha_2000.tif', 'Float32'],
-# 'drivers': ['s3://gfw2-data/climate/carbon_model/other_emissions_inputs/tree_cover_loss_drivers/processed/drivers_2022/20230407/00N_010E_tree_cover_loss_driver_processed.tif', 'Byte']}
-def add_file_type_to_dict(first_tiles):
-
-    # Dictionary where the keys are the dataset names and the values are a list with the first
-    # tile of the dataset in s3 and the datatype
-    download_dict_with_data_types = {}
-
-    # Iterates through the first tile of each tile set in s3 in the input dictionary
-    for key, file_path in first_tiles.items():
-
-        # Gets the datatype from the first tile of the dataset in s3
-        dtype = get_dtype_from_s3(file_path)
-        # Adds file path and dtype as a list as the value in the dictionary
-        download_dict_with_data_types[key] = [file_path, dtype]
-
-        # print(f"Key: {key}, File Path: {file_path}, Data Type: {dtype}")
-
-    return download_dict_with_data_types
-
-
 # Replaces a tile_id in s3 paths in a dictionary with another tile_id
 def replace_tile_id_in_dict(data_dict, new_tile_id):
+    # Use cn.tile_id_pattern if defined; otherwise, define it here
+    tile_id_pattern = cn.tile_id_pattern if hasattr(cn, 'tile_id_pattern') else r'\d{2}[NS]_\d{3}[EW]'
 
     # Loop through the dictionary and modify the values
     for key, value in data_dict.items():
         # Assuming value is a list where the first item is the file path
         file_path = value[0]
-        # Replace the pattern in the file path with the new tile_id
-        updated_file_path = re.sub(cn.tile_id_pattern, new_tile_id, file_path)
+        # Replace the tile_id in the file path with the new tile_id
+        updated_file_path = re.sub(tile_id_pattern, new_tile_id, file_path)
 
         # Update the dictionary with the new file path
         data_dict[key][0] = updated_file_path
