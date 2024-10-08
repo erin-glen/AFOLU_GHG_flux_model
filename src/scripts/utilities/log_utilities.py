@@ -1,6 +1,7 @@
 import boto3
 import logging
 import time
+import os
 
 from dask.distributed import print
 from datetime import datetime
@@ -152,4 +153,6 @@ def setup_logging():
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
+    # Prevent log messages from being propagated to ancestor loggers
+    logger.propagate = False
     return logger
