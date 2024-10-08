@@ -21,12 +21,16 @@ project_dir = 'climate/AFOLU_flux_model/organic_soils'
 raw_dir = 'inputs/raw'
 processed_dir = 'inputs/processed'
 
+# Define s3_out_dir for outputs
+s3_out_dir = 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/drainage_model'
+
+local_log_path = '/tmp'
 
 tile_id_pattern = r"[0-9]{2}[A-Z][_][0-9]{3}[A-Z]"
 
 # Local Directories
 local_root = 'C:/GIS/Data/Global'  # Adjust as needed for your local environment
-local_temp_dir = '/tmp'  # Adjust based on your environment
+local_temp_dir = 'C:/tmp'  # Adjust based on your environment
 
 # Date Configuration
 today_date = datetime.today().strftime('%Y%m%d')
@@ -97,10 +101,6 @@ datasets = {
 # 3. General Paths and Constants
 # ---------------------------------------------------
 
-# Land Cover URI
-# lc_uri = 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/inputs/LC'
-
-lc_uri = 'climate/AFOLU_flux_model/LULUCF/outputs/IPCC_basic_classes/2020/40000_pixels/20240205'
 
 # IPCC Codes
 ipcc_codes = {
@@ -114,7 +114,7 @@ ipcc_codes = {
 
 # File Name Patterns
 file_patterns = {
-    'land_cover': "IPCC_basic_classes",
+    'land_cover': "IPCC_basic_classes_2020",
     'vegetation_height': "vegetation_height",
     'planted_forest_type_layer': "planted_forest_type",
     'planted_forest_tree_crop_layer': "planted_forest_tree_crop",
@@ -129,17 +129,19 @@ file_patterns = {
 # ---------------------------------------------------
 # 4. Download Dictionary
 # ---------------------------------------------------
-
 # Prepare download dictionary using 'working_version' paths
+
+lc_uri = 'climate/AFOLU_flux_model/LULUCF/outputs/IPCC_basic_classes/2020/40000_pixels/20240205'
+
 download_dict = {
-    file_patterns['land_cover']: f's3://{s3_bucket_name}/{posixpath.join(lc_uri, f"{sample_tile_id}.tif")}',
+    file_patterns['land_cover']: f's3://{s3_bucket_name}/{posixpath.join(lc_uri, f"{sample_tile_id}__IPCC_classes_2020.tif")}',
     file_patterns['peat']: f's3://{s3_bucket_name}/{posixpath.join(peat_tiles_prefix, f"{sample_tile_id}.tif")}',
-    file_patterns['dadap']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['dadap']['working_version'], f'dadap_{sample_tile_id}.tif')}",
-    file_patterns['engert']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['engert']['working_version'], f'engert_{sample_tile_id}.tif')}",
-    file_patterns['grip']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['grip']['roads']['working_version'], f'{sample_tile_id}_grip_density.tif')}",
-    file_patterns['osm_roads']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['osm']['roads']['working_version'], f'{sample_tile_id}_osm_roads_density.tif')}",
-    file_patterns['osm_canals']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['osm']['canals']['working_version'], f'{sample_tile_id}_osm_canals_density.tif')}",
-    file_patterns['planted_forest_type_layer']: f"s3://{s3_bucket_name}/{posixpath.join(datasets['planted_forest_type']['working_version'], f'{sample_tile_id}_plantation_type_oilpalm_woodfiber_other.tif')}",
+    file_patterns['dadap']: f's3://{s3_bucket_name}/{posixpath.join(datasets["dadap"]["working_version"], f"dadap_{sample_tile_id}.tif")}',
+    file_patterns['engert']: f's3://{s3_bucket_name}/{posixpath.join(datasets["engert"]["working_version"], f"engert_{sample_tile_id}.tif")}',
+    file_patterns['grip']: f's3://{s3_bucket_name}/{posixpath.join(datasets["grip"]["roads"]["working_version"], f"{sample_tile_id}_grip_density.tif")}',
+    file_patterns['osm_roads']: f's3://{s3_bucket_name}/{posixpath.join(datasets["osm"]["roads"]["working_version"], f"{sample_tile_id}_osm_roads_density.tif")}',
+    file_patterns['osm_canals']: f's3://{s3_bucket_name}/{posixpath.join(datasets["osm"]["canals"]["working_version"], f"{sample_tile_id}_osm_canals_density.tif")}',
+    file_patterns['planted_forest_type_layer']: f's3://{s3_bucket_name}/{posixpath.join(datasets["planted_forest_type"]["working_version"], f"{sample_tile_id}_plantation_type_oilpalm_woodfiber_other.tif")}'
 }
 
 ### Miscellaneous
@@ -154,6 +156,8 @@ tree_threshold = 5
 
 # Converts tonnes to megatonnes
 t_to_Mt = 10**-3
+
+combined_log = "combined_log"
 
 # ---------------------------------------------------
 # 5. Helper Functions
