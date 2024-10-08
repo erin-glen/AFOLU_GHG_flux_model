@@ -4,13 +4,11 @@ import argparse
 import concurrent.futures
 import dask
 import numpy as np
-import os
-import sys
-import logging
-import boto3
 import gc
-from osgeo import gdal
-from numba import jit
+
+from dask.distributed import Client
+from numba import jit, types
+from numba.typed import Dict
 
 # Project imports
 from src.scripts.utilities import constants_and_names as cn
@@ -18,134 +16,27 @@ from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
 from src.scripts.utilities import numba_utilities as nu
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-# Configure logging
-logger = logging.getLogger(__name__)
+# Define constants for land cover codes
+CROPLAND_CODE = cn.ipcc_codes['cropland']
+SETTLEMENT_CODE = cn.ipcc_codes['settlement']
 
-def setup_aws_credentials():
-    """
-    Sets up AWS credentials for GDAL by retrieving them from a Boto3 session.
-    Returns a dictionary of AWS credentials if successful, None otherwise.
-    """
-    try:
-        # Create a Boto3 session
-        session = boto3.Session()
-        credentials = session.get_credentials()
-
-        if credentials is None:
-            logger.error("No AWS credentials found.")
-            return None
-
-        access_key = credentials.access_key
-        secret_key = credentials.secret_key
-        session_token = credentials.token  # Needed if using temporary credentials
-
-        if not access_key or not secret_key:
-            logger.error("Incomplete AWS credentials. Access Key or Secret Key is missing.")
-            return None
-
-        # Set GDAL configuration options
-        gdal.SetConfigOption('AWS_ACCESS_KEY_ID', access_key)
-        gdal.SetConfigOption('AWS_SECRET_ACCESS_KEY', secret_key)
-        if session_token:
-            gdal.SetConfigOption('AWS_SESSION_TOKEN', session_token)
-            logger.info("Using temporary AWS credentials with session token.")
-
-        logger.info("AWS credentials have been set for GDAL.")
-
-        # Return credentials as a dictionary
-        aws_credentials = {
-            'AWS_ACCESS_KEY_ID': access_key,
-            'AWS_SECRET_ACCESS_KEY': secret_key,
-            'AWS_SESSION_TOKEN': session_token
-        }
-        return aws_credentials
-
-    except Exception as e:
-        logger.exception(f"Error setting up AWS credentials: {e}")
-        return None
-
-def check_s3_file_exists(s3_client, bucket, key):
-    """
-    Check if a specific file exists in an S3 bucket.
-
-    Args:
-        s3_client (boto3.client): The boto3 S3 client.
-        bucket (str): The name of the S3 bucket.
-        key (str): The S3 object key/path.
-
-    Returns:
-        bool: True if the file exists, False otherwise.
-    """
-    try:
-        s3_client.head_object(Bucket=bucket, Key=key)
-        return True
-    except ClientError as e:
-        if e.response['Error']['Code'] == '404':
-            return False
-        else:
-            logger.error(f"Error checking {bucket}/{key}: {e}")
-            return False
-
-def test_boto3_s3_access(bucket_name):
-    """
-    Tests access to AWS S3 using Boto3 to confirm permissions.
-    Returns True if access is successful, False otherwise.
-    """
-    try:
-        s3_client = boto3.client('s3')
-        # Attempt to list objects in the specified bucket (or root)
-        s3_client.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
-        logger.info(f"Successfully accessed S3 bucket '{bucket_name}' using Boto3.")
-        return True
-    except NoCredentialsError:
-        logger.error("No AWS credentials found by Boto3.")
-        return False
-    except ClientError as e:
-        logger.error(f"Boto3 S3 access error: {e}")
-        return False
-    except Exception as e:
-        logger.exception(f"Unexpected error during Boto3 S3 access: {e}")
-        return False
-
-def open_dataset_with_gdal(s3_path):
-    """
-    Attempts to open the dataset at the given S3 path using GDAL.
-    Returns the dataset if successful, None otherwise.
-    """
-    try:
-        logger.info(f"Attempting to open dataset with GDAL: {s3_path}")
-        dataset = gdal.Open(s3_path, gdal.GA_ReadOnly)
-
-        if dataset is None:
-            logger.error("Failed to open dataset with GDAL.")
-            return None
-
-        logger.info("Dataset opened successfully with GDAL.")
-        return dataset
-
-    except RuntimeError as e:
-        logger.error(f"GDAL RuntimeError: {e}")
-        return None
-    except Exception as e:
-        logger.exception(f"Unexpected error during GDAL dataset open: {e}")
-        return None
-
+# Function to calculate drainage using Numba
 @jit(nopython=True)
 def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
-    # Initialize output dictionaries
-    out_dict_uint32 = {}
-    out_dict_float32 = {}
+    # Initialize output typed dictionaries
+    out_dict_uint32 = Dict.empty(key_type=types.unicode_type, value_type=types.uint32[:, :])
+    # Since we have no float32 outputs, we can omit out_dict_float32
+    # out_dict_float32 = Dict.empty(key_type=types.unicode_type, value_type=types.float32[:, :])  # Only if needed
 
     # Extract required input arrays
-    peat_block = in_dict_uint8[cn.file_patterns['peat']]
-    land_cover_block = in_dict_uint8[f"{cn.file_patterns['land_cover']}_2020"]
-    planted_forest_type_block = in_dict_uint8[cn.file_patterns['planted_forest_type_layer']]
-    dadap_block = in_dict_float32[cn.file_patterns['dadap']]
-    osm_roads_block = in_dict_float32[cn.file_patterns['osm_roads']]
-    osm_canals_block = in_dict_float32[cn.file_patterns['osm_canals']]
-    engert_block = in_dict_float32[cn.file_patterns['engert']]
-    grip_block = in_dict_float32[cn.file_patterns['grip']]
+    peat_block = in_dict_uint8['peat']
+    land_cover_block = in_dict_uint8['IPCC_basic_classes_2020']
+    planted_forest_type_block = in_dict_uint8['planted_forest_type']
+    dadap_block = in_dict_float32['dadap']
+    osm_roads_block = in_dict_float32['osm_roads']
+    osm_canals_block = in_dict_float32['osm_canals']
+    engert_block = in_dict_float32['engert']
+    grip_block = in_dict_float32['grip']
 
     # Initialize output arrays
     rows, cols = peat_block.shape
@@ -176,7 +67,7 @@ def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
                     node = nu.accrete_node(node, 2)
                     soil_block[row, col] = 1  # 'drained'
                     state_out[row, col] = node
-                elif land_cover == cn.ipcc_codes['cropland'] or land_cover == cn.ipcc_codes['settlement']:
+                elif land_cover == CROPLAND_CODE or land_cover == SETTLEMENT_CODE:
                     node = nu.accrete_node(node, 3)
                     soil_block[row, col] = 1  # 'drained'
                     state_out[row, col] = node
@@ -197,49 +88,13 @@ def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
     out_dict_uint32["soil"] = soil_block
     out_dict_uint32["state"] = state_out
 
-    return out_dict_uint32, out_dict_float32  # No float32 outputs in this case
+    return out_dict_uint32  # No float32 outputs in this case
 
-def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_final, no_upload, aws_credentials):
-    """
-    Calculate drainage status and upload the results.
-
-    Args:
-        bounds (list): The geographic bounds of the chunk [W, S, E, N].
-        download_dict_with_data_types (dict): Dictionary containing data paths with data types.
-        is_final (bool): Flag indicating if this is the final run.
-        no_upload (bool): Flag to prevent uploading outputs to S3.
-        aws_credentials (dict): AWS credentials for GDAL.
-
-    Returns:
-        tuple: A message indicating success or failure, and a list of chunk statistics.
-    """
-    # Set up logging
+def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_final, no_upload):
     logger = lu.setup_logging()
 
-    # Set GDAL configuration options in the worker process
-    try:
-        gdal.SetConfigOption('AWS_ACCESS_KEY_ID', aws_credentials['AWS_ACCESS_KEY_ID'])
-        gdal.SetConfigOption('AWS_SECRET_ACCESS_KEY', aws_credentials['AWS_SECRET_ACCESS_KEY'])
-        if aws_credentials['AWS_SESSION_TOKEN']:
-            gdal.SetConfigOption('AWS_SESSION_TOKEN', aws_credentials['AWS_SESSION_TOKEN'])
-            logger.info("Worker using temporary AWS credentials with session token.")
-        logger.info("AWS credentials have been set for GDAL in worker process.")
-
-        # Enable GDAL debug output (optional)
-        # Uncomment the following lines if you need detailed GDAL logs
-        # gdal.SetConfigOption('CPL_DEBUG', 'ON')
-        # gdal.SetConfigOption('CPL_VSIL_CURL_VERBOSE', 'YES')
-        # gdal.SetConfigOption('GDAL_DISABLE_READDIR_ON_OPEN', 'EMPTY_DIR')
-        # gdal.SetConfigOption('CPL_VSIL_CURL_ALLOWED_EXTENSIONS', '.tif')
-        # gdal.SetConfigOption('CPL_VSIL_CURL_NON_CACHED', 'YES')
-
-    except Exception as e:
-        logger.exception(f"Error setting AWS credentials in worker: {e}")
-        raise
-
-    # Get tile ID and chunk information
     bounds_str = uu.boundstr(bounds)
-    tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # Using W and N coordinates for tile ID
+    tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
 
     chunk_stats = []
@@ -265,26 +120,42 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
             logger.error(f"Error downloading layer {layer} for chunk {bounds_str}: {e}")
             return f"Failed to download layer {layer} for chunk {bounds_str}: {e}", chunk_stats
 
-    # Check for data presence in required layers
-    required_layers = {
-        f"{cn.file_patterns['land_cover']}_2020": layers.get(f"{cn.file_patterns['land_cover']}_2020"),
-        cn.file_patterns['peat']: layers.get(cn.file_patterns['peat'])
-    }
-    data_in_chunk = uu.check_chunk_for_data(required_layers, bounds_str, tile_id, "all", is_final, logger)
-    if not data_in_chunk:
-        return f"Skipped chunk {bounds_str} due to lack of data: {uu.timestr()}", chunk_stats
+    # Define expected data type lists for layers
+    uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type']
+    int16_list = []  # Add layer names as needed
+    int32_list = []  # Add layer names as needed
+    float32_list = ['dadap', 'osm_roads', 'osm_canals', 'engert', 'grip']
+
+    # Fill missing layers with NoData if necessary
+    layers = uu.fill_missing_input_layers_with_no_data(
+        layers, uint8_list, int16_list, int32_list, float32_list, bounds_str, tile_id, is_final, logger
+    )
+
+    # Verify that all required layers are present
+    expected_layers = uint8_list + int16_list + int32_list + float32_list
+    missing_layers = [layer for layer in expected_layers if layer not in layers]
+    if missing_layers:
+        logger.error(f"Missing layers after filling: {missing_layers}")
+        return f"Failed due to missing layers: {missing_layers}", chunk_stats
+
+    # Create typed dictionaries for Numba functions
+    typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
+
+    # Verify typed dictionaries have all required keys
+    missing_uint8_keys = [key for key in uint8_list if key not in typed_dict_uint8]
+    missing_float32_keys = [key for key in float32_list if key not in typed_dict_float32]
+    if missing_uint8_keys or missing_float32_keys:
+        logger.error(f"Typed dictionaries missing keys. uint8: {missing_uint8_keys}, float32: {missing_float32_keys}")
+        return f"Failed due to missing keys in typed dictionaries", chunk_stats
 
     # Calculate statistics for input layers
     for key, array in layers.items():
         stats = uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer')
         chunk_stats.append(stats)
 
-    # Create typed dictionaries for Numba functions
-    typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
-
     # Run the drainage calculation
     lu.print_and_log(f"Calculating drainage in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
-    out_dict_uint32, out_dict_float32 = calculate_drainage(
+    out_dict_uint32 = calculate_drainage(
         typed_dict_uint8, typed_dict_int16, typed_dict_float32
     )
 
@@ -338,12 +209,6 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
     Returns:
         None
     """
-    # Set up AWS credentials
-    aws_credentials = setup_aws_credentials()
-    if aws_credentials is None:
-        logger.error("Failed to set up AWS credentials for GDAL. Exiting.")
-        sys.exit(1)
-
     # Set default values if None
     if cluster_name is None:
         cluster_name = 'default_cluster'
@@ -374,8 +239,17 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
     all_stats = []
     return_messages = []
 
-    # Use download_dict from constants_and_names.py
-    download_dict = cn.download_dict
+    # Define the download dictionary directly in the script
+    download_dict = {
+        'IPCC_basic_classes_2020': 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/IPCC_basic_classes/2020/40000_pixels/20240205/{tile_id}__IPCC_classes_2020.tif',
+        'peat': 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/raw/soils/GFW_Global_Peatlands/{tile_id}.tif',
+        'dadap': 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/dadap_density/30m/20240925/dadap_{tile_id}.tif',
+        'engert': 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/engert_density/30m/20240925/engert_{tile_id}.tif',
+        'grip': 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/grip_density/40000_pixels/20240925/{tile_id}_grip_density.tif',
+        'osm_roads': 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_roads_density/40000_pixels/20240925/{tile_id}_osm_roads_density.tif',
+        'osm_canals': 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_canals_density/40000_pixels/20240822/{tile_id}_osm_canals_density.tif',
+        'planted_forest_type': 's3://gfw2-data/climate/carbon_model/other_emissions_inputs/plantation_type/SDPTv2/20230911/{tile_id}_plantation_type_oilpalm_woodfiber_other.tif',
+    }
 
     # Get first tile names and data types
     print(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
@@ -384,16 +258,18 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
     print(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
 
-    # Create delayed tasks for each chunk, passing aws_credentials
+    # Create tasks and start processing
     print(f"Creating tasks and starting processing: {uu.timestr()}")
-    delayed_results = [
-        dask.delayed(calculate_and_upload_drainage)(
-            chunk, download_dict_with_data_types, is_final, no_upload, aws_credentials
-        ) for chunk in chunks
-    ]
+    futures = []
+    for chunk in chunks:
+        future = client.submit(
+            calculate_and_upload_drainage,
+            chunk, download_dict_with_data_types, is_final, no_upload
+        )
+        futures.append(future)
 
-    # Compute tasks
-    results = dask.compute(*delayed_results)
+    # Collect the results once they are finished
+    results = client.gather(futures)
 
     # Process results
     success_count = 0
@@ -407,7 +283,7 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
         if "Success" in return_message:
             success_count += 1
 
-        if "skipping chunk" in return_message.lower():
+        if "skipped chunk" in return_message.lower():
             skipping_chunk_count += 1
 
         if return_message:
@@ -418,7 +294,7 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
 
     # Print counts
     print(f"Number of 'Success' chunks: {success_count}")
-    print(f"Number of 'skipping chunk' chunks: {skipping_chunk_count}")
+    print(f"Number of 'skipped chunk' chunks: {skipping_chunk_count}")
 
     # Calculate stats if not suppressed
     if not no_stats:
@@ -448,139 +324,10 @@ def main(argv=None):
     This script calculates the drainage model using specified parameters.
     It can be run with default settings or customized via command-line arguments.
 
-    Command-line Arguments:
-        -cn, --cluster_name CLUSTER_NAME
-            (str) Name of the Coiled cluster to use.
-            Default: 'default_cluster'
-            Example: -cn my_cluster_name
+    [Usage examples and documentation omitted for brevity]
 
-        -bb, --bounding_box W S E N
-            (float, float, float, float) Define the geographic area to process.
-            Coordinates are specified as four floating-point numbers representing
-            West, South, East, and North in degrees.
-            Default: [110, -10, 120, 0]
-            Example: -bb 100 -5 105 5
-
-        -cs, --chunk_size CHUNK_SIZE
-            (float) Specify the size of each chunk in degrees.
-            Default: 2
-            Example: -cs 1
-
-        --run_local
-            (flag) Include this flag to run the script locally without using Dask/Coiled.
-            Default: False
-            Example: --run_local
-
-        --no_stats
-            (flag) Include this flag to prevent the creation of the chunk stats spreadsheet.
-            Default: False
-            Example: --no_stats
-
-        --no_log
-            (flag) Include this flag to prevent the creation of the combined log.
-            Default: False
-            Example: --no_log
-
-        --no_upload
-            (flag) Include this flag to prevent saving and uploading outputs to S3.
-            Default: False
-            Example: --no_upload
-
-    Usage Examples:
-
-    1. **Run with default parameters:**
-
-       ```
-       python drainage_model.py
-       ```
-
-       This uses all default values and runs locally.
-
-    2. **Run with a specific cluster name:**
-
-       ```
-       python drainage_model.py -cn my_cluster_name
-       ```
-
-       Sets the cluster name to 'my_cluster_name' while using default values for other parameters.
-
-    3. **Define a custom bounding box:**
-
-       ```
-       python drainage_model.py -bb 100 -5 105 5
-       ```
-
-       Sets the bounding box to:
-       - West: 100 degrees
-       - South: -5 degrees
-       - East: 105 degrees
-       - North: 5 degrees
-
-    4. **Set a custom chunk size:**
-
-       ```
-       python drainage_model.py -cs 1
-       ```
-
-       Sets the chunk size to 1 degree.
-
-    5. **Run locally without Dask/Coiled:**
-
-       ```
-       python drainage_model.py --run_local
-       ```
-
-       Tells the script to run locally without connecting to a Dask/Coiled cluster.
-
-    6. **Prevent stats and log creation:**
-
-       ```
-       python drainage_model.py --no_stats --no_log
-       ```
-
-       Prevents the script from creating the chunk stats spreadsheet and the combined log.
-
-    7. **Run without uploading outputs to S3:**
-
-       ```
-       python drainage_model.py --no_upload
-       ```
-
-       Prevents the script from saving and uploading outputs to S3.
-
-    8. **Combine multiple options:**
-
-       ```
-       python drainage_model.py -cn my_cluster_name -bb 100 -5 105 5 -cs 1 --run_local --no_stats --no_log --no_upload
-       ```
-
-       This command:
-       - Sets the cluster name to 'my_cluster_name'.
-       - Uses a bounding box from 100°W to 105°E and -5°S to 5°N.
-       - Sets the chunk size to 1 degree.
-       - Runs the script locally without Dask/Coiled.
-       - Prevents creation of stats and logs.
-       - Prevents uploading outputs to S3.
-
-    9. **View help message:**
-
-       ```
-       python drainage_model.py -h
-       ```
-
-       Displays the help message with information about all available options.
-
-    Notes:
-    - **Order of Arguments:** The order of arguments doesn't matter, but values must follow their respective flags.
-    - **Default Values:** If you omit an argument, the script uses its default value as specified.
-    - **Ensure Dependencies are Installed:** Make sure all required Python packages are installed in your environment.
-    - **Check AWS Credentials:** If the script interacts with AWS services (like S3), ensure your AWS credentials are correctly configured.
-
-    Troubleshooting:
-    - **Argument Errors:** If you receive errors about arguments, double-check that you've provided the correct number and type of arguments.
-    - **Script Errors:** Review any error messages provided by the script to identify issues.
-    - **Help and Documentation:** Use the `-h` or `--help` flag to get information about the script's usage.
     """
+    import sys
     if argv is None:
         argv = sys.argv[1:]
     parser = argparse.ArgumentParser(description="Calculate drainage model.")
@@ -598,8 +345,8 @@ def main(argv=None):
     if not argv:
         print("No command-line arguments provided. Using default values for testing.")
         run_drainage_model(
-            cluster_name='default_cluster',
-            bounding_box=[110, -10, 120, 0],
+            cluster_name='drainage',
+            bounding_box=[112, -4, 114, -2],
             chunk_size=2,
             run_local=True,
             no_stats=False,
