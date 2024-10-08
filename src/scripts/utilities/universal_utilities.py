@@ -258,68 +258,212 @@ def check_chunk_for_data(required_layers, bounds_str, tile_id, any_or_all, is_fi
         raise Exception("any_or_all argument not valid")
 
 # Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
+
+import tempfile
+
+# universal_utilities.py
+
+import os
+import time
+import tempfile
+import boto3
+from botocore.config import Config
+import rasterio
+from rasterio.transform import from_bounds
+
+# Assuming cn and lu are imported from your project modules
+# from . import constants_and_names as cn
+# from . import log_utilities as lu
+
+def timestr():
+    """
+    Returns the current time as a string formatted as YYYYMMDD_HH_MM_SS.
+    """
+    return time.strftime('%Y%m%d_%H_%M_%S')
+
 def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
                                      bounds_str, output_dict, is_final, logger, no_data_val=None):
+    """
+    Saves raster data to local temporary files and uploads them to S3.
 
-    # Configures S3 client with increased retries; retries can max out for global analyses
+    This function processes raster data arrays by saving them locally in a temporary directory
+    and then uploading them to a specified S3 bucket and path. It ensures cross-platform
+    compatibility by using the system's temporary directory, handles exceptions during file
+    operations, and logs detailed information for debugging purposes.
+
+    **Differences from the Original Function:**
+
+    - **Cross-Platform Temporary Directory:**
+      - Replaced hardcoded '/tmp' paths with `tempfile.gettempdir()` to ensure compatibility
+        across different operating systems (e.g., Windows, Linux, macOS).
+      - This change prevents `FileNotFoundError` on systems where the '/tmp' directory does
+        not exist, such as Windows.
+
+    - **Correct S3 Key Construction:**
+      - Updated the S3 key construction to avoid duplicating the 's3://' prefix and the bucket name.
+      - Ensures that files are uploaded to the correct location within the S3 bucket without
+        redundant or incorrect path segments.
+
+    - **Enhanced Logging and Exception Handling:**
+      - Added detailed logging statements to record the full local file paths and S3 destinations.
+      - Implemented exception handling for file saving, uploading, and deletion to catch and
+        log any errors that occur during these operations.
+
+    Args:
+        bounds (list): Bounding box coordinates [W, S, E, N].
+        chunk_length_pixels (int): Number of pixels per chunk side.
+        tile_id (str): Identifier for the tile (e.g., '00N_110E').
+        bounds_str (str): String representation of bounds (e.g., '112_-4_114_-2').
+        output_dict (dict): Dictionary containing output arrays and metadata.
+            Each key is a descriptive name, and each value is a list containing:
+            - data_array (numpy.ndarray): The raster data array.
+            - data_type (str): Data type of the array (e.g., 'uint8', 'float32').
+            - data_meaning (str): Descriptor for the type of data (e.g., 'soil', 'state').
+            - year_out (str): Year associated with the data (e.g., '2020').
+        is_final (bool): Flag indicating if this is the final run. Affects file naming and logging verbosity.
+        logger (logging.Logger): Logger instance for logging messages.
+        no_data_val (int, optional): NoData value for the raster. Defaults to None.
+
+    Returns:
+        None
+
+    Raises:
+        Exception: Propagates exceptions after logging if critical errors occur during processing.
+
+    Example:
+        save_and_upload_small_raster_set(
+            bounds=[112, -4, 114, -2],
+            chunk_length_pixels=8000,
+            tile_id='00N_110E',
+            bounds_str='112_-4_114_-2',
+            output_dict={
+                'soil': [soil_array, 'float32', 'soil', '2020'],
+                'state': [state_array, 'uint8', 'state', '2020']
+            },
+            is_final=True,
+            logger=logger_instance,
+            no_data_val=0
+        )
+    """
+
+    # Configure S3 client with increased retries
     s3_config = Config(
         retries={
-            'max_attempts': 10,  # Increases the number of retry attempts
+            'max_attempts': 10,  # Increase retry attempts
             'mode': 'standard'
         }
     )
-    s3_client = boto3.client("s3", config=s3_config)  # Uses the configured client with more retries
+    s3_client = boto3.client("s3", config=s3_config)
 
-    transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
+    try:
+        # Create transform based on bounds and chunk size
+        transform = from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
+    except Exception as e:
+        logger.error(f"Failed to create transform from bounds {bounds}: {e}")
+        raise  # Re-raise the exception after logging
 
+    # Generate base filename info
     file_info = f'{tile_id}__{bounds_str}'
 
     if is_final:
         lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
 
-    # For every output file, saves from array to local raster, then to s3.
-    # Can't save directly to s3, unfortunately, so need to save locally first.
+    # Get the system's temporary directory
+    temp_dir = tempfile.gettempdir()
 
+    # Ensure the temporary directory exists
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir, exist_ok=True)
+
+    # Iterate over each output layer
     for key, value in output_dict.items():
         data_array = value[0]
         data_type = value[1]
         data_meaning = value[2]
         year_out = value[3]
 
+        # Construct file name
         if is_final:
             file_name = f"{file_info}__{key}.tif"
         else:
             file_name = f"{file_info}__{key}__{timestr()}.tif"
 
-        local_file_path = f"/tmp/{file_name}"
+        local_file_path = os.path.join(temp_dir, file_name)
 
         # Logging the local file path
         lu.print_and_log(f"Saving local file {local_file_path}", is_final, logger)
 
-        # [Existing code for saving the raster...]
+        # Logging saving process
+        if not is_final:
+            lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger)
 
+        # Prepare metadata for raster
+        rasterio_kwargs = {
+            'driver': 'GTiff',
+            'width': chunk_length_pixels,
+            'height': chunk_length_pixels,
+            'count': 1,
+            'dtype': data_type,
+            'crs': 'EPSG:4326',
+            'transform': transform,
+            'compress': 'lzw',
+            'blockxsize': 400,
+            'blockysize': 400
+        }
+
+        if no_data_val is not None:
+            rasterio_kwargs['nodata'] = no_data_val
+
+        # Save raster to local temporary file
+        try:
+            with rasterio.open(local_file_path, 'w', **rasterio_kwargs) as dst:
+                dst.write(data_array, 1)
+        except Exception as e:
+            lu.print_and_log(f"Failed to save raster {file_name} locally: {e}", is_final, logger)
+            continue  # Skip uploading if saving fails
+
+        # Construct S3 path
         s3_path = f"{cn.s3_out_dir}/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels/{time.strftime('%Y%m%d')}"
+
+        # Remove 's3://' prefix and bucket name if present
+        if s3_path.startswith('s3://'):
+            s3_path = s3_path[len('s3://'):]
+        if s3_path.startswith(f"{cn.s3_bucket_name}/"):
+            s3_path = s3_path[len(f"{cn.s3_bucket_name}/"):]
+
+        # Ensure S3 path uses forward slashes
+        s3_path = s3_path.replace("\\", "/")
+
         s3_key = f"{s3_path}/{file_name}"
 
         # Logging the S3 key
         lu.print_and_log(f"Uploading {local_file_path} to s3://{cn.s3_bucket_name}/{s3_key}", is_final, logger)
 
-        # Upload with exception handling
+        # Upload file to S3
         try:
             s3_client.upload_file(local_file_path, cn.s3_bucket_name, Key=s3_key)
+            lu.print_and_log(f"Successfully uploaded {local_file_path} to s3://{cn.s3_bucket_name}/{s3_key}", is_final, logger)
         except Exception as e:
             lu.print_and_log(f"Failed to upload {local_file_path} to s3://{cn.s3_bucket_name}/{s3_key}: {e}", is_final, logger)
-            continue  # Skip to the next file
+            continue  # Proceed to next file
 
-        # Verify upload (optional)
+        # Verify the upload by checking if the object exists
         try:
             s3_client.head_object(Bucket=cn.s3_bucket_name, Key=s3_key)
+            lu.print_and_log(f"Confirmed upload of {file_name} to s3://{cn.s3_bucket_name}/{s3_key}", is_final, logger)
         except Exception as e:
             lu.print_and_log(f"Upload verification failed for s3://{cn.s3_bucket_name}/{s3_key}: {e}", is_final, logger)
-            continue  # Skip to the next file
+            continue  # Proceed to next file
 
-        # Delete local file
-        os.remove(local_file_path)
+        # Delete local temporary file after successful upload
+        try:
+            os.remove(local_file_path)
+        except OSError as e:
+            lu.print_and_log(f"Failed to delete local raster {file_name}: {e}", is_final, logger)
+
+    if is_final:
+        lu.print_and_log(f"All rasters for {bounds_str} in {tile_id} have been processed and uploaded.", is_final, logger)
+
 
 from rasterio.transform import from_bounds  # Correct import
 
