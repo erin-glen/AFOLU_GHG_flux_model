@@ -5,10 +5,12 @@ import concurrent.futures
 import dask
 import numpy as np
 import gc
+import os
 
 from dask.distributed import Client
 from numba import jit, types
 from numba.typed import Dict
+from datetime import datetime
 
 # Project imports
 from src.scripts.utilities import constants_and_names as cn
@@ -24,9 +26,9 @@ SETTLEMENT_CODE = cn.ipcc_codes['settlement']
 @jit(nopython=True)
 def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
     # Initialize output typed dictionaries
-    out_dict_uint32 = Dict.empty(key_type=types.unicode_type, value_type=types.uint32[:, :])
+    out_dict_uint32 = Dict.empty(key_type=types.unicode_type, value_type=types.uint32[:,:])
     # Since we have no float32 outputs, we can omit out_dict_float32
-    # out_dict_float32 = Dict.empty(key_type=types.unicode_type, value_type=types.float32[:, :])  # Only if needed
+    # out_dict_float32 = Dict.empty(key_type=types.unicode_type, value_type=types.float32[:,:])  # Only if needed
 
     # Extract required input arrays
     peat_block = in_dict_uint8['peat']
@@ -239,17 +241,7 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
     all_stats = []
     return_messages = []
 
-    # Define the download dictionary directly in the script
-    download_dict = {
-        'IPCC_basic_classes_2020': 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/IPCC_basic_classes/2020/40000_pixels/20240205/{tile_id}__IPCC_classes_2020.tif',
-        'peat': 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/raw/soils/GFW_Global_Peatlands/{tile_id}.tif',
-        'dadap': 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/dadap_density/30m/20240925/dadap_{tile_id}.tif',
-        'engert': 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/engert_density/30m/20240925/engert_{tile_id}.tif',
-        'grip': 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/grip_density/40000_pixels/20240925/{tile_id}_grip_density.tif',
-        'osm_roads': 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_roads_density/40000_pixels/20240925/{tile_id}_osm_roads_density.tif',
-        'osm_canals': 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_canals_density/40000_pixels/20240822/{tile_id}_osm_canals_density.tif',
-        'planted_forest_type': 's3://gfw2-data/climate/carbon_model/other_emissions_inputs/plantation_type/SDPTv2/20230911/{tile_id}_plantation_type_oilpalm_woodfiber_other.tif',
-    }
+    download_dict = cn.download_dict
 
     # Get first tile names and data types
     print(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
@@ -298,7 +290,10 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
 
     # Calculate stats if not suppressed
     if not no_stats:
-        uu.calculate_chunk_stats(all_stats, stage)
+        try:
+            uu.calculate_chunk_stats(all_stats, stage)
+        except AttributeError:
+            print("Can't print chunk stats: module 'src.scripts.utilities.constants_and_names' has no attribute 'chunk_stats_path'")
 
     # End time
     end_time = uu.timestr()
@@ -307,10 +302,13 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
 
     # Compile and upload logs
     log_note = "Drainage model run"
-    lu.compile_and_upload_log(
-        no_log, client, cluster, stage, len(chunks), chunk_size,
-        start_time, end_time, log_note
-    )
+    try:
+        lu.compile_and_upload_log(
+            no_log, client, cluster, stage, len(chunks), chunk_size,
+            start_time, end_time, log_note
+        )
+    except AttributeError as e:
+        print(f"Error during log compilation and upload: {e}")
 
     # Close the client and cluster if not running locally
     if not run_local:
@@ -325,7 +323,6 @@ def main(argv=None):
     It can be run with default settings or customized via command-line arguments.
 
     [Usage examples and documentation omitted for brevity]
-
     """
     import sys
     if argv is None:
@@ -349,8 +346,8 @@ def main(argv=None):
             bounding_box=[112, -4, 114, -2],
             chunk_size=2,
             run_local=True,
-            no_stats=False,
-            no_log=False,
+            no_stats=True,
+            no_log=True,
             no_upload=False
         )
     else:
