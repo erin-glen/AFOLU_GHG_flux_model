@@ -1,67 +1,3 @@
-"""
-pp_extraction.py
-
-This script processes peat extraction datasets from Finland, Ireland, and Russia to create a global mosaic of possible peat extraction areas. The output is intended for use in both the drainage model and emission factor selection for peatlands.
-
-Datasets Used:
---------------
-
-1. **Finland Peatland Dataset**:
-   - **Source**: Geological Survey of Finland (GTK)
-   - **URL**: https://www.gtk.fi/en/current/first-spatial-dataset-on-peatlands-covers-mires-and-drained-peatlands-throughout-finland/
-   - **Description**: Provides comprehensive spatial data on peatlands across Finland, including mires and drained peatlands. Used to identify areas of peat extraction activities in Finland.
-
-2. **Ireland Peatland Dataset**:
-   - **Source**: National Peatlands Map for the Republic of Ireland
-   - **URL**: https://www.nature.com/articles/s41598-024-51660-0
-   - **Description**: Offers detailed information on the peatlands of Ireland. Used to identify peat extraction areas within Ireland.
-
-3. **Russia Peatland Dataset**:
-   - **Source**: Russian Register / Russian Federal Geologic Fund
-   - **Description**: Contains information on peatlands within Russia. Utilized to map peat extraction areas across Russia.
-
-Workflow:
----------
-
-1. **Data Retrieval**:
-   - Downloads necessary shapefiles and raster datasets from AWS S3 storage using utility functions.
-
-2. **Data Processing**:
-   - **Vector Datasets (Finland and Russia)**:
-     - Reads shapefiles into GeoDataFrames.
-     - Applies attribute filtering to select relevant features.
-     - Cleans and validates geometries.
-     - Reprojects data to match the coordinate reference system (CRS) of the peatland tile index.
-     - Identifies intersecting tiles via spatial join.
-     - Clips and rasterizes data for each intersecting tile.
-   - **Raster Dataset (Ireland)**:
-     - Downloads the raster dataset and sets CRS if missing.
-     - Transforms raster bounds to match peatland tile index CRS.
-     - Identifies intersecting tiles based on spatial overlap.
-     - Reprojects and resamples raster data to match tile properties.
-     - Applies raster value filtering to retain specific values.
-
-3. **Output Generation**:
-   - Saves processed tiles as GeoTIFF files with compression and tiling options.
-   - Uploads outputs back to AWS S3 storage.
-   - Cleans up local temporary files.
-
-Usage:
-------
-
-The script can be run with specified arguments to process different datasets and tiles. For example:
-
-```python
-if __name__ == "__main__":
-    # Process Finland dataset
-    main(dataset='finland', tile_id=None, run_mode='default')
-
-    # Process Ireland dataset
-    main(dataset='ireland', tile_id=None, run_mode='default')
-
-    # Process Russia dataset
-    main(dataset='russia', tile_id=None, run_mode='default')
-"""
 # pp_extraction.py
 
 import os
@@ -320,8 +256,8 @@ def process_vector_tile(dataset, tile_id, gdf_dataset, run_mode='default'):
     os.makedirs(output_dir, exist_ok=True)
 
     s3_output_dir = cn.datasets['extraction'][dataset]['s3_processed']
-    local_output_path = os.path.join(output_dir, f"{tile_id}_{dataset}_extraction.tif")
-    s3_output_path = os.path.join(s3_output_dir, f"{tile_id}_{dataset}_extraction.tif").replace("\\", "/")
+    local_output_path = os.path.join(output_dir, f"{tile_id}_extraction.tif")
+    s3_output_path = os.path.join(s3_output_dir, f"{tile_id}_extraction.tif").replace("\\", "/")
 
     try:
         if run_mode != 'test':
@@ -537,9 +473,9 @@ def process_raster_tile(dataset, tile_id, local_raster_path, run_mode='default')
         # Prepare output paths
         output_dir = cn.datasets['extraction'][dataset]['local_processed']
         os.makedirs(output_dir, exist_ok=True)
-        local_output_path = os.path.join(output_dir, f"{tile_id}_{dataset}_extraction.tif")
+        local_output_path = os.path.join(output_dir, f"{tile_id}_extraction.tif")
         s3_output_dir = cn.datasets['extraction'][dataset]['s3_processed']
-        s3_output_path = os.path.join(s3_output_dir, f"{tile_id}_{dataset}_extraction.tif").replace("\\", "/")
+        s3_output_path = os.path.join(s3_output_dir, f"{tile_id}_extraction.tif").replace("\\", "/")
 
         # Check if the output already exists
         if run_mode != 'test':
