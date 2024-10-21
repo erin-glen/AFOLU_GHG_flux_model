@@ -104,8 +104,16 @@ datasets = {
     },
     'descals_oil_palm': {
         'plant_year': {
+            's3_processed_base': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year'),
+            's3_processed': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year', today_date),
+            'local_processed': posixpath.join(local_temp_dir, 'descals_plantation', 'year', today_date),
+            'working_version': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year', '20240823')
         },
         'plant_type': {
+            's3_processed_base': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'extent'),
+            's3_processed': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'extent', today_date),
+            'local_processed': posixpath.join(local_temp_dir, 'descals_plantation', 'extent', today_date),
+            'working_version': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'extent', '20240823')
         }
     },
     'extraction': {
@@ -156,7 +164,9 @@ file_patterns = {
     'grip': "grip",
     'osm_roads': "osm_roads",
     'osm_canals': "osm_canals",
-    'extraction': "extraction"
+    'extraction': "extraction",
+    'descals_type': "descals_type",
+    'descals_year': "descals_year",
 }
 
 # ---------------------------------------------------
@@ -183,7 +193,13 @@ download_dict = {
     file_patterns[
         'planted_forest_type_layer']: f's3://{s3_bucket_name}/{posixpath.join(datasets["planted_forest_type"]["working_version"], f"{sample_tile_id}_plantation_type_oilpalm_woodfiber_other.tif")}',
     file_patterns[
-        'extraction']: f's3://{s3_bucket_name}/{posixpath.join(datasets["extraction"]["working_version"], f"{sample_tile_id}_extraction.tif")}'
+        'extraction']: f's3://{s3_bucket_name}/{posixpath.join(datasets["extraction"]["working_version"], f"{sample_tile_id}_extraction.tif")}',
+    file_patterns[
+        'descals_type']: f's3://{s3_bucket_name}/{posixpath.join(datasets["descals_oil_palm"]["plant_type"]["working_version"], f"descals_extent_{sample_tile_id}.tif")}',
+    file_patterns[
+        'descals_year']: f's3://{s3_bucket_name}/{posixpath.join(datasets["descals_oil_palm"]["plant_year"]["working_version"], f"descals_year_{sample_tile_id}.tif")}'
+
+
 }
 
 ### Miscellaneous
