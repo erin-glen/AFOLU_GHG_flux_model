@@ -343,7 +343,8 @@ def main(argv=None):
         print("No command-line arguments provided. Using default values for testing.")
         run_drainage_model(
             cluster_name='drainage',
-            bounding_box=[112, -4, 114, -2],
+            bounding_box=[112, -4, 114, -2], # one 2-degree chunk with data
+            # bounding_box=[110, -10, 120, 0], # 10x10 degree tile
             chunk_size=2,
             run_local=True,
             no_stats=True,
