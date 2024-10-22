@@ -40,6 +40,7 @@ def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
     engert_block = in_dict_float32['engert']
     grip_block = in_dict_float32['grip']
     extraction_block = in_dict_uint8['extraction']
+    descals_type_block = in_dict_uint8['descals_type']
 
     # Initialize output arrays
     rows, cols = peat_block.shape
@@ -58,6 +59,7 @@ def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
             engert = engert_block[row, col]
             grip = grip_block[row, col]
             extraction = extraction_block[row, col]
+            descals_type = descals_type_block[row, col]
 
             node = 0
 
@@ -75,11 +77,11 @@ def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
                     node = nu.accrete_node(node, 3)
                     soil_block[row, col] = 1  # 'drained'
                     state_out[row, col] = node
-                elif planted_forest_type > 0:
+                elif planted_forest_type or descals_type > 0:
                     node = nu.accrete_node(node, 4)
                     soil_block[row, col] = 1  # 'drained'
                     state_out[row, col] = node
-                elif extraction >  0:
+                elif extraction > 0:
                     node = nu.accrete_node(node, 5)
                     soil_block[row, col] = 1  # 'drained'
                     state_out[row, col] = node
@@ -129,7 +131,7 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
             return f"Failed to download layer {layer} for chunk {bounds_str}: {e}", chunk_stats
 
     # Define expected data type lists for layers
-    uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type','extraction']
+    uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type','extraction', 'descals_type']
     int16_list = []  # Add layer names as needed
     int32_list = []  # Add layer names as needed
     float32_list = ['dadap', 'osm_roads', 'osm_canals', 'engert', 'grip']
