@@ -304,9 +304,19 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
     log_note = "Drainage model run"
     try:
         lu.compile_and_upload_log(
-            no_log, client, cluster, stage, len(chunks), chunk_size,
-            start_time, end_time, log_note
+            no_log,
+            client,
+            cluster,
+            stage,
+            len(chunks),  # Total number of chunks
+            chunk_size,
+            start_time,
+            end_time,
+            success_count,  # New argument: Count of successfully processed chunks
+            skipping_chunk_count,  # New argument: Count of skipped chunks
+            log_note  # Log note
         )
+
     except AttributeError as e:
         print(f"Error during log compilation and upload: {e}")
 
@@ -347,8 +357,8 @@ def main(argv=None):
             # bounding_box=[110, -10, 120, 0], # 10x10 degree tile
             chunk_size=2,
             run_local=True,
-            no_stats=True,
-            no_log=True,
+            no_stats=False, #testing running this as false
+            no_log=False, #testing running this as false
             no_upload=False
         )
     else:
@@ -600,3 +610,4 @@ if __name__ == "__main__":
     This updated docstring provides clear and actionable examples for running the `drainage_model.py` script with various configurations, including using a Coiled cluster for a test AOI. By following these examples, you can effectively customize the script's behavior to suit different processing needs and environments.
 
     **Feel free to modify the examples or add more based on specific use cases or additional arguments! If you have any further questions or need additional assistance, please let me know.**
+"""
