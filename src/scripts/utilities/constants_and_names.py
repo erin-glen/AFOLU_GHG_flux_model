@@ -25,6 +25,7 @@ processed_dir = 'inputs/processed'
 s3_out_dir = 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/drainage_model'
 
 local_log_path = '/tmp'
+s3_log_path = "climate/AFOLU_flux_model/organic_soils/model_logs/"
 
 tile_id_pattern = r"[0-9]{2}[A-Z][_][0-9]{3}[A-Z]"
 
@@ -42,6 +43,9 @@ peat_tiles_prefix_1km = 'climate/AFOLU_flux_model/organic_soils/inputs/processed
 
 # Sample Tile ID Placeholder
 sample_tile_id = '{tile_id}'
+
+#model version for log
+model_version = 0.2
 
 # Local path for chunk stats
 chunk_stats_path = posixpath.join(local_temp_dir,'chunk_stats/')
