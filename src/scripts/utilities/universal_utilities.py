@@ -768,9 +768,23 @@ def calculate_chunk_stats(all_stats, stage):
     in_out_tables = {in_out_value: sorted_stats[sorted_stats['in_out'] == in_out_value]
                      for in_out_value in sorted_stats['in_out'].unique()}
 
+    # Ensure the directory exists
+    stats_dir = cn.chunk_stats_path
+    if not os.path.exists(stats_dir):
+        try:
+            os.makedirs(stats_dir, exist_ok=True)
+            print(f"Created directory for chunk stats at: {stats_dir}")
+        except Exception as e:
+            print(f"Error creating directory {stats_dir}: {e}")
+            return
+
+    # Construct the filename using os.path.join for portability
+    filename = f"{stage}_chunk_statistics_{timestr()}.xlsx"
+    filepath = os.path.join(stats_dir, filename)
+
     # Write the combined statistics to a single Excel file
     try:
-        with pd.ExcelWriter(f'{cn.chunk_stats_path}{stage}_chunk_statistics_{timestr()}.xlsx') as writer:
+        with pd.ExcelWriter(filepath) as writer:
 
             # Writes each 'in_out' DataFrame to its own sheet
             for in_out_value, table in in_out_tables.items():
@@ -780,6 +794,7 @@ def calculate_chunk_stats(all_stats, stage):
             # Write the min and max statistics to the second sheet
             min_max_stats.to_excel(writer, sheet_name='min_max_for_layers', index=False)
 
+        print(f"Chunk statistics successfully saved to {filepath}")
         print(sorted_stats.head())  # Show first few rows of the stats DataFrame for inspection
 
     except Exception as e:

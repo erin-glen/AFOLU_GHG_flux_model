@@ -43,6 +43,9 @@ peat_tiles_prefix_1km = 'climate/AFOLU_flux_model/organic_soils/inputs/processed
 # Sample Tile ID Placeholder
 sample_tile_id = '{tile_id}'
 
+# Local path for chunk stats
+chunk_stats_path = posixpath.join(local_temp_dir,'chunk_stats/')
+
 # ---------------------------------------------------
 # 2. Dataset Configurations
 # ---------------------------------------------------
