@@ -365,3 +365,238 @@ def main(argv=None):
 if __name__ == "__main__":
     main()
 
+
+    """
+    Main function to run the drainage model from the command line.
+
+    This script calculates the drainage model using specified parameters.
+    It can be run with default settings or customized via command-line arguments.
+
+    **Usage Examples:**
+
+    1. **Run with Default Settings (for Testing Purposes):**
+
+        ```bash
+        python drainage_model.py
+        ```
+
+        - **Description:** Executes the script using default parameters. This is useful for testing and ensuring that the script runs without any custom configurations.
+
+    2. **Specify a Coiled Cluster and a Test AOI:**
+
+        ```bash
+        python -m src.scripts.models.drainage_model -cn drainage_cluster -bb 112 -4 114 -2 -cs 2
+        ```
+
+        - **Description:** Runs the drainage model for a specific Area of Interest (AOI) using a Coiled cluster.
+        - **Parameters:**
+            - `-cn drainage_cluster` or `--cluster_name drainage_cluster`: Specifies the name of the Coiled cluster to use for distributed computing. Replace `drainage_cluster` with your actual Coiled cluster name.
+            - `-bb 112 -4 114 -2` or `--bounding_box 112 -4 114 -2`: Defines the bounding box for the AOI with west longitude `112°`, south latitude `-4°`, east longitude `114°`, and north latitude `-2°`.
+            - `-cs 2` or `--chunk_size 2`: Sets the chunk size to `2` degrees. Adjust based on your computational resources and data size.
+
+    3. **Run Locally Without Dask/Coiled:**
+
+        ```bash
+        python drainage_model.py --run_local
+        ```
+
+        - **Description:** Executes the script locally without leveraging Dask or Coiled for distributed computing. Useful for debugging or running on machines without access to a Dask cluster.
+
+    4. **Exclude Statistics Spreadsheet:**
+
+        ```bash
+        python drainage_model.py --no_stats
+        ```
+
+        - **Description:** Runs the script without generating the chunk statistics spreadsheet. Use this option if you do not require statistical summaries of each data chunk.
+
+    5. **Skip Log Creation:**
+
+        ```bash
+        python drainage_model.py --no_log
+        ```
+
+        - **Description:** Prevents the creation of the combined log file. Useful when logging is handled separately or is not needed.
+
+    6. **Disable Uploading Outputs to S3:**
+
+        ```bash
+        python drainage_model.py --no_upload
+        ```
+
+        - **Description:** Runs the script without saving and uploading outputs to Amazon S3. Use this option if you prefer to handle output storage manually or store outputs locally.
+
+    7. **Combine Multiple Options:**
+
+        ```bash
+        python -m src.scripts.models.drainage_model -cn drainage_cluster -bb 112 -4 114 -2 -cs 2 --no_stats --no_log --no_upload
+        ```
+
+        - **Description:** Executes the script with a combination of specified options:
+            - Connects to the `drainage_cluster` Coiled cluster.
+            - Processes data within the bounding box [112°W, 4°S, 114°E, 2°N].
+            - Sets the chunk size to 2 degrees.
+            - Skips generating the statistics spreadsheet.
+            - Prevents log creation.
+            - Does not upload outputs to S3.
+
+    8. **Run for a Larger AOI with a Different Chunk Size:**
+
+        ```bash
+        python -m src.scripts.models.drainage_model -cn large_cluster -bb 110 -10 120 0 -cs 5
+        ```
+
+        - **Description:** Runs the script for a larger Area of Interest with a chunk size of 5 degrees.
+        - **Parameters:**
+            - `-cn large_cluster`: Uses the `large_cluster` Coiled cluster.
+            - `-bb 110 -10 120 0`: Defines the bounding box from west longitude `110°`, south latitude `-10°`, east longitude `120°`, and north latitude `0°`.
+            - `-cs 5`: Sets the chunk size to `5` degrees.
+
+    **Arguments:**
+
+    - `-cn`, `--cluster_name`:
+        - **Type:** `str`
+        - **Description:** Name of the Coiled cluster to use for distributed computing.
+
+    - `-bb`, `--bounding_box`:
+        - **Type:** `float` (expects four values)
+        - **Description:** Defines the geographical bounding box for data processing as four float numbers representing [West, South, East, North] in degrees.
+
+    - `-cs`, `--chunk_size`:
+        - **Type:** `float`
+        - **Description:** Specifies the size of each data chunk in degrees.
+
+    - `--run_local`:
+        - **Action:** `store_true`
+        - **Description:** Runs the script locally without utilizing Dask or Coiled clusters.
+
+    - `--no_stats`:
+        - **Action:** `store_true`
+        - **Description:** Prevents the creation of the chunk statistics spreadsheet.
+
+    - `--no_log`:
+        - **Action:** `store_true`
+        - **Description:** Skips the creation of the combined log file.
+
+    - `--no_upload`:
+        - **Action:** `store_true`
+        - **Description:** Does not save and upload output files to Amazon S3.
+
+    **Default Behavior:**
+
+    - If no command-line arguments are provided, the script uses default values for all parameters, which are suitable for testing purposes. For example, it processes a predefined bounding box and chunk size, runs locally, and creates all logs and statistics unless specified otherwise.
+
+    **Notes:**
+
+    - **Module Execution:** To successfully run the script and avoid `ModuleNotFoundError`, it's recommended to execute the script as a module using the `-m` flag from the project's root directory. This ensures that Python recognizes the `src` directory as a top-level package.
+
+    - **Setting `PYTHONPATH`:** Alternatively, you can set the `PYTHONPATH` environment variable to include the project's root directory. This allows you to run the script directly without the `-m` flag.
+
+        ```bash
+        export PYTHONPATH=$(pwd)
+        python src/scripts/models/drainage_model.py -cn drainage_cluster -bb 112 -4 114 -2 -cs 2
+        ```
+
+    - **Ensure `__init__.py` Files:** Make sure that each directory in the `src` path contains an `__init__.py` file. This file can be empty but is necessary for Python to recognize the directories as packages.
+
+        ```bash
+        touch src/__init__.py
+        touch src/scripts/__init__.py
+        touch src/scripts/models/__init__.py
+        touch src/scripts/utilities/__init__.py
+        ```
+
+    - **Use Virtual Environments:** It's good practice to use virtual environments to manage dependencies.
+
+        ```bash
+        # Create a virtual environment
+        python -m venv venv
+
+        # Activate the virtual environment
+        source venv/bin/activate
+
+        # Install required packages
+        pip install -r requirements.txt
+        ```
+
+    - **Check Dependencies:** Ensure all required packages (e.g., `dask`, `numba`, `numpy`, `pandas`) are installed in your environment.
+
+        ```bash
+        pip install dask numba numpy pandas
+        ```
+
+    **Example Scenario: Running for a Test AOI with a Coiled Cluster**
+
+    Suppose you want to process a small test AOI within the bounding box [112°W, 4°S, 114°E, 2°N], using a chunk size of 2 degrees, and leverage a Coiled cluster named `drainage_cluster`. You also want to generate statistics and logs, and upload the outputs to S3. You would execute:
+
+    ```bash
+    python -m src.scripts.models.drainage_model -cn drainage_cluster -bb 112 -4 114 -2 -cs 2
+    ```
+
+    **Explanation:**
+
+    - `-m src.scripts.models.drainage_model`: Runs the `drainage_model.py` script as a module within the `src.scripts.models` package.
+    - `-cn drainage_cluster`: Connects to the `drainage_cluster` Coiled cluster for distributed computing.
+    - `-bb 112 -4 114 -2`: Sets the bounding box for the AOI to west longitude `112°`, south latitude `-4°`, east longitude `114°`, and north latitude `-2°`.
+    - `-cs 2`: Divides the AOI into chunks of 2 degrees each.
+    - **Flags Not Included:** By omitting `--no_stats`, `--no_log`, and `--no_upload`, the script will generate the statistics spreadsheet, create logs, and upload outputs to S3 as per default behavior.
+
+    **Another Example: Running a Test AOI Without Uploading Outputs**
+
+    If you prefer to run the same AOI and cluster but want to skip uploading the outputs to S3, you would add the `--no_upload` flag:
+
+    ```bash
+    python -m src.scripts.models.drainage_model -cn drainage_cluster -bb 112 -4 114 -2 -cs 2 --no_upload
+    ```
+
+    **Explanation:**
+
+    - All parameters are the same as the previous example.
+    - `--no_upload`: Prevents the script from uploading the output data to Amazon S3. Useful for local testing or when manual upload is preferred.
+
+    **Running Multiple Options Together:**
+
+    For a comprehensive run that connects to a Coiled cluster, processes a specific AOI with a defined chunk size, and disables both statistics generation and log creation, you can combine multiple flags:
+
+    ```bash
+    python -m src.scripts.models.drainage_model -cn drainage_cluster -bb 112 -4 114 -2 -cs 2 --no_stats --no_log
+    ```
+
+    **Explanation:**
+
+    - `-cn drainage_cluster`: Uses the `drainage_cluster` Coiled cluster.
+    - `-bb 112 -4 114 -2`: Sets the AOI bounding box.
+    - `-cs 2`: Sets the chunk size.
+    - `--no_stats`: Skips generating the statistics spreadsheet.
+    - `--no_log`: Skips creating the combined log file.
+    - **Output Upload:** Since `--no_upload` is not specified, outputs will still be uploaded to S3.
+
+    **Tips for Running the Script:**
+
+    - **Verify Cluster Availability:**
+        - Ensure that the specified Coiled cluster (`drainage_cluster` in the example) is active and accessible.
+        - You can manage and monitor your Coiled clusters through the [Coiled Dashboard](https://app.coiled.io/) or via the Coiled CLI.
+
+    - **Check Bounding Box Coordinates:**
+        - Double-check the AOI coordinates to ensure they cover the intended geographical area.
+        - Incorrect bounding box specifications can lead to processing unintended regions or empty datasets.
+
+    - **Adjust Chunk Size Appropriately:**
+        - Depending on the size of the AOI and available computational resources, choose a chunk size that balances performance and resource utilization.
+
+    - **Monitor Logs and Outputs:**
+        - If not disabling logs and statistics, regularly check these outputs to monitor the progress and performance of the script.
+        - If you encounter errors, refer to the log files for detailed information.
+
+    - **Handle Large AOIs with Care:**
+        - Processing very large AOIs can be resource-intensive. Ensure that your Coiled cluster has sufficient resources (e.g., memory, CPU) to handle the workload.
+        - Consider breaking down extremely large AOIs into smaller, manageable chunks if necessary.
+
+    - **Customize Output Paths if Needed:**
+        - By default, the script saves outputs to predefined directories. You can modify the script to change output paths based on your project structure or preferences.
+
+    **Conclusion:**
+
+    This updated docstring provides clear and actionable examples for running the `drainage_model.py` script with various configurations, including using a Coiled cluster for a test AOI. By following these examples, you can effectively customize the script's behavior to suit different processing needs and environments.
+
+    **Feel free to modify the examples or add more based on specific use cases or additional arguments! If you have any further questions or need additional assistance, please let me know.**
