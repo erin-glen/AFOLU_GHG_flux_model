@@ -7,36 +7,57 @@ from dask.distributed import print
 from src.LULUCF.scripts.utilities import constants_and_names as cn
 from src.LULUCF.scripts.utilities import universal_utilities as uu
 
-#Create coiled cluster
-# cluster = coiled.Cluster(
-#         n_workers=1,
-#         use_best_zone=True,
-#         compute_purchase_option="spot_with_fallback",
-#         idle_timeout="15 minutes",
-#         region="us-east-1",
-#         name="testing_hansenize",
-#         workspace='wri-forest-research',
-#         worker_memory = "8GiB",
-#         worker_cpu = 2,
-#         #environ = {'CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE':'YES'}
-#     )
-#
-# #Coiled cluster (cloud run)
-# client = cluster.get_client()
-# client
+############################################################################################################
+# Connects to local or Coiled cluster
+cluster_type = 'test'
+cluster_name = 'hansenize_gdal_test_with_subprocess'
 
-# Local cluster with multiple workers
-cluster = LocalCluster()
-client = Client(cluster)
+if cluster_type == 'full':
+    # Full cluster with 40 workers
+    coiled_cluster = coiled.Cluster(
+        n_workers=40,
+        use_best_zone=True,
+        compute_purchase_option="spot_with_fallback",
+        idle_timeout="10 minutes",
+        region="us-east-1",
+        name=cluster_name,
+        workspace='wri-forest-research',
+        worker_cpu=4,
+        worker_memory="16GiB"
+    )
+    client = coiled_cluster.get_client()
+
+elif cluster_type == 'test':
+    # Test cluster with 1 worker
+    coiled_cluster = coiled.Cluster(
+        n_workers=1,
+        use_best_zone=True,
+        compute_purchase_option="spot_with_fallback",
+        idle_timeout="10 minutes",
+        region="us-east-1",
+        name=cluster_name,
+        workspace='wri-forest-research',
+        worker_cpu=2,
+        worker_memory="8GiB"
+    )
+    client = coiled_cluster.get_client()
+elif cluster_type == 'local':
+    # Local cluster with multiple workers
+    local_cluster = LocalCluster()
+    client = Client(local_cluster)
+    # Took 32.5 minutes to process drivers data locally (uint8)
+else:
+    print("set cluster_type to one of the following: 'full', 'test', 'local'")
+
 client
-#Took 32.5 minutes to process drivers data locally (uint8)
 
+###########################################################################################################
 
 #Set the environment variable to enable random writes for S3
 os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
 
 #Set process
-process = 'secondary_natural_forest'
+process = 'drivers'
 #TODO add text input file or command line arguments to determine which inputs to preprocess
 
 #Step 1: Create download dictionary
@@ -46,7 +67,9 @@ if process == 'drivers':
         'raw_dir': cn.drivers_raw_dir,
         'raw_pattern': cn.drivers_pattern,
         'vrt': "drivers.vrt",
-        'processed_dir': cn.drivers_processed_dir,
+        #'processed_dir': cn.drivers_processed_dir,
+        #TODO: Switch back processed dir
+        'processed_dir': "s3://gfw2-data/drivers_of_loss/1_km/processed/coiled_test/",
         'processed_pattern': cn.drivers_pattern
     }
 
@@ -106,7 +129,7 @@ for key,items in download_upload_dictionary.items():
 
     #Create a vrt of all raw input rasters
     output_vrt = f"{path}{vrt}"
-    future = client.submit(uu.build_vrt_gdal, raster_list, output_vrt)
+    future = client.submit(uu.build_vrt_gdal, raster_list, vrt, output_vrt)
     vrt_futures.append(future)
     #This works locally, but does not write out the vrt using gdal when running with coiled
 

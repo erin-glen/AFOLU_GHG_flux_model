@@ -3,12 +3,6 @@ Run from src/LULUCF/
 python -m scripts.preprocessing.hansenize -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats
 -bb -180 -60 180 80 -cs 2   # entire world (12600 chunks) (60x 32GB r6i.2xlarge workers= 22 minutes; around 90 Coiled credits and $4 dollars of AWS costs)
 """
-############################################################################################################
-# Connects to Coiled cluster if not running locally
-cluster_name = 'testing'
-run_local = False
-cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
-############################################################################################################
 import boto3
 import os
 import argparse
@@ -36,8 +30,14 @@ from src.LULUCF.scripts.utilities import log_utilities as lu
 from src.LULUCF.scripts.utilities import numba_utilities as nu
 
 #Set the environment variable to enable random writes for S3
-os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
+#os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
 
+############################################################################################################
+# Connects to Coiled cluster if not running locally
+cluster_name = 'hansenize_test_with_gdal'
+run_local = False
+if run_local == False:
+    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 ############################################################################################################
 #TODO add to command line argument or have system time reformatted with rundate
 run_date = "20241004"
@@ -137,30 +137,30 @@ for key,items in download_upload_dictionary.items():
         print(f"vrt for {key} has data type: {dt} ({gdal_dt})")
     # TODO add error handling if it can't open up vrt
 
-#Step 3: Use warp_to_hansen to preprocess each dataset into 10x10 degree tiles
-tasks = []
-for tile_id in cn.tile_id_list:
-    for key,items in download_upload_dictionary.items():
-        output_vrt = f"{items['raw_dir']}{items['vrt']}"
-        output_tile = f"{items['processed_dir']}{tile_id}_{items['processed_pattern']}"
-        xmin, ymin, xmax, ymax = uu.get_10x10_tile_bounds(tile_id)
-        dt = items['dt']
-        task = dask.delayed(uu.warp_to_hansen)(output_vrt, output_tile, xmin, ymin, xmax, ymax, dt, 0, False)
-        tasks.append(task)
-        print(f"Submitting dask delayed task to hansenize {output_tile}")
-results = dask.compute(tasks)
-
-
-
-futures = []
-for tile_id in cn.tile_id_list:
-    for key,items in download_upload_dictionary.items():
-        output_vrt = f"{items['raw_dir']}{items['vrt']}"
-        output_tile = f"{items['processed_dir']}{tile_id}_{items['processed_pattern']}"
-        xmin, ymin, xmax, ymax = uu.get_10x10_tile_bounds(tile_id)
-        dt = items['dt']
-        future = client.submit(uu.warp_to_hansen, output_vrt, output_tile, xmin, ymin, xmax, ymax, dt, 0, False)
-        futures.append(future)
-        print(f"Submitting future to hansenize {output_tile}")
-
-results = client.gather(futures)
+# #Step 3: Use warp_to_hansen to preprocess each dataset into 10x10 degree tiles
+# tasks = []
+# for tile_id in cn.tile_id_list:
+#     for key,items in download_upload_dictionary.items():
+#         output_vrt = f"{items['raw_dir']}{items['vrt']}"
+#         output_tile = f"{items['processed_dir']}{tile_id}_{items['processed_pattern']}"
+#         xmin, ymin, xmax, ymax = uu.get_10x10_tile_bounds(tile_id)
+#         dt = items['dt']
+#         task = dask.delayed(uu.warp_to_hansen)(output_vrt, output_tile, xmin, ymin, xmax, ymax, dt, 0, False)
+#         tasks.append(task)
+#         print(f"Submitting dask delayed task to hansenize {output_tile}")
+# results = dask.compute(tasks)
+#
+#
+#
+# futures = []
+# for tile_id in cn.tile_id_list:
+#     for key,items in download_upload_dictionary.items():
+#         output_vrt = f"{items['raw_dir']}{items['vrt']}"
+#         output_tile = f"{items['processed_dir']}{tile_id}_{items['processed_pattern']}"
+#         xmin, ymin, xmax, ymax = uu.get_10x10_tile_bounds(tile_id)
+#         dt = items['dt']
+#         future = client.submit(uu.warp_to_hansen, output_vrt, output_tile, xmin, ymin, xmax, ymax, dt, 0, False)
+#         futures.append(future)
+#         print(f"Submitting future to hansenize {output_tile}")
+#
+# results = client.gather(futures)

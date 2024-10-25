@@ -878,17 +878,44 @@ def fill_missing_input_layers_with_no_data(layers, uint8_list, int16_list, int32
     return layers
 
 # Function to build a VRT using GDAL with vsis3 paths
-def build_vrt_gdal(s3_paths, output_vrt):
+def build_vrt_gdal(input_paths_list, vrt, output_vrt):
+
     # Convert S3 paths to vsis3 format
-    vsis3_paths = [path.replace("s3://", "/vsis3/") for path in s3_paths]
-    output_s3_path = output_vrt.replace("s3://", "/vsis3/")
+    input_vsis3_paths = [path.replace("s3://", "/vsis3/") for path in input_paths_list] #tile_paths
+    output_vsis3_path = output_vrt.replace("s3://", "/vsis3/")
 
-    # Use GDAL to build the VRT
-    gdal.BuildVRT(output_s3_path, vsis3_paths)
+    # Use GDAL Python API to build the VRT
+    #gdal.BuildVRT(output_vsis3_path, input_vsis3_paths)
 
-    #Check that file exists
+    # List all input rasters in vsis3 format in txt file
+    file_paths_txt = f'vsis3_paths.txt'
+
+    with open(f"/tmp/{file_paths_txt}", 'w') as file:
+        for item in input_vsis3_paths:
+            file.write(item + '\n')
+
+    # Use subprocess to build the VRT
+    buildvrt_command = ["gdalbuildvrt", "-input_file_list", f"/tmp/{file_paths_txt}", f"/tmp/{vrt}"]
+    #buildvrt_command.extend(input_vsis3_paths)
+
+    try:
+        #subprocess.run(buildvrt_command, check=True)
+        subprocess.check_call(buildvrt_command)
+        print(f"Successfully built vrt into {output_vrt}")
+    except subprocess.CalledProcessError as e:
+        print(f"Error building vrt: {e}")
+        return f"failure for {output_vrt}"
+
+    # Uploads vrt to s3
     s3 = boto3.client('s3')
     bucket_name, prefix = split_s3_path(output_vrt)
+    s3.upload_file(f"/tmp/{vrt}", Bucket=bucket_name, Key=prefix)
+
+    # Deletes the local text file and vrt
+    os.remove(f"/tmp/{file_paths_txt}")
+    os.remove(f"/tmp/{vrt}")
+
+    #Check that file exists
     try:
         s3.head_object(Bucket=bucket_name, Key=prefix)
         print(f"VRT successfully created at: {output_vrt}")
@@ -899,10 +926,6 @@ def build_vrt_gdal(s3_paths, output_vrt):
             raise RuntimeError(f"Error accessing S3: {e}")
 
     return output_vrt
-
-# Function to build a VRT using rasterio with vsis3 paths
-
-
 
 # Function to read a VRT from S3 using GDAL and vsis3
 def warp_to_hansen(source_raster_s3_path, output_raster_s3_path, xmin, ymin, xmax, ymax, dt, no_data, tiled=True,
@@ -923,37 +946,60 @@ def warp_to_hansen(source_raster_s3_path, output_raster_s3_path, xmin, ymin, xma
     # Open the VRT
     dataset = gdal.Open(source_gdal_path)
 
+    # Code to run gdal warp using Python API (does not work in coiled)
     if dataset:
         if tiled == True:
             # Warp the VRT to the new raster
-            options = gdal.WarpOptions(
-                dstSRS='EPSG:4326',
-                xRes=0.00025,
-                yRes=0.00025,
-                targetAlignedPixels=True,
-                outputBounds=[xmin, ymin, xmax, ymax],
-                dstNodata=no_data,
-                outputType=dt,
-                creationOptions=['COMPRESS=DEFLATE', 'TILED=YES',
-                                 f'BLOCKXSIZE={x_pixel_window}',
-                                 f'BLOCKYSIZE={y_pixel_window}'],
-                format='GTiff'
-            )
+            cmd = ['gdalwarp', '-t_srs', 'EPSG:4326', '-tr', '0.00025', '0.00025',
+                   '-tap', '-te', str(xmin), str(ymin), str(xmax), str(ymax),
+                   '-dstnodata', str(no_data), '-ot', dt, '-overwrite',
+                   '-co', 'COMPRESS=DEFLATE',
+                   '-co', 'TILED=YES',
+                   '-co', f'BLOCKXSIZE={x_pixel_window}',
+                   '-co', f'BLOCKYSIZE={y_pixel_window}',
+                   source_gdal_path, output_gdal_path]
         else:
-            # Warp the VRT to the new raster
-            options = gdal.WarpOptions(
-                dstSRS='EPSG:4326',  # Reproject to WGS84
-                xRes=0.00025,  # X resolution (10 degrees)
-                yRes=0.00025,  # Y resolution (10 degrees)
-                targetAlignedPixels=True,  # Ensure target aligned pixels (-tap)
-                outputBounds=[xmin, ymin, xmax, ymax],  # Output bounds
-                dstNodata=no_data,  # Set no data to 0
-                outputType=dt,  # Output data type
-                creationOptions=['COMPRESS=DEFLATE', 'TILED=NO'],  # Add Deflate compression and no tiling (40,000 x 1)
-                format='GTiff'  # Output format
-            )
+            cmd = ['gdalwarp', '-t_srs', 'EPSG:4326', '-tr', '0.00025', '0.00025',
+                   '-tap', '-te', str(xmin), str(ymin), str(xmax), str(ymax),
+                   '-dstnodata', str(no_data), '-ot', dt, '-overwrite',
+                   '-co', 'COMPRESS=DEFLATE',
+                   '-co', 'TILED=NO',
+                   source_gdal_path, output_gdal_path]
 
-        gdal.Warp(output_gdal_path, source_gdal_path, options=options)
+        subprocess.run(cmd, check=True)
+
+    #Code to run gdal warp using Python API (does not work in coiled)
+    # if dataset:
+    #     if tiled == True:
+    #         # Warp the VRT to the new raster
+    #         options = gdal.WarpOptions(
+    #             dstSRS='EPSG:4326',
+    #             xRes=0.00025,
+    #             yRes=0.00025,
+    #             targetAlignedPixels=True,
+    #             outputBounds=[xmin, ymin, xmax, ymax],
+    #             dstNodata=no_data,
+    #             outputType=dt,
+    #             creationOptions=['COMPRESS=DEFLATE', 'TILED=YES',
+    #                              f'BLOCKXSIZE={x_pixel_window}',
+    #                              f'BLOCKYSIZE={y_pixel_window}'],
+    #             format='GTiff'
+    #         )
+    #     else:
+    #         # Warp the VRT to the new raster
+    #         options = gdal.WarpOptions(
+    #             dstSRS='EPSG:4326',  # Reproject to WGS84
+    #             xRes=0.00025,  # X resolution (10 degrees)
+    #             yRes=0.00025,  # Y resolution (10 degrees)
+    #             targetAlignedPixels=True,  # Ensure target aligned pixels (-tap)
+    #             outputBounds=[xmin, ymin, xmax, ymax],  # Output bounds
+    #             dstNodata=no_data,  # Set no data to 0
+    #             outputType=dt,  # Output data type
+    #             creationOptions=['COMPRESS=DEFLATE', 'TILED=NO'],  # Add Deflate compression and no tiling (40,000 x 1)
+    #             format='GTiff'  # Output format
+    #         )
+    #
+    #     gdal.Warp(output_gdal_path, source_gdal_path, options=options)
 
         print(f"Warped raster saved at: {output_gdal_path}")
         return output_gdal_path
