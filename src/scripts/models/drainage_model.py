@@ -40,7 +40,6 @@ def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
     engert_block = in_dict_float32['engert']
     grip_block = in_dict_float32['grip']
     extraction_block = in_dict_uint8['extraction']
-    descals_type_block = in_dict_int16['descals_type']
 
     # Initialize output arrays
     rows, cols = peat_block.shape
@@ -59,7 +58,6 @@ def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
             engert = engert_block[row, col]
             grip = grip_block[row, col]
             extraction = extraction_block[row, col]
-            descals_type = descals_type_block[row, col]
 
             node = 0
 
@@ -78,7 +76,7 @@ def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
                     node = nu.accrete_node(node, 3)
                     soil_block[row, col] = 1  # 'drained'
                     state_out[row, col] = node
-                elif planted_forest_type or descals_type > 0:
+                elif planted_forest_type > 0:
                     node = nu.accrete_node(node, 4)
                     soil_block[row, col] = 1  # 'drained'
                     state_out[row, col] = node
@@ -133,7 +131,7 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
 
     # Define expected data type lists for layers
     uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type','extraction']
-    int16_list = ['descals_type']  # Add layer names as needed
+    int16_list = []  # Add layer names as needed
     int32_list = []  # Add layer names as needed
     float32_list = ['dadap', 'osm_roads', 'osm_canals', 'engert', 'grip']
 
@@ -364,10 +362,10 @@ def main(argv=None):
             cluster_name='drainage',
 
             # bounding_box=[112, -4, 114, -2], # one 2-degree chunk with data in Borneo 00N_110E
-            bounding_box=[110, -10, 120, 0], # 10x10 degree tile Borneo
+            # bounding_box=[110, -10, 120, 0], # 10x10 degree tile Borneo
             # bounding_box=[-74, -4, -72, -2],  # one 2-degree chunk with data Peru 00N_080W
             # bounding_box=[-80.0, -10.0, -70.0, 0.0],  # 10x10 degree tile peru 00N_080W
-            # bounding_box=[16.0, 6.0, 18.0, 8.0],  # 2-degree chunk Congo 10N_010E
+            bounding_box=[16.0, 6.0, 18.0, 8.0],  # 2-degree chunk Congo 10N_010E
             # bounding_box=[-10.0, 0.0, 0.0, 10],  # 10x10 degree tile Congo 10N_010E
             # bounding_box=[-8, 52, -6, 54, 2],  # 2-degree chunk Ireland 60N_010W
             # bounding_box=[-110.0, 50.0, -100.0, 60.0],  # 10x10 degree tile Ireland 60N_010W

@@ -201,12 +201,6 @@ download_dict = {
         'planted_forest_type_layer']: f's3://{s3_bucket_name}/{posixpath.join(datasets["planted_forest_type"]["working_version"], f"{sample_tile_id}_plantation_type_oilpalm_woodfiber_other.tif")}',
     file_patterns[
         'extraction']: f's3://{s3_bucket_name}/{posixpath.join(datasets["extraction"]["working_version"], f"{sample_tile_id}_extraction.tif")}',
-    file_patterns[
-        'descals_type']: f's3://{s3_bucket_name}/{posixpath.join(datasets["descals_oil_palm"]["plant_type"]["working_version"], f"descals_extent_{sample_tile_id}.tif")}',
-    file_patterns[
-        'descals_year']: f's3://{s3_bucket_name}/{posixpath.join(datasets["descals_oil_palm"]["plant_year"]["working_version"], f"descals_year_{sample_tile_id}.tif")}'
-
-
 }
 
 ### Miscellaneous
