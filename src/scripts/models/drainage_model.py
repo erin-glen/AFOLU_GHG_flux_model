@@ -364,7 +364,9 @@ def main(argv=None):
             cluster_name='drainage',
             # bounding_box=[112, -4, 114, -2], # one 2-degree chunk with data in Borneo 00N_110E
             # bounding_box=[-74, -4, -72, -2],  # one 2-degree chunk with data Peru 00N_080W
-            bounding_box=[-74, -4, -72, -2],  # 10x10 degree tile peru 00N_080W
+            bounding_box=[-80.0, -10.0, -70.0, 0.0],  # 10x10 degree tile peru 00N_080W
+            # bounding_box=[-10.0, 0.0, 0.0, 10],  # 10x10 degree tile Congo 10N_010E
+            # bounding_box=[-110.0, 50.0, -100.0, 60.0],  # 10x10 degree tile Ireland 60N_110W
             # bounding_box=[110, -10, 120, 0], # 10x10 degree tile
             chunk_size=2,
             run_local=True,
@@ -615,6 +617,11 @@ if __name__ == "__main__":
 
     - **Customize Output Paths if Needed:**
         - By default, the script saves outputs to predefined directories. You can modify the script to change output paths based on your project structure or preferences.
-
- 
+        
+        Some Testing tiles and bounds:
+            bounding_box=[112, -4, 114, -2], # one 2-degree chunk with data in Borneo 00N_110E
+            bounding_box=[-74, -4, -72, -2],  # one 2-degree chunk with data Peru 00N_080W
+            bounding_box=[-80.0, -10.0, -70.0, 0.0],  # 10x10 degree tile peru 00N_080W
+            bounding_box=[-10.0, 0.0, 0.0, 10],  # 10x10 degree tile Congo 10N_010E
+            bounding_box=[-110.0, 50.0, -100.0, 60.0],  # 10x10 degree tile Ireland 60N_110W
 """
