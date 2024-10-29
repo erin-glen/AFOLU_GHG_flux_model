@@ -40,7 +40,7 @@ def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
     engert_block = in_dict_float32['engert']
     grip_block = in_dict_float32['grip']
     extraction_block = in_dict_uint8['extraction']
-    descals_type_block = in_dict_uint8['descals_type']
+    descals_type_block = in_dict_int16['descals_type']
 
     # Initialize output arrays
     rows, cols = peat_block.shape
@@ -64,6 +64,7 @@ def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
             node = 0
 
             if peat == 1:
+                node = nu.accrete_node(node, 1)
                 node = nu.accrete_node(node, 1)
                 if dadap > 0 or osm_canals > 0:
                     node = nu.accrete_node(node, 1)
@@ -131,8 +132,8 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
             return f"Failed to download layer {layer} for chunk {bounds_str}: {e}", chunk_stats
 
     # Define expected data type lists for layers
-    uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type','extraction', 'descals_type']
-    int16_list = []  # Add layer names as needed
+    uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type','extraction']
+    int16_list = ['descals_type']  # Add layer names as needed
     int32_list = []  # Add layer names as needed
     float32_list = ['dadap', 'osm_roads', 'osm_canals', 'engert', 'grip']
 
@@ -361,7 +362,9 @@ def main(argv=None):
         print("No command-line arguments provided. Using default values for testing.")
         run_drainage_model(
             cluster_name='drainage',
-            bounding_box=[112, -4, 114, -2], # one 2-degree chunk with data
+            # bounding_box=[112, -4, 114, -2], # one 2-degree chunk with data in Borneo 00N_110E
+            # bounding_box=[-74, -4, -72, -2],  # one 2-degree chunk with data Peru 00N_080W
+            bounding_box=[-74, -4, -72, -2],  # 10x10 degree tile peru 00N_080W
             # bounding_box=[110, -10, 120, 0], # 10x10 degree tile
             chunk_size=2,
             run_local=True,
@@ -613,9 +616,5 @@ if __name__ == "__main__":
     - **Customize Output Paths if Needed:**
         - By default, the script saves outputs to predefined directories. You can modify the script to change output paths based on your project structure or preferences.
 
-    **Conclusion:**
-
-    This updated docstring provides clear and actionable examples for running the `drainage_model.py` script with various configurations, including using a Coiled cluster for a test AOI. By following these examples, you can effectively customize the script's behavior to suit different processing needs and environments.
-
-    **Feel free to modify the examples or add more based on specific use cases or additional arguments! If you have any further questions or need additional assistance, please let me know.**
+ 
 """
