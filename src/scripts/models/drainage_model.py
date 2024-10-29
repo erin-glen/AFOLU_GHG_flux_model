@@ -88,10 +88,10 @@ def calculate_drainage(in_dict_uint8, in_dict_int16, in_dict_float32):
                     state_out[row, col] = node
                 else:
                     node = nu.accrete_node(node, 6)
-                    soil_block[row, col] = 0  # 'undrained'
+                    soil_block[row, col] = 0  # 'undrained peat'
                     state_out[row, col] = node
             else:
-                soil_block[row, col] = 0  # 'undrained'
+                soil_block[row, col] = 0  # 'not peat'
                 node = nu.accrete_node(node, 2)
                 state_out[row, col] = node
 
