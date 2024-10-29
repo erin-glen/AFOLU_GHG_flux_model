@@ -871,36 +871,32 @@ def replace_tile_id_in_dict(data_dict, new_tile_id):
     return data_dict
 
 
-# Fills any missing chunks (layers) with NoData (0s) of the correct datatype.
 def fill_missing_input_layers_with_no_data(layers, uint8_list, int16_list, int32_list, float32_list,
                                            bounds_str, tile_id, is_final, logger):
+    # Determine the shape of arrays based on an existing layer
+    existing_array = next(iter(layers.values()), None)
+    if existing_array is not None:
+        array_shape = existing_array.shape
+    else:
+        # Handle the case where no data exists at all
+        raise ValueError(f"No data available to determine the size for missing layers in chunk {bounds_str} in {tile_id}: {uu.timestr()}")
 
-   # Fills missing layers with arrays of the appropriate data type and size
-    for key, array in layers.items():
-        if array is None:
+    # Create a mapping of data types to their corresponding layer names
+    data_type_lists = {
+        np.uint8: uint8_list,
+        np.int16: int16_list,
+        np.int32: int32_list,
+        np.float32: float32_list,
+    }
 
-            # Determines the appropriate dtype based on the categorized lists
-            if key in uint8_list:
-                dtype = np.uint8
-            elif key in int16_list:
-                dtype = np.int16
-            elif key in int32_list:
-                dtype = np.int32
-            elif key in float32_list:
-                dtype = np.float32
-            else:
-                raise ValueError(f"Key {key} for chunk {bounds_str} in {tile_id} not found in any data type lists: {timestr()}")
-
-            # Finds an existing array to use as a template for size
-            existing_array = next((arr for arr in layers.values() if arr is not None), None)
-            if existing_array is not None:
-                # Creates an array of zeros with the same shape and the determined dtype
-                layers[key] = np.zeros(existing_array.shape, dtype=dtype)
+    # Iterate over each data type and its corresponding list of layer names
+    for dtype, keys_list in data_type_lists.items():
+        for key in keys_list:
+            if key not in layers:
+                # Create an array of zeros with the determined dtype and shape
+                layers[key] = np.zeros(array_shape, dtype=dtype)
                 # Log the creation of the missing layer
-                lu.print_and_log(f"Created {key} for chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
-            else:
-                # Handles the case where no data exists at all
-                raise ValueError(f"No data available to determine the size for the missing layer {key} for chunk {bounds_str} in {tile_id}: {timestr()}")
+                lu.print_and_log(f"Filled missing layer '{key}' with NoData values for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
 
     return layers
 
