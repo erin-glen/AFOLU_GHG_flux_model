@@ -362,12 +362,16 @@ def main(argv=None):
         print("No command-line arguments provided. Using default values for testing.")
         run_drainage_model(
             cluster_name='drainage',
+
             # bounding_box=[112, -4, 114, -2], # one 2-degree chunk with data in Borneo 00N_110E
+            # bounding_box=[110, -10, 120, 0], # 10x10 degree tile Borneo
             # bounding_box=[-74, -4, -72, -2],  # one 2-degree chunk with data Peru 00N_080W
-            bounding_box=[-80.0, -10.0, -70.0, 0.0],  # 10x10 degree tile peru 00N_080W
+            # bounding_box=[-80.0, -10.0, -70.0, 0.0],  # 10x10 degree tile peru 00N_080W
+            # bounding_box=[16.0, 6.0, 18.0, 8.0],  # 2-degree chunk Congo 10N_010E
             # bounding_box=[-10.0, 0.0, 0.0, 10],  # 10x10 degree tile Congo 10N_010E
-            # bounding_box=[-110.0, 50.0, -100.0, 60.0],  # 10x10 degree tile Ireland 60N_110W
-            # bounding_box=[110, -10, 120, 0], # 10x10 degree tile
+            bounding_box=[-8, 52, -6, 54, 2],  # 2-degree chunk Ireland 60N_010W
+            # bounding_box=[-110.0, 50.0, -100.0, 60.0],  # 10x10 degree tile Ireland 60N_010W
+
             chunk_size=2,
             run_local=True,
             no_stats=False, #testing running this as false
@@ -623,5 +627,7 @@ if __name__ == "__main__":
             bounding_box=[-74, -4, -72, -2],  # one 2-degree chunk with data Peru 00N_080W
             bounding_box=[-80.0, -10.0, -70.0, 0.0],  # 10x10 degree tile peru 00N_080W
             bounding_box=[-10.0, 0.0, 0.0, 10],  # 10x10 degree tile Congo 10N_010E
-            bounding_box=[-110.0, 50.0, -100.0, 60.0],  # 10x10 degree tile Ireland 60N_110W
+            bounding_box=[16.0, 6.0, 18.0, 8.0],  # 2-degree chunk Congo 10N_010E
+            bounding_box=[-8, 52, -6, 54, 2],  #  2-degree chunk Ireland 60N_010W
+            bounding_box=[-110.0, 50.0, -100.0, 60.0],  # 10x10 degree tile Ireland 60N_010W
 """
