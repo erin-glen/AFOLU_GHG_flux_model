@@ -29,7 +29,7 @@ otherland_code = cn.ipcc_codes['otherland']
 @jit(nopython=True)
 def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float32):
     """
-    Calculates drainage status and CO₂ emissions for each pixel.
+    Calculates drainage status and emissions (CO₂, N₂O, CH₄) for each pixel.
 
     Args:
         in_dict_uint8 (Dict): Dictionary of uint8 input arrays.
@@ -54,8 +54,6 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     engert_block = in_dict_float32['engert']
     grip_block = in_dict_float32['grip']
     extraction_block = in_dict_uint8['extraction']
-
-    # New input arrays for ecozone and nutrient status per pixel
     ecozone_block = in_dict_uint8['ecozone']           # Ecozone codes: 1=boreal, 2=temperate, 3=tropical
     nutrient_block = in_dict_uint8['nutrient_status']  # Nutrient status codes: 1=poor, 2=rich
 
@@ -63,10 +61,15 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     rows, cols = peat_block.shape
     soil_block = np.zeros((rows, cols), dtype=np.uint32)
     state_out = np.zeros((rows, cols), dtype=np.uint32)
-    co2_emissions_out = np.zeros((rows, cols), dtype=np.float32)
-    # Initialize placeholders for N2O and CH4 emissions if needed in the future
-    # n2o_emissions_out = np.zeros((rows, cols), dtype=np.float32)
-    # ch4_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+    CO2_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+    N2O_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+    # Initialize arrays for CH₄ emissions split into land and ditch components
+    CH4_land_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+    CH4_ditch_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+    # Initialize array for offsite CO₂ emissions
+    CO2_offsite_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+    # Initialize placeholders for additional emissions if needed in the future
+    # e.g., other_gas_emissions_out = np.zeros((rows, cols), dtype=np.float32)
 
     # Iterate over each pixel
     for row in range(rows):
@@ -84,7 +87,11 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
             nutrient_status_code = nutrient_block[row, col]  # Numeric code for nutrient status
 
             node = 0
-            ef = 0.0  # Initialize emission factor
+            ef_co2 = 0.0  # Initialize emission factor for CO₂
+            ef_n2o = 0.0  # Initialize emission factor for N₂O
+            ef_ch4_land = 0.0  # Initialize emission factor for CH₄ from land
+            ef_ch4_ditch = 0.0  # Initialize emission factor for CH₄ from ditches
+            ef_co2_offsite = 0.0  # Initialize emission factor for offsite CO₂
 
             if peat == 1:
                 node = nu.accrete_node(node, 1)
@@ -158,77 +165,157 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
             if soil_block[row, col] == 1:
                 # Start of emission factor decision tree
                 if ecozone == 'boreal':
+                    ef_co2_offsite = 0.12
                     if land_cover == forest_code:
-                        if nutrient == 'poor':  # Update with actual data
-                            ef = 0.25
+                        if nutrient == 'poor':
+                            ef_co2 = 0.25
+                            ef_n2o = 0.22
+                            ef_ch4_land = 7.0
+                            ef_ch4_ditch = 217
                         elif nutrient == 'rich':
-                            ef = 0.95
+                            ef_co2 = 0.95
+                            ef_n2o = 3.2
+                            ef_ch4_land = 2.0
+                            ef_ch4_ditch = 217
                         else:
-                            ef = 0.0  # Default or handle unknown nutrient status
+                            ef_co2 = 0.0  # Handle unknown nutrient status
+                            ef_n2o = 0.0
+                            ef_ch4_land = 0.0
+                            ef_ch4_ditch = 0.0
                     elif land_cover == grassland_code:
-                        ef = 5.7
+                        ef_co2 = 5.7
+                        ef_n2o = 9.5
+                        ef_ch4_land = 1.4
+                        ef_ch4_ditch = 1165 # using deep default
                     elif land_cover == cropland_code:
-                        ef = 7.9
+                        ef_co2 = 7.9
+                        ef_n2o = 13
+                        ef_ch4_land = 0
+                        ef_ch4_ditch = 1165
                     elif extraction > 0:
-                        ef = 2.8
+                        ef_co2 = 2.8
+                        ef_n2o = 0.30
+                        ef_ch4_land = 6.1
+                        ef_ch4_ditch = 542
                     else:
-                        ef = 0.0  # No emissions or default value
+                        ef_co2 = 0.0  # No emissions or default value
+                        ef_n2o = 0.0
+                        ef_ch4_land = 0.0
+                        ef_ch4_ditch = 0.0
                 elif ecozone == 'temperate':
+                    ef_co2_offsite = 0.31
                     if land_cover == forest_code:
-                        ef = 2.6
+                        ef_co2 = 2.6
+                        ef_n2o = 2.8
+                        ef_ch4_land = 2.5
+                        ef_ch4_ditch = 217
                     elif land_cover == grassland_code:
-                        if nutrient == 'poor':  # Update with actual data
-                            ef = 5.3
+                        ef_ch4_ditch = 1165 # using deep default
+                        if nutrient == 'poor':
+                            ef_co2 = 5.3
+                            ef_n2o = 4.3
+                            ef_ch4_land = 1.8
                         elif nutrient == 'rich':
-                            ef = 6.1
+                            ef_co2 = 6.1
+                            ef_n2o = 8.2
+                            ef_ch4_land = 16 # using deep default
                         else:
-                            ef = 0.0  # Default or handle unknown nutrient status
+                            ef_co2 = 0.0  # Handle unknown nutrient status
+                            ef_n2o = 0.0
+                            ef_ch4_land = 0.0
                     elif land_cover == cropland_code:
-                        ef = 10.5  # Example value
+                        ef_co2 = 10.5
+                        ef_n2o = 13
+                        ef_ch4_land = 0
+                        ef_ch4_ditch = 1165
                     elif extraction > 0:
-                        ef = 3.0  # Example value
+                        ef_co2 = 3.0
+                        ef_n2o = 0.3
+                        ef_ch4_land = 6.1
+                        ef_ch4_ditch = 542
                     else:
-                        ef = 0.0  # No emissions or default value
+                        ef_co2 = 0.0  # No emissions or default value
+                        ef_n2o = 0.0
+                        ef_ch4_land = 0.0
+                        ef_ch4_ditch = 0.0
                 elif ecozone == 'tropical':
+                    ef_ch4_ditch = 2259
+                    ef_co2_offsite = 0.82
                     if planted_forest_type > 0:
                         if plantation_type == 'long_rotation':
-                            ef = 15.0
+                            ef_co2 = 15.0
+                            ef_n2o = 2.4
+                            ef_ch4_land = 2.7
                         elif plantation_type == 'short_rotation':
-                            ef = 20.0
+                            ef_co2 = 20.0
+                            ef_n2o = 2.4
+                            ef_ch4_land = 2.7
                         elif plantation_type == 'oil_palm':
-                            ef = 11.0
+                            ef_co2 = 11.0
+                            ef_n2o = 1.2
+                            ef_ch4_land = 0
                         elif plantation_type == 'sago_palm':
-                            ef = 1.5
+                            ef_co2 = 1.5
+                            ef_n2o = 3.3
+                            ef_ch4_land = 26.2
                         else:
-                            ef = 0.0  # Handle unknown plantation type
+                            ef_co2 = 0.0  # Handle unknown plantation type
+                            ef_n2o = 0.0
+                            ef_ch4_land = 0.0
                     elif land_cover == forest_code:
-                        ef = 5.3
+                        ef_co2 = 5.3
+                        ef_n2o = 2.4
+                        ef_ch4_land = 4.9
                     elif land_cover == grassland_code:
-                        ef = 9.6
+                        ef_co2 = 9.6
+                        ef_n2o = 5.0
+                        ef_ch4_land = 7.0
                     elif land_cover == cropland_code:
-                        ef = 14.0
+                        ef_co2 = 14.0
+                        ef_n2o = 5.0
+                        ef_ch4_land = 7.0
                     elif extraction > 0:
-                        ef = 2.0
+                        ef_co2 = 2.0
+                        ef_n2o = 0
+                        ef_ch4_land = 0
                     else:
-                        ef = 0.0  # No emissions or default value
+                        ef_co2 = 0.0  # No emissions or default value
+                        ef_n2o = 0.0
+                        ef_ch4_land = 0.0
                 else:
-                    ef = 0.0  # Default emission factor for unknown ecozone
+                    # todo insert message about uknown ecozone
 
-                # Calculate CO₂ emissions
+
+                # Calculate emissions
                 # Assuming each pixel represents 1 hectare
                 area = 1.0  # Adjust if pixel area is different
-                co2_emissions_out[row, col] = ef * area
+                CO2_emissions_out[row, col] = ef_co2 * area
+                N2O_emissions_out[row, col] = ef_n2o * area
+                CH4_land_emissions_out[row, col] = ef_ch4_land * area
+                CH4_ditch_emissions_out[row, col] = ef_ch4_ditch * area
+                CO2_offsite_emissions_out[row, col] = ef_co2_offsite * area
             else:
-                co2_emissions_out[row, col] = 0.0  # No emissions for undrained peat or non-peat areas
+                # No emissions for undrained peat or non-peat areas
+                CO2_emissions_out[row, col] = 0.0
+                N2O_emissions_out[row, col] = 0.0
+                CH4_land_emissions_out[row, col] = 0.0
+                CH4_ditch_emissions_out[row, col] = 0.0
+                CO2_offsite_emissions_out[row, col] = 0.0
 
-    # Add outputs to dictionaries
-    out_dict_uint32["soil"] = soil_block
-    out_dict_uint32["state"] = state_out
-    out_dict_float32["co2_emissions"] = co2_emissions_out
-    # out_dict_float32["n2o"] = n2o_emissions_out
-    # out_dict_float32["ch4_emissions"] = ch4_emissions_out
+        # Add outputs to dictionaries
+        out_dict_uint32["soil"] = soil_block
+        out_dict_uint32["state"] = state_out
+        out_dict_float32["CO2_emissions"] = CO2_emissions_out
+        out_dict_float32["N2O_emissions"] = N2O_emissions_out
+        out_dict_float32["CH4_land_emissions"] = CH4_land_emissions_out
+        out_dict_float32["CH4_ditch_emissions"] = CH4_ditch_emissions_out
+        out_dict_float32["CO2_offsite_emissions"] = CO2_offsite_emissions_out
+        # Add additional emissions to the dictionaries if needed
+        # e.g., out_dict_float32["other_gas_emissions"] = other_gas_emissions_out
 
-    return out_dict_uint32, out_dict_float32
+        return out_dict_uint32, out_dict_float32
+
+
 
 
 def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_final, no_upload):
