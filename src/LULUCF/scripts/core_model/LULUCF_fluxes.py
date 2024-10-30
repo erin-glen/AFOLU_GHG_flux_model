@@ -6,7 +6,7 @@ python -m scripts.utilities.create_cluster -n 1 -m 16 -c 2
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 10 49.75 10.25 50 -cs 0.25
 
 Full run:
-python -m scripts.utilities.create_cluster -n 200 -m 16 -c 2
+python -m scripts.utilities.create_cluster -n 200 -m 32 -c 4
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 1
 """
 
@@ -22,10 +22,6 @@ from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
 from ..utilities import log_utilities as lu
 from ..utilities import numba_utilities as nu
-
-import dask
-import logging
-from dask.distributed import Client, get_worker
 
 
 # Function to calculate LULUCF fluxes and carbon densities
@@ -163,8 +159,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         deadwood_c_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
         litter_c_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
 
-        ##TIME 1:50, 1:19
-        ##TIME with full outputs: 1:44 but redid 2 chunks
 
         # Iterates through all pixels in the chunk
         for row in range(LC_curr_block.shape[0]):
@@ -177,28 +171,20 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 veg_h_prev = veg_h_prev_block[row, col]
                 veg_h_curr = veg_h_curr_block[row, col]
 
-                ##TIME with full outputs: 1:26, 1:39 but redid 2 chunks
-
                 r_s_ratio_cell = r_s_ratio_block[row, col]
 
                 # TODO What to do if this is the first interval and there is no previous RF?
                 agc_rf_prev = agc_rf_out_block[row, col]  # The removal factor from the previous interval
 
-                ##TIME 1:11
-
                 # Replaces pixel without R:S (0) with the global non-mangrove R:S default #TODO This is the non-mangrove default. Need to adjust if mangrove pixel?
                 if r_s_ratio_cell == 0:
                     r_s_ratio_cell = cn.default_r_s_non_mang
-
-                ##TIME 1:16
 
                 # natrl_forest_curve_0_5 = natrl_forest_curve_0_5_block[row, col]
                 # natrl_forest_curve_6_10 = natrl_forest_curve_6_10_block[row, col]
                 # natrl_forest_curve_11_15 = natrl_forest_curve_11_15_block[row, col]
                 # natrl_forest_curve_16_20 = natrl_forest_curve_16_20_block[row, col]
                 # natrl_forest_curve_21_100 = natrl_forest_curve_21_100_block[row, col]
-
-                ##TIME 1:06
 
                 planted_forest_type_cell = planted_forest_type_block[row, col]
                 planted_forest_tree_crop_cell = planted_forest_tree_crop_block[row, col]
@@ -242,8 +228,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # in the record
                 first_forest_dist_in_record = 0
 
-                ##TIME 1:20
-
                 # Loops over burned area pixels since 2001 to see if there was a fire.
                 # Stops once a fire is detected because all that matters here is that there was a fire at some point.
                 for burned_area_year in burned_area_blocks_all_intervals_so_far:
@@ -278,8 +262,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # for each pool
                 c_dens_in = [agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in]
 
-                ##TIME with full outputs: 1:51, 2:04 but repeated 4 chunks
-
 
                 ### Defines specific land cover classes
 
@@ -308,10 +290,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 all_planted_trees = (SDPT_planted_trees or oil_palm_pre_2000 or oil_palm_after_Descals)
                 all_oil_palm = (SDPT_oil_palm or oil_palm_pre_2000 or oil_palm_after_Descals)
 
-                ##TIME 1:17
-                ##TIME with three float32 output dicts: 2:11 but redid some tasks, 1:49,2:23 but redid 6 chunks, 2:13 but redid 2 chunks
-
-
                 ## Various pixel metrics that are used in the decision tree
 
                 ## The most recent year of non-tall vegetation composite land cover in the cell before this interval
@@ -320,8 +298,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # Checks whether to update whether the most recent year of non-tall vegetation land cover.
                 # Returns the last year that was non-tall vegetation land cover.
                 most_recent_year_not_tall_veg = nu.check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_tall_veg, interval_end_year)
-
-                #TIME with minimal output chunks 1:35, 1:24, 1:37, 1:34
 
                 # ## Calculates the maximum canopy height since the last time a pixel was classified as non-tall vegetation land cover.
                 # # This is used to determine whether current height has decreased significantly from this maximum height.
@@ -343,8 +319,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # # 0=height loss relative to the maximum vegetation height has not already occurred.
                 # # 1=height loss relative to the maximum vegetation height has already occurred.
                 # first_time_sig_loss_from_max_height = first_time_sig_loss_from_max_height_block[row,col]
-                #
-                # ##TIME 5:06
 
     #             # Updates the tracker of whether this is the first time that significant height loss relative to
     #             # the height maximum has occurred to determine if a forest->forest disturbance should be reported.
@@ -846,7 +820,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         year_range = f"{interval_end_year - cn.interval_years}_{interval_end_year}"
 
         out_dict_uint32[f"{cn.land_state_pattern}_{year_range}"] = state_out_block.copy()
-        ##TIME 1:43
 
         out_dict_float32[f"{cn.agc_rf_pattern}_{year_range}"] = agc_rf_out_block.copy()
 
@@ -857,7 +830,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         out_dict_float32[f"{cn.bgc_gross_emis_pattern}_{year_range}"] = bgc_gross_emis_out_block.copy()
         out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = deadwood_c_gross_emis_out_block.copy()
         out_dict_float32[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] = litter_c_gross_emis_out_block.copy()
-        ##TIME 1:51
 
         out_dict_float32[f"{cn.agc_gross_removals_pattern}_{year_range}"] = agc_gross_removals_out_block.copy()
         out_dict_float32[f"{cn.bgc_gross_removals_pattern}_{year_range}"] = bgc_gross_removals_out_block.copy()
@@ -868,15 +840,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         out_dict_float32[f"{cn.bgc_net_flux_pattern}_{year_range}"] = bgc_net_flux_out_block.copy()
         out_dict_float32[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"] = deadwood_c_net_flux_out_block.copy()
         out_dict_float32[f"{cn.litter_c_net_flux_pattern}_{year_range}"] = litter_c_net_flux_out_block.copy()
-        ##TIME 1:34, 1:45, 1:43
 
         out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = ch4_gross_emis_out_block.copy()
         out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = n2o_gross_emis_out_block.copy()
-        ##TIME 1:51, 2:02 but redid some tasks, 1:44, 2:26 but redid some tasks, 2:04 but redid some tasks
-        ##TIME without net flux outputs 1:40, 1:27
-
-        ##TIME with two float32 output dicts: 1:36, 2:06 but redid some tasks, 1:41, 1:46, 1:40
-        ##TIME with three float32 output dicts: 2:11 but redid some tasks, 1:49,2:23 but redid 6 chunks, 2:13 but redid 2 chunks
 
         out_dict_float32[f"{cn.agc_dens_pattern}_{interval_end_year}"] = agc_dens_block.copy()
         out_dict_float32[f"{cn.bgc_dens_pattern}_{interval_end_year}"] = bgc_dens_block.copy()
@@ -886,14 +852,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         # Test/intermediate outputs
         out_dict_uint8[f"{cn.gain_year_count_pattern}_{year_range}"] = gain_year_count_out_block.copy()
         # Years selected to show it represents from model start to end of current interval
-        out_dict_uint16[f"most_recent_year_not_tall_veg_{cn.first_model_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()  ##TIME: 1:37, 1:25, 1:21, 1:50 redid 2
-        out_dict_uint8[f"years_of_forest_regrowth_{interval_end_year}"] = years_of_forest_regrowth_block.copy()   ##TIME: 1:23, 1:24, 1:22, 2:01 redid 2
-        out_dict_uint16[f"year_of_forest_loss_{year_range}"] = year_of_forest_loss_block.copy() ##TIME 1:58 but redid 2 chunks
+        out_dict_uint16[f"most_recent_year_not_tall_veg_{cn.first_model_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()
+        out_dict_uint8[f"years_of_forest_regrowth_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
+        out_dict_uint16[f"year_of_forest_loss_{year_range}"] = year_of_forest_loss_block.copy()
         out_dict_uint8[f"max_height_since_last_time_not_tall_veg_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
-        ##TIME: 2:00 redid lots, 2:08 redid several
         ##TIME with 32GB workers and 3 float32 dict outputs: 1:41, 1:35, 1:26, 1:27, 1:28, 1:23, 1:25
         ##TIME with 32GB workers and 2 float32 dicts outputs: 1:22, 1:25, 1:22
-        ##TIME with 32GB workers and 1 float32 dict output: 1:27, 1:28
+        ##TIME with 32GB workers and 1 float32 dict output: 1:27, 1:28, 1:33
 
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
