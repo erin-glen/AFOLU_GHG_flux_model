@@ -24,6 +24,51 @@ from ..utilities import log_utilities as lu
 from ..utilities import numba_utilities as nu
 
 
+@jit(nopython=True)
+def calc_max_height_since_last_time_not_tall_veg_local(most_recent_year_not_tall_veg, interval_end_year,
+                                                       vegetation_height_so_far_cell, years_so_far_cell):
+
+    # Determines the maximum height so far if the pixel has been tall vegetation land cover since the beginning of the model
+    if most_recent_year_not_tall_veg == 0:
+
+        # The maximum vegetation height through all intervals so far
+        max_height_since_last_time_not_tall_veg = max(vegetation_height_so_far_cell)
+
+    # Determines the maximum height so far if the pixel hasn't had tall vegetation land cover at least one year since the beginning of the model
+    else:
+
+        heights_since_last_time_not_tall_veg = []
+
+        # Loops over the years and corresponding heights to only get heights that are after the most recent
+        # non-tall vegetation year.
+        # This could be done more elegantly with conditional numpy arrays but that approach
+        # isn't supported in the numba function, unfortunately.
+        # https://chatgpt.com/share/e/6718fb20-48d8-800a-9eb2-d751bd6b1a8f
+        for i in range(len(years_so_far_cell)):
+            if years_so_far_cell[i] > most_recent_year_not_tall_veg:
+                heights_since_last_time_not_tall_veg.append(vegetation_height_so_far_cell[i])
+
+        # In case the pixel is currently non-tall vegetation land cover, so there are no intervals since then
+        # and therefore no heights
+        if len(heights_since_last_time_not_tall_veg) == 0:
+
+            # Uses the current vegetation height (which would exist when the land cover is not tall vegetation
+            # but there is still tall vegetation in the individual tree height layer)
+            max_height_since_last_time_not_tall_veg = vegetation_height_so_far_cell[-1]
+            # max_height_since_last_time_not_tall_veg = 0
+
+        # When the pixel was previously non-tall vegetation but is now tall vegetation,
+        # so there are intervals since then.
+        else:
+
+            # The maximum height in the years since the last non-tall vegetation land cover interval
+            max_height_since_last_time_not_tall_veg = max(heights_since_last_time_not_tall_veg)
+
+    return max_height_since_last_time_not_tall_veg
+
+
+
+
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
 @jit(nopython=True)
@@ -79,6 +124,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
     # Stores the forest disturbance blocks for the entire model duration (added to progressively during each interval)
     forest_dist_blocks_all_intervals_so_far = []
 
+    # Arrays of vegetation height and corresponding years in all intervals through the current one
+    # Eventually used to get the maximum height since last non-tall vegetation land cover
+    vegetation_height_all_intervals_so_far = []
+
     # Stores the last year that each pixel did not have tall vegetation composite land cover.
     # 0=Always tall vegetation so far. Other values represent the last year of non-tall vegetation.
     # This is assessed at the pixel level because numba wouldn't allow the needed logical operations on numpy arrays (chunks).
@@ -122,6 +171,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
             year_key = f"{cn.burned_area_pattern}_{year_offset}"
             burned_area_blocks_all_intervals_so_far.append(in_dict_uint8[year_key])
 
+
         # Creates a list of all the forest disturbance arrays from 2001 to the end of the interval.
         # The values in the list are the disturbance year starting from 1, e.g., 2001=1, 2008=8, 2017=17.
         # It works by getting the annual disturbance chunks for the current interval and appending them to a list of
@@ -137,6 +187,19 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
             # Makes a list of disturbance arrays with the disturbance year.
             # uint8 is okay because the highest value should be 20 (not 2020).
             forest_dist_blocks_all_intervals_so_far.append(year_disturb_array.astype('uint8'))
+
+
+        # Iterates through all intervals so far to make arrays of vegetation heights.
+        # This is eventually used to get the maximum canopy height after non-tall vegetation land cover.
+        # Stacks the height rasters as blocks but gets the max height since non-tall veg in the pixel-level iteration.
+        for year_offset in list(range(cn.first_model_year, interval_end_year + 1, cn.interval_years)):
+            # Vegetation height layer to retrieve
+            year_key = f"{cn.vegetation_height_pattern}_{year_offset}"
+
+            # Adds vegetation height and corresponding years to arrays from previous intervals
+            vegetation_height_all_intervals_so_far.append(in_dict_uint8[year_key])
+
+        # print(vegetation_height_all_intervals_so_far)
 
         # Numpy arrays for outputs that don't depend on previous interval's values
         state_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('uint32')  # Land cover state at end of interval
@@ -299,10 +362,34 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # Returns the last year that was non-tall vegetation land cover.
                 most_recent_year_not_tall_veg = nu.check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_tall_veg, interval_end_year)
 
-                # ## Calculates the maximum canopy height since the last time a pixel was classified as non-tall vegetation land cover.
-                # # This is used to determine whether current height has decreased significantly from this maximum height.
-                # max_height_since_last_time_not_tall_veg = (nu.calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, interval_end_year, in_dict_uint8, row, col))
+
+                # Calculates the maximum canopy height since the last time a pixel was classified as non-tall vegetation land cover.
+                # This is used to determine whether current height has decreased significantly from this maximum height.
+                # Arrays of vegetation height and corresponding years in all intervals through the current one
+                vegetation_height_so_far_cell = []
+
+                for vegetation_height_interval in vegetation_height_all_intervals_so_far:
+
+                    first_forest_dist_in_record = vegetation_height_interval[row, col]
+                    vegetation_height_so_far_cell.append(first_forest_dist_in_record)
+
+                # print(vegetation_height_so_far_cell)
+
+                years_so_far_cell = []
+
+                # Iterates through all intervals so far to make arrays of vegetation heights and corresponding years
+                for year_offset in list(range(cn.first_model_year, interval_end_year + 1, cn.interval_years)):
+
+                    years_so_far_cell.append(year_offset)
+
+                # print(years_so_far_cell)
+
+                max_height_since_last_time_not_tall_veg = nu.calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, vegetation_height_so_far_cell, years_so_far_cell)
+
+                # print(max_height_since_last_time_not_tall_veg)
                 #
+                # os.quit()
+
                 # # Height change from maximum height since last time not tall veg land cover.
                 # # Need to recast to signed int8 from uint8 so that negative values (height gain) stay negative.
                 # height_change_max_curr = np.int8(max_height_since_last_time_not_tall_veg - veg_h_curr)
@@ -799,13 +886,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
     #             bgc_dens_block[row, col] = c_dens_out[1]
     #             deadwood_c_dens_block[row, col] = c_dens_out[2]
     #             litter_c_dens_block[row, col] = c_dens_out[3]
-    #
-    #             # Test/intermediate outputs
-    #             gain_year_count_out_block[row, col] = gain_year_count
-    #             most_recent_year_not_tall_veg_block[row, col] = most_recent_year_not_tall_veg
-    #             years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
-    #             max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
-    #
+
+                # Test/intermediate outputs
+                # gain_year_count_out_block[row, col] = gain_year_count
+                most_recent_year_not_tall_veg_block[row, col] = most_recent_year_not_tall_veg
+                # years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
+                max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
+
 
         # End of iteration calculations and outputs
 
@@ -856,9 +943,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         out_dict_uint8[f"years_of_forest_regrowth_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
         out_dict_uint16[f"year_of_forest_loss_{year_range}"] = year_of_forest_loss_block.copy()
         out_dict_uint8[f"max_height_since_last_time_not_tall_veg_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
-        ##TIME with 32GB workers and 3 float32 dict outputs: 1:41, 1:35, 1:26, 1:27, 1:28, 1:23, 1:25
-        ##TIME with 32GB workers and 2 float32 dicts outputs: 1:22, 1:25, 1:22
-        ##TIME with 32GB workers and 1 float32 dict output: 1:27, 1:28, 1:33
 
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 

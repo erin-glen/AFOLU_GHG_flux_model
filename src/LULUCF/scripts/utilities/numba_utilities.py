@@ -401,26 +401,13 @@ def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_f
 # Calculates the maximum canopy height since the last time a pixel was classified as not tall vegetation land cover.
 # This is used to determine whether current height has decreased significantly from this maximum height.
 @jit(nopython=True)
-def calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, interval_end_year, in_dict_uint8, row, col):
-
-    # Arrays of vegetation height and corresponding years in all intervals through the current one
-    vegetation_height_all_intervals_so_far = []
-    years_so_far = []
-
-    # Iterates through all intervals so far to make arrays of vegetation heights and corresponding years
-    for year_offset in list(range(cn.first_model_year, interval_end_year + 1, cn.interval_years)):
-        # Vegetation height layer to retrieve
-        year_key = f"{cn.vegetation_height_pattern}_{year_offset}"
-
-        # Adds vegetation height and corresponding years to arrays from previous intervals
-        vegetation_height_all_intervals_so_far.append(in_dict_uint8[year_key][row, col])
-        years_so_far.append(year_offset)
+def calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, vegetation_height_so_far_cell, years_so_far_cell):
 
     # Determines the maximum height so far if the pixel has been tall vegetation land cover since the beginning of the model
     if most_recent_year_not_tall_veg == 0:
 
         # The maximum vegetation height through all intervals so far
-        max_height_since_last_time_not_tall_veg = max(vegetation_height_all_intervals_so_far)
+        max_height_since_last_time_not_tall_veg = max(vegetation_height_so_far_cell)
 
     # Determines the maximum height so far if the pixel hasn't had tall vegetation land cover at least one year since the beginning of the model
     else:
@@ -432,9 +419,9 @@ def calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, 
         # This could be done more elegantly with conditional numpy arrays but that approach
         # isn't supported in the numba function, unfortunately.
         # https://chatgpt.com/share/e/6718fb20-48d8-800a-9eb2-d751bd6b1a8f
-        for i in range(len(years_so_far)):
-            if years_so_far[i] > most_recent_year_not_tall_veg:
-                heights_since_last_time_not_tall_veg.append(vegetation_height_all_intervals_so_far[i])
+        for i in range(len(years_so_far_cell)):
+            if years_so_far_cell[i] > most_recent_year_not_tall_veg:
+                heights_since_last_time_not_tall_veg.append(vegetation_height_so_far_cell[i])
 
         # In case the pixel is currently non-tall vegetation land cover, so there are no intervals since then
         # and therefore no heights
@@ -442,8 +429,7 @@ def calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, 
 
             # Uses the current vegetation height (which would exist when the land cover is not tall vegetation
             # but there is still tall vegetation in the individual tree height layer)
-            max_height_since_last_time_not_tall_veg = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year}"][row, col]
-            # max_height_since_last_time_not_tall_veg = 0
+            max_height_since_last_time_not_tall_veg = vegetation_height_so_far_cell[-1]
 
         # When the pixel was previously non-tall vegetation but is now tall vegetation,
         # so there are intervals since then.
