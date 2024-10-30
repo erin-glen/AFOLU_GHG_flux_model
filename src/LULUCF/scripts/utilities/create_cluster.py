@@ -21,10 +21,13 @@ def create_cluster(n_workers, worker_memory, worker_cpu):
         workspace='wri-forest-research',
         # mount_bucket="s3://gfw2-data",
         worker_memory = worker_memory_str,
-        worker_cpu = worker_cpu
+        worker_cpu = worker_cpu,
+        worker_options={
+            "nthreads": 2  # Forces two tasks/chunks to be processed per worker, regardless of the number of vcpus
+        }
     )
     print(f"Cluster created with name: {cluster.name}")
-    print(f"Number of workers: {n_workers}; Worker memory: {worker_memory_str}; cpus per worker: {worker_cpu}")
+    print(f"Number of workers: {n_workers}; Worker memory: {worker_memory_str}")
     return cluster
 
 if __name__ == "__main__":

@@ -20,8 +20,8 @@
 -bb 10 46 14 50 -cs 2               # 4x4 deg (50N_010E), 4 chunks
 -bb 10 49 11 50 -cs 1               # 1x1 deg (50N_010E), 1 chunk
 -bb 10 49 11 50 -cs 0.5             # 1x1  (50N_010E), 4 chunks
--bb 10 49.5 10.5 50 -cs 0.25        # 0.5x0.5 deg, 4 chunks
 -bb 10 42 11 43 -cs 0.5             # 1x1 deg, 4 chunks (some GLCLU code=254 for ocean and some land, so data should be output)
+-bb 10 49.5 10.5 50 -cs 0.25        # 0.5x0.5 deg, 4 chunks
 -bb 10 49.75 10.25 50 -cs 0.25      # 0.25x0.25 deg, 1 chunk (has data, no fire)
 -bb 15 41.75 15.25 42 -cs 0.25      # 0.25x0.25 deg, 1 chunk (has data with fire)
 -bb 116 -3 116.25 -2.75 -cs 0.25    # 0.25x0.25 deg, 1 chunk (has mangroves)

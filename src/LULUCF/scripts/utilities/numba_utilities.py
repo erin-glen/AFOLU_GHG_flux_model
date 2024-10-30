@@ -112,10 +112,12 @@ def unpack_stand_replacing_emission_factors(ef):
 
 
 # Calculate non-CO2 emissions
+# Cf, Gef_ch4 and Gef_n2O default to -1 so that fire emissions calculations are not performed if no
+# arguments are supplied. This isn't a Pythonic approach but Numba doesn't allow =None as arguments.
 #TODO Make sure this is right? Should there be CO2 emissions from fire as well? Had some of that in the forest model?
 # Outstanding questions are highlighted in emission factor slides of model schematic.
 @jit(nopython=True)
-def fire_equations(carbon_in, r_s_ratio_cell, Cf, Gef_ch4, Gef_n2o):
+def fire_equations(carbon_in, r_s_ratio_cell, Cf=-1.0, Gef_ch4=-1.0, Gef_n2o=-1.0):
     # Cf is the combustion factor
     # Gef_ch4 and Gef_n2o are the emission factors for their respective gases
 
@@ -123,7 +125,8 @@ def fire_equations(carbon_in, r_s_ratio_cell, Cf, Gef_ch4, Gef_n2o):
     ch4_flux_out = 0
     n2o_flux_out = 0
 
-    if (isinstance(Cf, (int, float)) and isinstance(Gef_ch4, (int, float)) and isinstance(Gef_n2o, (int, float))):
+    # Won't calculate CH4 and N2O fluxes if default values are provided (i.e. no values from decision tree)
+    if Cf > 0 and Gef_ch4 > 0 and Gef_n2o > 0:
 
         # print(f"Carbon in: {carbon_in}; R:S: {r_s_ratio_cell}; Cf: {Cf}; Gef_ch4: {Gef_ch4}; GWP CH4: {cn.gwp_ch4}")
 

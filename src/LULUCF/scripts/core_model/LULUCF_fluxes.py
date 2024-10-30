@@ -23,75 +23,9 @@ from ..utilities import universal_utilities as uu
 from ..utilities import log_utilities as lu
 from ..utilities import numba_utilities as nu
 
-
-
-# @jit(nopython=True)
-# def calc_max_height_since_last_time_not_tall_veg_local(most_recent_year_not_tall_veg, interval_end_year, in_dict_uint8, row, col):
-#
-#
-#     # Arrays of vegetation height and corresponding years in all intervals through the current one
-#     vegetation_height_all_intervals_so_far = []
-#     years_so_far = []
-#
-#     # Iterates through all intervals so far to make arrays of vegetation heights and corresponding years
-#     for year_offset in list(range(cn.first_model_year, interval_end_year + 1, cn.interval_years)):
-#         # Vegetation height layer to retrieve
-#         year_key = f"{cn.vegetation_height_pattern}_{year_offset}"
-#
-#         # Adds vegetation height and corresponding years to arrays from previous intervals
-#         vegetation_height_all_intervals_so_far.append(in_dict_uint8[year_key][row, col])
-#         years_so_far.append(year_offset)
-#
-#     # most_recent_year_not_tall_veg = interval_end_year-5 #TODO Delete. For testing.
-#
-#     # if (row == 0) and (col == 0):
-#     #
-#     #     print(interval_end_year)
-#     #     # print(years_so_far)
-#     #     # print(vegetation_height_all_intervals_so_far)
-#     #     # print(most_recent_year_not_tall_veg)
-#
-#
-#     # Determines the maximum height so far if the pixel has been tall vegetation land cover since the beginning of the model
-#     if most_recent_year_not_tall_veg == 0:
-#
-#         # The maximum vegetation height through all intervals so far
-#         max_height_since_last_time_not_tall_veg = max(vegetation_height_all_intervals_so_far)
-#
-#     # Determines the maximum height so far if the pixel hasn't had tall vegetation land cover at least one year since the beginning of the model
-#     else:
-#
-#         heights_since_last_time_not_tall_veg = []
-#
-#         # Loops over the years and corresponding heights to only get heights that are after the most recent
-#         # non-tall vegetation year.
-#         # This could be done more elegantly with conditional numpy arrays but that approach
-#         # isn't supported in the numba function, unfortunately.
-#         # https://chatgpt.com/share/e/6718fb20-48d8-800a-9eb2-d751bd6b1a8f
-#         for i in range(len(years_so_far)):
-#             if years_so_far[i] > most_recent_year_not_tall_veg:
-#                 heights_since_last_time_not_tall_veg.append(vegetation_height_all_intervals_so_far[i])
-#
-#         # In case the pixel is currently non-tall vegetation land cover, so there are no intervals since then
-#         # and therefore no heights
-#         if len(heights_since_last_time_not_tall_veg) == 0:
-#
-#             # Uses the current vegetation height (which would exist when the land cover is not tall vegetation
-#             # but there is still tall vegetation in the individual tree height layer)
-#             max_height_since_last_time_not_tall_veg = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year}"][row, col]
-#             # max_height_since_last_time_not_tall_veg = 0
-#
-#         # When the pixel was previously non-tall vegetation but is now tall vegetation,
-#         # so there are intervals since then.
-#         else:
-#
-#             # The maximum height in the years since the last non-tall vegetation land cover interval
-#             max_height_since_last_time_not_tall_veg = max(heights_since_last_time_not_tall_veg)
-#
-#     # return max_height_since_last_time_not_tall_veg
-#     return max_height_since_last_time_not_tall_veg
-
-
+import dask
+import logging
+from dask.distributed import Client, get_worker
 
 
 # Function to calculate LULUCF fluxes and carbon densities
@@ -141,17 +75,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
     drivers_block = in_dict_uint8[cn.drivers_pattern]
     continent_ecozone_block = in_dict_int16[cn.continent_ecozone_pattern]
 
+    ## Test/intermediate outputs blocks
+
     # Stores the burned area blocks for the entire model duration (added to progressively during each interval)
     burned_area_blocks_all_intervals_so_far = []
 
     # Stores the forest disturbance blocks for the entire model duration (added to progressively during each interval)
     forest_dist_blocks_all_intervals_so_far = []
-
-    # # Stores the vegetation height blocks through the current interval (added to progressively during each interval)
-    # vegetation_height_all_intervals_so_far = []
-
-
-    # Test/intermediate outputs blocks
 
     # Stores the last year that each pixel did not have tall vegetation composite land cover.
     # 0=Always tall vegetation so far. Other values represent the last year of non-tall vegetation.
@@ -167,6 +97,15 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
 
     # Maximum height of vegetation since the last interval in which there was not forest
     max_height_since_last_time_not_tall_veg_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('uint8')
+
+    # Tracks whether the height has already decreased more than the signif. height loss threshold compared to
+    # maximum vegetation height since the last time the pixel was non-tall vegetation land cover.
+    # This prevents a pixel from repeatedly (multiple intervals) being counted as having a disturbance compared to
+    # the maximum height; this can only be triggered once since the maximum height is attained.
+    # This is used to determine if a forest->forest disturbance based on height loss relative to the max height should be reported.
+    # 0=height loss relative to the maximum vegetation height has not already occurred.
+    # 1=height loss relative to the maximum vegetation height has already occurred.
+    first_time_sig_loss_from_max_height_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('uint8')
 
 
     # Iterates through model intervals
@@ -192,10 +131,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         # It works by getting the annual disturbance chunks for the current interval and appending them to a list of
         # chunks from previous intervals.
         for year_offset in range(interval_end_year-4, interval_end_year+1):
+
             # The name of the disturbance layer in the input dictionary
             year_key = f"{cn.forest_disturbance_layer_name}_{year_offset}"
 
-            # Replaces the binary annual disturbance array with the year of disturbance (1, 2, 3...2020)
+            # Replaces the binary annual disturbance array with the year of disturbance (1, 2, 3...20)
             year_disturb_array = in_dict_uint8[year_key] * (year_offset - cn.first_model_year)
 
             # Makes a list of disturbance arrays with the disturbance year.
@@ -223,6 +163,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         deadwood_c_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
         litter_c_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
 
+        ##TIME 1:50, 1:19
+        ##TIME with full outputs: 1:44 but redid 2 chunks
+
         # Iterates through all pixels in the chunk
         for row in range(LC_curr_block.shape[0]):
             for col in range(LC_curr_block.shape[1]):
@@ -234,20 +177,28 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 veg_h_prev = veg_h_prev_block[row, col]
                 veg_h_curr = veg_h_curr_block[row, col]
 
+                ##TIME with full outputs: 1:26, 1:39 but redid 2 chunks
+
                 r_s_ratio_cell = r_s_ratio_block[row, col]
 
                 # TODO What to do if this is the first interval and there is no previous RF?
                 agc_rf_prev = agc_rf_out_block[row, col]  # The removal factor from the previous interval
 
+                ##TIME 1:11
+
                 # Replaces pixel without R:S (0) with the global non-mangrove R:S default #TODO This is the non-mangrove default. Need to adjust if mangrove pixel?
                 if r_s_ratio_cell == 0:
                     r_s_ratio_cell = cn.default_r_s_non_mang
 
-                natrl_forest_curve_0_5 = natrl_forest_curve_0_5_block[row, col]
-                natrl_forest_curve_6_10 = natrl_forest_curve_6_10_block[row, col]
-                natrl_forest_curve_11_15 = natrl_forest_curve_11_15_block[row, col]
-                natrl_forest_curve_16_20 = natrl_forest_curve_16_20_block[row, col]
-                natrl_forest_curve_21_100 = natrl_forest_curve_21_100_block[row, col]
+                ##TIME 1:16
+
+                # natrl_forest_curve_0_5 = natrl_forest_curve_0_5_block[row, col]
+                # natrl_forest_curve_6_10 = natrl_forest_curve_6_10_block[row, col]
+                # natrl_forest_curve_11_15 = natrl_forest_curve_11_15_block[row, col]
+                # natrl_forest_curve_16_20 = natrl_forest_curve_16_20_block[row, col]
+                # natrl_forest_curve_21_100 = natrl_forest_curve_21_100_block[row, col]
+
+                ##TIME 1:06
 
                 planted_forest_type_cell = planted_forest_type_block[row, col]
                 planted_forest_tree_crop_cell = planted_forest_tree_crop_block[row, col]
@@ -291,6 +242,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # in the record
                 first_forest_dist_in_record = 0
 
+                ##TIME 1:20
+
                 # Loops over burned area pixels since 2001 to see if there was a fire.
                 # Stops once a fire is detected because all that matters here is that there was a fire at some point.
                 for burned_area_year in burned_area_blocks_all_intervals_so_far:
@@ -325,6 +278,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # for each pool
                 c_dens_in = [agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in]
 
+                ##TIME with full outputs: 1:51, 2:04 but repeated 4 chunks
+
 
                 ### Defines specific land cover classes
 
@@ -353,8 +308,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 all_planted_trees = (SDPT_planted_trees or oil_palm_pre_2000 or oil_palm_after_Descals)
                 all_oil_palm = (SDPT_oil_palm or oil_palm_pre_2000 or oil_palm_after_Descals)
 
+                ##TIME 1:17
+                ##TIME with three float32 output dicts: 2:11 but redid some tasks, 1:49,2:23 but redid 6 chunks, 2:13 but redid 2 chunks
 
-                ### Various pixel metrics that are used in the decision tree
+
+                ## Various pixel metrics that are used in the decision tree
 
                 ## The most recent year of non-tall vegetation composite land cover in the cell before this interval
                 most_recent_year_not_tall_veg = most_recent_year_not_tall_veg_block[row, col]
@@ -363,474 +321,517 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # Returns the last year that was non-tall vegetation land cover.
                 most_recent_year_not_tall_veg = nu.check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_tall_veg, interval_end_year)
 
+                #TIME with minimal output chunks 1:35, 1:24, 1:37, 1:34
 
-                ## Calculates the maximum canopy height since the last time a pixel was classified as non-tall vegetation land cover.
-                # This is used to determine whether current height has decreased significantly from this maximum height.
-                max_height_since_last_time_not_tall_veg = (
-                    nu.calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, interval_end_year, in_dict_uint8, row, col))
-
-
-                ## Number of years of regrowth for new forest since last time not forest
-                years_of_forest_regrowth = years_of_forest_regrowth_block[row, col]
-
-                # Calculates the number of years of forest regrowth since the last year of not-tall vegetation.
-                # Can override the pre-existing value.
-                years_of_forest_regrowth = nu.calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_tall_veg, tall_veg_curr, years_of_forest_regrowth)
-
-
-                ## Height change during the interval. Need to recast to signed int8 from uint8 so that negative values (height gain) stay negative.
-                height_change_prev_curr = np.int8(veg_h_prev - veg_h_curr)
-
-                # Is height loss during the interval significant in absolute change (m)?
-                sig_height_loss_prev_curr_abs = (height_change_prev_curr >= cn.sig_height_loss_threshold_abs)
-
-
-                ### Starting output pixel values
-
-                # Starting decision tree node value
-                node = 0
-
-                # Need to force arrays into float32 because numba is so particular about datatypes.
-                state_out = 0
-                gain_year_count = 0
-                agc_rf = 0
-                c_gross_emis_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross emissions: AGC, BGC, deadwood C, litter C.
-                c_gross_removals_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross removals: AGC, BGC, deadwood C, litter C.
-                non_co2_flux_out = np.array([0, 0]).astype('float32')  # Initializes dummy output non-CO2 fluxes: CH4, N2O
-                c_dens_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C densities: AGC, BGC, deadwood C, litter C.
-
-
-                ### Tree gain
-                if tall_veg_gain:  # Non-tree converted to tree (1)    #TODO: Include mangrove exception.
-                    node = nu.accrete_node(node, 1)
-                    if all_planted_trees:  # New planted trees (11)
-                        node = nu.accrete_node(node, 1)
-                        if SDPT_planted_trees: # New SDPT planted trees (incl. SDPT oil palm) (111)
-                            state_out = nu.accrete_node(node, 1)
-                            agc_rf = planted_forest_removal_factor_cell
-                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in)
-                        else: # New non-SDPT oil palm (112)
-                            state_out = nu.accrete_node(node, 2)
-                            agc_rf = cn.oil_palm_agc_rf
-                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in)
-                    else:  # New non-planted trees (12)
-                        node = nu.accrete_node(node, 2)
-                        if tall_veg_curr:  # New terrestrial natural forest (121)
-                            state_out = nu.accrete_node(node, 1)
-                            agc_rf = natrl_forest_curve_0_5
-                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in)
-                        else:  # New trees outside forests (122)
-                            state_out = nu.accrete_node(node, 2)
-                            agc_rf = cn.trees_outside_forests_agc_rf_max
-                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in)
-
-                ### Tree loss
-                elif tall_veg_loss:  # Tree converted to non-tree (2)    #TODO: Include mangrove exception.
-                    node = 2
-                    if all_planted_trees:  # Full loss of planted trees (21)
-                        node = nu.accrete_node(node, 1)
-                        if all_oil_palm:  # Full loss of oil palm (211)
-                            node = nu.accrete_node(node, 1)
-                            if burned_in_last_interval:  # Full loss of oil palm (burned) (2111)
-                                state_out = nu.accrete_node(node, 1)
-                                agc_rf = 2.2
-                                ef = cn.biomass_emissions_only
-                                c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
-                            else:  # Full loss of oil palm (not burned) (2112)
-                                state_out = nu.accrete_node(node, 2)
-                                agc_rf = 2.2
-                                ef = cn.agc_emissions_only
-                                c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                        else:  # Full loss of non-oil palm planted trees (212)
-                            node = nu.accrete_node(node, 2)
-                            if LC_curr == cn.cropland:  # Plantation harvested as cropland (2121)
-                                node = nu.accrete_node(node, 1)
-                                if burned_in_last_interval:  # Plantation harvested as cropland (burned) (21211)
-                                    state_out = nu.accrete_node(node, 1)
-                                    agc_rf = 2.2
-                                    ef = cn.all_non_soil_pools
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
-                                else:  # Plantation harvested as cropland (not burned) (21212)
-                                    state_out = nu.accrete_node(node, 2)
-                                    agc_rf = 2.2
-                                    ef = cn.all_non_soil_pools
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                            elif short_veg_curr:  # Plantation harvested as short vegetation (2122)
-                                node = nu.accrete_node(node, 2)
-                                if burned_in_last_interval:  # Plantation harvested as short vegetation (burned) (21221)
-                                    state_out = nu.accrete_node(node, 1)
-                                    agc_rf = 2.2
-                                    ef = cn.biomass_emissions_only
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
-                                else:  # Plantation harvested as short vegetation (not burned) (21222)
-                                    state_out = nu.accrete_node(node, 2)
-                                    agc_rf = 2.2
-                                    ef = cn.all_but_bgc_emissions
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                            elif med_veg_curr:  # Plantation harvested as medium vegetation (2123)
-                                node = nu.accrete_node(node, 3)
-                                if burned_in_last_interval:  # Plantation harvested as medium vegetation (burned) (21231)
-                                    state_out = nu.accrete_node(node, 1)
-                                    agc_rf = 2.2
-                                    ef = cn.biomass_emissions_only
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
-                                else:  # Plantation harvested as medium vegetation (not burned) (21232)
-                                    state_out = nu.accrete_node(node, 2)
-                                    agc_rf = 2.2
-                                    ef = cn.all_but_bgc_emissions
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                            elif LC_curr == cn.builtup:  # Plantation converted to settlement (2124)
-                                node = nu.accrete_node(node, 4)
-                                if burned_in_last_interval:  # Plantation converted to settlement (burned) (21241)
-                                    state_out = nu.accrete_node(node, 1)
-                                    agc_rf = 2.2
-                                    ef = cn.all_non_soil_pools
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
-                                else:  # Plantation converted to settlement (not burned) (21242)
-                                    state_out = nu.accrete_node(node, 2)
-                                    agc_rf = 2.2
-                                    ef =  cn.all_non_soil_pools
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                            else:  # Plantation converted to anything else (2125)
-                                node = nu.accrete_node(node, 5)
-                                if burned_in_last_interval:  # Plantation converted to anything else (burned) (21251)
-                                    state_out = nu.accrete_node(node, 1)
-                                    agc_rf = 2.2
-                                    ef = cn.biomass_emissions_only
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
-                                else:  # Plantation converted to anything else (not burned)
-                                    state_out = nu.accrete_node(node, 2)
-                                    agc_rf = 2.2
-                                    ef = cn.all_but_bgc_emissions
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                    else:  # Full loss of non-planted trees (22)
-                        node = nu.accrete_node(node, 2)
-                        if tall_veg_prev:  # Full loss of natural forest (221)
-                            node = nu.accrete_node(node, 1)
-                            if LC_curr == cn.cropland:  # Natural forest converted to cropland (2211)
-                                node = nu.accrete_node(node, 1)
-                                if burned_in_last_interval:  # Natural forest converted to cropland (burned) (22111)
-                                    state_out = nu.accrete_node(node, 1)
-                                    agc_rf_pre = 2.2
-                                    ef = cn.all_non_soil_pools
-                                    agc_rf_post = 4.7
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
-                                else:  # Natural forest converted to cropland (not burned) (22112)
-                                    state_out = nu.accrete_node(node, 2)
-                                    agc_rf_pre = 2.2
-                                    ef = cn.all_non_soil_pools
-                                    agc_rf_post = 4.7
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                            elif short_veg_curr:  # Natural forest converted to short vegetation (2212)
-                                node = nu.accrete_node(node, 2)
-                                if drivers_cell in cn.drivers_non_soil_C: # Natural forest converted to short vegetation with disturbance that emits all non-soil C pools (22121)
-                                    node = nu.accrete_node(node, 1)
-                                    if burned_in_last_interval:  # Natural forest converted to short vegetation with disturbance that emits all non-soil C pools (burned) (221211)
-                                        state_out = nu.accrete_node(node, 1)
-                                        agc_rf = 2.2
-                                        ef = cn.biomass_emissions_only
-                                        c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
-                                    else:  # Natural forest converted to short vegetation with disturbance that emits all non-soil C pools (not burned) (221212)
-                                        agc_rf = 2.2
-                                        ef = cn.biomass_emissions_only
-                                        c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                                else:  # Natural forest converted to short vegetation with disturbance that emits biomass C pools only (22122)
-                                    node = nu.accrete_node(node, 2)
-                                    if burned_in_last_interval:  # Natural forest converted to short vegetation with disturbance that emits biomass C pools only (burned) (221221)
-                                        state_out = nu.accrete_node(node, 1)
-                                        agc_rf = 2.2
-                                        ef = cn.all_non_soil_pools
-                                        c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in,0.5, 4.7, 0.26)
-                                    else:  # Natural forest converted to short vegetation with disturbance that emits biomass C pools only (not burned) (221222)
-                                        state_out = nu.accrete_node(node, 2)
-                                        agc_rf = 2.2
-                                        ef = cn.all_non_soil_pools
-                                        c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                            elif LC_curr == cn.builtup:  # Natural forest converted to settlement (2213)
-                                node = nu.accrete_node(node, 3)
-                                if burned_in_last_interval:  # Natural forest converted to settlement (burned) (22131)
-                                    state_out = nu.accrete_node(node, 1)
-                                    agc_rf = 2.2
-                                    ef = cn.all_non_soil_pools
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
-                                else:  # Natural forest converted to settlement (not burned) (22132)
-                                    state_out = nu.accrete_node(node, 2)
-                                    agc_rf = 2.2
-                                    ef = cn.all_non_soil_pools
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                            elif med_veg_curr:  # Natural forest converted to medium vegetation (2214)
-                                node = nu.accrete_node(node, 4)
-                                if drivers_cell in cn.drivers_non_soil_C: # Natural forest converted to medium vegetation with disturbance that emits all non-soil C pools (22141)
-                                    node = nu.accrete_node(node, 1)
-                                    if burned_in_last_interval:  # Natural forest converted to medium vegetation with disturbance that emits all non-soil C pools (burned) (221411)
-                                        state_out = nu.accrete_node(node, 1)
-                                        agc_rf_pre = 2.2
-                                        ef = cn.biomass_emissions_only
-                                        agc_rf_post = 4.7
-                                        c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
-                                    else:  # Natural forest converted to medium vegetation with disturbance that emits all non-soil C pools (not burned) (221412)
-                                        agc_rf_pre = 2.2
-                                        ef = cn.biomass_emissions_only
-                                        agc_rf_post = 4.7
-                                        c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                                else:  # Natural forest converted to medium vegetation with disturbance that emits biomass C pools only (22142)
-                                    node = nu.accrete_node(node, 2)
-                                    if burned_in_last_interval:  # Natural forest converted to medium vegetation with disturbance that emits biomass C pools only (burned) (221421)
-                                        state_out = nu.accrete_node(node, 1)
-                                        agc_rf_pre = 2.2
-                                        ef = cn.all_non_soil_pools
-                                        agc_rf_post = 4.7
-                                        c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in,0.5, 4.7, 0.26)
-                                    else:  # Natural forest converted to medium vegetation with disturbance that emits biomass C pools only (not burned) (221422)
-                                        state_out = nu.accrete_node(node, 2)
-                                        agc_rf_pre = 2.2
-                                        ef = cn.all_non_soil_pools
-                                        agc_rf_post = 4.7
-                                        c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                            else:  # Natural forest converted to anything else (wetland/open water/ice, etc.) (2215)
-                                node = nu.accrete_node(node, 5)
-                                if burned_in_last_interval:  # Natural forest converted to anything else (burned) (22151)
-                                    state_out = nu.accrete_node(node, 1)
-                                    agc_rf = 2.2
-                                    ef = cn.all_non_soil_pools
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
-                                else:  # Natural forest converted to anything else (not burned) (22152)
-                                    state_out = nu.accrete_node(node, 2)
-                                    agc_rf = 2.2
-                                    ef = cn.all_non_soil_pools
-                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-                        else:  # Full loss of trees outside forests (222)
-                            node = nu.accrete_node(node, 2)
-                            if burned_in_last_interval:  # Full loss of trees outside forests (burned) (2221)
-                                state_out = nu.accrete_node(node, 1)
-                                agc_rf = 2.2
-                                ef = cn.all_non_soil_pools
-                                c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
-                            else:  # Full loss of trees outside forests (not burned) (2222)
-                                state_out = nu.accrete_node(node, 2)
-                                agc_rf = 2.2
-                                ef = cn.all_non_soil_pools
-                                c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in)
-
-                ### Trees remaining trees
-                elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: Include mangrove exception.
-                    node = nu.accrete_node(node, 3)
-                    if (forest_dist_last > 0) or (sig_height_loss_prev_curr_abs) :  # Partially disturbed trees (31)
-                        state_out = nu.accrete_node(node, 1)
-
-                    else:
-                        state_out = nu.accrete_node(node, 2)  # Undisturbed trees (32)
-                #         if planted_forest_type_cell == 0:  # Non-planted trees without stand-replacing disturbance in the last interval (311)
-                #             node = nu.accrete_node(node, 1)
-                #             if not tall_veg_curr:  # Trees outside forests without stand-replacing disturbance in the last interval (3111)
-                #                 node = nu.accrete_node(node, 1)
-                #                 if not sig_height_loss_prev_curr:  # Stable trees outside forests (31111)
-                #                     state_out = nu.accrete_node(node, 1)
-                #                     agc_rf = agc_rf_prev
-                #                     c_net_flux_out, c_dens_out = nu.calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in)
-                #                 else:  # Partially disturbed trees outside forests (31112)
-                #                     node = nu.accrete_node(node, 2)
-                #                     if burned_area_last == 0:  # Partially disturbed trees outside forests without fire (311121)
-                #                         state_out = nu.accrete_node(node, 1)
-                #                         agc_rf = agc_rf_prev
-                #                         agc_ef = 0.9
-                #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
-                #                     else:  # Partially disturbed trees outside forests with fire (311122)
-                #                         state_out = nu.accrete_node(node, 2)
-                #                         agc_rf = agc_rf_prev
-                #                         agc_ef = 0.33
-                #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
-                #             else:  # Natural forest without stand-replacing disturbance in the last interval (3112)
-                #                 node = nu.accrete_node(node, 2)
-                #                 #TODO This doesn't seem like it's working right, e.g., 15.205 41.84 (assigning node 2 instead of node 1 when no height reduction)
-                #                 # sig_height_loss_prev_curr may not be working
-                #                 if not sig_height_loss_prev_curr:    # Stable natural forest (31121)
-                #                     node = nu.accrete_node(node, 1)
-                #                     if first_forest_dist_in_record == 0:   # Natural forest undisturbed since 2000 (311211)  ##TODO: Include "OR non-forest at some point" exception
-                #                         node = nu.accrete_node(node, 1)
-                #                         if ifl_primary_cell == 0:  # Old secondary forest (3112111)
-                #                             state_out = nu.accrete_node(node, 1)
-                #                             agc_rf = agc_rf_prev
-                #                             c_net_flux_out, c_dens_out = nu.calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in)
-                #                         else:  # Primary forest (3112112)
-                #                             state_out = nu.accrete_node(node, 2)
-                #                             agc_rf = agc_rf_prev
-                #                             c_net_flux_out, c_dens_out = nu.calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in)
-                #                     else:   # Young secondary natural forest (311212)
-                #                         state_out = nu.accrete_node(node, 2)
-                #                         agc_rf = agc_rf_prev
-                #                         c_net_flux_out, c_dens_out = nu.calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in)
-                #                 else:  # Partially disturbed natural forest (31122)
-                #                     node = nu.accrete_node(node, 2)
-                #                     if burned_area_last == 0: # Partially disturbed natural forest without fire (311221)
-                #                         state_out = nu.accrete_node(node, 1)
-                #                         agc_rf = agc_rf_prev
-                #                         agc_ef = 0.6
-                #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
+                # ## Calculates the maximum canopy height since the last time a pixel was classified as non-tall vegetation land cover.
+                # # This is used to determine whether current height has decreased significantly from this maximum height.
+                # max_height_since_last_time_not_tall_veg = (nu.calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, interval_end_year, in_dict_uint8, row, col))
                 #
-                #                         # if interval_end_year == 2010:
-                #                         #     print(state_out)
-                #                         #     print(agc_rf_prev)
-                #                         #     print(agc_rf)
-                #                         #     print(c_net_flux_out)
-                #                         #     os.quit()
+                # # Height change from maximum height since last time not tall veg land cover.
+                # # Need to recast to signed int8 from uint8 so that negative values (height gain) stay negative.
+                # height_change_max_curr = np.int8(max_height_since_last_time_not_tall_veg - veg_h_curr)
                 #
-                #                     else:  # Partially disturbed natural forest with fire (311222)
-                #                         state_out = nu.accrete_node(node, 2)
-                #                         agc_rf = agc_rf_prev
-                #                         agc_ef = 0.95
-                #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
-                #         else:  # SDPT planted trees without stand-replacing disturbance in the last interval (312)
-                #             node = nu.accrete_node(node, 2)
-                #             if not sig_height_loss_prev_curr: # Stable SDPT (3121)
-                #                 state_out = nu.accrete_node(node, 1)
-                #                 agc_rf = 1.3
-                #                 c_net_flux_out, c_dens_out = nu.calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in)
-                #             else: # Partially disturbed SDPT (3122)
-                #                 node = nu.accrete_node(node, 2)
-                #                 if burned_area_last == 0: # Partially disturbed SDPT without fire (31221)
-                #                     state_out = nu.accrete_node(node, 1)
-                #                     agc_rf = 1.5
-                #                     agc_ef = 0.1
-                #                     c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
-                #                 else: # Partially disturbed SDPT with fire (31222)
-                #                     state_out = nu.accrete_node(node, 2)
-                #                     agc_rf = 1.3
-                #                     agc_ef = 0.65
-                #                     c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
-                #     else: # Trees with stand-replacing disturbance with regrowth in last interval (32)
-                #         node = nu.accrete_node(node, 2)
-                #         if planted_forest_type_cell == 0: # Non-planted terrestrial trees disturbed with regrowth in last interval (321)
-                #             node = nu.accrete_node(node, 1)
-                #             if not tall_veg_curr: # Trees outside forests disturbed and regrown in last interval (3211)
-                #                 node = nu.accrete_node(node, 1)
-                #                 if burned_area_last == 0: # Trees outside forests disturbed without fire and regrown in last interval (32111)
-                #                     state_out = nu.accrete_node(node, 1)
-                #                     agc_rf = 0.75
-                #                     agc_ef = 0.33
-                #                     c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
-                #                 else: # Trees outside forests disturbed with fire and regrown in last interval (32112)
-                #                     state_out = nu.accrete_node(node, 2)
-                #                     agc_rf = 0.75
-                #                     agc_ef = 0.95
-                #                     c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
-                #             else: # Natural forest disturbed and regrown in last interval (3212)
-                #                 node = nu.accrete_node(node, 2)
-                #                 if drivers_cell == 1: # Natural forest loss due to commodity-driven deforestation followed by regrowth (32121)
-                #                     node = nu.accrete_node(node, 1)
-                #                     if burned_area_last == 0: # Natural forest->commod. driven (no fire)->regrowth (321211)
-                #                         state_out = nu.accrete_node(node, 1)
-                #                         agc_rf = 0.75
-                #                         agc_ef = 0.33
-                #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
-                #                     else: # Natural forest->commod. driven (fire)->regrowth (321212)
-                #                         state_out = nu.accrete_node(node, 2)
-                #                         agc_rf = 0.75
-                #                         agc_ef = 0.33
-                #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
-                #                 elif drivers_cell == 2: # Natural forest loss due to shifting agriculture followed by regrowth (32122)
-                #                     node = nu.accrete_node(node, 2)
-                #                     if burned_area_last == 0: # Natural forest->shifting ag. (no fire)->regrowth (321221)
-                #                         state_out = nu.accrete_node(node, 1)
-                #                         agc_rf = 0.75
-                #                         agc_ef = 0.33
-                #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
-                #                     else: # Natural forest->shifting ag. (fire)->regrowth (321222)
-                #                         state_out = nu.accrete_node(node, 2)
-                #                         agc_rf = 0.75
-                #                         agc_ef = 0.33
-                #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
-                #                 elif drivers_cell == 5:  # Natural forest loss due to urbanization followed by regrowth (32123)
-                #                     node = nu.accrete_node(node, 3)
-                #                     if burned_area_last == 0:  # Natural forest->urbanization (no fire)->regrowth (321231)
-                #                         state_out = nu.accrete_node(node, 1)
-                #                         agc_rf = 0.75
-                #                         agc_ef = 0.33
-                #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
-                #                     else:  # Natural forest->urbanization (fire)->regrowth (321232)
-                #                         state_out = nu.accrete_node(node, 2)
-                #                         agc_rf = 0.75
-                #                         agc_ef = 0.33
-                #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
-                #                 else:  # Natural forest loss due to forestry/wildfire/unknown followed by regrowth (32124)
-                #                     node = nu.accrete_node(node, 4)
-                #                     if burned_area_last == 0:  # Natural forest->forestry/wildfire/unknown (no fire)->regrowth (321241)
-                #                         state_out = nu.accrete_node(node, 1)
-                #                         agc_rf = 0.75
-                #                         agc_ef = 0.33
-                #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
-                #                     else:  # Natural forest->forestry/wildfire/unknown (fire)->regrowth (321242)
-                #                         state_out = nu.accrete_node(node, 2)
-                #                         agc_rf = 0.75
-                #                         agc_ef = 0.33
-                #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
-                #         else: # Planted forest disturbed with regrowth in last interval (322)
-                #             node = nu.accrete_node(node, 2)
-                #             if burned_area_last == 0:  # SDPT planted forest->not burned->regrowth (3221)
-                #                 state_out = nu.accrete_node(node, 1)
-                #                 agc_rf = 0.75
-                #                 agc_ef = 0.33
-                #                 c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
-                #             else:  # SDPT planted forest->burned->regrowth (3222)
-                #                 state_out = nu.accrete_node(node, 2)
-                #                 agc_rf = 0.75
-                #                 agc_ef = 0.33
-                #                 c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
+                # # Is height loss significant in absolute change (m) compared to the maximum height since the last time
+                # # not tall vegetation land cover?
+                # sig_height_loss_max_current_abs = (height_change_max_curr >= cn.sig_height_loss_threshold_abs)
                 #
-                # # If none of the cases above apply, defaults are assigned
-                # else:
-                #     state_out = 4000000000
-                #     gain_year_count = 0
-                #     agc_rf = 0
+                # # Tracks whether the height has already decreased more than the signif. height loss threshold compared to
+                # # maximum vegetation height since the last time the pixel was non-tall vegetation land cover.
+                # # This prevents a pixel from repeatedly (multiple intervals) being counted as having a disturbance compared to
+                # # the maximum height; this can only be triggered once since the maximum height is attained.
+                # # This is used to determine if a forest->forest disturbance based on height loss relative to the max height should be reported.
+                # # 0=height loss relative to the maximum vegetation height has not already occurred.
+                # # 1=height loss relative to the maximum vegetation height has already occurred.
+                # first_time_sig_loss_from_max_height = first_time_sig_loss_from_max_height_block[row,col]
                 #
-                #     agc_gross_emis_out_block[row, col] = -1000
-                #     bgc_gross_emis_out_block[row, col] = -900
-                #     deadwood_c_gross_emis_out_block[row, col] = -800
-                #     litter_c_gross_emis_out_block[row, col] = -700
-                #
-                #     ch4_gross_emis_out_block[row, col] = 0
-                #     n2o_gross_emis_out_block[row, col] = 0
-                #
-                #     agc_gross_removals_out_block[row, col] = -1000
-                #     bgc_gross_removals_out_block[row, col] = -900
-                #     deadwood_c_gross_removals_out_block[row, col] = -800
-                #     litter_c_gross_removals_out_block[row, col] = -700
-                #
-                #     agc_dens_block[row, col] = -4000
-                #     bgc_dens_block[row, col] = -3600
-                #     deadwood_c_dens_block[row, col] = -3200
-                #     litter_c_dens_block[row, col] = -2800
+                # ##TIME 5:06
 
-
-                # Populates the output arrays with the calculated fluxes and densities
-                state_out_block[row, col] = state_out
-
-                agc_rf_out_block[row, col] = agc_rf
-
-                agc_gross_emis_out_block[row, col] = c_gross_emis_out[0]
-                bgc_gross_emis_out_block[row, col] = c_gross_emis_out[1]
-                deadwood_c_gross_emis_out_block[row, col] = c_gross_emis_out[2]
-                litter_c_gross_emis_out_block[row, col] = c_gross_emis_out[3]
-
-                ch4_gross_emis_out_block[row, col] = non_co2_flux_out[0]
-                n2o_gross_emis_out_block[row, col] = non_co2_flux_out[1]
-
-                agc_gross_removals_out_block[row, col] = c_gross_removals_out[0]
-                bgc_gross_removals_out_block[row, col] = c_gross_removals_out[1]
-                deadwood_c_gross_removals_out_block[row, col] = c_gross_removals_out[2]
-                litter_c_gross_removals_out_block[row, col] = c_gross_removals_out[3]
-
-                agc_dens_block[row, col] = c_dens_out[0]
-                bgc_dens_block[row, col] = c_dens_out[1]
-                deadwood_c_dens_block[row, col] = c_dens_out[2]
-                litter_c_dens_block[row, col] = c_dens_out[3]
-
-                # Test/intermediate outputs
-                gain_year_count_out_block[row, col] = gain_year_count
-                most_recent_year_not_tall_veg_block[row, col] = most_recent_year_not_tall_veg
-                years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
-                max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
-
+    #             # Updates the tracker of whether this is the first time that significant height loss relative to
+    #             # the height maximum has occurred to determine if a forest->forest disturbance should be reported.
+    #             # If this height decrease did not occur in a previous interval, the flag is changed to 1 to show it
+    #             # is being reported in this interval.
+    #             # If this height decrease occurred in a previous interval, the flag is changed to 0 to show it has
+    #             # already been reported.
+    #             # TODO This is still not working
+    #             if sig_height_loss_max_current_abs:
+    #                 if first_time_sig_loss_from_max_height == 0:
+    #                     first_time_sig_loss_from_max_height = 1
+    #                 else:
+    #                     first_time_sig_loss_from_max_height = 0
+    #
+    #
+    #             ## Number of years of regrowth for new forest since last time not forest
+    #             years_of_forest_regrowth = years_of_forest_regrowth_block[row, col]
+    #
+    #             # Calculates the number of years of forest regrowth since the last year of not-tall vegetation.
+    #             # Can override the pre-existing value.
+    #             years_of_forest_regrowth = nu.calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_tall_veg, tall_veg_curr, years_of_forest_regrowth)
+    #
+    #
+    #             ## Height change during the interval. Need to recast to signed int8 from uint8 so that negative values (height gain) stay negative.
+    #             height_change_prev_curr = np.int8(veg_h_prev - veg_h_curr)
+    #
+    #             # Is height loss during the interval significant in absolute change (m)?
+    #             sig_height_loss_prev_curr_abs = (height_change_prev_curr >= cn.sig_height_loss_threshold_abs)
+    #
+    #
+    #
+    #
+    #             ### Starting output pixel values
+    #
+    #             # Starting decision tree node value
+    #             node = 0
+    #
+    #             # Need to force arrays into float32 because numba is so particular about datatypes.
+    #             state_out = 0
+    #             gain_year_count = 0
+    #             agc_rf = 0
+    #             c_gross_emis_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross emissions: AGC, BGC, deadwood C, litter C.
+    #             c_gross_removals_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross removals: AGC, BGC, deadwood C, litter C.
+    #             non_co2_flux_out = np.array([0, 0]).astype('float32')  # Initializes dummy output non-CO2 fluxes: CH4, N2O
+    #             c_dens_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C densities: AGC, BGC, deadwood C, litter C.
+    #
+    #
+    #             ### Tree gain
+    #             if tall_veg_gain:  # Non-tree converted to tree (1)    #TODO: Include mangrove exception.
+    #                 node = nu.accrete_node(node, 1)
+    #                 if all_planted_trees:  # New planted trees (11)
+    #                     node = nu.accrete_node(node, 1)
+    #                     if SDPT_planted_trees: # New SDPT planted trees (incl. SDPT oil palm) (111)
+    #                         state_out = nu.accrete_node(node, 1)
+    #                         agc_rf = planted_forest_removal_factor_cell
+    #                         c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in)
+    #                     else: # New non-SDPT oil palm (112)
+    #                         state_out = nu.accrete_node(node, 2)
+    #                         agc_rf = cn.oil_palm_agc_rf
+    #                         c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in)
+    #                 else:  # New non-planted trees (12)
+    #                     node = nu.accrete_node(node, 2)
+    #                     if tall_veg_curr:  # New terrestrial natural forest (121)
+    #                         state_out = nu.accrete_node(node, 1)
+    #                         agc_rf = natrl_forest_curve_0_5
+    #                         c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in)
+    #                     else:  # New trees outside forests (122)
+    #                         state_out = nu.accrete_node(node, 2)
+    #                         agc_rf = cn.trees_outside_forests_agc_rf_max
+    #                         c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in)
+    #
+    #             ### Tree loss
+    #             elif tall_veg_loss:  # Tree converted to non-tree (2)    #TODO: Include mangrove exception.
+    #                 node = 2
+    #                 if all_planted_trees:  # Full loss of planted trees (21)
+    #                     node = nu.accrete_node(node, 1)
+    #                     if all_oil_palm:  # Full loss of oil palm (211)
+    #                         node = nu.accrete_node(node, 1)
+    #                         if burned_in_last_interval:  # Full loss of oil palm (burned) (2111)
+    #                             state_out = nu.accrete_node(node, 1)
+    #                             agc_rf = 2.2
+    #                             ef = cn.biomass_emissions_only
+    #                             c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
+    #                         else:  # Full loss of oil palm (not burned) (2112)
+    #                             state_out = nu.accrete_node(node, 2)
+    #                             agc_rf = 2.2
+    #                             ef = cn.agc_emissions_only
+    #                             c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+    #                     else:  # Full loss of non-oil palm planted trees (212)
+    #                         node = nu.accrete_node(node, 2)
+    #                         if LC_curr == cn.cropland:  # Plantation harvested as cropland (2121)
+    #                             node = nu.accrete_node(node, 1)
+    #                             if burned_in_last_interval:  # Plantation harvested as cropland (burned) (21211)
+    #                                 state_out = nu.accrete_node(node, 1)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.all_non_soil_pools
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
+    #                             else:  # Plantation harvested as cropland (not burned) (21212)
+    #                                 state_out = nu.accrete_node(node, 2)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.all_non_soil_pools
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+    #                         elif short_veg_curr:  # Plantation harvested as short vegetation (2122)
+    #                             node = nu.accrete_node(node, 2)
+    #                             if burned_in_last_interval:  # Plantation harvested as short vegetation (burned) (21221)
+    #                                 state_out = nu.accrete_node(node, 1)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.biomass_emissions_only
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
+    #                             else:  # Plantation harvested as short vegetation (not burned) (21222)
+    #                                 state_out = nu.accrete_node(node, 2)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.all_but_bgc_emissions
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+    #                         elif med_veg_curr:  # Plantation harvested as medium vegetation (2123)
+    #                             node = nu.accrete_node(node, 3)
+    #                             if burned_in_last_interval:  # Plantation harvested as medium vegetation (burned) (21231)
+    #                                 state_out = nu.accrete_node(node, 1)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.biomass_emissions_only
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
+    #                             else:  # Plantation harvested as medium vegetation (not burned) (21232)
+    #                                 state_out = nu.accrete_node(node, 2)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.all_but_bgc_emissions
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+    #                         elif LC_curr == cn.builtup:  # Plantation converted to settlement (2124)
+    #                             node = nu.accrete_node(node, 4)
+    #                             if burned_in_last_interval:  # Plantation converted to settlement (burned) (21241)
+    #                                 state_out = nu.accrete_node(node, 1)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.all_non_soil_pools
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
+    #                             else:  # Plantation converted to settlement (not burned) (21242)
+    #                                 state_out = nu.accrete_node(node, 2)
+    #                                 agc_rf = 2.2
+    #                                 ef =  cn.all_non_soil_pools
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+    #                         else:  # Plantation converted to anything else (2125)
+    #                             node = nu.accrete_node(node, 5)
+    #                             if burned_in_last_interval:  # Plantation converted to anything else (burned) (21251)
+    #                                 state_out = nu.accrete_node(node, 1)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.biomass_emissions_only
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
+    #                             else:  # Plantation converted to anything else (not burned)
+    #                                 state_out = nu.accrete_node(node, 2)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.all_but_bgc_emissions
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+    #                 else:  # Full loss of non-planted trees (22)
+    #                     node = nu.accrete_node(node, 2)
+    #                     if tall_veg_prev:  # Full loss of natural forest (221)
+    #                         node = nu.accrete_node(node, 1)
+    #                         if LC_curr == cn.cropland:  # Natural forest converted to cropland (2211)
+    #                             node = nu.accrete_node(node, 1)
+    #                             if burned_in_last_interval:  # Natural forest converted to cropland (burned) (22111)
+    #                                 state_out = nu.accrete_node(node, 1)
+    #                                 agc_rf_pre = 2.2
+    #                                 ef = cn.all_non_soil_pools
+    #                                 agc_rf_post = 4.7
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
+    #                             else:  # Natural forest converted to cropland (not burned) (22112)
+    #                                 state_out = nu.accrete_node(node, 2)
+    #                                 agc_rf_pre = 2.2
+    #                                 ef = cn.all_non_soil_pools
+    #                                 agc_rf_post = 4.7
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+    #                         elif short_veg_curr:  # Natural forest converted to short vegetation (2212)
+    #                             node = nu.accrete_node(node, 2)
+    #                             if drivers_cell in cn.drivers_non_soil_C: # Natural forest converted to short vegetation with disturbance that emits all non-soil C pools (22121)
+    #                                 node = nu.accrete_node(node, 1)
+    #                                 if burned_in_last_interval:  # Natural forest converted to short vegetation with disturbance that emits all non-soil C pools (burned) (221211)
+    #                                     state_out = nu.accrete_node(node, 1)
+    #                                     agc_rf = 2.2
+    #                                     ef = cn.biomass_emissions_only
+    #                                     c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
+    #                                 else:  # Natural forest converted to short vegetation with disturbance that emits all non-soil C pools (not burned) (221212)
+    #                                     agc_rf = 2.2
+    #                                     ef = cn.biomass_emissions_only
+    #                                     c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+    #                             else:  # Natural forest converted to short vegetation with disturbance that emits biomass C pools only (22122)
+    #                                 node = nu.accrete_node(node, 2)
+    #                                 if burned_in_last_interval:  # Natural forest converted to short vegetation with disturbance that emits biomass C pools only (burned) (221221)
+    #                                     state_out = nu.accrete_node(node, 1)
+    #                                     agc_rf = 2.2
+    #                                     ef = cn.all_non_soil_pools
+    #                                     c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in,0.5, 4.7, 0.26)
+    #                                 else:  # Natural forest converted to short vegetation with disturbance that emits biomass C pools only (not burned) (221222)
+    #                                     state_out = nu.accrete_node(node, 2)
+    #                                     agc_rf = 2.2
+    #                                     ef = cn.all_non_soil_pools
+    #                                     c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0,0)
+    #                         elif LC_curr == cn.builtup:  # Natural forest converted to settlement (2213)
+    #                             node = nu.accrete_node(node, 3)
+    #                             if burned_in_last_interval:  # Natural forest converted to settlement (burned) (22131)
+    #                                 state_out = nu.accrete_node(node, 1)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.all_non_soil_pools
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
+    #                             else:  # Natural forest converted to settlement (not burned) (22132)
+    #                                 state_out = nu.accrete_node(node, 2)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.all_non_soil_pools
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0,0)
+    #                         elif med_veg_curr:  # Natural forest converted to medium vegetation (2214)
+    #                             node = nu.accrete_node(node, 4)
+    #                             if drivers_cell in cn.drivers_non_soil_C: # Natural forest converted to medium vegetation with disturbance that emits all non-soil C pools (22141)
+    #                                 node = nu.accrete_node(node, 1)
+    #                                 if burned_in_last_interval:  # Natural forest converted to medium vegetation with disturbance that emits all non-soil C pools (burned) (221411)
+    #                                     state_out = nu.accrete_node(node, 1)
+    #                                     agc_rf_pre = 2.2
+    #                                     ef = cn.biomass_emissions_only
+    #                                     agc_rf_post = 4.7
+    #                                     c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
+    #                                 else:  # Natural forest converted to medium vegetation with disturbance that emits all non-soil C pools (not burned) (221412)
+    #                                     agc_rf_pre = 2.2
+    #                                     ef = cn.biomass_emissions_only
+    #                                     agc_rf_post = 4.7
+    #                                     c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+    #                             else:  # Natural forest converted to medium vegetation with disturbance that emits biomass C pools only (22142)
+    #                                 node = nu.accrete_node(node, 2)
+    #                                 if burned_in_last_interval:  # Natural forest converted to medium vegetation with disturbance that emits biomass C pools only (burned) (221421)
+    #                                     state_out = nu.accrete_node(node, 1)
+    #                                     agc_rf_pre = 2.2
+    #                                     ef = cn.all_non_soil_pools
+    #                                     agc_rf_post = 4.7
+    #                                     c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in,0.5, 4.7, 0.26)
+    #                                 else:  # Natural forest converted to medium vegetation with disturbance that emits biomass C pools only (not burned) (221422)
+    #                                     state_out = nu.accrete_node(node, 2)
+    #                                     agc_rf_pre = 2.2
+    #                                     ef = cn.all_non_soil_pools
+    #                                     agc_rf_post = 4.7
+    #                                     c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+    #                         else:  # Natural forest converted to anything else (wetland/open water/ice, etc.) (2215)
+    #                             node = nu.accrete_node(node, 5)
+    #                             if burned_in_last_interval:  # Natural forest converted to anything else (burned) (22151)
+    #                                 state_out = nu.accrete_node(node, 1)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.all_non_soil_pools
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
+    #                             else:  # Natural forest converted to anything else (not burned) (22152)
+    #                                 state_out = nu.accrete_node(node, 2)
+    #                                 agc_rf = 2.2
+    #                                 ef = cn.all_non_soil_pools
+    #                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+    #                     else:  # Full loss of trees outside forests (222)
+    #                         node = nu.accrete_node(node, 2)
+    #                         if burned_in_last_interval:  # Full loss of trees outside forests (burned) (2221)
+    #                             state_out = nu.accrete_node(node, 1)
+    #                             agc_rf = 2.2
+    #                             ef = cn.all_non_soil_pools
+    #                             c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
+    #                         else:  # Full loss of trees outside forests (not burned) (2222)
+    #                             state_out = nu.accrete_node(node, 2)
+    #                             agc_rf = 2.2
+    #                             ef = cn.all_non_soil_pools
+    #                             c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+    #
+    #             ### Trees remaining trees
+    #             elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: Include mangrove exception.
+    #                 node = nu.accrete_node(node, 3)
+    #                 # if (forest_dist_last > 0) or (sig_height_loss_prev_curr_abs) or (first_time_sig_loss_from_max_height):  # Partially disturbed trees (31)
+    #                 if first_time_sig_loss_from_max_height: # Partially disturbed trees (31)  #TODO This is still not working
+    #                     state_out = nu.accrete_node(node, 1)
+    #                     agc_rf = 2.2
+    #                     ef = cn.all_non_soil_pools
+    #                     c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
+    #
+    #                 else:
+    #                     state_out = nu.accrete_node(node, 2)  # Undisturbed trees (32)
+    #                     agc_rf = 2.2
+    #                     ef = cn.all_non_soil_pools
+    #                     c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
+    #
+    #
+    #             #         if planted_forest_type_cell == 0:  # Non-planted trees without stand-replacing disturbance in the last interval (311)
+    #             #             node = nu.accrete_node(node, 1)
+    #             #             if not tall_veg_curr:  # Trees outside forests without stand-replacing disturbance in the last interval (3111)
+    #             #                 node = nu.accrete_node(node, 1)
+    #             #                 if not sig_height_loss_prev_curr:  # Stable trees outside forests (31111)
+    #             #                     state_out = nu.accrete_node(node, 1)
+    #             #                     agc_rf = agc_rf_prev
+    #             #                     c_net_flux_out, c_dens_out = nu.calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in)
+    #             #                 else:  # Partially disturbed trees outside forests (31112)
+    #             #                     node = nu.accrete_node(node, 2)
+    #             #                     if burned_area_last == 0:  # Partially disturbed trees outside forests without fire (311121)
+    #             #                         state_out = nu.accrete_node(node, 1)
+    #             #                         agc_rf = agc_rf_prev
+    #             #                         agc_ef = 0.9
+    #             #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
+    #             #                     else:  # Partially disturbed trees outside forests with fire (311122)
+    #             #                         state_out = nu.accrete_node(node, 2)
+    #             #                         agc_rf = agc_rf_prev
+    #             #                         agc_ef = 0.33
+    #             #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
+    #             #             else:  # Natural forest without stand-replacing disturbance in the last interval (3112)
+    #             #                 node = nu.accrete_node(node, 2)
+    #             #                 #TODO This doesn't seem like it's working right, e.g., 15.205 41.84 (assigning node 2 instead of node 1 when no height reduction)
+    #             #                 # sig_height_loss_prev_curr may not be working
+    #             #                 if not sig_height_loss_prev_curr:    # Stable natural forest (31121)
+    #             #                     node = nu.accrete_node(node, 1)
+    #             #                     if first_forest_dist_in_record == 0:   # Natural forest undisturbed since 2000 (311211)  ##TODO: Include "OR non-forest at some point" exception
+    #             #                         node = nu.accrete_node(node, 1)
+    #             #                         if ifl_primary_cell == 0:  # Old secondary forest (3112111)
+    #             #                             state_out = nu.accrete_node(node, 1)
+    #             #                             agc_rf = agc_rf_prev
+    #             #                             c_net_flux_out, c_dens_out = nu.calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in)
+    #             #                         else:  # Primary forest (3112112)
+    #             #                             state_out = nu.accrete_node(node, 2)
+    #             #                             agc_rf = agc_rf_prev
+    #             #                             c_net_flux_out, c_dens_out = nu.calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in)
+    #             #                     else:   # Young secondary natural forest (311212)
+    #             #                         state_out = nu.accrete_node(node, 2)
+    #             #                         agc_rf = agc_rf_prev
+    #             #                         c_net_flux_out, c_dens_out = nu.calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in)
+    #             #                 else:  # Partially disturbed natural forest (31122)
+    #             #                     node = nu.accrete_node(node, 2)
+    #             #                     if burned_area_last == 0: # Partially disturbed natural forest without fire (311221)
+    #             #                         state_out = nu.accrete_node(node, 1)
+    #             #                         agc_rf = agc_rf_prev
+    #             #                         agc_ef = 0.6
+    #             #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
+    #             #
+    #             #                         # if interval_end_year == 2010:
+    #             #                         #     print(state_out)
+    #             #                         #     print(agc_rf_prev)
+    #             #                         #     print(agc_rf)
+    #             #                         #     print(c_net_flux_out)
+    #             #                         #     os.quit()
+    #             #
+    #             #                     else:  # Partially disturbed natural forest with fire (311222)
+    #             #                         state_out = nu.accrete_node(node, 2)
+    #             #                         agc_rf = agc_rf_prev
+    #             #                         agc_ef = 0.95
+    #             #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
+    #             #         else:  # SDPT planted trees without stand-replacing disturbance in the last interval (312)
+    #             #             node = nu.accrete_node(node, 2)
+    #             #             if not sig_height_loss_prev_curr: # Stable SDPT (3121)
+    #             #                 state_out = nu.accrete_node(node, 1)
+    #             #                 agc_rf = 1.3
+    #             #                 c_net_flux_out, c_dens_out = nu.calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in)
+    #             #             else: # Partially disturbed SDPT (3122)
+    #             #                 node = nu.accrete_node(node, 2)
+    #             #                 if burned_area_last == 0: # Partially disturbed SDPT without fire (31221)
+    #             #                     state_out = nu.accrete_node(node, 1)
+    #             #                     agc_rf = 1.5
+    #             #                     agc_ef = 0.1
+    #             #                     c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
+    #             #                 else: # Partially disturbed SDPT with fire (31222)
+    #             #                     state_out = nu.accrete_node(node, 2)
+    #             #                     agc_rf = 1.3
+    #             #                     agc_ef = 0.65
+    #             #                     c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
+    #             #     else: # Trees with stand-replacing disturbance with regrowth in last interval (32)
+    #             #         node = nu.accrete_node(node, 2)
+    #             #         if planted_forest_type_cell == 0: # Non-planted terrestrial trees disturbed with regrowth in last interval (321)
+    #             #             node = nu.accrete_node(node, 1)
+    #             #             if not tall_veg_curr: # Trees outside forests disturbed and regrown in last interval (3211)
+    #             #                 node = nu.accrete_node(node, 1)
+    #             #                 if burned_area_last == 0: # Trees outside forests disturbed without fire and regrown in last interval (32111)
+    #             #                     state_out = nu.accrete_node(node, 1)
+    #             #                     agc_rf = 0.75
+    #             #                     agc_ef = 0.33
+    #             #                     c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
+    #             #                 else: # Trees outside forests disturbed with fire and regrown in last interval (32112)
+    #             #                     state_out = nu.accrete_node(node, 2)
+    #             #                     agc_rf = 0.75
+    #             #                     agc_ef = 0.95
+    #             #                     c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
+    #             #             else: # Natural forest disturbed and regrown in last interval (3212)
+    #             #                 node = nu.accrete_node(node, 2)
+    #             #                 if drivers_cell == 1: # Natural forest loss due to commodity-driven deforestation followed by regrowth (32121)
+    #             #                     node = nu.accrete_node(node, 1)
+    #             #                     if burned_area_last == 0: # Natural forest->commod. driven (no fire)->regrowth (321211)
+    #             #                         state_out = nu.accrete_node(node, 1)
+    #             #                         agc_rf = 0.75
+    #             #                         agc_ef = 0.33
+    #             #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
+    #             #                     else: # Natural forest->commod. driven (fire)->regrowth (321212)
+    #             #                         state_out = nu.accrete_node(node, 2)
+    #             #                         agc_rf = 0.75
+    #             #                         agc_ef = 0.33
+    #             #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
+    #             #                 elif drivers_cell == 2: # Natural forest loss due to shifting agriculture followed by regrowth (32122)
+    #             #                     node = nu.accrete_node(node, 2)
+    #             #                     if burned_area_last == 0: # Natural forest->shifting ag. (no fire)->regrowth (321221)
+    #             #                         state_out = nu.accrete_node(node, 1)
+    #             #                         agc_rf = 0.75
+    #             #                         agc_ef = 0.33
+    #             #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
+    #             #                     else: # Natural forest->shifting ag. (fire)->regrowth (321222)
+    #             #                         state_out = nu.accrete_node(node, 2)
+    #             #                         agc_rf = 0.75
+    #             #                         agc_ef = 0.33
+    #             #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
+    #             #                 elif drivers_cell == 5:  # Natural forest loss due to urbanization followed by regrowth (32123)
+    #             #                     node = nu.accrete_node(node, 3)
+    #             #                     if burned_area_last == 0:  # Natural forest->urbanization (no fire)->regrowth (321231)
+    #             #                         state_out = nu.accrete_node(node, 1)
+    #             #                         agc_rf = 0.75
+    #             #                         agc_ef = 0.33
+    #             #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
+    #             #                     else:  # Natural forest->urbanization (fire)->regrowth (321232)
+    #             #                         state_out = nu.accrete_node(node, 2)
+    #             #                         agc_rf = 0.75
+    #             #                         agc_ef = 0.33
+    #             #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
+    #             #                 else:  # Natural forest loss due to forestry/wildfire/unknown followed by regrowth (32124)
+    #             #                     node = nu.accrete_node(node, 4)
+    #             #                     if burned_area_last == 0:  # Natural forest->forestry/wildfire/unknown (no fire)->regrowth (321241)
+    #             #                         state_out = nu.accrete_node(node, 1)
+    #             #                         agc_rf = 0.75
+    #             #                         agc_ef = 0.33
+    #             #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
+    #             #                     else:  # Natural forest->forestry/wildfire/unknown (fire)->regrowth (321242)
+    #             #                         state_out = nu.accrete_node(node, 2)
+    #             #                         agc_rf = 0.75
+    #             #                         agc_ef = 0.33
+    #             #                         c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
+    #             #         else: # Planted forest disturbed with regrowth in last interval (322)
+    #             #             node = nu.accrete_node(node, 2)
+    #             #             if burned_area_last == 0:  # SDPT planted forest->not burned->regrowth (3221)
+    #             #                 state_out = nu.accrete_node(node, 1)
+    #             #                 agc_rf = 0.75
+    #             #                 agc_ef = 0.33
+    #             #                 c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in)
+    #             #             else:  # SDPT planted forest->burned->regrowth (3222)
+    #             #                 state_out = nu.accrete_node(node, 2)
+    #             #                 agc_rf = 0.75
+    #             #                 agc_ef = 0.33
+    #             #                 c_net_flux_out, non_co2_flux_out, c_dens_out = nu.calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, 0.5, 4.7, 0.26)
+    #             #
+    #             # # If none of the cases above apply, defaults are assigned
+    #             # else:
+    #             #     state_out = 4000000000
+    #             #     gain_year_count = 0
+    #             #     agc_rf = 0
+    #             #
+    #             #     agc_gross_emis_out_block[row, col] = -1000
+    #             #     bgc_gross_emis_out_block[row, col] = -900
+    #             #     deadwood_c_gross_emis_out_block[row, col] = -800
+    #             #     litter_c_gross_emis_out_block[row, col] = -700
+    #             #
+    #             #     ch4_gross_emis_out_block[row, col] = 0
+    #             #     n2o_gross_emis_out_block[row, col] = 0
+    #             #
+    #             #     agc_gross_removals_out_block[row, col] = -1000
+    #             #     bgc_gross_removals_out_block[row, col] = -900
+    #             #     deadwood_c_gross_removals_out_block[row, col] = -800
+    #             #     litter_c_gross_removals_out_block[row, col] = -700
+    #             #
+    #             #     agc_dens_block[row, col] = -4000
+    #             #     bgc_dens_block[row, col] = -3600
+    #             #     deadwood_c_dens_block[row, col] = -3200
+    #             #     litter_c_dens_block[row, col] = -2800
+    #
+    #
+    #             # Populates the output arrays with the calculated fluxes and densities
+    #             state_out_block[row, col] = state_out
+    #
+    #             agc_rf_out_block[row, col] = agc_rf
+    #
+    #             agc_gross_emis_out_block[row, col] = c_gross_emis_out[0]
+    #             bgc_gross_emis_out_block[row, col] = c_gross_emis_out[1]
+    #             deadwood_c_gross_emis_out_block[row, col] = c_gross_emis_out[2]
+    #             litter_c_gross_emis_out_block[row, col] = c_gross_emis_out[3]
+    #
+    #             ch4_gross_emis_out_block[row, col] = non_co2_flux_out[0]
+    #             n2o_gross_emis_out_block[row, col] = non_co2_flux_out[1]
+    #
+    #             agc_gross_removals_out_block[row, col] = c_gross_removals_out[0]
+    #             bgc_gross_removals_out_block[row, col] = c_gross_removals_out[1]
+    #             deadwood_c_gross_removals_out_block[row, col] = c_gross_removals_out[2]
+    #             litter_c_gross_removals_out_block[row, col] = c_gross_removals_out[3]
+    #
+    #             agc_dens_block[row, col] = c_dens_out[0]
+    #             bgc_dens_block[row, col] = c_dens_out[1]
+    #             deadwood_c_dens_block[row, col] = c_dens_out[2]
+    #             litter_c_dens_block[row, col] = c_dens_out[3]
+    #
+    #             # Test/intermediate outputs
+    #             gain_year_count_out_block[row, col] = gain_year_count
+    #             most_recent_year_not_tall_veg_block[row, col] = most_recent_year_not_tall_veg
+    #             years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
+    #             max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
+    #
 
         # End of iteration calculations and outputs
 
@@ -845,15 +846,18 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         year_range = f"{interval_end_year - cn.interval_years}_{interval_end_year}"
 
         out_dict_uint32[f"{cn.land_state_pattern}_{year_range}"] = state_out_block.copy()
+        ##TIME 1:43
 
         out_dict_float32[f"{cn.agc_rf_pattern}_{year_range}"] = agc_rf_out_block.copy()
 
         #TODO Convert C fluxes to CO2 fluxes somewhere in the process
         # (best place TBD but perhaps out here rather than in the decision tree so only need to apply 44/12 a few times)
+        #TODO Convert 5-year fluxes to annual fluxes
         out_dict_float32[f"{cn.agc_gross_emis_pattern}_{year_range}"] = agc_gross_emis_out_block.copy()
         out_dict_float32[f"{cn.bgc_gross_emis_pattern}_{year_range}"] = bgc_gross_emis_out_block.copy()
         out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = deadwood_c_gross_emis_out_block.copy()
         out_dict_float32[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] = litter_c_gross_emis_out_block.copy()
+        ##TIME 1:51
 
         out_dict_float32[f"{cn.agc_gross_removals_pattern}_{year_range}"] = agc_gross_removals_out_block.copy()
         out_dict_float32[f"{cn.bgc_gross_removals_pattern}_{year_range}"] = bgc_gross_removals_out_block.copy()
@@ -864,9 +868,15 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         out_dict_float32[f"{cn.bgc_net_flux_pattern}_{year_range}"] = bgc_net_flux_out_block.copy()
         out_dict_float32[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"] = deadwood_c_net_flux_out_block.copy()
         out_dict_float32[f"{cn.litter_c_net_flux_pattern}_{year_range}"] = litter_c_net_flux_out_block.copy()
+        ##TIME 1:34, 1:45, 1:43
 
         out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = ch4_gross_emis_out_block.copy()
         out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = n2o_gross_emis_out_block.copy()
+        ##TIME 1:51, 2:02 but redid some tasks, 1:44, 2:26 but redid some tasks, 2:04 but redid some tasks
+        ##TIME without net flux outputs 1:40, 1:27
+
+        ##TIME with two float32 output dicts: 1:36, 2:06 but redid some tasks, 1:41, 1:46, 1:40
+        ##TIME with three float32 output dicts: 2:11 but redid some tasks, 1:49,2:23 but redid 6 chunks, 2:13 but redid 2 chunks
 
         out_dict_float32[f"{cn.agc_dens_pattern}_{interval_end_year}"] = agc_dens_block.copy()
         out_dict_float32[f"{cn.bgc_dens_pattern}_{interval_end_year}"] = bgc_dens_block.copy()
@@ -876,12 +886,14 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         # Test/intermediate outputs
         out_dict_uint8[f"{cn.gain_year_count_pattern}_{year_range}"] = gain_year_count_out_block.copy()
         # Years selected to show it represents from model start to end of current interval
-        out_dict_uint16[f"most_recent_year_not_tall_veg_{cn.first_model_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()
-        out_dict_uint8[f"years_of_forest_regrowth_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
-        out_dict_uint16[f"years_of_forest_loss_{year_range}"] = year_of_forest_loss_block.copy()
+        out_dict_uint16[f"most_recent_year_not_tall_veg_{cn.first_model_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()  ##TIME: 1:37, 1:25, 1:21, 1:50 redid 2
+        out_dict_uint8[f"years_of_forest_regrowth_{interval_end_year}"] = years_of_forest_regrowth_block.copy()   ##TIME: 1:23, 1:24, 1:22, 2:01 redid 2
+        out_dict_uint16[f"year_of_forest_loss_{year_range}"] = year_of_forest_loss_block.copy() ##TIME 1:58 but redid 2 chunks
         out_dict_uint8[f"max_height_since_last_time_not_tall_veg_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
-
-        # os.quit()
+        ##TIME: 2:00 redid lots, 2:08 redid several
+        ##TIME with 32GB workers and 3 float32 dict outputs: 1:41, 1:35, 1:26, 1:27, 1:28, 1:23, 1:25
+        ##TIME with 32GB workers and 2 float32 dicts outputs: 1:22, 1:25, 1:22
+        ##TIME with 32GB workers and 1 float32 dict output: 1:27, 1:28
 
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
@@ -976,16 +988,14 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # print("uint8_typed_list:", typed_dict_uint8)
     # print("int16_typed_list:", typed_dict_int16)
     # print("int32_typed_list:", typed_dict_int32)
-    # print("float32_typed_list:", typed_dict_float32)
+    # print("float32_typed_list:", out_dict_float32)
 
 
     ### Part 4: Calculates LULUCF fluxes and densities
 
     lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
 
-    out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(
-        typed_dict_uint8, typed_dict_int16, typed_dict_float32, primary_forest_RFs
-    )
+    out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(typed_dict_uint8, typed_dict_int16, typed_dict_float32, primary_forest_RFs)
 
     # print(out_dict_uint32)
     # print(out_dict_float32)
@@ -998,23 +1008,20 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     out_dict_all_dtypes = {}
 
     # Transfers the dictionaries of numpy arrays for each data type to a new, Pythonic array
-    for key, value in out_dict_uint8.items():
-        out_dict_all_dtypes[key] = value
+    out_dicts = [
+        out_dict_uint8,
+        out_dict_uint16,
+        out_dict_uint32,
+        out_dict_float32
+    ]
 
-    for key, value in out_dict_uint16.items():
-        out_dict_all_dtypes[key] = value
+    # Loop through each dictionary and update out_dict_all_dtypes
+    for out_dict in out_dicts:
+        for key, value in out_dict.items():
+            out_dict_all_dtypes[key] = value
 
-    for key, value in out_dict_uint32.items():
-        out_dict_all_dtypes[key] = value
-
-    for key, value in out_dict_float32.items():
-        out_dict_all_dtypes[key] = value
-
-    # Clear memory of unneeded arrays
-    del out_dict_uint8
-    del out_dict_uint16
-    del out_dict_uint32
-    del out_dict_float32
+        # Clear memory of unneeded arrays
+        del out_dict
 
 
     ### Part 5: Calculates min, mean, and max for each output chunk.
@@ -1201,8 +1208,8 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
 
     # Prepares chunk stats spreadsheet: min, mean, max for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
-    # only if not suppressed by the --no_stats flag
-    if not no_stats:
+    # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
+    if (not no_stats) and (success_count > 0):
         uu.calculate_chunk_stats(all_stats, stage)
 
     # Ending time for stage

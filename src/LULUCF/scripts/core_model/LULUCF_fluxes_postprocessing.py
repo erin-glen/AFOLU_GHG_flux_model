@@ -5,6 +5,9 @@ Test:
 python -m scripts.utilities.create_cluster -n 1 -m 16 -c 2
 python -m scripts.core_model.LULUCF_fluxes_postprocessing -cn AFOLU_flux_model_scripts -d 20240930
 
+python -m scripts.utilities.create_cluster -n 200 -m 16 -c 2
+python -m scripts.core_model.LULUCF_fluxes_postprocessing -cn AFOLU_flux_model_scripts -d 20240930
+
 """
 
 
@@ -45,50 +48,50 @@ def main(cluster_name, date, run_local=False, no_upload=False):
 
     # Folders to process
     s3_in_folders = [
-        # f"{cn.outputs_path}{cn.AGC_density_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.AGC_density_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.AGC_density_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.AGC_density_path_part}/2015_2020/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.AGC_density_path_part}/2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.AGC_density_path_part}/2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.AGC_density_path_part}/2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.AGC_density_path_part}/2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.BGC_density_path_part}/2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.BGC_density_path_part}/2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.BGC_density_path_part}/2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.BGC_density_path_part}/2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.deadwood_c_density_path_part}/2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.deadwood_c_density_path_part}/2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.deadwood_c_density_path_part}/2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.deadwood_c_density_path_part}/2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.litter_c_density_path_part}/2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.litter_c_density_path_part}/2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.litter_c_density_path_part}/2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.litter_c_density_path_part}/2020/4000_pixels/{date}/"
+
+        # f"{cn.outputs_path}{cn.agc_net_flux_pattern}/2000_2005/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.agc_net_flux_pattern}/2005_2010/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.agc_net_flux_pattern}/2010_2015/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.agc_net_flux_pattern}/2015_2020/4000_pixels/{date}/",
         #
-        # f"{cn.outputs_path}{cn.BGC_density_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.BGC_density_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.BGC_density_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.BGC_density_path_part}/2015_2020/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.bgc_net_flux_pattern}/2000_2005/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.bgc_net_flux_pattern}/2005_2010/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.bgc_net_flux_pattern}/2010_2015/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.bgc_net_flux_pattern}/2015_2020/4000_pixels/{date}/",
         #
-        # f"{cn.outputs_path}{cn.deadwood_c_density_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_density_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_density_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_density_path_part}/2015_2020/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.deadwood_c_net_flux_pattern}/2000_2005/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.deadwood_c_net_flux_pattern}/2005_2010/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.deadwood_c_net_flux_pattern}/2010_2015/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.deadwood_c_net_flux_pattern}/2015_2020/4000_pixels/{date}/",
         #
-        # f"{cn.outputs_path}{cn.litter_c_density_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_density_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_density_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_density_path_part}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.AGC_flux_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.AGC_flux_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.AGC_flux_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.AGC_flux_path_part}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.BGC_flux_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.BGC_flux_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.BGC_flux_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.BGC_flux_path_part}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.deadwood_c_flux_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_flux_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_flux_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_flux_path_part}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.litter_c_flux_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_flux_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_flux_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_flux_path_part}/2015_2020/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.litter_c_net_flux_pattern}/2000_2005/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.litter_c_net_flux_pattern}/2005_2010/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.litter_c_net_flux_pattern}/2010_2015/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.litter_c_net_flux_pattern}/2015_2020/4000_pixels/{date}/",
         #
         # f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.land_state_node_path_part}/2005_2010/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.land_state_node_path_part}/2010_2015/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/4000_pixels/{date}/"
+        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/4000_pixels/{date}/"
     ]
 
     # # Creates dictionary of s3 tile set paths with corresponding tile index shapefile names
