@@ -361,7 +361,7 @@ def main(argv=None):
         run_drainage_model(
             cluster_name='drainage',
 
-            bounding_box=[112, -4, 114, -2], # one 2-degree chunk with data in Borneo 00N_110E
+            # bounding_box=[112, -4, 114, -2], # one 2-degree chunk with data in Borneo 00N_110E
             # bounding_box=[110, -10, 120, 0], # 10x10 degree tile Borneo
             # bounding_box=[-74, -4, -72, -2],  # one 2-degree chunk with data Peru 00N_080W
             # bounding_box=[-80.0, -10.0, -70.0, 0.0],  # 10x10 degree tile peru 00N_080W
@@ -369,6 +369,7 @@ def main(argv=None):
             # bounding_box=[-10.0, 0.0, 0.0, 10],  # 10x10 degree tile Congo 10N_010E
             # bounding_box=[-8, 52, -6, 54, 2],  # 2-degree chunk Ireland 60N_010W
             # bounding_box=[-110.0, 50.0, -100.0, 60.0],  # 10x10 degree tile Ireland 60N_010W
+            bounding_box = [-180, -60, 180, 80], #entire world
 
             chunk_size=2,
             run_local=True,
@@ -402,7 +403,7 @@ if __name__ == "__main__":
     1. **Run with Default Settings (for Testing Purposes):**
 
         ```bash
-        python drainage_model.py
+        python -m drainage_model.py
         ```
 
         - **Description:** Executes the script using default parameters. This is useful for testing and ensuring that the script runs without any custom configurations.
@@ -422,7 +423,7 @@ if __name__ == "__main__":
     3. **Run Locally Without Dask/Coiled:**
 
         ```bash
-        python drainage_model.py --run_local
+        python -m drainage_model.py --run_local
         ```
 
         - **Description:** Executes the script locally without leveraging Dask or Coiled for distributed computing. Useful for debugging or running on machines without access to a Dask cluster.
@@ -430,7 +431,7 @@ if __name__ == "__main__":
     4. **Exclude Statistics Spreadsheet:**
 
         ```bash
-        python drainage_model.py --no_stats
+        python -m drainage_model.py --no_stats
         ```
 
         - **Description:** Runs the script without generating the chunk statistics spreadsheet. Use this option if you do not require statistical summaries of each data chunk.
@@ -438,7 +439,7 @@ if __name__ == "__main__":
     5. **Skip Log Creation:**
 
         ```bash
-        python drainage_model.py --no_log
+        python -m drainage_model.py --no_log
         ```
 
         - **Description:** Prevents the creation of the combined log file. Useful when logging is handled separately or is not needed.
@@ -446,7 +447,7 @@ if __name__ == "__main__":
     6. **Disable Uploading Outputs to S3:**
 
         ```bash
-        python drainage_model.py --no_upload
+        python -m drainage_model.py --no_upload
         ```
 
         - **Description:** Runs the script without saving and uploading outputs to Amazon S3. Use this option if you prefer to handle output storage manually or store outputs locally.
