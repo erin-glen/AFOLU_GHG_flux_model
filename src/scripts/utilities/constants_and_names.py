@@ -165,6 +165,30 @@ ipcc_codes = {
     'otherland': 6
 }
 
+# Ecozone Codes
+ecozone_codes = {
+    'unknown': 0,
+    'boreal': 1,
+    'temperate': 2,
+    'tropical': 3
+}
+
+# Nutrient Status Codes
+nutrient_status_codes = {
+    'unknown': 0,
+    'poor': 1,
+    'rich': 2
+}
+
+# Plantation Types Codes
+plantation_type_codes = {
+    'unknown': (0, 0),
+    'long_rotation': (1, 5),
+    'short_rotation': (6, 10),
+    'oil_palm': (11, 15),
+    'sago_palm': (16, 20)
+}
+
 # File Name Patterns
 file_patterns = {
     'land_cover': "IPCC_basic_classes_2020",
@@ -231,38 +255,3 @@ t_to_Mt = 10 ** -3
 combined_log = "combined_log"
 
 
-# ---------------------------------------------------
-# 5. Helper Functions
-# ---------------------------------------------------
-
-def check_s3_path_exists(s3_client, bucket, path):
-    """
-    Check if a specific path exists in an S3 bucket.
-
-    Args:
-        s3_client (boto3.client): The boto3 S3 client.
-        bucket (str): The name of the S3 bucket.
-        path (str): The S3 object key/path.
-
-    Returns:
-        bool: True if the path exists, False otherwise.
-    """
-    try:
-        s3_client.head_object(Bucket=bucket, Key=path)
-        return True
-    except ClientError as e:
-        if e.response['Error']['Code'] == '404':
-            print(f"ClientError 404: {path} not found.")
-        else:
-            print(f"ClientError {e.response['Error']['Code']}: {path} - {e.response['Message']}")
-        return False
-
-
-# ---------------------------------------------------
-# 6. AWS S3 Client Initialization
-# ---------------------------------------------------
-
-# Initialize S3 Resource and Client
-s3 = boto3.resource('s3', region_name=s3_region_name)
-s3_client = boto3.client('s3', region_name=s3_region_name)
-my_bucket = s3.Bucket(s3_bucket_name)

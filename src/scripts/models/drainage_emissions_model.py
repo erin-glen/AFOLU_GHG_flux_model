@@ -17,6 +17,14 @@ from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
 from src.scripts.utilities import numba_utilities as nu
 
+# ... [existing imports] ...
+
+# Project-specific imports (ensure these modules are available)
+from src.scripts.utilities import constants_and_names as cn
+from src.scripts.utilities import universal_utilities as uu
+from src.scripts.utilities import log_utilities as lu
+from src.scripts.utilities import numba_utilities as nu
+
 # Define constants for land cover codes
 forest_code = cn.ipcc_codes['forest']
 cropland_code = cn.ipcc_codes['cropland']
@@ -24,6 +32,24 @@ settlement_code = cn.ipcc_codes['settlement']
 wetland_code = cn.ipcc_codes['wetland']
 grassland_code = cn.ipcc_codes['grassland']
 otherland_code = cn.ipcc_codes['otherland']
+
+# Define constants for ecozone codes
+boreal_code = cn.ecozone_codes['boreal']
+temperate_code = cn.ecozone_codes['temperate']
+tropical_code = cn.ecozone_codes['tropical']
+unknown_ecozone_code = cn.ecozone_codes['unknown']
+
+# Define constants for nutrient status codes
+poor_nutrient_code = cn.nutrient_status_codes['poor']
+rich_nutrient_code = cn.nutrient_status_codes['rich']
+unknown_nutrient_code = cn.nutrient_status_codes['unknown']
+
+# Define constants for plantation type codes
+long_rotation_code = cn.plantation_type_codes['long_rotation']
+short_rotation_code = cn.plantation_type_codes['short_rotation']
+oil_palm_code = cn.plantation_type_codes['oil_palm']
+sago_palm_code = cn.plantation_type_codes['sago_palm']
+unknown_plantation_code = cn.plantation_type_codes['unknown']
 
 # Function to calculate drainage and emissions using Numba
 @jit(nopython=True)
@@ -79,8 +105,8 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
             engert = engert_block[row, col]
             grip = grip_block[row, col]
             extraction = extraction_block[row, col]
-            ecozone_code = ecozone_block[row, col]        # Numeric code for ecozone
-            nutrient_status_code = nutrient_block[row, col]  # Numeric code for nutrient status
+            ecozone = ecozone_block[row, col]        # Numeric code for ecozone
+            nutrient = nutrient_block[row, col]  # Numeric code for nutrient status
 
             node = 0
             ef_co2 = np.float32(0.0)
@@ -116,55 +142,22 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
             # Update state_out with the node value
             state_out_block[row, col] = node
 
-            # Map ecozone_code to ecozone string
-            # Ecozone codes: 1=boreal, 2=temperate, 3=tropical
-            if ecozone_code == 1:
-                ecozone = 'boreal'
-            elif ecozone_code == 2:
-                ecozone = 'temperate'
-            elif ecozone_code == 3:
-                ecozone = 'tropical'
-            else:
-                ecozone = 'unknown'  # Handle unknown ecozone
-
-            # Map nutrient_status_code to nutrient status
-            # Nutrient status codes: 1=poor, 2=rich
-            if nutrient_status_code == 1:
-                nutrient = 'poor'
-            elif nutrient_status_code == 2:
-                nutrient = 'rich'
-            else:
-                nutrient = 'unknown'  # Handle unknown nutrient status
-
-            # Determine plantation_type based on planted_forest_type
-            # Plantation types: 1=long_rotation, 2=short_rotation, 3=oil_palm, 4=sago_palm
-            if planted_forest_type == 1:
-                plantation_type = 'long_rotation'
-            elif planted_forest_type == 2:
-                plantation_type = 'short_rotation'
-            elif planted_forest_type == 3:
-                plantation_type = 'oil_palm'
-            elif planted_forest_type == 4:
-                plantation_type = 'sago_palm'
-            else:
-                plantation_type = 'unknown'
-
             # New decision tree for emission factors where soil_block == 1
             if soil_block[row, col] == 1:
                 node = nu.accrete_node(node, 1)
                 # Start of emission factor decision tree
-                if ecozone == 'boreal':
+                if ecozone == boreal_code:
                     node = nu.accrete_node(node, 1)
                     ef_co2_offsite = 0.12
                     if land_cover == forest_code:
                         node = nu.accrete_node(node, 1)
-                        if nutrient == 'poor':
+                        if nutrient == poor_nutrient_code:
                             node = nu.accrete_node(node, 1)
                             ef_co2 = 0.25
                             ef_n2o = 0.22
                             ef_ch4_land = 7.0
                             ef_ch4_ditch = 217.0
-                        elif nutrient == 'rich':
+                        elif nutrient == rich_nutrient_code:
                             node = nu.accrete_node(node, 2)
                             ef_co2 = 0.95
                             ef_n2o = 3.2
@@ -200,7 +193,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_n2o = 0.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 0.0
-                elif ecozone == 'temperate':
+                elif ecozone == temperate_code:
                     node = nu.accrete_node(node, 2)
                     ef_co2_offsite = 0.31
                     if land_cover == forest_code:
@@ -212,12 +205,12 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                     elif land_cover == grassland_code:
                         node = nu.accrete_node(node, 2)
                         ef_ch4_ditch = 1165.0  # using deep default
-                        if nutrient == 'poor':
+                        if nutrient == poor_nutrient_code:
                             node = nu.accrete_node(node, 1)
                             ef_co2 = 5.3
                             ef_n2o = 4.3
                             ef_ch4_land = 1.8
-                        elif nutrient == 'rich':
+                        elif nutrient == rich_nutrient_code:
                             node = nu.accrete_node(node, 2)
                             ef_co2 = 6.1
                             ef_n2o = 8.2
@@ -246,28 +239,28 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_n2o = 0.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 0.0
-                elif ecozone == 'tropical':
+                elif ecozone == tropical_code:
                     node = nu.accrete_node(node, 3)
                     ef_co2_offsite = 0.82
                     ef_ch4_ditch = 2259.0  # Assigned before conditions
                     if planted_forest_type > 0:
                         node = nu.accrete_node(node, 1)
-                        if plantation_type == 'long_rotation':
+                        if planted_forest_type == long_rotation_code:
                             node = nu.accrete_node(node, 1)
                             ef_co2 = 15.0
                             ef_n2o = 2.4
                             ef_ch4_land = 2.7
-                        elif plantation_type == 'short_rotation':
+                        elif planted_forest_type == short_rotation_code:
                             node = nu.accrete_node(node, 2)
                             ef_co2 = 20.0
                             ef_n2o = 2.4
                             ef_ch4_land = 2.7
-                        elif plantation_type == 'oil_palm':
+                        elif planted_forest_type == oil_palm_code:
                             node = nu.accrete_node(node, 3)
                             ef_co2 = 11.0
                             ef_n2o = 1.2
                             ef_ch4_land = 0.0
-                        elif plantation_type == 'sago_palm':
+                        elif planted_forest_type == sago_palm_code:
                             node = nu.accrete_node(node, 4)
                             ef_co2 = 1.5
                             ef_n2o = 3.3
