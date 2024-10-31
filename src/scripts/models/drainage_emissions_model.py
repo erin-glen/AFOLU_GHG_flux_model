@@ -26,6 +26,7 @@ grassland_code = cn.ipcc_codes['grassland']
 otherland_code = cn.ipcc_codes['otherland']
 
 # Function to calculate drainage and emissions using Numba
+# Function to calculate drainage and emissions using Numba
 @jit(nopython=True)
 def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float32):
     """
@@ -125,9 +126,6 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                 node = nu.accrete_node(node, 2)
                 state_out[row, col] = node
 
-            # todo define data for ecozone, nutrient status, group plantation types, and pixel area
-            # todo build function for calculating actual emissions
-
             # Map ecozone_code to ecozone string
             # Ecozone codes: 1=boreal, 2=temperate, 3=tropical
             if ecozone_code == 1:
@@ -186,11 +184,11 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_co2 = 5.7
                         ef_n2o = 9.5
                         ef_ch4_land = 1.4
-                        ef_ch4_ditch = 1165 # using deep default
+                        ef_ch4_ditch = 1165  # using deep default
                     elif land_cover == cropland_code:
                         ef_co2 = 7.9
-                        ef_n2o = 13
-                        ef_ch4_land = 0
+                        ef_n2o = 13.0
+                        ef_ch4_land = 0.0
                         ef_ch4_ditch = 1165
                     elif extraction > 0:
                         ef_co2 = 2.8
@@ -210,7 +208,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_ch4_land = 2.5
                         ef_ch4_ditch = 217
                     elif land_cover == grassland_code:
-                        ef_ch4_ditch = 1165 # using deep default
+                        ef_ch4_ditch = 1165  # using deep default
                         if nutrient == 'poor':
                             ef_co2 = 5.3
                             ef_n2o = 4.3
@@ -218,15 +216,15 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         elif nutrient == 'rich':
                             ef_co2 = 6.1
                             ef_n2o = 8.2
-                            ef_ch4_land = 16 # using deep default
+                            ef_ch4_land = 16.0  # using deep default
                         else:
                             ef_co2 = 0.0  # Handle unknown nutrient status
                             ef_n2o = 0.0
                             ef_ch4_land = 0.0
                     elif land_cover == cropland_code:
                         ef_co2 = 10.5
-                        ef_n2o = 13
-                        ef_ch4_land = 0
+                        ef_n2o = 13.0
+                        ef_ch4_land = 0.0
                         ef_ch4_ditch = 1165
                     elif extraction > 0:
                         ef_co2 = 3.0
@@ -253,7 +251,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         elif plantation_type == 'oil_palm':
                             ef_co2 = 11.0
                             ef_n2o = 1.2
-                            ef_ch4_land = 0
+                            ef_ch4_land = 0.0
                         elif plantation_type == 'sago_palm':
                             ef_co2 = 1.5
                             ef_n2o = 3.3
@@ -262,6 +260,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                             ef_co2 = 0.0  # Handle unknown plantation type
                             ef_n2o = 0.0
                             ef_ch4_land = 0.0
+                            ef_ch4_ditch = 0.0
                     elif land_cover == forest_code:
                         ef_co2 = 5.3
                         ef_n2o = 2.4
@@ -276,15 +275,21 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_ch4_land = 7.0
                     elif extraction > 0:
                         ef_co2 = 2.0
-                        ef_n2o = 0
-                        ef_ch4_land = 0
+                        ef_n2o = 0.0
+                        ef_ch4_land = 0.0
                     else:
                         ef_co2 = 0.0  # No emissions or default value
                         ef_n2o = 0.0
                         ef_ch4_land = 0.0
+                        ef_ch4_ditch = 0.0
                 else:
-                    # todo insert message about uknown ecozone
-
+                    # Handle unknown ecozone by setting emission factors to zero
+                    ef_co2 = 0.0
+                    ef_n2o = 0.0
+                    ef_ch4_land = 0.0
+                    ef_ch4_ditch = 0.0
+                    ef_co2_offsite = 0.0
+                    # Note: Cannot print or log in nopython mode; handle as needed
 
                 # Calculate emissions
                 # Assuming each pixel represents 1 hectare
@@ -302,18 +307,18 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                 CH4_ditch_emissions_out[row, col] = 0.0
                 CO2_offsite_emissions_out[row, col] = 0.0
 
-        # Add outputs to dictionaries
-        out_dict_uint32["soil"] = soil_block
-        out_dict_uint32["state"] = state_out
-        out_dict_float32["CO2_emissions"] = CO2_emissions_out
-        out_dict_float32["N2O_emissions"] = N2O_emissions_out
-        out_dict_float32["CH4_land_emissions"] = CH4_land_emissions_out
-        out_dict_float32["CH4_ditch_emissions"] = CH4_ditch_emissions_out
-        out_dict_float32["CO2_offsite_emissions"] = CO2_offsite_emissions_out
-        # Add additional emissions to the dictionaries if needed
-        # e.g., out_dict_float32["other_gas_emissions"] = other_gas_emissions_out
+    # Add outputs to dictionaries
+    out_dict_uint32["soil"] = soil_block
+    out_dict_uint32["state"] = state_out
+    out_dict_float32["CO2_emissions"] = CO2_emissions_out
+    out_dict_float32["N2O_emissions"] = N2O_emissions_out
+    out_dict_float32["CH4_land_emissions"] = CH4_land_emissions_out
+    out_dict_float32["CH4_ditch_emissions"] = CH4_ditch_emissions_out
+    out_dict_float32["CO2_offsite_emissions"] = CO2_offsite_emissions_out
+    # Add additional emissions to the dictionaries if needed
+    # e.g., out_dict_float32["other_gas_emissions"] = other_gas_emissions_out
 
-        return out_dict_uint32, out_dict_float32
+    return out_dict_uint32, out_dict_float32
 
 
 
