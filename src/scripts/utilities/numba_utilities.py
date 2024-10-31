@@ -44,10 +44,10 @@ def create_typed_dicts(layers):
             pass
             # raise TypeError(f"{key} dtype not in list")
 
-    # print(f"uint8 datasets: {uint8_dict_layers.keys()}")
-    # print(f"int16 datasets: {int16_dict_layers.keys()}")
-    # print(f"int32 datasets: {int32_dict_layers.keys()}")
-    # print(f"float32 datasets: {float32_dict_layers.keys()}")
+    print(f"uint8 datasets: {uint8_dict_layers.keys()}")
+    print(f"int16 datasets: {int16_dict_layers.keys()}")
+    print(f"int32 datasets: {int32_dict_layers.keys()}")
+    print(f"float32 datasets: {float32_dict_layers.keys()}")
 
     # Creates numba-compliant typed dict for each type of array
     typed_dict_uint8 = Dict.empty(
