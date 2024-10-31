@@ -18,6 +18,12 @@ from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
 from src.scripts.utilities import numba_utilities as nu
 
+# Import constants
+c_to_co2 = np.float32(cn.c_to_co2)
+n2o_n_to_n2o = np.float32(cn.n2o_n_to_n2o)
+gwp_ch4 = np.float32(cn.gwp_ch4)
+gwp_n2o = np.float32(cn.gwp_n2o)
+
 # Define constants for land cover codes
 forest_code = cn.ipcc_codes['forest']
 cropland_code = cn.ipcc_codes['cropland']
@@ -123,11 +129,6 @@ def calculate_emissions_co2e(ef_co2, ef_n2o, ef_ch4_land, ef_ch4_ditch, ef_co2_o
             ch4_land_emissions_co2e, ch4_ditch_emissions_co2e,
             co2_offsite_emissions)
 
-# Numba utility function to build node
-@jit(nopython=True)
-def accrete_node(combo, new):
-    combo = combo * 10 + new
-    return combo
 
 # Main function
 @jit(nopython=True)
@@ -193,6 +194,8 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
             ef_ch4_land = np.float32(0.0)
             ef_ch4_ditch = np.float32(0.0)
             ef_co2_offsite = np.float32(0.0)
+            frac_ditch = np.float32(0.0)
+
 
             if peat == 1:
                 node = accrete_node(node, 1)
@@ -236,42 +239,49 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                             ef_n2o = 0.22
                             ef_ch4_land = 7.0
                             ef_ch4_ditch = 217.0
+                            frac_ditch = 0.025
                         elif nutrient == rich_nutrient_code:
                             node = accrete_node(node, 2)
                             ef_co2 = 0.95
                             ef_n2o = 3.2
                             ef_ch4_land = 2.0
                             ef_ch4_ditch = 217.0
+                            frac_ditch = 0.025
                         else:
                             node = accrete_node(node, 3)
                             ef_co2 = 0.0  # Handle unknown nutrient status
                             ef_n2o = 0.0
                             ef_ch4_land = 0.0
                             ef_ch4_ditch = 0.0
+                            frac_ditch = 0
                     elif land_cover == grassland_code:
                         node = accrete_node(node, 2)
                         ef_co2 = 5.7
                         ef_n2o = 9.5
                         ef_ch4_land = 1.4
                         ef_ch4_ditch = 1165.0  # using deep default
+                        frac_ditch = 0.05
                     elif land_cover == cropland_code:
                         node = accrete_node(node, 3)
                         ef_co2 = 7.9
                         ef_n2o = 13.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 1165.0
+                        frac_ditch = 0.05
                     elif extraction > 0:
                         node = accrete_node(node, 4)
                         ef_co2 = 2.8
                         ef_n2o = 0.30
                         ef_ch4_land = 6.1
                         ef_ch4_ditch = 542.0
+                        frac_ditch = 0.05
                     else:
                         node = accrete_node(node, 5)
                         ef_co2 = 0.0  # No emissions or default value
                         ef_n2o = 0.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 0.0
+                        frac_ditch = 0
                 elif ecozone == temperate_code:
                     node = accrete_node(node, 2)
                     ef_co2_offsite = 0.31
@@ -281,6 +291,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_n2o = 2.8
                         ef_ch4_land = 2.5
                         ef_ch4_ditch = 217.0
+                        frac_ditch = 0.05
                     elif land_cover == grassland_code:
                         node = accrete_node(node, 2)
                         ef_ch4_ditch = 1165.0  # using deep default
@@ -289,39 +300,46 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                             ef_co2 = 5.3
                             ef_n2o = 4.3
                             ef_ch4_land = 1.8
+                            frac_ditch = 0.05
                         elif nutrient == rich_nutrient_code:
                             node = accrete_node(node, 2)
                             ef_co2 = 6.1
                             ef_n2o = 8.2
                             ef_ch4_land = 16.0  # using deep default
+                            frac_ditch = 0.05
                         else:
                             node = accrete_node(node, 3)
                             ef_co2 = 0.0  # Handle unknown nutrient status
                             ef_n2o = 0.0
                             ef_ch4_land = 0.0
                             ef_ch4_ditch = 0.0
+                            frac_ditch = 0.05
                     elif land_cover == cropland_code:
                         node = accrete_node(node, 3)
                         ef_co2 = 10.5
                         ef_n2o = 13.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 1165.0
+                        frac_ditch = 0.05
                     elif extraction > 0:
                         node = accrete_node(node, 4)
                         ef_co2 = 3.0
                         ef_n2o = 0.3
                         ef_ch4_land = 6.1
                         ef_ch4_ditch = 542.0
+                        frac_ditch = 0.05
                     else:
                         node = accrete_node(node, 5)
                         ef_co2 = 0.0  # No emissions or default value
                         ef_n2o = 0.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 0.0
+                        frac_ditch = 0
                 elif ecozone == tropical_code:
                     node = accrete_node(node, 3)
                     ef_co2_offsite = 0.82
                     ef_ch4_ditch = 2259.0  # Assigned before conditions
+                    frac_ditch = 0.02
                     if planted_forest_type > 0:
                         node = accrete_node(node, 1)
                         if planted_forest_type == long_rotation_code:
@@ -395,7 +413,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                 (co2_emissions, n2o_emissions_co2e,
                  ch4_land_emissions_co2e, ch4_ditch_emissions_co2e,
                  co2_offsite_emissions) = calculate_emissions_co2e(
-                    ef_co2, ef_n2o, ef_ch4_land, ef_ch4_ditch, ef_co2_offsite,
+                    ef_co2, ef_n2o, ef_ch4_land, ef_ch4_ditch, ef_co2_offsite, frac_ditch,
                     area, gwp_ch4, gwp_n2o
                 )
 
