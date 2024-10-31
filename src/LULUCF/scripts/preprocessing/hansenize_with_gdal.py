@@ -3,23 +3,20 @@ from dask.distributed import Client, LocalCluster
 import coiled
 import os
 from osgeo import gdal
+import tempfile
+from pathlib import Path
 from dask.distributed import print
 from src.LULUCF.scripts.utilities import constants_and_names as cn
 from src.LULUCF.scripts.utilities import universal_utilities as uu
 
 ############################################################################################################
 # Connects to local or Coiled cluster
-cluster_type = 'local'
+cluster_type = 'test'
 cluster_name = 'hansenize_gdal_test'
-no_upload = True  #TODO Change to False when running final version
-remove_local_file = False #TODO Change to True when running final version
+no_upload = False  #TODO Change to False when running final version
+save_local_file = True #TODO Change to False when running final version
+process = 'drivers' #TODO add text input file or command line arguments to determine which inputs to preprocess
 
-#Set the environment variable to enable random writes for S3
-os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
-
-#Set process
-process = 'drivers'
-#TODO add text input file or command line arguments to determine which inputs to preprocess
 
 
 if cluster_type == 'full':
@@ -123,15 +120,21 @@ for key,items in download_upload_dictionary.items():
     path = items["raw_dir"]
     pattern = items["raw_pattern"]
     vrt = items["vrt"]
+    output_vrt_s3 = f"{path}{vrt}"
 
-    # Find all files that match the raw pattern
-    raster_list  = uu.list_s3_files_with_pattern(path, pattern)
-    if raster_list:
-        download_upload_dictionary[key]["raw_raster_list"] = raster_list
+    # Find all files in s3 that match the raw pattern and add raw file s3 paths to download_upload_dictionary
+    input_raster_list_s3  = uu.list_s3_files_with_pattern(path, pattern)
+    if input_raster_list_s3:
+        download_upload_dictionary[key]["raw_raster_list"] = input_raster_list_s3
 
     #Create a vrt of all raw input rasters
-    output_vrt = f"{path}{vrt}"
-    future = client.submit(uu.build_vrt_gdal, raster_list, vrt, output_vrt, no_upload, remove_local_file)
+    print(f"Attempting to build vrt for {key}:")
+    if cluster_type == 'full' or cluster_type == 'test':
+        # If running in coiled, download all raw input files and build vrt in cluster
+        future = client.submit(uu.build_vrt_gdal_coiled, input_raster_list_s3, output_vrt_s3, vrt, no_upload, save_local_file)
+    elif cluster_type == 'local':
+        # If running locally, save vrt directly to s3 using vsis3 (does not work in coiled)
+        future = client.submit(uu.build_vrt_gdal_local, input_raster_list_s3, output_vrt_s3)
     vrt_futures.append(future)
 
 # Collect the results once they are finished
@@ -140,36 +143,48 @@ vrt_results = client.gather(vrt_futures)
 
 #Step 3: Get GDAL datatype of each VRT
 for key,items in download_upload_dictionary.items():
-   #path = items["raw_dir"]
+    path = items["raw_dir"]
     vrt = items["vrt"]
+    output_vrt = f"{path}{vrt}"  #s3 path to upload vrt file
 
-    # Add datatype to download_upload dictionary
-    #output_vrt = f"{path}{vrt}"
-    dt = uu.get_dtype_from_local(vrt)
+    # Get raster data type from vrt
+    if cluster_type == 'full' or cluster_type == 'test':
+        dt = uu.get_dtype_from_raster(vrt)  #If running in coiled, uses local vrt
+    elif cluster_type == 'local':
+        dt = uu.get_dtype_from_s3(output_vrt)   #If running locally, uses vrt in s3
+
+    # Add GDAL data type to download_upload dictionary
     if dt:
         gdal_dt = next(key for key, value in uu.gdal_dtype_mapping.items() if value == dt)  # Get GDAL data type
         download_upload_dictionary[key]["dt"] = gdal_dt
         print(f"vrt for {key} has data type: {dt} ({gdal_dt})")
 
 
-#Step 3: Use warp_to_hansen to preprocess each dataset into 10x10 degree tiles
+#Step 4: Use warp_to_hansen to preprocess each dataset into 10x10 degree tiles
 #TODO see LULUCF model (take a bounding box as a command line argument, and make chunks)
 for tile_id in cn.tile_id_list:
     tile_futures = []
     for key,items in download_upload_dictionary.items():
-        vrt = items["vrt"]  #Saved locally with this file name so no need to download from s3
-        out_pattern = items['processed_pattern']
-        out_dir = items['processed_dir']
-
-        filename = f"{tile_id}_{out_pattern}"
-        output_tile_s3 = f"{out_dir}{filename}"
+        filename = f"{tile_id}_{items['processed_pattern']}"
+        output_tile_s3 = f"{items['processed_dir']}{filename}"
         xmin, ymin, xmax, ymax = uu.get_10x10_tile_bounds(tile_id)
         dt = items['dt']
-        tile_future = client.submit(uu.warp_to_hansen, vrt, filename, output_tile_s3, xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
+
+        if cluster_type == 'full' or cluster_type == 'test':
+            vrt = items["vrt"]
+            tile_future = client.submit(uu.warp_to_hansen_coiled, vrt, filename, output_tile_s3,  xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
+        elif cluster_type == 'local':
+            input_vrt_s3 = f"{items['raw_dir']}{items['vrt']}"
+            tile_future = client.submit(uu.warp_to_hansen_local, input_vrt_s3, output_tile_s3, xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
         tile_futures.append(tile_future)
 
     # Collect the results once they are finished
     tile_results = client.gather(tile_futures)
+
+#Step 5: Delete local files
+# Remove vrt after tile creation step
+#os.remove(str(Path(source_raster_path))) #vrt
+#remove local files in raster list
 #TODO: Add upload_to_s3/ no_upload_to_s3 and delete_local_copy_after_upload options
 
 #TODO: Change for loop/ tile_futures /tile_results structure so parallelizes more tasks with Coiled?
