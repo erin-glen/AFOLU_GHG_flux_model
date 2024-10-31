@@ -26,7 +26,6 @@ grassland_code = cn.ipcc_codes['grassland']
 otherland_code = cn.ipcc_codes['otherland']
 
 # Function to calculate drainage and emissions using Numba
-# Function to calculate drainage and emissions using Numba
 @jit(nopython=True)
 def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float32):
     """
@@ -61,16 +60,12 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     # Initialize output arrays
     rows, cols = peat_block.shape
     soil_block = np.zeros((rows, cols), dtype=np.uint32)
-    state_out = np.zeros((rows, cols), dtype=np.uint32)
-    CO2_emissions_out = np.zeros((rows, cols), dtype=np.float32)
-    N2O_emissions_out = np.zeros((rows, cols), dtype=np.float32)
-    # Initialize arrays for CH₄ emissions split into land and ditch components
-    CH4_land_emissions_out = np.zeros((rows, cols), dtype=np.float32)
-    CH4_ditch_emissions_out = np.zeros((rows, cols), dtype=np.float32)
-    # Initialize array for offsite CO₂ emissions
-    CO2_offsite_emissions_out = np.zeros((rows, cols), dtype=np.float32)
-    # Initialize placeholders for additional emissions if needed in the future
-    # e.g., other_gas_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+    state_out_block = np.zeros((rows, cols), dtype=np.uint32)
+    co2_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+    n2o_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+    ch4_land_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+    ch4_ditch_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+    co2_offsite_emissions_out = np.zeros((rows, cols), dtype=np.float32)
 
     # Iterate over each pixel
     for row in range(rows):
@@ -96,35 +91,30 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
 
             if peat == 1:
                 node = nu.accrete_node(node, 1)
-                node = nu.accrete_node(node, 1)
                 if dadap > 0 or osm_canals > 0:
                     node = nu.accrete_node(node, 1)
                     soil_block[row, col] = 1  # 'drained'
-                    state_out[row, col] = node
                 elif engert > 0 or grip > 0 or osm_roads > 0:
                     node = nu.accrete_node(node, 2)
                     soil_block[row, col] = 1  # 'drained'
-                    state_out[row, col] = node
                 elif land_cover == cropland_code or land_cover == settlement_code:
                     node = nu.accrete_node(node, 3)
                     soil_block[row, col] = 1  # 'drained'
-                    state_out[row, col] = node
                 elif planted_forest_type > 0:
                     node = nu.accrete_node(node, 4)
                     soil_block[row, col] = 1  # 'drained'
-                    state_out[row, col] = node
                 elif extraction > 0:
                     node = nu.accrete_node(node, 5)
                     soil_block[row, col] = 1  # 'drained'
-                    state_out[row, col] = node
                 else:
                     node = nu.accrete_node(node, 6)
                     soil_block[row, col] = 0  # 'undrained peat'
-                    state_out[row, col] = node
             else:
-                soil_block[row, col] = 0  # 'not peat'
                 node = nu.accrete_node(node, 2)
-                state_out[row, col] = node
+                soil_block[row, col] = 0  # 'not peat'
+
+            # Update state_out with the node value
+            state_out_block[row, col] = node
 
             # Map ecozone_code to ecozone string
             # Ecozone codes: 1=boreal, 2=temperate, 3=tropical
@@ -161,128 +151,161 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
 
             # New decision tree for emission factors where soil_block == 1
             if soil_block[row, col] == 1:
+                node = nu.accrete_node(node, 1)
                 # Start of emission factor decision tree
                 if ecozone == 'boreal':
+                    node = nu.accrete_node(node, 1)
                     ef_co2_offsite = 0.12
                     if land_cover == forest_code:
+                        node = nu.accrete_node(node, 1)
                         if nutrient == 'poor':
+                            node = nu.accrete_node(node, 1)
                             ef_co2 = 0.25
                             ef_n2o = 0.22
                             ef_ch4_land = 7.0
                             ef_ch4_ditch = 217
                         elif nutrient == 'rich':
+                            node = nu.accrete_node(node, 2)
                             ef_co2 = 0.95
                             ef_n2o = 3.2
                             ef_ch4_land = 2.0
                             ef_ch4_ditch = 217
                         else:
+                            node = nu.accrete_node(node, 3)
                             ef_co2 = 0.0  # Handle unknown nutrient status
                             ef_n2o = 0.0
                             ef_ch4_land = 0.0
                             ef_ch4_ditch = 0.0
                     elif land_cover == grassland_code:
+                        node = nu.accrete_node(node, 2)
                         ef_co2 = 5.7
                         ef_n2o = 9.5
                         ef_ch4_land = 1.4
                         ef_ch4_ditch = 1165  # using deep default
                     elif land_cover == cropland_code:
+                        node = nu.accrete_node(node, 3)
                         ef_co2 = 7.9
                         ef_n2o = 13.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 1165
                     elif extraction > 0:
+                        node = nu.accrete_node(node, 4)
                         ef_co2 = 2.8
                         ef_n2o = 0.30
                         ef_ch4_land = 6.1
                         ef_ch4_ditch = 542
                     else:
+                        node = nu.accrete_node(node, 5)
                         ef_co2 = 0.0  # No emissions or default value
                         ef_n2o = 0.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 0.0
                 elif ecozone == 'temperate':
+                    node = nu.accrete_node(node, 2)
                     ef_co2_offsite = 0.31
                     if land_cover == forest_code:
+                        node = nu.accrete_node(node, 1)
                         ef_co2 = 2.6
                         ef_n2o = 2.8
                         ef_ch4_land = 2.5
                         ef_ch4_ditch = 217
                     elif land_cover == grassland_code:
+                        node = nu.accrete_node(node, 2)
                         ef_ch4_ditch = 1165  # using deep default
                         if nutrient == 'poor':
+                            node = nu.accrete_node(node, 1)
                             ef_co2 = 5.3
                             ef_n2o = 4.3
                             ef_ch4_land = 1.8
                         elif nutrient == 'rich':
+                            node = nu.accrete_node(node, 2)
                             ef_co2 = 6.1
                             ef_n2o = 8.2
                             ef_ch4_land = 16.0  # using deep default
                         else:
+                            node = nu.accrete_node(node, 3)
                             ef_co2 = 0.0  # Handle unknown nutrient status
                             ef_n2o = 0.0
                             ef_ch4_land = 0.0
+                            ef_ch4_ditch = 0.0
                     elif land_cover == cropland_code:
+                        node = nu.accrete_node(node, 3)
                         ef_co2 = 10.5
                         ef_n2o = 13.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 1165
                     elif extraction > 0:
+                        node = nu.accrete_node(node, 4)
                         ef_co2 = 3.0
                         ef_n2o = 0.3
                         ef_ch4_land = 6.1
                         ef_ch4_ditch = 542
                     else:
+                        node = nu.accrete_node(node, 5)
                         ef_co2 = 0.0  # No emissions or default value
                         ef_n2o = 0.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 0.0
                 elif ecozone == 'tropical':
-                    ef_ch4_ditch = 2259
+                    node = nu.accrete_node(node, 3)
                     ef_co2_offsite = 0.82
+                    ef_ch4_ditch = 2259  # Assigned before conditions
                     if planted_forest_type > 0:
+                        node = nu.accrete_node(node, 1)
                         if plantation_type == 'long_rotation':
+                            node = nu.accrete_node(node, 1)
                             ef_co2 = 15.0
                             ef_n2o = 2.4
                             ef_ch4_land = 2.7
                         elif plantation_type == 'short_rotation':
+                            node = nu.accrete_node(node, 2)
                             ef_co2 = 20.0
                             ef_n2o = 2.4
                             ef_ch4_land = 2.7
                         elif plantation_type == 'oil_palm':
+                            node = nu.accrete_node(node, 3)
                             ef_co2 = 11.0
                             ef_n2o = 1.2
                             ef_ch4_land = 0.0
                         elif plantation_type == 'sago_palm':
+                            node = nu.accrete_node(node, 4)
                             ef_co2 = 1.5
                             ef_n2o = 3.3
                             ef_ch4_land = 26.2
                         else:
+                            node = nu.accrete_node(node, 5)
                             ef_co2 = 0.0  # Handle unknown plantation type
                             ef_n2o = 0.0
                             ef_ch4_land = 0.0
                             ef_ch4_ditch = 0.0
                     elif land_cover == forest_code:
+                        node = nu.accrete_node(node, 2)
                         ef_co2 = 5.3
                         ef_n2o = 2.4
                         ef_ch4_land = 4.9
                     elif land_cover == grassland_code:
+                        node = nu.accrete_node(node, 3)
                         ef_co2 = 9.6
                         ef_n2o = 5.0
                         ef_ch4_land = 7.0
                     elif land_cover == cropland_code:
+                        node = nu.accrete_node(node, 4)
                         ef_co2 = 14.0
                         ef_n2o = 5.0
                         ef_ch4_land = 7.0
                     elif extraction > 0:
+                        node = nu.accrete_node(node, 5)
                         ef_co2 = 2.0
                         ef_n2o = 0.0
                         ef_ch4_land = 0.0
                     else:
+                        node = nu.accrete_node(node, 6)
                         ef_co2 = 0.0  # No emissions or default value
                         ef_n2o = 0.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 0.0
                 else:
+                    node = nu.accrete_node(node, 4)
                     # Handle unknown ecozone by setting emission factors to zero
                     ef_co2 = 0.0
                     ef_n2o = 0.0
@@ -291,36 +314,40 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                     ef_co2_offsite = 0.0
                     # Note: Cannot print or log in nopython mode; handle as needed
 
+                # Update state_out with the node value after emission factor decisions
+                state_out_block[row, col] = node
+
                 # Calculate emissions
                 # Assuming each pixel represents 1 hectare
                 area = 1.0  # Adjust if pixel area is different
-                CO2_emissions_out[row, col] = ef_co2 * area
-                N2O_emissions_out[row, col] = ef_n2o * area
-                CH4_land_emissions_out[row, col] = ef_ch4_land * area
-                CH4_ditch_emissions_out[row, col] = ef_ch4_ditch * area
-                CO2_offsite_emissions_out[row, col] = ef_co2_offsite * area
+                co2_emissions_out[row, col] = ef_co2 * area
+                n2o_emissions_out[row, col] = ef_n2o * area
+                ch4_land_emissions_out[row, col] = ef_ch4_land * area
+                ch4_ditch_emissions_out[row, col] = ef_ch4_ditch * area
+                co2_offsite_emissions_out[row, col] = ef_co2_offsite * area
             else:
+                node = nu.accrete_node(node, 2)
+                # Update state_out with the node value
+                state_out_block[row, col] = node
                 # No emissions for undrained peat or non-peat areas
-                CO2_emissions_out[row, col] = 0.0
-                N2O_emissions_out[row, col] = 0.0
-                CH4_land_emissions_out[row, col] = 0.0
-                CH4_ditch_emissions_out[row, col] = 0.0
-                CO2_offsite_emissions_out[row, col] = 0.0
+                co2_emissions_out[row, col] = 0.0
+                n2o_emissions_out[row, col] = 0.0
+                ch4_land_emissions_out[row, col] = 0.0
+                ch4_ditch_emissions_out[row, col] = 0.0
+                co2_offsite_emissions_out[row, col] = 0.0
 
     # Add outputs to dictionaries
     out_dict_uint32["soil"] = soil_block
-    out_dict_uint32["state"] = state_out
-    out_dict_float32["CO2_emissions"] = CO2_emissions_out
-    out_dict_float32["N2O_emissions"] = N2O_emissions_out
-    out_dict_float32["CH4_land_emissions"] = CH4_land_emissions_out
-    out_dict_float32["CH4_ditch_emissions"] = CH4_ditch_emissions_out
-    out_dict_float32["CO2_offsite_emissions"] = CO2_offsite_emissions_out
+    out_dict_uint32["state"] = state_out_block
+    out_dict_float32["CO2_emissions"] = co2_emissions_out
+    out_dict_float32["N2O_emissions"] = n2o_emissions_out
+    out_dict_float32["CH4_land_emissions"] = ch4_land_emissions_out
+    out_dict_float32["CH4_ditch_emissions"] = ch4_ditch_emissions_out
+    out_dict_float32["CO2_offsite_emissions"] = co2_offsite_emissions_out
     # Add additional emissions to the dictionaries if needed
     # e.g., out_dict_float32["other_gas_emissions"] = other_gas_emissions_out
 
     return out_dict_uint32, out_dict_float32
-
-
 
 
 def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_final, no_upload):
