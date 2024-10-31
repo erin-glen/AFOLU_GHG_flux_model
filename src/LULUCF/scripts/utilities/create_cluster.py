@@ -33,10 +33,20 @@ def create_cluster(n_workers, worker_memory, worker_cpu):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create a Coiled cluster with specified parameters.")
     parser.add_argument('-n', '--n_workers', type=int, default=1, help='Number of workers for the cluster')
-    parser.add_argument('-m', '--worker_memory', type=str, default='8', help='Memory per worker (e.g., 8GiB)')
-    parser.add_argument('-c', '--worker_cpu', type=str, default='4', help='Number of CPUs per worker')
+    parser.add_argument('-m', '--worker_memory', type=str, default='16', help='Memory per worker (default=16GiB)')
+    parser.add_argument('-c', '--worker_cpu', type=str, default='2', help='Number of CPUs per worker (default=2 CPUs)')
+    parser.add_argument('-l', '--large_scale_mode', action='store_true', help='Use memory and workers for large-scale analysis')
 
     args = parser.parse_args()
 
+    n_workers = args.n_workers
+    worker_memory = args.worker_memory
+    worker_cpu = args.worker_cpu
+
+    if args.large_scale_mode:
+
+        worker_memory = '32'
+        worker_cpu = 4
+
     # Create the cluster with command line arguments
-    create_cluster(args.n_workers, args.worker_memory, args.worker_cpu)
+    create_cluster(n_workers, worker_memory, worker_cpu)
