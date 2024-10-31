@@ -258,3 +258,7 @@ combined_log = "combined_log"
 # Constants for GWPs
 gwp_ch4 = np.float32(28.0)  # For example
 gwp_n2o = np.float32(265.0)  # For example
+
+# constants_and_names.py
+c_to_co2 = np.float32(3.67)      # Conversion factor from C to CO₂
+n2o_n_to_n2o = np.float32(1.571) # Conversion factor from N₂O-N to N₂O
