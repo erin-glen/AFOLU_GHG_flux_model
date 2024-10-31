@@ -54,8 +54,8 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     engert_block = in_dict_float32['engert']
     grip_block = in_dict_float32['grip']
     extraction_block = in_dict_uint8['extraction']
-    ecozone_block = in_dict_uint8['continent_ecozone']  # Will be zeros if defaulted
-    nutrient_block = in_dict_uint8['nutrient_status']  # Will be zeros if defaulted
+    ecozone_block = in_dict_int16['continent_ecozone']
+    nutrient_block = in_dict_uint8['nutrient_status']
 
     # Initialize output arrays
     rows, cols = peat_block.shape
@@ -211,7 +211,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_ch4_ditch = 217.0
                     elif land_cover == grassland_code:
                         node = nu.accrete_node(node, 2)
-                        ef_ch4_ditch = 1165  # using deep default
+                        ef_ch4_ditch = 1165.0  # using deep default
                         if nutrient == 'poor':
                             node = nu.accrete_node(node, 1)
                             ef_co2 = 5.3
@@ -233,13 +233,13 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_co2 = 10.5
                         ef_n2o = 13.0
                         ef_ch4_land = 0.0
-                        ef_ch4_ditch = 1165
+                        ef_ch4_ditch = 1165.0
                     elif extraction > 0:
                         node = nu.accrete_node(node, 4)
                         ef_co2 = 3.0
                         ef_n2o = 0.3
                         ef_ch4_land = 6.1
-                        ef_ch4_ditch = 542
+                        ef_ch4_ditch = 542.0
                     else:
                         node = nu.accrete_node(node, 5)
                         ef_co2 = 0.0  # No emissions or default value
@@ -249,7 +249,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                 elif ecozone == 'tropical':
                     node = nu.accrete_node(node, 3)
                     ef_co2_offsite = 0.82
-                    ef_ch4_ditch = 2259  # Assigned before conditions
+                    ef_ch4_ditch = 2259.0  # Assigned before conditions
                     if planted_forest_type > 0:
                         node = nu.accrete_node(node, 1)
                         if plantation_type == 'long_rotation':
@@ -352,6 +352,8 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
 
     # todo add some post processing outputs like emissions grouped by gas and total emissions
 
+
+
     return out_dict_uint32, out_dict_float32
 
 
@@ -387,9 +389,8 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
 
     # Define expected data type lists for layers
     # Define expected data type lists for layers
-    uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type', 'extraction', 'nutrient_status',
-                  'continent_ecozone']
-    int16_list = []  # No int16 layers now
+    uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type', 'extraction', 'nutrient_status']
+    int16_list = ['continent_ecozone']  # No int16 layers now
     int32_list = []
     float32_list = ['dadap', 'osm_roads', 'osm_canals', 'engert', 'grip']
 
@@ -397,21 +398,6 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
     layers = uu.fill_missing_input_layers_with_no_data(
         layers, uint8_list, int16_list, int32_list, float32_list, bounds_str, tile_id, is_final, logger
     )
-
-    # Create default arrays for missing layers
-    rows, cols = layers['peat'].shape  # Use an existing layer to get the shape
-
-    # For nutrient_status (default to 'unknown' coded as 0)
-    if 'nutrient_status' not in layers:
-        default_nutrient_status = np.zeros((rows, cols), dtype=np.uint8)  # Assuming 0 represents 'unknown'
-        layers['nutrient_status'] = default_nutrient_status
-        logger.info("Default 'nutrient_status' array created with value 0 (unknown).")
-
-    # For continent_ecozone (default to 'unknown' coded as 0)
-    if 'continent_ecozone' not in layers:
-        default_continent_ecozone = np.zeros((rows, cols), dtype=np.uint8)  # Using uint8 now
-        layers['continent_ecozone'] = default_continent_ecozone
-        logger.info("Default 'continent_ecozone' array created with value 0 (unknown).")
 
     # Troubleshooting Step 1: Log available layers after filling
     logger.info(f"Available layers after filling: {list(layers.keys())}")
