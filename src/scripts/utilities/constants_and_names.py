@@ -44,11 +44,11 @@ peat_tiles_prefix_1km = 'climate/AFOLU_flux_model/organic_soils/inputs/processed
 # Sample Tile ID Placeholder
 sample_tile_id = '{tile_id}'
 
-#model version for log
+# model version for log
 model_version = 0.2
 
 # Local path for chunk stats
-chunk_stats_path = posixpath.join(local_temp_dir,'chunk_stats/')
+chunk_stats_path = posixpath.join(local_temp_dir, 'chunk_stats/')
 
 # ---------------------------------------------------
 # 2. Dataset Configurations
@@ -125,22 +125,28 @@ datasets = {
     },
     'extraction': {
         'finland': {
-            's3_raw': posixpath.join(project_dir, raw_dir, 'extraction', 'Finland', 'Finland_turvetuotantoalueet', 'turvetuotantoalueet_jalkikaytto'),
+            's3_raw': posixpath.join(project_dir, raw_dir, 'extraction', 'Finland', 'Finland_turvetuotantoalueet',
+                                     'turvetuotantoalueet_jalkikaytto'),
         },
         'ireland': {
-            's3_raw': posixpath.join(project_dir, raw_dir, 'extraction', 'Ireland', 'Ireland_Habibetal', 'RF_S2_LU_5_11_23.tif'),
+            's3_raw': posixpath.join(project_dir, raw_dir, 'extraction', 'Ireland', 'Ireland_Habibetal',
+                                     'RF_S2_LU_5_11_23.tif'),
         },
         'russia': {
             's3_raw': [
-                posixpath.join(project_dir, raw_dir, 'extraction', 'Russia', 'allocated_without_licenses', 'allocated_mineral_reserve'),
-                posixpath.join(project_dir, raw_dir, 'extraction', 'Russia', 'allocated_with_licenses', 'peat_extraction_dates')
+                posixpath.join(project_dir, raw_dir, 'extraction', 'Russia', 'allocated_without_licenses',
+                               'allocated_mineral_reserve'),
+                posixpath.join(project_dir, raw_dir, 'extraction', 'Russia', 'allocated_with_licenses',
+                               'peat_extraction_dates')
             ],
         },
         's3_processed_base': posixpath.join(project_dir, processed_dir, 'extraction'),
         's3_processed': posixpath.join(project_dir, processed_dir, 'extraction', today_date),
         'local_processed': posixpath.join(local_temp_dir, 'extraction', today_date),
         'working_version': posixpath.join(project_dir, processed_dir, 'extraction', '20241021')
-    }
+    },
+    'continent_ecozone': "climate/carbon_model/fao_ecozones/ecozone_continent/20190116/processed/"
+
     # Add other datasets as needed
 }
 
@@ -174,6 +180,7 @@ file_patterns = {
     'extraction': "extraction",
     'descals_type': "descals_type",
     'descals_year': "descals_year",
+    'continent_ecozone': "continent_ecozone"
 }
 
 # ---------------------------------------------------
@@ -203,10 +210,10 @@ download_dict = {
         'extraction']: f's3://{s3_bucket_name}/{posixpath.join(datasets["extraction"]["working_version"], f"{sample_tile_id}_extraction.tif")}',
     file_patterns[
         'descals_type']: f's3://{s3_bucket_name}/{posixpath.join(datasets["descals_oil_palm"]["plant_type"]["working_version"], f"descals_extent_{sample_tile_id}.tif")}',
+    file_patterns[
+        'continent_ecozone']: f's3://{s3_bucket_name}/{posixpath.join(datasets["continent_ecozone"], f"{sample_tile_id}_fao_ecozones_continents_processed.tif")}'
+
 }
-
-
-
 
 ### Miscellaneous
 

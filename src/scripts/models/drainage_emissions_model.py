@@ -54,7 +54,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     engert_block = in_dict_float32['engert']
     grip_block = in_dict_float32['grip']
     extraction_block = in_dict_uint8['extraction']
-    ecozone_block = in_dict_uint8['ecozone']           # Ecozone codes: 1=boreal, 2=temperate, 3=tropical
+    ecozone_block = in_dict_int16['continent_ecozone']           # Ecozone codes: 1=boreal, 2=temperate, 3=tropical
     nutrient_block = in_dict_uint8['nutrient_status']  # Nutrient status codes: 1=poor, 2=rich
 
     # Initialize output arrays
@@ -350,6 +350,8 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     # Add additional emissions to the dictionaries if needed
     # e.g., out_dict_float32["other_gas_emissions"] = other_gas_emissions_out
 
+    # todo add some post processing outputs like emissions grouped by gas and total emissions
+
     return out_dict_uint32, out_dict_float32
 
 
@@ -385,7 +387,7 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
 
     # Define expected data type lists for layers
     uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type', 'extraction']
-    int16_list = []  # Add layer names as needed
+    int16_list = ['continent_ecozone']  # Add layer names as needed
     int32_list = []  # Add layer names as needed
     float32_list = ['dadap', 'osm_roads', 'osm_canals', 'engert', 'grip']
 
@@ -504,17 +506,7 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
 
     # Prepare the download dictionary
     # This dictionary should include paths to all required input datasets
-    download_dict = {
-        'IPCC_basic_classes_2020': f"{cn.land_cover_path}2020/raw/{{tile_id}}.tif",
-        'peat': f"{cn.peat_extent_path}{{tile_id}}.tif",
-        'planted_forest_type': f"{cn.planted_forest_type_path}{{tile_id}}.tif",
-        'dadap': f"{cn.dadap_path}{{tile_id}}.tif",
-        'osm_roads': f"{cn.osm_roads_path}{{tile_id}}.tif",
-        'osm_canals': f"{cn.osm_canals_path}{{tile_id}}.tif",
-        'engert': f"{cn.engert_path}{{tile_id}}.tif",
-        'grip': f"{cn.grip_path}{{tile_id}}.tif",
-        'extraction': f"{cn.extraction_path}{{tile_id}}.tif",
-    }
+    download_dict = cn.download_dict
 
     # Get first tile names and data types
     print(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
@@ -626,8 +618,8 @@ def main(argv=None):
             cluster_name='drainage',
 
             # Define your test bounding box here
-            bounding_box=[110, -10, 120, 0],  # Example bounding box
-
+            # bounding_box=[110, -10, 120, 0],  # Example bounding box
+            bounding_box=[-74, -4, -72, -2],  # one 2-degree chunk with data Peru 00N_080W
             chunk_size=2,
             run_local=True,
             no_stats=False,
