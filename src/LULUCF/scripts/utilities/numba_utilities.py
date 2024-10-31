@@ -430,6 +430,7 @@ def calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, 
             # Uses the current vegetation height (which would exist when the land cover is not tall vegetation
             # but there is still tall vegetation in the individual tree height layer)
             max_height_since_last_time_not_tall_veg = vegetation_height_so_far_cell[-1]
+            # max_height_since_last_time_not_tall_veg = 0
 
         # When the pixel was previously non-tall vegetation but is now tall vegetation,
         # so there are intervals since then.
