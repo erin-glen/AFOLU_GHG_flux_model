@@ -54,7 +54,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     engert_block = in_dict_float32['engert']
     grip_block = in_dict_float32['grip']
     extraction_block = in_dict_uint8['extraction']
-    ecozone_block = in_dict_int16['continent_ecozone']           # Ecozone codes: 1=boreal, 2=temperate, 3=tropical
+    ecozone_block = in_dict_int16['continent_ecozone']  # Ecozone codes: 1=boreal, 2=temperate, 3=tropical
     nutrient_block = in_dict_uint8['nutrient_status']  # Nutrient status codes: 1=poor, 2=rich
 
     # Initialize output arrays
@@ -396,21 +396,36 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
         layers, uint8_list, int16_list, int32_list, float32_list, bounds_str, tile_id, is_final, logger
     )
 
-    # Verify that all required layers are present
+    # Troubleshooting Step 1: Log available layers after filling
+    logger.info(f"Available layers after filling: {list(layers.keys())}")
+
+    # Troubleshooting Step 2: Verify that all required layers are present
     expected_layers = uint8_list + int16_list + int32_list + float32_list
     missing_layers = [layer for layer in expected_layers if layer not in layers]
     if missing_layers:
         logger.error(f"Missing layers after filling: {missing_layers}")
         return f"Failed due to missing layers: {missing_layers}", chunk_stats
 
+    # Troubleshooting Step 3: Log data types of each layer
+    for key in layers:
+        logger.info(f"Layer '{key}' data type: {layers[key].dtype}")
+
     # Create typed dictionaries for Numba functions
     typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
 
+    # Troubleshooting Step 4: Log keys in typed dictionaries
+    logger.info(f"Keys in typed_dict_uint8: {list(typed_dict_uint8.keys())}")
+    logger.info(f"Keys in typed_dict_int16: {list(typed_dict_int16.keys())}")
+    logger.info(f"Keys in typed_dict_int32: {list(typed_dict_int32.keys())}")
+    logger.info(f"Keys in typed_dict_float32: {list(typed_dict_float32.keys())}")
+
     # Verify typed dictionaries have all required keys
     missing_uint8_keys = [key for key in uint8_list if key not in typed_dict_uint8]
+    missing_int16_keys = [key for key in int16_list if key not in typed_dict_int16]
+    missing_int32_keys = [key for key in int32_list if key not in typed_dict_int32]
     missing_float32_keys = [key for key in float32_list if key not in typed_dict_float32]
-    if missing_uint8_keys or missing_float32_keys:
-        logger.error(f"Typed dictionaries missing keys. uint8: {missing_uint8_keys}, float32: {missing_float32_keys}")
+    if missing_uint8_keys or missing_int16_keys or missing_int32_keys or missing_float32_keys:
+        logger.error(f"Typed dictionaries missing keys. uint8: {missing_uint8_keys}, int16: {missing_int16_keys}, int32: {missing_int32_keys}, float32: {missing_float32_keys}")
         return f"Failed due to missing keys in typed dictionaries", chunk_stats
 
     # Calculate statistics for input layers
@@ -420,9 +435,17 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
 
     # Run the drainage and emissions calculation
     lu.print_and_log(f"Calculating drainage and emissions in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
-    out_dict_uint32, out_dict_float32 = calculate_drainage_and_emissions(
-        typed_dict_uint8, typed_dict_int16, typed_dict_float32
-    )
+    try:
+        out_dict_uint32, out_dict_float32 = calculate_drainage_and_emissions(
+            typed_dict_uint8, typed_dict_int16, typed_dict_float32
+        )
+    except KeyError as e:
+        logger.error(f"KeyError during Numba function execution: {e}")
+        logger.error("Possible missing key in typed dictionaries passed to Numba function.")
+        return f"Failed due to KeyError in Numba function: {e}", chunk_stats
+    except Exception as e:
+        logger.error(f"Exception during Numba function execution: {e}")
+        return f"Failed due to exception in Numba function: {e}", chunk_stats
 
     # Combine outputs into a single dictionary
     out_dict_all_dtypes = {**out_dict_uint32, **out_dict_float32}
