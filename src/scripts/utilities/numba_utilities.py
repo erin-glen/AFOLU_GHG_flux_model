@@ -84,3 +84,44 @@ def create_typed_dicts(layers):
         typed_dict_float32[key] = array
 
     return typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32
+
+@jit(nopython=True)
+def calculate_emissions_co2e(ef_co2, ef_n2o, ef_ch4_land, ef_ch4_ditch, ef_co2_offsite, area, gwp_ch4, gwp_n2o):
+    """
+    Calculates emissions in CO₂ equivalents based on emission factors and area.
+
+    Args:
+        ef_co2 (float32): Emission factor for CO₂ (tonnes CO₂/ha/year).
+        ef_n2o (float32): Emission factor for N₂O (kg N₂O/ha/year).
+        ef_ch4_land (float32): Emission factor for CH₄ from land (kg CH₄/ha/year).
+        ef_ch4_ditch (float32): Emission factor for CH₄ from ditches (kg CH₄/ha/year).
+        ef_co2_offsite (float32): Emission factor for offsite CO₂ emissions (tonnes CO₂/ha/year).
+        area (float32): Area in hectares.
+        gwp_ch4 (float32): Global Warming Potential for CH₄.
+        gwp_n2o (float32): Global Warming Potential for N₂O.
+
+    Returns:
+        co2_emissions (float32): CO₂ emissions (tonnes CO₂/year).
+        n2o_emissions_co2e (float32): N₂O emissions in tonnes CO₂e/year.
+        ch4_land_emissions_co2e (float32): CH₄ emissions from land in tonnes CO₂e/year.
+        ch4_ditch_emissions_co2e (float32): CH₄ emissions from ditches in tonnes CO₂e/year.
+        co2_offsite_emissions (float32): Offsite CO₂ emissions (tonnes CO₂/year).
+    """
+    # CO₂ emissions
+    co2_emissions = ef_co2 * area
+
+    # Offsite CO₂ emissions
+    co2_offsite_emissions = ef_co2_offsite * area
+
+    # N₂O emissions in tonnes CO₂e
+    n2o_emissions_co2e = (ef_n2o * area * gwp_n2o) / 1000.0  # Convert kg to tonnes
+
+    # CH₄ emissions from land in tonnes CO₂e
+    ch4_land_emissions_co2e = (ef_ch4_land * area * gwp_ch4) / 1000.0  # Convert kg to tonnes
+
+    # CH₄ emissions from ditches in tonnes CO₂e
+    ch4_ditch_emissions_co2e = (ef_ch4_ditch * area * gwp_ch4) / 1000.0  # Convert kg to tonnes
+
+    return (co2_emissions, n2o_emissions_co2e,
+            ch4_land_emissions_co2e, ch4_ditch_emissions_co2e,
+            co2_offsite_emissions)

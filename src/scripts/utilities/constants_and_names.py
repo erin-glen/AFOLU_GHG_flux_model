@@ -4,6 +4,7 @@ import posixpath
 from datetime import datetime
 import boto3
 from botocore.exceptions import ClientError
+import numpy as np
 
 # ---------------------------------------------------
 # 1. General Configuration
@@ -254,4 +255,6 @@ t_to_Mt = 10 ** -3
 
 combined_log = "combined_log"
 
-
+# Constants for GWPs
+gwp_ch4 = np.float32(28.0)  # For example
+gwp_n2o = np.float32(265.0)  # For example
