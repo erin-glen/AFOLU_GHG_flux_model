@@ -83,11 +83,11 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
             nutrient_status_code = nutrient_block[row, col]  # Numeric code for nutrient status
 
             node = 0
-            ef_co2 = 0.0  # Initialize emission factor for CO₂
-            ef_n2o = 0.0  # Initialize emission factor for N₂O
-            ef_ch4_land = 0.0  # Initialize emission factor for CH₄ from land
-            ef_ch4_ditch = 0.0  # Initialize emission factor for CH₄ from ditches
-            ef_co2_offsite = 0.0  # Initialize emission factor for offsite CO₂
+            ef_co2 = np.float32(0.0)
+            ef_n2o = np.float32(0.0)
+            ef_ch4_land = np.float32(0.0)
+            ef_ch4_ditch = np.float32(0.0)
+            ef_co2_offsite = np.float32(0.0)
 
             if peat == 1:
                 node = nu.accrete_node(node, 1)
@@ -163,13 +163,13 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                             ef_co2 = 0.25
                             ef_n2o = 0.22
                             ef_ch4_land = 7.0
-                            ef_ch4_ditch = 217
+                            ef_ch4_ditch = 217.0
                         elif nutrient == 'rich':
                             node = nu.accrete_node(node, 2)
                             ef_co2 = 0.95
                             ef_n2o = 3.2
                             ef_ch4_land = 2.0
-                            ef_ch4_ditch = 217
+                            ef_ch4_ditch = 217.0
                         else:
                             node = nu.accrete_node(node, 3)
                             ef_co2 = 0.0  # Handle unknown nutrient status
@@ -181,7 +181,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_co2 = 5.7
                         ef_n2o = 9.5
                         ef_ch4_land = 1.4
-                        ef_ch4_ditch = 1165  # using deep default
+                        ef_ch4_ditch = 1165.0  # using deep default
                     elif land_cover == cropland_code:
                         node = nu.accrete_node(node, 3)
                         ef_co2 = 7.9
@@ -193,7 +193,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_co2 = 2.8
                         ef_n2o = 0.30
                         ef_ch4_land = 6.1
-                        ef_ch4_ditch = 542
+                        ef_ch4_ditch = 542.0
                     else:
                         node = nu.accrete_node(node, 5)
                         ef_co2 = 0.0  # No emissions or default value
@@ -208,7 +208,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_co2 = 2.6
                         ef_n2o = 2.8
                         ef_ch4_land = 2.5
-                        ef_ch4_ditch = 217
+                        ef_ch4_ditch = 217.0
                     elif land_cover == grassland_code:
                         node = nu.accrete_node(node, 2)
                         ef_ch4_ditch = 1165  # using deep default
@@ -319,12 +319,15 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
 
                 # Calculate emissions
                 # Assuming each pixel represents 1 hectare
-                area = 1.0  # Adjust if pixel area is different
+                area = 1.0  # This will be replaced with actual pixel area
+
+                # and these will be replaced by actual emission functions
                 co2_emissions_out[row, col] = ef_co2 * area
                 n2o_emissions_out[row, col] = ef_n2o * area
                 ch4_land_emissions_out[row, col] = ef_ch4_land * area
                 ch4_ditch_emissions_out[row, col] = ef_ch4_ditch * area
                 co2_offsite_emissions_out[row, col] = ef_co2_offsite * area
+
             else:
                 node = nu.accrete_node(node, 2)
                 # Update state_out with the node value
@@ -339,11 +342,11 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     # Add outputs to dictionaries
     out_dict_uint32["soil"] = soil_block
     out_dict_uint32["state"] = state_out_block
-    out_dict_float32["CO2_emissions"] = co2_emissions_out
-    out_dict_float32["N2O_emissions"] = n2o_emissions_out
-    out_dict_float32["CH4_land_emissions"] = ch4_land_emissions_out
-    out_dict_float32["CH4_ditch_emissions"] = ch4_ditch_emissions_out
-    out_dict_float32["CO2_offsite_emissions"] = co2_offsite_emissions_out
+    out_dict_float32["co2_emissions"] = co2_emissions_out
+    out_dict_float32["n2o_emissions"] = n2o_emissions_out
+    out_dict_float32["ch4_land_emissions"] = ch4_land_emissions_out
+    out_dict_float32["ch4_ditch_emissions"] = ch4_ditch_emissions_out
+    out_dict_float32["co2_offsite_emissions"] = co2_offsite_emissions_out
     # Add additional emissions to the dictionaries if needed
     # e.g., out_dict_float32["other_gas_emissions"] = other_gas_emissions_out
 
