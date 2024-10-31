@@ -879,7 +879,7 @@ def fill_missing_input_layers_with_no_data(layers, uint8_list, int16_list, int32
         array_shape = existing_array.shape
     else:
         # Handle the case where no data exists at all
-        raise ValueError(f"No data available to determine the size for missing layers in chunk {bounds_str} in {tile_id}: {uu.timestr()}")
+        raise ValueError(f"No data available to determine the size for missing layers in chunk {bounds_str} in {tile_id}: {timestr()}")
 
     # Create a mapping of data types to their corresponding layer names
     data_type_lists = {
@@ -896,7 +896,7 @@ def fill_missing_input_layers_with_no_data(layers, uint8_list, int16_list, int32
                 # Create an array of zeros with the determined dtype and shape
                 layers[key] = np.zeros(array_shape, dtype=dtype)
                 # Log the creation of the missing layer
-                lu.print_and_log(f"Filled missing layer '{key}' with NoData values for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+                lu.print_and_log(f"Filled missing layer '{key}' with NoData values for chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
 
     return layers
 
