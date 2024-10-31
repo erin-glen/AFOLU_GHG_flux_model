@@ -54,8 +54,8 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     engert_block = in_dict_float32['engert']
     grip_block = in_dict_float32['grip']
     extraction_block = in_dict_uint8['extraction']
-    ecozone_block = in_dict_int16['continent_ecozone']  # Ecozone codes: 1=boreal, 2=temperate, 3=tropical
-    nutrient_block = in_dict_uint8['nutrient_status']  # Nutrient status codes: 1=poor, 2=rich
+    ecozone_block = in_dict_uint8['continent_ecozone']  # Will be zeros if defaulted
+    nutrient_block = in_dict_uint8['nutrient_status']  # Will be zeros if defaulted
 
     # Initialize output arrays
     rows, cols = peat_block.shape
@@ -386,15 +386,32 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
             return f"Failed to download layer {layer} for chunk {bounds_str}: {e}", chunk_stats
 
     # Define expected data type lists for layers
-    uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type', 'extraction']
-    int16_list = ['continent_ecozone']  # Add layer names as needed
-    int32_list = []  # Add layer names as needed
+    # Define expected data type lists for layers
+    uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type', 'extraction', 'nutrient_status',
+                  'continent_ecozone']
+    int16_list = []  # No int16 layers now
+    int32_list = []
     float32_list = ['dadap', 'osm_roads', 'osm_canals', 'engert', 'grip']
 
     # Fill missing layers with NoData if necessary
     layers = uu.fill_missing_input_layers_with_no_data(
         layers, uint8_list, int16_list, int32_list, float32_list, bounds_str, tile_id, is_final, logger
     )
+
+    # Create default arrays for missing layers
+    rows, cols = layers['peat'].shape  # Use an existing layer to get the shape
+
+    # For nutrient_status (default to 'unknown' coded as 0)
+    if 'nutrient_status' not in layers:
+        default_nutrient_status = np.zeros((rows, cols), dtype=np.uint8)  # Assuming 0 represents 'unknown'
+        layers['nutrient_status'] = default_nutrient_status
+        logger.info("Default 'nutrient_status' array created with value 0 (unknown).")
+
+    # For continent_ecozone (default to 'unknown' coded as 0)
+    if 'continent_ecozone' not in layers:
+        default_continent_ecozone = np.zeros((rows, cols), dtype=np.uint8)  # Using uint8 now
+        layers['continent_ecozone'] = default_continent_ecozone
+        logger.info("Default 'continent_ecozone' array created with value 0 (unknown).")
 
     # Troubleshooting Step 1: Log available layers after filling
     logger.info(f"Available layers after filling: {list(layers.keys())}")
