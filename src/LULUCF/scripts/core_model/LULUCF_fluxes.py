@@ -109,6 +109,21 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
 
         # print(f"Now at {interval_end_year}:")
 
+        # Model intervals so far, including the model start year.
+        # Eventually used to determine whether current height has decreased significantly from maximum height since last non-tall veg year over multiple intervals (gradual height loss).
+        years_so_far = list(range(cn.first_model_year, interval_end_year + 1, cn.interval_years))
+
+        # Pre-fetches vegetation height data for this chunk and stores in a dictionary or list.
+        # Eventually used to determine whether current height has decreased significantly from maximum height since last non-tall veg year over multiple intervals (gradual height loss).
+        # Suggested by https://chatgpt.com/share/e/6724d803-aca4-800a-928c-11d76d38c0ec to work well with numba
+        # and speed the code up. I was trying to get vegetation height so far in a variety of ways and it kept being slow.
+        # This approach, in conjunction with some pixel-level operations below, seems to not slow down the code.
+        vegetation_heights_so_far_block = [
+            in_dict_uint8[f"{cn.vegetation_height_pattern}_{year}"]
+            for year in years_so_far
+        ]
+        ##TIME -bb 10 49.5 10.5 50 -cs 0.5: 00:57, 00:59, 00:58, 00:54
+
         # Writes the dictionary entries to a chunk for use in the decision tree
         LC_prev_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year - cn.interval_years}"]
         LC_curr_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year}"]
@@ -300,25 +315,48 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # Checks whether to update whether the most recent year of non-tall vegetation land cover.
                 # Returns the last year that was non-tall vegetation land cover.
                 most_recent_year_not_tall_veg = nu.check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_tall_veg, interval_end_year)
+                ##TIME -bb 10 49.5 10.5 50 -cs 0.5: 00:58, 00:53, 00:58, 00:55
+                ##TIME -bb 110 -10 114 -6 -cs 1: 1:57, 1:58, 1:57
 
                 # Calculates the maximum canopy height since the last time a pixel was classified as non-tall vegetation land cover.
                 # This is eventually used to determine whether current height has decreased significantly from this maximum height over multiple intervals (gradual height loss).
-                # Model intervals so far, including the model start year.
-                # This is paired with the heights for all intervals so far.
-                years_so_far_cell = list(range(cn.first_model_year, interval_end_year + 1, cn.interval_years))
 
-                # Stores vegetation heights for all intervals so far, including the model start year.
-                vegetation_height_so_far_cell = []
+                # Initializes a fixed-length array for vegetation_height_so_far_cell.
+                # Suggested by https://chatgpt.com/share/e/6724d803-aca4-800a-928c-11d76d38c0ec to work well with numba.
+                vegetation_height_so_far_cell = np.empty(len(years_so_far), dtype=np.uint8)
 
-                # Iterates through model years so far to create an array of the vegetation heights so far
-                ##TODO This is slow for some reason. See if there's a way to accelerate it.
-                for year in years_so_far_cell:
+                # Populates the fixed-length array by accessing vegetation_heights_all_years
+                # Used to determine whether current height has decreased significantly from this maximum height over multiple intervals (gradual height loss).
+                # Suggested by https://chatgpt.com/share/e/6724d803-aca4-800a-928c-11d76d38c0ec to work well with numba
+                # and speed the code up. I was trying to get vegetation height so far in a variety of ways and it kept being slow.
+                # This approach, in conjunction with some the chunk-level preparation above, seems to not slow down the code.
+                for i, year_data in enumerate(vegetation_heights_so_far_block):
+                    vegetation_height_so_far_cell[i] = year_data[row, col]
+                ##TIME -bb 10 49.5 10.5 50 -cs 0.5: 00:55, 00:56, 00:53
+                ##TIME -bb 110 -10 114 -6 -cs 1: 2:04, 2:07, 2:04
 
-                    height_year = in_dict_uint8[f"{cn.vegetation_height_pattern}_{year}"][row, col]
-                    vegetation_height_so_far_cell.append(height_year)
+                # # Stores vegetation heights for all intervals so far, including the model start year.
+                # vegetation_height_so_far_cell = []
+                #
+                # # Iterates through model years so far to create an array of the vegetation heights so far
+                # ##TODO This is slow for some reason. See if there's a way to accelerate it.
+                # for year in years_so_far:
+                #
+                #     height_year = in_dict_uint8[f"{cn.vegetation_height_pattern}_{year}"][row, col]
+                #     vegetation_height_so_far_cell.append(height_year)
+                # #TIME -bb 10 49.5 10.5 50 -cs 0.5: 1:09, 1:12
 
                 # Returns the maximum vegetation height since the last year of non-tall vegetation land cover
-                max_height_since_last_time_not_tall_veg = nu.calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, vegetation_height_so_far_cell, years_so_far_cell)
+                max_height_since_last_time_not_tall_veg = nu.calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, vegetation_height_so_far_cell, years_so_far)
+                ##TIME 0.5x0.5: 1:00, 00:59, 00:55
+                ##TIME -bb 110 -10 114 -6 -cs 1: 2:20, 2:10, 2:08
+
+                # if (row==0) and (col==0):
+                #     print(years_so_far)
+                #     print(vegetation_height_so_far_cell)
+                #     print(max_height_since_last_time_not_tall_veg)
+                #
+                # os.quit()
 
                 # Height change from maximum height since last time not tall veg land cover.
                 # Need to recast to signed int8 from uint8 so that negative values (height gain) stay negative.
@@ -343,7 +381,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # is being reported in this interval.
                 # If this height decrease occurred in a previous interval, the flag is changed to 0 to show it has
                 # already been reported.
-                # TODO This is still not working
+                # TODO This is still not doing what I want it to
                 if sig_height_loss_max_current_abs:
                     if first_time_sig_loss_from_max_height == 0:
                         first_time_sig_loss_from_max_height = 1
@@ -380,6 +418,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 c_gross_removals_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross removals: AGC, BGC, deadwood C, litter C.
                 non_co2_flux_out = np.array([0, 0]).astype('float32')  # Initializes dummy output non-CO2 fluxes: CH4, N2O
                 c_dens_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C densities: AGC, BGC, deadwood C, litter C.
+                ##TIME -bb 110 -10 114 -6 -cs 1: 2:08, 2:07, 2:03
 
 
                 ### Tree gain
@@ -609,8 +648,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                         agc_rf = 2.2
                         ef = cn.all_non_soil_pools
                         c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
+                ##TIME -bb 110 -10 114 -6 -cs 1: 2:34, 2:33, 2:25
 
-    #
     #             #         if planted_forest_type_cell == 0:  # Non-planted trees without stand-replacing disturbance in the last interval (311)
     #             #             node = nu.accrete_node(node, 1)
     #             #             if not tall_veg_curr:  # Trees outside forests without stand-replacing disturbance in the last interval (3111)
@@ -819,8 +858,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # Test/intermediate outputs
                 gain_year_count_out_block[row, col] = gain_year_count
                 most_recent_year_not_tall_veg_block[row, col] = most_recent_year_not_tall_veg
-                years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
-                max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
+                # years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
+                # max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
 
 
         # End of iteration calculations and outputs
