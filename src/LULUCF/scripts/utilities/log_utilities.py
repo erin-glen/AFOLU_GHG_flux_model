@@ -16,7 +16,7 @@ from . import universal_utilities as uu
 #TODO Wait to run this until all entries have been added to the Coiled log--
 # running this right after the model finishes means that final log entries haven't made it into Coiled yet.
 def compile_and_upload_log(no_log, client, cluster, stage, chunk_count, chunk_size_deg,
-                           start_time_str, end_time_str, success_count, skipping_chunk_count, log_note):
+                           start_time_str, end_time_str, success_count, skipping_chunk_count, bounding_box, log_note):
 
     # Only consolidates the worker logs and uploads to s3 if not deactivated
     if no_log:
@@ -36,8 +36,11 @@ def compile_and_upload_log(no_log, client, cluster, stage, chunk_count, chunk_si
     start_time = datetime.strptime(start_time_str, "%Y%m%d_%H_%M_%S")
     end_time = datetime.strptime(end_time_str, "%Y%m%d_%H_%M_%S")
 
+    # Retrieves properties of the workers
+    workers = client.scheduler_info()["workers"]
+
     # Retrieves the number of workers
-    n_workers = len(client.scheduler_info()['workers'])  # Get the number of connected workers
+    n_workers = len(workers)
 
     # Retrieves scheduler info for other cluster properties
     scheduler_info = cluster.scheduler_info  # Access scheduler info directly as a dictionary
@@ -59,6 +62,7 @@ def compile_and_upload_log(no_log, client, cluster, stage, chunk_count, chunk_si
         f"Model version: {cn.model_version}",
         f"Number of workers: {n_workers}",
         f"Memory per worker: {worker_memory}",
+        f"Bounding box: {bounding_box}",
         f"Number of chunks: {chunk_count}",
         f"Chunk size (degrees): {chunk_size_deg}",
         # f"Worker Type: {worker_type}",

@@ -6,7 +6,9 @@ python -m scripts.utilities.create_cluster -n 1 -m 8
 import coiled
 import argparse
 
-def create_cluster(n_workers, worker_memory, worker_cpu):
+from . import constants_and_names as cn
+
+def create_cluster(n_workers, threads_per_worker, worker_memory, worker_cpu):
 
     # Convert worker_memory from an integer to the required format (e.g., 8 to "8GiB")
     worker_memory_str = f"{worker_memory}GiB"
@@ -23,11 +25,11 @@ def create_cluster(n_workers, worker_memory, worker_cpu):
         worker_memory = worker_memory_str,
         worker_cpu = worker_cpu,
         worker_options={
-            "nthreads": 3  # Forces 3 tasks/chunks to be processed per worker, regardless of the number of vcpus
+            "nthreads": threads_per_worker
         }
     )
     print(f"Cluster created with name: {cluster.name}")
-    print(f"Number of workers: {n_workers}; Worker memory: {worker_memory_str}")
+    print(f"Number of workers: {n_workers}; Worker memory: {worker_memory_str}; Threads per worker: {threads_per_worker}")
     return cluster
 
 if __name__ == "__main__":
@@ -35,11 +37,13 @@ if __name__ == "__main__":
     parser.add_argument('-n', '--n_workers', type=int, default=1, help='Number of workers for the cluster')
     parser.add_argument('-m', '--worker_memory', type=str, default='16', help='Memory per worker (default=16GiB)')
     parser.add_argument('-c', '--worker_cpu', type=str, default='2', help='Number of CPUs per worker (default=2 CPUs)')
+    parser.add_argument('-t', '--threads_per_worker', type=int, default='3', help='Number of threads/worker (default=3)')
     parser.add_argument('-l', '--large_scale_mode', action='store_true', help='Use memory and workers for large-scale analysis')
 
     args = parser.parse_args()
 
     n_workers = args.n_workers
+    threads_per_worker = args.threads_per_worker
     worker_memory = args.worker_memory
     worker_cpu = args.worker_cpu
 
@@ -49,4 +53,4 @@ if __name__ == "__main__":
         worker_cpu = 4
 
     # Create the cluster with command line arguments
-    create_cluster(n_workers, worker_memory, worker_cpu)
+    create_cluster(n_workers, threads_per_worker, worker_memory, worker_cpu)
