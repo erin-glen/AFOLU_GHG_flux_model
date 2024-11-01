@@ -23,7 +23,7 @@ def create_cluster(n_workers, worker_memory, worker_cpu):
         worker_memory = worker_memory_str,
         worker_cpu = worker_cpu,
         worker_options={
-            "nthreads": 2  # Forces two tasks/chunks to be processed per worker, regardless of the number of vcpus
+            "nthreads": 3  # Forces 3 tasks/chunks to be processed per worker, regardless of the number of vcpus
         }
     )
     print(f"Cluster created with name: {cluster.name}")
