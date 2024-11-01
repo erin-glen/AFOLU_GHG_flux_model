@@ -2,11 +2,11 @@
 Run from src/LULUCF
 
 Test:
-python -m scripts.utilities.create_cluster -n 1 -m 16 -c 2
+python -m scripts.utilities.create_cluster -n 1
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 10 49.75 10.25 50 -cs 0.25
 
 Full run:
-python -m scripts.utilities.create_cluster -n 200 -m 32 -c 4
+python -m scripts.utilities.create_cluster -n 200
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 1
 """
 
@@ -907,12 +907,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         # Test/intermediate outputs only saved if not a large run
         if not is_final:
             out_dict_uint8[f"{cn.gain_year_count_pattern}_{year_range}"] = gain_year_count_out_block.copy()
-            out_dict_uint16[f"most_recent_year_not_tall_veg_{cn.first_model_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
-            out_dict_uint8[f"years_of_forest_regrowth_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
-            out_dict_uint16[f"year_of_forest_loss_{year_range}"] = year_of_forest_loss_block.copy()
-            out_dict_uint8[f"max_height_since_last_time_not_tall_veg_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
-            out_dict_uint8[f"first_time_sig_loss_from_max_height_block_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()
-
+            out_dict_uint16[f"{cn.most_recent_year_not_tall_veg}_{cn.first_model_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
+            out_dict_uint8[f"{cn.years_of_forest_regrowth}_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
+            out_dict_uint16[f"{cn.year_of_forest_loss}_{year_range}"] = year_of_forest_loss_block.copy()
+            out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
+            out_dict_uint8[f"{cn.first_time_sig_loss_from_max_height_block}_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()
 
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
@@ -1245,8 +1244,6 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
     if not run_local:
         # Closes the Dask client if not running locally
         client.close()
-
-
 
 
 if __name__ == "__main__":

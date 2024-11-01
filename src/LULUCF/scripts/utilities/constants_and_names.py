@@ -276,8 +276,6 @@ soil_c_2000_pattern = "soil_C_full_extent_2000_Mg_C_ha"
 
 land_state_pattern = "land_state_node"
 
-gain_year_count_pattern = "gain_year_count_during_interval"
-
 agc_rf_pattern = "AGC_removal_factor_UNITS_TBD" #TODO Specify RF units here
 
 # Gross and net fluxes
@@ -298,3 +296,14 @@ litter_c_net_flux_pattern = "litter_C_net_flux_MgC_ha"
 
 ch4_flux_pattern = "CH4_flux_MgCO2e_ha"
 n2o_flux_pattern = "N2O_flux_MgCO2e_ha"
+
+# Intermediate outputs
+gain_year_count_pattern = "gain_year_count_during_interval"
+most_recent_year_not_tall_veg = "most_recent_year_not_tall_veg"
+years_of_forest_regrowth = "years_of_forest_regrowth"
+year_of_forest_loss = "year_of_forest_loss"
+max_height_since_last_time_not_tall_veg = "max_height_since_last_time_not_tall_veg"
+first_time_sig_loss_from_max_height_block ="first_time_sig_loss_from_max_height_block"
+
+intermediate_outputs = [gain_year_count_pattern, most_recent_year_not_tall_veg, years_of_forest_regrowth,
+                        year_of_forest_loss, max_height_since_last_time_not_tall_veg, first_time_sig_loss_from_max_height_block]
