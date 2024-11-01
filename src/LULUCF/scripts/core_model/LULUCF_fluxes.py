@@ -27,7 +27,7 @@ from ..utilities import numba_utilities as nu
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
 @jit(nopython=True)
-def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_RFs):
+def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_RFs, is_final):
 
     # Separate dictionaries for output numpy arrays of each datatype, named by output data type).
     # This is because a dictionary in a Numba function cannot have arrays with multiple data types, so each dictionary has to store only one data type,
@@ -858,11 +858,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # Test/intermediate outputs
                 gain_year_count_out_block[row, col] = gain_year_count
                 most_recent_year_not_tall_veg_block[row, col] = most_recent_year_not_tall_veg
-                # years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
-                # max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
+                years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
+                max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
 
 
-        # End of iteration calculations and outputs
+        ### End of iteration calculations and outputs
 
         # Calculates net flux. Gross removals is added to gross emissions because gross removals are already negative
         agc_net_flux_out_block = agc_gross_emis_out_block + agc_gross_removals_out_block
@@ -904,13 +904,14 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         out_dict_float32[f"{cn.deadwood_c_dens_pattern}_{interval_end_year}"] = deadwood_c_dens_block.copy()
         out_dict_float32[f"{cn.litter_c_dens_pattern}_{interval_end_year}"] = litter_c_dens_block.copy()
 
-        # Test/intermediate outputs
-        out_dict_uint8[f"{cn.gain_year_count_pattern}_{year_range}"] = gain_year_count_out_block.copy()
-        out_dict_uint16[f"most_recent_year_not_tall_veg_{cn.first_model_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()         # Years represent from model start to current interval end
-        out_dict_uint8[f"years_of_forest_regrowth_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
-        out_dict_uint16[f"year_of_forest_loss_{year_range}"] = year_of_forest_loss_block.copy()
-        out_dict_uint8[f"max_height_since_last_time_not_tall_veg_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
-        out_dict_uint8[f"first_time_sig_loss_from_max_height_block_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()
+        # Test/intermediate outputs only saved if not a large run
+        if not is_final:
+            out_dict_uint8[f"{cn.gain_year_count_pattern}_{year_range}"] = gain_year_count_out_block.copy()
+            out_dict_uint16[f"most_recent_year_not_tall_veg_{cn.first_model_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
+            out_dict_uint8[f"years_of_forest_regrowth_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
+            out_dict_uint16[f"year_of_forest_loss_{year_range}"] = year_of_forest_loss_block.copy()
+            out_dict_uint8[f"max_height_since_last_time_not_tall_veg_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
+            out_dict_uint8[f"first_time_sig_loss_from_max_height_block_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()
 
 
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
@@ -1013,7 +1014,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
 
-    out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(typed_dict_uint8, typed_dict_int16, typed_dict_float32, primary_forest_RFs)
+    out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(typed_dict_uint8, typed_dict_int16, typed_dict_float32, primary_forest_RFs, is_final)
 
     # print(out_dict_uint32)
     # print(out_dict_float32)
