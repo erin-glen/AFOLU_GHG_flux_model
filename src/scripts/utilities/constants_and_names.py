@@ -234,11 +234,12 @@ download_dict = {
     file_patterns[
         'extraction']: f's3://{s3_bucket_name}/{posixpath.join(datasets["extraction"]["working_version"], f"{sample_tile_id}_extraction.tif")}',
     file_patterns[
-        'continent_ecozone']: f's3://{s3_bucket_name}/{posixpath.join(datasets["continent_ecozone"], f"{sample_tile_id}_fao_ecozones_continents_processed.tif")}'
+        'continent_ecozone']: f's3://{s3_bucket_name}/{posixpath.join(datasets["continent_ecozone"], f"{sample_tile_id}_fao_ecozones_continents_processed.tif")}',
+    file_patterns[
+        'descals_type']: f's3://{s3_bucket_name}/{posixpath.join(datasets["descals_oil_palm"]["plant_type"]["working_version"], f"descals_extent_{sample_tile_id}.tif")}',
+
 }
 
-# file_patterns[
-#         'descals_type']: f's3://{s3_bucket_name}/{posixpath.join(datasets["descals_oil_palm"]["plant_type"]["working_version"], f"descals_extent_{sample_tile_id}.tif")}',
 
 ### Miscellaneous
 
