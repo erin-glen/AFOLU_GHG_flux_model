@@ -643,13 +643,52 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                                 agc_rf = 2.2
                                 ef = cn.agc_emissions_only
                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+                    else:  # Undisturbed trees (32)
+                        node = nu.accrete_node(node, 2)
+                        if all_planted_trees:  # Undisturbed planted trees (321)
+                            node = nu.accrete_node(node, 1)
+                            if burned_in_last_interval:  # Planted trees with fire (burned) (3211)
+                                state_out = nu.accrete_node(node, 1)
+                                agc_rf = 2.2
+                                ef = cn.biomass_emissions_only
+                                c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
+                            else:  # Planted trees without fire (not burned) (3212)
+                                state_out = nu.accrete_node(node, 2)
+                                agc_rf = 2.2
+                                ef = cn.agc_emissions_only
+                                c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+                        else:  # Undisturbed non-planted trees (322)
+                            node = nu.accrete_node(node, 2)
+                            if tall_veg_curr:  # Undisturbed forest (3221)
+                                node = nu.accrete_node(node, 1)
+                                if first_forest_dist_in_record:  # Young secondary natural forest (32211)
+                                    node = nu.accrete_node(node, 1)
+                                    if burned_in_last_interval:  # Young secondary natural forest with fire (burned) (322111)
+                                        state_out = nu.accrete_node(node, 1)
+                                        agc_rf = 2.2
+                                        ef = cn.biomass_emissions_only
+                                        c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in,0.5, 4.7, 0.26)
+                                    else:  # Young secondary natural forest without fire (not burned) (322112)
+                                        state_out = nu.accrete_node(node, 2)
+                                        agc_rf = 2.2
+                                        ef = cn.agc_emissions_only
+                                        c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in,0, 0, 0)
+                                else:  # Natural forest undisturbed since 2000 (32212)
+                                    state_out = nu.accrete_node(node, 8)
+                                    agc_rf = 2.2
+                                    ef = cn.biomass_emissions_only
+                                    c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                        agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,
+                                        4.7, 0.26)
 
 
-                    else:
-                        state_out = nu.accrete_node(node, 2)  # Undisturbed trees (32)
-                        agc_rf = 2.2
-                        ef = cn.all_non_soil_pools
-                        c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
+
+
+                            else:  # Undisturbed trees outside forests (3222)
+                                state_out = nu.accrete_node(node, 2)
+                                agc_rf = 2.2
+                                ef = cn.all_non_soil_pools
+                                c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7,0.26)
 
 
 
