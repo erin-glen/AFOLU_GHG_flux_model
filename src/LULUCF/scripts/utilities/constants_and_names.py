@@ -109,8 +109,11 @@ IPCC_removal_factor_table_tab = "natrl fores gain, for std model"
 
 full_raster_dims = 40000    # Size of a 10x10 deg raster in pixels
 
-# Threshold for height loss to be counted as tree loss (meters)
+# Threshold for height loss to be counted as disturbed (m)
 sig_height_loss_threshold_abs = 5
+
+# Threshold for height gain to be counted as regrowth in the same interval as a disturbance
+sig_height_gain_threshold_abs = -5
 
 # Height minimum for trees (meters)
 tree_threshold = 5

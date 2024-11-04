@@ -318,7 +318,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
 
                 # Calculates the maximum canopy height since the last time a pixel was classified as non-tall vegetation land cover.
                 # This is eventually used to determine whether current height has decreased significantly from this maximum height over multiple intervals (gradual height loss).
-
                 # Initializes a fixed-length array for vegetation_height_so_far_cell.
                 # Suggested by https://chatgpt.com/share/e/6724d803-aca4-800a-928c-11d76d38c0ec to work well with numba.
                 vegetation_height_so_far_cell = np.empty(len(years_so_far), dtype=np.uint8)
@@ -330,17 +329,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # This approach, in conjunction with some the chunk-level preparation above, seems to not slow down the code.
                 for i, year_data in enumerate(vegetation_heights_so_far_block):
                     vegetation_height_so_far_cell[i] = year_data[row, col]
-
-                # # Stores vegetation heights for all intervals so far, including the model start year.
-                # vegetation_height_so_far_cell = []
-                #
-                # # Iterates through model years so far to create an array of the vegetation heights so far
-                # ##TODO This is slow for some reason. See if there's a way to accelerate it.
-                # for year in years_so_far:
-                #
-                #     height_year = in_dict_uint8[f"{cn.vegetation_height_pattern}_{year}"][row, col]
-                #     vegetation_height_so_far_cell.append(height_year)
-                # #TIME -bb 10 49.5 10.5 50 -cs 0.5: 1:09, 1:12
 
                 # Returns the maximum vegetation height since the last year of non-tall vegetation land cover
                 max_height_since_last_time_not_tall_veg = nu.calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, vegetation_height_so_far_cell, years_so_far)
@@ -390,6 +378,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
 
                 # Is height loss during the interval significant in absolute change (m)?
                 sig_height_loss_prev_curr_abs = (height_change_prev_curr >= cn.sig_height_loss_threshold_abs)
+
+                # Is height gain during the interval significant in absolute change (m)?
+                sig_height_gain_prev_curr_abs = (height_change_prev_curr <= cn.sig_height_gain_threshold_abs)
+
+
 
 
                 ### Starting output pixel values
@@ -625,17 +618,39 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: Include mangrove exception.
                     node = nu.accrete_node(node, 3)
                     if (forest_dist_last > 0) or (sig_height_loss_prev_curr_abs) or (first_time_sig_loss_from_max_height == 1):  # Partially disturbed trees (31)
-                    # if first_time_sig_loss_from_max_height == 1: # Partially disturbed trees (31)
-                        state_out = nu.accrete_node(node, 1)
-                        agc_rf = 2.2
-                        ef = cn.all_non_soil_pools
-                        c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
+                        node = nu.accrete_node(node, 1)
+                        if sig_height_gain_prev_curr_abs:  # Partially disturbed trees with signif. height increase after (311)
+                            node = nu.accrete_node(node, 1)
+                            if burned_in_last_interval:  # Partially disturbed trees with height increase (burned) (3111)
+                                state_out = nu.accrete_node(node, 1)
+                                agc_rf = 2.2
+                                ef = cn.biomass_emissions_only
+                                c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
+                            else:  # Partially disturbed trees with height increase (not burned) (3112)
+                                state_out = nu.accrete_node(node, 2)
+                                agc_rf = 2.2
+                                ef = cn.agc_emissions_only
+                                c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+                        else:  # Partially disturbed trees without signif. height increase after (312)
+                            node = nu.accrete_node(node, 2)
+                            if burned_in_last_interval:  # Partially disturbed trees without height increase (burned) (3121)
+                                state_out = nu.accrete_node(node, 1)
+                                agc_rf = 2.2
+                                ef = cn.biomass_emissions_only
+                                c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
+                            else:  # Partially disturbed trees without height increase (not burned) (3122)
+                                state_out = nu.accrete_node(node, 2)
+                                agc_rf = 2.2
+                                ef = cn.agc_emissions_only
+                                c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
+
 
                     else:
                         state_out = nu.accrete_node(node, 2)  # Undisturbed trees (32)
                         agc_rf = 2.2
                         ef = cn.all_non_soil_pools
                         c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
+
 
 
 
