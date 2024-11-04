@@ -538,6 +538,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                                         ef = cn.biomass_emissions_only
                                         c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
                                     else:  # Natural forest converted to short vegetation with disturbance that emits all non-soil C pools (not burned) (221212)
+                                        state_out = nu.accrete_node(node, 2)
                                         agc_rf = 2.2
                                         ef = cn.biomass_emissions_only
                                         c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
@@ -576,6 +577,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                                         agc_rf_post = 4.7
                                         c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf_pre, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
                                     else:  # Natural forest converted to medium vegetation with disturbance that emits all non-soil C pools (not burned) (221412)
+                                        state_out = nu.accrete_node(node, 2)
                                         agc_rf_pre = 2.2
                                         ef = cn.biomass_emissions_only
                                         agc_rf_post = 4.7
@@ -622,8 +624,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 ### Trees remaining trees
                 elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: Include mangrove exception.
                     node = nu.accrete_node(node, 3)
-                    # if (forest_dist_last > 0) or (sig_height_loss_prev_curr_abs) or (first_time_sig_loss_from_max_height == 1):  # Partially disturbed trees (31)
-                    if first_time_sig_loss_from_max_height == 1: # Partially disturbed trees (31)
+                    if (forest_dist_last > 0) or (sig_height_loss_prev_curr_abs) or (first_time_sig_loss_from_max_height == 1):  # Partially disturbed trees (31)
+                    # if first_time_sig_loss_from_max_height == 1: # Partially disturbed trees (31)
                         state_out = nu.accrete_node(node, 1)
                         agc_rf = 2.2
                         ef = cn.all_non_soil_pools
@@ -634,6 +636,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                         agc_rf = 2.2
                         ef = cn.all_non_soil_pools
                         c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
+
+
 
     #             #         if planted_forest_type_cell == 0:  # Non-planted trees without stand-replacing disturbance in the last interval (311)
     #             #             node = nu.accrete_node(node, 1)
