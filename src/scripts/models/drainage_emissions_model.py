@@ -117,7 +117,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     extraction_block = in_dict_uint8['extraction']
     ecozone_block = in_dict_int16['continent_ecozone']
     nutrient_block = in_dict_uint8['nutrient_status']
-    descals_type_block = in_dict_int16['descals_type']
+    descals_type_block = in_dict_uint8['descals_type']
 
     # Initialize output arrays
     rows, cols = peat_block.shape
@@ -441,8 +441,8 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
 
     # Define expected data type lists for layers
     # Define expected data type lists for layers
-    uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type', 'extraction', 'nutrient_status']
-    int16_list = ['continent_ecozone', 'descals_type']
+    uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type', 'extraction', 'nutrient_status', 'descals_type']
+    int16_list = ['continent_ecozone']
     int32_list = []
     float32_list = ['dadap', 'osm_roads', 'osm_canals', 'engert', 'grip']
 
