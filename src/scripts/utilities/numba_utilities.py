@@ -87,7 +87,7 @@ def create_typed_dicts(layers):
 
 @jit(nopython=True)
 def calculate_emissions_co2e(
-    ef_co2, ef_n2o_n, ef_ch4_land, ef_ch4_ditch, ef_co2_offsite, frac_ditch,
+    ef_co2, ef_n2o, ef_ch4_land, ef_ch4_ditch, ef_co2_offsite, frac_ditch,
     c_to_co2, n2o_n_to_n2o, gwp_n2o, gwp_ch4
 ):
     """
@@ -119,7 +119,7 @@ def calculate_emissions_co2e(
     co2_offsite_emissions = ef_co2_offsite * c_to_co2
 
     # N₂O emissions in tonnes CO₂e/ha/year
-    n2o_emissions_co2e = (ef_n2o_n * n2o_n_to_n2o * gwp_n2o) / 1000.0  # Convert kg to tonnes
+    n2o_emissions_co2e = (ef_n2o * n2o_n_to_n2o * gwp_n2o) / 1000.0  # Convert kg to tonnes
 
     # CH₄ emissions from land in tonnes CO₂e/ha/year
     ch4_land_emissions_co2e = (ef_ch4_land / 1000.0) * gwp_ch4  # Convert kg to tonnes, then multiply by GWP

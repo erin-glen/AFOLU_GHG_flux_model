@@ -11,7 +11,6 @@ from numba import jit, types
 from numba.typed import Dict
 from datetime import datetime
 
-
 # Project-specific imports (ensure these modules are available)
 from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import universal_utilities as uu
@@ -86,6 +85,7 @@ sago_palm_code = 4
 # Global Warming Potentials
 gwp_ch4 = np.float32(28.0)
 gwp_n2o = np.float32(265.0)
+
 
 # Helper function
 @jit(nopython=True)
@@ -172,7 +172,6 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     ch4_ditch_emissions_out = np.zeros((rows, cols), dtype=np.float32)
     co2_offsite_emissions_out = np.zeros((rows, cols), dtype=np.float32)
 
-
     # Iterate over each pixel
     for row in range(rows):
         for col in range(cols):
@@ -185,7 +184,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
             engert = engert_block[row, col]
             grip = grip_block[row, col]
             extraction = extraction_block[row, col]
-            ecozone = ecozone_block[row, col]        # Numeric code for ecozone
+            ecozone = ecozone_block[row, col]  # Numeric code for ecozone
             nutrient = nutrient_block[row, col]  # Numeric code for nutrient status
 
             ef_co2 = np.float32(0.0)
@@ -406,17 +405,16 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                 # Update state_out with the node value after emission factor decisions
                 state_out_block[row, col] = node
 
-                # Calculate emissions
-                area = np.float32(1.0)  # Assuming each pixel represents 1 hectare
-
                 # Use the helper function to calculate emissions in CO₂e
-                (co2_emissions, n2o_emissions_co2e,
-                 ch4_land_emissions_co2e, ch4_ditch_emissions_co2e,
-                 co2_offsite_emissions) = calculate_emissions_co2e(
+                (co2_emissions,
+                 n2o_emissions_co2e,
+                 ch4_land_emissions_co2e,
+                 ch4_ditch_emissions_co2e,
+                 co2_offsite_emissions
+                 ) = calculate_emissions_co2e(
                     ef_co2, ef_n2o, ef_ch4_land, ef_ch4_ditch, ef_co2_offsite, frac_ditch,
                     c_to_co2, n2o_n_to_n2o, gwp_n2o, gwp_ch4
                 )
-
                 # Assign emissions to output arrays
                 co2_emissions_out[row, col] = co2_emissions
                 n2o_emissions_out[row, col] = n2o_emissions_co2e
@@ -451,7 +449,6 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     out_dict_float32["total_emissions"] = total_emissions_out
 
     return out_dict_uint32, out_dict_float32
-
 
 
 def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_final, no_upload):
@@ -525,7 +522,8 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
     missing_int32_keys = [key for key in int32_list if key not in typed_dict_int32]
     missing_float32_keys = [key for key in float32_list if key not in typed_dict_float32]
     if missing_uint8_keys or missing_int16_keys or missing_int32_keys or missing_float32_keys:
-        logger.error(f"Typed dictionaries missing keys. uint8: {missing_uint8_keys}, int16: {missing_int16_keys}, int32: {missing_int32_keys}, float32: {missing_float32_keys}")
+        logger.error(
+            f"Typed dictionaries missing keys. uint8: {missing_uint8_keys}, int16: {missing_int16_keys}, int32: {missing_int32_keys}, float32: {missing_float32_keys}")
         return f"Failed due to missing keys in typed dictionaries", chunk_stats
 
     # Calculate statistics for input layers
@@ -534,7 +532,8 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
         chunk_stats.append(stats)
 
     # Run the drainage and emissions calculation
-    lu.print_and_log(f"Calculating drainage and emissions in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+    lu.print_and_log(f"Calculating drainage and emissions in {bounds_str} in {tile_id}: {uu.timestr()}", is_final,
+                     logger)
     try:
         out_dict_uint32, out_dict_float32 = calculate_drainage_and_emissions(
             typed_dict_uint8, typed_dict_int16, typed_dict_float32
@@ -579,6 +578,7 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
 
     success_message = f"Success for {bounds_str}: {uu.timestr()}"
     return success_message, chunk_stats
+
 
 def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
                        run_local=False, no_stats=False, no_log=False, no_upload=False):
@@ -681,7 +681,8 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
         try:
             uu.calculate_chunk_stats(all_stats, stage)
         except AttributeError:
-            print("Can't print chunk stats: module 'src.scripts.utilities.constants_and_names' has no attribute 'chunk_stats_path'")
+            print(
+                "Can't print chunk stats: module 'src.scripts.utilities.constants_and_names' has no attribute 'chunk_stats_path'")
 
     # End time
     end_time = uu.timestr()
@@ -712,6 +713,7 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
     if not run_local:
         client.close()
         cluster.close()
+
 
 def main(argv=None):
     """
@@ -759,6 +761,7 @@ def main(argv=None):
             no_log=args.no_log,
             no_upload=args.no_upload
         )
+
 
 if __name__ == "__main__":
     main()
