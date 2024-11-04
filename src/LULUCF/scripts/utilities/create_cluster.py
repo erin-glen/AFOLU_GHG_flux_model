@@ -37,7 +37,7 @@ if __name__ == "__main__":
     parser.add_argument('-n', '--n_workers', type=int, default=1, help='Number of workers for the cluster')
     parser.add_argument('-m', '--worker_memory', type=str, default='16', help='Memory per worker (default=16GiB)')
     parser.add_argument('-c', '--worker_cpu', type=str, default='2', help='Number of CPUs per worker (default=2 CPUs)')
-    parser.add_argument('-t', '--threads_per_worker', type=int, default='3', help='Number of threads/worker (default=3)')
+    parser.add_argument('-t', '--threads_per_worker', type=int, default='2', help='Number of threads/worker (default=2)')
     parser.add_argument('-l', '--large_scale_mode', action='store_true', help='Use memory and workers for large-scale analysis')
 
     args = parser.parse_args()

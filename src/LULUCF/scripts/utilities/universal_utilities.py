@@ -179,7 +179,7 @@ def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, 
         numpy_dtype = map_to_numpy_dtype(data_type)   # Translates the GDAL-style datatype to numpy-style datatype
         data = np.full((chunk_length_pixels, chunk_length_pixels), 0).astype(numpy_dtype)
 
-        lu.print_and_log(f"flm: Error accessing the dataset. Returning array of all 0s: {e}", is_final, logger)
+        lu.print_and_log(f"Error accessing the dataset. Returning array of all 0s: {e}", is_final, logger)
 
     return data
 
@@ -331,6 +331,9 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
     if is_final:
         lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
 
+    # This makes it so that all output files are uploaded to a folder of the same date, even if the model run is divided over multiple days
+    output_date = time.strftime('%Y%m%d')
+
     # For every output file, saves from array to local raster, then to s3.
     # Can't save directly to s3, unfortunately, so need to save locally first.
     for key, value in output_dict.items():
@@ -365,7 +368,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
                                blockysize=400) as dst:
                 dst.write(data_array, 1)
 
-        s3_path = f"{cn.s3_out_dir}/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels/{time.strftime('%Y%m%d')}"
+        s3_path = f"{cn.s3_out_dir}/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels/{output_date}"
 
         # Only prints if not a final run
         if not is_final:

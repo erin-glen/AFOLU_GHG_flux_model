@@ -96,11 +96,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
 
     # Tracks whether the height has already decreased more than the signif. height loss threshold compared to
     # maximum vegetation height since the last time the pixel was non-tall vegetation land cover.
-    # This prevents a pixel from repeatedly (multiple intervals) being counted as having a disturbance compared to
+    # This prevents a pixel from repeatedly (multiple intervals) being counted as having a height loss disturbance compared to
     # the maximum height; this can only be triggered once since the maximum height is attained.
     # This is used to determine if a forest->forest disturbance based on height loss relative to the max height should be reported.
-    # 0=height loss relative to the maximum vegetation height has not already occurred.
-    # 1=height loss relative to the maximum vegetation height has already occurred.
+    # 0=no significant height loss relative to the maximum vegetation height since last non-tall vegetation.
+    # 1=height loss relative to the maximum vegetation height occurred in this interval.
+    # 2=height loss relative to the maximum vegetation height occurred in a previous interval.
     first_time_sig_loss_from_max_height_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('uint8')
 
 
@@ -122,7 +123,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
             in_dict_uint8[f"{cn.vegetation_height_pattern}_{year}"]
             for year in years_so_far
         ]
-        ##TIME -bb 10 49.5 10.5 50 -cs 0.5: 00:57, 00:59, 00:58, 00:54
 
         # Writes the dictionary entries to a chunk for use in the decision tree
         LC_prev_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year - cn.interval_years}"]
@@ -315,8 +315,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # Checks whether to update whether the most recent year of non-tall vegetation land cover.
                 # Returns the last year that was non-tall vegetation land cover.
                 most_recent_year_not_tall_veg = nu.check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_tall_veg, interval_end_year)
-                ##TIME -bb 10 49.5 10.5 50 -cs 0.5: 00:58, 00:53, 00:58, 00:55
-                ##TIME -bb 110 -10 114 -6 -cs 1: 1:57, 1:58, 1:57
 
                 # Calculates the maximum canopy height since the last time a pixel was classified as non-tall vegetation land cover.
                 # This is eventually used to determine whether current height has decreased significantly from this maximum height over multiple intervals (gradual height loss).
@@ -332,8 +330,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # This approach, in conjunction with some the chunk-level preparation above, seems to not slow down the code.
                 for i, year_data in enumerate(vegetation_heights_so_far_block):
                     vegetation_height_so_far_cell[i] = year_data[row, col]
-                ##TIME -bb 10 49.5 10.5 50 -cs 0.5: 00:55, 00:56, 00:53
-                ##TIME -bb 110 -10 114 -6 -cs 1: 2:04, 2:07, 2:04
 
                 # # Stores vegetation heights for all intervals so far, including the model start year.
                 # vegetation_height_so_far_cell = []
@@ -348,15 +344,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
 
                 # Returns the maximum vegetation height since the last year of non-tall vegetation land cover
                 max_height_since_last_time_not_tall_veg = nu.calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, vegetation_height_so_far_cell, years_so_far)
-                ##TIME 0.5x0.5: 1:00, 00:59, 00:55
-                ##TIME -bb 110 -10 114 -6 -cs 1: 2:20, 2:10, 2:08
-
-                # if (row==0) and (col==0):
-                #     print(years_so_far)
-                #     print(vegetation_height_so_far_cell)
-                #     print(max_height_since_last_time_not_tall_veg)
-                #
-                # os.quit()
 
                 # Height change from maximum height since last time not tall veg land cover.
                 # Need to recast to signed int8 from uint8 so that negative values (height gain) stay negative.
@@ -373,24 +360,21 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # This is used to determine if a forest->forest disturbance based on height loss relative to the max height should be reported.
                 # 0=no significant height loss relative to the maximum vegetation height since last non-tall vegetation.
                 # 1=height loss relative to the maximum vegetation height occurred in this interval.
-                # 2=height loss relative to the maximum vegetation height occurred in a previous interval
+                # 2=height loss relative to the maximum vegetation height occurred in a previous interval.
                 first_time_sig_loss_from_max_height = first_time_sig_loss_from_max_height_block[row,col]
 
                 # Updates the tracker of whether this is the first time that significant height loss relative to
                 # the height maximum has occurred to determine if a forest->forest disturbance should be reported.
-                # If this height decrease did not occur in a previous interval, the flag is changed to 1 to show it
-                # is being reported in this interval.
-                # If this height decrease occurred in a previous interval, the flag is changed to 0 to show it has
+                # If this is the first interval in which there has been a significant height decrease relative to the maximum
+                # height since the last non-tall vegetation interval, the flag is changed to 1 to show it is being reported in this interval.
+                # If this height decrease already occurred in a previous interval, the flag is changed to 2 to show it has
                 # already been reported.
-                # TODO This is still not doing what I want it to
-
                 if first_time_sig_loss_from_max_height == 1:
                     first_time_sig_loss_from_max_height = 2
 
                 if sig_height_loss_max_current_abs:
                     if first_time_sig_loss_from_max_height == 0:
                         first_time_sig_loss_from_max_height = 1
-
 
 
                 ## Number of years of regrowth for new forest since last time not forest
@@ -421,7 +405,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 c_gross_removals_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross removals: AGC, BGC, deadwood C, litter C.
                 non_co2_flux_out = np.array([0, 0]).astype('float32')  # Initializes dummy output non-CO2 fluxes: CH4, N2O
                 c_dens_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C densities: AGC, BGC, deadwood C, litter C.
-                ##TIME -bb 110 -10 114 -6 -cs 1: 2:08, 2:07, 2:03
 
 
                 ### Tree gain
@@ -640,7 +623,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: Include mangrove exception.
                     node = nu.accrete_node(node, 3)
                     # if (forest_dist_last > 0) or (sig_height_loss_prev_curr_abs) or (first_time_sig_loss_from_max_height == 1):  # Partially disturbed trees (31)
-                    if first_time_sig_loss_from_max_height == 1: # Partially disturbed trees (31)  #TODO This is still not working
+                    if first_time_sig_loss_from_max_height == 1: # Partially disturbed trees (31)
                         state_out = nu.accrete_node(node, 1)
                         agc_rf = 2.2
                         ef = cn.all_non_soil_pools
@@ -651,7 +634,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                         agc_rf = 2.2
                         ef = cn.all_non_soil_pools
                         c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
-                ##TIME -bb 110 -10 114 -6 -cs 1: 2:34, 2:33, 2:25
 
     #             #         if planted_forest_type_cell == 0:  # Non-planted trees without stand-replacing disturbance in the last interval (311)
     #             #             node = nu.accrete_node(node, 1)
@@ -984,7 +966,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     data_in_chunk = uu.check_chunk_for_data(checked_layers, bounds_str, tile_id, "all", is_final, logger)
 
     if data_in_chunk == False:
-        return f"Skipped chunk {bounds_str} because of a lack of data: {uu.timestr()}", chunk_stats
+        return f"Skipped chunk {bounds_str} because of missing necessary input data: {uu.timestr()}", chunk_stats
 
 
     ### Part 2: Calculates min, mean, and max for each input chunk.

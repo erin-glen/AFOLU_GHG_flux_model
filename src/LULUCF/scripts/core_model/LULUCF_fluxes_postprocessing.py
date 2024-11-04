@@ -2,36 +2,25 @@
 Run from src/LULUCF
 
 Test:
-python -m scripts.utilities.create_cluster -n 1 -m 16 -c 2
-python -m scripts.core_model.LULUCF_fluxes_postprocessing -cn AFOLU_flux_model_scripts -d 20240930
+For tile indexes:
+python -m scripts.utilities.create_cluster -n 15  #15 workers with 3 threads each should be able to make tile indexes for all 44 outputs in one pass
+python -m scripts.core_model.LULUCF_fluxes_postprocessing -cn AFOLU_flux_model_scripts -d 20241102
 
-python -m scripts.utilities.create_cluster -n 200 -m 16 -c 2
-python -m scripts.core_model.LULUCF_fluxes_postprocessing -cn AFOLU_flux_model_scripts -d 20240930
+For 1x1 deg chunk aggregation:
+python -m scripts.utilities.create_cluster -n 200
+python -m scripts.core_model.LULUCF_fluxes_postprocessing -cn AFOLU_flux_model_scripts -d 20241102
 
 """
 
 
 import argparse
-import concurrent.futures
-import coiled
 import dask
-import numpy as np
 
-from dask.distributed import Client
 from dask.distributed import print
-from numba import jit
-
-import re
-import subprocess
-import boto3
-import os
-from osgeo import gdal
 
 # Project imports
 from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
-from ..utilities import log_utilities as lu
-from ..utilities import numba_utilities as nu
 from ..utilities import resize_cluster
 
 def main(cluster_name, date, run_local=False, no_upload=False):
@@ -66,62 +55,71 @@ def main(cluster_name, date, run_local=False, no_upload=False):
         f"{cn.outputs_path}{cn.litter_c_density_path_part}/2005/4000_pixels/{date}/",
         f"{cn.outputs_path}{cn.litter_c_density_path_part}/2010/4000_pixels/{date}/",
         f"{cn.outputs_path}{cn.litter_c_density_path_part}/2015/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.litter_c_density_path_part}/2020/4000_pixels/{date}/"
+        f"{cn.outputs_path}{cn.litter_c_density_path_part}/2020/4000_pixels/{date}/",
 
-        # f"{cn.outputs_path}{cn.agc_net_flux_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.agc_net_flux_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.agc_net_flux_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.agc_net_flux_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.bgc_net_flux_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.bgc_net_flux_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.bgc_net_flux_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.bgc_net_flux_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.deadwood_c_net_flux_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_net_flux_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_net_flux_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_net_flux_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.litter_c_net_flux_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_net_flux_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_net_flux_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_net_flux_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/4000_pixels/{date}/"
+        f"{cn.outputs_path}{cn.agc_net_flux_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.agc_net_flux_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.agc_net_flux_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.agc_net_flux_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.bgc_net_flux_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.bgc_net_flux_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.bgc_net_flux_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.bgc_net_flux_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.deadwood_c_net_flux_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.deadwood_c_net_flux_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.deadwood_c_net_flux_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.deadwood_c_net_flux_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.litter_c_net_flux_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.litter_c_net_flux_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.litter_c_net_flux_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.litter_c_net_flux_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.ch4_flux_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.ch4_flux_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.ch4_flux_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.ch4_flux_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.n2o_flux_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.n2o_flux_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.n2o_flux_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.n2o_flux_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.land_state_node_path_part}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.land_state_node_path_part}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/4000_pixels/{date}/"
     ]
 
-    # # Creates dictionary of s3 tile set paths with corresponding tile index shapefile names
-    # s3_in_folders_list_of_dicts = []
-    #
-    # for path in s3_in_folders:
-    #     # Extracts the portion after 'cn.outputs_path'
-    #     path_suffix = path.replace(cn.outputs_path, "")
-    #
-    #     # Replaces '/' with '__'
-    #     value = path_suffix.rstrip('/').replace("/", "__")
-    #
-    #     s3_in_folders_list_of_dicts.append({path: value})
-    #
-    # # Make raster footprint shapefiles from output rasters
-    # # Takes over 1 hour on global LULUCF output 1x1 tile set
-    # delayed_result = [dask.delayed(uu.make_tile_footprint_shp)(input_dict) for input_dict in s3_in_folders_list_of_dicts]
-    #
-    # # Actually runs analysis
-    # results = dask.compute(*delayed_result)
-    # print(results)
-    #
-    # # Ending time for stage
-    # end_time = uu.timestr()
-    # print(f"Stage {stage} ended at: {end_time}")
-    # uu.stage_duration(start_time, end_time, stage)
+    # Creates dictionary of s3 tile set paths with corresponding tile index shapefile names
+    s3_in_folders_list_of_dicts = []
+
+    for path in s3_in_folders:
+        # Extracts the portion after 'cn.outputs_path'
+        path_suffix = path.replace(cn.outputs_path, "")
+
+        # Replaces '/' with '__'
+        value = path_suffix.rstrip('/').replace("/", "__")
+
+        s3_in_folders_list_of_dicts.append({path: value})
+
+    # Make raster footprint shapefiles from output rasters
+    # Takes over 1 hour on global LULUCF output 1x1 tile set
+    delayed_result = [dask.delayed(uu.make_tile_footprint_shp)(input_dict) for input_dict in s3_in_folders_list_of_dicts]
+
+    # Actually runs analysis
+    results = dask.compute(*delayed_result)
+    print(results)
+
+    # Ending time for stage
+    end_time = uu.timestr()
+    print(f"Stage {stage} ended at: {end_time}")
+    uu.stage_duration(start_time, end_time, stage)
 
 
-    # resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 50)
-
+    resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 50)
     # Model stage being running
     stage = 'LULUCF_flux_postprocessing__merge_tiles'
 
@@ -136,7 +134,7 @@ def main(cluster_name, date, run_local=False, no_upload=False):
     # For testing. Limits the number of output rasters
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:3]  # First 3 tiles
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[40:41] # 10N_130E; Internal chunks missing and padding needed on right; FID40
-    list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:2]  # 00N_000E
+    # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:2]  # 00N_000E
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[16:17] # 00N_110E
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[41:42]  # 10S_010E; No padding needed; FID41
     # print(list_of_s3_name_dicts_total)
