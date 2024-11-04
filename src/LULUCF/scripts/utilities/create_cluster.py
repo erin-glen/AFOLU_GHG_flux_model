@@ -19,7 +19,7 @@ def create_cluster(n_workers, threads_per_worker, worker_memory, worker_cpu):
         compute_purchase_option="spot_with_fallback",
         idle_timeout="15 minutes",
         region="us-east-1",
-        name="AFOLU_flux_model_scripts_test",
+        name="AFOLU_flux_model_scripts",
         workspace='wri-forest-research',
         # mount_bucket="s3://gfw2-data",
         worker_memory = worker_memory_str,

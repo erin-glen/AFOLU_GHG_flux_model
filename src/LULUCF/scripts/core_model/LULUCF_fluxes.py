@@ -371,8 +371,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # This prevents a pixel from repeatedly (multiple intervals) being counted as having a disturbance compared to
                 # the maximum height; this can only be triggered once since the maximum height is attained.
                 # This is used to determine if a forest->forest disturbance based on height loss relative to the max height should be reported.
-                # 0=height loss relative to the maximum vegetation height has not already occurred.
-                # 1=height loss relative to the maximum vegetation height has already occurred.
+                # 0=no significant height loss relative to the maximum vegetation height since last non-tall vegetation.
+                # 1=height loss relative to the maximum vegetation height occurred in this interval.
+                # 2=height loss relative to the maximum vegetation height occurred in a previous interval
                 first_time_sig_loss_from_max_height = first_time_sig_loss_from_max_height_block[row,col]
 
                 # Updates the tracker of whether this is the first time that significant height loss relative to
@@ -382,12 +383,14 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 # If this height decrease occurred in a previous interval, the flag is changed to 0 to show it has
                 # already been reported.
                 # TODO This is still not doing what I want it to
+
+                if first_time_sig_loss_from_max_height == 1:
+                    first_time_sig_loss_from_max_height = 2
+
                 if sig_height_loss_max_current_abs:
                     if first_time_sig_loss_from_max_height == 0:
                         first_time_sig_loss_from_max_height = 1
-                    else:
-                        first_time_sig_loss_from_max_height = 0
-                first_time_sig_loss_from_max_height_block[row, col] = first_time_sig_loss_from_max_height
+
 
 
                 ## Number of years of regrowth for new forest since last time not forest
@@ -636,8 +639,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 ### Trees remaining trees
                 elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: Include mangrove exception.
                     node = nu.accrete_node(node, 3)
-                    # if (forest_dist_last > 0) or (sig_height_loss_prev_curr_abs) or (first_time_sig_loss_from_max_height):  # Partially disturbed trees (31)
-                    if first_time_sig_loss_from_max_height: # Partially disturbed trees (31)  #TODO This is still not working
+                    # if (forest_dist_last > 0) or (sig_height_loss_prev_curr_abs) or (first_time_sig_loss_from_max_height == 1):  # Partially disturbed trees (31)
+                    if first_time_sig_loss_from_max_height == 1: # Partially disturbed trees (31)  #TODO This is still not working
                         state_out = nu.accrete_node(node, 1)
                         agc_rf = 2.2
                         ef = cn.all_non_soil_pools
@@ -860,6 +863,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 most_recent_year_not_tall_veg_block[row, col] = most_recent_year_not_tall_veg
                 years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
                 max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
+                first_time_sig_loss_from_max_height_block[row, col] = first_time_sig_loss_from_max_height
 
 
         ### End of iteration calculations and outputs
