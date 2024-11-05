@@ -440,3 +440,4 @@ def calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, 
             max_height_since_last_time_not_tall_veg = max(heights_since_last_time_not_tall_veg)
 
     return max_height_since_last_time_not_tall_veg
+
