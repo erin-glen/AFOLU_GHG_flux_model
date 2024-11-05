@@ -115,13 +115,13 @@ datasets = {
             's3_processed_base': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year'),
             's3_processed': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year', today_date),
             'local_processed': posixpath.join(local_temp_dir, 'descals_plantation', 'year', today_date),
-            'working_version': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year', '20240823')
+            'working_version': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year', '20241105')
         },
         'plant_type': {
             's3_processed_base': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'extent'),
             's3_processed': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'extent', today_date),
             'local_processed': posixpath.join(local_temp_dir, 'descals_plantation', 'extent', today_date),
-            'working_version': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'extent', '20240823')
+            'working_version': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'extent', '20241105')
         }
     },
     'extraction': {
