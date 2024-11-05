@@ -181,13 +181,21 @@ nutrient_status_codes = {
     'rich': 2
 }
 
+
+"""
+Some info on SDPT data from David:
+They're for SDPTv2, from 20240911, I think. For planted forest type, 
+1-oil palm, 2-woodfiber, 3-other. For planted_forest_tree_crop, I believe 1-planted forest, 2-tree crop.
+"""
+
+#TODO this needs to be updated!!!
 # Plantation Types Codes
 plantation_type_codes = {
-    'unknown': (0, 0),
-    'long_rotation': (1, 5),
-    'short_rotation': (6, 10),
-    'oil_palm': (11, 15),
-    'sago_palm': (16, 20)
+    'unknown': 0,
+    'long_rotation': 2,
+    'short_rotation': 2,
+    'oil_palm': 1,
+    'sago_palm': 3
 }
 
 # File Name Patterns

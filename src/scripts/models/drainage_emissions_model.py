@@ -11,6 +11,11 @@ from numba import jit, types
 from numba.typed import Dict
 from datetime import datetime
 
+# Function to calculate drainage and emissions using Numba
+from numba import jit, types
+from numba.typed import Dict
+import numpy as np
+
 # Project-specific imports (ensure these modules are available)
 from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import universal_utilities as uu
@@ -48,43 +53,6 @@ short_rotation_code = cn.plantation_type_codes['short_rotation']
 oil_palm_code = cn.plantation_type_codes['oil_palm']
 sago_palm_code = cn.plantation_type_codes['sago_palm']
 unknown_plantation_code = cn.plantation_type_codes['unknown']
-
-# Function to calculate drainage and emissions using Numba
-from numba import jit, types
-from numba.typed import Dict
-import numpy as np
-
-# Import constants (replace these with your actual constants from constants_and_names.py)
-# For example:
-# from constants_and_names import (
-#     boreal_code, temperate_code, tropical_code,
-#     forest_code, grassland_code, cropland_code, settlement_code,
-#     poor_nutrient_code, rich_nutrient_code,
-#     long_rotation_code, short_rotation_code, oil_palm_code, sago_palm_code,
-#     gwp_ch4, gwp_n2o
-# )
-
-# Assuming constants are defined as follows:
-boreal_code = 1
-temperate_code = 2
-tropical_code = 3
-
-forest_code = 1
-grassland_code = 2
-cropland_code = 3
-settlement_code = 4
-
-poor_nutrient_code = 1
-rich_nutrient_code = 2
-
-long_rotation_code = 1
-short_rotation_code = 2
-oil_palm_code = 3
-sago_palm_code = 4
-
-# Global Warming Potentials
-gwp_ch4 = np.float32(28.0)
-gwp_n2o = np.float32(265.0)
 
 
 # Main function
