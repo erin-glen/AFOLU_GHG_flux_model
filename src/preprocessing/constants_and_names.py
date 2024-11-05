@@ -120,15 +120,15 @@ datasets = {
         }
     },
     'descals_oil_palm': {
-        'plant_year': {
-            's3_raw': posixpath.join(project_dir, raw_dir, 'descals', 'plant_year'),
+        'plantation_year': {
+            's3_raw': posixpath.join(project_dir, raw_dir, 'plantations', 'plantation_year'),
             's3_processed_base': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year'),
             's3_processed': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year', today_date),
             'local_processed': posixpath.join(local_temp_dir, 'descals_plantation', 'year', today_date),
             'working_version': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year', '20240823')
         },
-        'plant_type': {
-            's3_raw': posixpath.join(project_dir, raw_dir, 'descals', 'plant_type'),
+        'plantation_type': {
+            's3_raw': posixpath.join(project_dir, raw_dir, 'plantations', 'plantation_extent'),
             's3_processed_base': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'extent'),
             's3_processed': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'extent', today_date),
             'local_processed': posixpath.join(local_temp_dir, 'descals_plantation', 'extent', today_date),
