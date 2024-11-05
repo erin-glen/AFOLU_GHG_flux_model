@@ -35,6 +35,8 @@ last_model_year = 2020   # Last year of model
 
 # Number of years in interval.
 interval_years = 5    #TODO: calculate programmatically in numba function rather than coded here-- for greater flexibility.
+interval_end_years = list(range(first_model_year, last_model_year + 1, interval_years))[1:]
+
 
 # Number of years of removals in a tree cover gain pixel
 NF_F_gain_year = math.ceil(interval_years/2)
@@ -220,7 +222,7 @@ planted_forest_removal_factor_pattern = "annual_gain_rate_AGC_Mg_ha_planted_fore
 oil_palm_2000_extent_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/IDN_MYS_plantation_pre_2000/processed/20200724/"
 oil_palm_2000_extent_pattern = "plantation_2000_or_earlier_processed"
 
-oil_palm_first_year_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/organic_soils/inputs/processed/descals_plantation/year/20240823/"
+oil_palm_first_year_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/organic_soils/inputs/processed/descals_plantation/year/20241105/"
 oil_palm_first_year_pattern = "descals_year"
 
 # Originally from gfw-data-lake, so it's in 400x400 windows

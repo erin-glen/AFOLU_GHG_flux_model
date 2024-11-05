@@ -179,7 +179,7 @@ def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, 
         numpy_dtype = map_to_numpy_dtype(data_type)   # Translates the GDAL-style datatype to numpy-style datatype
         data = np.full((chunk_length_pixels, chunk_length_pixels), 0).astype(numpy_dtype)
 
-        lu.print_and_log(f"Error accessing the dataset. Returning array of all 0s: {e}", is_final, logger)
+        lu.print_and_log(f"Can't access the dataset. Returning array of all 0s: {e}", is_final, logger)
 
     return data
 
