@@ -621,24 +621,24 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                         node = nu.accrete_node(node, 1)
                         if sig_height_gain_prev_curr_abs:  # Trees partially disturbed in the last interval with signif. height increase after (311)
                             node = nu.accrete_node(node, 1)
-                            if burned_in_last_interval:  # Partially disturbed trees with height increase (burned) (3111)
+                            if burned_in_last_interval:  # Trees partially disturbed in the last interval with height increase after (burned) (3111)
                                 state_out = nu.accrete_node(node, 1)
                                 agc_rf = 2.2
                                 ef = cn.biomass_emissions_only
                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5, 4.7, 0.26)
-                            else:  # Partially disturbed trees with height increase (not burned) (3112)
+                            else:  # Trees partially disturbed in the last interval with height increase after (not burned) (3112)
                                 state_out = nu.accrete_node(node, 2)
                                 agc_rf = 2.2
                                 ef = cn.agc_emissions_only
                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0)
-                        else:  # Trees partially disturbed without signif. height increase after (312)
+                        else:  # Trees partially disturbed in the last interval without signif. height increase after (312)
                             node = nu.accrete_node(node, 2)
-                            if burned_in_last_interval:  # Partially disturbed trees without height increase (burned) (3121)
+                            if burned_in_last_interval:  # Trees partially disturbed in the last interval without height increase after (burned) (3121)
                                 state_out = nu.accrete_node(node, 1)
                                 agc_rf = 2.2
                                 ef = cn.biomass_emissions_only
                                 c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0.5,4.7, 0.26)
-                            else:  # Partially disturbed trees without height increase (not burned) (3122)
+                            else:  # Trees partially disturbed in the last interval without height increase after (not burned) (3122)
                                 state_out = nu.accrete_node(node, 2)
                                 agc_rf = 2.2
                                 ef = cn.agc_emissions_only
@@ -661,9 +661,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                             node = nu.accrete_node(node, 2)
                             if tall_veg_curr:  # Forest not disturbed in last interval (3221)
                                 node = nu.accrete_node(node, 1)
-                                # if first_forest_dist_in_record or sig_height_loss_prev_curr_abs or (first_time_sig_loss_from_max_height > 0) or (most_recent_year_not_tall_veg > 0): # Young secondary natural forest (32211)
-                                if first_forest_dist_in_record: # Young secondary natural forest (32211)
-                                # if sig_height_loss_prev_curr_abs: # Young secondary natural forest (32211)
+                                if first_forest_dist_in_record or (first_time_sig_loss_from_max_height > 0) or (most_recent_year_not_tall_veg > 0): # Young secondary natural forest (32211)
+                                # if first_forest_dist_in_record: # Young secondary natural forest (32211)
                                 # if (first_time_sig_loss_from_max_height > 0): # Young secondary natural forest (32211)
                                 # if (most_recent_year_not_tall_veg > 0): # Young secondary natural forest (32211)
                                     node = nu.accrete_node(node, 1)
