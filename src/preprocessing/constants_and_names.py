@@ -1,6 +1,7 @@
 # config/constants_and_names.py
 
 import os
+import posixpath
 from datetime import datetime
 import boto3
 from botocore.exceptions import ClientError
@@ -48,7 +49,8 @@ datasets = {
         'roads': {
             's3_raw': os.path.join(project_dir, raw_dir, 'roads', 'osm_roads', 'roads_by_tile'),
             's3_processed_base': os.path.join(project_dir, processed_dir, 'osm_roads_density'),
-            's3_processed_small': os.path.join(project_dir, processed_dir, 'osm_roads_density', '4000_pixels', today_date),
+            's3_processed_small': os.path.join(project_dir, processed_dir, 'osm_roads_density', '4000_pixels',
+                                               today_date),
             's3_processed': os.path.join(project_dir, processed_dir, 'osm_roads_density', today_date),
             'local_processed': os.path.join(local_temp_dir, 'osm_roads_density', today_date),
             # 'working_version': os.path.join(project_dir, processed_dir, 'osm_roads_density', 'working_version') # note this needs to be updated
@@ -56,7 +58,8 @@ datasets = {
         'canals': {
             's3_raw': os.path.join(project_dir, raw_dir, 'roads', 'osm_roads', 'canals_by_tile'),
             's3_processed_base': os.path.join(project_dir, processed_dir, 'osm_canals_density'),
-            's3_processed_small': os.path.join(project_dir, processed_dir, 'osm_canals_density', '4000_pixels', today_date),
+            's3_processed_small': os.path.join(project_dir, processed_dir, 'osm_canals_density', '4000_pixels',
+                                               today_date),
             's3_processed': os.path.join(project_dir, processed_dir, 'osm_canals_density', today_date),
             'local_processed': os.path.join(local_temp_dir, 'osm_canals_density', today_date),
             # 'working_version': os.path.join(project_dir, processed_dir, 'osm_canals_density', '20240822')
@@ -73,21 +76,24 @@ datasets = {
         }
     },
     'engert': {
-        's3_raw': os.path.join(project_dir, raw_dir, 'roads', 'engert_roads', 'engert_asiapac_ghrdens_1km_resample_30m.tif'),
+        's3_raw': os.path.join(project_dir, raw_dir, 'roads', 'engert_roads',
+                               'engert_asiapac_ghrdens_1km_resample_30m.tif'),
         's3_processed_base': os.path.join(project_dir, processed_dir, 'engert_density', '30m'),
         's3_processed': os.path.join(project_dir, processed_dir, 'engert_density', '30m', today_date),
         'local_processed': os.path.join(local_temp_dir, 'engert_density', today_date),
         'working_version': os.path.join(project_dir, processed_dir, 'engert_density', '30m', '20240925')
     },
     'dadap': {
-        's3_raw': os.path.join(project_dir, raw_dir, 'canals', 'Dadap_SEA_Drainage', 'canal_length_data', 'canal_length_1km_resample_30m.tif'),
+        's3_raw': os.path.join(project_dir, raw_dir, 'canals', 'Dadap_SEA_Drainage', 'canal_length_data',
+                               'canal_length_1km_resample_30m.tif'),
         's3_processed_base': os.path.join(project_dir, processed_dir, 'dadap_density', '30m'),
         's3_processed': os.path.join(project_dir, processed_dir, 'dadap_density', '30m', today_date),
         'local_processed': os.path.join(local_temp_dir, 'dadap_density', today_date),
         'working_version': os.path.join(project_dir, processed_dir, 'dadap_density', '30m', '20240925')
     },
     'planted_forest_type': {
-        's3_processed_base': os.path.join('climate', 'carbon_model', 'other_emissions_inputs', 'plantation_type', 'SDPTv2', '20230911'),
+        's3_processed_base': os.path.join('climate', 'carbon_model', 'other_emissions_inputs', 'plantation_type',
+                                          'SDPTv2', '20230911'),
         # 'working_version': os.path.join('climate', 'carbon_model', 'other_emissions_inputs', 'plantation_type', 'SDPTv2', 'working_version')
     },
     'extraction': {
@@ -112,7 +118,23 @@ datasets = {
             's3_processed': f'{project_dir}/{processed_dir}/extraction/{today_date}/',
             'local_processed': f'{local_temp_dir}/extraction/russia/{today_date}/'
         }
+    },
+    'descals_oil_palm': {
+        'plant_year': {
+            's3_raw': posixpath.join(project_dir, raw_dir, 'descals', 'plant_year'),
+            's3_processed_base': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year'),
+            's3_processed': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year', today_date),
+            'local_processed': posixpath.join(local_temp_dir, 'descals_plantation', 'year', today_date),
+            'working_version': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'year', '20240823')
+        },
+        'plant_type': {
+            's3_raw': posixpath.join(project_dir, raw_dir, 'descals', 'plant_type'),
+            's3_processed_base': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'extent'),
+            's3_processed': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'extent', today_date),
+            'local_processed': posixpath.join(local_temp_dir, 'descals_plantation', 'extent', today_date),
+            'working_version': posixpath.join(project_dir, processed_dir, 'descals_plantation', 'extent', '20240823')
     }
+}
     # Add other datasets as needed
 }
 
@@ -163,10 +185,9 @@ download_dict = {
     # file_patterns['osm_canals']: f"s3://{s3_bucket_name}/{datasets['osm']['canals']['working_version']}/canals_density_{sample_tile_id}.tif"
 }
 
-
 ### Miscellaneous
 
-full_raster_dims = 40000    # Size of a 10x10 deg raster in pixels
+full_raster_dims = 40000  # Size of a 10x10 deg raster in pixels
 
 # Threshold for height loss to be counted as tree loss (meters)
 sig_height_loss_threshold = 5
@@ -175,7 +196,7 @@ sig_height_loss_threshold = 5
 tree_threshold = 5
 
 # Converts tonnes to megatonnes
-t_to_Mt = 10**-3
+t_to_Mt = 10 ** -3
 
 
 # ---------------------------------------------------
@@ -203,6 +224,7 @@ def check_s3_path_exists(s3_client, bucket, path):
         else:
             print(f"ClientError {e.response['Error']['Code']}: {path} - {e.response['Message']}")
         return False
+
 
 # ---------------------------------------------------
 # 6. AWS S3 Client Initialization
