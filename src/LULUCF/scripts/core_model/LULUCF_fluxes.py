@@ -24,6 +24,9 @@ from ..utilities import log_utilities as lu
 from ..utilities import numba_utilities as nu
 
 
+import gc
+
+
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
 @jit(nopython=True)
@@ -757,6 +760,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
 
         # Adds the output arrays to the dictionary with the appropriate data type
         # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
+        # This applies even for the outputs that aren't reused in the next interval;
+        # they will still get overwritten with the last interval's values, I believe.
         year_range = f"{interval_end_year - cn.interval_years}_{interval_end_year}"
 
         out_dict_uint32[f"{cn.land_state_pattern}_{year_range}"] = state_out_block.copy()
@@ -911,12 +916,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     out_dict_all_dtypes = {}
 
     # Transfers the dictionaries of numpy arrays for each data type to a new, Pythonic array
-    out_dicts = [
-        out_dict_uint8,
-        out_dict_uint16,
-        out_dict_uint32,
-        out_dict_float32
-    ]
+    out_dicts = [out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32]
 
     # Loop through each dictionary and update out_dict_all_dtypes
     for out_dict in out_dicts:
@@ -929,6 +929,11 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     ### Part 6: Calculates combined gross fluxes and net fluxes.
     ### Doing this outside numba function to minimize pixel-level calculations and chunks being returned by numba function.
+
+    # Deletes all unnecessary input dictionaries before the memory-intensive derived output calculations
+    # Suggested by ChatGPT: https://chatgpt.com/share/e/672bbf2e-ebbc-800a-aae3-3d92f5a1d663
+    in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
+    [in_dict.clear() for in_dict in in_dicts]
 
     for interval_end_year in cn.interval_end_years:
 
