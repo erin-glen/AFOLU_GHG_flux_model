@@ -40,8 +40,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
     out_dict_uint32 = {}
     out_dict_float32 = {}
 
-    # interval_end_years = [2005, 2010]
-
     # Numpy arrays for outputs that do depend on previous interval's values
     agc_dens_block = in_dict_float32[cn.agc_2000_pattern].astype('float32')
     bgc_dens_block = in_dict_float32[cn.bgc_2000_pattern].astype('float32')
@@ -394,10 +392,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 state_out = 0
                 gain_year_count = 0
                 agc_rf = 0
-                c_gross_emis_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross emissions: AGC, BGC, deadwood C, litter C.
-                c_gross_removals_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross removals: AGC, BGC, deadwood C, litter C.
-                non_co2_flux_out = np.array([0, 0]).astype('float32')  # Initializes dummy output non-CO2 fluxes: CH4, N2O
-                c_dens_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C densities: AGC, BGC, deadwood C, litter C.
+                c_gross_emis_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross emissions (Mg C/ha/interval): AGC, BGC, deadwood C, litter C.
+                c_gross_removals_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross removals (Mg C/ha/interval): AGC, BGC, deadwood C, litter C.
+                non_co2_flux_out = np.array([0, 0]).astype('float32')  # Initializes dummy output non-CO2 fluxes (Mg CO2e/ha/interval): CH4, N2O
+                c_dens_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C densities (Mg C/ha): AGC, BGC, deadwood C, litter C.
 
 
                 ### Tree gain

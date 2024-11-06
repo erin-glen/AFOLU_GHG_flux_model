@@ -142,25 +142,25 @@ def fire_equations(carbon_in, r_s_ratio_cell, Cf=-1.0, Gef_ch4=-1.0, Gef_n2o=-1.
 @jit(nopython=True)
 def calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in):
 
-    # Retrieves the starting densities for each carbon pool from the input array
+    # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
 
     # Step 1: Calculates the number of years of carbon gain
     gain_year_count = cn.NT_T_gain_year_count_default
 
-    # Step 2: Calculates gross removals by carbon pools. Gross removals are negative.
+    # Step 2: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
     agc_gross_removals_out = (agc_rf * gain_year_count) * -1
     bgc_gross_removals_out = float(agc_gross_removals_out) * r_s_ratio_cell
     deadwood_c_gross_removals_out = cn.deadwood_c_NT_T_rf
     litter_c_gross_removals_out = cn.litter_c_NT_T_rf
 
-    # Step 3: Calculates gross emissions by carbon pools
+    # Step 3: Calculates gross emissions by carbon pools (Mg C/ha/interval)
     agc_gross_emis_out = 0
     bgc_gross_emis_out = 0
     deadwood_c_gross_emis_out = 0
     litter_c_gross_emis_out = 0
 
-    # Step 4: Calculates ending carbon densities by carbon pool
+    # Step 4: Calculates ending carbon densities by carbon pool (Mg C/ha)
     agc_dens_out = agc_dens_in - agc_gross_removals_out
     bgc_dens_out = bgc_dens_in - bgc_gross_removals_out
     deadwood_c_dens_out = deadwood_c_dens_in - deadwood_c_gross_removals_out
