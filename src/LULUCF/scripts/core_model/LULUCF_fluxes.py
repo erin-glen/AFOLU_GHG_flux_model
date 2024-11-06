@@ -760,13 +760,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
 
         out_dict_float32[f"{cn.agc_rf_pattern}_{year_range}"] = agc_rf_out_block.copy()
 
-        #TODO Convert C fluxes to CO2 fluxes somewhere in the process
-        # (best place TBD but perhaps out here rather than in the decision tree so only need to apply 44/12 a few times)
-        #TODO Convert 5-year fluxes to annual fluxes
-        out_dict_float32[f"{cn.agc_gross_emis_pattern}_{year_range}"] = agc_gross_emis_out_block.copy()
-        out_dict_float32[f"{cn.bgc_gross_emis_pattern}_{year_range}"] = bgc_gross_emis_out_block.copy()
-        out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = deadwood_c_gross_emis_out_block.copy()
-        out_dict_float32[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] = litter_c_gross_emis_out_block.copy()
+        # Converts carbon pool fluxes from Mg C/ha/interval to Mg CO2/ha/year
+        out_dict_float32[f"{cn.agc_gross_emis_pattern}_{year_range}"] = (agc_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
+        out_dict_float32[f"{cn.bgc_gross_emis_pattern}_{year_range}"] = (bgc_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
+        out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = (deadwood_c_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
+        out_dict_float32[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] = (litter_c_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
 
         out_dict_float32[f"{cn.agc_gross_removals_pattern}_{year_range}"] = (agc_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
         out_dict_float32[f"{cn.bgc_gross_removals_pattern}_{year_range}"] = (bgc_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
