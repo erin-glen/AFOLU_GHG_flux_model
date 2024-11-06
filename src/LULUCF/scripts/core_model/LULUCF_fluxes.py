@@ -385,8 +385,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                 sig_height_gain_prev_curr_abs = (height_change_prev_curr <= cn.sig_height_gain_threshold_abs)
 
 
-
-
                 ### Starting output pixel values
 
                 # Starting decision tree node value
@@ -752,12 +750,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
 
         ### End of iteration calculations and outputs
 
-        # # Calculates net flux. Gross removals is added to gross emissions because gross removals are already negative
-        # agc_net_flux_out_block = agc_gross_emis_out_block + agc_gross_removals_out_block
-        # bgc_net_flux_out_block = bgc_gross_emis_out_block + bgc_gross_removals_out_block
-        # deadwood_c_net_flux_out_block = deadwood_c_gross_emis_out_block + deadwood_c_gross_removals_out_block
-        # litter_c_net_flux_out_block = litter_c_gross_emis_out_block + litter_c_gross_removals_out_block
-
         # Adds the output arrays to the dictionary with the appropriate data type
         # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
         # This applies even for the outputs that aren't reused in the next interval;
@@ -776,15 +768,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = deadwood_c_gross_emis_out_block.copy()
         out_dict_float32[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] = litter_c_gross_emis_out_block.copy()
 
-        out_dict_float32[f"{cn.agc_gross_removals_pattern}_{year_range}"] = agc_gross_removals_out_block.copy()
-        out_dict_float32[f"{cn.bgc_gross_removals_pattern}_{year_range}"] = bgc_gross_removals_out_block.copy()
-        out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"] = deadwood_c_gross_removals_out_block.copy()
-        out_dict_float32[f"{cn.litter_c_gross_removals_pattern}_{year_range}"] = litter_c_gross_removals_out_block.copy()
-
-        # out_dict_float32[f"{cn.agc_net_flux_pattern}_{year_range}"] = agc_net_flux_out_block.copy()
-        # out_dict_float32[f"{cn.bgc_net_flux_pattern}_{year_range}"] = bgc_net_flux_out_block.copy()
-        # out_dict_float32[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"] = deadwood_c_net_flux_out_block.copy()
-        # out_dict_float32[f"{cn.litter_c_net_flux_pattern}_{year_range}"] = litter_c_net_flux_out_block.copy()
+        out_dict_float32[f"{cn.agc_gross_removals_pattern}_{year_range}"] = (agc_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
+        out_dict_float32[f"{cn.bgc_gross_removals_pattern}_{year_range}"] = (bgc_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
+        out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"] = (deadwood_c_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
+        out_dict_float32[f"{cn.litter_c_gross_removals_pattern}_{year_range}"] = (litter_c_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
 
         out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = ch4_gross_emis_out_block.copy()
         out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = n2o_gross_emis_out_block.copy()

@@ -39,9 +39,13 @@ interval_end_years = list(range(first_model_year, last_model_year + 1, interval_
 
 
 # Number of years of removals in a tree cover gain pixel
-NF_F_gain_year = math.ceil(interval_years/2)
+NT_T_gain_year_count_default = math.ceil(interval_years / 2)
 
 ### Carbon constants
+
+# Carbon to CO2 (data type needs to be specified because of use in numba
+C_to_CO2 = 44/12
+C_to_CO2_numba = np.float32(C_to_CO2)
 
 # Biomass to carbon ratios
 biomass_to_carbon_non_mangrove = 0.47   # Conversion of biomass to carbon for non-mangrove forests

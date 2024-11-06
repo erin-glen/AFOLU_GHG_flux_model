@@ -146,7 +146,7 @@ def calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in):
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
 
     # Step 1: Calculates the number of years of carbon gain
-    gain_year_count = cn.NF_F_gain_year
+    gain_year_count = cn.NT_T_gain_year_count_default
 
     # Step 2: Calculates gross removals by carbon pools. Gross removals are negative.
     agc_gross_removals_out = (agc_rf * gain_year_count) * -1
