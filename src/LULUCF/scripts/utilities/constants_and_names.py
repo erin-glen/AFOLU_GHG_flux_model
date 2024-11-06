@@ -284,23 +284,32 @@ land_state_pattern = "land_state_node"
 agc_rf_pattern = "AGC_removal_factor_UNITS_TBD" #TODO Specify RF units here
 
 # Gross and net fluxes
-agc_gross_emis_pattern = "AGC_gross_emis_MgC_ha"
-bgc_gross_emis_pattern = "BGC_gross_emis_MgC_ha"
-deadwood_c_gross_emis_pattern = "deadwood_C_gross_emis_MgC_ha"
-litter_c_gross_emis_pattern = "litter_C_gross_emis_MgC_ha"
+agc_gross_emis_pattern = "AGC_gross_emissions__MgCO2_ha_yr"
+bgc_gross_emis_pattern = "BGC_gross_emissions__MgCO2_ha_yr"
+deadwood_c_gross_emis_pattern = "deadwood_C_gross_emissions__MgCO2_ha_yr"
+litter_c_gross_emis_pattern = "litter_C_gross_emissions__MgCO2_ha_yr"
 
-agc_gross_removals_pattern = "AGC_gross_removals_MgC_ha"
-bgc_gross_removals_pattern = "BGC_gross_removals_MgC_ha"
-deadwood_c_gross_removals_pattern = "deadwood_C_gross_removals_MgC_ha"
-litter_c_gross_removals_pattern = "litter_C_gross_removals_MgC_ha"
+agc_gross_removals_pattern = "AGC_gross_removals__MgCO2_ha_yr"
+bgc_gross_removals_pattern = "BGC_gross_removals__MgCO2_ha_yr"
+deadwood_c_gross_removals_pattern = "deadwood_C_gross_removals__MgCO2_ha_yr"
+litter_c_gross_removals_pattern = "litter_C_gross_removals__MgCO2_ha_yr"
 
-agc_net_flux_pattern = "AGC_net_flux_MgC_ha"
-bgc_net_flux_pattern = "BGC_net_flux_MgC_ha"
-deadwood_c_net_flux_pattern = "deadwood_C_net_flux_MgC_ha"
-litter_c_net_flux_pattern = "litter_C_net_flux_MgC_ha"
+agc_net_flux_pattern = "AGC_net_flux__MgCO2_ha_yr"
+bgc_net_flux_pattern = "BGC_net_flux__MgCO2_ha_yr"
+deadwood_c_net_flux_pattern = "deadwood_C_net_flux__MgCO2_ha_yr"
+litter_c_net_flux_pattern = "litter_C_net_flux__MgCO2_ha_yr"
 
-ch4_flux_pattern = "CH4_flux_MgCO2e_ha"
-n2o_flux_pattern = "N2O_flux_MgCO2e_ha"
+ch4_flux_pattern = "CH4_flux__MgCO2e_ha_yr"
+n2o_flux_pattern = "N2O_flux__MgCO2e_ha_yr"
+
+gross_emis_all_C_pools_CO2_only_pattern = "gross_emissions_all_C_pools_CO2_only__MgCO2_ha_yr"
+gross_emis_non_CO2_only_pattern = "gross_emissions_non_CO2_only__MgCO2e_ha_yr"
+gross_emis_all_C_pools_all_gases_pattern = "gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr"
+
+gross_removals_all_C_pools_pattern = "gross_removals_all_C_pools__MgCO2_ha_yr"
+
+net_flux_all_C_pools_CO2_only_pattern = "net_flux_all_C_pools_CO2_only__MgCO2_ha_yr"
+net_flux_all_C_pools_all_gases_pattern = "net_flux_all_C_pools_all_gases__MgCO2e_ha_yr"
 
 # Intermediate outputs
 gain_year_count_pattern = "gain_year_count_during_interval"
