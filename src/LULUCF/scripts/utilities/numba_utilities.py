@@ -121,17 +121,10 @@ def fire_equations(carbon_in, r_s_ratio_cell, Cf=-1.0, Gef_ch4=-1.0, Gef_n2o=-1.
     # Cf is the combustion factor
     # Gef_ch4 and Gef_n2o are the emission factors for their respective gases
 
-    # Default non-CO2 gases to 0
-    ch4_flux_out = 0
-    n2o_flux_out = 0
+    # print(f"Carbon in: {carbon_in}; R:S: {r_s_ratio_cell}; Cf: {Cf}; Gef_ch4: {Gef_ch4}; GWP CH4: {cn.gwp_ch4}")
 
-    # Won't calculate CH4 and N2O fluxes if default values are provided (i.e. no values from decision tree)
-    if Cf > 0 and Gef_ch4 > 0 and Gef_n2o > 0:
-
-        # print(f"Carbon in: {carbon_in}; R:S: {r_s_ratio_cell}; Cf: {Cf}; Gef_ch4: {Gef_ch4}; GWP CH4: {cn.gwp_ch4}")
-
-        ch4_flux_out = (carbon_in/r_s_ratio_cell) * Cf * Gef_ch4 * cn.g_to_kg * cn.gwp_ch4  # TODO This assumes non-mangrove. Need to make flexible?
-        n2o_flux_out = (carbon_in/r_s_ratio_cell) * Cf * Gef_n2o * cn.g_to_kg * cn.gwp_n2o  # TODO This assumes non-mangrove. Need to make flexible?
+    ch4_flux_out = (carbon_in/r_s_ratio_cell) * Cf * Gef_ch4 * cn.g_to_kg * cn.gwp_ch4  # TODO This assumes non-mangrove. Need to make flexible?
+    n2o_flux_out = (carbon_in/r_s_ratio_cell) * Cf * Gef_n2o * cn.g_to_kg * cn.gwp_n2o  # TODO This assumes non-mangrove. Need to make flexible?
 
     # print(f"ch4_flux_out: {ch4_flux_out}; n2o_flux_out: {n2o_flux_out};")
 
@@ -176,10 +169,11 @@ def calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in):
     return c_gross_emissions_out, c_gross_removals_out, c_dens_out, gain_year_count
 
 
-# Gross and net fluxes and ending carbon stocks for tree converted to non-tree with and without fire.
+# Gross fluxes and ending carbon stocks for tree converted to non-tree with and without fire.
 # Non-CO2 gas emissions are only calculated if arguments for fires are supplied.
 @jit(nopython=True)
-def calc_T_NT(agc_rf, ef_by_pool, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, Cf=None, Gef_ch4=None, Gef_n2o=None):
+def calc_T_NT(node, burned_in_last_interval, agc_rf, ef_by_pool, forest_dist_last, r_s_ratio_cell, interval_end_year,
+              c_dens_in, post_dist_regrowth=None, Cf=None, Gef_ch4=None, Gef_n2o=None):
 
     # Retrieves the starting densities for each carbon pool from the input array
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
@@ -232,8 +226,23 @@ def calc_T_NT(agc_rf, ef_by_pool, forest_dist_last, r_s_ratio_cell, interval_end
     deadwood_c_dens_out = deadwood_c_dens_in - deadwood_c_gross_removals_out - deadwood_c_gross_emis_out
     litter_c_dens_out = litter_c_dens_in - litter_c_gross_removals_out - litter_c_gross_emis_out
 
-    # Step 6: Calculates non-CO2 gases, if required (as determined by fire-related argument to function)
-    ch4_flux_out, n2o_flux_out = fire_equations(agc_dens_in, r_s_ratio_cell, Cf, Gef_ch4, Gef_n2o)  # agc_dens_in can be any set of carbon pools
+    # Step 6: Calculates non-CO2 emissions (if relevant)
+    # Dummy non-CO2 emissions values
+    ch4_flux_out = 0
+    n2o_flux_out = 0
+
+    # Only assigns fire node code and calculates CH4 and N2O fluxes if pixel burned in the last interval
+    if burned_in_last_interval and Cf > 0 and Gef_ch4 > 0 and Gef_n2o > 0:
+
+        state_out = accrete_node(node, 1)
+
+        # Step 6: Calculates non-CO2 gases, if required (as determined by fire-related argument to function)
+        ch4_flux_out, n2o_flux_out = fire_equations(agc_dens_in, r_s_ratio_cell, Cf, Gef_ch4, Gef_n2o)  # agc_dens_in can be any set of carbon pools
+
+    # Node code if no fire in the last interval
+    else:
+
+        state_out = accrete_node(node, 2)
 
     # Step 7: Prepares outputs
     # Consolidates all gross fluxes from all carbon pools into arrays to reduce the number of arguments returned to the decision tree
@@ -243,7 +252,7 @@ def calc_T_NT(agc_rf, ef_by_pool, forest_dist_last, r_s_ratio_cell, interval_end
     c_dens_out = np.array([agc_dens_out, bgc_dens_out, deadwood_c_dens_out, litter_c_dens_out]).astype('float32')
     non_co2_fluxes_out = np.array([ch4_flux_out, n2o_flux_out]).astype('float32')
 
-    return c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out, gain_year_count
+    return state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out, gain_year_count
 
 
 # Gross and net fluxes and ending carbon stocks for trees remaining trees without disturbances
