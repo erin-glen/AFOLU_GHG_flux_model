@@ -172,14 +172,15 @@ def calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in):
 # Gross fluxes and ending carbon stocks for tree converted to non-tree with and without fire.
 # Non-CO2 gas emissions are only calculated if arguments for fires are supplied.
 @jit(nopython=True)
-def calc_T_NT(node, burned_in_last_interval, agc_rf, ef_by_pool, forest_dist_last, r_s_ratio_cell, interval_end_year,
-              c_dens_in, post_dist_regrowth=None, Cf=None, Gef_ch4=None, Gef_n2o=None):
+def calc_T_NT(node, burned_in_last_interval, agc_rf, ef_fire_CO2, ef_fire_non_CO2, ef_no_fire, forest_dist_last,
+              r_s_ratio_cell, interval_end_year, c_dens_in,
+              post_dist_regrowth=None, Cf=None, Gef_ch4=None, Gef_n2o=None):
 
     # Retrieves the starting densities for each carbon pool from the input array
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
 
     # Emission factor for each non-soil carbon pool
-    agc_ef, bgc_ef, deadwood_c_ef, litter_c_ef = unpack_stand_replacing_emission_factors(ef_by_pool)
+    agc_ef, bgc_ef, deadwood_c_ef, litter_c_ef = unpack_stand_replacing_emission_factors(ef_no_fire)
 
     ## Step 1: Calculates the number of years of carbon gin before loss occurred
     if forest_dist_last > 0:

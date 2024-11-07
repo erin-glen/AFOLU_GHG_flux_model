@@ -24,7 +24,122 @@ from ..utilities import log_utilities as lu
 from ..utilities import numba_utilities as nu
 
 
-import gc
+
+import math
+
+# Calculate non-CO2 emissions
+# Cf, Gef_ch4 and Gef_n2O default to -1 so that fire emissions calculations are not performed if no
+# arguments are supplied. This isn't a Pythonic approach but Numba doesn't allow =None as arguments.
+#TODO Make sure this is right? Should there be CO2 emissions from fire as well? Had some of that in the forest model?
+# Outstanding questions are highlighted in emission factor slides of model schematic.
+@jit(nopython=True)
+def fire_equations_local(carbon_in, ef_fire_CO2, ef_fire_non_CO2, r_s_ratio_cell, Cf=None, Gef_ch4=None, Gef_n2o=None):
+    # Cf is the combustion factor
+    # Gef_ch4 and Gef_n2o are the emission factors for their respective gases
+
+    # print(f"Carbon in: {carbon_in}; R:S: {r_s_ratio_cell}; Cf: {Cf}; Gef_ch4: {Gef_ch4}; GWP CH4: {cn.gwp_ch4}")
+
+    ch4_flux_out = (carbon_in/r_s_ratio_cell) * Cf * Gef_ch4 * cn.g_to_kg * cn.gwp_ch4  # TODO This assumes non-mangrove. Need to make flexible?
+    n2o_flux_out = (carbon_in/r_s_ratio_cell) * Cf * Gef_n2o * cn.g_to_kg * cn.gwp_n2o  # TODO This assumes non-mangrove. Need to make flexible?
+
+    # print(f"ch4_flux_out: {ch4_flux_out}; n2o_flux_out: {n2o_flux_out};")
+
+    return ch4_flux_out, n2o_flux_out
+
+
+
+# Gross fluxes and ending carbon stocks for tree converted to non-tree with and without fire.
+# Non-CO2 gas emissions are only calculated if arguments for fires are supplied.
+@jit(nopython=True)
+def calc_T_NT_local(node, burned_in_last_interval, agc_rf, ef_fire_CO2, ef_fire_non_CO2, ef_no_fire,
+                    forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in,
+                    post_dist_regrowth=None, Cf=None, Gef_ch4=None, Gef_n2o=None):
+
+    # Retrieves the starting densities for each carbon pool from the input array
+    agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = nu.unpack_starting_carbon_densities(c_dens_in)
+
+    # Non-fire emission factor for each non-soil carbon pool
+    agc_ef, bgc_ef, deadwood_c_ef, litter_c_ef = nu.unpack_stand_replacing_emission_factors(ef_no_fire)
+
+    ## Step 1: Calculates the number of years of carbon gin before loss occurred
+    if forest_dist_last > 0:
+        # If a forest disturbance was detected, the gain_year_count are the number of years until detection of the last disturbance.
+        # There is no growth in the year of disturbance or the years after.
+        # The - 1 at the excludes the disturbance year from the gain_year_count since we decided there are no removals in the disturbance year.
+        # For example, if the time interval is 2010-2015 and the disturbance is detected in 2013 (t-2),
+        # there should be 2 years of growth (years t-4 and t-3, 2011 and 2012).
+        # This table illustrates each case for the example interval of 2010-2015.
+        # 0 years         11               - ((2015              - 2000)                - 5) - 1   (year t-4)
+        # 1 years         12               - ((2015              - 2000)                - 5) - 1   (year t-3)
+        # 2 years         13               - ((2015              - 2000)                - 5) - 1   (year t-2)
+        # 3 years         14               - ((2015              - 2000)                - 5) - 1   (year t-1)
+        # 4 years         15               - ((2015              - 2000)                - 5) - 1   (year t)
+        gain_year_count = forest_dist_last - ((interval_end_year - cn.first_model_year) - cn.interval_years) - 1
+    else:
+        # If a forest disturbance was not detected, the disturbance is assumed to occur in the middle of the interval
+        # (year t-2), with removals until then (years t-4 and t-3). There are no removals in the year of assumed
+        # disturbance or the years after.
+        gain_year_count = math.floor(cn.interval_years/2)
+
+    # Step 2: Calculates gross removals by carbon pools. Gross removals are negative.
+    agc_gross_removals_out = (agc_rf * gain_year_count) * -1
+    bgc_gross_removals_out = float(agc_gross_removals_out) * r_s_ratio_cell
+    deadwood_c_gross_removals_out= cn.deadwood_c_NT_T_rf
+    litter_c_gross_removals_out= cn.litter_c_NT_T_rf
+
+    # Step 3: Calculates carbon densities at the year of loss by carbon pool
+    agc_pre_disturb = agc_dens_in - agc_gross_removals_out
+    bgc_pre_disturb = bgc_dens_in - bgc_gross_removals_out
+    deadwood_c_pre_disturb = deadwood_c_dens_in - deadwood_c_gross_removals_out
+    litter_c_pre_disturb = litter_c_dens_in - litter_c_gross_removals_out
+
+    # Step 4: Calculates gross emissions by carbon pools
+    agc_gross_emis_out = agc_pre_disturb * agc_ef
+    bgc_gross_emis_out = bgc_pre_disturb * bgc_ef
+    deadwood_c_gross_emis_out = deadwood_c_pre_disturb * deadwood_c_ef
+    litter_c_gross_emis_out = litter_c_pre_disturb * litter_c_ef
+
+    # Step 5: Calculates post-disturbance gross removals, if applicable (medium height veg and cropland)
+    #TODO Add post-disturbance removals where applicable
+
+    # Step 6: Calculates ending carbon densities by carbon pool.
+    # Starts with carbon density in, adds gross removals (subtracts negative value), subtracts emissions
+    agc_dens_out = agc_dens_in - agc_gross_removals_out - agc_gross_emis_out
+    bgc_dens_out = bgc_dens_in - bgc_gross_removals_out - bgc_gross_emis_out
+    deadwood_c_dens_out = deadwood_c_dens_in - deadwood_c_gross_removals_out - deadwood_c_gross_emis_out
+    litter_c_dens_out = litter_c_dens_in - litter_c_gross_removals_out - litter_c_gross_emis_out
+
+    # Step 7: Calculates non-CO2 emissions (if relevant)
+    # Dummy non-CO2 emissions values
+    ch4_flux_out = 0
+    n2o_flux_out = 0
+
+    # Only assigns fire node code and calculates CH4 and N2O fluxes if pixel burned in the last interval
+    if burned_in_last_interval:
+
+        state_out = nu.accrete_node(node, 1)
+
+        # Step 6: Calculates non-CO2 gases, if required (as determined by fire-related argument to function)
+        # agc_dens_in can be any set of carbon pools
+        ch4_flux_out, n2o_flux_out = fire_equations_local(agc_dens_in, ef_fire_CO2, ef_fire_non_CO2,
+                                                          r_s_ratio_cell, Cf, Gef_ch4, Gef_n2o)
+
+    # Node code if no fire in the last interval
+    else:
+
+        state_out = nu.accrete_node(node, 2)
+
+    # Step 8: Prepares outputs
+    # Consolidates all gross fluxes from all carbon pools into arrays to reduce the number of arguments returned to the decision tree
+    # Must specify float32 because numba is quite particular about datatypes
+    c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')
+    c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')
+    c_dens_out = np.array([agc_dens_out, bgc_dens_out, deadwood_c_dens_out, litter_c_dens_out]).astype('float32')
+    non_co2_fluxes_out = np.array([ch4_flux_out, n2o_flux_out]).astype('float32')
+
+    return state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out, gain_year_count
+
+
 
 
 # Function to calculate LULUCF fluxes and carbon densities
@@ -429,22 +544,17 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
                         node = nu.accrete_node(node, 1)
                         if all_oil_palm:  # Full loss of oil palm (211->2111/2112)
                             node = nu.accrete_node(node, 1)
-                            agc_rf = 2.2
-                            ef = cn.biomass_emissions_only
-                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
-                                node, burned_in_last_interval, agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0.5, 4.7, 0.26)
-                            # if burned_in_last_interval:  # Full loss of oil palm (burned) (2111)
-                            #     state_out = nu.accrete_node(node, 1)
-                            #     agc_rf = 2.2
-                            #     ef = cn.biomass_emissions_only
-                            #     c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
-                            #         agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0.5, 4.7, 0.26)
-                            # else:  # Full loss of oil palm (not burned) (2112)
-                            #     state_out = nu.accrete_node(node, 2)
-                            #     agc_rf = 2.2
-                            #     ef = cn.agc_emissions_only
-                            #     c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
-                            #         agc_rf, ef, forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in, 0, 0, 0, 0)
+                            agc_rf = cn.oil_palm_agc_rf
+                            ef_fire_CO2 = cn.agc_emissions_only
+                            ef_fire_non_CO2 = cn.agc_emissions_only
+                            ef_no_fire = cn.biomass_emissions_only
+                            # state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                            #     node, burned_in_last_interval, agc_rf, ef_fire_CO2, ef_fire_non_CO2, ef_no_fire, forest_dist_last, r_s_ratio_cell,
+                            #     interval_end_year, c_dens_in, 0, 0.5, 4.7, 0.26)
+                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = calc_T_NT_local(
+                                node, burned_in_last_interval, agc_rf, ef_fire_CO2, ef_fire_non_CO2, ef_no_fire, forest_dist_last, r_s_ratio_cell,
+                                interval_end_year, c_dens_in, 0, 0.5, 4.7, 0.26)
+
                     #     else:  # Full loss of non-oil palm planted trees (212)
                     #         node = nu.accrete_node(node, 2)
                     #         if LC_curr == cn.cropland:  # Plantation harvested as cropland (2121)
