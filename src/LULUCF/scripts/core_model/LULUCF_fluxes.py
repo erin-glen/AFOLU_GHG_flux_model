@@ -29,31 +29,25 @@ import math
 
 # Calculate non-CO2 emissions
 # Cf, Gef_ch4 and Gef_n2O default to -1 so that fire emissions calculations are not performed if no
-# arguments are supplied. This isn't a Pythonic approach but Numba doesn't allow =None as arguments.
-#TODO Make sure this is right? Should there be CO2 emissions from fire as well? Had some of that in the forest model?
-# Outstanding questions are highlighted in emission factor slides of model schematic.
+# arguments are supplied.
+# Cf is the combustion factor
+# Gef_co2, Gef_ch4 and Gef_n2o are the emission factors for their respective gases.
 @jit(nopython=True)
-def fire_equations_local(carbon_in, ef_fire_CO2, ef_fire_non_CO2,
-                         Cf=None, Gef_co2=None, Gef_ch4=None, Gef_n2o=None):
-    # Cf is the combustion factor
-    # Gef_co2, Gef_ch4 and Gef_n2o are the emission factors for their respective gases
+def non_CO2_fire_equations_local(carbon_in, Cf, Gef_ch4, Gef_n2o):
 
     # print(f"Carbon in: {carbon_in}; R:S: {r_s_ratio_cell}; Cf: {Cf}; Gef_ch4: {Gef_ch4}; GWP CH4: {cn.gwp_ch4}")
 
-    agc_ef_non_CO2, bgc_ef_non_CO2, deadwood_c_ef_non_CO2, litter_c_ef_non_CO2 = nu.unpack_stand_replacing_emission_factors(ef_fire_non_CO2)
-
-    ch4_flux_out = (carbon_in/cn.biomass_to_carbon_non_mangrove) * Cf * Gef_ch4 * cn.g_to_kg * cn.gwp_ch4  # TODO This assumes non-mangrove. Need to make flexible?
-    n2o_flux_out = (carbon_in/cn.biomass_to_carbon_non_mangrove) * Cf * Gef_n2o * cn.g_to_kg * cn.gwp_n2o  # TODO This assumes non-mangrove. Need to make flexible?
+    ch4_flux_out = (carbon_in/cn.biomass_to_carbon_non_mangrove) * Cf * Gef_ch4 * cn.g_to_kg * cn.gwp_ch4
+    n2o_flux_out = (carbon_in/cn.biomass_to_carbon_non_mangrove) * Cf * Gef_n2o * cn.g_to_kg * cn.gwp_n2o
 
     # print(f"ch4_flux_out: {ch4_flux_out}; n2o_flux_out: {n2o_flux_out};")
 
     return ch4_flux_out, n2o_flux_out
 
 
-
 # Gross fluxes and ending carbon stocks for tree converted to non-tree with and without fire.
-# Non-CO2 gas emissions are only calculated if arguments for fires are supplied.
-# @jit(nopython=True)
+# Non-CO2 gas emissions are only calculated if fire was detected during the interval.
+@jit(nopython=True)
 def calc_T_NT_local(node, burned_in_last_interval, agc_rf, ef_fire_CO2, ef_fire_non_CO2, ef_no_fire,
                     forest_dist_last, r_s_ratio_cell, interval_end_year, c_dens_in,
                     post_dist_regrowth=None, Cf=None, Gef_co2=None, Gef_ch4=None, Gef_n2o=None):
@@ -99,9 +93,11 @@ def calc_T_NT_local(node, burned_in_last_interval, agc_rf, ef_fire_CO2, ef_fire_
     deadwood_c_pre_disturb = deadwood_c_dens_in - deadwood_c_gross_removals_out
     litter_c_pre_disturb = litter_c_dens_in - litter_c_gross_removals_out
 
-    # Step 4: Calculates gross emissions by carbon pools
+    # Step 4: Calculates CO2 gross emissions by carbon pools
 
-    # Calculates CO2 emissions from fire using fire constants if a Gef for CO2 is supplied and if there was fire during the interval
+    # Calculates CO2 emissions from fire for each C pool using fire constants
+    # if a Gef for CO2 is supplied and if there was fire during the interval.
+    # This is only used for forest loss with fires where part of the C pools are combusted.
     if Gef_co2 and burned_in_last_interval:
 
         #TODO Do these equations actually equal gross emissions in Mg C/ha? I'm not sure the units are correct.
@@ -110,6 +106,8 @@ def calc_T_NT_local(node, burned_in_last_interval, agc_rf, ef_fire_CO2, ef_fire_
         deadwood_c_gross_emis_out = ((deadwood_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * deadwood_c_ef_CO2
         litter_c_gross_emis_out = ((litter_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * litter_c_ef_CO2
 
+    # Calculates CO2 emissions from forest loss for each C pool when no fire is detected
+    # or when fire is detected but entire C pools are assumed to be combusted.
     else:
 
         agc_gross_emis_out = agc_pre_disturb * agc_ef_CO2
@@ -132,17 +130,21 @@ def calc_T_NT_local(node, burned_in_last_interval, agc_rf, ef_fire_CO2, ef_fire_
     ch4_flux_out = 0
     n2o_flux_out = 0
 
-    # Only assigns fire node code and calculates CH4 and N2O fluxes if pixel burned in the last interval
+    # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
     if burned_in_last_interval:
 
         state_out = nu.accrete_node(node, 1)
 
-        # Step 6: Calculates non-CO2 gases, if required (as determined by fire-related argument to function)
-        # agc_dens_in can be any set of carbon pools
-        ch4_flux_out, n2o_flux_out = fire_equations_local(agc_dens_in, ef_fire_CO2, ef_fire_non_CO2,
-                                                          Cf, Gef_co2, Gef_ch4, Gef_n2o)
+        c_pre_disturb = np.array([agc_pre_disturb, bgc_pre_disturb, deadwood_c_pre_disturb, litter_c_pre_disturb])
 
-    # Node code if no fire in the last interval
+        c_pools_for_fire = np.where(ef_fire_non_CO2 == 1, c_pre_disturb, 0)
+
+        c_pools_for_fire_total = np.sum(c_pools_for_fire)
+
+        # agc_dens_in can be any set of carbon pools
+        ch4_flux_out, n2o_flux_out = non_CO2_fire_equations_local(c_pools_for_fire_total, Cf, Gef_ch4, Gef_n2o)
+
+    # Node code if no fire in the last interval. No CH4 and N2O emissions calculated.
     else:
 
         state_out = nu.accrete_node(node, 2)
@@ -155,18 +157,19 @@ def calc_T_NT_local(node, burned_in_last_interval, agc_rf, ef_fire_CO2, ef_fire_
     c_dens_out = np.array([agc_dens_out, bgc_dens_out, deadwood_c_dens_out, litter_c_dens_out]).astype('float32')
     non_co2_fluxes_out = np.array([ch4_flux_out, n2o_flux_out]).astype('float32')
 
-    if Gef_co2 and burned_in_last_interval and (agc_dens_in>62.96 and agc_dens_in<62.99):
-
-        print("agc_dens_in:", agc_dens_in)
-        print("agc_gross_removals_out:", agc_gross_removals_out)
-        print("agc_pre_disturb:", agc_pre_disturb)
-        print("biomass_to_carbon_non_mangrove:", cn.biomass_to_carbon_non_mangrove)
-        print("Cf:", Cf)
-        print("Gef_co2:", Gef_co2)
-        print()
-        print("agc_gross_emis_out:", agc_gross_emis_out)
-        print("agc_dens_out:", agc_dens_out)
-        os.quit()
+    # # For testing
+    # if Gef_co2 and burned_in_last_interval and (agc_dens_in>62.96 and agc_dens_in<62.99):
+    #
+    #     print("agc_dens_in:", agc_dens_in)
+    #     print("agc_gross_removals_out:", agc_gross_removals_out)
+    #     print("agc_pre_disturb:", agc_pre_disturb)
+    #     print("biomass_to_carbon_non_mangrove:", cn.biomass_to_carbon_non_mangrove)
+    #     print("Cf:", Cf)
+    #     print("Gef_co2:", Gef_co2)
+    #     print()
+    #     print("agc_gross_emis_out:", agc_gross_emis_out)
+    #     print("agc_dens_out:", agc_dens_out)
+    #     os.quit()
 
     return state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out, gain_year_count
 
@@ -175,7 +178,7 @@ def calc_T_NT_local(node, burned_in_last_interval, agc_rf, ef_fire_CO2, ef_fire_
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-# @jit(nopython=True)
+@jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_RFs, is_final):
 
     # Separate dictionaries for output numpy arrays of each datatype, named by output data type).
@@ -942,8 +945,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_float32, primary_forest_
         out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"] = (deadwood_c_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
         out_dict_float32[f"{cn.litter_c_gross_removals_pattern}_{year_range}"] = (litter_c_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
 
-        out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = ch4_gross_emis_out_block.copy()
-        out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = n2o_gross_emis_out_block.copy()
+        out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = (ch4_gross_emis_out_block/cn.interval_years).copy()
+        out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = (n2o_gross_emis_out_block/cn.interval_years).copy()
 
         out_dict_float32[f"{cn.agc_dens_pattern}_{interval_end_year}"] = agc_dens_block.copy()
         out_dict_float32[f"{cn.bgc_dens_pattern}_{interval_end_year}"] = bgc_dens_block.copy()
