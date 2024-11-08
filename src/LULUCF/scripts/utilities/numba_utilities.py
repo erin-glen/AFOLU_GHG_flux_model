@@ -144,6 +144,7 @@ def calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in):
     # Step 2: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
     agc_gross_removals_out = (agc_rf * gain_year_count) * -1
     bgc_gross_removals_out = float(agc_gross_removals_out) * r_s_ratio_cell
+    #TODO add deadwood and litter RF for forest that was previously not forest
     deadwood_c_gross_removals_out = cn.deadwood_c_NT_T_rf
     litter_c_gross_removals_out = cn.litter_c_NT_T_rf
 
@@ -275,6 +276,31 @@ def calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in):
     deadwood_c_dens_out = deadwood_c_dens_in - deadwood_c_flux_out
     litter_c_dens_out = litter_c_dens_in - litter_c_flux_out
 
+    ####FROM F->NF-- POTENTIALLY REUSE HERE BUT NOT RELEVANT THERE ANYMORE.
+    # # Step 4: Calculates CO2 gross emissions by carbon pools
+    #
+    # # Calculates CO2 emissions from fire for each C pool using fire emission factors
+    # # if a Gef for CO2 is supplied AND if there was fire during the interval.
+    # # This is only used for forest loss with fires where just parts of the C pools are combusted
+    # # (as opposed to entire C pools being combusted).
+    # # Supplying a Gef_CO2 argument indicates that only some of the carbon is combusted.
+    # if Gef_co2 and burned_in_last_interval:
+    #
+    #     #TODO Do these equations actually equal gross emissions in Mg C/ha? I'm not sure the units are correct. Could be CO2/ha or something else.
+    #     agc_gross_emis_out = ((agc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * agc_ef_CO2
+    #     bgc_gross_emis_out = ((bgc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * bgc_ef_CO2
+    #     deadwood_c_gross_emis_out = ((deadwood_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * deadwood_c_ef_CO2
+    #     litter_c_gross_emis_out = ((litter_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * litter_c_ef_CO2
+    #
+    # # Calculates CO2 emissions from forest loss for each C pool when no fire is detected
+    # # or when fire is detected but entire C pools are assumed to be combusted (no Gef_CO2 supplied).
+    # else:
+    #
+    #     agc_gross_emis_out = agc_pre_disturb * agc_ef_CO2
+    #     bgc_gross_emis_out = bgc_pre_disturb * bgc_ef_CO2
+    #     deadwood_c_gross_emis_out = deadwood_c_pre_disturb * deadwood_c_ef_CO2
+    #     litter_c_gross_emis_out = litter_c_pre_disturb * litter_c_ef_CO2
+
     # Must specify float32 because numba is quite particular about datatypes
     c_fluxes_out = np.array([agc_flux_out, bgc_flux_out, deadwood_c_flux_out, litter_c_flux_out]).astype('float32')
     c_dens_out = np.array([agc_dens_out, bgc_dens_out, deadwood_c_dens_out, litter_c_dens_out]).astype('float32')
@@ -286,6 +312,32 @@ def calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in):
 #TODO include sequence of fluxes for disturbances: pre-disturb removals, emissions, post-disturb removals
 @jit(nopython=True)
 def calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, Cf=None, Gef_ch4=None, Gef_n2o=None):
+    ####FROM F->NF-- POTENTIALLY REUSE HERE BUT NOT RELEVANT THERE ANYMORE.
+    # # Step 4: Calculates CO2 gross emissions by carbon pools
+    #
+    # # Calculates CO2 emissions from fire for each C pool using fire emission factors
+    # # if a Gef for CO2 is supplied AND if there was fire during the interval.
+    # # This is only used for forest loss with fires where just parts of the C pools are combusted
+    # # (as opposed to entire C pools being combusted).
+    # # Supplying a Gef_CO2 argument indicates that only some of the carbon is combusted.
+    # if Gef_co2 and burned_in_last_interval:
+    #
+    #     #TODO Do these equations actually equal gross emissions in Mg C/ha? I'm not sure the units are correct. Could be CO2/ha or something else.
+    #     agc_gross_emis_out = ((agc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * agc_ef_CO2
+    #     bgc_gross_emis_out = ((bgc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * bgc_ef_CO2
+    #     deadwood_c_gross_emis_out = ((deadwood_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * deadwood_c_ef_CO2
+    #     litter_c_gross_emis_out = ((litter_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * litter_c_ef_CO2
+    #
+    # # Calculates CO2 emissions from forest loss for each C pool when no fire is detected
+    # # or when fire is detected but entire C pools are assumed to be combusted (no Gef_CO2 supplied).
+    # else:
+    #
+    #     agc_gross_emis_out = agc_pre_disturb * agc_ef_CO2
+    #     bgc_gross_emis_out = bgc_pre_disturb * bgc_ef_CO2
+    #     deadwood_c_gross_emis_out = deadwood_c_pre_disturb * deadwood_c_ef_CO2
+    #     litter_c_gross_emis_out = litter_c_pre_disturb * litter_c_ef_CO2
+
+
     agc_dens_in = c_dens_in[0]
     bgc_dens_in = c_dens_in[1]
     deadwood_c_dens_in = c_dens_in[2]
@@ -317,6 +369,30 @@ def calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, Cf=No
 #TODO include sequence of fluxes for disturbances: pre-disturb removals, emissions, post-disturb removals
 @jit(nopython=True)
 def calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, Cf=None, Gef_ch4=None, Gef_n2o=None):
+    ####FROM F->NF-- POTENTIALLY REUSE HERE BUT NOT RELEVANT THERE ANYMORE.
+    # # Step 4: Calculates CO2 gross emissions by carbon pools
+    #
+    # # Calculates CO2 emissions from fire for each C pool using fire emission factors
+    # # if a Gef for CO2 is supplied AND if there was fire during the interval.
+    # # This is only used for forest loss with fires where just parts of the C pools are combusted
+    # # (as opposed to entire C pools being combusted).
+    # # Supplying a Gef_CO2 argument indicates that only some of the carbon is combusted.
+    # if Gef_co2 and burned_in_last_interval:
+    #
+    #     #TODO Do these equations actually equal gross emissions in Mg C/ha? I'm not sure the units are correct. Could be CO2/ha or something else.
+    #     agc_gross_emis_out = ((agc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * agc_ef_CO2
+    #     bgc_gross_emis_out = ((bgc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * bgc_ef_CO2
+    #     deadwood_c_gross_emis_out = ((deadwood_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * deadwood_c_ef_CO2
+    #     litter_c_gross_emis_out = ((litter_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) * litter_c_ef_CO2
+    #
+    # # Calculates CO2 emissions from forest loss for each C pool when no fire is detected
+    # # or when fire is detected but entire C pools are assumed to be combusted (no Gef_CO2 supplied).
+    # else:
+    #
+    #     agc_gross_emis_out = agc_pre_disturb * agc_ef_CO2
+    #     bgc_gross_emis_out = bgc_pre_disturb * bgc_ef_CO2
+    #     deadwood_c_gross_emis_out = deadwood_c_pre_disturb * deadwood_c_ef_CO2
+    #     litter_c_gross_emis_out = litter_c_pre_disturb * litter_c_ef_CO2
 
     agc_dens_in = c_dens_in[0]
     bgc_dens_in = c_dens_in[1]
