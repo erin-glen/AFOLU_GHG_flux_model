@@ -80,6 +80,11 @@ non_tropical_litter_c_ratio = 0.04
 # From IPCC 2019 Refinement Cropland Table 5.3.
 oil_palm_agc_rf = 2.4
 
+# One-time annual cropland removal factor
+#TODO check units
+#TODO add source
+cropland_rf = 4.7
+
 # Aboveground carbon removal factor for trees outside forests (Mg C/ha/yr), assuming that the entire hectare is ToF
 #TODO Confirm value and units and add source
 trees_outside_forests_agc_rf_max = 2.8
@@ -286,7 +291,7 @@ soil_c_2000_pattern = "soil_C_full_extent_2000_Mg_C_ha"
 
 land_state_pattern = "land_state_node"
 
-agc_rf_pattern = "AGC_removal_factor_UNITS_TBD" #TODO Specify RF units here
+agc_rf_pre_dist_pattern = "AGC_removal_factor__MgC_ha_yr" #TODO Specify RF units here
 
 # Gross and net fluxes
 agc_gross_emis_pattern = "AGC_gross_emissions__MgCO2_ha_yr"
