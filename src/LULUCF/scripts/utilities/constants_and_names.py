@@ -130,8 +130,9 @@ g_to_kg = 10 ** -3
 # Which carbon pools are emitted under different circumstances for full tree loss: AGC, BGC, deadwood C, litter C.
 # Need to specify numpy datatype because they're used in the Numba functions, which need explicit datatypes
 agc_emissions_only = np.array([1, 0, 0, 0]).astype('uint8')
-all_but_bgc_emissions = np.array([1, 0, 1, 1]).astype('uint8')
 biomass_emissions_only = np.array([1, 1, 0, 0]).astype('uint8')
+all_but_bgc_emissions = np.array([1, 0, 1, 1]).astype('uint8')
+deadwood_litter_emissions = np.array([0, 0, 1, 1]).astype('uint8')
 all_non_soil_pools = np.array([1, 1, 1, 1]).astype('uint8')
 
 SDPT_oil_palm_code = 1

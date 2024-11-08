@@ -101,7 +101,7 @@ def unpack_starting_carbon_densities(c_dens_in):
 
 # Returns the emission factor for each carbon pool
 @jit(nopython=True)
-def unpack_stand_replacing_emission_factors(ef):
+def unpack_emission_factors(ef):
 
     agc_ef = np.float32(ef[0])
     bgc_ef = np.float32(ef[1])
@@ -180,7 +180,7 @@ def calc_T_NT(node, burned_in_last_interval, agc_rf, ef_fire_CO2, ef_fire_non_CO
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
 
     # Emission factor for each non-soil carbon pool
-    agc_ef, bgc_ef, deadwood_c_ef, litter_c_ef = unpack_stand_replacing_emission_factors(ef_no_fire)
+    agc_ef, bgc_ef, deadwood_c_ef, litter_c_ef = unpack_emission_factors(ef_no_fire)
 
     ## Step 1: Calculates the number of years of carbon gin before loss occurred
     if forest_dist_last > 0:
