@@ -87,6 +87,145 @@ def create_typed_dicts(layers):
     return typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32
 
 
+# Checks if pixel does not have tall vegetation. If so, updates the value to the most recent year without tall vegetation.
+# Tall vegetation/non-tall vegetation is based on the composite land cover maps, not the canopy height maps.
+# 0=Always tall vegetation so far. Other values represent the last year of non-tall vegetation.
+# Theoretically, checking whether pixels are ever not forest could be done at the chunk level rather
+# than at the pixel level (as done here). However, numba doesn't allow the conditional operation
+# that would have to be applied to numpy arrays, so I'm doing it at the pixel level instead.
+# I have no idea if checking if pixels have ever not been forest is faster or slower at the pixel level
+# than at the numpy array level, but the array-level operation isn't even an option.
+@jit(nopython=True)
+def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_forest, interval_end_year):
+
+    # For the first interval, the land cover in 2000 has to be checked for tall vegetation as well
+    if interval_end_year == (cn.first_model_year + cn.interval_years):
+
+        # Criteria for excluding tall vegetation land cover
+        not_tall_veg_condition = (
+                (LC_prev < cn.tree_dry_min_height_code) |
+                ((LC_prev > cn.tree_dry_max_height_code) & (LC_prev < cn.tree_wet_min_height_code))
+                | (LC_prev > cn.tree_wet_max_height_code)
+        )
+
+        # Sets cell to the model start year wherever land cover is not tall vegetation
+        if not_tall_veg_condition == 1:
+            most_recent_year_not_forest = cn.first_model_year
+
+
+    # Checks the current end of interval land cover
+    # Criteria for excluding tall vegetation land cover
+    not_tall_veg_condition = (
+            (LC_curr < cn.tree_dry_min_height_code) |
+            ((LC_curr > cn.tree_dry_max_height_code) & (LC_curr < cn.tree_wet_min_height_code))
+            | (LC_curr > cn.tree_wet_max_height_code)
+    )
+
+    # Sets cell to interval end year wherever land cover is not tall vegetation
+    if not_tall_veg_condition == 1:
+        most_recent_year_not_forest = interval_end_year
+
+    return most_recent_year_not_forest
+
+
+# Calculates the number of years of forest regrowth since the last year of not-tall vegetation
+@jit(nopython=True)
+def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_forest, tall_veg_curr, years_of_forest_regrowth):
+
+    # Determines if the number of years of regrowth should be calculated.
+    # Condition 1: The end of the interval must be after the last year that was not tall vegetation,
+    # i.e. there was not tall vegetation previously but there is at the end of this interval (indicating regrowth).
+    # Condition 2: There must have been some year that was not forest,
+    # i.e. the years of regrowth is only relevant when there was not forest some year.
+    if (interval_end_year > most_recent_year_not_forest) & (most_recent_year_not_forest > 0):
+
+        # Calculates the number of years of regrowth since the last year that was not forest
+        years_of_forest_regrowth = (interval_end_year - most_recent_year_not_forest)
+
+    # Resets the growth year counter in cases where there was tall vegetation and then there wasn't in the next interval.
+    # Otherwise, the years counter would continue accruing even if tall veg was lost.
+    if not tall_veg_curr:
+        years_of_forest_regrowth = 0
+
+    return years_of_forest_regrowth
+
+
+# Calculates the maximum canopy height since the last time a pixel was classified as not tall vegetation land cover.
+# This is used to determine whether current height has decreased significantly from this maximum height.
+@jit(nopython=True)
+def calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, vegetation_height_so_far_cell, years_so_far_cell):
+
+    # Determines the maximum height so far if the pixel has been tall vegetation land cover since the beginning of the model
+    if most_recent_year_not_tall_veg == 0:
+
+        # The maximum vegetation height through all intervals so far
+        max_height_since_last_time_not_tall_veg = max(vegetation_height_so_far_cell)
+
+    # Determines the maximum height so far if the pixel hasn't had tall vegetation land cover at least one year since the beginning of the model
+    else:
+
+        heights_since_last_time_not_tall_veg = []
+
+        # Loops over the years and corresponding heights to only get heights that are after the most recent
+        # non-tall vegetation year.
+        # This could be done more elegantly with conditional numpy arrays but that approach
+        # isn't supported in the numba function, unfortunately.
+        # https://chatgpt.com/share/e/6718fb20-48d8-800a-9eb2-d751bd6b1a8f
+        for i in range(len(years_so_far_cell)):
+            if years_so_far_cell[i] > most_recent_year_not_tall_veg:
+                heights_since_last_time_not_tall_veg.append(vegetation_height_so_far_cell[i])
+
+        # In case the pixel is currently non-tall vegetation land cover, so there are no intervals since then
+        # and therefore no heights
+        if len(heights_since_last_time_not_tall_veg) == 0:
+
+            # Uses the current vegetation height (which would exist when the land cover is not tall vegetation
+            # but there is still tall vegetation in the individual tree height layer)
+            max_height_since_last_time_not_tall_veg = vegetation_height_so_far_cell[-1]
+            # max_height_since_last_time_not_tall_veg = 0
+
+        # When the pixel was previously non-tall vegetation but is now tall vegetation,
+        # so there are intervals since then.
+        else:
+
+            # The maximum height in the years since the last non-tall vegetation land cover interval
+            max_height_since_last_time_not_tall_veg = max(heights_since_last_time_not_tall_veg)
+
+    return max_height_since_last_time_not_tall_veg
+
+
+# Calculates the ratio of deadwood C:AGC and litter C:AGC based on climate domain, elevation, and precip
+# for natural, terrestrial forests.
+# Deadwood and litter carbon as fractions of AGC are from
+# https://cdm.unfccc.int/methodologies/ARmethodologies/tools/ar-am-tool-12-v3.0.pdf
+# "Clean Development Mechanism A/R Methodological Tool:
+# Estimation of carbon stocks and change in carbon stocks in dead wood and litter in A/R CDM project activities version 03.0"
+# Tables on pages 18 (deadwood) and 19 (litter).
+# They depend on the climate domain, elevation, and precipitation.
+@jit(nopython=True)
+def calc_deadwood_litter_ratios(elevation, climate_domain, precipitation):
+
+    if climate_domain == 1:  # Tropical/subtropical
+        if elevation <= 2000:  # Low elevation
+            if precipitation <= 1000:  # Low precipitation or no precip raster
+                deadwood_c_ratio = cn.tropical_low_elev_low_precip_deadwood_c_ratio
+                litter_c_ratio = cn.tropical_low_elev_low_precip_litter_c_ratio
+            elif ((precipitation > 1000) and (precipitation <= 1600)):  # Medium precipitation
+                deadwood_c_ratio = cn.tropical_low_elev_med_precip_deadwood_c_ratio
+                litter_c_ratio = cn.tropical_low_elev_med_precip_litter_c_ratio
+            else:  # High precipitation
+                deadwood_c_ratio = cn.tropical_low_elev_high_precip_deadwood_c_ratio
+                litter_c_ratio = cn.tropical_low_elev_high_precip_litter_c_ratio
+        else:  # High elevation
+            deadwood_c_ratio = cn.tropical_high_elev_deadwood_c_ratio
+            litter_c_ratio = cn.tropical_high_elev_litter_c_ratio
+    else:  # Temperate/boreal
+        deadwood_c_ratio = cn.non_tropical_deadwood_c_ratio
+        litter_c_ratio = cn.non_tropical_litter_c_ratio
+
+    return float(deadwood_c_ratio), float(litter_c_ratio)
+
+
 # Returns the starting carbon density for each carbon pool
 @jit(nopython=True)
 def unpack_starting_carbon_densities(c_dens_in):
@@ -131,7 +270,7 @@ def non_CO2_fire_equations(carbon_in, Cf, Gef_ch4, Gef_n2o):
 
 # Gross and net fluxes and ending carbon stocks for non-tree converted to tree
 @jit(nopython=True)
-def calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in, deadwood_c_ratio=None, litter_c_ratio=None, bgc_rf=None):
+def calc_NT_T(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio=None, litter_c_ratio=None):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
@@ -150,11 +289,7 @@ def calc_NT_T(agc_rf, r_s_ratio_cell, c_dens_in, deadwood_c_ratio=None, litter_c
         litter_c_ratio = 0
 
     agc_gross_removals_out = float((agc_rf * gain_year_count) * -1)  #float() necessary for Numba typing
-    # If a BGC RF is supplied (for SDPT only) it is used instead of deriving BGC gross removals from BGC:AGC
-    if bgc_rf:
-        bgc_gross_removals_out = float((bgc_rf * gain_year_count) * -1)
-    else:
-        bgc_gross_removals_out = agc_gross_removals_out * r_s_ratio_cell
+    bgc_gross_removals_out = float((bgc_rf * gain_year_count) * -1)  #float() necessary for Numba typing
     deadwood_c_gross_removals_out = agc_gross_removals_out * deadwood_c_ratio
     litter_c_gross_removals_out = agc_gross_removals_out * litter_c_ratio
 
@@ -224,17 +359,16 @@ def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c
 
     # Step 2: Calculates gross removals by carbon pools. Gross removals are negative.
     # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest only).
-    # Thus, we need to check whether the pixel was non-tall vegetation at some point during the model.
-    # If no deadwood C:AGC or litter C:AGC are supplied (e.g., for SDPT),
-    # assume 0, and thus no removals to deadwood or litter.
-    if most_recent_year_not_tall_veg >= cn.first_model_year:
+    # Thus, we need to check whether the pixel was non-tall vegetation at some point during the model before the end of this interval.
+    # If no deadwood C:AGC or litter C:AGC are supplied (e.g., for SDPT), assume 0, and thus no removals to deadwood or litter.
+    if (most_recent_year_not_tall_veg >= cn.first_model_year) or (most_recent_year_not_tall_veg < interval_end_year):
         if not deadwood_c_ratio:
             deadwood_c_ratio = 0
         if not litter_c_ratio:
             litter_c_ratio = 0
 
-    agc_gross_removals_out = float((agc_rf * gain_year_count) * -1)
-    bgc_gross_removals_out = float((bgc_rf * gain_year_count) * -1)
+    agc_gross_removals_out = float((agc_rf * gain_year_count) * -1) #float() necessary for Numba typing
+    bgc_gross_removals_out = float((bgc_rf * gain_year_count) * -1) #float() necessary for Numba typing
     deadwood_c_gross_removals_out= agc_gross_removals_out * deadwood_c_ratio
     litter_c_gross_removals_out= agc_gross_removals_out * litter_c_ratio
 
@@ -490,142 +624,3 @@ def calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, Cf=None, 
     non_co2_fluxes_out = np.array([ch4_flux_out, n2o_flux_out]).astype('float32')
 
     return c_fluxes_out, non_co2_fluxes_out, c_dens_out
-
-
-# Checks if pixel does not have tall vegetation. If so, updates the value to the most recent year without tall vegetation.
-# Tall vegetation/non-tall vegetation is based on the composite land cover maps, not the canopy height maps.
-# 0=Always tall vegetation so far. Other values represent the last year of non-tall vegetation.
-# Theoretically, checking whether pixels are ever not forest could be done at the chunk level rather
-# than at the pixel level (as done here). However, numba doesn't allow the conditional operation
-# that would have to be applied to numpy arrays, so I'm doing it at the pixel level instead.
-# I have no idea if checking if pixels have ever not been forest is faster or slower at the pixel level
-# than at the numpy array level, but the array-level operation isn't even an option.
-@jit(nopython=True)
-def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_forest, interval_end_year):
-
-    # For the first interval, the land cover in 2000 has to be checked for tall vegetation as well
-    if interval_end_year == (cn.first_model_year + cn.interval_years):
-
-        # Criteria for excluding tall vegetation land cover
-        not_tall_veg_condition = (
-                (LC_prev < cn.tree_dry_min_height_code) |
-                ((LC_prev > cn.tree_dry_max_height_code) & (LC_prev < cn.tree_wet_min_height_code))
-                | (LC_prev > cn.tree_wet_max_height_code)
-        )
-
-        # Sets cell to the model start year wherever land cover is not tall vegetation
-        if not_tall_veg_condition == 1:
-            most_recent_year_not_forest = cn.first_model_year
-
-
-    # Checks the current end of interval land cover
-    # Criteria for excluding tall vegetation land cover
-    not_tall_veg_condition = (
-            (LC_curr < cn.tree_dry_min_height_code) |
-            ((LC_curr > cn.tree_dry_max_height_code) & (LC_curr < cn.tree_wet_min_height_code))
-            | (LC_curr > cn.tree_wet_max_height_code)
-    )
-
-    # Sets cell to interval end year wherever land cover is not tall vegetation
-    if not_tall_veg_condition == 1:
-        most_recent_year_not_forest = interval_end_year
-
-    return most_recent_year_not_forest
-
-
-# Calculates the number of years of forest regrowth since the last year of not-tall vegetation
-@jit(nopython=True)
-def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_forest, tall_veg_curr, years_of_forest_regrowth):
-
-    # Determines if the number of years of regrowth should be calculated.
-    # Condition 1: The end of the interval must be after the last year that was not tall vegetation,
-    # i.e. there was not tall vegetation previously but there is at the end of this interval (indicating regrowth).
-    # Condition 2: There must have been some year that was not forest,
-    # i.e. the years of regrowth is only relevant when there was not forest some year.
-    if (interval_end_year > most_recent_year_not_forest) & (most_recent_year_not_forest > 0):
-
-        # Calculates the number of years of regrowth since the last year that was not forest
-        years_of_forest_regrowth = (interval_end_year - most_recent_year_not_forest)
-
-    # Resets the growth year counter in cases where there was tall vegetation and then there wasn't in the next interval.
-    # Otherwise, the years counter would continue accruing even if tall veg was lost.
-    if not tall_veg_curr:
-        years_of_forest_regrowth = 0
-
-    return years_of_forest_regrowth
-
-
-# Calculates the maximum canopy height since the last time a pixel was classified as not tall vegetation land cover.
-# This is used to determine whether current height has decreased significantly from this maximum height.
-@jit(nopython=True)
-def calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, vegetation_height_so_far_cell, years_so_far_cell):
-
-    # Determines the maximum height so far if the pixel has been tall vegetation land cover since the beginning of the model
-    if most_recent_year_not_tall_veg == 0:
-
-        # The maximum vegetation height through all intervals so far
-        max_height_since_last_time_not_tall_veg = max(vegetation_height_so_far_cell)
-
-    # Determines the maximum height so far if the pixel hasn't had tall vegetation land cover at least one year since the beginning of the model
-    else:
-
-        heights_since_last_time_not_tall_veg = []
-
-        # Loops over the years and corresponding heights to only get heights that are after the most recent
-        # non-tall vegetation year.
-        # This could be done more elegantly with conditional numpy arrays but that approach
-        # isn't supported in the numba function, unfortunately.
-        # https://chatgpt.com/share/e/6718fb20-48d8-800a-9eb2-d751bd6b1a8f
-        for i in range(len(years_so_far_cell)):
-            if years_so_far_cell[i] > most_recent_year_not_tall_veg:
-                heights_since_last_time_not_tall_veg.append(vegetation_height_so_far_cell[i])
-
-        # In case the pixel is currently non-tall vegetation land cover, so there are no intervals since then
-        # and therefore no heights
-        if len(heights_since_last_time_not_tall_veg) == 0:
-
-            # Uses the current vegetation height (which would exist when the land cover is not tall vegetation
-            # but there is still tall vegetation in the individual tree height layer)
-            max_height_since_last_time_not_tall_veg = vegetation_height_so_far_cell[-1]
-            # max_height_since_last_time_not_tall_veg = 0
-
-        # When the pixel was previously non-tall vegetation but is now tall vegetation,
-        # so there are intervals since then.
-        else:
-
-            # The maximum height in the years since the last non-tall vegetation land cover interval
-            max_height_since_last_time_not_tall_veg = max(heights_since_last_time_not_tall_veg)
-
-    return max_height_since_last_time_not_tall_veg
-
-
-# Calculates the ratio of deadwood C:AGC and litter C:AGC based on climate domain, elevation, and precip
-# for natural, terrestrial forests.
-# Deadwood and litter carbon as fractions of AGC are from
-# https://cdm.unfccc.int/methodologies/ARmethodologies/tools/ar-am-tool-12-v3.0.pdf
-# "Clean Development Mechanism A/R Methodological Tool:
-# Estimation of carbon stocks and change in carbon stocks in dead wood and litter in A/R CDM project activities version 03.0"
-# Tables on pages 18 (deadwood) and 19 (litter).
-# They depend on the climate domain, elevation, and precipitation.
-@jit(nopython=True)
-def calc_deadwood_litter_ratios(elevation, climate_domain, precipitation):
-
-    if climate_domain == 1:  # Tropical/subtropical
-        if elevation <= 2000:  # Low elevation
-            if precipitation <= 1000:  # Low precipitation or no precip raster
-                deadwood_c_ratio = cn.tropical_low_elev_low_precip_deadwood_c_ratio
-                litter_c_ratio = cn.tropical_low_elev_low_precip_litter_c_ratio
-            elif ((precipitation > 1000) and (precipitation <= 1600)):  # Medium precipitation
-                deadwood_c_ratio = cn.tropical_low_elev_med_precip_deadwood_c_ratio
-                litter_c_ratio = cn.tropical_low_elev_med_precip_litter_c_ratio
-            else:  # High precipitation
-                deadwood_c_ratio = cn.tropical_low_elev_high_precip_deadwood_c_ratio
-                litter_c_ratio = cn.tropical_low_elev_high_precip_litter_c_ratio
-        else:  # High elevation
-            deadwood_c_ratio = cn.tropical_high_elev_deadwood_c_ratio
-            litter_c_ratio = cn.tropical_high_elev_litter_c_ratio
-    else:  # Temperate/boreal
-        deadwood_c_ratio = cn.non_tropical_deadwood_c_ratio
-        litter_c_ratio = cn.non_tropical_litter_c_ratio
-
-    return float(deadwood_c_ratio), float(litter_c_ratio)
