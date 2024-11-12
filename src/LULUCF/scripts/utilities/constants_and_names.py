@@ -94,6 +94,7 @@ gwp_ch4 = 27 # AR6 WG1 Table 7.15
 gwp_n2o = 273 # AR6 WG1 Table 7.15
 
 # Removal factors for deadwood and litter carbon
+#TODO These shouldn't be used in the future. Replaced them with relevant ratios in code.
 deadwood_c_NT_T_rf = 0  # NT->T removal factor
 litter_c_NT_T_rf = 0  # NT->T removal factor
 deadwood_c_T_T_rf = 0  # T->T removal factor
