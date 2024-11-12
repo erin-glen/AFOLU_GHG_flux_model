@@ -79,6 +79,7 @@ non_tropical_litter_c_ratio = 0.04
 # Aboveground carbon removal factor for oil palm (Mg C/ha/yr).
 # From IPCC 2019 Refinement Cropland Table 5.3.
 oil_palm_agc_rf = 2.4
+oil_palm_bgc_rf = oil_palm_agc_rf * default_r_s_non_mang
 
 # One-time annual cropland removal factor
 #TODO check units
@@ -227,8 +228,11 @@ ifl_primary_pattern = "ifl_2000_primary_2001_merged"
 planted_forest_type_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/plantation_type/SDPTv2/20230911/"
 planted_forest_type_pattern = "plantation_type_oilpalm_woodfiber_other"
 
-planted_forest_removal_factor_path = f"{full_bucket_prefix}/climate/carbon_model/annual_removal_factor_planted_forest/SDPTv2_AGC/20230911/"
-planted_forest_removal_factor_pattern = "annual_gain_rate_AGC_Mg_ha_planted_forest"
+planted_forest_AGC_removal_factor_path = f"{full_bucket_prefix}/climate/carbon_model/annual_removal_factor_planted_forest/SDPTv2_AGC/20230911/"
+planted_forest_AGC_removal_factor_pattern = "annual_gain_rate_AGC_Mg_ha_planted_forest"
+
+planted_forest_AGC_BGC_removal_factor_path = f"{full_bucket_prefix}/climate/carbon_model/annual_removal_factor_planted_forest/SDPTv2_AGC_BGC/20230911/"
+planted_forest_AGC_BGC_removal_factor_pattern = "annual_gain_rate_AGC_BGC_Mg_ha_planted_forest"
 
 oil_palm_2000_extent_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/IDN_MYS_plantation_pre_2000/processed/20200724/"
 oil_palm_2000_extent_pattern = "plantation_2000_or_earlier_processed"
