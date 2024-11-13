@@ -303,6 +303,52 @@ def calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs):
     return primary_forest_RF
 
 
+# Calculates Cf for fire emissions from forests (as opposed to savanna/grassland or biofuel burning).
+# From IPCC 2019 Table 2.6 (unitless)
+@jit(nopython=True)
+def calc_Cf_forest(climate_domain_cell, drivers_cell, ifl_primary_cell):
+
+    # Groups of drivers with different Cfs
+    driver_group_1 = [cn.permanent_agriculture, cn.shifting_cultivation, cn.hard_commodities, cn.wildfire, cn.settlements_and_infrastruct]
+    driver_group_2 = [cn.forest_management]
+    driver_group_3 = [cn.other_natural_disturbances]
+
+    if climate_domain_cell == 1:  # Tropical/subtropical
+        if ifl_primary_cell:  # Tropical/subtropical, primary forest
+            Cf = 0.36
+        else:  # Tropical/subtropical, not primary forest
+            Cf = 0.55
+    elif climate_domain_cell == 2:   # Temperate
+        if drivers_cell in driver_group_1:  # Temperate, driver group 1
+            Cf = 0.51
+        elif drivers_cell in driver_group_2:  # Temperate, driver group 2
+            Cf = 0.62
+        elif drivers_cell in driver_group_3:  # Temperate, driver group 3
+            Cf = 0.45
+        else:  # Temperate, no driver assigned
+            Cf = 0.45
+    elif climate_domain_cell == 3:
+        if drivers_cell in driver_group_1:  # Boreal, driver group 1
+            Cf = 0.59
+        elif drivers_cell in driver_group_2:  # Boreal, driver group 2
+            Cf = 0.33
+        elif drivers_cell in driver_group_3:  # Boreal, driver group 3
+            Cf = 0.34
+        else:  # Boreal, no driver assigned
+            Cf = 0.34
+    else:  # Outside ecozone bounds
+        if drivers_cell in driver_group_1:  # Outside ecozone bounds, driver group 1
+            Cf = 0.59
+        elif drivers_cell in driver_group_2:  # Outside ecozone bounds, driver group 2
+            Cf = 0.33
+        elif drivers_cell in driver_group_3:  # Outside ecozone bounds, driver group 2
+            Cf = 0.34
+        else:  # Outside ecozone bounds, no driver assigned
+            Cf = 0.34
+
+    return Cf
+
+
 # Calculates Gef for fire emissions from forests (as opposed to savanna/grassland or biofuel burning).
 # From IPCC 2019 Table 2.5 (g/kg dry matter)
 @jit(nopython=True)
