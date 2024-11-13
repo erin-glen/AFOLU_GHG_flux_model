@@ -196,7 +196,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 if r_s_ratio_cell == 0:
                     r_s_ratio_cell = cn.default_r_s_non_mang
 
-                # Secondary forest removal factos (Mg AGC/ha/yr)
+                # Secondary forest removal factors (Mg AGC/ha/yr)
                 natrl_forest_curve_0_5_cell = natrl_forest_curve_0_5_block[row, col]
                 natrl_forest_curve_6_10_cell = natrl_forest_curve_6_10_block[row, col]
                 natrl_forest_curve_11_15_cell = natrl_forest_curve_11_15_block[row, col]
@@ -311,6 +311,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                                         climate_domain_cell, precipitation_cell)
 
                 # One-time removal factor for gain of medium-height vegetation (Mg C/ha)
+                #TODO Correct and complete this function
                 medium_height_veg_AGC_RF, medium_height_veg_BGC_RF = nu.calc_medium_height_veg_removals(climate_domain_cell)
 
 
@@ -509,7 +510,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                 node = nu.accrete_node(node, 3)
                                 agc_rf = planted_forest_AGC_removal_factor_cell
                                 bgc_rf = planted_forest_BGC_removal_factor_cell
-                                rf_post_dist = np.array([3.3, 1.4, 0, 0]).astype('float32') #TODO write function to correctly source the medium vegetation post-dist RF
+                                rf_post_dist = np.array([medium_height_veg_AGC_RF, medium_height_veg_BGC_RF, 0, 0]).astype('float32')
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
                                 c_pools_no_fire = cn.biomass_emissions_only
@@ -592,7 +593,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                     node = nu.accrete_node(node, 1)
                                     agc_rf = agc_rf_pre_dist_prev
                                     bgc_rf = agc_rf * r_s_ratio_cell
-                                    rf_post_dist = np.array([3.3, 1.4, 0, 0]).astype('float32') #TODO write function to correctly source the medium vegetation post-dist RF
+                                    rf_post_dist = np.array([medium_height_veg_AGC_RF, medium_height_veg_AGC_RF, 0, 0]).astype('float32')
                                     c_pools_fire_CO2 = cn.all_non_soil_pools
                                     c_pools_fire_non_CO2 = cn.all_non_soil_pools
                                     c_pools_no_fire = cn.all_non_soil_pools
@@ -1107,6 +1108,7 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
         cn.organic_soil_extent_pattern: f"{cn.organic_soil_extent_path}{sample_tile_id}_{cn.organic_soil_extent_pattern}.tif",
         cn.elevation_pattern: f"{cn.elevation_path}{sample_tile_id}_{cn.elevation_pattern}.tif",
         cn.climate_domain_pattern: f"{cn.climate_domain_path}{sample_tile_id}_{cn.climate_domain_pattern}.tif",
+        # cn.climate_zone_pattern: f"{cn.climate_zone_path}{sample_tile_id}_{cn.climate_zone_pattern}.tif",
         cn.precipitation_pattern: f"{cn.precipitation_path}{sample_tile_id}_{cn.precipitation_pattern}.tif",
         # "ecozone": f"s3://gfw2-data/fao_ecozones/v2000/raster/epsg-4326/10/40000/class/gdal-geotiff/{sample_tile_id}.tif",   # Originally from gfw-data-lake, so it's in 400x400 windows
         # "iso": f"s3://gfw2-data/gadm_administrative_boundaries/v3.6/raster/epsg-4326/10/40000/adm0/gdal-geotiff/{sample_tile_id}.tif",  # Originally from gfw-data-lake, so it's in 400x400 windows
