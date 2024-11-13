@@ -226,6 +226,30 @@ def calc_deadwood_litter_ratios(elevation, climate_domain, precipitation):
     return float(deadwood_c_ratio), float(litter_c_ratio)
 
 
+# Returns AGC and BGC one-time removal factors for the gain of medium-height vegetation (Mg C/ha)
+#TODO Complete the moisture level and temperature decisions and add correct values
+@jit(nopython=True)
+def calc_medium_height_veg_removals(climate_domain):
+
+    if climate_domain == 1:  # Tropical/subtropical
+        medium_height_veg_AGB_RF = 2.0
+        medium_height_veg_BGB_RF = 1.0
+    elif climate_domain == 2: # Temperate
+        medium_height_veg_AGB_RF = 2.0
+        medium_height_veg_BGB_RF = 1.0
+    elif climate_domain == 3: # Boreal
+        medium_height_veg_AGB_RF = 1.7
+        medium_height_veg_BGB_RF = (8.5-medium_height_veg_AGB_RF)
+    else: # Outside bounds
+        medium_height_veg_AGB_RF = 1.7
+        medium_height_veg_BGB_RF = (8.5-medium_height_veg_AGB_RF)
+
+    medium_height_veg_AGC_RF = medium_height_veg_AGB_RF * cn.biomass_to_carbon_non_mangrove
+    medium_height_veg_BGC_RF = medium_height_veg_BGB_RF * cn.biomass_to_carbon_non_mangrove
+
+    return medium_height_veg_AGC_RF, medium_height_veg_BGC_RF
+
+
 # Returns the starting carbon density for each carbon pool
 @jit(nopython=True)
 def unpack_starting_carbon_densities(c_dens_in):
@@ -248,6 +272,20 @@ def unpack_emission_factors(ef):
     litter_c_ef = np.float32(ef[3])
 
     return agc_ef, bgc_ef, deadwood_c_ef, litter_c_ef
+
+# Returns the removal factor for primary forest/IFL based on the continent-ecozone combination (Mg AGC/ha/yr)
+# From https://chatgpt.com/share/e/67340a6f-b8cc-800a-84e3-f98e600001e5
+@jit(nopython=True)
+def calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs):
+
+    primary_forest_RF_indices = np.where(primary_forest_RFs[:, 0] == continent_ecozone_cell)
+
+    # Checks if there are matching indices and extracts corresponding primary forest RF
+    if primary_forest_RF_indices[0].size > 0:
+        primary_forest_RF = primary_forest_RFs[primary_forest_RF_indices[0][0], 1] * cn.biomass_to_carbon_non_mangrove
+    else:
+        primary_forest_RF = 1000  # Absurd number that should show up easily in outputs
+    return primary_forest_RF
 
 
 # Calculates non-CO2 emissions (CH4 and N2O) separately.
@@ -318,6 +356,9 @@ def calc_NT_T(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio=None, litter_c_ratio=N
 # Gross fluxes and ending carbon stocks for trees converted to non-trees with and without fire.
 # Non-CO2 gas emissions are only calculated if fire was detected during the interval.
 # CO2 emissions are calculated differently depending on if fire was detected during the interval and if a Gef_CO2 is supplied.
+# Gross fluxes and ending carbon stocks for trees converted to non-trees with and without fire.
+# Non-CO2 gas emissions are only calculated if fire was detected during the interval.
+# CO2 emissions are calculated differently depending on if fire was detected during the interval and if a Gef_CO2 is supplied.
 @jit(nopython=True)
 def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
                     forest_dist_last, interval_end_year, c_dens_in,
@@ -357,16 +398,23 @@ def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c
         gain_year_count = math.floor(cn.interval_years/2)
 
 
-    # Step 2: Calculates gross removals by carbon pools. Gross removals are negative.
+    # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant
     # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest only).
     # Thus, we need to check whether the pixel was non-tall vegetation at some point during the model before the end of this interval.
-    # If no deadwood C:AGC or litter C:AGC are supplied (e.g., for SDPT), assume 0, and thus no removals to deadwood or litter.
-    if (most_recent_year_not_tall_veg >= cn.first_model_year) or (most_recent_year_not_tall_veg < interval_end_year):
-        if not deadwood_c_ratio:
-            deadwood_c_ratio = 0
-        if not litter_c_ratio:
-            litter_c_ratio = 0
+    # For simplicity, deadwood and litter C do not accumulate during loss intervals; it's too awkward to write a rule
+    # that allows deadwood and litter C accumulation during the loss interval.
+    if (most_recent_year_not_tall_veg >= cn.first_model_year) or (most_recent_year_not_tall_veg == interval_end_year):
+        deadwood_c_ratio = 0
+        litter_c_ratio = 0
 
+    # If no deadwood C:AGC or litter C:AGC are supplied (e.g., for SDPT), assume 0, and thus no removals to deadwood or litter.
+    if deadwood_c_ratio == None:
+        deadwood_c_ratio = 0
+    if litter_c_ratio == None:
+        litter_c_ratio = 0
+
+
+    # Step 3: Calculates gross removals by carbon pools. Gross removals are negative.
     agc_gross_removals_out = float((agc_rf * gain_year_count) * -1) #float() necessary for Numba typing
     bgc_gross_removals_out = float((bgc_rf * gain_year_count) * -1) #float() necessary for Numba typing
     deadwood_c_gross_removals_out= agc_gross_removals_out * deadwood_c_ratio
@@ -377,7 +425,7 @@ def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c
     c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')
 
 
-    # Step 3: Calculates carbon densities at the year of loss by carbon pool
+    # Step 4: Calculates carbon densities at the year of loss by carbon pool
     agc_pre_disturb = agc_dens_in - agc_gross_removals_out
     bgc_pre_disturb = bgc_dens_in - bgc_gross_removals_out
     deadwood_c_pre_disturb = deadwood_c_dens_in - deadwood_c_gross_removals_out
@@ -387,7 +435,7 @@ def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c
     c_pre_disturb = np.array([agc_pre_disturb, bgc_pre_disturb, deadwood_c_pre_disturb, litter_c_pre_disturb])
 
 
-    # Step 4: Calculates CO2 gross emissions by carbon pools. Which ones are emitted depends on whether fire was detected.
+    # Step 5: Calculates CO2 gross emissions by carbon pools. Which ones are emitted depends on whether fire was detected.
     agc_gross_emis_out = agc_pre_disturb * agc_ef_CO2
     bgc_gross_emis_out = bgc_pre_disturb * bgc_ef_CO2
     deadwood_c_gross_emis_out = deadwood_c_pre_disturb * deadwood_c_ef_CO2
@@ -397,18 +445,18 @@ def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c
     c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')
 
 
-    # Step 5: Updates gross removals to include one-time post-disturbance regrowth, if applicable (medium height veg and cropland).
+    # Step 6: Updates gross removals to include one-time post-disturbance regrowth, if applicable (medium height veg and cropland).
     # Regrowth of medium height veg and cropland is a one-time value, not annual, so no multiplication by gain year count.
     c_gross_removals_out = c_gross_removals_out - post_dist_regrowth
 
 
-    # Step 6: Calculates ending carbon densities by carbon pool.
+    # Step 7: Calculates ending carbon densities by carbon pool.
     # Starts with carbon density in (list converted to np array), adds gross removals (subtracts negative value), subtracts emissions.
     # Ending carbon pools are not affected by non-CO2 emissions in the next step.
     c_dens_out = np.array(c_dens_in).astype('float32') - c_gross_removals_out - c_gross_emissions_out
 
 
-    # Step 7: Calculates non-CO2 emissions (if relevant)
+    # Step 8: Calculates non-CO2 emissions (if relevant)
     # Default non-CO2 emissions values
     ch4_flux_out = 0
     n2o_flux_out = 0
