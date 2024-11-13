@@ -87,6 +87,21 @@ def create_typed_dicts(layers):
     return typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32
 
 
+# Classifies vegetation height classes for start and end of current interval
+@jit(nopython=True)
+def classify_veg_height(LC_curr, LC_prev):
+    tall_veg_prev = (((LC_prev >= cn.tree_dry_min_height_code) and (LC_prev <= cn.tree_dry_max_height_code)) or
+                     ((LC_prev >= cn.tree_wet_min_height_code) and (LC_prev <= cn.tree_wet_max_height_code)))
+    tall_veg_curr = (((LC_curr >= cn.tree_dry_min_height_code) and (LC_curr <= cn.tree_dry_max_height_code)) or
+                     ((LC_curr >= cn.tree_wet_min_height_code) and (LC_curr <= cn.tree_wet_max_height_code)))
+    med_veg_prev = (((LC_prev >= 25) and (LC_prev <= 26)) or ((LC_prev >= 125) and (LC_prev <= 126)))
+    med_veg_curr = (((LC_curr >= 25) and (LC_curr <= 26)) or ((LC_curr >= 125) and (LC_curr <= 126)))
+    short_veg_prev = (((LC_prev >= 2) and (LC_prev <= 24)) or ((LC_prev >= 102) and (LC_prev <= 124)))
+    short_veg_curr = (((LC_curr >= 2) and (LC_curr <= 24)) or ((LC_curr >= 102) and (LC_curr <= 124)))
+
+    return short_veg_prev, short_veg_curr, med_veg_prev, med_veg_curr, tall_veg_prev, tall_veg_curr
+
+
 # Checks if pixel does not have tall vegetation. If so, updates the value to the most recent year without tall vegetation.
 # Tall vegetation/non-tall vegetation is based on the composite land cover maps, not the canopy height maps.
 # 0=Always tall vegetation so far. Other values represent the last year of non-tall vegetation.
@@ -240,7 +255,7 @@ def calc_medium_height_veg_removals(climate_domain):
     elif climate_domain == 3: # Boreal
         medium_height_veg_AGB_RF = 1.7
         medium_height_veg_BGB_RF = (8.5-medium_height_veg_AGB_RF)
-    else: # Outside bounds
+    else: # Outside ecozone bounds
         medium_height_veg_AGB_RF = 1.7
         medium_height_veg_BGB_RF = (8.5-medium_height_veg_AGB_RF)
 
@@ -286,6 +301,27 @@ def calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs):
     else:
         primary_forest_RF = 1000  # Absurd number that should show up easily in outputs
     return primary_forest_RF
+
+
+# Calculates Gef for fire emissions from forests (as opposed to savanna/grassland or biofuel burning).
+# From IPCC 2019 Table 2.5 (g/kg dry matter)
+@jit(nopython=True)
+def calc_Gef_forest(climate_domain_cell):
+
+    if climate_domain_cell == 1:  # Tropical/subtropical
+        Gef_CO2_forest = 1580.0
+        Gef_CH4_forest = 6.8
+        Gef_N2O_forest = 0.2
+    elif climate_domain_cell == 2 or climate_domain_cell == 3:   # Temperate/boreal
+        Gef_CO2_forest = 1569.0
+        Gef_CH4_forest = 4.7
+        Gef_N2O_forest = 0.26
+    else:  # Outside ecozone bounds
+        Gef_CO2_forest = 1569.0
+        Gef_CH4_forest = 4.7
+        Gef_N2O_forest = 0.26
+
+    return Gef_CO2_forest, Gef_CH4_forest, Gef_N2O_forest
 
 
 # Calculates non-CO2 emissions (CH4 and N2O) separately.
