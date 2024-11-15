@@ -851,11 +851,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.agc_emissions_only
                                 c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                # state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = calc_T_T_non_stand_disturbs_local(
-                                #     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                #     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                #     rf_post_dist, most_recent_year_not_tall_veg,
-                                #     Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = calc_T_T_non_stand_disturbs_local(
+                                    node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                    c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                    rf_post_dist, most_recent_year_not_tall_veg,
+                                    Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
                             else:  # Planted trees partially disturbed in the last interval without signif. height increase after (3112->31121/31122)
                                 node = nu.accrete_node(node, 2)
                                 if all_oil_palm:  # Because this planted tree node includes SDPT + non-SDPT oil palm, we need to assign the right RFs
@@ -868,11 +868,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.agc_emissions_only
                                 c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                # state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = calc_T_T_non_stand_disturbs_local(
-                                #     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                #     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                #     rf_post_dist, most_recent_year_not_tall_veg,
-                                #     Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = calc_T_T_non_stand_disturbs_local(
+                                    node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                    c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                    rf_post_dist, most_recent_year_not_tall_veg,
+                                    Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
                         else:  # Non-planted trees partially disturbed in the last interval (312)
                             node = nu.accrete_node(node, 2)
                             if tall_veg_curr:  # Forest partially disturbed in the last interval (3121)
@@ -907,6 +907,38 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                         rf_post_dist, most_recent_year_not_tall_veg,
                                         Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
+                            else:  # Trees outside forests partially disturbed in the last interval (3122)
+                                node = nu.accrete_node(node, 2)
+                                if sig_height_gain_prev_curr_abs:  # Trees outside forests partially disturbed in the last interval with signif. height increase after (31221->312211/312212)
+                                    node = nu.accrete_node(node, 1)
+                                    agc_rf = cn.trees_outside_forests_agc_rf_max
+                                    bgc_rf = agc_rf * r_s_ratio_cell
+                                    agc_rf_post = cn.trees_outside_forests_agc_rf_max
+                                    bgc_rf_post = agc_rf_post * r_s_ratio_cell
+                                    rf_post_dist = np.array([agc_rf_post, bgc_rf_post, 0, 0]).astype('float32')
+                                    c_pools_fire_CO2 = cn.agc_emissions_only
+                                    c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                    c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = calc_T_T_non_stand_disturbs_local(
+                                        node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                        c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                        rf_post_dist, most_recent_year_not_tall_veg,
+                                        Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                        deadwood_c_ratio=0, litter_c_ratio=0)
+                                else:  # Trees outside forests partially disturbed in the last interval with signif. height increase after (31222->312221/312222)
+                                    node = nu.accrete_node(node, 2)
+                                    agc_rf = cn.trees_outside_forests_agc_rf_max
+                                    bgc_rf = agc_rf * r_s_ratio_cell
+                                    rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')  # No post-disturbance RFs or removals
+                                    c_pools_fire_CO2 = cn.agc_emissions_only
+                                    c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                    c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = calc_T_T_non_stand_disturbs_local(
+                                        node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                        c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                        rf_post_dist, most_recent_year_not_tall_veg,
+                                        Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                        deadwood_c_ratio=0, litter_c_ratio=0)
 
                     # else:  # Trees not disturbed in the last interval (32)
                     #     node = nu.accrete_node(node, 2)
