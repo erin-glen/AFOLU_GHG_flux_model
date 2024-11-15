@@ -67,10 +67,10 @@ def calc_T_T_non_stand_disturbs_local(node, burned_in_last_interval, agc_rf, bgc
         gain_year_count = math.floor(cn.interval_years/2)
 
 
-    # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant
+    # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant.
     # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest only).
     # Thus, we need to check whether the pixel was non-tall vegetation at some point during the model before the end of this interval.
-    if (most_recent_year_not_tall_veg >= cn.first_model_year) or (most_recent_year_not_tall_veg == interval_end_year):
+    if (most_recent_year_not_tall_veg >= cn.first_model_year) or (most_recent_year_not_tall_veg == interval_end_year) or (most_recent_year_not_tall_veg == 0):
         deadwood_c_ratio = 0.0
         litter_c_ratio = 0.0
 
