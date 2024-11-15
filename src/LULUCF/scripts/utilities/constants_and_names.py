@@ -182,7 +182,7 @@ elevation_pattern = "elevation"
 climate_domain_path = f"{full_bucket_prefix}/climate/carbon_model/inputs_for_carbon_pools/processed/fao_ecozones_bor_tem_tro/20190418/"
 climate_domain_pattern = "fao_ecozones_bor_tem_tro_processed"
 
-climate_zone_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/climate_zone/raw/"
+climate_zone_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/climate_zone/processed/20200724/"
 climate_zone_pattern = "climate_zone_processed"
 
 precipitation_path = f"{full_bucket_prefix}/climate/carbon_model/inputs_for_carbon_pools/processed/precip/20190418/"

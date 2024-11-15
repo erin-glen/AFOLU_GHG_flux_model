@@ -246,19 +246,19 @@ def calc_deadwood_litter_ratios(elevation, climate_domain, precipitation):
 
 
 # Returns AGC and BGC one-time removal factors for the gain of medium-height vegetation (Mg C/ha)
-#TODO Complete the moisture level and temperature decisions and add correct values
+#TODO Correct and complete this function. Currently using just climate domain as a stand in for IPCC climate zone.
 @jit(nopython=True, parallel=True)
 def calc_medium_height_veg_removals(climate_domain):
 
     if climate_domain == 1:  # Tropical/subtropical
-        medium_height_veg_AGB_RF = 2.0
-        medium_height_veg_BGB_RF = 1.0
+        medium_height_veg_AGB_RF = 4.3   # Average of the two tropical classes for now
+        medium_height_veg_BGB_RF = (12.4-medium_height_veg_AGB_RF)  # Average of the two tropical classes for now
     elif climate_domain == 2: # Temperate
-        medium_height_veg_AGB_RF = 2.0
+        medium_height_veg_AGB_RF = 2.1
         medium_height_veg_BGB_RF = 1.0
     elif climate_domain == 3: # Boreal
-        medium_height_veg_AGB_RF = 1.7
-        medium_height_veg_BGB_RF = (8.5-medium_height_veg_AGB_RF)
+        medium_height_veg_AGB_RF = 1.7  # Average of the four temperate classes for now
+        medium_height_veg_BGB_RF = (9.9-medium_height_veg_AGB_RF)  # Average of the four temperate classes for now
     else: # Outside ecozone bounds
         medium_height_veg_AGB_RF = 1.7
         medium_height_veg_BGB_RF = (8.5-medium_height_veg_AGB_RF)
@@ -376,8 +376,9 @@ def calc_Gef_forest(climate_domain_cell):
 
 # Calculates non-CO2 emissions (CH4 and N2O) separately.
 # Cf is the combustion factor
-# Gef_co2, Gef_ch4 and Gef_n2o are the emission factors for their respective gases.
+# Gef_ch4 and Gef_n2o are the emission factors for their respective gases.
 # biomass_to_carbon can be hard-coded as non-mangrove because we assume that mangroves don't have fires.
+# From IPCC 2019 Eqn. 2.27
 @jit(nopython=True, parallel=True)
 def non_CO2_fire_equations(carbon_in, Cf, Gef_ch4, Gef_n2o):
 
@@ -439,9 +440,6 @@ def calc_NT_T(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio=None, litter_c_ratio=N
     return c_gross_emissions_out, c_gross_removals_out, c_dens_out, gain_year_count
 
 
-# Gross fluxes and ending carbon stocks for trees converted to non-trees with and without fire.
-# Non-CO2 gas emissions are only calculated if fire was detected during the interval.
-# CO2 emissions are calculated differently depending on if fire was detected during the interval and if a Gef_CO2 is supplied.
 # Gross fluxes and ending carbon stocks for trees converted to non-trees with and without fire.
 # Non-CO2 gas emissions are only calculated if fire was detected during the interval.
 # CO2 emissions are calculated differently depending on if fire was detected during the interval and if a Gef_CO2 is supplied.
