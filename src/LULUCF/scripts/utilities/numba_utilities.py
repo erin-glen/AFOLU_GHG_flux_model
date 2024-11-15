@@ -9,7 +9,7 @@ from . import constants_and_names as cn
 
 
 # Adds latest decision tree branch to the state node
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def accrete_node(combo, new):
     combo = combo*10 + new
     return combo
@@ -32,15 +32,19 @@ def create_typed_dicts(layers):
         if array is None:
             continue
 
+        # Suggested by https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/672bad5a-cda0-800a-8889-09657ed7e888
+        # to optimize memory allocation for numba. Not sure it helps but it doesn't seemt to hurt, so leaving it in.
+        contig_array = np.ascontiguousarray(array)
+
         # If there is data, it puts the data in the corresponding dictionary for that datatype
         if array.dtype == np.uint8:
-            uint8_dict_layers[key] = array
+            uint8_dict_layers[key] = contig_array
         elif array.dtype == np.int16:
-            int16_dict_layers[key] = array
+            int16_dict_layers[key] = contig_array
         elif array.dtype == np.int32:
-            int32_dict_layers[key] = array
+            int32_dict_layers[key] = contig_array
         elif array.dtype == np.float32:
-            float32_dict_layers[key] = array
+            float32_dict_layers[key] = contig_array
         else:
             pass
             # raise TypeError(f"{key} dtype not in list")
@@ -88,7 +92,7 @@ def create_typed_dicts(layers):
 
 
 # Classifies vegetation height classes for start and end of current interval
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def classify_veg_height(LC_curr, LC_prev):
     tall_veg_prev = (((LC_prev >= cn.tree_dry_min_height_code) and (LC_prev <= cn.tree_dry_max_height_code)) or
                      ((LC_prev >= cn.tree_wet_min_height_code) and (LC_prev <= cn.tree_wet_max_height_code)))
@@ -110,7 +114,7 @@ def classify_veg_height(LC_curr, LC_prev):
 # that would have to be applied to numpy arrays, so I'm doing it at the pixel level instead.
 # I have no idea if checking if pixels have ever not been forest is faster or slower at the pixel level
 # than at the numpy array level, but the array-level operation isn't even an option.
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_forest, interval_end_year):
 
     # For the first interval, the land cover in 2000 has to be checked for tall vegetation as well
@@ -144,7 +148,7 @@ def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_f
 
 
 # Calculates the number of years of forest regrowth since the last year of not-tall vegetation
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_forest, tall_veg_curr, years_of_forest_regrowth):
 
     # Determines if the number of years of regrowth should be calculated.
@@ -167,7 +171,7 @@ def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_f
 
 # Calculates the maximum canopy height since the last time a pixel was classified as not tall vegetation land cover.
 # This is used to determine whether current height has decreased significantly from this maximum height.
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, vegetation_height_so_far_cell, years_so_far_cell):
 
     # Determines the maximum height so far if the pixel has been tall vegetation land cover since the beginning of the model
@@ -217,7 +221,7 @@ def calc_max_height_since_last_time_not_tall_veg(most_recent_year_not_tall_veg, 
 # Estimation of carbon stocks and change in carbon stocks in dead wood and litter in A/R CDM project activities version 03.0"
 # Tables on pages 18 (deadwood) and 19 (litter).
 # They depend on the climate domain, elevation, and precipitation.
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def calc_deadwood_litter_ratios(elevation, climate_domain, precipitation):
 
     if climate_domain == 1:  # Tropical/subtropical
@@ -243,7 +247,7 @@ def calc_deadwood_litter_ratios(elevation, climate_domain, precipitation):
 
 # Returns AGC and BGC one-time removal factors for the gain of medium-height vegetation (Mg C/ha)
 #TODO Complete the moisture level and temperature decisions and add correct values
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def calc_medium_height_veg_removals(climate_domain):
 
     if climate_domain == 1:  # Tropical/subtropical
@@ -266,7 +270,7 @@ def calc_medium_height_veg_removals(climate_domain):
 
 
 # Returns the starting carbon density for each carbon pool
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def unpack_starting_carbon_densities(c_dens_in):
 
     agc_dens_in = np.float32(c_dens_in[0])
@@ -278,7 +282,7 @@ def unpack_starting_carbon_densities(c_dens_in):
 
 
 # Returns the emission factor for each carbon pool
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def unpack_emission_factors(ef):
 
     agc_ef = np.float32(ef[0])
@@ -290,7 +294,7 @@ def unpack_emission_factors(ef):
 
 # Returns the removal factor for primary forest/IFL based on the continent-ecozone combination (Mg AGC/ha/yr)
 # From https://chatgpt.com/share/e/67340a6f-b8cc-800a-84e3-f98e600001e5
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs):
 
     primary_forest_RF_indices = np.where(primary_forest_RFs[:, 0] == continent_ecozone_cell)
@@ -305,7 +309,7 @@ def calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs):
 
 # Calculates Cf for fire emissions from forests (as opposed to savanna/grassland or biofuel burning).
 # From IPCC 2019 Table 2.6 (unitless)
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def calc_Cf_forest(climate_domain_cell, drivers_cell, ifl_primary_cell):
 
     # Groups of drivers with different Cfs
@@ -351,7 +355,7 @@ def calc_Cf_forest(climate_domain_cell, drivers_cell, ifl_primary_cell):
 
 # Calculates Gef for fire emissions from forests (as opposed to savanna/grassland or biofuel burning).
 # From IPCC 2019 Table 2.5 (g/kg dry matter)
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def calc_Gef_forest(climate_domain_cell):
 
     if climate_domain_cell == 1:  # Tropical/subtropical
@@ -374,7 +378,7 @@ def calc_Gef_forest(climate_domain_cell):
 # Cf is the combustion factor
 # Gef_co2, Gef_ch4 and Gef_n2o are the emission factors for their respective gases.
 # biomass_to_carbon can be hard-coded as non-mangrove because we assume that mangroves don't have fires.
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def non_CO2_fire_equations(carbon_in, Cf, Gef_ch4, Gef_n2o):
 
     # print(f"Carbon in: {carbon_in}; Cf: {Cf}; Gef_ch4: {Gef_ch4}; GWP CH4: {cn.gwp_ch4}")
@@ -389,7 +393,7 @@ def non_CO2_fire_equations(carbon_in, Cf, Gef_ch4, Gef_n2o):
 
 
 # Gross and net fluxes and ending carbon stocks for non-tree converted to tree
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def calc_NT_T(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio=None, litter_c_ratio=None):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
@@ -441,7 +445,7 @@ def calc_NT_T(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio=None, litter_c_ratio=N
 # Gross fluxes and ending carbon stocks for trees converted to non-trees with and without fire.
 # Non-CO2 gas emissions are only calculated if fire was detected during the interval.
 # CO2 emissions are calculated differently depending on if fire was detected during the interval and if a Gef_CO2 is supplied.
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
                     forest_dist_last, interval_end_year, c_dens_in,
                     post_dist_regrowth, most_recent_year_not_tall_veg, Cf, Gef_ch4, Gef_n2o,
@@ -593,7 +597,7 @@ def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c
 
 
 # Gross and net fluxes and ending carbon stocks for trees remaining trees without disturbances
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in):
 
     agc_dens_in = c_dens_in[0]
@@ -645,7 +649,7 @@ def calc_T_T_undisturbed(agc_rf, r_s_ratio_cell, c_dens_in):
 
 # Gross and net fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances
 #TODO include sequence of fluxes for disturbances: pre-disturb removals, emissions, post-disturb removals
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, Cf=None, Gef_ch4=None, Gef_n2o=None):
     ####FROM F->NF-- POTENTIALLY REUSE HERE BUT NOT RELEVANT THERE ANYMORE.
     # # Step 4: Calculates CO2 gross emissions by carbon pools
@@ -702,7 +706,7 @@ def calc_T_T_non_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, Cf=No
 
 # Gross and net fluxes and ending carbon stocks for trees remaining trees with stand-replacing disturbances
 #TODO include sequence of fluxes for disturbances: pre-disturb removals, emissions, post-disturb removals
-@jit(nopython=True)
+@jit(nopython=True, parallel=True)
 def calc_T_T_stand_disturbs(agc_rf, agc_ef, r_s_ratio_cell, c_dens_in, Cf=None, Gef_ch4=None, Gef_n2o=None):
     ####FROM F->NF-- POTENTIALLY REUSE HERE BUT NOT RELEVANT THERE ANYMORE.
     # # Step 4: Calculates CO2 gross emissions by carbon pools
