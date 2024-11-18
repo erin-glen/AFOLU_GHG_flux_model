@@ -149,9 +149,12 @@ def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_f
 
 # Calculates the number of years of forest regrowth since the last year of not-tall vegetation
 @jit(nopython=True, parallel=True)
-def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_forest, tall_veg_curr, years_of_forest_regrowth):
+def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_forest, tall_veg_curr,
+                                       partially_disturbed_in_last_interval, years_of_forest_regrowth):
 
-    # Determines if the number of years of regrowth should be calculated.
+    # Determines if the number of years of regrowth should be calculated, based on last stand-replacing disturbance
+    # or partial disturbance.
+    # Stand-replacing disturbance:
     # Condition 1: The end of the interval must be after the last year that was not tall vegetation,
     # i.e. there was not tall vegetation previously but there is at the end of this interval (indicating regrowth).
     # Condition 2: There must have been some year that was not forest,
@@ -160,6 +163,16 @@ def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_f
 
         # Calculates the number of years of regrowth since the last year that was not forest
         years_of_forest_regrowth = (interval_end_year - most_recent_year_not_forest)
+
+    # Partial disturbance: if a partial disturbance occurred in the last interval, years of regrowth is set to
+    # part of the interval
+    elif partially_disturbed_in_last_interval:
+
+        years_of_forest_regrowth = (interval_end_year - cn.NT_T_gain_year_count_default)
+
+    else:
+        years_of_forest_regrowth = years_of_forest_regrowth
+
 
     # Resets the growth year counter in cases where there was tall vegetation and then there wasn't in the next interval.
     # Otherwise, the years counter would continue accruing even if tall veg was lost.
@@ -756,7 +769,7 @@ def calc_T_T_non_stand_disturbs(node, burned_in_last_interval, agc_rf, bgc_rf, c
 
 # Gross and net fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances
 @jit(nopython=True)
-def calc_T_T_no_disturbs_local(node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
+def calc_T_T_no_disturbs(node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                interval_end_year, c_dens_in,
                                most_recent_year_not_tall_veg, Cf, Gef_co2, Gef_ch4, Gef_n2o,
                                deadwood_c_ratio, litter_c_ratio):

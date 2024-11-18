@@ -403,15 +403,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                     if first_time_sig_loss_from_max_height == 0:
                         first_time_sig_loss_from_max_height = 1
 
-
-                ## Number of years of regrowth for new forest since last time not forest
-                years_of_forest_regrowth = years_of_forest_regrowth_block[row, col]
-
-                # Calculates the number of years of forest regrowth since the last year of not-tall vegetation.
-                # Can override the pre-existing value.
-                years_of_forest_regrowth = nu.calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_tall_veg, tall_veg_curr, years_of_forest_regrowth)
-
-
                 ## Height change during the interval. Need to recast to signed int8 from uint8 so that negative values (height gain) stay negative.
                 height_change_prev_curr = np.int8(veg_h_prev - veg_h_curr)
 
@@ -421,8 +412,18 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 # Is height gain during the interval significant in absolute change (m)?
                 sig_height_gain_prev_curr_abs = (height_change_prev_curr <= cn.sig_height_gain_threshold_abs)
 
-                # Assigns an AGC RF for natural forest based on years since last disturbance (years_of_forest_regrowth).
-                # If there are no years of forest regrowth, the previous interval's RF is used.
+                # Whether tall vegetation was partially disturbed in the last interval
+                partially_disturbed_in_last_interval = (forest_dist_last > 0) or (sig_height_loss_prev_curr_abs) or (first_time_sig_loss_from_max_height == 1)
+
+                ## Number of years of regrowth for new forest since last time not forest
+                years_of_forest_regrowth = years_of_forest_regrowth_block[row, col]
+
+                # Calculates the number of years of forest regrowth since the last year of not-tall vegetation.
+                # Can override the pre-existing value.
+                years_of_forest_regrowth = nu.calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_tall_veg, tall_veg_curr, partially_disturbed_in_last_interval, years_of_forest_regrowth)
+
+                # Assigns an AGC RF for natural forest based on years since last time not tall vegetation (years_of_forest_regrowth).
+                # If there are no years of forest regrowth (i.e. no record of non-tall veg land cover), the previous interval's RF is used.
                 if years_of_forest_regrowth > 0 and years_of_forest_regrowth <= 5:
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_0_5_cell
                 elif years_of_forest_regrowth > 5 and years_of_forest_regrowth <= 10:
@@ -439,15 +440,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
                 # Starting decision tree node value
                 node = 0
-
-                # Need to force arrays into float32 because numba is so particular about datatypes.
-                state_out = 0
                 gain_year_count = 0
                 agc_rf = 0
+                # Need to force arrays into float32 because numba is so particular about datatypes.
                 c_gross_emis_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross emissions (Mg C/ha/interval): AGC, BGC, deadwood C, litter C.
                 c_gross_removals_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross removals (Mg C/ha/interval): AGC, BGC, deadwood C, litter C.
                 non_co2_flux_out = np.array([0, 0]).astype('float32')  # Initializes dummy output non-CO2 fluxes (Mg CO2e/ha/interval): CH4, N2O
-                c_dens_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C densities (Mg C/ha): AGC, BGC, deadwood C, litter C.
 
                 ### Tree gain
                 if tall_veg_gain:  # Non-tree converted to tree (1)    #TODO: Include mangrove exception.
@@ -674,7 +672,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 ### Trees remaining trees
                 elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: Include mangrove exception.
                     node = nu.accrete_node(node, 3)
-                    if (forest_dist_last > 0) or (sig_height_loss_prev_curr_abs) or (first_time_sig_loss_from_max_height == 1):  # Trees partially disturbed in the last interval (31)
+                    if partially_disturbed_in_last_interval:  # Trees partially disturbed in the last interval (31)
                         node = nu.accrete_node(node, 1)
                         if all_planted_trees:   # Planted trees partially disturbed in the last interval (311)
                             node = nu.accrete_node(node, 1)
@@ -790,7 +788,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                 bgc_rf = planted_forest_BGC_removal_factor_cell
                             c_pools_fire_CO2 = cn.agc_emissions_only
                             c_pools_fire_non_CO2 = cn.agc_emissions_only
-                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = calc_T_T_no_disturbs_local(
+                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs(
                                 node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                 interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
@@ -800,11 +798,21 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                 node = nu.accrete_node(node, 1)
                                 if first_forest_dist_in_record or (first_time_sig_loss_from_max_height > 0) or (most_recent_year_not_tall_veg > 0): # Young secondary natural forest (32211->322111/322112)
                                     node = nu.accrete_node(node, 1)
-                                    agc_rf = natrl_forest_age_dependent_agc_rf
+                                    # Because the pixel had a stand-replacing or non-stand-replacing disturbance at some point
+                                    # it shouldn't use primary forest or old secondary forest RF anymore.
+                                    # This replaces those RFs with a young secondary forest RF.
+                                    # +/- 0.01 the primary forest and old secondary RF are to provide some tolerance around
+                                    # those RFs in case numba is rounding them and they aren't exact matches.
+                                    if (natrl_forest_age_dependent_agc_rf > primary_forest_AGC_RF - 0.01) and (natrl_forest_age_dependent_agc_rf < primary_forest_AGC_RF + 0.01):
+                                        agc_rf = natrl_forest_curve_0_5_cell
+                                    elif (natrl_forest_age_dependent_agc_rf > natrl_forest_curve_21_100_cell - 0.01) and (natrl_forest_age_dependent_agc_rf < natrl_forest_curve_21_100_cell + 0.01):
+                                        agc_rf = natrl_forest_curve_0_5_cell
+                                    else:  # If not using primary or old secondary RF, it can use whatever the relevant young secondary RF is
+                                        agc_rf = natrl_forest_age_dependent_agc_rf
                                     bgc_rf = agc_rf * r_s_ratio_cell
                                     c_pools_fire_CO2 = cn.agc_emissions_only
                                     c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = calc_T_T_no_disturbs_local(
+                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs(
                                         node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                         interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                         Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
@@ -817,7 +825,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                         bgc_rf = agc_rf * r_s_ratio_cell
                                         c_pools_fire_CO2 = cn.agc_emissions_only
                                         c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = calc_T_T_no_disturbs_local(
+                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs(
                                             node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
@@ -828,7 +836,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                         bgc_rf = agc_rf * r_s_ratio_cell
                                         c_pools_fire_CO2 = cn.agc_emissions_only
                                         c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = calc_T_T_no_disturbs_local(
+                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs(
                                             node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
@@ -839,14 +847,19 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                 bgc_rf = agc_rf * r_s_ratio_cell
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = calc_T_T_no_disturbs_local(
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs(
                                     node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                     Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
 
-                # Need to know when a state isn't being assigned. It should always be assigned.
+                # When decision trees above do not apply
                 else:
+                    # Need to know when a state isn't being assigned. It should always be assigned.
                     state_out = 4000000000
+
+                    # If no C fluxes calculated in decision tree, densities out should be densities in.
+                    # Otherwise, they get reset to 0.
+                    c_dens_out = np.array(c_dens_in).astype('float32')
 
 
                 ### Populates the output arrays with the calculated fluxes and densities
