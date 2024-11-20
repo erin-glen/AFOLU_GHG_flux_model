@@ -154,30 +154,37 @@ def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_f
 
     # Determines if the number of years of regrowth should be calculated, based on last stand-replacing disturbance
     # or partial disturbance.
-    # Stand-replacing disturbance:
-    # Condition 1: The end of the interval must be after the last year that was not tall vegetation,
-    # i.e. there was not tall vegetation previously but there is at the end of this interval (indicating regrowth).
-    # Condition 2: There must have been some year that was not forest,
-    # i.e. the years of regrowth is only relevant when there was not forest some year.
-    if (interval_end_year > most_recent_year_not_forest) & (most_recent_year_not_forest > 0):
-
-        # Calculates the number of years of regrowth since the last year that was not forest
-        years_of_forest_regrowth = (interval_end_year - most_recent_year_not_forest)
+    # Resets the number of years since disturbance to 0 if partial or complete disturbances occur.
 
     # Partial disturbance: if a partial disturbance occurred in the last interval, years of regrowth is set to
-    # part of the interval
-    elif partially_disturbed_in_last_interval:
+    # part of the interval.
+    # Years of forest growth doesn't start until the end of the interval, regardless of the year in which the
+    # disturbance occurs, if known.
+    # For example, if a partial disturbance occurs in 2001 (as identified by the annual disturbance raster),
+    # regrowth is assumed not to begin until the start of the next interval (2005).
+    if partially_disturbed_in_last_interval:
 
-        years_of_forest_regrowth = (interval_end_year - cn.NT_T_gain_year_count_default)
-
-    else:
-        years_of_forest_regrowth = years_of_forest_regrowth
-
+        years_of_forest_regrowth = 0
+        return years_of_forest_regrowth
 
     # Resets the growth year counter in cases where there was tall vegetation and then there wasn't in the next interval.
     # Otherwise, the years counter would continue accruing even if tall veg was lost.
     if not tall_veg_curr:
         years_of_forest_regrowth = 0
+        return years_of_forest_regrowth
+
+    # Increases the years of forest regrowth if certain conditions are met:
+    # Condition 1: The end of the interval must be after the last year that was not tall vegetation,
+    # i.e. there was not tall vegetation previously but there is at the end of this interval (indicating regrowth).
+    # Condition 2: There must have been some year that was not forest,
+    # i.e. the years of regrowth is only relevant when there was not forest some year.
+    else:
+        if (interval_end_year > most_recent_year_not_forest) & (most_recent_year_not_forest > 0):
+
+            years_of_forest_regrowth = years_of_forest_regrowth + cn.interval_years
+
+        else:  # No change
+            years_of_forest_regrowth = years_of_forest_regrowth
 
     return years_of_forest_regrowth
 
@@ -498,11 +505,10 @@ def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant
     # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest only).
     # Thus, we need to check whether the pixel was non-tall vegetation at some point during the model before the end of this interval.
-    # For simplicity, deadwood and litter C do not accumulate during loss intervals; it's too awkward to write a rule
-    # that allows deadwood and litter C accumulation during the loss interval.
-    if (most_recent_year_not_tall_veg >= cn.first_model_year) or (most_recent_year_not_tall_veg == interval_end_year):
-        deadwood_c_ratio = 0
-        litter_c_ratio = 0
+    # If conditions aren't met, the deadwood and litter ratios are set to 0 (no removals).
+    if most_recent_year_not_tall_veg == 0:
+        deadwood_c_ratio = 0.0
+        litter_c_ratio = 0.0
 
     # If no deadwood C:AGC or litter C:AGC are supplied (e.g., for SDPT), assume 0, and thus no removals to deadwood or litter.
     if deadwood_c_ratio == None:
@@ -650,7 +656,8 @@ def calc_T_T_non_stand_disturbs(node, burned_in_last_interval, agc_rf, bgc_rf, c
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant.
     # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest only).
     # Thus, we need to check whether the pixel was non-tall vegetation at some point during the model before the end of this interval.
-    if (most_recent_year_not_tall_veg >= cn.first_model_year) or (most_recent_year_not_tall_veg == interval_end_year) or (most_recent_year_not_tall_veg == 0):
+    # If conditions aren't met, the deadwood and litter ratios are set to 0 (no removals).
+    if most_recent_year_not_tall_veg == 0 or most_recent_year_not_tall_veg == interval_end_year:
         deadwood_c_ratio = 0.0
         litter_c_ratio = 0.0
 
@@ -684,8 +691,6 @@ def calc_T_T_non_stand_disturbs(node, burned_in_last_interval, agc_rf, bgc_rf, c
     # From IPCC 2019 Eqn. 2.27
     if burned_in_last_interval:
 
-        #TODO Do these equations actually equal gross emissions in Mg C/ha (that's what subsequent calcs are assuming)?
-        # I'm not sure the units are correct. Could be CO2/ha or something else.
         agc_gross_emis_out = ((agc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * agc_ef_CO2
         bgc_gross_emis_out = ((bgc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * bgc_ef_CO2
         deadwood_c_gross_emis_out = ((deadwood_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * deadwood_c_ef_CO2
@@ -802,7 +807,10 @@ def calc_T_T_no_disturbs(node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant.
     # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest only).
     # Thus, we need to check whether the pixel was non-tall vegetation at some point during the model before the end of this interval.
-    if (most_recent_year_not_tall_veg >= cn.first_model_year) or (most_recent_year_not_tall_veg == interval_end_year) or (most_recent_year_not_tall_veg == 0):
+    # If conditions aren't met, the deadwood and litter ratios are set to 0 (no removals).
+    #TODO Refactor this rule into its own function and use that in T->T disturbed, and T->T undisturbed.
+    # T->NT has a slightly different formulation of the rule for when to set these to 0.
+    if most_recent_year_not_tall_veg == 0 or most_recent_year_not_tall_veg == interval_end_year:
         deadwood_c_ratio = 0.0
         litter_c_ratio = 0.0
 
@@ -836,8 +844,6 @@ def calc_T_T_no_disturbs(node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_
     # From IPCC 2019 Eqn. 2.27
     if most_recent_year_burned > 0:
 
-        #TODO Do these equations actually equal gross emissions in Mg C/ha (that's what subsequent calcs are assuming)?
-        # I'm not sure the units are correct. Could be CO2/ha or something else.
         agc_gross_emis_out = ((agc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * agc_ef_CO2
         bgc_gross_emis_out = ((bgc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * bgc_ef_CO2
         deadwood_c_gross_emis_out = ((deadwood_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * deadwood_c_ef_CO2

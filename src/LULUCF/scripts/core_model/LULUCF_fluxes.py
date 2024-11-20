@@ -418,8 +418,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 ## Number of years of regrowth for new forest since last time not forest
                 years_of_forest_regrowth = years_of_forest_regrowth_block[row, col]
 
-                # Calculates the number of years of forest regrowth since the last year of not-tall vegetation.
+                # Calculates the number of years of forest regrowth since the last year of not-tall vegetation
+                # or partial disturbance.
                 # Can override the pre-existing value.
+                #TODO: This does not seem to work correctly after partial disturbances, at least in primary forest. It doesn't increment the years since disturbance.
+                # Look at ArcMap bookmark "Primary forest->partial disturbance->stable forest->stable forest"
                 years_of_forest_regrowth = nu.calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_tall_veg, tall_veg_curr, partially_disturbed_in_last_interval, years_of_forest_regrowth)
 
                 # Assigns an AGC RF for natural forest based on years since last time not tall vegetation (years_of_forest_regrowth).
@@ -476,7 +479,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                             bgc_rf = agc_rf * r_s_ratio_cell
                             c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in)
 
-                # TODO Confirm correct deadwood and litter RF for forest that was previously not forest
                 ### Tree loss
                 elif tall_veg_loss:  # Tree converted to non-tree (2)    #TODO: Include mangrove exception.
                     node = nu.accrete_node(node, 2)
@@ -607,7 +609,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                     node = nu.accrete_node(node, 1)
                                     agc_rf = natrl_forest_age_dependent_agc_rf
                                     bgc_rf = agc_rf * r_s_ratio_cell
-                                    rf_post_dist = np.array([medium_height_veg_AGC_RF, medium_height_veg_AGC_RF, 0, 0]).astype('float32')
+                                    rf_post_dist = np.array([medium_height_veg_AGC_RF, medium_height_veg_BGC_RF, 0, 0]).astype('float32')
                                     c_pools_fire_CO2 = cn.all_non_soil_pools
                                     c_pools_fire_non_CO2 = cn.all_non_soil_pools
                                     c_pools_no_fire = cn.all_non_soil_pools
@@ -620,7 +622,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                     node = nu.accrete_node(node, 2)
                                     agc_rf = natrl_forest_age_dependent_agc_rf
                                     bgc_rf = agc_rf * r_s_ratio_cell
-                                    rf_post_dist = np.array([3.3, 1.4, 0, 0]).astype('float32') #TODO write function to correctly source the medium vegetation post-dist RF
+                                    rf_post_dist = np.array([medium_height_veg_AGC_RF, medium_height_veg_BGC_RF, 0, 0]).astype('float32')
                                     c_pools_fire_CO2 = cn.agc_emissions_only
                                     c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
                                     c_pools_no_fire = cn.biomass_emissions_only
