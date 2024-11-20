@@ -43,13 +43,13 @@ NT_T_gain_year_count_default = math.ceil(interval_years / 2)
 
 ### Carbon constants
 
-# Carbon to CO2 (data type needs to be specified because of use in numba
+# Carbon to CO2 (data type needs to be specified because of use in numba)
 C_to_CO2 = 44/12
 C_to_CO2_numba = np.float32(C_to_CO2)
 
 # Biomass to carbon ratios
 biomass_to_carbon_non_mangrove = 0.47   # Conversion of biomass to carbon for non-mangrove forests
-biomass_to_carbon_mangrove = 0.45   # Conversion of biomass to carbon for mangroves (IPCC wetlands supplement table 4.2)
+biomass_to_carbon_mangrove = 0.45   # Conversion of biomass to carbon for mangroves (IPCC 2013 Wetlands Supplement table 4.2)
 
 # Default root:shoot when no Huang et al. 2021 is available. The average slope of the AGB:BGB relationship in Figure 3 of Mokany et al. 2006.
 # and is only used where Huang et al. 2021 can't reach (remote Pacific islands).
@@ -58,7 +58,7 @@ default_r_s_non_mang = 0.26
 rate_ratio_spreadsheet = 'http://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_model/LULUCF/rate_ratio_lookup_tables/rate_and_ratio_lookup_tables_20240718.xlsx'
 mangrove_rate_ratio_tab = 'mang gain C ratio, for model'
 
-# Non-mangrove deadwood C:AGC and litter C:AGC constants
+# Non-mangrove deadwood C:AGC and litter C:AGC constants (unitless)
 # Deadwood and litter carbon as fractions of AGC are from
 # https://cdm.unfccc.int/methodologies/ARmethodologies/tools/ar-am-tool-12-v3.0.pdf
 # "Clean Development Mechanism A/R Methodological Tool:
@@ -76,25 +76,22 @@ tropical_high_elev_litter_c_ratio = 0.01
 non_tropical_deadwood_c_ratio = 0.08
 non_tropical_litter_c_ratio = 0.04
 
-# Aboveground carbon removal factor for oil palm (Mg C/ha/yr).
-# From IPCC 2019 Refinement Cropland Table 5.3.
+# Aboveground carbon removal factor for oil palm (Mg C/ha/yr) (IPCC 2019 Cropland Table 5.3)
 oil_palm_agc_rf = 2.4
 oil_palm_bgc_rf = oil_palm_agc_rf * default_r_s_non_mang
 
-# One-time annual cropland removal factor
-#TODO check units
-#TODO add source
+# One-time annual cropland removal factor (Mg C/ha) (IPCC 2019 Cropland Section 5.3.1.2)
 cropland_rf = 4.7
 
 # Aboveground carbon removal factor for trees outside forests (Mg C/ha/yr), assuming that the entire hectare is ToF
-#TODO Confirm value and units and add source
+# (IPCC 2019 Settlements Section 8.2.1.2 (p. 8.5))
 trees_outside_forests_agc_rf_max = 2.8
 
 # Global warming potentials (GWP)
 gwp_ch4 = 27 # AR6 WG1 Table 7.15
 gwp_n2o = 273 # AR6 WG1 Table 7.15
 
-### GLCLU codes
+### GLCLU cover codes
 cropland = 244
 builtup = 250
 
@@ -103,7 +100,8 @@ tree_dry_max_height_code = 48
 tree_wet_min_height_code = 127
 tree_wet_max_height_code = 148
 
-# IPCC Tier 1 removal factor spreadsheet (IPCC 2019, Table 4.9)
+# IPCC Tier 1 removal factor spreadsheet by continent-ecozone-age category combination
+# (IPCC 2019, Table 4.9, with corrigenda 4 temperate forest revision) (Mg AGB/ha/yr)
 IPCC_removal_factor_table_url = "http://gfw2-data.s3.amazonaws.com/climate/carbon_model/removal_rate_tables/"
 IPCC_removal_factor_table_name = "gain_rate_continent_ecozone_age_20230821.xlsx"
 IPCC_removal_factor_table_full_path = f"{IPCC_removal_factor_table_url}{IPCC_removal_factor_table_name}"
@@ -127,13 +125,16 @@ tree_threshold = 5
 g_to_kg = 10 ** -3
 
 # Which carbon pools are emitted under different circumstances for full tree loss: AGC, BGC, deadwood C, litter C.
-# Need to specify numpy datatype because they're used in the Numba functions, which need explicit datatypes
+# Need to specify numpy datatype because they're used in the Numba functions, which need explicit datatypes.
+# Based on LULUCF model framework slides: https://onewri-my.sharepoint.com/:p:/g/personal/david_gibbs_wri_org/EWwyxRfgdeVJi4ezwX7LrfcBT4k1CY-vHRtVDjJIAsgsJg?e=6nDCkA
+# 1 means full emissions, 0 means no emissions.
 agc_emissions_only = np.array([1, 0, 0, 0]).astype('uint8')
 biomass_emissions_only = np.array([1, 1, 0, 0]).astype('uint8')
 all_but_bgc_emissions = np.array([1, 0, 1, 1]).astype('uint8')
 deadwood_litter_emissions = np.array([0, 0, 1, 1]).astype('uint8')
 all_non_soil_pools = np.array([1, 1, 1, 1]).astype('uint8')
 
+# SDPT v2.0 planted forest type codes
 SDPT_oil_palm_code = 1
 SDPT_wood_fiber_code = 2
 SDPT_other_code = 3
@@ -216,7 +217,6 @@ other_natural_disturbances = 7
 drivers_biomass_C_only = (forest_management, wildfire, other_natural_disturbances)
 drivers_non_soil_C = (permanent_agriculture, hard_commodities, shifting_cultivation, settlements_and_infrastruct)
 
-
 ifl_primary_path = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged/processed/20200724/"
 ifl_primary_pattern = "ifl_2000_primary_2001_merged"
 
@@ -291,9 +291,9 @@ soil_c_2000_pattern = "soil_C_full_extent_2000_Mg_C_ha"
 
 land_state_pattern = "land_state_node"
 
-agc_rf_pre_dist_pattern = "AGC_removal_factor__MgC_ha_yr" #TODO Specify RF units here
+agc_rf_pre_dist_pattern = "AGC_removal_factor__MgC_ha_yr"
 
-# Gross and net fluxes
+# Gross and net fluxes (fluxes are in Mg CO2/ha/yr or Mg CO2e/ha/yr)
 agc_gross_emis_pattern = "AGC_gross_emissions__MgCO2_ha_yr"
 bgc_gross_emis_pattern = "BGC_gross_emissions__MgCO2_ha_yr"
 deadwood_c_gross_emis_pattern = "deadwood_C_gross_emissions__MgCO2_ha_yr"

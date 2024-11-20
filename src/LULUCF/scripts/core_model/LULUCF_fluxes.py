@@ -48,13 +48,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
     r_s_ratio_block = in_dict_float32[cn.r_s_ratio_pattern].astype('float32')
 
-    natrl_forest_curve_0_5_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__0_5_years"].astype('float32')
-    natrl_forest_curve_6_10_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__6_10_years"].astype('float32')
-    natrl_forest_curve_11_15_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__11_15_years"].astype('float32')
-    natrl_forest_curve_16_20_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__16_20_years"].astype('float32')
-    natrl_forest_curve_21_100_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__21_100_years"].astype('float32')
+    natrl_forest_curve_0_5_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__0_5_years"].astype('float32')
+    natrl_forest_curve_6_10_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__6_10_years"].astype('float32')
+    natrl_forest_curve_11_15_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__11_15_years"].astype('float32')
+    natrl_forest_curve_16_20_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__16_20_years"].astype('float32')
+    natrl_forest_curve_21_100_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__21_100_years"].astype('float32')
 
-    # Removal factor (Mg [some unit]/ha/yr) #TODO Units TBD
+    # Removal factor (Mg C/ha/yr)
     # Because this is used to store the RF from the previous interval,
     # it persists from one interval to the next. Therefore, it must be defined before the first iteration.
     # That way, removal factors can be over-written by those used in the latest interval.
@@ -62,8 +62,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
     planted_forest_type_block = in_dict_uint8[cn.planted_forest_type_pattern]
     planted_forest_tree_crop_block = in_dict_uint8[cn.planted_forest_tree_crop_pattern]
-    planted_forest_AGC_removal_factor_block = in_dict_float32[cn.planted_forest_AGC_removal_factor_pattern]
-    planted_forest_AGC_BGC_removal_factor_block = in_dict_float32[cn.planted_forest_AGC_BGC_removal_factor_pattern]
+    planted_forest_AGC_RF_block = in_dict_float32[cn.planted_forest_AGC_removal_factor_pattern]
+    planted_forest_AGC_BGC_RF_block = in_dict_float32[cn.planted_forest_AGC_BGC_removal_factor_pattern]
     oil_palm_2000_extent_block = in_dict_uint8[cn.oil_palm_2000_extent_pattern]
     oil_palm_first_year_block = in_dict_int16[cn.oil_palm_first_year_pattern]
 
@@ -200,17 +200,17 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                     r_s_ratio_cell = cn.default_r_s_non_mang
 
                 # Secondary forest removal factors (Mg AGC/ha/yr)
-                natrl_forest_curve_0_5_cell = natrl_forest_curve_0_5_block[row, col]
-                natrl_forest_curve_6_10_cell = natrl_forest_curve_6_10_block[row, col]
-                natrl_forest_curve_11_15_cell = natrl_forest_curve_11_15_block[row, col]
-                natrl_forest_curve_16_20_cell = natrl_forest_curve_16_20_block[row, col]
-                natrl_forest_curve_21_100_cell = natrl_forest_curve_21_100_block[row, col]
+                natrl_forest_curve_0_5_AGC_RF_cell = natrl_forest_curve_0_5_AGC_RF_block[row, col]
+                natrl_forest_curve_6_10_AGC_RF_cell = natrl_forest_curve_6_10_AGC_RF_block[row, col]
+                natrl_forest_curve_11_15_AGC_RF_cell = natrl_forest_curve_11_15_AGC_RF_block[row, col]
+                natrl_forest_curve_16_20_AGC_RF_cell = natrl_forest_curve_16_20_AGC_RF_block[row, col]
+                natrl_forest_curve_21_100_AGC_RF_cell = natrl_forest_curve_21_100_AGC_RF_block[row, col]
 
                 planted_forest_type_cell = planted_forest_type_block[row, col]
                 planted_forest_tree_crop_cell = planted_forest_tree_crop_block[row, col]
-                planted_forest_AGC_removal_factor_cell = planted_forest_AGC_removal_factor_block[row, col]
-                planted_forest_AGC_BGC_removal_factor_cell = planted_forest_AGC_BGC_removal_factor_block[row, col]
-                planted_forest_BGC_removal_factor_cell = planted_forest_AGC_BGC_removal_factor_cell - planted_forest_AGC_removal_factor_cell
+                planted_forest_AGC_RF_cell = planted_forest_AGC_RF_block[row, col]
+                planted_forest_AGC_BGC_RF_cell = planted_forest_AGC_BGC_RF_block[row, col]
+                planted_forest_BGC_RF_cell = planted_forest_AGC_BGC_RF_cell - planted_forest_AGC_RF_cell
 
                 oil_palm_2000_extent_cell = oil_palm_2000_extent_block[row, col]
                 oil_palm_first_year_cell = oil_palm_first_year_block[row, col]
@@ -220,23 +220,24 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 continent_ecozone_cell = continent_ecozone_block[row, col]
                 climate_zone_cell = climate_zone_block[row, col]
 
-                # Removal factor for primary forests/IFL (Mg AGC/ha/yr)
+                # Determines the removal factor for primary forests/IFL based on the ecozone (Mg AGC/ha/yr)
                 primary_forest_AGC_RF = nu.calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs)
 
                 # Assigns the previous interval's pre-disturbance removal factor to this interval.
+                # This is only used for natural forests (non-SDPT/oil palm), where the RF can change from interval to interval.
                 # If it's the first interval (i.e. no previous interval),
-                # primary forest/IFL RF is used if in that, otheerwise old secondary forest RF is used.
+                # primary forest/IFL RF is used if in that, otherwise old secondary forest RF is used.
                 # This effectively assumes that any disturbed natural forest has
                 # primary forest or old secondary forest RF before disturbance (not young secondary).
                 # Obviously not realistic but a fine starting simplification, I think.
                 #TODO: Include better way to determine what the starting natural forest RF should be than just assuming
                 # primary or old secondary forest
-                if interval_end_year == 2005:   # If in first interval...
+                if interval_end_year == 2005:   # If first interval...
                     if ifl_primary_cell:   # And if in IFL/primary forest...
                         agc_rf_pre_dist_prev = primary_forest_AGC_RF   # Use the primary forest/IFL RF
-                    else:  #If not in IFL/primary forest...
-                        agc_rf_pre_dist_prev = natrl_forest_curve_21_100_cell   # Use old secondary forest RF
-                else:  # If not in first interval...
+                    else:  # If not in IFL/primary forest...
+                        agc_rf_pre_dist_prev = natrl_forest_curve_21_100_AGC_RF_cell   # Use old secondary forest RF
+                else:  # If not first interval...
                     agc_rf_pre_dist_prev = agc_rf_pre_dist_out_block[row, col]  # Use removal factor from the previous interval
 
 
@@ -294,7 +295,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 # if first_forest_dist_in_record > 0:
                 #     print("disturbance", row, col, first_forest_dist_in_record)
 
-                # Input carbon densities for the pools using the end of the previous interval
+                # Input carbon densities for the pools using the end of the previous interval (Mg C/ha)
                 agc_dens_in = agc_dens_block[row, col]
                 bgc_dens_in = bgc_dens_block[row, col]
                 deadwood_c_dens_in = deadwood_c_dens_block[row, col]
@@ -303,7 +304,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
                 # Makes a list of carbon densities to save space in the decision tree below.
                 # This list is input to flux calculation functions as one argument, rather than a separate argument
-                # for each pool
+                # for each pool (Mg C/ha)
                 c_dens_in = [agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in]
 
                 elevation_cell = elevation_block[row, col]
@@ -318,10 +319,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 #TODO Correct and complete this function. Currently using just climate domain as a stand in for IPCC climate zone.
                 medium_height_veg_AGC_RF, medium_height_veg_BGC_RF = nu.calc_medium_height_veg_removals(climate_domain_cell)
 
-                # Gef for fire emissions for different gases for forests specifically (g/kg dry matter)
+                # Gef for fire emissions for different gases for forests specifically (g respective gas/kg dry matter)
                 Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest = nu.calc_Gef_forest(climate_domain_cell)
 
-                # Cf for fire emissions for all gases for forests specifically (g/kg dry matter)
+                # Cf for fire emissions for all gases for forests specifically (unitless)
                 #TODO Eventually decide if we want to revise this from using drivers to using ending LC
                 Cf = nu.calc_Cf_forest(climate_domain_cell, drivers_cell, ifl_primary_cell)
 
@@ -425,16 +426,16 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 # Look at ArcMap bookmark "Primary forest->partial disturbance->stable forest->stable forest"
                 years_of_forest_regrowth = nu.calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_tall_veg, tall_veg_curr, partially_disturbed_in_last_interval, years_of_forest_regrowth)
 
-                # Assigns an AGC RF for natural forest based on years since last time not tall vegetation (years_of_forest_regrowth).
+                # Assigns an AGC RF for natural forest based on years since last time not tall vegetation (years_of_forest_regrowth) (Mg AGC/ha/yr).
                 # If there are no years of forest regrowth (i.e. no record of non-tall veg land cover), the previous interval's RF is used.
                 if years_of_forest_regrowth > 0 and years_of_forest_regrowth <= 5:
-                    natrl_forest_age_dependent_agc_rf = natrl_forest_curve_0_5_cell
+                    natrl_forest_age_dependent_agc_rf = natrl_forest_curve_0_5_AGC_RF_cell
                 elif years_of_forest_regrowth > 5 and years_of_forest_regrowth <= 10:
-                    natrl_forest_age_dependent_agc_rf = natrl_forest_curve_6_10_cell
+                    natrl_forest_age_dependent_agc_rf = natrl_forest_curve_6_10_AGC_RF_cell
                 elif years_of_forest_regrowth > 10 and years_of_forest_regrowth <= 15:
-                    natrl_forest_age_dependent_agc_rf = natrl_forest_curve_11_15_cell
+                    natrl_forest_age_dependent_agc_rf = natrl_forest_curve_11_15_AGC_RF_cell
                 elif years_of_forest_regrowth > 15 and years_of_forest_regrowth <= 20:
-                    natrl_forest_age_dependent_agc_rf = natrl_forest_curve_16_20_cell
+                    natrl_forest_age_dependent_agc_rf = natrl_forest_curve_16_20_AGC_RF_cell
                 else:
                     natrl_forest_age_dependent_agc_rf = agc_rf_pre_dist_prev
 
@@ -442,13 +443,19 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 ### Starting output pixel values
 
                 # Starting decision tree node value
+                # All C pool fluxes and densities are kept in Mg C (as opposed to Mg CO2) until they are saved to
+                # the output dictionaries. This simplifies arithmetic.
+                agc_rf = 0  # (Mg AGC/ha/yr)
+                # Need to force arrays into float32 because numba is so particular about datatypes.
+                # Initializes dummy output C gross emissions (Mg C/ha/interval->later converted to Mg CO2/ha/yr): AGC, BGC, deadwood C, litter C.
+                c_gross_emis_out = np.array([0, 0, 0, 0]).astype('float32')
+                # Initializes dummy output C gross removals (Mg C/ha/interval->later converted to Mg CO2/ha/yr): AGC, BGC, deadwood C, litter C.
+                c_gross_removals_out = np.array([0, 0, 0, 0]).astype('float32')
+                # Initializes dummy output non-CO2 fluxes (Mg CO2e/ha/interval->later converted to Mg CO2e/ha/yr): CH4, N2O
+                non_co2_flux_out = np.array([0, 0]).astype('float32')
+
                 node = 0
                 gain_year_count = 0
-                agc_rf = 0
-                # Need to force arrays into float32 because numba is so particular about datatypes.
-                c_gross_emis_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross emissions (Mg C/ha/interval): AGC, BGC, deadwood C, litter C.
-                c_gross_removals_out = np.array([0, 0, 0, 0]).astype('float32')  # Initializes dummy output C gross removals (Mg C/ha/interval): AGC, BGC, deadwood C, litter C.
-                non_co2_flux_out = np.array([0, 0]).astype('float32')  # Initializes dummy output non-CO2 fluxes (Mg CO2e/ha/interval): CH4, N2O
 
                 ### Tree gain
                 if tall_veg_gain:  # Non-tree converted to tree (1)    #TODO: Include mangrove exception.
@@ -462,14 +469,14 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                             c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in)
                         else: # New non-oil palm planted trees (112)
                             state_out = nu.accrete_node(node, 2)
-                            agc_rf = planted_forest_AGC_removal_factor_cell
-                            bgc_rf = planted_forest_BGC_removal_factor_cell
+                            agc_rf = planted_forest_AGC_RF_cell
+                            bgc_rf = planted_forest_BGC_RF_cell
                             c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in)
                     else:  # New non-planted trees (12)
                         node = nu.accrete_node(node, 2)
                         if tall_veg_curr:  # New terrestrial natural forest (121)
                             state_out = nu.accrete_node(node, 1)
-                            agc_rf = natrl_forest_curve_0_5_cell
+                            agc_rf = natrl_forest_curve_0_5_AGC_RF_cell
                             bgc_rf = agc_rf * r_s_ratio_cell
                             c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in,
                                                                             deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
@@ -500,8 +507,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                             node = nu.accrete_node(node, 2)
                             if LC_curr == cn.cropland:  # Plantation harvested as cropland (2121->21211/21212)
                                 node = nu.accrete_node(node, 1)
-                                agc_rf = planted_forest_AGC_removal_factor_cell
-                                bgc_rf = planted_forest_BGC_removal_factor_cell
+                                agc_rf = planted_forest_AGC_RF_cell
+                                bgc_rf = planted_forest_BGC_RF_cell
                                 rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
@@ -512,8 +519,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest)
                             elif short_veg_curr:  # Plantation harvested as short vegetation (2122->21221/21222)
                                 node = nu.accrete_node(node, 2)
-                                agc_rf = planted_forest_AGC_removal_factor_cell
-                                bgc_rf = planted_forest_BGC_removal_factor_cell
+                                agc_rf = planted_forest_AGC_RF_cell
+                                bgc_rf = planted_forest_BGC_RF_cell
                                 rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
@@ -524,8 +531,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest)
                             elif med_veg_curr:  # Plantation harvested as medium vegetation (2123->21231/21232)
                                 node = nu.accrete_node(node, 3)
-                                agc_rf = planted_forest_AGC_removal_factor_cell
-                                bgc_rf = planted_forest_BGC_removal_factor_cell
+                                agc_rf = planted_forest_AGC_RF_cell
+                                bgc_rf = planted_forest_BGC_RF_cell
                                 rf_post_dist = np.array([medium_height_veg_AGC_RF, medium_height_veg_BGC_RF, 0, 0]).astype('float32')
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
@@ -536,8 +543,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest)
                             elif LC_curr == cn.builtup:  # Plantation converted to settlement (2124->21241/21242)
                                 node = nu.accrete_node(node, 4)
-                                agc_rf = planted_forest_AGC_removal_factor_cell
-                                bgc_rf = planted_forest_BGC_removal_factor_cell
+                                agc_rf = planted_forest_AGC_RF_cell
+                                bgc_rf = planted_forest_BGC_RF_cell
                                 rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
@@ -548,8 +555,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest)
                             else:  # Plantation converted to anything else (2125->21251/21252)
                                 node = nu.accrete_node(node, 5)
-                                agc_rf = planted_forest_AGC_removal_factor_cell
-                                bgc_rf = planted_forest_BGC_removal_factor_cell
+                                agc_rf = planted_forest_AGC_RF_cell
+                                bgc_rf = planted_forest_BGC_RF_cell
                                 rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
@@ -684,8 +691,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                     agc_rf = cn.oil_palm_agc_rf
                                     bgc_rf = cn.oil_palm_bgc_rf
                                 else:
-                                    agc_rf = planted_forest_AGC_removal_factor_cell
-                                    bgc_rf = planted_forest_BGC_removal_factor_cell
+                                    agc_rf = planted_forest_AGC_RF_cell
+                                    bgc_rf = planted_forest_BGC_RF_cell
                                 rf_post_dist = np.array([agc_rf, bgc_rf, 0, 0]).astype('float32')
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.agc_emissions_only
@@ -701,8 +708,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                     agc_rf = cn.oil_palm_agc_rf
                                     bgc_rf = cn.oil_palm_bgc_rf
                                 else:
-                                    agc_rf = planted_forest_AGC_removal_factor_cell
-                                    bgc_rf = planted_forest_BGC_removal_factor_cell
+                                    agc_rf = planted_forest_AGC_RF_cell
+                                    bgc_rf = planted_forest_BGC_RF_cell
                                 rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.agc_emissions_only
@@ -720,7 +727,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                     node = nu.accrete_node(node, 1)
                                     agc_rf = natrl_forest_age_dependent_agc_rf
                                     bgc_rf = agc_rf * r_s_ratio_cell
-                                    agc_rf_post = natrl_forest_curve_0_5_cell # Post-dist RF is 0-5 year secondary forest
+                                    agc_rf_post = natrl_forest_curve_0_5_AGC_RF_cell # Post-dist RF is 0-5 year secondary forest
                                     bgc_rf_post = agc_rf_post * r_s_ratio_cell
                                     rf_post_dist = np.array([agc_rf_post, bgc_rf_post, 0, 0]).astype('float32')
                                     c_pools_fire_CO2 = cn.agc_emissions_only
@@ -786,8 +793,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                 agc_rf = cn.oil_palm_agc_rf
                                 bgc_rf = cn.oil_palm_bgc_rf
                             else:
-                                agc_rf = planted_forest_AGC_removal_factor_cell
-                                bgc_rf = planted_forest_BGC_removal_factor_cell
+                                agc_rf = planted_forest_AGC_RF_cell
+                                bgc_rf = planted_forest_BGC_RF_cell
                             c_pools_fire_CO2 = cn.agc_emissions_only
                             c_pools_fire_non_CO2 = cn.agc_emissions_only
                             state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs(
@@ -806,9 +813,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                     # +/- 0.01 the primary forest and old secondary RF are to provide some tolerance around
                                     # those RFs in case numba is rounding them and they aren't exact matches.
                                     if (natrl_forest_age_dependent_agc_rf > primary_forest_AGC_RF - 0.01) and (natrl_forest_age_dependent_agc_rf < primary_forest_AGC_RF + 0.01):
-                                        agc_rf = natrl_forest_curve_0_5_cell
-                                    elif (natrl_forest_age_dependent_agc_rf > natrl_forest_curve_21_100_cell - 0.01) and (natrl_forest_age_dependent_agc_rf < natrl_forest_curve_21_100_cell + 0.01):
-                                        agc_rf = natrl_forest_curve_0_5_cell
+                                        agc_rf = natrl_forest_curve_0_5_AGC_RF_cell
+                                    elif (natrl_forest_age_dependent_agc_rf > natrl_forest_curve_21_100_AGC_RF_cell - 0.01) and (natrl_forest_age_dependent_agc_rf < natrl_forest_curve_21_100_AGC_RF_cell + 0.01):
+                                        agc_rf = natrl_forest_curve_0_5_AGC_RF_cell
                                     else:  # If not using primary or old secondary RF, it can use whatever the relevant young secondary RF is
                                         agc_rf = natrl_forest_age_dependent_agc_rf
                                     bgc_rf = agc_rf * r_s_ratio_cell
@@ -834,7 +841,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                             deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
                                     else:  # Old secondary forest (322122->3221221/3221222)
                                         node = nu.accrete_node(node, 2)
-                                        agc_rf = natrl_forest_curve_21_100_cell
+                                        agc_rf = natrl_forest_curve_21_100_AGC_RF_cell
                                         bgc_rf = agc_rf * r_s_ratio_cell
                                         c_pools_fire_CO2 = cn.agc_emissions_only
                                         c_pools_fire_non_CO2 = cn.agc_emissions_only
@@ -859,7 +866,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                     # Need to know when a state isn't being assigned. It should always be assigned.
                     state_out = 4000000000
 
-                    # If no C fluxes calculated in decision tree, densities out should be densities in.
+                    # If no C fluxes calculated in decision tree, densities out should be densities in (Mg C/ha).
                     # Otherwise, they get reset to 0.
                     c_dens_out = np.array(c_dens_in).astype('float32')
 
@@ -867,22 +874,26 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 ### Populates the output arrays with the calculated fluxes and densities
                 state_out_block[row, col] = state_out
 
-                # Sets the RF from this interval as the RF from the previous interval for the next interval
+                # Sets the RF from this interval as the RF from the previous interval for the next interval (Mg AGC/ha/yr)
                 agc_rf_pre_dist_out_block[row, col] = agc_rf
 
+                # Gross emissions for each C pool for the interval before conversion to CO2 (Mg C/ha/interval)
                 agc_gross_emis_out_block[row, col] = c_gross_emis_out[0]
                 bgc_gross_emis_out_block[row, col] = c_gross_emis_out[1]
                 deadwood_c_gross_emis_out_block[row, col] = c_gross_emis_out[2]
                 litter_c_gross_emis_out_block[row, col] = c_gross_emis_out[3]
 
+                # Non-CO2 emissions for the interval (Mg CO2e/ha/interval)
                 ch4_gross_emis_out_block[row, col] = non_co2_flux_out[0]
                 n2o_gross_emis_out_block[row, col] = non_co2_flux_out[1]
 
+                # Gross removals for each C pool for the interval before conversion to CO2 (Mg C/ha/interval)
                 agc_gross_removals_out_block[row, col] = c_gross_removals_out[0]
                 bgc_gross_removals_out_block[row, col] = c_gross_removals_out[1]
                 deadwood_c_gross_removals_out_block[row, col] = c_gross_removals_out[2]
                 litter_c_gross_removals_out_block[row, col] = c_gross_removals_out[3]
 
+                # C density for each C pool at the end of the interval (Mg C/ha)
                 agc_dens_block[row, col] = c_dens_out[0]
                 bgc_dens_block[row, col] = c_dens_out[1]
                 deadwood_c_dens_block[row, col] = c_dens_out[2]
@@ -895,21 +906,22 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
                 first_time_sig_loss_from_max_height_block[row, col] = first_time_sig_loss_from_max_height
 
-        # os.quit()
+        # os.quit()   # For testing the first interval
 
         ### End of iteration calculations and outputs
 
         # Adds the output arrays to the dictionary with the appropriate data type
         # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
         # This applies even for the outputs that aren't reused in the next interval;
-        # they will still get overwritten with the last interval's values, I believe.
+        # they will still get overwritten with the final interval's values, I believe.
         year_range = f"{interval_end_year - cn.interval_years}_{interval_end_year}"
 
         out_dict_uint32[f"{cn.land_state_pattern}_{year_range}"] = state_out_block.copy()
 
         out_dict_float32[f"{cn.agc_rf_pre_dist_pattern}_{year_range}"] = agc_rf_pre_dist_out_block.copy()
 
-        # Converts carbon pool fluxes from Mg C/ha/interval to Mg CO2/ha/year
+        # Converts carbon pool fluxes from Mg C/ha/interval to Mg CO2/ha/yr.
+        # Gross emissions are positive. Gross removals are negative.
         out_dict_float32[f"{cn.agc_gross_emis_pattern}_{year_range}"] = (agc_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
         out_dict_float32[f"{cn.bgc_gross_emis_pattern}_{year_range}"] = (bgc_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
         out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = (deadwood_c_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
@@ -920,9 +932,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
         out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"] = (deadwood_c_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
         out_dict_float32[f"{cn.litter_c_gross_removals_pattern}_{year_range}"] = (litter_c_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
 
+        # Converts non-CO2 emissions from Mg CO2e/ha/interval to Mg CO2e/ha/yr
         out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = (ch4_gross_emis_out_block/cn.interval_years).copy()
         out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = (n2o_gross_emis_out_block/cn.interval_years).copy()
 
+        # Still Mg C/ha
         out_dict_float32[f"{cn.agc_dens_pattern}_{interval_end_year}"] = agc_dens_block.copy()
         out_dict_float32[f"{cn.bgc_dens_pattern}_{interval_end_year}"] = bgc_dens_block.copy()
         out_dict_float32[f"{cn.deadwood_c_dens_pattern}_{interval_end_year}"] = deadwood_c_dens_block.copy()
@@ -1260,6 +1274,8 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
                                                           cn.IPCC_removal_factor_table_tab,
                                                           ['gainEcoCon', 'growth_primary'])
 
+    # Converts primary forest AGB RFs to AGC RFs (Mg AGB/ha/yr -> Mg AGC/ha/yr)
+    primary_forest_RFs[:, 1] = primary_forest_RFs[:, 1] * cn.biomass_to_carbon_non_mangrove
 
     # Creates list of tasks to run (1 task = 1 chunk)
     print(f"Creating tasks and starting processing: {uu.timestr()}")
