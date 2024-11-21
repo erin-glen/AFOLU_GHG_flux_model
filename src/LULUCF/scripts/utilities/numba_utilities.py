@@ -417,23 +417,13 @@ def non_CO2_fire_equations(carbon_in, Cf, Gef_ch4, Gef_n2o):
 # Gross and net fluxes and ending carbon stocks for non-tree converted to tree.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 @jit(nopython=True)
-def calc_NT_T(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio=None, litter_c_ratio=None):
+def calc_NT_T(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
 
     # Step 1: Calculates the number of years of carbon gain (years)
     gain_year_count = cn.NT_T_gain_year_count_default
-
-    # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant
-    # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest only).
-    # By definition, NT->T pixels fall into this category, so all new natural terrestrial forest should have DOM removals.
-    # If no deadwood C:AGC or litter C:AGC are supplied (e.g., for SDPT, ToF),
-    # assume 0, and thus no removals to deadwood or litter.
-    if not deadwood_c_ratio:
-        deadwood_c_ratio = 0
-    if not litter_c_ratio:
-        litter_c_ratio = 0
 
     # Step 2: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
     agc_gross_removals_out = float((agc_rf * gain_year_count) * -1)  #float() necessary for Numba typing
@@ -472,7 +462,7 @@ def calc_NT_T(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio=None, litter_c_ratio=N
 def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
                     forest_dist_last, interval_end_year, c_dens_in,
                     post_dist_regrowth, most_recent_year_not_tall_veg, Cf, Gef_ch4, Gef_n2o,
-                    deadwood_c_ratio=None, litter_c_ratio=None):
+                    deadwood_c_ratio, litter_c_ratio):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
@@ -515,12 +505,6 @@ def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c
     # For simplicity, there are no deadwood or litter removals in loss intervals.
     if most_recent_year_not_tall_veg == 0 or most_recent_year_not_tall_veg == interval_end_year:
         deadwood_c_ratio = 0.0
-        litter_c_ratio = 0.0
-
-    # If no deadwood C:AGC or litter C:AGC are supplied (e.g., for SDPT), assume 0, and thus no removals to deadwood or litter.
-    if deadwood_c_ratio == None:
-        deadwood_c_ratio = 0.0
-    if litter_c_ratio == None:
         litter_c_ratio = 0.0
 
 

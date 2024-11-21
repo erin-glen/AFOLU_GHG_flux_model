@@ -466,12 +466,14 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                             state_out = nu.accrete_node(node, 1)
                             agc_rf = cn.oil_palm_agc_rf
                             bgc_rf = cn.oil_palm_bgc_rf
-                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in)
+                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in,
+                                                                                                               deadwood_c_ratio=0, litter_c_ratio=0)
                         else: # New non-oil palm planted trees (112)
                             state_out = nu.accrete_node(node, 2)
                             agc_rf = planted_forest_AGC_RF_cell
                             bgc_rf = planted_forest_BGC_RF_cell
-                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in)
+                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in,
+                                                                                                               deadwood_c_ratio=0, litter_c_ratio=0)
                     else:  # New non-planted trees (12)
                         node = nu.accrete_node(node, 2)
                         if tall_veg_curr:  # New terrestrial natural forest (121)
@@ -484,7 +486,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                             state_out = nu.accrete_node(node, 2)
                             agc_rf = cn.trees_outside_forests_agc_rf_max
                             bgc_rf = agc_rf * r_s_ratio_cell
-                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in)
+                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in,
+                                                                                                               deadwood_c_ratio=0, litter_c_ratio=0)
 
                 ### Tree loss
                 elif tall_veg_loss:  # Tree converted to non-tree (2)    #TODO: Include mangrove exception.
@@ -502,7 +505,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                             state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
                                 node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                 c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest)
+                                rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
+                                deadwood_c_ratio=0, litter_c_ratio=0)
                         else:  # Full loss of non-oil palm planted trees (212)
                             node = nu.accrete_node(node, 2)
                             if LC_curr == cn.cropland:  # Plantation harvested as cropland (2121->21211/21212)
@@ -516,7 +520,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                 state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                    rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest)
+                                    rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
+                                    deadwood_c_ratio=0, litter_c_ratio=0)
                             elif short_veg_curr:  # Plantation harvested as short vegetation (2122->21221/21222)
                                 node = nu.accrete_node(node, 2)
                                 agc_rf = planted_forest_AGC_RF_cell
@@ -528,7 +533,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                 state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                    rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest)
+                                    rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
+                                    deadwood_c_ratio=0, litter_c_ratio=0)
                             elif med_veg_curr:  # Plantation harvested as medium vegetation (2123->21231/21232)
                                 node = nu.accrete_node(node, 3)
                                 agc_rf = planted_forest_AGC_RF_cell
@@ -540,7 +546,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                 state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                    rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest)
+                                    rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
+                                    deadwood_c_ratio=0, litter_c_ratio=0)
                             elif LC_curr == cn.builtup:  # Plantation converted to settlement (2124->21241/21242)
                                 node = nu.accrete_node(node, 4)
                                 agc_rf = planted_forest_AGC_RF_cell
@@ -552,7 +559,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                 state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                    rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest)
+                                    rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
+                                    deadwood_c_ratio=0, litter_c_ratio=0)
                             else:  # Plantation converted to anything else (2125->21251/21252)
                                 node = nu.accrete_node(node, 5)
                                 agc_rf = planted_forest_AGC_RF_cell
@@ -564,7 +572,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                                 state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                    rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest)
+                                    rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
+                                    deadwood_c_ratio=0, litter_c_ratio=0)
                     else:  # Full loss of non-planted trees (22)
                         node = nu.accrete_node(node, 2)
                         if tall_veg_prev:  # Full loss of natural forest (221)
@@ -676,7 +685,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                             state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
                                 node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                 c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest)
+                                rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
+                                deadwood_c_ratio=0, litter_c_ratio=0)
 
                 ### Trees remaining trees
                 elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: Include mangrove exception.
