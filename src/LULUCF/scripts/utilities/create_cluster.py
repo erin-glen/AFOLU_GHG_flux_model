@@ -1,6 +1,6 @@
 """
 Run from src/LULUCF/
-python -m scripts.utilities.create_cluster -n 1 -m 8
+python -m scripts.utilities.create_cluster -n 1
 """
 
 import coiled

@@ -1055,6 +1055,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs, is_final)
 
+    lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+
     # print(out_dict_uint32)
     # print(out_dict_float32)
     # print(f"Average of {list(out_dict_uint32.keys())[0]} is: {list(out_dict_uint32.values())[0].mean()}")
