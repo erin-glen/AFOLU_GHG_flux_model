@@ -694,10 +694,17 @@ def calculate_chunk_stats(all_stats, stage):
     input_rows = sorted_stats[sorted_stats['in_out'] == 'input_layer']
     output_rows = sorted_stats[sorted_stats['in_out'] == 'output_layer']
 
-    # Splits output rows based on 'layer_name' containing 'flux', 'gross', or 'net'
-    flux_output = output_rows[output_rows['layer_name'].str.contains('gross|net|flux', case=False, na=False)]
+    # Splits input rows based on 'layer_name' containing 'ba_' or 'forest_disturbance'
+    annual_inputs = input_rows[input_rows['layer_name'].str.contains('ba_|forest_disturbance', case=False, na=False)]
 
-    # If any output rows don't contain 'flux', 'gross', or 'net', puts them in a separate tab
+    # Puts output rows that don't contain 'ba_' or 'forest_disturbance' in a separate tab
+    other_inputs = input_rows[~input_rows['layer_name'].str.contains('ba_|forest_disturbance', case=False, na=False)]
+
+    # Splits output rows based on 'layer_name' containing 'flux', 'gross', or 'net'
+    gross_flux_output = output_rows[output_rows['layer_name'].str.contains('gross', case=False, na=False)]
+    net_flux_output = output_rows[output_rows['layer_name'].str.contains('net|flux', case=False, na=False)]
+
+    # Puts output rows that don't contain 'flux|gross|net' in a separate tab
     other_output = output_rows[~output_rows['layer_name'].str.contains('flux|gross|net', case=False, na=False)]
 
     # Writes the data to a single Excel file with separate sheets.
@@ -707,11 +714,12 @@ def calculate_chunk_stats(all_stats, stage):
         with pd.ExcelWriter(f'{cn.chunk_stats_path}{stage}_chunk_statistics_{timestr()}.xlsx') as writer:
 
             # Writes input rows to one sheet
-            input_rows.to_excel(writer, sheet_name='input_stats', index=False)
+            annual_inputs.to_excel(writer, sheet_name='annual_inputs', index=False)
+            other_inputs.to_excel(writer, sheet_name='other_inputs', index=False)
 
             # Writes output rows based on layer_name conditions to separate sheets
-            flux_output.to_excel(writer, sheet_name='flux_outputs', index=False)
-
+            gross_flux_output.to_excel(writer, sheet_name='gross_outputs', index=False)
+            net_flux_output.to_excel(writer, sheet_name='flux_outputs', index=False)
             other_output.to_excel(writer, sheet_name='other_outputs', index=False)
 
             # Write the min and max statistics to the second sheet
