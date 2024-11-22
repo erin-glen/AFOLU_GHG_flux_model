@@ -23,6 +23,7 @@ from dask.distributed import print
 
 # Project imports
 from ..utilities import constants_and_names as cn
+from ..utilities import log_utilities as lu
 from ..utilities import universal_utilities as uu
 
 
@@ -69,7 +70,7 @@ def global_totals_local(s3_name_dict, no_upload):
         return None
 
 
-def main(cluster_name, date, run_local=False, no_upload=False):
+def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -135,40 +136,42 @@ def main(cluster_name, date, run_local=False, no_upload=False):
         # f"{cn.outputs_path}{cn.n2o_flux_pattern}/2010_2015/40000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.n2o_flux_pattern}/2015_2020/40000_pixels/{date}/",
 
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/40000_pixels/{date}/",
 
-        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2000_2005/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2005_2010/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2010_2015/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2015_2020/40000_pixels/{date}/",
 
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2000_2005/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2005_2010/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2010_2015/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2015_2020/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/40000_pixels/{date}/",
+        #
+        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2000_2005/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2005_2010/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2010_2015/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2015_2020/40000_pixels/{date}/",
+        #
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2000_2005/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2005_2010/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2010_2015/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2015_2020/40000_pixels/{date}/",
+        #
+        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2000_2005/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2005_2010/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2010_2015/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2015_2020/40000_pixels/{date}/",
+        #
+        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2000_2005/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2005_2010/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2010_2015/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2015_2020/40000_pixels/{date}/",
+        #
+        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2000_2005/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2005_2010/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2010_2015/40000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2015_2020/40000_pixels/{date}/"
 
-        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2000_2005/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2005_2010/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2010_2015/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2015_2020/40000_pixels/{date}/",
-
-        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2000_2005/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2005_2010/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2010_2015/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2015_2020/40000_pixels/{date}/",
-
-        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2000_2005/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2005_2010/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2010_2015/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2015_2020/40000_pixels/{date}/",
-
-        f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.land_state_node_path_part}/2005_2010/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.land_state_node_path_part}/2010_2015/40000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/40000_pixels/{date}/"
+        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2005_2010/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2010_2015/40000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/40000_pixels/{date}/"
     ]
 
     # Starting time for stage
@@ -177,7 +180,7 @@ def main(cluster_name, date, run_local=False, no_upload=False):
 
     # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
     # These are the basis for the tasks.
-    list_of_s3_name_dicts_total = uu.create_list_for_aggregation(s3_in_folders)
+    list_of_s3_name_dicts_total = uu.create_list_for_aggregation(LULUCF_output_folders)
 
     # For testing. Limits the number of output rasters
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:3]  # First 3 tiles
@@ -204,6 +207,11 @@ def main(cluster_name, date, run_local=False, no_upload=False):
     print(f"Stage {stage} ended at: {end_time}")
     uu.stage_duration(start_time, end_time, stage)
 
+    # Creates combined log if not deactivated
+    log_note = f"{stage} run"
+    lu.compile_and_upload_log(no_log, client, cluster, stage, 0, '10x10deg', start_time, end_time, end_time,
+                              'N/A', 'N/A', 'N/A', log_note)
+
     if not run_local:
         # Closes the Dask client if not running locally
         client.close()
@@ -215,10 +223,10 @@ if __name__ == "__main__":
     parser.add_argument('-d', '--date', help='Date in YYYYMMDD to process')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
-    parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
+    parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 
     args = parser.parse_args()
 
     # Create the cluster with command line arguments
-    main(args.cluster_name, args.date, args.run_local, args.no_upload)
+    main(args.cluster_name, args.date, args.run_local, args.no_upload, args.no_log)

@@ -459,7 +459,7 @@ def make_tile_footprint_shp(input_dict, no_upload):
     return(f"Completed: {timestr()}")
 
 
-# Saves an xarray data array locally as a raster and then uploads it to s3
+# Saves a data array locally as a raster and then uploads it to s3
 def save_and_upload_raster_10x10(**kwargs):
 
     s3_client = boto3.client("s3") # Needs to be in the same function as the upload_file call
@@ -534,6 +534,7 @@ def create_list_for_aggregation(s3_in_folders):
 
 # Flattens a nested list
 def flatten_list(nested_list):
+    # print("NESTED LIST:", nested_list)
     return [x for xs in nested_list for x in xs]
 
 
