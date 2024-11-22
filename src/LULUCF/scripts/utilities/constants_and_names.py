@@ -314,7 +314,7 @@ n2o_flux_pattern = "N2O_flux__MgCO2e_ha_yr"
 
 gross_emis_all_C_pools_CO2_only_pattern = "gross_emissions_all_C_pools_CO2_only__MgCO2_ha_yr"
 gross_emis_non_CO2_only_pattern = "gross_emissions_non_CO2_only__MgCO2e_ha_yr"
-gross_emis_all_C_pools_all_gases_pattern = "gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr"
+gross_emis_all_C_pools_all_gases_pattern = "gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr"  #TODO change to MgCO2e
 
 gross_removals_all_C_pools_pattern = "gross_removals_all_C_pools__MgCO2_ha_yr"
 

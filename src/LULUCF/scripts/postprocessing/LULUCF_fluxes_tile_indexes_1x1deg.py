@@ -148,7 +148,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     #TODO log for this stage is untested.
     log_note = f"{stage} run"
     lu.compile_and_upload_log(no_log, client, cluster, stage, 0, '1x1deg', start_time, end_time, end_time,
-                              'N/A', 'N/A', 'N/A', log_note)
+                              0, 0, 'N/A', log_note)
 
     if not run_local:
         # Closes the Dask client if not running locally

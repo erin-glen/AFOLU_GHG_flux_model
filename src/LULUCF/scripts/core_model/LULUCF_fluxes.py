@@ -1190,7 +1190,7 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
 
     # Starting time for stage
     start_time = uu.timestr()
-    print(f"Stage {stage} started at: {start_time}")
+    print(f"Stage {stage} started at: {start_time}")  #TODO in all main() functions, add print statements to log
 
     # Makes list of chunks to analyze
     chunks = uu.get_chunk_bounds(bounding_box, chunk_size)

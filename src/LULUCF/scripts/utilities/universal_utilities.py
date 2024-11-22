@@ -482,20 +482,20 @@ def save_and_upload_raster_10x10(**kwargs):
     os.remove(f"/tmp/{out_file_name}")
 
 
-# Creates a list of 2x2 deg tiles to aggregate into 10x10 deg tiles, where the list is a list of dictionaries of the form
-# [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif', '00N_120E__AGC_density_MgC_ha_2000.tif']},
-# {'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/BGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__BGC_density_MgC_ha_2000.tif', '00N_120E__BGC_density_MgC_ha_2000.tif']}]
+# Creates a list of 10x10 deg tiles to create, where the list is a list of dictionaries of the form
+# [{'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_000E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']},
+# {'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_010E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']}, ... ]
+# The keys are s3 destination foldes and the values are the output 10x10 deg file names
 def create_list_for_aggregation(s3_in_folders):
-    list_of_s3_names_total = []  # Final list of dictionaries of input s3 paths and output aggregated 10x10 raster names
 
-    print(f"flm: Starting to list files in {s3_in_folders}.")
+    list_of_s3_names_total = []  # Final list of dictionaries of input s3 paths and output aggregated 10x10 raster names
 
     # Iterates through all the input s3 folders
     for s3_in_folder in s3_in_folders:
 
-        print(f"flm: Starting to list files in {s3_in_folder}.")
+        print(f"flm: Listing files in {s3_in_folder}")
 
-        simple_file_names = []  # List of output aggregatd output 10x10 rasters
+        simple_output_file_names = []  # List of output aggregated output 10x10 rasters
 
         # Raw filenames in an input folder, e.g., ['00N_000E__6_-2_8_0__IPCC_classes_2020.tif', '00N_000E__6_-4_8_-2__IPCC_classes_2020.tif',...]
         filenames = list_rasters_in_folder(s3_in_folder)
@@ -503,28 +503,29 @@ def create_list_for_aggregation(s3_in_folders):
         # Iterates through all the files in a folder and converts them to the output names.
         # Essentially [tile_id]__[pattern].tif. Drops the chunk bounds from the middle.
         for filename in filenames:
-            result = filename[:10] + filename[filename.rfind("__") + len("__"):]  # Extracts the relevant parts of the raw file names
-            simple_file_names.append(result)  # New list of simplified file names used for 10x10 degree outputs
+            result = re.sub(r'__-?\d+_-?\d+_-?\d+_-?\d+__', '__', filename)
+            simple_output_file_names.append(result)  # New list of simplified file names used for 10x10 degree outputs
 
         # Removes duplicate simplified file names.
         # There are duplicates because each 10x10 output raster has many constituent chunks, each of which have the same aggregated, final name
         # e.g., ['00N_000E__IPCC_classes_2020.tif', '00N_010E__IPCC_classes_2020.tif', ...]
-        simple_file_names = np.unique(simple_file_names).tolist()
+        simple_output_file_names = np.unique(simple_output_file_names).tolist()
 
         # Makes nested lists of the file names. Nested for next step.
         # e.g., [['00N_110E__AGC_density_MgC_ha_2000.tif']]
-        simple_file_names = [[item] for item in simple_file_names]
+        simple_output_file_names = [[item] for item in simple_output_file_names]
 
         # Makes a list of dictionaries, where the key is the input s3 path and the value is the output aggregated name
         # e.g., [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif']}]
-        list_of_s3_name_dicts = [{key: value} for value in simple_file_names for key in [s3_in_folder]]
+        list_of_s3_name_dicts = [{key: value} for value in simple_output_file_names for key in [s3_in_folder]]
 
         # Adds the dictionary of s3 paths and output names for this folder to the list for all folders
         list_of_s3_names_total.append(list_of_s3_name_dicts)
 
-    # Output of above is a nested list, where each input folder is its own inner list. Need to flatten to a list.
-    # e.g., [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif', '00N_120E__AGC_density_MgC_ha_2000.tif']},
-    # {'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/BGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__BGC_density_MgC_ha_2000.tif', '00N_120E__BGC_density_MgC_ha_2000.tif']}]
+    # Combines all the lists from individual output folders into a single list
+    # Now it's:
+    # [{'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_000E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']},
+    # {'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_010E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']}, ... ]
     list_of_s3_names_total = flatten_list(list_of_s3_names_total)
 
     print(f"flm: There are {len(list_of_s3_names_total)} 10x10 deg rasters to create across {len(s3_in_folders)} input folders.")
@@ -534,13 +535,15 @@ def create_list_for_aggregation(s3_in_folders):
 
 # Flattens a nested list
 def flatten_list(nested_list):
-    # print("NESTED LIST:", nested_list)
     return [x for xs in nested_list for x in xs]
 
 
 # Merges rasters that are <10x10 degrees into 10x10 degree rasters in the standard grid.
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
-def merge_small_tiles_gdal(s3_name_dict, no_upload):
+def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
+
+    logger = lu.setup_logging()
+
     in_folder = list(s3_name_dict.keys())[0]  # The input s3 folder for the small rasters
     out_file_name = list(s3_name_dict.values())[0][0]  # The output file name for the combined rasters
 
@@ -557,10 +560,9 @@ def merge_small_tiles_gdal(s3_name_dict, no_upload):
     filenames_in_focus_area = [i for i in filenames if tile_id in i]
 
     # Lists the tile paths for the relevant rasters
-    tile_paths = []
     tile_paths = [vsis3_in_folder + filename for filename in filenames_in_focus_area]
 
-    print(f"flm: Merging small rasters in {tile_id} in {vsis3_in_folder}")
+    lu.print_and_log(f"flm: Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger)
 
     # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
     out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
@@ -601,22 +603,22 @@ def merge_small_tiles_gdal(s3_name_dict, no_upload):
 
     try:
         subprocess.check_call(merge_command)
-        print(f"flm: Successfully merged rasters into {merged_file}")
+        lu.print_and_log(f"flm: Successfully merged rasters into {merged_file}", is_final, logger)
     except subprocess.CalledProcessError as e:
-        print(f"flm: Error merging rasters: {e}")
+        lu.print_and_log(f"flm: Error merging rasters: {e}", is_final, logger)
         return f"failure for {s3_name_dict}"
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
 
-    print(f"flm: Saving {out_file_name} to s3: {out_folder}{out_file_name}")
+    lu.print_and_log(f"flm: Saving {out_file_name} to s3: {out_folder}{out_file_name}", is_final, logger)
 
     if not no_upload:
 
         try:
             s3_client.upload_file(merged_file, "gfw2-data", Key=f"{out_folder[15:]}{out_file_name}")  #[15:] drops s3://gfw2-data/ from front
-            print(f"flm: Successfully uploaded {out_file_name} to s3")
+            lu.print_and_log(f"flm: Successfully uploaded {out_file_name} to s3", is_final, logger)
         except boto3.exceptions.S3UploadFailedError as e:
-            print(f"flm: Error uploading file to s3: {e}")
+            lu.print_and_log(f"flm: Error uploading file to s3: {e}", is_final, logger)
             return f"failure for {s3_name_dict}"
 
     # Deletes the local merged raster

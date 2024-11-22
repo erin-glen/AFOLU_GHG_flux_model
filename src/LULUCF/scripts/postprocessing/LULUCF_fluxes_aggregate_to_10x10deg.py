@@ -1,10 +1,10 @@
 """
 Run from src/LULUCF
 
-# 30 workers with 10 threads each should be able to process 330 outputs simultaneously (30 workers * (10 threads/worker + 1 bonus thread that's always there)).
+# 30 workers with 10 threads each should be able to process 630 outputs simultaneously (30 workers * (20 threads/worker + 1 bonus thread that's always there)).
 # Making 10x10 aggregate tiles takes basically no memory, so each worker can handle lots of tasks at the same time, it seems.
-# Could I have even more than 10 threads per worker? What's the max? Mighta s well have more than 10/worker.
-python -m scripts.utilities.create_cluster -n 30 -t 10
+# 40 threads/worker caused some gdal_merge errors
+python -m scripts.utilities.create_cluster -n 30 -t 20
 python -m scripts.postprocessing.LULUCF_fluxes_aggregate_to_10x10deg -cn AFOLU_flux_model_scripts -d 20241121
 
 """
@@ -12,71 +12,17 @@ python -m scripts.postprocessing.LULUCF_fluxes_aggregate_to_10x10deg -cn AFOLU_f
 import argparse
 import dask
 
-from dask.distributed import print
-
 # Project imports
 from ..utilities import constants_and_names as cn
 from ..utilities import log_utilities as lu
 from ..utilities import universal_utilities as uu
 
 
-import numpy as np
-import re
-
-# Creates a list of 2x2 deg tiles to aggregate into 10x10 deg tiles, where the list is a list of dictionaries of the form
-# [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif', '00N_120E__AGC_density_MgC_ha_2000.tif']},
-# {'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/BGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__BGC_density_MgC_ha_2000.tif', '00N_120E__BGC_density_MgC_ha_2000.tif']}]
-def create_list_for_aggregation_local(s3_in_folders):
-    list_of_s3_names_total = []  # Final list of dictionaries of input s3 paths and output aggregated 10x10 raster names
-
-    print(f"flm: Starting to list files in {s3_in_folders}.")
-
-    # Iterates through all the input s3 folders
-    for s3_in_folder in s3_in_folders:
-
-        print(f"flm: Starting to list files in {s3_in_folder}.")
-
-        simple_ouput_file_names = []  # List of output aggregated output 10x10 rasters
-
-        # Raw filenames in an input folder, e.g., ['00N_000E__6_-2_8_0__IPCC_classes_2020.tif', '00N_000E__6_-4_8_-2__IPCC_classes_2020.tif',...]
-        filenames = uu.list_rasters_in_folder(s3_in_folder)
-
-        # Iterates through all the files in a folder and converts them to the output names.
-        # Essentially [tile_id]__[pattern].tif. Drops the chunk bounds from the middle.
-        for filename in filenames:
-            result = re.sub(r'__-?\d+_-?\d+_-?\d+_-?\d+__', '__', filename)
-            simple_ouput_file_names.append(result)  # New list of simplified file names used for 10x10 degree outputs
-
-        # Removes duplicate simplified file names.
-        # There are duplicates because each 10x10 output raster has many constituent chunks, each of which have the same aggregated, final name
-        # e.g., ['00N_000E__IPCC_classes_2020.tif', '00N_010E__IPCC_classes_2020.tif', ...]
-        simple_ouput_file_names = np.unique(simple_ouput_file_names).tolist()
-
-        # Makes nested lists of the file names. Nested for next step.
-        # e.g., [['00N_110E__AGC_density_MgC_ha_2000.tif']]
-        simple_ouput_file_names = [[item] for item in simple_ouput_file_names]
-
-        # Makes a list of dictionaries, where the key is the input s3 path and the value is the output aggregated name
-        # e.g., [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif']}]
-        list_of_s3_name_dicts = [{key: value} for value in simple_ouput_file_names for key in [s3_in_folder]]
-
-        # Adds the dictionary of s3 paths and output names for this folder to the list for all folders
-        list_of_s3_names_total.append(list_of_s3_name_dicts)
-
-    # Output of above is a nested list, where each input folder is its own inner list. Need to flatten to a list.
-    # e.g., [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif', '00N_120E__AGC_density_MgC_ha_2000.tif']},
-    # {'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/BGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__BGC_density_MgC_ha_2000.tif', '00N_120E__BGC_density_MgC_ha_2000.tif']}]
-    list_of_s3_names_total = uu.flatten_list(list_of_s3_names_total)
-
-    # print(list_of_s3_names_total)
-
-    print(f"flm: There are {len(list_of_s3_names_total)} 10x10 deg rasters to create across {len(s3_in_folders)} input folders.")
-
-    return list_of_s3_names_total
-
-
-
 def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
+
+    logger = lu.setup_logging()
+
+    is_final = False
 
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -86,7 +32,8 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 
     # Starting time for stage
     start_time = uu.timestr()
-    print(f"Stage {stage} started at: {start_time}")
+    #TODO Logging in any of the main() functions does not work; nothing sent to logger
+    lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
 
     # Folders to process
     #TODO centralize the output folder list in constants_and_names and reuse in other post-processing steps
@@ -141,52 +88,52 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         # f"{cn.outputs_path}{cn.n2o_flux_pattern}/2010_2015/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.n2o_flux_pattern}/2015_2020/4000_pixels/{date}/",
 
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
 
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2000_2005/4000_pixels/{date}/"
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
-        # # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
-        # # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
-        # # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/4000_pixels/{date}/"
+        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.land_state_node_path_part}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.land_state_node_path_part}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/4000_pixels/{date}/"
     ]
 
     # Starting time for stage
     start_time = uu.timestr()
-    print(f"Stage {stage} started at: {start_time}")
+    lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
 
     # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
     # These are the basis for the tasks.
-    list_of_s3_name_dicts_total = create_list_for_aggregation_local(LULUCF_output_folders)
+    list_of_s3_name_dicts_total = uu.create_list_for_aggregation(LULUCF_output_folders)
 
     # For testing. Limits the number of output rasters
-    list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:1]  # First 1 tile
+    # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:1]  # First 1 tile
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:3]  # First 3 tiles
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[40:41] # 10N_130E; Internal chunks missing and padding needed on right; FID40
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:2]  # 00N_000E
@@ -194,25 +141,23 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[41:42]  # 10S_010E; No padding needed; FID41
     # print(list_of_s3_name_dicts_total)
 
-    print(list_of_s3_name_dicts_total)
-
-    os.quit()
-
-    delayed_result = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, no_upload) for s3_name_dict in list_of_s3_name_dicts_total]
+    # TODO Output as COGs, not just geotifs? Need to ask AJ first.
+    # Each task is a single 10x10 deg aggregated geotif
+    delayed_result = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload, no_log) for s3_name_dict in list_of_s3_name_dicts_total]
 
     results = dask.compute(*delayed_result)
-    print(results)
+    lu.print_and_log(results, is_final, logger)
 
     # Ending time for stage
     end_time = uu.timestr()
-    print(f"Stage {stage} ended at: {end_time}")
+    lu.print_and_log(f"Stage {stage} ended at: {end_time}", is_final, logger)
     uu.stage_duration(start_time, end_time, stage)
 
     # Creates combined log if not deactivated
-    #TODO log for this stage is untested.
+    #TODO outputs log file with header and footer but no other info (filtered content is empty). Don't know why.
     log_note = f"{stage} run"
-    lu.compile_and_upload_log(no_log, client, cluster, stage, 0, '10x10deg', start_time, end_time, end_time,
-                              'N/A', 'N/A', 'N/A', log_note)
+    lu.compile_and_upload_log(no_log, client, cluster, stage, len(list_of_s3_name_dicts_total), '10x10deg', start_time, end_time, end_time,
+                              0, 0, 'N/A', log_note)
 
     if not run_local:
         # Closes the Dask client if not running locally
