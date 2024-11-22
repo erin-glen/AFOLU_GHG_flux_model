@@ -1351,12 +1351,10 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
     print(f"Stage {stage} tile stats ended at: {end_time_2}")
     uu.stage_duration(start_time, end_time_2, stage)
 
-    #TODO add step that counts the number of tiles in each output folder, prints that, and saves to the log
+    #TODO Add step that counts the number of tiles in each output folder, prints that, and saves to the log
 
     # Creates combined log if not deactivated
     log_note = f"{stage} run"
-    # lu.compile_and_upload_log(no_log, client, cluster, stage, len(chunks), chunk_size, start_time, end_time_2,
-    #                           success_count, skipping_chunk_count, bounding_box, log_note)
     lu.compile_and_upload_log(no_log, client, cluster, stage, len(chunks), chunk_size, start_time, end_time_1, end_time_2,
                               success_count, skipping_chunk_count, bounding_box, log_note)
 

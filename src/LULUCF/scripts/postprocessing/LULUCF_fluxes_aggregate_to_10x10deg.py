@@ -1,12 +1,13 @@
 """
 Run from src/LULUCF
 
-For 1x1 deg output aggregation:
-python -m scripts.utilities.create_cluster -n 100
+# 30 workers with 10 threads each should be able to process 330 outputs simultaneously (30 workers * (10 threads/worker + 1 bonus thread that's always there)).
+# Making 10x10 aggregate tiles takes basically no memory, so each worker can handle lots of tasks at the same time, it seems.
+# Could I have even more than 10 threads per worker? What's the max? Mighta s well have more than 10/worker.
+python -m scripts.utilities.create_cluster -n 30 -t 10
 python -m scripts.postprocessing.LULUCF_fluxes_aggregate_to_10x10deg -cn AFOLU_flux_model_scripts -d 20241121
 
 """
-
 
 import argparse
 import dask
@@ -14,11 +15,12 @@ import dask
 from dask.distributed import print
 
 # Project imports
-from src.LULUCF.scripts.utilities import constants_and_names as cn
-from src.LULUCF.scripts.utilities import universal_utilities as uu
-from src.LULUCF.scripts.utilities import resize_cluster
+from ..utilities import constants_and_names as cn
+from ..utilities import log_utilities as lu
+from ..utilities import universal_utilities as uu
 
-def main(cluster_name, date, run_local=False, no_upload=False):
+
+def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -145,6 +147,12 @@ def main(cluster_name, date, run_local=False, no_upload=False):
     print(f"Stage {stage} ended at: {end_time}")
     uu.stage_duration(start_time, end_time, stage)
 
+    # Creates combined log if not deactivated
+    #TODO log for this stage is untested.
+    log_note = f"{stage} run"
+    lu.compile_and_upload_log(no_log, client, cluster, stage, 0, '10x10deg', start_time, end_time, end_time,
+                              'N/A', 'N/A', 'N/A', log_note)
+
     if not run_local:
         # Closes the Dask client if not running locally
         client.close()
@@ -156,10 +164,10 @@ if __name__ == "__main__":
     parser.add_argument('-d', '--date', help='Date in YYYYMMDD to process')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
-    parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
+    parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 
     args = parser.parse_args()
 
     # Create the cluster with command line arguments
-    main(args.cluster_name, args.date, args.run_local, args.no_upload)
+    main(args.cluster_name, args.date, args.run_local, args.no_upload, args.no_log)

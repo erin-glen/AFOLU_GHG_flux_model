@@ -488,8 +488,12 @@ def save_and_upload_raster_10x10(**kwargs):
 def create_list_for_aggregation(s3_in_folders):
     list_of_s3_names_total = []  # Final list of dictionaries of input s3 paths and output aggregated 10x10 raster names
 
+    print(f"flm: Starting to list files in {s3_in_folders}.")
+
     # Iterates through all the input s3 folders
     for s3_in_folder in s3_in_folders:
+
+        print(f"flm: Starting to list files in {s3_in_folder}.")
 
         simple_file_names = []  # List of output aggregatd output 10x10 rasters
 
@@ -523,8 +527,7 @@ def create_list_for_aggregation(s3_in_folders):
     # {'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/BGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__BGC_density_MgC_ha_2000.tif', '00N_120E__BGC_density_MgC_ha_2000.tif']}]
     list_of_s3_names_total = flatten_list(list_of_s3_names_total)
 
-    print(
-        f"flm: There are {len(list_of_s3_names_total)} 10x10 deg rasters to create across {len(s3_in_folders)} input folders.")
+    print(f"flm: There are {len(list_of_s3_names_total)} 10x10 deg rasters to create across {len(s3_in_folders)} input folders.")
 
     return list_of_s3_names_total
 
