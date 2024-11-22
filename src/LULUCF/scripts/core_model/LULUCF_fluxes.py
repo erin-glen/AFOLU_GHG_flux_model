@@ -1226,7 +1226,7 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
 
         cn.r_s_ratio_pattern: f"{cn.r_s_ratio_path}{sample_tile_id}_{cn.r_s_ratio_pattern}.tif",
 
-        cn.drivers_pattern: f"{cn.drivers_path}{sample_tile_id}_{cn.drivers_pattern}.tif",
+        cn.drivers_pattern: f"{cn.drivers_path}{sample_tile_id}_{cn.drivers_pattern}.tif",  #TODO update to latest version
 
         cn.planted_forest_type_pattern: f"{cn.planted_forest_type_path}{sample_tile_id}_{cn.planted_forest_type_pattern}.tif",
         cn.planted_forest_AGC_removal_factor_pattern: f"{cn.planted_forest_AGC_removal_factor_path}{sample_tile_id}_{cn.planted_forest_AGC_removal_factor_pattern}.tif",
@@ -1304,6 +1304,9 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
     success_count = 0
     skipping_chunk_count = 0
 
+    #TODO Can I resize the cluster down to just 1 worker at this point and still do the tile stats and logs?
+    # I shouldn't need all the workers for at least the tile stats spreadsheet creation.
+
     # Processes the chunk stats and returned messages
     # Results are the messages from the chunks and chunk stats
     for result in results:
@@ -1320,6 +1323,9 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
 
         if chunk_stats is not None:
             all_stats.extend(chunk_stats)
+
+    #TODO Test if including the success_message returns or printing them slows down large runs.
+    # Don't return the success messages or print them if they slow down large runs.
 
     # Prints the returned messages
     for message in return_messages:
@@ -1345,6 +1351,8 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
     print(f"Stage {stage} tile stats ended at: {end_time_2}")
     uu.stage_duration(start_time, end_time_2, stage)
 
+    #TODO add step that counts the number of tiles in each output folder, prints that, and saves to the log
+
     # Creates combined log if not deactivated
     log_note = f"{stage} run"
     # lu.compile_and_upload_log(no_log, client, cluster, stage, len(chunks), chunk_size, start_time, end_time_2,
@@ -1361,6 +1369,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate LULUCF fluxes.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
+    #TODO add option to use 10x10 deg tile index shapefile to create chunks from for global run
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')

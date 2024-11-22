@@ -166,6 +166,8 @@ def stage_duration(start_time_str, end_time_str, stage):
 # So, that is addressed here.
 def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, logger):
 
+    bounds_str = boundstr(bounds)
+
     # If the uri exists, the relevant window is opened and returned and returned as an array.
     # Note that this chunk could still just have NoData values, which would be downloaded.
     try:
@@ -179,7 +181,7 @@ def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, 
         numpy_dtype = map_to_numpy_dtype(data_type)   # Translates the GDAL-style datatype to numpy-style datatype
         data = np.full((chunk_length_pixels, chunk_length_pixels), 0).astype(numpy_dtype)
 
-        lu.print_and_log(f"Can't access the dataset. Returning array of all 0s: {e}", is_final, logger)
+        lu.print_and_log(f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}", is_final, logger)
 
     return data
 
@@ -417,7 +419,7 @@ def upload_shp(in_folder, shp):
 
 
 # Makes a shapefile of the footprints of rasters in a folder, for checking geographical completeness of rasters
-def make_tile_footprint_shp(input_dict):
+def make_tile_footprint_shp(input_dict, no_upload):
 
     in_folder = list(input_dict.keys())[0]
     pattern = list(input_dict.values())[0]
@@ -447,8 +449,10 @@ def make_tile_footprint_shp(input_dict):
     cmd = ["gdaltindex", "-t_srs", "EPSG:4326", f"/tmp/{shp}", "--optfile", f"/tmp/{file_paths_txt}"]
     subprocess.check_call(cmd)
 
-    # Uploads shapefile to s3
-    upload_shp(s3_in_folder, shp)
+    # Uploads shapefile to s3 if upload not disabled
+    if not no_upload:
+
+        upload_shp(s3_in_folder, shp)
 
     os.remove(f"/tmp/{file_paths_txt}")
 
