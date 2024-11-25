@@ -21,7 +21,8 @@ from ..utilities import universal_utilities as uu
 
 # Calculates statistics for 1x1 degree rasters and summarizes them in a spreadsheet
 # Per https://chatgpt.com/share/e/674105d3-6924-800a-ba00-a942ca95ac32
-def get_chunk_stats(tile_to_process_uri, fishnet_iso_df):
+# def get_chunk_stats(tile_to_process_uri, fishnet_iso_df):
+def get_chunk_stats(tile_to_process_uri):
 
     is_final = False
     logger = lu.setup_logging()
@@ -60,8 +61,10 @@ def get_chunk_stats(tile_to_process_uri, fishnet_iso_df):
 
     #  Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes,
     # and joins the ISO to each entry
+    # stats = uu.calculate_stats(tile_to_process_chunk_per_ha, file_name,
+    #                            bounds, tile_id, "output_layer", fishnet_iso_df, tile_to_process_chunk_per_pixel)
     stats = uu.calculate_stats(tile_to_process_chunk_per_ha, file_name,
-                               bounds, tile_id, "output_layer", fishnet_iso_df, tile_to_process_chunk_per_pixel)
+                               bounds, tile_id, "output_layer", tile_to_process_chunk_per_pixel)
 
     return stats
 
@@ -137,34 +140,34 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 
 
 
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
 
-        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
+
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",
         f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2015_2020/4000_pixels/{date}/"
 
         # f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/4000_pixels/{date}/",
@@ -197,6 +200,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     # tiles_to_process = tiles_to_process[0:20]  # First 20 tiles
     # tiles_to_process = tiles_to_process[0:100]  # First 100 tiles
     # tiles_to_process = tiles_to_process[15000:15005]  # Some middle tiles
+    # tiles_to_process = tiles_to_process[13000:14000]  # Some middle tiles
     # print(tiles_to_process)
 
     # Returns a dataframe of chunk_id and ISO, to be joined with chunk stats
@@ -204,15 +208,18 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 
     # For local runs
     if run_local:
+        print("Using dask delayed for local run")
         # Distributes tasks and processes them
         delayed_result = [dask.delayed(get_chunk_stats)(tile_to_process, fishnet_iso_df) for tile_to_process in tiles_to_process]
         results = dask.compute(*delayed_result)
 
     # This approach handles large task lists (graphs) better than [dask.delayed(get_chunk_stats ... )]
     else:
+        print("Using futures for large task list")
         futures = []
         for tile_to_process in tiles_to_process:
-            future = client.submit(get_chunk_stats, tile_to_process, fishnet_iso_df)
+            # future = client.submit(get_chunk_stats, tile_to_process, fishnet_iso_df)
+            future = client.submit(get_chunk_stats, tile_to_process)
             futures.append(future)
 
         # Collect the results once they are finished

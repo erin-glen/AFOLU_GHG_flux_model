@@ -694,7 +694,8 @@ def convert_lookup_table_to_array(spreadsheet, sheet_name, fields_to_keep):
 # Also joins ISO from GADM to each entry.
 # Stats calculations adapted from https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
 # Joining iso adapted from https://chatgpt.com/share/e/6744de08-6b64-800a-b8c4-6a20833f7e3a
-def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, fishnet_iso_df, array_per_pixel=None):
+# def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, fishnet_iso_df, array_per_pixel=None):
+def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_pixel=None):
 
     # Sums the per pixel totals if supplied
     if array_per_pixel is None:
@@ -702,15 +703,15 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, fishnet_iso
     else:
         sum_value = np.sum(array_per_pixel)
 
-    # Uses loc to find the iso corresponding to the chunk_id
-    iso_value = fishnet_iso_df.loc[fishnet_iso_df['chunk_id'] == bounds_str, 'iso'].values
-
-    # Checks if an iso was found
-    if len(iso_value) > 0:
-        iso_value = iso_value[0]  # Extracts the first value (assuming chunk_id is unique)
-        print(f"{bounds_str} in {iso_value}")
-    else:
-        iso_value = 'No iso found'  # Handles case where chunk_id is not found
+    # # Uses loc to find the iso corresponding to the chunk_id
+    # iso_value = fishnet_iso_df.loc[fishnet_iso_df['chunk_id'] == bounds_str, 'iso'].values
+    #
+    # # Checks if an iso was found
+    # if len(iso_value) > 0:
+    #     iso_value = iso_value[0]  # Extracts the first value (assuming chunk_id is unique)
+    #     print(f"{bounds_str} in {iso_value}")
+    # else:
+    #     iso_value = 'No iso found'  # Handles case where chunk_id is not found
 
     if array_per_ha is None or not np.any(array_per_ha):  # Checks if the array is None or empty
         return {
@@ -723,7 +724,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, fishnet_iso
             'max_value': 'no data',
             'count_value': 'no data',
             'sum_value': 'no data',
-            'iso_value': 'no data',
+            # 'iso_value': 'no data',
             'data_type': 'no data'
         }
     else:    # Only calculates stats if there is data in the array
@@ -737,7 +738,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, fishnet_iso
             'max_value': np.max(array_per_ha),
             'count_value': np.count_nonzero(array_per_ha),
             'sum_value': sum_value,
-            'iso_value': iso_value,
+            # 'iso_value': iso_value,
             'data_type': array_per_ha.dtype.name
         }
 
@@ -767,13 +768,22 @@ def calculate_chunk_stats(all_stats, stage, no_upload):
         max_value=('max_value', 'max')
     ).reset_index()
 
+    # Read the shapefile from S3 to extract "chunk_id" and "iso" fields
+    gdf = gpd.read_file(cn.fishnet_s3_uri)
+
+    # Create a DataFrame with "chunk_id" and "iso" fields
+    shapefile_df = gdf[['chunk_id', 'iso']]
+
+    # Merge the shapefile data with the statistics DataFrame
+    merged_stats = sorted_stats.merge(shapefile_df, on='chunk_id', how='left')
+
     # Calculates the min and max values for each layer_name for each chunk.
     # There are so many chunks with so many inputs and outputs in a full model run that Excel can't handle all the rows
     # and they need to be split across multiple workbook tabs.
 
     # Separates input rows (in_out == 'input') and output rows (in_out == 'output')
-    input_rows = sorted_stats[sorted_stats['in_out'] == 'input_layer']
-    output_rows = sorted_stats[sorted_stats['in_out'] == 'output_layer']
+    input_rows = merged_stats[merged_stats['in_out'] == 'input_layer']
+    output_rows = merged_stats[merged_stats['in_out'] == 'output_layer']
 
     # Splits input rows based on 'layer_name' containing 'ba_' or 'forest_disturbance'
     annual_inputs = input_rows[input_rows['layer_name'].str.contains('ba_|forest_disturbance', case=False, na=False)]
@@ -809,7 +819,7 @@ def calculate_chunk_stats(all_stats, stage, no_upload):
             # Write the min and max statistics to the second sheet
             min_max_stats.to_excel(writer, sheet_name='min_max_for_layers', index=False)
 
-        print(sorted_stats.head())  # Show first few rows of the stats DataFrame for inspection
+        print(merged_stats.head())  # Show first few rows of the stats DataFrame for inspection
 
         print(f"Done aggregating and exporting tile stats at {timestr()}...")
 
