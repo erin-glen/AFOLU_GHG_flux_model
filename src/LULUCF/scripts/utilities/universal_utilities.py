@@ -382,8 +382,8 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
         os.remove(f"/tmp/{file_name}")
 
 
-# Lists rasters in an s3 folder and returns their names as a list
-def list_rasters_in_folder(full_in_folder):
+# Returns list of rasters in an s3 folder and returns their names as a list (but not full paths)
+def list_raster_names_in_s3_folder(full_in_folder):
 
     cmd = ['aws', 's3', 'ls', full_in_folder]
     s3_contents_bytes = subprocess.check_output(cmd)
@@ -395,6 +395,48 @@ def list_rasters_in_folder(full_in_folder):
     rasters = [i for i in rasters if "tif" in i]
 
     return rasters
+
+
+# Returns list of rasters (full paths and names) in an s3 folder, and also returns the count of them
+#Per https://chatgpt.com/share/e/67413a39-1b3c-800a-b582-72d1a8a17de1
+def list_raster_full_paths_in_s3_folder_and_count(s3_path):
+    """
+    List all GeoTIFF files from a list of full S3 paths using boto3 and return the count.
+
+    Args:
+        s3_paths (list): List of S3 paths (e.g., "s3://bucket-name/prefix/").
+
+    Returns:
+        tuple: A tuple containing:
+            - A flat list of GeoTIFF file paths.
+            - The total count of GeoTIFF files.
+    """
+
+    # Initialize the S3 client
+    s3_client = boto3.client('s3')
+    geotiff_files = []
+
+    try:
+        # Parses bucket and prefix from the S3 path
+        if s3_path.startswith("s3://"):
+            path_parts = s3_path[5:].split("/", 1)
+            bucket_name = path_parts[0]
+            prefix = path_parts[1] if len(path_parts) > 1 else ""
+        else:
+            raise ValueError(f"Invalid S3 path: {s3_path}")
+
+        # Uses pagination to handle more than 1,000 objects (otherwise, limited to list of 1000 elements)
+        paginator = s3_client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+            if 'Contents' in page:
+                files = [obj['Key'] for obj in page['Contents']]
+                geotiffs = [f"s3://{bucket_name}/{file}" for file in files if file.endswith(('.tif', '.tiff'))]
+                geotiff_files.extend(geotiffs)
+
+    except Exception as e:
+        print(f"Error accessing {s3_path}: {e}")
+
+    return geotiff_files, len(geotiff_files)
 
 
 # Uploads a shapefile to s3
@@ -432,7 +474,7 @@ def make_tile_footprint_shp(input_dict, no_upload):
     vsis3_in_folder = f'/vsis3/{in_folder[5:]}' #[5] drops the s3:// at the front
 
     # List of all the filenames in the folder
-    filenames = list_rasters_in_folder(s3_in_folder)
+    filenames = list_raster_names_in_s3_folder(s3_in_folder)
 
     # List of the tile paths in the folder
     tile_paths = [vsis3_in_folder + filename for filename in filenames]
@@ -493,17 +535,17 @@ def create_list_for_aggregation(s3_in_folders):
     # Iterates through all the input s3 folders
     for s3_in_folder in s3_in_folders:
 
-        print(f"flm: Listing files in {s3_in_folder}")
+        print(f"Listing files in {s3_in_folder}")
 
         simple_output_file_names = []  # List of output aggregated output 10x10 rasters
 
         # Raw filenames in an input folder, e.g., ['00N_000E__6_-2_8_0__IPCC_classes_2020.tif', '00N_000E__6_-4_8_-2__IPCC_classes_2020.tif',...]
-        filenames = list_rasters_in_folder(s3_in_folder)
+        filenames = list_raster_names_in_s3_folder(s3_in_folder)
 
         # Iterates through all the files in a folder and converts them to the output names.
         # Essentially [tile_id]__[pattern].tif. Drops the chunk bounds from the middle.
         for filename in filenames:
-            result = re.sub(r'__-?\d+_-?\d+_-?\d+_-?\d+__', '__', filename)
+            result = re.sub(cn.small_chunk_pattern, '__', filename)   #TODO Haven't run this since switching to cn.small_chunk_pattern
             simple_output_file_names.append(result)  # New list of simplified file names used for 10x10 degree outputs
 
         # Removes duplicate simplified file names.
@@ -528,7 +570,7 @@ def create_list_for_aggregation(s3_in_folders):
     # {'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_010E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']}, ... ]
     list_of_s3_names_total = flatten_list(list_of_s3_names_total)
 
-    print(f"flm: There are {len(list_of_s3_names_total)} 10x10 deg rasters to create across {len(s3_in_folders)} input folders.")
+    print(f"There are {len(list_of_s3_names_total)} 10x10 deg rasters to create across {len(s3_in_folders)} input folders.")
 
     return list_of_s3_names_total
 
@@ -551,7 +593,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
     vsis3_in_folder = f'/vsis3/{in_folder[5:]}'  # The input s3 folder with /vsis3/ prepended
 
     # Lists all the rasters in the specified s3 folder
-    filenames = list_rasters_in_folder(s3_in_folder)
+    filenames = list_raster_names_in_s3_folder(s3_in_folder)
 
     # Gets the tile_id from the output file name in the standard format
     tile_id = out_file_name[:8]
@@ -562,7 +604,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
     # Lists the tile paths for the relevant rasters
     tile_paths = [vsis3_in_folder + filename for filename in filenames_in_focus_area]
 
-    lu.print_and_log(f"flm: Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger)
+    lu.print_and_log(f"Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger)
 
     # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
     out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
@@ -603,22 +645,22 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
 
     try:
         subprocess.check_call(merge_command)
-        lu.print_and_log(f"flm: Successfully merged rasters into {merged_file}", is_final, logger)
+        lu.print_and_log(f"Successfully merged rasters into {merged_file}", is_final, logger)
     except subprocess.CalledProcessError as e:
-        lu.print_and_log(f"flm: Error merging rasters: {e}", is_final, logger)
+        lu.print_and_log(f"Error merging rasters: {e}", is_final, logger)
         return f"failure for {s3_name_dict}"
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
 
-    lu.print_and_log(f"flm: Saving {out_file_name} to s3: {out_folder}{out_file_name}", is_final, logger)
+    lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}", is_final, logger)
 
     if not no_upload:
 
         try:
             s3_client.upload_file(merged_file, "gfw2-data", Key=f"{out_folder[15:]}{out_file_name}")  #[15:] drops s3://gfw2-data/ from front
-            lu.print_and_log(f"flm: Successfully uploaded {out_file_name} to s3", is_final, logger)
+            lu.print_and_log(f"Successfully uploaded {out_file_name} to s3", is_final, logger)
         except boto3.exceptions.S3UploadFailedError as e:
-            lu.print_and_log(f"flm: Error uploading file to s3: {e}", is_final, logger)
+            lu.print_and_log(f"Error uploading file to s3: {e}", is_final, logger)
             return f"failure for {s3_name_dict}"
 
     # Deletes the local merged raster

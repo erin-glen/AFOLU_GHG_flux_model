@@ -1,10 +1,10 @@
 """
 Run from src/LULUCF
 
-# 30 workers with 10 threads each should be able to process 630 outputs simultaneously (30 workers * (20 threads/worker + 1 bonus thread that's always there)).
+# 30 workers with 10 threads each should be able to process 315 outputs simultaneously (35 workers * (8 threads/worker + 1 bonus thread that's always there)).
 # Making 10x10 aggregate tiles takes basically no memory, so each worker can handle lots of tasks at the same time, it seems.
-# 40 threads/worker caused some gdal_merge errors
-python -m scripts.utilities.create_cluster -n 30 -t 20
+# 20 and 40 threads/worker caused many gdal_merge errors. Even 10 threads/worker caused at least one error.
+python -m scripts.utilities.create_cluster -n 35 -t 8
 python -m scripts.postprocessing.LULUCF_fluxes_aggregate_to_10x10deg -cn AFOLU_flux_model_scripts -d 20241121
 
 """
@@ -88,15 +88,15 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         # f"{cn.outputs_path}{cn.n2o_flux_pattern}/2010_2015/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.n2o_flux_pattern}/2015_2020/4000_pixels/{date}/",
 
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
-
-        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
+        #
+        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
 
         f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2000_2005/4000_pixels/{date}/",
         f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2005_2010/4000_pixels/{date}/",
@@ -147,6 +147,14 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 
     results = dask.compute(*delayed_result)
     lu.print_and_log(results, is_final, logger)
+
+    LULUCF_aggreg_folders = [path.replace("4000", "40000") for path in LULUCF_output_folders]
+
+    for LULUCF_aggreg_folder in LULUCF_aggreg_folders:
+
+        geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(LULUCF_aggreg_folder)
+        # print(geotiff_files)
+        lu.print_and_log(f"Aggregated 10x10 deg outputs in {LULUCF_aggreg_folder}: {file_count}", is_final, logger)
 
     # Ending time for stage
     end_time = uu.timestr()

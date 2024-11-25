@@ -18,6 +18,7 @@ s3_client = boto3.client("s3")
 
 ### Pattern for tile_ids in regex form
 tile_id_pattern = r"[0-9]{2}[A-Z][_][0-9]{3}[A-Z]"
+small_chunk_pattern = r'__-?\d+_-?\d+_-?\d+_-?\d+__'
 
 ### IPCC codes
 forest_IPCC = 1
@@ -40,6 +41,8 @@ interval_end_years = list(range(first_model_year, last_model_year + 1, interval_
 
 # Number of years of removals in a tree cover gain pixel
 NT_T_gain_year_count_default = math.ceil(interval_years / 2)
+
+m2_to_ha = 1/10000
 
 ### Carbon constants
 
@@ -193,6 +196,9 @@ natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_10
 
 drivers_path = f"{full_bucket_prefix}/drivers_of_loss/1_km/processed/20241004/"
 drivers_pattern = "drivers_of_TCL_1_km_20241004"
+
+pixel_area_path = f"{full_bucket_prefix}/analyses/area_28m/"
+pixel_area_pattern = "hanson_2013_area"
 
 '''
 From Radost Stanimirova via Slack 2024-10-18:
