@@ -1,27 +1,18 @@
 """
 Run from src/LULUCF
 
-Test:
-For tile indexes:
-python -m scripts.utilities.create_cluster -n 15  #15 workers with 3 threads each should be able to make tile indexes for all 44 outputs in one pass
-python -m scripts.core_model.LULUCF_fluxes_postprocessing -cn AFOLU_flux_model_scripts -d 20241102
-
-For 1x1 deg chunk aggregation:
-python -m scripts.utilities.create_cluster -n 200
-python -m scripts.postprocessing.LULUCF_fluxes_global_totals -cn AFOLU_flux_model_scripts -d 20241121
+python -m scripts.utilities.create_cluster -n 1 -t 9
+python -m scripts.utilities.create_cluster -n 100 -t 7 #100 workers with 150 threads each (9+1 bonus one) should be able to handle 1000 tasks simultaneously
+python -m scripts.postprocessing.LULUCF_fluxes_global_chunk_stats -cn AFOLU_flux_model_scripts -d 20241121
 
 """
 
-
 import argparse
 import dask
-import rasterio
-import numpy as np
-import boto3
-
-from dask.distributed import print
 import os
 import re
+
+from dask.distributed import print
 
 # Project imports
 from ..utilities import constants_and_names as cn
@@ -30,7 +21,7 @@ from ..utilities import universal_utilities as uu
 
 # Calculates statistics for 1x1 degree rasters and summarizes them in a spreadsheet
 # Per https://chatgpt.com/share/e/674105d3-6924-800a-ba00-a942ca95ac32
-def get_chunk_stats_local(tile_to_process_uri):
+def get_chunk_stats(tile_to_process_uri, fishnet_iso_df):
 
     is_final = False
     logger = lu.setup_logging()
@@ -58,14 +49,19 @@ def get_chunk_stats_local(tile_to_process_uri):
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
     pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds_list, 4000, is_final, logger)
-    tile_to_process_chunk_per_ha = uu.get_tile_dataset_rio(tile_to_process_uri, 'Float32', bounds_list, 4000, is_final, logger)
+
+    try:
+        tile_to_process_chunk_per_ha = uu.get_tile_dataset_rio(tile_to_process_uri, 'Float32', bounds_list, 4000, is_final, logger)
+    except Exception as e:
+        return f"Failed to pixel area raster for {bounds_list}: {e}"
 
     # Converts per hectare values to per pixel values in the numpy array
     tile_to_process_chunk_per_pixel = tile_to_process_chunk_per_ha * pixel_area_chunk * cn.m2_to_ha
 
-    #  Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
+    #  Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes,
+    # and joins the ISO to each entry
     stats = uu.calculate_stats(tile_to_process_chunk_per_ha, file_name,
-                               bounds, tile_id, "output_layer", tile_to_process_chunk_per_pixel)
+                               bounds, tile_id, "output_layer", fishnet_iso_df, tile_to_process_chunk_per_pixel)
 
     return stats
 
@@ -144,7 +140,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/"
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
         #
         # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
@@ -165,11 +161,11 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
-        #
+
         # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2000_2005/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2005_2010/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2015_2020/4000_pixels/{date}/"
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2015_2020/4000_pixels/{date}/"
 
         # f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.land_state_node_path_part}/2005_2010/4000_pixels/{date}/",
@@ -193,21 +189,34 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     # Converts nested list of tiles [[...], [...], [...],...] to flat list [...]
     tiles_to_process = uu.flatten_list(tiles_to_process)
 
-    # print(tiles_to_process)
-    # print(tiles_to_process[-100:])
-    lu.print_and_log(f"Tiles to process: {len(tiles_to_process)}", is_final, logger)
+    lu.print_and_log(f"Output rasters to process in {len(LULUCF_output_folders)} folders: {len(tiles_to_process)}", is_final, logger)
 
     # For testing. Limits the number of output rasters
     # tiles_to_process = tiles_to_process[0:1]  # First 1 tile
-    tiles_to_process = tiles_to_process[0:3]  # First 3 tiles
+    # tiles_to_process = tiles_to_process[0:3]  # First 3 tiles
     # tiles_to_process = tiles_to_process[0:20]  # First 20 tiles
     # tiles_to_process = tiles_to_process[0:100]  # First 100 tiles
+    # tiles_to_process = tiles_to_process[15000:15005]  # Some middle tiles
     # print(tiles_to_process)
 
-    # Distributes tasks and processes them
-    delayed_result = [dask.delayed(get_chunk_stats_local)(tile_to_process) for tile_to_process in tiles_to_process]
+    # Returns a dataframe of chunk_id and ISO, to be joined with chunk stats
+    fishnet_iso_df = uu.fishnet_with_GADM_iso()
 
-    results = dask.compute(*delayed_result)
+    # For local runs
+    if run_local:
+        # Distributes tasks and processes them
+        delayed_result = [dask.delayed(get_chunk_stats)(tile_to_process, fishnet_iso_df) for tile_to_process in tiles_to_process]
+        results = dask.compute(*delayed_result)
+
+    # This approach handles large task lists (graphs) better than [dask.delayed(get_chunk_stats ... )]
+    else:
+        futures = []
+        for tile_to_process in tiles_to_process:
+            future = client.submit(get_chunk_stats, tile_to_process, fishnet_iso_df)
+            futures.append(future)
+
+        # Collect the results once they are finished
+        results = client.gather(futures)
 
     # Filters out None values in case of errors
     results = [res for res in results if res is not None]

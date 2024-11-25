@@ -5,6 +5,7 @@ import time
 import math
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 import pytz
 import rasterio
 import rasterio.transform
@@ -689,15 +690,27 @@ def convert_lookup_table_to_array(spreadsheet, sheet_name, fields_to_keep):
 
 
 # Calculates stats for a chunk (numpy array), mostly using per hectare values
-# but optionally summing per pixel values to get a chunk total
-# From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_pixel=None):
+# but optionally summing per pixel values to get a chunk total.
+# Also joins ISO from GADM to each entry.
+# Stats calculations adapted from https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
+# Joining iso adapted from https://chatgpt.com/share/e/6744de08-6b64-800a-b8c4-6a20833f7e3a
+def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, fishnet_iso_df, array_per_pixel=None):
 
     # Sums the per pixel totals if supplied
     if array_per_pixel is None:
         sum_value = 'no per pixel array supplied'
     else:
         sum_value = np.sum(array_per_pixel)
+
+    # Uses loc to find the iso corresponding to the chunk_id
+    iso_value = fishnet_iso_df.loc[fishnet_iso_df['chunk_id'] == bounds_str, 'iso'].values
+
+    # Checks if an iso was found
+    if len(iso_value) > 0:
+        iso_value = iso_value[0]  # Extracts the first value (assuming chunk_id is unique)
+        print(f"{bounds_str} in {iso_value}")
+    else:
+        iso_value = 'No iso found'  # Handles case where chunk_id is not found
 
     if array_per_ha is None or not np.any(array_per_ha):  # Checks if the array is None or empty
         return {
@@ -710,6 +723,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'max_value': 'no data',
             'count_value': 'no data',
             'sum_value': 'no data',
+            'iso_value': 'no data',
             'data_type': 'no data'
         }
     else:    # Only calculates stats if there is data in the array
@@ -723,6 +737,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'max_value': np.max(array_per_ha),
             'count_value': np.count_nonzero(array_per_ha),
             'sum_value': sum_value,
+            'iso_value': iso_value,
             'data_type': array_per_ha.dtype.name
         }
 
@@ -734,7 +749,7 @@ def calculate_chunk_stats(all_stats, stage, no_upload):
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
 
-    print("Calculating tile stats...")
+    print(f"Starting to aggregate and export tile stats at {timestr()}...")
 
     # Converts accumulated statistics to a DataFrame
     df_all_stats = pd.DataFrame(all_stats)
@@ -795,6 +810,8 @@ def calculate_chunk_stats(all_stats, stage, no_upload):
             min_max_stats.to_excel(writer, sheet_name='min_max_for_layers', index=False)
 
         print(sorted_stats.head())  # Show first few rows of the stats DataFrame for inspection
+
+        print(f"Done aggregating and exporting tile stats at {timestr()}...")
 
     except Exception as e:
         print(f"Can't print chunk stats: {e}")
@@ -941,3 +958,15 @@ def strip_and_extract_years(key):
     year_range = re.search(cn.date_date_range_pattern, key).group()[1:]
 
     return pattern, year_range
+
+
+# Creates a dataframe from the attribute table of the 1x1 deg fishnet with GADM iso joined to it
+def fishnet_with_GADM_iso():
+
+    # Reads the 1x1 deg fishnet with GADM3.6 iso joined from S3 to extract "chunk_id" and "iso" fields
+    gdf = gpd.read_file(cn.fishnet_s3_uri)
+
+    # Creates a DataFrame of the 1x1def fishnet with "chunk_id" and "iso" fields
+    fishnet_df = gdf[['chunk_id', 'iso']]
+
+    return fishnet_df

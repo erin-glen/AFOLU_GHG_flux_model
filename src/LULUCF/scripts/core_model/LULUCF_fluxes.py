@@ -965,7 +965,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
 
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
-def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types, is_final, no_upload):
+def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types, fishnet_iso_df, is_final, no_upload):
 
     logger = lu.setup_logging()
 
@@ -1038,7 +1038,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     # Calculates stats for the input layers
     for key, array in layers.items():
-        chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer'))
+        chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer', fishnet_iso_df))
     # print(stats)
 
 
@@ -1291,12 +1291,17 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
     # Converts primary forest AGB RFs to AGC RFs (Mg AGB/ha/yr -> Mg AGC/ha/yr)
     primary_forest_RFs[:, 1] = primary_forest_RFs[:, 1] * cn.biomass_to_carbon_non_mangrove
 
+    # Returns a dataframe of chunk_id and ISO, to be joined with chunk stats
+    fishnet_iso_df = uu.fishnet_with_GADM_iso()
+
     # Creates list of tasks to run (1 task = 1 chunk)
     print(f"Creating tasks and starting processing: {uu.timestr()}")
 
+    # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
     futures = []
     for chunk in chunks:
-        future = client.submit(calculate_and_upload_LULUCF_fluxes, chunk, primary_forest_RFs, download_dict_with_data_types, is_final, no_upload)
+        future = client.submit(calculate_and_upload_LULUCF_fluxes, chunk, primary_forest_RFs,
+                               download_dict_with_data_types, fishnet_iso_df, is_final, no_upload)
         futures.append(future)
 
     # Collect the results once they are finished

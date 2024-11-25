@@ -158,6 +158,9 @@ combined_log = "AFOLU_model_log"
 local_chunk_stats_path = "chunk_stats/"
 s3_chunk_stats_path = "climate/AFOLU_flux_model/LULUCF/chunk_stats/"
 
+# 1x1 deg fishnet between 80N and 60N, 180W and 180E that intersects GADM3.6 and has GADM iso joined to it
+fishnet_s3_uri = "s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/"
+
 land_cover_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/composite/"
 land_cover_pattern = "land_cover"
 
