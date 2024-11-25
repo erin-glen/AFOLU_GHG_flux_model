@@ -688,10 +688,18 @@ def convert_lookup_table_to_array(spreadsheet, sheet_name, fields_to_keep):
     return filtered_array
 
 
-# Calculates stats for a chunk (numpy array)
+# Calculates stats for a chunk (numpy array), mostly using per hectare values
+# but optionally summing per pixel values to get a chunk total
 # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-def calculate_stats(array, name, bounds_str, tile_id, in_out):
-    if array is None or not np.any(array):  # Check if the array is None or empty
+def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_pixel=None):
+
+    # Sums the per pixel totals if supplied
+    if array_per_pixel is None:
+        sum_value = 'no per pixel array supplied'
+    else:
+        sum_value = np.sum(array_per_pixel)
+
+    if array_per_ha is None or not np.any(array_per_ha):  # Checks if the array is None or empty
         return {
             'chunk_id': bounds_str,
             'tile_id': tile_id,
@@ -700,6 +708,8 @@ def calculate_stats(array, name, bounds_str, tile_id, in_out):
             'min_value': 'no data',
             'mean_value': 'no data',
             'max_value': 'no data',
+            'count_value': 'no data',
+            'sum_value': 'no data',
             'data_type': 'no data'
         }
     else:    # Only calculates stats if there is data in the array
@@ -708,17 +718,21 @@ def calculate_stats(array, name, bounds_str, tile_id, in_out):
             'tile_id': tile_id,
             'layer_name': name,
             'in_out': in_out,
-            'min_value': np.min(array),
-            'mean_value': np.mean(array),
-            'max_value': np.max(array),
-            'data_type': array.dtype.name
+            'min_value': np.min(array_per_ha),
+            'mean_value': np.mean(array_per_ha),
+            'max_value': np.max(array_per_ha),
+            'count_value': np.count_nonzero(array_per_ha),
+            'sum_value': sum_value,
+            'data_type': array_per_ha.dtype.name
         }
 
 
 # Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet
 # Also calculates the min and max value for each input and output across all chunks
 # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-def calculate_chunk_stats(all_stats, stage):
+def calculate_chunk_stats(all_stats, stage, no_upload):
+
+    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
 
     print("Calculating tile stats...")
 
@@ -762,8 +776,11 @@ def calculate_chunk_stats(all_stats, stage):
     # Writes the data to a single Excel file with separate sheets.
     # Should continue with model post-processing even if chunk stats don't work for some reason
     # (e.g., more many rows output than rows in an Excel spreadsheet)
+    out_spreadsheet = f'{stage}_chunk_statistics_{timestr()}.xlsx'
+    local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+
     try:
-        with pd.ExcelWriter(f'{cn.chunk_stats_path}{stage}_chunk_statistics_{timestr()}.xlsx') as writer:
+        with pd.ExcelWriter(local_spreadsheet) as writer:
 
             # Writes input rows to one sheet
             annual_inputs.to_excel(writer, sheet_name='annual_inputs', index=False)
@@ -781,6 +798,10 @@ def calculate_chunk_stats(all_stats, stage):
 
     except Exception as e:
         print(f"Can't print chunk stats: {e}")
+
+    if not no_upload:
+        s3_client.upload_file(local_spreadsheet, "gfw2-data", Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
+
 
 
 # Gets the name of the first file in a dictionary of dataset names and folders in s3.

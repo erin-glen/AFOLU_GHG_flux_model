@@ -1148,7 +1148,9 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     ### Part 7: Calculates min, mean, and max for each output chunk.
     ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
 
-    # Calculate stats for the output layers from create_starting_C_densities
+    #TODO Add step to calculate per-pixel values and get chunk sums for float32 outputs
+
+    # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
     for key, array in out_dict_all_dtypes.items():
         chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'output_layer'))
 
@@ -1344,7 +1346,7 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count > 0):
-        uu.calculate_chunk_stats(all_stats, stage)
+        uu.calculate_chunk_stats(all_stats, stage, no_upload)
 
     # Ending time for stage
     end_time_2 = uu.timestr()

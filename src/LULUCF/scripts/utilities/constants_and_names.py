@@ -155,7 +155,8 @@ s3_log_path = "climate/AFOLU_flux_model/LULUCF/model_logs/"
 combined_log = "AFOLU_model_log"
 
 # Local path for chunk stats
-chunk_stats_path = "chunk_stats/"
+local_chunk_stats_path = "chunk_stats/"
+s3_chunk_stats_path = "climate/AFOLU_flux_model/LULUCF/chunk_stats/"
 
 land_cover_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/composite/"
 land_cover_pattern = "land_cover"
