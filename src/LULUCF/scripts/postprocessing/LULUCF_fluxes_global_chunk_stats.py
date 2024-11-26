@@ -151,6 +151,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         # f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
 
         # This is about 196,272 rasters to analyze!
+        # 1237 credits, #39, 1:26:51
         f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2000_2005/4000_pixels/{date}/",
         f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2005_2010/4000_pixels/{date}/",
         f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",

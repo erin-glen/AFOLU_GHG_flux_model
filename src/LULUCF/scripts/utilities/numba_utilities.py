@@ -324,6 +324,7 @@ def calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs):
     if primary_forest_RF_indices[0].size > 0:
         primary_forest_RF = primary_forest_RFs[primary_forest_RF_indices[0][0], 1]
     else:
+        #TODO Replace 1000 with the mean of primary forest RFs or something
         primary_forest_RF = 1000  # Absurd number that should show up easily in outputs
     return primary_forest_RF
 

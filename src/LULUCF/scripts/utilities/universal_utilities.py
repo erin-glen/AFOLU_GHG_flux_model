@@ -703,6 +703,9 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
     else:
         sum_value = np.sum(array_per_pixel)
 
+    #TODO Add field for getting year (for stocks) or year range (for fluxes) to output
+    #TODO Add field for getting layer pattern to output
+
     # # Uses loc to find the iso corresponding to the chunk_id
     # iso_value = fishnet_iso_df.loc[fishnet_iso_df['chunk_id'] == bounds_str, 'iso'].values
     #
