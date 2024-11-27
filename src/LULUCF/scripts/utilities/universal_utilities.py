@@ -711,9 +711,6 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
 
     out_pattern, year_range = strip_and_extract_years(name)
 
-    #TODO Add field for getting year (for stocks) or year range (for fluxes) to output
-    #TODO Add field for getting layer pattern to output
-
     if array_per_ha is None or not np.any(array_per_ha):  # Checks if the array is None or empty
         return {
             'chunk_id': bounds_str,
@@ -772,6 +769,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
     ).reset_index()
 
     # Reads the shapefile from S3 to extract "chunk_id" and "iso" fields
+    # Based on https://chatgpt.com/share/e/6744de08-6b64-800a-b8c4-6a20833f7e3a
     gdf = gpd.read_file(cn.fishnet_s3_uri)
 
     # Creates a DataFrame with "chunk_id" and "iso" fields
@@ -779,6 +777,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
 
     # Merges the shapefile data with the statistics DataFrame
     merged_stats = sorted_stats.merge(fishnet_shapefile_df, on='chunk_id', how='left')
+    merged_stats['iso'] = merged_stats['iso'].fillna('no iso assigned')
 
     # Calculates the min and max values for each layer_name for each chunk.
     # There are so many chunks with so many inputs and outputs in a full model run that Excel can't handle all the rows
