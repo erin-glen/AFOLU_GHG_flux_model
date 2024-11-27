@@ -230,7 +230,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     # print(results)
 
     # Creates a chunk stats spreadsheet and optionally uploads it to s3
-    uu.calculate_chunk_stats(results, stage, no_upload)
+    uu.aggregate_chunk_stats(results, stage, no_upload)
 
     # Ending time for stage
     end_time = uu.timestr()

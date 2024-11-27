@@ -359,7 +359,7 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag
     if not no_stats:
-        uu.calculate_chunk_stats(all_stats, stage)
+        uu.aggregate_chunk_stats(all_stats, stage)
 
     # Ending time for stage
     end_time = uu.timestr()

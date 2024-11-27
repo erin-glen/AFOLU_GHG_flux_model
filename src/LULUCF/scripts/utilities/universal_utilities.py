@@ -709,6 +709,8 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
     else:
         sum_value = np.sum(array_per_pixel)
 
+    out_pattern, year_range = strip_and_extract_years(name)
+
     #TODO Add field for getting year (for stocks) or year range (for fluxes) to output
     #TODO Add field for getting layer pattern to output
 
@@ -718,6 +720,8 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'tile_id': tile_id,
             'layer_name': name,
             'in_out': in_out,
+            'pattern': out_pattern,
+            'years': year_range,
             'min_value': 'no data',
             'mean_value': 'no data',
             'max_value': 'no data',
@@ -731,6 +735,8 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'tile_id': tile_id,
             'layer_name': name,
             'in_out': in_out,
+            'pattern': out_pattern,
+            'years': year_range,
             'min_value': np.min(array_per_ha),
             'mean_value': np.mean(array_per_ha),
             'max_value': np.max(array_per_ha),
@@ -743,7 +749,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
 # Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet
 # Also calculates the min and max value for each input and output across all chunks
 # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-def calculate_chunk_stats(all_stats, stage, no_upload):
+def aggregate_chunk_stats(all_stats, stage, no_upload):
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
 
@@ -962,7 +968,11 @@ def fill_missing_input_layers_with_no_data(layers, uint8_list, int16_list, int32
 def strip_and_extract_years(key):
 
     pattern = re.sub(cn.date_date_range_pattern, '', key)
-    year_range = re.search(cn.date_date_range_pattern, key).group()[1:]
+
+    try:
+        year_range = re.search(cn.date_date_range_pattern, key).group()[1:]
+    except:
+        year_range = 'no year range'
 
     return pattern, year_range
 
