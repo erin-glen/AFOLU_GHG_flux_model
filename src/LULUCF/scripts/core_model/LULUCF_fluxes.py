@@ -989,12 +989,6 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
 
-    # Checks whether tile exists at all. Doesn't try to download data in chunk if the tile doesn't exist.
-    tile_exists = uu.check_for_tile(updated_download_dict, is_final, logger)
-
-    if not tile_exists:
-        return f"Skipped chunk {bounds_str} because {tile_id} does not exist for any inputs: {uu.timestr()}", chunk_stats
-
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
@@ -1020,22 +1014,6 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern])
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern].max())
     # print(layers[soil_c_2000_pattern].dtype)
-
-    # List of layers that must be present for the chunk to be run.
-    # All of the listed layers must exist for this chunk in order to proceed.
-    checked_layers = {cn.agc_2000_pattern: layers[cn.agc_2000_pattern], cn.bgc_2000_pattern: layers[cn.bgc_2000_pattern],
-                      cn.deadwood_c_2000_pattern: layers[cn.deadwood_c_2000_pattern],
-                      cn.litter_c_2000_pattern: layers[cn.litter_c_2000_pattern],
-                      f"{cn.land_cover_pattern}_2000": layers[f"{cn.land_cover_pattern}_2000"]}
-
-    # print(f"Layers to check for data: {layers_to_check_for_data}")
-
-    # Checks chunk for data. Skips the chunk if it does not have the required data.
-    # data_in_chunk = uu.check_chunk_for_data(checked_layers, bounds_str, tile_id, "all", is_final, logger)
-    data_in_chunk = uu.check_chunk_for_data(checked_layers, bounds_str, tile_id, "all", is_final, logger)
-
-    if data_in_chunk == False:
-        return f"Skipped chunk {bounds_str} because of missing necessary input data: {uu.timestr()}", chunk_stats
 
 
     ### Part 2: Calculates min, mean, and max for each input chunk.
@@ -1202,6 +1180,11 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     start_time = uu.timestr()
     print(f"Stage {stage} started at: {start_time}")  #TODO in all main() functions, add print statements to log
 
+    # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
+    # chunk_ids for making chunk list if shapefile is supplied in command line.
+    # chunk_ids and iso code used for chunk stats.
+    fishnet_iso_df = uu.fishnet_with_GADM_iso()
+
     # Makes list of chunks to analyze from the bounding box and chunk size (deg)
     # Outut list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
     if bounding_box and chunk_size:
@@ -1217,23 +1200,23 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
         print("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
 
-        gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
-        fishnet_1x1_df = gdf[['chunk_id']]  # Creates dataframe
+        # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
+        fishnet_1x1_chunk_id_df = fishnet_iso_df[['chunk_id']]  # Creates dataframe
 
         # If argument for number of chunks in shapefile is supplied, limit to that
         if first_chunks:
-            fishnet_1x1_df = fishnet_1x1_df[:first_chunks]
+            fishnet_1x1_chunk_id_df = fishnet_1x1_chunk_id_df[:first_chunks]
 
         # Converts dataframe column of chunk bounds to nested list
         # Per https://chatgpt.com/share/e/674747ee-d588-800a-995c-1f897a8ace31
-        chunks = fishnet_1x1_df['chunk_id'].apply(uu.process_chunk_id).tolist()
+        chunks = fishnet_1x1_chunk_id_df['chunk_id'].apply(uu.process_chunk_id).tolist()
 
     else:
         print("Chunk list cannot be determined")
         sys.exit()
 
     print(f"Processing {len(chunks)} chunks")
-    # print(chunks)
+    print(chunks)
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
@@ -1327,9 +1310,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Converts primary forest AGB RFs to AGC RFs (Mg AGB/ha/yr -> Mg AGC/ha/yr)
     primary_forest_RFs[:, 1] = primary_forest_RFs[:, 1] * cn.biomass_to_carbon_non_mangrove
-
-    # Returns a dataframe of chunk_id and ISO, to be joined with chunk stats
-    fishnet_iso_df = uu.fishnet_with_GADM_iso()
 
     # Creates list of tasks to run (1 task = 1 chunk)
     print(f"Creating tasks and starting processing: {uu.timestr()}")
