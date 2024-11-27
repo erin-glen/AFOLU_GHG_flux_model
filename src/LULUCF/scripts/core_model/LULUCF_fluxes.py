@@ -1284,6 +1284,7 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.
+    # Inputs are Mg AGB/ha/yr. Outputs are Mg AGB/ha/yr. Conversion to Mg AGC/ha/yr is done below.
     primary_forest_RFs = uu.convert_lookup_table_to_array(cn.IPCC_removal_factor_table_full_path,
                                                           cn.IPCC_removal_factor_table_tab,
                                                           ['gainEcoCon', 'growth_primary'])

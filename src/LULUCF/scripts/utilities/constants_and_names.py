@@ -8,7 +8,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = 0.1
+model_version = 0.2
 
 ### s3 buckets
 s3 = boto3.resource('s3')
