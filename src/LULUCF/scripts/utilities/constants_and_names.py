@@ -341,3 +341,90 @@ first_time_sig_loss_from_max_height_block ="first_time_sig_loss_from_max_height_
 
 intermediate_outputs = [gain_year_count_pattern, most_recent_year_not_tall_veg, years_of_forest_regrowth,
                         year_of_forest_loss, max_height_since_last_time_not_tall_veg, first_time_sig_loss_from_max_height_block]
+
+LULUCF_output_folders = [
+    f"{outputs_path}{AGC_density_path_part}/2005/RES_pixels/DATE/",
+    f"{outputs_path}{AGC_density_path_part}/2010/RES_pixels/DATE/",
+    f"{outputs_path}{AGC_density_path_part}/2015/RES_pixels/DATE/",
+    f"{outputs_path}{AGC_density_path_part}/2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{BGC_density_path_part}/2005/RES_pixels/DATE/",
+    f"{outputs_path}{BGC_density_path_part}/2010/RES_pixels/DATE/",
+    f"{outputs_path}{BGC_density_path_part}/2015/RES_pixels/DATE/",
+    f"{outputs_path}{BGC_density_path_part}/2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{deadwood_c_density_path_part}/2005/RES_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_density_path_part}/2010/RES_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_density_path_part}/2015/RES_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_density_path_part}/2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{litter_c_density_path_part}/2005/RES_pixels/DATE/",
+    f"{outputs_path}{litter_c_density_path_part}/2010/RES_pixels/DATE/",
+    f"{outputs_path}{litter_c_density_path_part}/2015/RES_pixels/DATE/",
+    f"{outputs_path}{litter_c_density_path_part}/2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{agc_net_flux_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{agc_net_flux_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{agc_net_flux_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{agc_net_flux_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{bgc_net_flux_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{bgc_net_flux_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{bgc_net_flux_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{bgc_net_flux_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{deadwood_c_net_flux_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_net_flux_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_net_flux_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_net_flux_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{litter_c_net_flux_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{litter_c_net_flux_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{litter_c_net_flux_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{litter_c_net_flux_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{ch4_flux_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{ch4_flux_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{ch4_flux_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{ch4_flux_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{n2o_flux_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{n2o_flux_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{n2o_flux_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{n2o_flux_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{gross_removals_all_C_pools_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{gross_removals_all_C_pools_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{gross_removals_all_C_pools_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{gross_removals_all_C_pools_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{land_state_node_path_part}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{land_state_node_path_part}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{land_state_node_path_part}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{land_state_node_path_part}/2015_2020/RES_pixels/DATE/"
+]

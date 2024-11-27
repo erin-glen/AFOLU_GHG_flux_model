@@ -7,19 +7,16 @@ python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 10 4
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cl s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1
 
-
-
 Full run:
 python -m scripts.utilities.create_cluster -n 200
-python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 1
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cl s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/
 """
 
 import argparse
 import concurrent.futures
 import sys
+import re
 import numpy as np
-import geopandas as gpd
 
 from dask.distributed import print
 from numba import jit
@@ -1165,8 +1162,6 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     return success_message, chunk_stats  # Return both the success message and the statistics
 
 
-
-
 def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=False,
          bounding_box=None, chunk_size=None, chunk_list=None, first_chunks=None):
 
@@ -1191,7 +1186,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
         print("Using bounding box and chunk size to determine chunks")
         chunks = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
-        print(chunks)
 
     # Makes list of chunks to analyze from a shapefile attribute table.
     # Attribute table column must be formatted as W_S_E_N.
@@ -1216,7 +1210,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         sys.exit()
 
     print(f"Processing {len(chunks)} chunks")
-    print(chunks)
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
@@ -1360,6 +1353,17 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     print(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
     print(f"Difference between submitted chunks and processed chunks: {len(chunks) - (success_count + skipping_chunk_count)}")
 
+    # Iterates through output folders and counts the number of output rasters.
+    # Only useful when doing a global run.
+    for LULUCF_output_folder in cn.LULUCF_output_folders:
+
+        LULUCF_output_folder = re.sub('RES_pixels', '4000_pixels', LULUCF_output_folder)
+        LULUCF_output_folder = re.sub('DATE', uu.timestr()[:8], LULUCF_output_folder)
+
+        geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(LULUCF_output_folder)
+        print(f"Output rasters in {LULUCF_output_folder}: {file_count}")
+        # print(geotiff_files)
+
     end_time_1 = uu.timestr()
     print(f"Stage {stage} ended at: {end_time_1}")
     uu.stage_duration(start_time, end_time_1, stage)
@@ -1375,9 +1379,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     print(f"Stage {stage} tile stats ended at: {end_time_2}")
     uu.stage_duration(start_time, end_time_2, stage)
 
-    #TODO Add step that counts the number of tiles in each output folder, prints that, and saves to the log
-
-    # Creates combined log if not deactivated
+    # Creates combined log from all workers if not deactivated
     log_note = f"{stage} run"
     lu.compile_and_upload_log(no_log, client, cluster, stage, len(chunks), chunk_size, start_time, end_time_1, end_time_2,
                               success_count, skipping_chunk_count, bounding_box, log_note)

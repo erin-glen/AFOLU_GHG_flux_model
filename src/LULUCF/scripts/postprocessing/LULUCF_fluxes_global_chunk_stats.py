@@ -184,8 +184,6 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     # with the count of tiles in each folder
     for LULUCF_output_folder in LULUCF_output_folders:
 
-        # geotiff_files = uu.list_raster_names_in_folder(LULUCF_output_folder)
-
         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(LULUCF_output_folder)
         # print(geotiff_files)
         lu.print_and_log(f"Output rasters in {LULUCF_output_folder} to process: {file_count}", is_final, logger)

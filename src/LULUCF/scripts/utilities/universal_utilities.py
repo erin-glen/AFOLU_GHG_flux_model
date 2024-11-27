@@ -27,7 +27,6 @@ from . import log_utilities as lu
 
 # Time in Eastern US timezone as a string
 def timestr():
-    # return time.strftime("%Y%m%d_%H_%M_%S")
 
     # Define the Eastern Time timezone
     eastern = pytz.timezone('US/Eastern')
