@@ -777,6 +777,9 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
 
     # Merges the shapefile data with the statistics DataFrame
     merged_stats = sorted_stats.merge(fishnet_shapefile_df, on='chunk_id', how='left')
+
+    # When iso isn't assigned, empty cells are filled.
+    # iso is only assigned when the chunks are 1x1 deg (since that's what the fishnet uses)
     merged_stats['iso'] = merged_stats['iso'].fillna('no iso assigned')
 
     # Calculates the min and max values for each layer_name for each chunk.

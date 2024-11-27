@@ -971,7 +971,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     logger = lu.setup_logging()
 
-    bounds_str = uu.boundstr(bounds)  # String form of chunk bounds
+    bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
 
@@ -1125,17 +1125,26 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
                 + out_dict_all_dtypes[f"{cn.gross_emis_non_CO2_only_pattern}_{year_range}"])
 
 
-    ### Part 7: Calculates min, mean, and max for each output chunk.
+    ### Part 7: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
     ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
+    ### Also useful for a quick sum of outputs without doing zonal stats
 
-    #TODO Add step to calculate per-pixel values and get chunk sums for float32 outputs
+    # The relevant pixel area (m^2) file in s3
+    pixel_area_uri = f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{tile_id}.tif"
+
+    # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
+    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger)
 
     # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
-    for key, array in out_dict_all_dtypes.items():
-        chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'output_layer'))
+    for key, array_per_ha in out_dict_all_dtypes.items():
+
+        # Converts per hectare values to per pixel values for the output numpy array
+        output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
+
+        chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
 
-    ### Part 7: Saves numpy arrays as rasters and uploads to s3
+    ### Part 8: Saves numpy arrays as rasters and uploads to s3
 
     # Only saves arrays to geotifs and uploads them to s3 if enabled
     if not no_upload:
@@ -1259,7 +1268,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         # "ecozone": f"s3://gfw2-data/fao_ecozones/v2000/raster/epsg-4326/10/40000/class/gdal-geotiff/{sample_tile_id}.tif",   # Originally from gfw-data-lake, so it's in 400x400 windows
         # "iso": f"s3://gfw2-data/gadm_administrative_boundaries/v3.6/raster/epsg-4326/10/40000/adm0/gdal-geotiff/{sample_tile_id}.tif",  # Originally from gfw-data-lake, so it's in 400x400 windows
         cn.ifl_primary_pattern: f"{cn.ifl_primary_path}{sample_tile_id}_{cn.ifl_primary_pattern}.tif",
-        cn.continent_ecozone_pattern: f"{cn.continent_ecozone_path}{sample_tile_id}_{cn.continent_ecozone_pattern}.tif"
+        cn.continent_ecozone_pattern: f"{cn.continent_ecozone_path}{sample_tile_id}_{cn.continent_ecozone_pattern}.tif",
+        cn.pixel_area_pattern: f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{sample_tile_id}.tif"
     }
 
     # Land cover and vegetation height rasters (5-year intervals)
