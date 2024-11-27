@@ -5,16 +5,21 @@ Test:
 python -m scripts.utilities.create_cluster -n 1
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 10 49.75 10.25 50 -cs 0.25
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload
+python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cl s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1
+
 
 
 Full run:
 python -m scripts.utilities.create_cluster -n 200
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 1
+python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cl s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/
 """
 
 import argparse
 import concurrent.futures
+import sys
 import numpy as np
+import geopandas as gpd
 
 from dask.distributed import print
 from numba import jit
@@ -1182,7 +1187,10 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     return success_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False, no_log=False, no_upload=False):
+
+
+def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=False,
+         bounding_box=None, chunk_size=None, chunk_list=None, first_chunks=None):
 
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -1194,8 +1202,36 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
     start_time = uu.timestr()
     print(f"Stage {stage} started at: {start_time}")  #TODO in all main() functions, add print statements to log
 
-    # Makes list of chunks to analyze
-    chunks = uu.get_chunk_bounds(bounding_box, chunk_size)
+    # Makes list of chunks to analyze from the bounding box and chunk size (deg)
+    # Outut list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+    if bounding_box and chunk_size:
+
+        print("Using bounding box and chunk size to determine chunks")
+        chunks = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
+        print(chunks)
+
+    # Makes list of chunks to analyze from a shapefile attribute table.
+    # Attribute table column must be formatted as W_S_E_N.
+    # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+    elif chunk_list:
+
+        print("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
+
+        gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
+        fishnet_1x1_df = gdf[['chunk_id']]  # Creates dataframe
+
+        # If argument for number of chunks in shapefile is supplied, limit to that
+        if first_chunks:
+            fishnet_1x1_df = fishnet_1x1_df[:first_chunks]
+
+        # Converts dataframe column of chunk bounds to nested list
+        # Per https://chatgpt.com/share/e/674747ee-d588-800a-995c-1f897a8ace31
+        chunks = fishnet_1x1_df['chunk_id'].apply(uu.process_chunk_id).tolist()
+
+    else:
+        print("Chunk list cannot be determined")
+        sys.exit()
+
     print(f"Processing {len(chunks)} chunks")
     # print(chunks)
 
@@ -1375,8 +1411,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate LULUCF fluxes.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
-    #TODO add option to use 10x10 deg tile index shapefile to create chunks from for global run
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
+    parser.add_argument('-cl', '--chunk_list', help='Shapefile of chunks')
+    parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
@@ -1385,5 +1422,17 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    cluster_name = args.cluster_name
+    bounding_box = args.bounding_box
+    chunk_size = args.chunk_size
+    chunk_list = args.chunk_list
+    first_chunks = args.first_chunks
+    run_local = args.run_local
+    no_stats = args.no_stats
+    no_log = args.no_log
+    no_upload = args.no_upload
+
     # Create the cluster with command line arguments
-    main(args.cluster_name, args.bounding_box, args.chunk_size, args.run_local, args.no_stats, args.no_log, args.no_upload)
+    main(cluster_name, run_local, no_stats, no_log, no_upload,
+         bounding_box=bounding_box, chunk_size=chunk_size,
+         chunk_list=chunk_list, first_chunks=first_chunks)

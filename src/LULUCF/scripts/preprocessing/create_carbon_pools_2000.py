@@ -325,7 +325,7 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
                                                            ['gainEcoCon', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
 
     # Makes list of chunks to analyze
-    chunks = uu.get_chunk_bounds(bounding_box, chunk_size)
+    chunks = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
     print("Processing", len(chunks), "chunks")
     # print(chunks)
 

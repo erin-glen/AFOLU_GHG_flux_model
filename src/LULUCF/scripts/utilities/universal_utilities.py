@@ -54,7 +54,6 @@ def connect_to_Coiled_cluster(cluster_name, run_local):
         return cluster, client
 
 
-
 # Chunk bounds as a string
 def boundstr(bounds):
     bounds_str = "_".join([str(round(x)) for x in bounds])
@@ -65,6 +64,14 @@ def boundstr(bounds):
 def calc_chunk_length_pixels(bounds):
     chunk_length_pixels = int((bounds[3] - bounds[1]) * (40000 / 10))
     return chunk_length_pixels
+
+
+# Creates list of bounding boxes for chunks from a dataframe column structured as W_S_E_N.
+# Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+def process_chunk_id(chunk_id):
+    # Split by underscore
+    bounding_box = list(map(float, chunk_id.split('_')))
+    return bounding_box
 
 
 # Maps GDAL data type to the appropriate string value
@@ -111,7 +118,7 @@ def get_10x10_tile_bounds(tile_id):
 
 
 # Returns list of all chunk boundaries within a bounding box for chunks of a given size
-def get_chunk_bounds(bounding_box, chunk_size):
+def get_chunk_bounds_from_bounding_box(bounding_box, chunk_size):
     min_x = bounding_box[0]
     min_y = bounding_box[1]
     max_x = bounding_box[2]
@@ -706,16 +713,6 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
     #TODO Add field for getting year (for stocks) or year range (for fluxes) to output
     #TODO Add field for getting layer pattern to output
 
-    # # Uses loc to find the iso corresponding to the chunk_id
-    # iso_value = fishnet_iso_df.loc[fishnet_iso_df['chunk_id'] == bounds_str, 'iso'].values
-    #
-    # # Checks if an iso was found
-    # if len(iso_value) > 0:
-    #     iso_value = iso_value[0]  # Extracts the first value (assuming chunk_id is unique)
-    #     print(f"{bounds_str} in {iso_value}")
-    # else:
-    #     iso_value = 'No iso found'  # Handles case where chunk_id is not found
-
     if array_per_ha is None or not np.any(array_per_ha):  # Checks if the array is None or empty
         return {
             'chunk_id': bounds_str,
@@ -727,7 +724,6 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'max_value': 'no data',
             'count_value': 'no data',
             'sum_value': 'no data',
-            # 'iso_value': 'no data',
             'data_type': 'no data'
         }
     else:    # Only calculates stats if there is data in the array
@@ -741,7 +737,6 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'max_value': np.max(array_per_ha),
             'count_value': np.count_nonzero(array_per_ha),
             'sum_value': sum_value,
-            # 'iso_value': iso_value,
             'data_type': array_per_ha.dtype.name
         }
 
@@ -771,14 +766,14 @@ def calculate_chunk_stats(all_stats, stage, no_upload):
         max_value=('max_value', 'max')
     ).reset_index()
 
-    # Read the shapefile from S3 to extract "chunk_id" and "iso" fields
+    # Reads the shapefile from S3 to extract "chunk_id" and "iso" fields
     gdf = gpd.read_file(cn.fishnet_s3_uri)
 
-    # Create a DataFrame with "chunk_id" and "iso" fields
-    shapefile_df = gdf[['chunk_id', 'iso']]
+    # Creates a DataFrame with "chunk_id" and "iso" fields
+    fishnet_shapefile_df = gdf[['chunk_id', 'iso']]
 
-    # Merge the shapefile data with the statistics DataFrame
-    merged_stats = sorted_stats.merge(shapefile_df, on='chunk_id', how='left')
+    # Merges the shapefile data with the statistics DataFrame
+    merged_stats = sorted_stats.merge(fishnet_shapefile_df, on='chunk_id', how='left')
 
     # Calculates the min and max values for each layer_name for each chunk.
     # There are so many chunks with so many inputs and outputs in a full model run that Excel can't handle all the rows
