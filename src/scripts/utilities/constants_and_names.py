@@ -146,10 +146,12 @@ datasets = {
         'local_processed': posixpath.join(local_temp_dir, 'extraction', today_date),
         'working_version': posixpath.join(project_dir, processed_dir, 'extraction', '20241021')
     },
-    'continent_ecozone': "climate/carbon_model/fao_ecozones/ecozone_continent/20190116/processed/"
+    'climate_domain': "climate/carbon_model/inputs_for_carbon_pools/processed/fao_ecozones_bor_tem_tro/20190418/"
 
     # Add other datasets as needed
 }
+
+
 
 # ---------------------------------------------------
 # 3. General Paths and Constants
@@ -169,9 +171,10 @@ ipcc_codes = {
 # Ecozone Codes
 ecozone_codes = {
     'unknown': 0,
-    'boreal': 1,
-    'temperate': 2,
-    'tropical': 3
+    'tropical': 1,
+    'boreal': 2,
+    'temperate': 3,
+
 }
 
 # Nutrient Status Codes
@@ -213,7 +216,7 @@ file_patterns = {
     'extraction': "extraction",
     'descals_type': "descals_type",
     'descals_year': "descals_year",
-    'continent_ecozone': "continent_ecozone"
+    'climate_domain': "climate_domain"
 }
 
 # ---------------------------------------------------
@@ -242,7 +245,7 @@ download_dict = {
     file_patterns[
         'extraction']: f's3://{s3_bucket_name}/{posixpath.join(datasets["extraction"]["working_version"], f"{sample_tile_id}_extraction.tif")}',
     file_patterns[
-        'continent_ecozone']: f's3://{s3_bucket_name}/{posixpath.join(datasets["continent_ecozone"], f"{sample_tile_id}_fao_ecozones_continents_processed.tif")}',
+        'climate_domain']: f's3://{s3_bucket_name}/{posixpath.join(datasets["climate_domain"], f"{sample_tile_id}_fao_ecozones_bor_tem_tro_processed.tif")}',
     file_patterns[
         'descals_type']: f's3://{s3_bucket_name}/{posixpath.join(datasets["descals_oil_palm"]["plant_type"]["working_version"], f"descals_extent_{sample_tile_id}.tif")}',
 
