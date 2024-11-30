@@ -29,6 +29,7 @@ local_log_path = '/tmp'
 s3_log_path = "climate/AFOLU_flux_model/organic_soils/model_logs/"
 
 tile_id_pattern = r"[0-9]{2}[A-Z][_][0-9]{3}[A-Z]"
+small_chunk_pattern = r"__-?\d+_-?\d+_-?\d+_-?\d+__"
 
 # Local Directories
 local_root = 'C:/GIS/Data/Global'  # Adjust as needed for your local environment

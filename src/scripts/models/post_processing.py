@@ -25,11 +25,9 @@ import os
 from osgeo import gdal
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import universal_utilities as uu
-from ..utilities import log_utilities as lu
-from ..utilities import numba_utilities as nu
-from ..utilities import resize_cluster
+from src.scripts.utilities import constants_and_names as cn
+from src.scripts.utilities import universal_utilities as uu
+from src.scripts.utilities import log_utilities as lu
 
 def main(cluster_name, date, run_local=False, no_upload=False):
 
@@ -37,7 +35,7 @@ def main(cluster_name, date, run_local=False, no_upload=False):
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Model stage being running
-    stage = 'LULUCF_flux_postprocessing'
+    stage = 'drainage_postprocessing'
 
     # Starting time for stage
     start_time = uu.timestr()
@@ -45,50 +43,7 @@ def main(cluster_name, date, run_local=False, no_upload=False):
 
     # Folders to process
     s3_in_folders = [
-        f"{cn.outputs_path}{cn.AGC_density_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.AGC_density_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.AGC_density_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.AGC_density_path_part}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.BGC_density_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.BGC_density_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.BGC_density_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.BGC_density_path_part}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.deadwood_c_density_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_density_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_density_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_density_path_part}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.litter_c_density_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_density_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_density_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_density_path_part}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.AGC_flux_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.AGC_flux_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.AGC_flux_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.AGC_flux_path_part}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.BGC_flux_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.BGC_flux_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.BGC_flux_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.BGC_flux_path_part}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.deadwood_c_flux_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_flux_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_flux_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.deadwood_c_flux_path_part}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.litter_c_flux_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_flux_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_flux_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.litter_c_flux_path_part}/2015_2020/4000_pixels/{date}/",
-        #
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2010_2015/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/4000_pixels/{date}/"
+        f"{cn.s3_out_dir}/total_emissions/2020/8000_pixels/{date}/",
     ]
 
     # Creates dictionary of s3 tile set paths with corresponding tile index shapefile names
@@ -96,7 +51,7 @@ def main(cluster_name, date, run_local=False, no_upload=False):
 
     for path in s3_in_folders:
         # Extracts the portion after 'cn.outputs_path'
-        path_suffix = path.replace(cn.outputs_path, "")
+        path_suffix = path.replace(cn.s3_out_dir, "")
 
         # Replaces '/' with '__'
         value = path_suffix.rstrip('/').replace("/", "__")

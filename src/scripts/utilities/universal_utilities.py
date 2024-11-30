@@ -927,3 +927,211 @@ def complete_inputs(existing_input_list, typed_dict, datatype, chunk_length_pixe
             typed_dict[dataset_name] = np.full((chunk_length_pixels, chunk_length_pixels), 0, dtype=datatype)
             lu.print_and_log(f"Created {dataset_name} for chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
     return typed_dict
+
+# The keys are s3 destination foldes and the values are the output 10x10 deg file names
+def create_list_for_aggregation(s3_in_folders):
+
+    list_of_s3_names_total = []  # Final list of dictionaries of input s3 paths and output aggregated 10x10 raster names
+
+    # Iterates through all the input s3 folders
+    for s3_in_folder in s3_in_folders:
+
+        print(f"Listing files in {s3_in_folder}")
+
+        simple_output_file_names = []  # List of output aggregated output 10x10 rasters
+
+        # Raw filenames in an input folder, e.g., ['00N_000E__6_-2_8_0__IPCC_classes_2020.tif', '00N_000E__6_-4_8_-2__IPCC_classes_2020.tif',...]
+        filenames = list_raster_names_in_s3_folder(s3_in_folder)
+
+        # Iterates through all the files in a folder and converts them to the output names.
+        # Essentially [tile_id]__[pattern].tif. Drops the chunk bounds from the middle.
+        for filename in filenames:
+            result = re.sub(cn.small_chunk_pattern, '__', filename)   #TODO Haven't run this since switching to cn.small_chunk_pattern
+            simple_output_file_names.append(result)  # New list of simplified file names used for 10x10 degree outputs
+
+        # Removes duplicate simplified file names.
+        # There are duplicates because each 10x10 output raster has many constituent chunks, each of which have the same aggregated, final name
+        # e.g., ['00N_000E__IPCC_classes_2020.tif', '00N_010E__IPCC_classes_2020.tif', ...]
+        simple_output_file_names = np.unique(simple_output_file_names).tolist()
+
+        # Makes nested lists of the file names. Nested for next step.
+        # e.g., [['00N_110E__AGC_density_MgC_ha_2000.tif']]
+        simple_output_file_names = [[item] for item in simple_output_file_names]
+
+        # Makes a list of dictionaries, where the key is the input s3 path and the value is the output aggregated name
+        # e.g., [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif']}]
+        list_of_s3_name_dicts = [{key: value} for value in simple_output_file_names for key in [s3_in_folder]]
+
+        # Adds the dictionary of s3 paths and output names for this folder to the list for all folders
+        list_of_s3_names_total.append(list_of_s3_name_dicts)
+
+    # Combines all the lists from individual output folders into a single list
+    # Now it's:
+    # [{'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_000E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']},
+    # {'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_010E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']}, ... ]
+    list_of_s3_names_total = flatten_list(list_of_s3_names_total)
+
+    print(f"There are {len(list_of_s3_names_total)} 10x10 deg rasters to create across {len(s3_in_folders)} input folders.")
+
+    return list_of_s3_names_total
+
+
+# Flattens a nested list
+def flatten_list(nested_list):
+    return [x for xs in nested_list for x in xs]
+
+import boto3
+
+def list_raster_names_in_s3_folder(s3_in_folder):
+    print(f"Listing files in {s3_in_folder}")
+
+    # Remove 's3://' prefix and split bucket and prefix
+    s3_in_folder = s3_in_folder.replace('s3://', '')
+    bucket_name, *prefix_parts = s3_in_folder.split('/')
+    prefix = '/'.join(prefix_parts)
+
+    s3_client = boto3.client('s3')
+    paginator = s3_client.get_paginator('list_objects_v2')
+    page_iterator = paginator.paginate(Bucket=bucket_name, Prefix=prefix)
+
+    filenames = []
+    for page in page_iterator:
+        if 'Contents' in page:
+            for obj in page['Contents']:
+                key = obj['Key']
+                # Exclude the prefix itself and any folders
+                if key.endswith('/'):
+                    continue
+                # Extract the filename from the key
+                filename = key.split('/')[-1]
+                filenames.append(filename)
+
+    return filenames
+
+
+def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
+
+    logger = lu.setup_logging()
+
+    in_folder = list(s3_name_dict.keys())[0]  # The input s3 folder for the small rasters
+    out_file_name = list(s3_name_dict.values())[0][0]  # The output file name for the combined rasters
+
+    s3_in_folder = in_folder  # The input s3 folder with s3:// prepended
+    vsis3_in_folder = f'/vsis3/{in_folder[5:]}'  # The input s3 folder with /vsis3/ prepended
+
+    # Lists all the rasters in the specified s3 folder
+    filenames = list_raster_names_in_s3_folder(s3_in_folder)
+
+    # Gets the tile_id from the output file name in the standard format
+    tile_id = out_file_name[:8]
+
+    # Limits the input rasters to the specified tile_id (the relevant 10x10 area)
+    filenames_in_focus_area = [i for i in filenames if tile_id in i]
+
+    # Lists the tile paths for the relevant rasters
+    tile_paths = [vsis3_in_folder + filename for filename in filenames_in_focus_area]
+
+    lu.print_and_log(f"Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger)
+
+    # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
+    out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
+
+    min_x, min_y, max_x, max_y = get_10x10_tile_bounds(tile_id)
+
+    # Dynamically sets the datatype for the merged raster based on the input rasters (courtesy of https://chatgpt.com/share/e/a91c4c98-b2b1-4680-a4a7-453f1a878052)
+    # Determines the data type of the first raster
+    first_raster_path = tile_paths[0]
+    ds = gdal.Open(first_raster_path)
+    raster_datatype = ds.GetRasterBand(1).DataType
+    raster_nodata_value = ds.GetRasterBand(1).GetNoDataValue()
+    ds = None
+
+    # Defaults to Float32 if not found
+    dtype_str = gdal_dtype_mapping.get(raster_datatype, 'Float32')
+
+    # Merges the rasters (courtesy of ChatGPT: https://chatgpt.com/share/e/13158ebb-dd0a-41d8-8dfb-9ee12e4c804e)
+    # This is the only system I found that maintains the extent of all the constituent rasters and doesn't change their resolution or pixel size or shift them.
+    # I also tried various gdal_translate, build_vrt, and numpy padding approaches, none of which worked in all cases.
+    merged_file = f"/tmp/merged_{out_file_name}"
+
+    merge_command = [
+        'gdal_merge.py',
+        '-o', merged_file,
+        '-of', 'GTiff',
+        '-co', 'COMPRESS=DEFLATE',
+        '-co', 'TILED=YES', # If not included, the size of the merged small rasters can be many times their sum. Answer at https://gis.stackexchange.com/a/258215
+        '-co', 'BLOCKXSIZE=400',  # Internal tiling
+        '-co', 'BLOCKYSIZE=400',  # Internal tiling
+        '-ul_lr', str(min_x), str(max_y), str(max_x), str(min_y),
+        '-ot', dtype_str,
+        '-a_nodata', str(raster_nodata_value)
+    ]
+
+    # Add the input tile paths
+    merge_command.extend(tile_paths)
+
+    try:
+        subprocess.check_call(merge_command)
+        lu.print_and_log(f"Successfully merged rasters into {merged_file}", is_final, logger)
+    except subprocess.CalledProcessError as e:
+        lu.print_and_log(f"Error merging rasters: {e}", is_final, logger)
+        return f"failure for {s3_name_dict}"
+
+    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
+
+    lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}", is_final, logger)
+
+    if not no_upload:
+
+        try:
+            s3_client.upload_file(merged_file, "gfw2-data", Key=f"{out_folder[15:]}{out_file_name}")  #[15:] drops s3://gfw2-data/ from front
+            lu.print_and_log(f"Successfully uploaded {out_file_name} to s3", is_final, logger)
+        except boto3.exceptions.S3UploadFailedError as e:
+            lu.print_and_log(f"Error uploading file to s3: {e}", is_final, logger)
+            return f"failure for {s3_name_dict}"
+
+    # Deletes the local merged raster
+    os.remove(merged_file)
+
+    return f"success for {s3_name_dict}"
+
+# Returns list of rasters (full paths and names) in an s3 folder, and also returns the count of them
+#Per https://chatgpt.com/share/e/67413a39-1b3c-800a-b582-72d1a8a17de1
+def list_raster_full_paths_in_s3_folder_and_count(s3_path):
+    """
+    List all GeoTIFF files from a list of full S3 paths using boto3 and return the count.
+
+    Args:
+        s3_paths (list): List of S3 paths (e.g., "s3://bucket-name/prefix/").
+
+    Returns:
+        tuple: A tuple containing:
+            - A flat list of GeoTIFF file paths.
+            - The total count of GeoTIFF files.
+    """
+
+    # Initialize the S3 client
+    s3_client = boto3.client('s3')
+    geotiff_files = []
+
+    try:
+        # Parses bucket and prefix from the S3 path
+        if s3_path.startswith("s3://"):
+            path_parts = s3_path[5:].split("/", 1)
+            bucket_name = path_parts[0]
+            prefix = path_parts[1] if len(path_parts) > 1 else ""
+        else:
+            raise ValueError(f"Invalid S3 path: {s3_path}")
+
+        # Uses pagination to handle more than 1,000 objects (otherwise, limited to list of 1000 elements)
+        paginator = s3_client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+            if 'Contents' in page:
+                files = [obj['Key'] for obj in page['Contents']]
+                geotiffs = [f"s3://{bucket_name}/{file}" for file in files if file.endswith(('.tif', '.tiff'))]
+                geotiff_files.extend(geotiffs)
+
+    except Exception as e:
+        print(f"Error accessing {s3_path}: {e}")
+
+    return geotiff_files, len(geotiff_files)
