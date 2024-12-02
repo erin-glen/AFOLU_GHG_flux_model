@@ -26,6 +26,7 @@ from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
 from ..utilities import log_utilities as lu
 from ..utilities import numba_utilities as nu
+from ..utilities import resize_cluster
 
 
 # Function to calculate LULUCF fluxes and carbon densities
@@ -1042,10 +1043,12 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     ### Part 4: Calculates LULUCF fluxes and densities
 
     lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+    print(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}")
 
     out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs, is_final)
 
     lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+    print(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}")
 
     # print(out_dict_uint32)
     # print(out_dict_float32)
@@ -1331,9 +1334,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     success_count = 0
     skipping_chunk_count = 0
 
-    #TODO Can I resize the cluster down to just 1 worker at this point and still do the tile stats and logs?
-    # I shouldn't need all the workers for at least the tile stats spreadsheet creation.
-
     # Processes the chunk stats and returned messages
     # Results are the messages from the chunks and chunk stats
     for result in results:
@@ -1351,9 +1351,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         if chunk_stats is not None:
             all_stats.extend(chunk_stats)
 
-    #TODO Test if including the success_message returns or printing them slows down large runs.
-    # Don't return the success messages or print them if they slow down large runs.
-
     # Prints the returned messages if not a large (is_final) run
     if not is_final:
         for message in return_messages:
@@ -1363,6 +1360,19 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     print(f"Number of 'Success' chunks: {success_count}")
     print(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
     print(f"Difference between submitted chunks and processed chunks: {len(chunks) - (success_count + skipping_chunk_count)}")
+
+
+
+    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    # cluster, not all the workers.
+    workers = client.scheduler_info()["workers"]
+    n_workers = len(workers)
+
+    # Reduces number of workers in the cluster down to 1 if there is more than 1
+    if n_workers > 1:
+        print("Resizing cluster to 1 worker")
+
+        resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
 
     # Iterates through output folders and counts the number of output rasters.
     # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
@@ -1379,6 +1389,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     end_time_1 = uu.timestr()
     print(f"Stage {stage} ended at: {end_time_1}")
     uu.stage_duration(start_time, end_time_1, stage)
+
 
     # Prepares chunk stats spreadsheet: min, mean, max for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
