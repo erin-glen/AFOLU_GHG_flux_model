@@ -1354,9 +1354,10 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     #TODO Test if including the success_message returns or printing them slows down large runs.
     # Don't return the success messages or print them if they slow down large runs.
 
-    # Prints the returned messages
-    for message in return_messages:
-        print(message)
+    # Prints the returned messages if not a large (is_final) run
+    if not is_final:
+        for message in return_messages:
+            print(message)
 
     # Print the counts
     print(f"Number of 'Success' chunks: {success_count}")
@@ -1364,15 +1365,16 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     print(f"Difference between submitted chunks and processed chunks: {len(chunks) - (success_count + skipping_chunk_count)}")
 
     # Iterates through output folders and counts the number of output rasters.
-    # Only useful when doing a global run.
-    for LULUCF_output_folder in cn.LULUCF_output_folders:
+    # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
+    if chunk_size == 1:
+        for LULUCF_output_folder in cn.LULUCF_output_folders:
 
-        LULUCF_output_folder = re.sub('RES_pixels', '4000_pixels', LULUCF_output_folder)
-        LULUCF_output_folder = re.sub('DATE', uu.timestr()[:8], LULUCF_output_folder)
+            LULUCF_output_folder = re.sub('RES_pixels', '4000_pixels', LULUCF_output_folder)
+            LULUCF_output_folder = re.sub('DATE', uu.timestr()[:8], LULUCF_output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
 
-        geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(LULUCF_output_folder)
-        print(f"Output rasters in {LULUCF_output_folder}: {file_count}")
-        # print(geotiff_files)
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(LULUCF_output_folder)
+            print(f"Output rasters in {LULUCF_output_folder}: {file_count}")
+            # print(geotiff_files)
 
     end_time_1 = uu.timestr()
     print(f"Stage {stage} ended at: {end_time_1}")
