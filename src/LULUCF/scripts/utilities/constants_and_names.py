@@ -198,8 +198,8 @@ natural_forest_growth_curve_path = f"{full_bucket_prefix}/climate/secondary_fore
 natural_forest_growth_curve_pattern = "natural_forest_mean_growth_rate__Mg_AGC_ha_yr"
 natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_100']
 
-drivers_path = f"{full_bucket_prefix}/drivers_of_loss/1_km/processed/20241004/"
-drivers_pattern = "drivers_of_TCL_1_km_20241004"
+drivers_path = f"{full_bucket_prefix}/drivers_of_loss/1_km/processed/20241121/"
+drivers_pattern = "drivers_of_TCL_1_km_20241121"
 
 pixel_area_path = f"{full_bucket_prefix}/analyses/area_28m/"
 pixel_area_pattern = "hanson_2013_area"
@@ -324,7 +324,7 @@ n2o_flux_pattern = "N2O_flux__MgCO2e_ha_yr"
 
 gross_emis_all_C_pools_CO2_only_pattern = "gross_emissions_all_C_pools_CO2_only__MgCO2_ha_yr"
 gross_emis_non_CO2_only_pattern = "gross_emissions_non_CO2_only__MgCO2e_ha_yr"
-gross_emis_all_C_pools_all_gases_pattern = "gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr"  #TODO change to MgCO2e
+gross_emis_all_C_pools_all_gases_pattern = "gross_emissions_all_C_pools_all_gases__MgCO2e_ha_yr"
 
 gross_removals_all_C_pools_pattern = "gross_removals_all_C_pools__MgCO2_ha_yr"
 

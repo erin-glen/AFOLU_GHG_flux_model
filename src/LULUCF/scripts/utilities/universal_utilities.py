@@ -703,12 +703,13 @@ def convert_lookup_table_to_array(spreadsheet, sheet_name, fields_to_keep):
 # def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, fishnet_iso_df, array_per_pixel=None):
 def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_pixel=None):
 
-    # Sums the per pixel totals if supplied
-    if array_per_pixel is None:
-        sum_value = 'no per pixel array supplied'
-    else:
+    # Sums the per pixel totals if relevant
+    if in_out == 'output_layer':
         sum_value = np.sum(array_per_pixel)
+    else:
+        sum_value = 'N/A- input layer or no per-pixel array supplied'
 
+    # Gets the output file pattern and year/year_range
     out_pattern, year_range = strip_and_extract_years(name)
 
     if array_per_ha is None or not np.any(array_per_ha):  # Checks if the array is None or empty

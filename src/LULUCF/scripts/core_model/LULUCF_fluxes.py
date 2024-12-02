@@ -1249,7 +1249,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
         cn.r_s_ratio_pattern: f"{cn.r_s_ratio_path}{sample_tile_id}_{cn.r_s_ratio_pattern}.tif",
 
-        cn.drivers_pattern: f"{cn.drivers_path}{sample_tile_id}_{cn.drivers_pattern}.tif",  #TODO update to latest version
+        cn.drivers_pattern: f"{cn.drivers_path}{sample_tile_id}_{cn.drivers_pattern}.tif",
 
         cn.planted_forest_type_pattern: f"{cn.planted_forest_type_path}{sample_tile_id}_{cn.planted_forest_type_pattern}.tif",
         cn.planted_forest_AGC_removal_factor_pattern: f"{cn.planted_forest_AGC_removal_factor_path}{sample_tile_id}_{cn.planted_forest_AGC_removal_factor_pattern}.tif",
