@@ -426,7 +426,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 # or partial disturbance.
                 # Can override the pre-existing value.
                 #TODO: This does not seem to work correctly after partial disturbances, at least in primary forest. It doesn't increment the years since disturbance.
-                # Look at ArcMap bookmark "Primary forest->partial disturbance->stable forest->stable forest"
+                # It seems that the disturbance is being recorded correctly and the pixel is being reclassified as
+                # young secondary forest, but calculate_years_of_forest_regrowth isn't being triggered by this multi-interval disturbance.
+                # Look at ArcMap bookmark "Primary forest->partial disturbance->stable forest->stable forest".
+                # Checked this before the second global run and it's still the case (output folder v38).
                 years_of_forest_regrowth = nu.calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_tall_veg, tall_veg_curr, partially_disturbed_in_last_interval, years_of_forest_regrowth)
 
                 # Assigns an AGC RF for natural forest based on years since last time not tall vegetation (years_of_forest_regrowth) (Mg AGC/ha/yr).
