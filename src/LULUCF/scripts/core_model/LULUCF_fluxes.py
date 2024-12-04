@@ -1379,7 +1379,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Iterates through output folders and counts the number of output rasters.
     # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
-    if chunk_size == 1:
+    if is_final==True:
         for LULUCF_output_folder in cn.LULUCF_output_folders:
 
             LULUCF_output_folder = re.sub('RES_pixels', '4000_pixels', LULUCF_output_folder)

@@ -8,10 +8,11 @@ import argparse
 
 from . import constants_and_names as cn
 
-def create_cluster(n_workers, threads_per_worker, worker_memory, worker_cpu, idle_timeout):
+def create_cluster(n_workers, threads_per_worker, worker_memory, scheduler_memory, worker_cpu, idle_timeout):
 
     # Converts worker_memory from an integer to the required format (e.g., 8 to "8GiB")
     worker_memory_str = f"{worker_memory}GiB"
+    scheduler_memory_str = f"{scheduler_memory}GiB"
     idle_timeout = f"{idle_timeout} minutes"
 
     cluster = coiled.Cluster(
@@ -23,6 +24,7 @@ def create_cluster(n_workers, threads_per_worker, worker_memory, worker_cpu, idl
         name="AFOLU_flux_model_scripts",
         workspace='wri-forest-research',
         # mount_bucket="s3://gfw2-data",
+        scheduler_memory = scheduler_memory_str,
         worker_memory = worker_memory_str,
         worker_cpu = worker_cpu,
         worker_options={
@@ -30,7 +32,7 @@ def create_cluster(n_workers, threads_per_worker, worker_memory, worker_cpu, idl
         }
     )
     print(f"Cluster created with name: {cluster.name}")
-    print(f"Number of workers: {n_workers}; worker memory: {worker_memory_str}; threads per worker: {threads_per_worker}")
+    print(f"Number of workers: {n_workers}; worker memory: {worker_memory_str}; scheduler memory: {scheduler_memory_str}; threads per worker: {threads_per_worker}")
     return cluster
 
 if __name__ == "__main__":
@@ -57,6 +59,10 @@ if __name__ == "__main__":
         worker_memory = '32'
         worker_cpu = 4
         idle_timeout = 15
+        scheduler_memory = '64'
+
+    else:
+        scheduler_memory = worker_memory
 
     # Create the cluster with command line arguments
-    create_cluster(n_workers, threads_per_worker, worker_memory, worker_cpu, idle_timeout)
+    create_cluster(n_workers, threads_per_worker, worker_memory, scheduler_memory, worker_cpu, idle_timeout)

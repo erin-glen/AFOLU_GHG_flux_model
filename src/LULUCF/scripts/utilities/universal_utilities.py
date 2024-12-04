@@ -761,9 +761,11 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
     df_all_stats['max_value'] = pd.to_numeric(df_all_stats['max_value'], errors='coerce')
 
     # Sorts the DataFrame by 'in_out' and 'layer_name'
+    print(f"Sorting tile stats by properties at {timestr()}...")
     sorted_stats = df_all_stats.sort_values(by=['in_out', 'layer_name']).reset_index(drop=True)
 
     # Calculates the min and max values for each layer_name across all chunks
+    print(f"Calculating min and max values across all chunks at {timestr()}...")
     min_max_stats = df_all_stats.groupby('layer_name').agg(
         min_value=('min_value', 'min'),
         max_value=('max_value', 'max')
@@ -777,6 +779,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
     fishnet_shapefile_df = gdf[['chunk_id', 'iso']]
 
     # Merges the shapefile data with the statistics DataFrame
+    print(f"Merging country code to chunk stats table at {timestr()}...")
     merged_stats = sorted_stats.merge(fishnet_shapefile_df, on='chunk_id', how='left')
 
     # When iso isn't assigned, empty cells are filled.
@@ -788,6 +791,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
     # and they need to be split across multiple workbook tabs.
 
     # Separates input rows (in_out == 'input') and output rows (in_out == 'output')
+    print(f"Separating outputs into different tables at {timestr()}...")
     input_rows = merged_stats[merged_stats['in_out'] == 'input_layer']
     output_rows = merged_stats[merged_stats['in_out'] == 'output_layer']
 
@@ -810,14 +814,17 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
     out_spreadsheet = f'{stage}_chunk_statistics_{timestr()}.xlsx'
     local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
 
+    print(f"Writing tile stats to spreadsheet at {timestr()}...")
     try:
         with pd.ExcelWriter(local_spreadsheet) as writer:
 
             # Writes input rows to one sheet
+            print(f"Writing inputs to spreadsheet at {timestr()}...")
             annual_inputs.to_excel(writer, sheet_name='annual_inputs', index=False)
             other_inputs.to_excel(writer, sheet_name='other_inputs', index=False)
 
             # Writes output rows based on layer_name conditions to separate sheets
+            print(f"Writing output to spreadsheet at {timestr()}...")
             gross_flux_output.to_excel(writer, sheet_name='gross_outputs', index=False)
             net_flux_output.to_excel(writer, sheet_name='flux_outputs', index=False)
             other_output.to_excel(writer, sheet_name='other_outputs', index=False)
@@ -833,6 +840,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
         print(f"Can't print chunk stats: {e}")
 
     if not no_upload:
+        print(f"Uploading chunk stats spreadsheet to s3 at {timestr()}...")
         s3_client.upload_file(local_spreadsheet, "gfw2-data", Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
 
 
