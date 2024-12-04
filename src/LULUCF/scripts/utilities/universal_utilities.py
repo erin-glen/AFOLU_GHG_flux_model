@@ -16,7 +16,7 @@ import requests
 import concurrent.futures
 from botocore.config import Config
 from dask.distributed import print
-from dask.distributed import Client
+from dask.distributed import Client, LocalCluster
 from dask import delayed
 from datetime import datetime
 from io import BytesIO
@@ -53,6 +53,32 @@ def connect_to_Coiled_cluster(cluster_name, run_local):
         client = Client(cluster)
 
         return cluster, client
+
+# Creates a local client using dask or Coiled cluster with a specified name, # of worker, # of CPUs and # GiB
+def get_client_from_cluster_type(cluster_type, cluster_name=None, workers=None, cpu=None, memory=None):
+
+    if cluster_type == 'coiled':
+        coiled_cluster = coiled.Cluster(
+            n_workers=workers,
+            use_best_zone=True,
+            compute_purchase_option="spot_with_fallback",
+            idle_timeout="10 minutes",
+            region="us-east-1",
+            name=cluster_name,
+            workspace='wri-forest-research',
+            worker_cpu=cpu,
+            worker_memory=memory
+        )
+        client = coiled_cluster.get_client()
+
+    elif cluster_type == 'local':
+
+        local_cluster = LocalCluster()
+        client = Client(local_cluster)
+    else:
+        print("set cluster_type to one of the following: 'coiled', 'local'")
+
+    return client
 
 # Splits a full s3 path "s3://bucket-name/rest_of_path" into "bucket-name" and "rest_of_path"
 def split_s3_path(s3_path):
@@ -784,10 +810,15 @@ def first_file_name_in_s3_folder(download_dict):
 # Gets the datatype of a raster in s3.
 # This seems much faster than the rasterio version that ChatGPT suggested later in the chat.
 # From https://chatgpt.com/share/e/a48c768d-0331-43da-9fc6-ef8a84af586c
-def get_dtype_from_s3(file_path):
+def get_dtype_from_s3(s3_path):
     # Constructs the /vsis3/ path
-    vsis3_path = f'/vsis3/{file_path[len("s3://"):]}'
+    vsis3_path = f'/vsis3/{s3_path[len("s3://"):]}'
     data_type = get_dtype_from_raster(vsis3_path)
+    return data_type
+
+def get_dtype_from_coiled(s3_path, local_path):
+    file = download_s3_file(s3_path, local_path)
+    data_type = get_dtype_from_raster(file)
     return data_type
 
 def get_dtype_from_raster(file_path):
@@ -841,7 +872,6 @@ def replace_tile_id_in_dict(data_dict, new_tile_id):
     return data_dict
 
 
-
 # Fills any missing chunks (layers) with NoData (0s) of the correct datatype.
 # The 0s must be the correct datatype so that the numba function receives consistent datatypes for each input dataset.
 # Needs to be expanded if additional datatypes are being used.
@@ -877,22 +907,18 @@ def fill_missing_input_layers_with_no_data(layers, uint8_list, int16_list, int32
 
     return layers
 
-# Function that writes a file in the temporary directory
-def write_temp_file(temp_dir, filename, content):
-    temp_file_path = os.path.join(temp_dir, filename)
-    with open(temp_file_path, 'w') as f:
-        f.write(content)
-    print(f'File {filename} written to temporary directory.')
 
 def download_s3_file(s3_path, local_path):
     s3 = boto3.client('s3')
     bucket, key = split_s3_path(s3_path)
     s3.download_file(bucket, key, local_path)
 
+
 def upload_s3_file(s3_path, local_path):
     s3 = boto3.client('s3')
     bucket, key = split_s3_path(s3_path)
     s3.upload_file(local_path, Bucket=bucket, Key=key)
+
 
 def check_s3_file_created(s3_path):
     s3 = boto3.client('s3')
@@ -925,10 +951,11 @@ def build_vrt_gdal_local(raw_raster_paths_list_s3, output_vrt_s3):
     #Check that s3 file exists
     check_s3_file_created(output_vrt_s3)
 
+
 # Function to build a VRT using GDAL using tmp dir as intermediate step to download input files and build VRT
     # raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
     # output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is saved to
-def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt,  no_upload, save_local_file):
+def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
     # Download input files locally
     local_files = []
     for s3_path in raw_raster_paths_list_s3:
@@ -941,30 +968,16 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt,  n
 
     #Check that local file exists
     if os.path.exists(local_vrt):
-        print(f"File '{local_vrt}' exists.")
-    else:
-        print(f"File '{local_vrt}' does not exist.")
-
-    # # Use subprocess to build the VRT locally
-    # buildvrt_command = ["gdalbuildvrt", "-o", local_vrt] + local_files
-    #
-    # try:
-    #     vrt_file = subprocess.run(buildvrt_command, check=True)
-    #     print(f"Successfully built vrt into {local_vrt}")
-    #     return vrt_file
-    # except subprocess.CalledProcessError as e:
-    #     print(f"Error building vrt: {e}")
-    #     return f"failure for {local_vrt}"
-
-    # Uploads vrt to s3 if no_upload == False
-    if not no_upload:
+        print(f"File '{local_vrt}' exists at {os.path.abspath(local_vrt)}.")
         upload_s3_file(output_vrt_s3, local_vrt)
         check_s3_file_created(output_vrt_s3)
 
-    # Remove local tiles after processing
-    if not save_local_file:
-        for local_file in local_files:
-            os.remove(local_file)  # Delete each downloaded file (keep vrt for next step)
+    else:
+        print(f"File '{local_vrt}' does not exist.")
+
+
+
+
 
 # Function to read a VRT from S3 using GDAL and vsis3
 def warp_to_hansen_local(source_raster_s3_path, output_raster_s3_path, xmin, ymin, xmax, ymax, dt, no_data, tiled=True,
@@ -1019,64 +1032,6 @@ def warp_to_hansen_local(source_raster_s3_path, output_raster_s3_path, xmin, ymi
 
         # Check that file exists
         check_s3_file_created(output_raster_s3_path)
-        #return output_raster_s3_path
-
-    else:
-        raise RuntimeError(f"Failed to open VRT: {source_gdal_path}")
-
-def warp_to_hansen_local(source_raster_s3_path, output_raster_s3_path, xmin, ymin, xmax, ymax, dt, no_data, tiled=True,
-                   x_pixel_window=400, y_pixel_window=400):
-    #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
-
-    # Set the environment variable to enable random writes for S3
-    os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
-
-    # Check that pixel window arguments are given if tiled = True
-    if tiled and not (x_pixel_window and y_pixel_window):
-        raise ValueError("If tiled = True, x_pixel_window and y_pixel_window must be passed as arguments")
-
-    # Convert the S3 paths to GDAL's vsis3 paths
-    source_gdal_path = source_raster_s3_path.replace("s3://", "/vsis3/")
-    output_gdal_path = output_raster_s3_path.replace("s3://", "/vsis3/")
-
-    # Open the VRT
-    dataset = gdal.Open(source_gdal_path)
-
-    if dataset:
-        if tiled == True:
-            # Warp the VRT to the new raster
-            options = gdal.WarpOptions(
-                dstSRS='EPSG:4326',  # Reproject to WGS84
-                xRes=0.00025,  # X resolution (10 degrees)
-                yRes=0.00025,  # Y resolution (10 degrees)
-                targetAlignedPixels=True,  # Ensure target aligned pixels (-tap)
-                outputBounds=[xmin, ymin, xmax, ymax],  # Output bounds
-                dstNodata=no_data,  # Set no data to 0
-                outputType=dt,  # Output data type
-                creationOptions=['COMPRESS=DEFLATE', 'TILED=YES',   # Tiling with user-specified dimensions
-                                 f'BLOCKXSIZE={x_pixel_window}',
-                                 f'BLOCKYSIZE={y_pixel_window}'],
-                format='GTiff'  # Output format
-            )
-        else:
-            # Warp the VRT to the new raster
-            options = gdal.WarpOptions(
-                dstSRS='EPSG:4326',
-                xRes=0.00025,
-                yRes=0.00025,
-                targetAlignedPixels=True,
-                outputBounds=[xmin, ymin, xmax, ymax],
-                dstNodata=no_data,
-                outputType=dt,
-                creationOptions=['COMPRESS=DEFLATE', 'TILED=NO'],  # No tiling (i.e. 40,000 x 1)
-                format='GTiff'
-            )
-
-        gdal.Warp(output_gdal_path, source_gdal_path, options=options)
-
-        # Check that file exists
-        check_s3_file_created(output_raster_s3_path)
-        #return output_raster_s3_path
 
     else:
         raise RuntimeError(f"Failed to open VRT: {source_gdal_path}")
@@ -1095,32 +1050,6 @@ def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path, x
 
     # Open the VRT
     dataset = gdal.Open(str(Path(source_raster_path)))
-
-    # Code to run gdal warp using Python API (does not work in coiled)
-    # if dataset:
-    #     if tiled == True:
-    #         # Warp the VRT to the new raster
-    #         cmd = ['gdalwarp', '-t_srs', 'EPSG:4326', '-tr', '0.00025', '0.00025',
-    #                '-tap', '-te', str(xmin), str(ymin), str(xmax), str(ymax),
-    #                '-dstnodata', str(no_data), '-ot', str(dt), '-overwrite',
-    #                '-co', 'COMPRESS=DEFLATE',
-    #                '-co', 'TILED=YES',
-    #                '-co', f'BLOCKXSIZE={x_pixel_window}',
-    #                '-co', f'BLOCKYSIZE={y_pixel_window}',
-    #                str(Path(source_raster_path)), str(Path(filename))]
-    #     else:
-    #         cmd = ['gdalwarp', '-t_srs', 'EPSG:4326', '-tr', '0.00025', '0.00025',
-    #                '-tap', '-te', str(xmin), str(ymin), str(xmax), str(ymax),
-    #                '-dstnodata', str(no_data), '-ot', str(dt), '-overwrite',
-    #                '-co', 'COMPRESS=DEFLATE',
-    #                '-co', 'TILED=NO',
-    #                str(Path(source_raster_path)), str(Path(filename))]
-    #     try:
-    #         subprocess.run(cmd, check=True)
-    #         print(f"Successfully created {filename} from {source_raster_path}")
-    #     except subprocess.CalledProcessError as e:
-    #         print(f"Error creating {filename} from {source_raster_path}: {e}")
-    #         return f"failure for {filename}"
 
     #Code to run gdal warp using Python API
     if dataset:
@@ -1166,35 +1095,12 @@ def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path, x
     else:
         raise RuntimeError(f"Failed to open VRT: {source_raster_path}")
 
-    #Code to run gdal warp using Python API (does not work in coiled)
-    # if dataset:
-    #     if tiled == True:
-    #         # Warp the VRT to the new raster
-    #         options = gdal.WarpOptions(
-    #             dstSRS='EPSG:4326',
-    #             xRes=0.00025,
-    #             yRes=0.00025,
-    #             targetAlignedPixels=True,
-    #             outputBounds=[xmin, ymin, xmax, ymax],
-    #             dstNodata=no_data,
-    #             outputType=dt,
-    #             creationOptions=['COMPRESS=DEFLATE', 'TILED=YES',
-    #                              f'BLOCKXSIZE={x_pixel_window}',
-    #                              f'BLOCKYSIZE={y_pixel_window}'],
-    #             format='GTiff'
-    #         )
-    #     else:
-    #         # Warp the VRT to the new raster
-    #         options = gdal.WarpOptions(
-    #             dstSRS='EPSG:4326',  # Reproject to WGS84
-    #             xRes=0.00025,  # X resolution (10 degrees)
-    #             yRes=0.00025,  # Y resolution (10 degrees)
-    #             targetAlignedPixels=True,  # Ensure target aligned pixels (-tap)
-    #             outputBounds=[xmin, ymin, xmax, ymax],  # Output bounds
-    #             dstNodata=no_data,  # Set no data to 0
-    #             outputType=dt,  # Output data type
-    #             creationOptions=['COMPRESS=DEFLATE', 'TILED=NO'],  # Add Deflate compression and no tiling (40,000 x 1)
-    #             format='GTiff'  # Output format
-    #         )
-    #
-    #     gdal.Warp(output_gdal_path, source_gdal_path, options=options)
+
+def delete_build_vrt_input_files(raw_raster_paths_list_s3, vrt):
+    # Delete local input files
+    for s3_path in raw_raster_paths_list_s3:
+        local_file = s3_path.split('/')[-1]
+        os.remove(str(Path(local_file)))
+
+    # Delete local vrt
+    os.remove(str(Path(vrt)))
