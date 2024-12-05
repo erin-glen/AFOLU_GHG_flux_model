@@ -1,7 +1,7 @@
 """
 Run from src/LULUCF
 
-python -m scripts.utilities.create_cluster -n 4 -m 32 -c 4 -t 1 -i 10 -cn global_4km_raster_test
+python -m scripts.utilities.create_cluster -n 2 -m 32 -c 4 -t 1 -i 10 -cn global_4km_raster_test
 python -m scripts.postprocessing.create_global_4km_maps -cn global_4km_raster_test
 
 """
@@ -49,29 +49,32 @@ def combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, globa
 
     Parameters:
         tiles (list): List of numpy arrays for all tiles.
-        bounds_list (list): List of bounds corresponding to each tile.
-
-    Returns:
-        numpy array: Combined global raster.
+        bounds_list (list): List of bounds corresponding to each tile (W, S, E, N).
+        tile_id (str): Identifier for the global raster.
+        global_4km_outfile (str): Name of the output global raster file.
+        global_4km_output_path (str): S3 output path for the global raster.
     """
 
     is_final = False
     logger = lu.setup_logging()
 
-
-
-
     # Define global raster size (360x180 degrees at 0.04 resolution)
-    global_shape = (3600, 7200)
+    global_shape = (int(180 / 0.04), int(360 / 0.04))  # Rows, Columns
     global_raster = np.zeros(global_shape, dtype=np.float32)
 
-    # Insert each tile into the global raster
     for tile, bounds in zip(tiles, bounds_list):
         min_x, min_y, max_x, max_y = bounds
+
+        # Calculate pixel indices for placement in the global raster
         x_start = int((min_x + 180) / 0.04)
-        y_start = int((min_y + 90) / 0.04)
-        x_end = x_start + tile.shape[1]
-        y_end = y_start + tile.shape[0]
+        x_end = int((max_x + 180) / 0.04)
+        y_start = int((90 - max_y) / 0.04)
+        y_end = int((90 - min_y) / 0.04)
+
+        # Validate bounds alignment
+        tile_height, tile_width = tile.shape
+        assert (y_end - y_start) == tile_height, "Tile height does not match the calculated bounds"
+        assert (x_end - x_start) == tile_width, "Tile width does not match the calculated bounds"
 
         # Insert the tile into the global raster
         global_raster[y_start:y_end, x_start:x_end] += tile
