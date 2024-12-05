@@ -67,12 +67,14 @@ def get_client_from_cluster_type(cluster_type, cluster_name=None, workers=None, 
             name=cluster_name,
             workspace='wri-forest-research',
             worker_cpu=cpu,
-            worker_memory=memory
+            worker_memory=memory,
+            environment_vars={
+                "CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE": "YES"
+            }
         )
         client = coiled_cluster.get_client()
 
     elif cluster_type == 'local':
-
         local_cluster = LocalCluster()
         client = Client(local_cluster)
     else:
@@ -178,6 +180,13 @@ def xy_to_tile_id(top_left_x, top_left_y):
 
     return f"{lat}_{lng}"
 
+def string_to_tile_id(string):
+    pattern = r"[0-8][0-9][NS]_[01][0-7][0-9][EW]"
+
+    # Search for the first match
+    match = re.search(pattern, string)
+    return match.group(0) if match else None
+
 
 # Calculates the elapsed time for a stage
 def stage_duration(start_time_str, end_time_str, stage):
@@ -200,6 +209,8 @@ def stage_duration(start_time_str, end_time_str, stage):
 # (Here and other functions that use s3): https://chatgpt.com/share/e/1fe33655-3700-465c-8b5f-19b6b0444407
 def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, logger):
 
+    bounds_str = boundstr(bounds)
+
     # If the uri exists, the relevant window is opened and returned and returned as an array.
     # Note that this chunk could still just have NoData values, which would be downloaded.
     try:
@@ -209,11 +220,10 @@ def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, 
 
     # If the uri doesn't exist, a numpy array of the correct size and datatype populated with 0s is returned.
     except Exception as e:
-
         numpy_dtype = map_to_numpy_dtype(data_type)   # Translates the GDAL-style datatype to numpy-style datatype
         data = np.full((chunk_length_pixels, chunk_length_pixels), 0).astype(numpy_dtype)
 
-        lu.print_and_log(f"flm: Error accessing the dataset. Returning array of all 0s: {e}", is_final, logger)
+        lu.print_and_log(f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}", is_final, logger)
 
     return data
 
@@ -430,6 +440,22 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
         os.remove(f"/tmp/{file_name}")
 
 
+
+# Returns list of rasters in an s3 folder and returns their names as a list (but not full paths)
+def list_raster_names_in_s3_folder(full_in_folder):
+
+    cmd = ['aws', 's3', 'ls', full_in_folder]
+    s3_contents_bytes = subprocess.check_output(cmd)
+
+    # Converts subprocess results to useful string
+    s3_contents_str = s3_contents_bytes.decode('utf-8')
+    s3_contents_list = s3_contents_str.splitlines()
+    rasters = [line.split()[-1] for line in s3_contents_list]
+    rasters = [i for i in rasters if "tif" in i]
+
+    return rasters
+
+
 # Lists rasters in an s3 folder and returns their names as a list
 def list_rasters_in_folder(full_in_folder):
 
@@ -506,21 +532,17 @@ def make_tile_footprint_shp(input_dict):
 
 
 # Saves an xarray data array locally as a raster and then uploads it to s3
-def save_and_upload_raster_10x10(**kwargs):
+def save_and_upload_raster_10x10(data_array, out_folder, out_file_name):
 
     s3_client = boto3.client("s3") # Needs to be in the same function as the upload_file call
 
-    data_array = kwargs['data']   # The data being saved
-    out_file_name = kwargs['out_file_name']   # The output file name
-    out_folder = kwargs['out_folder']   # The output folder
-
-    print(f"flm: Saving {out_file_name} locally")
+    print(f" Saving {out_file_name} locally")
 
     profile_kwargs = {'compress': 'lzw'}   # Adds attribute to compress the output raster
     # data_array.rio.to_raster(f"{out_file_name}", **profile_kwargs)
     data_array.rio.to_raster(f"/tmp/{out_file_name}", **profile_kwargs)
 
-    print(f"flm: Saving {out_file_name} to {out_folder[10:]}{out_file_name}")
+    print(f" Saving {out_file_name} to {out_folder[10:]}{out_file_name}")
 
     s3_client.upload_file(f"/tmp/{out_file_name}", "gfw2-data", Key=f"{out_folder[10:]}{out_file_name}")
 
@@ -582,7 +604,10 @@ def flatten_list(nested_list):
 
 # Merges rasters that are <10x10 degrees into 10x10 degree rasters in the standard grid.
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
-def merge_small_tiles_gdal(s3_name_dict, no_upload):
+def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
+
+    logger = lu.setup_logging()
+
     in_folder = list(s3_name_dict.keys())[0]  # The input s3 folder for the small rasters
     out_file_name = list(s3_name_dict.values())[0][0]  # The output file name for the combined rasters
 
@@ -590,7 +615,7 @@ def merge_small_tiles_gdal(s3_name_dict, no_upload):
     vsis3_in_folder = f'/vsis3/{in_folder[5:]}'  # The input s3 folder with /vsis3/ prepended
 
     # Lists all the rasters in the specified s3 folder
-    filenames = list_rasters_in_folder(s3_in_folder)
+    filenames = list_raster_names_in_s3_folder(s3_in_folder)
 
     # Gets the tile_id from the output file name in the standard format
     tile_id = out_file_name[:8]
@@ -599,10 +624,9 @@ def merge_small_tiles_gdal(s3_name_dict, no_upload):
     filenames_in_focus_area = [i for i in filenames if tile_id in i]
 
     # Lists the tile paths for the relevant rasters
-    tile_paths = []
     tile_paths = [vsis3_in_folder + filename for filename in filenames_in_focus_area]
 
-    print(f"flm: Merging small rasters in {tile_id} in {vsis3_in_folder}")
+    lu.print_and_log(f"Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger)
 
     # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
     out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
@@ -643,22 +667,22 @@ def merge_small_tiles_gdal(s3_name_dict, no_upload):
 
     try:
         subprocess.check_call(merge_command)
-        print(f"flm: Successfully merged rasters into {merged_file}")
+        lu.print_and_log(f"Successfully merged rasters into {merged_file}", is_final, logger)
     except subprocess.CalledProcessError as e:
-        print(f"flm: Error merging rasters: {e}")
+        lu.print_and_log(f"Error merging rasters: {e}", is_final, logger)
         return f"failure for {s3_name_dict}"
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
 
-    print(f"flm: Saving {out_file_name} to s3: {out_folder}{out_file_name}")
+    lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}", is_final, logger)
 
     if not no_upload:
 
         try:
             s3_client.upload_file(merged_file, "gfw2-data", Key=f"{out_folder[15:]}{out_file_name}")  #[15:] drops s3://gfw2-data/ from front
-            print(f"flm: Successfully uploaded {out_file_name} to s3")
+            lu.print_and_log(f"Successfully uploaded {out_file_name} to s3", is_final, logger)
         except boto3.exceptions.S3UploadFailedError as e:
-            print(f"flm: Error uploading file to s3: {e}")
+            lu.print_and_log(f"Error uploading file to s3: {e}", is_final, logger)
             return f"failure for {s3_name_dict}"
 
     # Deletes the local merged raster
