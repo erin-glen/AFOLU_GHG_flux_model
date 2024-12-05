@@ -1164,3 +1164,28 @@ def delete_build_vrt_input_files(raw_raster_paths_list_s3, vrt):
 
     # Delete local vrt
     os.remove(str(Path(vrt)))
+
+
+def reaggregate_resolution(data, original_res, target_res):
+    #Courtesy of ChatGPT
+    """
+    Reaggregates a numpy array by summing values within the target resolution window.
+
+    Parameters:
+        data (numpy array): The input array at high resolution.
+        original_res (float): The resolution of the input data.
+        target_res (float): The desired resolution for the output data.
+
+    Returns:
+        numpy array: The reaggregated array at the desired resolution.
+    """
+    factor = int(target_res / original_res)
+    new_shape = (
+        data.shape[0] // factor,
+        factor,
+        data.shape[1] // factor,
+        factor
+    )
+    # Reshape and sum
+    return data.reshape(new_shape).sum(axis=(1, 3))
+

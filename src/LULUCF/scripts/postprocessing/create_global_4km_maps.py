@@ -1,7 +1,7 @@
 """
 Run from src/LULUCF
 
-python -m scripts.utilities.create_large_memory_cluster -n 40 -m 32 -t 1 -cn cropland_emissions_test
+python -m scripts.utilities.create_cluster -n 40 -m 32 -t 1 -cn cropland_emissions_test
 python -m scripts.postprocessing.create_global_4km_maps -cn cropland_emissions_test
 
 """
@@ -18,59 +18,73 @@ from ..utilities import log_utilities as lu
 
 ########################################################################################################################
 
-def cropland_emissions_unit_conversion(chunk, cropland_emissions_kg_input_dir, cropland_emissions_Mg_output_dir):
+def agg_4x4(tile_id, pixel_area_tile, mg_ha_yr_tile, per_pixel_output_tile, per_pixel_output_path):
 
-    is_final = True
+    is_final = False
     logger = lu.setup_logging()
 
-    print("In Dask function")
-
-    input_tile = chunk
-    print(input_tile)
-
-    input_tile_path = f"{cropland_emissions_kg_input_dir}{input_tile}"
-    output_tile = input_tile.replace("kg", "Mg")
-
-    print(input_tile_path)
-
     # Get bounds and chunk_length_pixels to read in input data
-    tile_id = uu.string_to_tile_id(input_tile_path)
     bounds = uu.get_10x10_tile_bounds(tile_id)
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
 
-    print(tile_id)
-    print(bounds)
-    print(chunk_length_pixels)
+    # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
+    print(f"Getting rasters for {tile_id}")
+    pixel_area_tile_chunk = uu.get_tile_dataset_rio(pixel_area_tile, 'Float32', bounds, chunk_length_pixels, is_final, logger)
+    mg_ha_yr_tile_chunk = uu.get_tile_dataset_rio(mg_ha_yr_tile, 'Float32', bounds, chunk_length_pixels, is_final, logger)
 
-    # Read in the raster
-    print("Getting cropland raster")
-    kg_tile_chunk = uu.get_tile_dataset_rio(input_tile_path, 'Float32', bounds, chunk_length_pixels, is_final, logger)
-
-    print(kg_tile_chunk)
-
-    # # Create an array with the conversion value
-    # conversion_array = np.full(kg_tile_chunk.shape, 1e-3, dtype=np.float32)
-
-    kg_to_Mg = 1e-3
-
-    # print(conversion_array)
-
-    # Multiply the input tile by the conversion array to get the Mg values
-    print("Performing kg to Mg conversion")
-    Mg_tile_chunk = kg_tile_chunk * kg_to_Mg
-
-    print(Mg_tile_chunk)
+    # Converts per hectare values to per pixel values in the numpy array
+    mg_yr_per_pixel_tile_chunk = mg_ha_yr_tile_chunk * pixel_area_tile_chunk * cn.m2_to_ha
 
     # Upload raster to s3
-    data_type = Mg_tile_chunk.dtype.name
-    uu.save_and_upload_single_raster(bounds, chunk_length_pixels, tile_id, Mg_tile_chunk, data_type, output_tile,
-                                     cropland_emissions_Mg_output_dir, is_final, logger)
+    data_type = mg_yr_per_pixel_tile_chunk.dtype.name
+    uu.save_and_upload_single_raster(bounds, chunk_length_pixels, tile_id, mg_yr_per_pixel_tile_chunk, data_type,
+                                     per_pixel_output_tile, per_pixel_output_path, is_final, logger)
+    #TODO Eventually create per-pixel tile and upload to s3 in a different script
 
-def main(cluster_name, cluster_type):
+    # Reaggregate into 0.04x0.04 degree resolution
+    mg_yr_per_pixel_agg_4x4_tile_chunk = uu.reaggregate_resolution(mg_yr_per_pixel_tile_chunk, 0.00025, 0.04)
+    del pixel_area_tile_chunk
+    del mg_ha_yr_tile_chunk
+    del mg_yr_per_pixel_tile_chunk
 
+    return mg_yr_per_pixel_agg_4x4_tile_chunk
+
+
+def combine_global_raster(tiles, bounds_list):
+    #Courtest of chatGPT
+    """
+    Combines multiple 0.04x0.04 degree tiles into a single global raster.
+
+    Parameters:
+        tiles (list): List of numpy arrays for all tiles.
+        bounds_list (list): List of bounds corresponding to each tile.
+
+    Returns:
+        numpy array: Combined global raster.
+    """
+    logger = lu.setup_logging()
+    # Define global raster size (360x180 degrees at 0.04 resolution)
+    global_shape = (3600, 7200)
+    global_raster = np.zeros(global_shape, dtype=np.float32)
+
+    # Insert each tile into the global raster
+    for tile, bounds in zip(tiles, bounds_list):
+        min_x, min_y, max_x, max_y = bounds
+        x_start = int((min_x + 180) / 0.04)
+        y_start = int((min_y + 90) / 0.04)
+        x_end = x_start + tile.shape[1]
+        y_end = y_start + tile.shape[0]
+
+        # Insert the tile into the global raster
+        global_raster[y_start:y_end, x_start:x_end] += tile
+
+    return global_raster
+
+
+def main(cluster_name):
+    # -------------------------------------------------------------------------------------------------------------------
+    # Step 1: Connects to Coiled cluster if not running locally
     run_local = False
-
-    # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # -------------------------------------------------------------------------------------------------------------------
@@ -78,76 +92,87 @@ def main(cluster_name, cluster_type):
     #TODO: Pass in which fluxes and which years you want to process as command line arguments and add to download_upload_dictionary accordingly.
     # For now hardcoding the download_upload_dictionary. Update flux path/patterns from cn.
     download_upload_dictionary = {
-        "cropland_emissions_kg_ha_yr" : {
-            'tile_dir': "s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/processed/20241204/year_2020/all_sources/kg/including_peatland/2019/physical_area/",
-            # TODO: Fix this path
-            'tile_pattern': cn.global_cropland_mean_rate_physical_area_all_crops_peat_2019_processed_pattern,
-            '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/cropland_emissions_all_crops_all_gases__MgCO2e_yr/2020/",
-            # TODO: Fix this path
+        "cropland_emissions_mg_ha_yr" : {
+            'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/processed/20241204/year_2020/all_sources/mean_rate/including_peatland/2019/physical_area/",
+            'mg_ha_yr_pattern': "_all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_2019_Mg_ha_CO2.tif",
+            '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/processed/20241204/year_2020/all_sources/0_04deg_output_aggregation/cropland_emissions_all_crops_all_gases__MgCO2e_yr/2019/",
             '4km_pattern': '0_04deg_global__all_GHGs_cropland_physical_area_CO2eq_all_crops_2019__MgCO2e_yr.tif'
         },
         "net_flux_2000_2005_mg_ha_yr": {
-            'tile_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2000_2005/40000_pixels/20241203/",
-            'tile_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2000_2005.tif",
+            'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2000_2005/40000_pixels/20241203/",
+            'mg_ha_yr_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2000_2005.tif",
             '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2000-2005/",
             '4km_pattern': '0_04deg_global__net_flux_all_C_pools_all_gases__MgCO2e_yr_2000_2005.tif'
         },
         "net_flux_2005_2010_mg_ha_yr": {
-            'tile_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2005_2010/40000_pixels/20241203/",
-            'tile_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2005_2010.tif",
+            'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2005_2010/40000_pixels/20241203/",
+            'mg_ha_yr_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2005_2010.tif",
             '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2005-2010/",
             '4km_pattern': '0_04deg_global__net_flux_all_C_pools_all_gases__MgCO2e_yr_2005_2010.tif'
         },
         "net_flux_2010_2015_mg_ha_yr": {
-            'tile_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2010_2015/40000_pixels/20241203/",
-            'tile_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2010_2015.tif",
+            'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2010_2015/40000_pixels/20241203/",
+            'mg_ha_yr_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2010_2015.tif",
             '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2010-2015/",
             '4km_pattern': '0_04deg_global__net_flux_all_C_pools_all_gases__MgCO2e_yr_2010_2015.tif'
         },
         "net_flux_2015_2020_mg_ha_yr": {
-            'tile_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2015_2020/40000_pixels/20241203/",
-            'tile_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2015_2020.tif",
+            'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2015_2020/40000_pixels/20241203/",
+            'mg_ha_yr_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2015_2020.tif",
             '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2015-2020/",
             '4km_pattern': '0_04deg_global__net_flux_all_C_pools_all_gases__MgCO2e_yr_2015_2020.tif'
         }
     }
 
     # -------------------------------------------------------------------------------------------------------------------
-    # Step 3: Convert cropland emissions from kg per hectare per year to mg per hectare per year
-    #TODO: Move this step to hansenize function for cropland emissions
-    #Model stage being run
-    stage = 'convert_cropland_emissions_units_from_kg_to_mg'
+    # Step 3: Create per-pixel rasters, aggregate into 0.04x0.04 degrees, combine into global raster
+    # Model stage being run
+    stage = 'create 0.04x0.04 degree global rasters'
 
     # Starting time for stage
     start_time = uu.timestr()
     print(f"Stage {stage} started at: {start_time}")
 
-    # Input/ output dirs
-    cropland_emissions_kg_input_dir = download_upload_dictionary["cropland_emissions_kg_ha_yr"]["tile_dir"]
-    cropland_emissions_Mg_output_dir = "s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/processed/20241204/year_2020/all_sources/mean_rate/including_peatland/2019/physical_area/"
+    # Creating per-pixel rasters
+    for key, items in download_upload_dictionary:
+        bounds_list = []
+        delayed_results = []
+        for tile_id in cn.tile_id_list:
+            mg_ha_yr_tile = f"{items['mg_ha_yr_dir']}{tile_id}{items['mg_ha_yr_pattern']}"
+            print(mg_ha_yr_tile)
+            pixel_area_tile = f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{tile_id}.tif"
+            print(pixel_area_tile)
+            bounds = uu.get_10x10_tile_bounds(tile_id)
+            print(bounds)
+            bounds_list.append(bounds)
+            delayed_results.append(dask.delayed(agg_4x4)(tile_id, pixel_area_tile, mg_ha_yr_tile))
 
-    # Get list of all tiles in the cropland emissions kg s3 folder
-    cropland_emissions_kg_tiles_list = uu.list_raster_names_in_s3_folder(cropland_emissions_kg_input_dir)
-    print(cropland_emissions_kg_tiles_list)
+        #Check
+        print(bounds_list)
+        print(delayed_results)
 
-    # Creates list of tasks to run (1 task = 1 chunk)
-    print(f"Creating tasks and starting processing: {uu.timestr()}")
-    delayed_results = [dask.delayed(cropland_emissions_unit_conversion)(chunk, cropland_emissions_kg_input_dir, cropland_emissions_Mg_output_dir) for chunk in cropland_emissions_kg_tiles_list]
+        # Compute results
+        tiles = dask.compute(*delayed_results)
+        print(tiles)
 
-    # Runs analysis and gathers results
-    results = dask.compute(*delayed_results)
+        # Combine results into global raster
+        global_raster = combine_global_raster(tiles, bounds_list)
 
-    print(results)
+        # Save the global raster
+        global_bounds = (-180, -90, 180, 90)
+        uu.save_and_upload_single_raster(global_bounds, global_raster.shape[1], 'global_4km', global_raster,
+                                         'Float32', 'global_4km.tif', 's3://your_output_bucket/', True,
+                                         lu.setup_logging())
+
 
     client.close()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Postprocessing cropland emissions.")
+    parser = argparse.ArgumentParser(description="Aggregating AFOLU model output into global ~4km rasters.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-ct', '--cluster_type', action='store', help='Run locally with Dask (local), test with 1 worker in coiled (test), or run with full coiled cluster (full)')
 
     args = parser.parse_args()
 
     # Create the cluster with command line arguments
-    main(args.cluster_name, args.cluster_type)
+    main(args.cluster_name)

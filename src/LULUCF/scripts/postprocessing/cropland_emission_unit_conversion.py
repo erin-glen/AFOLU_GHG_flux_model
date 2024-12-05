@@ -1,15 +1,11 @@
 """
 Run from src/LULUCF
 
-python -m scripts.utilities.create_large_memory_cluster -n 40 -m 32 -t 1 -cn cropland_emissions_test
+python -m scripts.utilities.create_cluster -n 40 -m 32 -t 1 -cn cropland_emissions_test
 python -m scripts.postprocessing.create_global_4km_maps -cn cropland_emissions_test
 
 """
-import os
-from osgeo import gdal
-import numpy as np
 import argparse
-import subprocess
 import dask
 from dask.distributed import print
 from ..utilities import constants_and_names as cn
@@ -49,7 +45,7 @@ def cropland_emissions_unit_conversion(chunk, cropland_emissions_kg_input_dir, c
                                      cropland_emissions_Mg_output_dir, is_final, logger)
 
 def main(cluster_name):
-
+    # -------------------------------------------------------------------------------------------------------------------
     # Step 1: Connects to Coiled cluster if not running locally
     run_local = False
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -86,11 +82,10 @@ def main(cluster_name):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Postprocessing cropland emissions.")
+    parser = argparse.ArgumentParser(description="Cropland emissions unit conversion.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-ct', '--cluster_type', action='store', help='Run locally with Dask (local), test with 1 worker in coiled (test), or run with full coiled cluster (full)')
 
     args = parser.parse_args()
 
     # Create the cluster with command line arguments
-    main(args.cluster_name, args.cluster_type)
+    main(args.cluster_name)
