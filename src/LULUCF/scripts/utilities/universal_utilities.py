@@ -437,6 +437,45 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
         # Deletes the local raster
         os.remove(f"/tmp/{file_name}")
 
+# Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
+def save_and_upload_single_raster(bounds, chunk_length_pixels, tile_id,
+                                      data_array, data_type, output_tile, output_dir, is_final, logger, no_data_val=None):
+    # For every output file, saves from array to local raster, then to s3.
+    # Can't save directly to s3, unfortunately, so need to save locally first
+    transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
+
+    if is_final:
+        lu.print_and_log(f"Saving and uploading outputs for {tile_id}: {timestr()}", is_final, logger)
+
+    # Includes NoData value in output raster
+    if no_data_val is not None:
+        with rasterio.open(f"/tmp/{output_tile}", 'w', driver='GTiff', width=chunk_length_pixels,
+                           height=chunk_length_pixels, count=1,
+                           dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw', blockxsize=400,
+                           blockysize=400, nodata=no_data_val) as dst:
+            dst.write(data_array, 1)
+        lu.print_and_log(f"Writing local output for {tile_id}: {timestr()}", is_final, logger)
+
+    # No NoData value in output raster
+    else:
+        with rasterio.open(f"/tmp/{output_tile}", 'w', driver='GTiff', width=chunk_length_pixels,
+                           height=chunk_length_pixels, count=1,
+                           dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw', blockxsize=400,
+                           blockysize=400) as dst:
+            dst.write(data_array, 1)
+        lu.print_and_log(f"Writing local output for {tile_id}: {timestr()}", is_final, logger)
+
+    s3_path = f"{output_dir}{output_tile}"
+
+    # Only prints if not a final run
+    if not is_final:
+        lu.print_and_log(f"Uploading {output_tile} to {output_dir}: {timestr()}", is_final, logger)
+
+    upload_s3_file(s3_path,f"/tmp/{output_tile}")
+
+    # Deletes the local raster
+    os.remove(f"/tmp/{output_tile}")
+
 
 
 # Returns list of rasters in an s3 folder and returns their names as a list (but not full paths)
