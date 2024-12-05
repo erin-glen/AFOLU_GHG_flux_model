@@ -1,15 +1,12 @@
 """
 Run from src/LULUCF
 
-python -m scripts.utilities.create_cluster -n 40 -m 32 -t 1 -cn cropland_emissions_test
-python -m scripts.postprocessing.create_global_4km_maps -cn cropland_emissions_test
+python -m scripts.utilities.create_cluster -n 2 -m 32 -t 1 -cn global_4km_raster_test
+python -m scripts.postprocessing.create_global_4km_maps -cn global_4km_raster_test
 
 """
-import os
-from osgeo import gdal
 import numpy as np
 import argparse
-import subprocess
 import dask
 from dask.distributed import print
 from ..utilities import constants_and_names as cn
@@ -18,24 +15,22 @@ from ..utilities import log_utilities as lu
 
 ########################################################################################################################
 
-def agg_4x4(tile_id, pixel_area_tile, mg_ha_yr_tile, per_pixel_output_tile, per_pixel_output_path):
+def agg_4x4(tile_id, bounds, chunk_length_pixels, pixel_area_tile, mg_ha_yr_tile, per_pixel_output_tile, per_pixel_output_path):
 
     is_final = False
     logger = lu.setup_logging()
 
-    # Get bounds and chunk_length_pixels to read in input data
-    bounds = uu.get_10x10_tile_bounds(tile_id)
-    chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
+
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
-    print(f"Getting rasters for {tile_id}")
+    print(f"Getting rasters for {tile_id}: \n {pixel_area_tile} \n {mg_ha_yr_tile}")
     pixel_area_tile_chunk = uu.get_tile_dataset_rio(pixel_area_tile, 'Float32', bounds, chunk_length_pixels, is_final, logger)
     mg_ha_yr_tile_chunk = uu.get_tile_dataset_rio(mg_ha_yr_tile, 'Float32', bounds, chunk_length_pixels, is_final, logger)
 
     # Converts per hectare values to per pixel values in the numpy array
     mg_yr_per_pixel_tile_chunk = mg_ha_yr_tile_chunk * pixel_area_tile_chunk * cn.m2_to_ha
 
-    # Upload raster to s3
+    # Upload per-pixel raster to s3
     data_type = mg_yr_per_pixel_tile_chunk.dtype.name
     uu.save_and_upload_single_raster(bounds, chunk_length_pixels, tile_id, mg_yr_per_pixel_tile_chunk, data_type,
                                      per_pixel_output_tile, per_pixel_output_path, is_final, logger)
@@ -43,14 +38,11 @@ def agg_4x4(tile_id, pixel_area_tile, mg_ha_yr_tile, per_pixel_output_tile, per_
 
     # Reaggregate into 0.04x0.04 degree resolution
     mg_yr_per_pixel_agg_4x4_tile_chunk = uu.reaggregate_resolution(mg_yr_per_pixel_tile_chunk, 0.00025, 0.04)
-    del pixel_area_tile_chunk
-    del mg_ha_yr_tile_chunk
-    del mg_yr_per_pixel_tile_chunk
 
     return mg_yr_per_pixel_agg_4x4_tile_chunk
 
 
-def combine_global_raster(tiles, bounds_list):
+def combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, global_4km_output_path):
     #Courtest of chatGPT
     """
     Combines multiple 0.04x0.04 degree tiles into a single global raster.
@@ -62,7 +54,13 @@ def combine_global_raster(tiles, bounds_list):
     Returns:
         numpy array: Combined global raster.
     """
+
+    is_final = False
     logger = lu.setup_logging()
+
+
+
+
     # Define global raster size (360x180 degrees at 0.04 resolution)
     global_shape = (3600, 7200)
     global_raster = np.zeros(global_shape, dtype=np.float32)
@@ -78,7 +76,14 @@ def combine_global_raster(tiles, bounds_list):
         # Insert the tile into the global raster
         global_raster[y_start:y_end, x_start:x_end] += tile
 
-    return global_raster
+    # Save the global raster
+    global_bounds = (-180, -90, 180, 90)
+    uu.save_and_upload_single_raster(global_bounds, global_raster.shape[1], tile_id, global_raster,
+                                     'Float32', global_4km_outfile, global_4km_output_path, is_final,
+                                     logger)
+
+    return "Success"
+    #TODO update with checking to see if the file exists in s3
 
 
 def main(cluster_name):
@@ -95,39 +100,50 @@ def main(cluster_name):
         "cropland_emissions_mg_ha_yr" : {
             'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/processed/20241204/year_2020/all_sources/mean_rate/including_peatland/2019/physical_area/",
             'mg_ha_yr_pattern': "_all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_2019_Mg_ha_CO2.tif",
+            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/processed/20241204/year_2020/all_sources/per_pixel/including_peatland/2019/physical_area/",
+            'mg_per_pixel_pattern': "_all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_2019_Mg_CO2.tif",
             '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/processed/20241204/year_2020/all_sources/0_04deg_output_aggregation/cropland_emissions_all_crops_all_gases__MgCO2e_yr/2019/",
             '4km_pattern': '0_04deg_global__all_GHGs_cropland_physical_area_CO2eq_all_crops_2019__MgCO2e_yr.tif'
         },
         "net_flux_2000_2005_mg_ha_yr": {
             'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2000_2005/40000_pixels/20241203/",
             'mg_ha_yr_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2000_2005.tif",
+            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_yr/2000_2005/40000_pixels/20241203/",
+            'mg_per_pixel_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_yr_2000_2005.tif",
             '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2000-2005/",
             '4km_pattern': '0_04deg_global__net_flux_all_C_pools_all_gases__MgCO2e_yr_2000_2005.tif'
         },
         "net_flux_2005_2010_mg_ha_yr": {
             'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2005_2010/40000_pixels/20241203/",
             'mg_ha_yr_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2005_2010.tif",
+            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_yr/2005_2010/40000_pixels/20241203/",
+            'mg_per_pixel_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_yr_2005_2010.tif",
             '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2005-2010/",
             '4km_pattern': '0_04deg_global__net_flux_all_C_pools_all_gases__MgCO2e_yr_2005_2010.tif'
         },
         "net_flux_2010_2015_mg_ha_yr": {
             'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2010_2015/40000_pixels/20241203/",
             'mg_ha_yr_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2010_2015.tif",
+            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_yr/2010_2015/40000_pixels/20241203/",
+            'mg_per_pixel_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_yr_2010_2015.tif",
             '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2010-2015/",
             '4km_pattern': '0_04deg_global__net_flux_all_C_pools_all_gases__MgCO2e_yr_2010_2015.tif'
         },
         "net_flux_2015_2020_mg_ha_yr": {
             'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2015_2020/40000_pixels/20241203/",
             'mg_ha_yr_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2015_2020.tif",
+            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_yr/2015_2020/40000_pixels/20241203/",
+            'mg_per_pixel_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_yr_2015_2020.tif",
             '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2015-2020/",
             '4km_pattern': '0_04deg_global__net_flux_all_C_pools_all_gases__MgCO2e_yr_2015_2020.tif'
         }
-    }
-
+    } #TODO REMOVE 4KM PATTERN
+        #TODO: After net flux and cropland per pixel tiles are created, update paths in constants and names, remove per-pixel creation step here,
+        #  after per-pixel creation step is its own script, remove mg_ha_yr_dir/pattern from download_upload dictionary
     # -------------------------------------------------------------------------------------------------------------------
-    # Step 3: Create per-pixel rasters, aggregate into 0.04x0.04 degrees, combine into global raster
+    # Step 3: Create per-pixel rasters and aggregate into 0.04x0.04 degrees for each tile
     # Model stage being run
-    stage = 'create 0.04x0.04 degree global rasters'
+    stage = 'create 0.04x0.04 tile rasters'
 
     # Starting time for stage
     start_time = uu.timestr()
@@ -142,27 +158,48 @@ def main(cluster_name):
             print(mg_ha_yr_tile)
             pixel_area_tile = f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{tile_id}.tif"
             print(pixel_area_tile)
+            per_pixel_tile_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
+            print(per_pixel_tile_outfile)
+            per_pixel_output_path = items["mg_per_pixel_dir"]
+            print(per_pixel_output_path)
+
+            # Get bounds and chunk_length_pixels to read in input data
             bounds = uu.get_10x10_tile_bounds(tile_id)
-            print(bounds)
             bounds_list.append(bounds)
-            delayed_results.append(dask.delayed(agg_4x4)(tile_id, pixel_area_tile, mg_ha_yr_tile))
+            print(bounds)
+
+            chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
+            print(chunk_length_pixels)
+
+            #Submit dask task to create per-pixel raster and aggregate into 0.04x0.04 degrees for each tile
+            delayed_results.append(dask.delayed(agg_4x4)(tile_id, bounds, chunk_length_pixels, pixel_area_tile, mg_ha_yr_tile, per_pixel_tile_outfile, per_pixel_output_path))
 
         #Check
         print(bounds_list)
         print(delayed_results)
+
+        # -------------------------------------------------------------------------------------------------------------------
+        # Step 4: Combine 0.04x0.04 degrees tiles into global raster
+        # Model stage being run
+        stage = 'create 0.04x0.04 degree global rasters'
+
+        # Starting time for stage
+        start_time = uu.timestr()
+        print(f"Stage {stage} started at: {start_time}")
 
         # Compute results
         tiles = dask.compute(*delayed_results)
         print(tiles)
 
         # Combine results into global raster
-        global_raster = combine_global_raster(tiles, bounds_list)
+        tile_id = "0_04deg_global"
+        global_4km_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
+        global_4km_output_path = items['4km_dir']
 
-        # Save the global raster
-        global_bounds = (-180, -90, 180, 90)
-        uu.save_and_upload_single_raster(global_bounds, global_raster.shape[1], 'global_4km', global_raster,
-                                         'Float32', 'global_4km.tif', 's3://your_output_bucket/', True,
-                                         lu.setup_logging())
+        global_raster = combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, global_4km_output_path)
+        print(global_raster)
+
+
 
 
     client.close()
