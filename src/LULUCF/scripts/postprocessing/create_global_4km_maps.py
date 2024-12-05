@@ -11,7 +11,7 @@ Full run:
 python -m src.LULUCF.scripts.postprocessing.create_global_4km_maps -cn create_global_4km_maps -ct full
 
 #QC
-cluster_name = 'create_global_4km_maps'
+cluster_name = 'cropland_emissions_unit_conversion'
 cluster_type = 'local'
 
 """
@@ -90,7 +90,7 @@ def main(cluster_name, cluster_type):
     # -------------------------------------------------------------------------------------------------------------------
     # Step 3: Convert cropland emissions from kg per hectare per year to mg per hectare per year
     #TODO: Move this step to hansenize function for cropland emissions
-    # Model stage being running
+    #Model stage being run
     stage = 'convert_cropland_emissions_units_from_kg_to_mg'
 
     # Starting time for stage
@@ -104,29 +104,43 @@ def main(cluster_name, cluster_type):
     # Get list of all tiles in the cropland emissions kg s3 folder
     cropland_emissions_kg_tiles_list = uu.list_raster_names_in_s3_folder(cropland_emissions_kg_input_dir)
 
+    print(f"Practice on testing tile")
     # Testing:
     cropland_emissions_kg_tiles_list = cropland_emissions_kg_tiles_list[0]
+    print(cropland_emissions_kg_tiles_list)
     input_tile = cropland_emissions_kg_tiles_list
+    print(cropland_emissions_kg_tiles_list)
     input_folder = cropland_emissions_kg_input_dir
+    print(cropland_emissions_kg_input_dir)
     output_folder = cropland_emissions_Mg_output_dir
+    print(cropland_emissions_Mg_output_dir)
 
     input_tile_path = f"{input_folder}{input_tile}"
+    print(input_tile_path)
     output_tile = input_tile.replace("kg", "Mg")
+    print(input_tile_path)
     output_tile_path = f"{output_folder}{output_tile}"
+    print(input_tile_path)
 
     # Get bounds and chunk_length_pixels to create numpy array of cropland emissions data
     tile_id = uu.string_to_tile_id(input_tile_path)
+    print(tile_id)
     bounds = uu.get_10x10_tile_bounds(tile_id)
+    print(bounds)
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
+    print(chunk_length_pixels)
 
     # Open the input raster
     kg_tile_chunk = uu.get_tile_dataset_rio(input_tile_path, 'Float32', bounds, chunk_length_pixels, is_final, logger)
+    print(kg_tile_chunk)
 
     #Create an array with the conversion value
     conversion_array = np.full(kg_tile_chunk.shape, 1e-3 , dtype=np.float32)
+    print(conversion_array)
 
     # Multiply the input tile by the conversion array to get the Mg values
     Mg_tile_chunk = kg_tile_chunk * conversion_array
+    print(Mg_tile_chunk)
 
     # Convert data array to raster
     profile_kwargs = {'compress': 'lzw'}
@@ -134,42 +148,14 @@ def main(cluster_name, cluster_type):
 
     # Upload raster to s3
     uu.upload_s3_file(output_tile_path, f"/tmp/{output_tile}")
+    return("success")
 
-    #Function to convert
-    # def kg_to_Mg_conversion(input_tile, input_folder, output_folder):
-    #     # Input/ output paths
-    #     input_tile_path = f"{input_folder}{input_tile}"
-    #     output_tile = input_tile.replace("kg", "Mg")
-    #     output_tile_path = f"{output_folder}{output_tile}"
-    #
-    #     # Get bounds and chunk_length_pixels to create numpy array of cropland emissions data
-    #     tile_id = uu.string_to_tile_id(input_tile_path)
-    #     bounds = uu.get_10x10_tile_bounds(tile_id)
-    #     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
-    #
-    #     # Open the input raster
-    #     kg_tile_chunk = uu.get_tile_dataset_rio(input_tile_path, 'Float32', bounds, chunk_length_pixels, is_final, logger)
-    #
-    #     #Create an array with the conversion value
-    #     conversion_array = np.full(kg_tile_chunk.shape, 1e-3 , dtype=np.float32)
-    #
-    #     # Multiply the input tile by the conversion array to get the Mg values
-    #     Mg_tile_chunk = kg_tile_chunk * conversion_array
-    #
-    #     # Convert data array to raster
-    #     profile_kwargs = {'compress': 'lzw'}
-    #     Mg_tile_chunk.rio.to_raster(f"/tmp/{output_tile}", **profile_kwargs)
-    #
-    #     # Upload raster to s3
-    #     uu.upload_s3_file(output_tile_path, f"/tmp/{output_tile}")
-    #
-    # tile_futures = []
-    # for tile in cropland_emissions_kg_tiles_list:
-    #     tile_future = client.submit(kg_to_Mg_conversion, tile, cropland_emissions_kg_input_dir, cropland_emissions_Mg_output_dir)
-    #     tile_futures.append(tile_future)
-    #
-    # # Collect the results once they are finished
-    # tile_results = client.gather(tile_futures)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Postprocessing cropland emissions.")
+    parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
+    parser.add_argument('-ct', '--cluster_type', action='store', help='Run locally with Dask (local), test with 1 worker in coiled (test), or run with full coiled cluster (full)')
 
+    args = parser.parse_args()
 
-
+    # Create the cluster with command line arguments
+    main(args.cluster_name, args.cluster_type)

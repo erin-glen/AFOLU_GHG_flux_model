@@ -67,10 +67,7 @@ def get_client_from_cluster_type(cluster_type, cluster_name=None, workers=None, 
             name=cluster_name,
             workspace='wri-forest-research',
             worker_cpu=cpu,
-            worker_memory=memory,
-            environment_vars={
-                "CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE": "YES"
-            }
+            worker_memory=memory
         )
         client = coiled_cluster.get_client()
 
@@ -81,6 +78,7 @@ def get_client_from_cluster_type(cluster_type, cluster_name=None, workers=None, 
         print("set cluster_type to one of the following: 'coiled', 'local'")
 
     return client
+#TODO: environment_vars={"CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE": "YES"}
 
 # Splits a full s3 path "s3://bucket-name/rest_of_path" into "bucket-name" and "rest_of_path"
 def split_s3_path(s3_path):
