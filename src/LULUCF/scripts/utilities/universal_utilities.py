@@ -444,8 +444,7 @@ def save_and_upload_single_raster(bounds, chunk_length_pixels, tile_id,
     # Can't save directly to s3, unfortunately, so need to save locally first
     transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
 
-    if is_final:
-        lu.print_and_log(f"Saving and uploading outputs for {tile_id}: {timestr()}", is_final, logger)
+    lu.print_and_log(f"Saving and uploading outputs for {tile_id}: {timestr()}", is_final, logger)
 
     # Includes NoData value in output raster
     if no_data_val is not None:
