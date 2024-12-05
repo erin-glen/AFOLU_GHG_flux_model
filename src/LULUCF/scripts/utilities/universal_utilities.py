@@ -179,7 +179,7 @@ def xy_to_tile_id(top_left_x, top_left_y):
     return f"{lat}_{lng}"
 
 def string_to_tile_id(string):
-    pattern = r"[0-8][0-9][NS]_[01][0-7][0-9][EW]"
+    pattern = "[0-9]{2}[A-Z][_][0-9]{3}[A-Z]"
 
     # Search for the first match
     match = re.search(pattern, string)
