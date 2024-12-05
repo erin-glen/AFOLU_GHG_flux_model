@@ -1372,6 +1372,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     n_workers = len(workers)
 
     # Reduces number of workers in the cluster down to 1 if there is more than 1
+    #TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
     if n_workers > 1:
         print("Resizing cluster to 1 worker")
 
@@ -1394,7 +1395,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     uu.stage_duration(start_time, end_time_1, stage)
 
 
-    # Prepares chunk stats spreadsheet: min, mean, max for all input and output chunks,
+    # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count > 0):
@@ -1406,6 +1407,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     uu.stage_duration(start_time, end_time_2, stage)
 
     # Creates combined log from all workers if not deactivated
+    #TODO Figure out how to make it gather worker logs as soon as run finishes so that they're not lost,
+    # then upload the consolidated log at the very end like this.
     log_note = f"{stage} run"
     lu.compile_and_upload_log(no_log, client, cluster, stage, len(chunks), chunk_size, start_time, end_time_1, end_time_2,
                               success_count, skipping_chunk_count, bounding_box, log_note)

@@ -1,11 +1,15 @@
 """
 Run from src/LULUCF
 
-# 30 workers with 10 threads each should be able to process 315 outputs simultaneously (35 workers * (8 threads/worker + 1 bonus thread that's always there)).
-# Making 10x10 aggregate tiles takes basically no memory, so each worker can handle lots of tasks at the same time, it seems.
+# Making 10x10 aggregate tiles takes basically no memory, so each worker can handle several of tasks at the same time, it seems.
 # 20 and 40 threads/worker caused many gdal_merge errors. Even 10 threads/worker caused at least one error.
 python -m scripts.utilities.create_cluster -n 100 -t 7
 python -m scripts.postprocessing.LULUCF_fluxes_aggregate_to_10x10deg -cn AFOLU_flux_model_scripts -d 20241203
+
+Took about 30 minutes to do the aggregated gross and net flux outputs. A few 10x10 tiles from many of the folders
+weren't output, and I got various GDAL errors throughout. Not investigating further now.
+Log to explore is https://cloud.coiled.io/clusters/676603/account/wri-forest-research/information?workspace=WRI-forest-research&tab=Logs&filterPattern=&showLifecycle=0
+It has some potentially useful errors.
 
 """
 
@@ -87,6 +91,9 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         # f"{cn.outputs_path}{cn.n2o_flux_pattern}/2005_2010/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.n2o_flux_pattern}/2010_2015/4000_pixels/{date}/",
         # f"{cn.outputs_path}{cn.n2o_flux_pattern}/2015_2020/4000_pixels/{date}/",
+
+
+
 
         f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
         f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
