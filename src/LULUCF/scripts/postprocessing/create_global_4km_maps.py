@@ -1,7 +1,7 @@
 """
 Run from src/LULUCF
 
-python -m scripts.utilities.create_cluster -n 2 -m 32 -t 1 -cn global_4km_raster_test
+python -m scripts.utilities.create_cluster -n 4 -m 32 -c 4 -t 1 -i 10 -cn global_4km_raster_test
 python -m scripts.postprocessing.create_global_4km_maps -cn global_4km_raster_test
 
 """
@@ -79,7 +79,7 @@ def combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, globa
     # Save the global raster
     global_bounds = (-180, -90, 180, 90)
     uu.save_and_upload_single_raster(global_bounds, global_raster.shape[1], tile_id, global_raster,
-                                     'Float32', global_4km_outfile, global_4km_output_path, is_final,
+                                     np.float32, global_4km_outfile, global_4km_output_path, is_final,
                                      logger)
 
     return "Success"
@@ -150,7 +150,7 @@ def main(cluster_name):
     print(f"Stage {stage} started at: {start_time}")
 
     # Creating per-pixel rasters
-    for key, items in download_upload_dictionary:
+    for key, items in download_upload_dictionary.items():
         bounds_list = []
         delayed_results = []
         for tile_id in cn.tile_id_list:

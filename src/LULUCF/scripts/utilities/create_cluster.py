@@ -8,7 +8,7 @@ import argparse
 
 from . import constants_and_names as cn
 
-def create_cluster(n_workers, threads_per_worker, worker_memory, scheduler_memory, worker_cpu, idle_timeout):
+def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory, scheduler_memory, worker_cpu, idle_timeout):
 
     # Converts worker_memory from an integer to the required format (e.g., 8 to "8GiB")
     worker_memory_str = f"{worker_memory}GiB"
@@ -21,7 +21,7 @@ def create_cluster(n_workers, threads_per_worker, worker_memory, scheduler_memor
         compute_purchase_option="spot_with_fallback",
         idle_timeout=idle_timeout,
         region="us-east-1",
-        name="AFOLU_flux_model_scripts",
+        name=cluster_name,
         workspace='wri-forest-research',
         # mount_bucket="s3://gfw2-data",
         scheduler_memory = scheduler_memory_str,
@@ -37,6 +37,7 @@ def create_cluster(n_workers, threads_per_worker, worker_memory, scheduler_memor
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create a Coiled cluster with specified parameters.")
+    parser.add_argument('-cn', '--cluster_name', type=str, help='Coiled cluster name')
     parser.add_argument('-n', '--n_workers', type=int, default=1, help='Number of workers for the cluster')
     parser.add_argument('-m', '--worker_memory', type=str, default='16', help='Memory per worker (default=16GiB)')
     parser.add_argument('-c', '--worker_cpu', type=str, default='2', help='Number of CPUs per worker (default=2 CPUs)')
@@ -46,6 +47,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    cluster_name = args.cluster_name
     n_workers = args.n_workers
     threads_per_worker = args.threads_per_worker
     worker_memory = args.worker_memory
@@ -65,4 +67,4 @@ if __name__ == "__main__":
         scheduler_memory = worker_memory
 
     # Create the cluster with command line arguments
-    create_cluster(n_workers, threads_per_worker, worker_memory, scheduler_memory, worker_cpu, idle_timeout)
+    create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory, scheduler_memory, worker_cpu, idle_timeout)
