@@ -1168,6 +1168,7 @@ def delete_build_vrt_input_files(raw_raster_paths_list_s3, vrt):
 
 def reaggregate_resolution(data, original_res, target_res):
     #Courtesy of ChatGPT
+    #TODO include the ChatGPT conversation link. Useful to come back to it sometimes...
     """
     Reaggregates a numpy array by summing values within the target resolution window.
 

@@ -9,6 +9,8 @@ global maps (0.00025 resolution) for cropland emissions and net flux (2000-2005,
 using 40 workers with 32 GiB mem, 4 cpus, and 1 thread per worker.
 NOTES: Low CPU utilization, and high memory pressure.
 - Also, many workers idle while final tiles were processing so should lower number of workers next time
+#TODO See note below about combining all 10x10s to be processed into a single list to reduce the number of times
+# there are laggard tasks
 
 """
 import numpy as np
@@ -40,7 +42,7 @@ def agg_4x4(tile_id, bounds, chunk_length_pixels, pixel_area_tile, mg_ha_yr_tile
     data_type = mg_yr_per_pixel_tile_chunk.dtype.name
     uu.save_and_upload_single_raster(bounds, chunk_length_pixels, tile_id, mg_yr_per_pixel_tile_chunk, data_type,
                                      per_pixel_output_tile, per_pixel_output_path, is_final, logger)
-    #TODO Eventually create per-pixel tile and upload to s3 in a different script
+    #TODO Discuss where to create per-pixel tile and upload to s3 in a different script
 
     # Reaggregate into 0.04x0.04 degree resolution
     mg_yr_per_pixel_agg_4x4_tile_chunk = uu.reaggregate_resolution(mg_yr_per_pixel_tile_chunk, 0.00025, 0.04)
@@ -50,6 +52,7 @@ def agg_4x4(tile_id, bounds, chunk_length_pixels, pixel_area_tile, mg_ha_yr_tile
 
 def combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, global_4km_output_path):
     #Courtest of chatGPT
+    #TODO Include the ChatGPT conversation link
     """
     Combines multiple 0.04x0.04 degree tiles into a single global raster.
 
@@ -86,6 +89,8 @@ def combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, globa
         global_raster[y_start:y_end, x_start:x_end] += tile
 
     # Save the global raster
+    #TODO Maybe this should have NoData set to 0 since 0s aren't likely to be actual pixel values
+    #TODO Discuss whether the aggregated maps should be converted to Mt (instead of Mg) because the pixel values are large in Mg
     global_bounds = (-180, -90, 180, 90)
     uu.save_and_upload_single_raster(global_bounds, global_raster.shape[1], tile_id, global_raster,
                                      np.float32, global_4km_outfile, global_4km_output_path, is_final,
@@ -105,6 +110,7 @@ def main(cluster_name):
     # Step 2: Create download/ upload dictionary from list of processes to run
     #TODO: Pass in which fluxes and which years you want to process as command line arguments and add to download_upload_dictionary accordingly.
     # For now hardcoding the download_upload_dictionary. Update flux path/patterns from cn.
+    #TODO Discuss where per-pixel outputs should go in s3: their own outer folders or as a variant inside outer folders
     download_upload_dictionary = {
         "cropland_emissions_mg_ha_yr" : {
             'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/processed/20241204/year_2020/all_sources/mean_rate/including_peatland/2019/physical_area/",
@@ -117,39 +123,45 @@ def main(cluster_name):
         "net_flux_2000_2005_mg_ha_yr": {
             'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2000_2005/40000_pixels/20241203/",
             'mg_ha_yr_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2000_2005.tif",
-            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_yr/2000_2005/40000_pixels/20241203/",
-            'mg_per_pixel_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_yr_2000_2005.tif",
-            '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2000-2005/",
+            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_px_yr/2000_2005/40000_pixels/20241203/",
+            'mg_per_pixel_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_px_yr_2000_2005.tif",
+            '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2000_2005/",
             '4km_pattern': '0_04deg_global__net_flux_all_C_pools_all_gases__MgCO2e_yr_2000_2005.tif'
         },
         "net_flux_2005_2010_mg_ha_yr": {
             'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2005_2010/40000_pixels/20241203/",
             'mg_ha_yr_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2005_2010.tif",
-            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_yr/2005_2010/40000_pixels/20241203/",
-            'mg_per_pixel_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_yr_2005_2010.tif",
-            '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2005-2010/",
+            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_px_yr/2005_2010/40000_pixels/20241203/",
+            'mg_per_pixel_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_px_yr_2005_2010.tif",
+            '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2005_2010/",
             '4km_pattern': '0_04deg_global__net_flux_all_C_pools_all_gases__MgCO2e_yr_2005_2010.tif'
         },
         "net_flux_2010_2015_mg_ha_yr": {
             'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2010_2015/40000_pixels/20241203/",
             'mg_ha_yr_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2010_2015.tif",
-            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_yr/2010_2015/40000_pixels/20241203/",
-            'mg_per_pixel_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_yr_2010_2015.tif",
-            '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2010-2015/",
+            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_px_yr/2010_2015/40000_pixels/20241203/",
+            'mg_per_pixel_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_px_yr_2010_2015.tif",
+            '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2010_2015/",
             '4km_pattern': '0_04deg_global__net_flux_all_C_pools_all_gases__MgCO2e_yr_2010_2015.tif'
         },
         "net_flux_2015_2020_mg_ha_yr": {
             'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_ha_yr/2015_2020/40000_pixels/20241203/",
             'mg_ha_yr_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_ha_yr_2015_2020.tif",
-            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_yr/2015_2020/40000_pixels/20241203/",
-            'mg_per_pixel_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_yr_2015_2020.tif",
-            '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2015-2020/",
+            'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/net_flux_all_C_pools_all_gases__MgCO2e_px_yr/2015_2020/40000_pixels/20241203/",
+            'mg_per_pixel_pattern': "__net_flux_all_C_pools_all_gases__MgCO2e_px_yr_2015_2020.tif",
+            '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/0_04deg_output_aggregation/net_flux_all_C_pools_all_gases__MgCO2e_yr/2015_2020/",
             '4km_pattern': '0_04deg_global__net_flux_all_C_pools_all_gases__MgCO2e_yr_2015_2020.tif'
         }
-    } #TODO REMOVE 4KM PATTERN
-        #TODO: After net flux and cropland per pixel tiles are created, update paths in constants and names, remove per-pixel creation step here,
-        #  after per-pixel creation step is its own script, remove mg_ha_yr_dir/pattern from download_upload dictionary
-    # -------------------------------------------------------------------------------------------------------------------
+    }
+    #TODO Generally discuss post-processing pipelines and which steps should go where, particularly the per-pixel raster creation
+    #TODO REMOVE 4KM PATTERN
+    #TODO: After net flux and cropland per pixel tiles are created, update paths in constants and names, remove per-pixel creation step here,
+    #  after per-pixel creation step is its own script, remove mg_ha_yr_dir/pattern from download_upload dictionary
+    #TODO For efficiency, rather than having this process one set of outputs, wait for laggards, and then move to the next,
+    # consider instead having it reprocess all 10x10s into the aggregated pixels, then making the global maps
+    # at the very end, outside the loop. Theoretically, this would be more efficient because there won't be
+    # multiple rounds of laggard tasks.
+    #-------------------------------------------------------------------------------------------------------------------
     # Step 3: Create per-pixel rasters and aggregate into 0.04x0.04 degrees for each tile
 
 
@@ -159,7 +171,7 @@ def main(cluster_name):
         delayed_results = []
         for tile_id in cn.tile_id_list:
             # Model stage being run
-            stage = f'create 0.04x0.04 tile rasters for {key}'
+            stage = f'create 0.04x0.04 deg tile rasters for {key}'
             start_time = uu.timestr()
             print(f"Stage {stage} started at: {start_time}")
 
@@ -197,7 +209,7 @@ def main(cluster_name):
 
         global_raster = combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, global_4km_output_path)
         print(global_raster)
-        #TODO: Have it check that file was created in s3
+        #TODO: Have it check that file was created in s3. Use the existing file counter uu function.
 
     client.close()
 
