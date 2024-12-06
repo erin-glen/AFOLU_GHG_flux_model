@@ -41,8 +41,9 @@ def cropland_emissions_unit_conversion(chunk, cropland_emissions_kg_input_dir, c
 
     # Upload raster to s3
     data_type = Mg_tile_chunk.dtype.name
+    no_data_val = float(0)
     uu.save_and_upload_single_raster(bounds, chunk_length_pixels, tile_id, Mg_tile_chunk, data_type, output_tile,
-                                     cropland_emissions_Mg_output_dir, is_final, logger)
+                                     cropland_emissions_Mg_output_dir, is_final, logger, no_data_val)
 
 def main(cluster_name):
     # -------------------------------------------------------------------------------------------------------------------

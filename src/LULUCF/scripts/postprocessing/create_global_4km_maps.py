@@ -1,8 +1,14 @@
 """
 Run from src/LULUCF
 
-python -m scripts.utilities.create_cluster -n 2 -m 32 -c 4 -t 1 -i 10 -cn global_4km_raster_test
-python -m scripts.postprocessing.create_global_4km_maps -cn global_4km_raster_test
+python -m scripts.utilities.create_cluster -n 20 -m 32 -c 4 -t 1 -i 15 -cn global_4km_raster
+python -m scripts.postprocessing.create_global_4km_maps -cn global_4km_raster
+
+It took 1 hour, 5 minutes (192 coiled credits) to create 10x10 per-pixel tiles (0.04 resolution) and
+global maps (0.00025 resolution) for cropland emissions and net flux (2000-2005, 2005-2010, 2010-2015, 2015-2020)
+using 40 workers with 32 GiB mem, 4 cpus, and 1 thread per worker.
+NOTES: Low CPU utilization, and high memory pressure.
+- Also, many workers idle while final tiles were processing so should lower number of workers next time
 
 """
 import numpy as np
@@ -104,7 +110,7 @@ def main(cluster_name):
             'mg_ha_yr_dir': "s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/processed/20241204/year_2020/all_sources/mean_rate/including_peatland/2019/physical_area/",
             'mg_ha_yr_pattern': "_all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_2019_Mg_ha_CO2.tif",
             'mg_per_pixel_dir': "s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/processed/20241204/year_2020/all_sources/per_pixel/including_peatland/2019/physical_area/",
-            'mg_per_pixel_pattern': "_all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_2019_Mg_CO2.tif",
+            'mg_per_pixel_pattern': "_all_GHGs_cropland_per_pixel_physical_area_CO2eq_all_crops_2019_Mg_CO2.tif",
             '4km_dir': "s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/processed/20241204/year_2020/all_sources/0_04deg_output_aggregation/cropland_emissions_all_crops_all_gases__MgCO2e_yr/2019/",
             '4km_pattern': '0_04deg_global__all_GHGs_cropland_physical_area_CO2eq_all_crops_2019__MgCO2e_yr.tif'
         },
@@ -145,54 +151,44 @@ def main(cluster_name):
         #  after per-pixel creation step is its own script, remove mg_ha_yr_dir/pattern from download_upload dictionary
     # -------------------------------------------------------------------------------------------------------------------
     # Step 3: Create per-pixel rasters and aggregate into 0.04x0.04 degrees for each tile
-    # Model stage being run
-    stage = 'create 0.04x0.04 tile rasters'
 
-    # Starting time for stage
-    start_time = uu.timestr()
-    print(f"Stage {stage} started at: {start_time}")
 
     # Creating per-pixel rasters
     for key, items in download_upload_dictionary.items():
         bounds_list = []
         delayed_results = []
         for tile_id in cn.tile_id_list:
+            # Model stage being run
+            stage = f'create 0.04x0.04 tile rasters for {key}'
+            start_time = uu.timestr()
+            print(f"Stage {stage} started at: {start_time}")
+
             mg_ha_yr_tile = f"{items['mg_ha_yr_dir']}{tile_id}{items['mg_ha_yr_pattern']}"
-            print(mg_ha_yr_tile)
             pixel_area_tile = f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{tile_id}.tif"
-            print(pixel_area_tile)
             per_pixel_tile_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
-            print(per_pixel_tile_outfile)
             per_pixel_output_path = items["mg_per_pixel_dir"]
-            print(per_pixel_output_path)
 
             # Get bounds and chunk_length_pixels to read in input data
             bounds = uu.get_10x10_tile_bounds(tile_id)
             bounds_list.append(bounds)
-            print(bounds)
-
             chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
-            print(chunk_length_pixels)
 
             #Submit dask task to create per-pixel raster and aggregate into 0.04x0.04 degrees for each tile
             delayed_results.append(dask.delayed(agg_4x4)(tile_id, bounds, chunk_length_pixels, pixel_area_tile, mg_ha_yr_tile, per_pixel_tile_outfile, per_pixel_output_path))
 
         #Check
-        print(bounds_list)
-        print(delayed_results)
+        # print(bounds_list)
+        # print(delayed_results)
 
         # -------------------------------------------------------------------------------------------------------------------
         # Step 4: Combine 0.04x0.04 degrees tiles into global raster
         # Model stage being run
-        stage = 'create 0.04x0.04 degree global rasters'
-
-        # Starting time for stage
+        stage = f'create 0.04x0.04 degree global raster for {key}'
         start_time = uu.timestr()
         print(f"Stage {stage} started at: {start_time}")
 
         # Compute results
         tiles = dask.compute(*delayed_results)
-        print(tiles)
 
         # Combine results into global raster
         tile_id = "0_04deg_global"
@@ -201,9 +197,7 @@ def main(cluster_name):
 
         global_raster = combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, global_4km_output_path)
         print(global_raster)
-
-
-
+        #TODO: Have it check that file was created in s3
 
     client.close()
 
