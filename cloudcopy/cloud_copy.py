@@ -21,16 +21,15 @@ Usage (example):
       --task-file my_tasks.json \\
       --resume
 
-Requires:
-  - coiled
-  - dask
-  - gcsfs
-  - s3fs
-  - tqdm (optional, but useful for local progress bars)
+Requirements:
+    `conda env create -f environment.yml` 
 
 Authentication:
   - GCS: Set `GOOGLE_APPLICATION_CREDENTIALS` or have gcloud creds in your environment.
+    `gcloud auth application-default login` should set this all up for you
   - AWS: Standard environment variables like `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc.
+    `export AWS_PROFILE=[your_profile]`
+    `aws sso login`
 """
 
 import os
