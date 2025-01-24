@@ -151,6 +151,7 @@ def generate_task_file(source_files, src_root, dst_root, task_filename, check_de
 
         # Print progess on a single line
         print(f'Check existing: {src_path} ({status}) {counter}', end="\r")
+    print("\n")
 
     
     with open(task_filename, "w") as f:
