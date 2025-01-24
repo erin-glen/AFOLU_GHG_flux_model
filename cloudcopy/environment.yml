@@ -1,0 +1,13 @@
+name: cloud-copy
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - dask
+  - coiled
+  - fsspec
+  - gcsfs
+  - s3fs
+  - tqdm
+
+ 
