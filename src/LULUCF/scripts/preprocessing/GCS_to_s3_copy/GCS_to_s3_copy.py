@@ -30,6 +30,10 @@ Authentication:
   - AWS: Standard environment variables like `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc.
     `export AWS_PROFILE=[your_profile]`
     `aws sso login`
+
+Created by Chris Rowe with the assistance of https://chatgpt.com/share/e/6793f009-3660-8011-bfb4-e131c37acd69.
+Not run in WSL Ubuntu at this point. He ran it in whatever environment he had on his computer.
+##TODO Get this to run in WSL like the rest of the code.
 """
 
 import os
