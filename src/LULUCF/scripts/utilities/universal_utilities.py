@@ -26,8 +26,61 @@ from osgeo import gdal
 from . import constants_and_names as cn
 from . import log_utilities as lu
 
-#TODO: @Mel - Order all s3 functions together. Tile IDS. Chunk IDs and bounding boxes. Hansenizing.
+###################################################################################################
+# S3 Utilities
+###################################################################################################
+# Splits a full s3 path "s3://bucket-name/rest_of_path" into "bucket-name" and "rest_of_path"
+def split_s3_path(s3_path):
+    s3_path = s3_path.replace("s3://", "")   # Remove the "s3://" prefix
+    bucket, key = s3_path.split("/", 1)    # Split the remaining string by the first "/"
+    return bucket, key
 
+# List files in an S3 bucket with a certain pattern
+def list_s3_files_with_pattern(s3_path, pattern):
+    s3 = boto3.client("s3")
+    bucket_name, prefix = split_s3_path(s3_path)
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)  # List objects in the bucket with the given prefix
+
+    matching_files = []
+    # Check if any contents are returned
+    if 'Contents' in response:
+        for obj in response['Contents']:
+            key = obj['Key']
+            if key.endswith(pattern):
+                matching_files.append(f"s3://{bucket_name}/{key}")
+        print(f"Files matching pattern '{pattern}':")
+        for file in matching_files:
+            print(file)
+    else:
+        print(f"No files found in the bucket '{bucket_name}' with the prefix '{prefix}'")
+    return matching_files
+
+def download_s3_file(s3_path, local_path):
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    s3.download_file(bucket, key, local_path)
+
+def upload_s3_file(s3_path, local_path):
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    s3.upload_file(local_path, Bucket=bucket, Key=key)
+
+def check_s3_file_created(s3_path):
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        print(f"File successfully created at: {s3_path}")
+        return True
+    except s3.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == "404":
+            raise RuntimeError(f"Failed to create file at: {s3_path}")
+        else:
+            raise RuntimeError(f"Error accessing S3: {e}")
+
+###################################################################################################
+# LULUCF model utilities
+###################################################################################################
 # Time in Eastern US timezone as a string
 def timestr():
 
@@ -81,11 +134,7 @@ def get_client_from_cluster_type(cluster_type, cluster_name=None, workers=None, 
 
     return client
 
-# Splits a full s3 path "s3://bucket-name/rest_of_path" into "bucket-name" and "rest_of_path"
-def split_s3_path(s3_path):
-    s3_path = s3_path.replace("s3://", "")   # Remove the "s3://" prefix
-    bucket, key = s3_path.split("/", 1)    # Split the remaining string by the first "/"
-    return bucket, key
+
 
 # Chunk bounds as a string
 def boundstr(bounds):
@@ -285,25 +334,6 @@ def check_for_tile(download_dict, is_final, logger):
 
     return False
 
-# List files in an S3 bucket with a certain pattern
-def list_s3_files_with_pattern(s3_path, pattern):
-    s3 = boto3.client("s3")
-    bucket_name, prefix = split_s3_path(s3_path)
-    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)  # List objects in the bucket with the given prefix
-
-    matching_files = []
-    # Check if any contents are returned
-    if 'Contents' in response:
-        for obj in response['Contents']:
-            key = obj['Key']
-            if key.endswith(pattern):
-                matching_files.append(f"s3://{bucket_name}/{key}")
-        print(f"Files matching pattern '{pattern}':")
-        for file in matching_files:
-            print(file)
-    else:
-        print(f"No files found in the bucket '{bucket_name}' with the prefix '{prefix}'")
-    return matching_files
 
 # Checks whether a chunk has data in it.
 # There are two options for how to assess if a chunk has data (any_or_all argument): if any assessed input has data, or if all assessed inputs have data.
@@ -1067,30 +1097,13 @@ def fishnet_with_GADM_iso():
     return fishnet_df
 
 
-def download_s3_file(s3_path, local_path):
-    s3 = boto3.client('s3')
-    bucket, key = split_s3_path(s3_path)
-    s3.download_file(bucket, key, local_path)
-
-def upload_s3_file(s3_path, local_path):
-    s3 = boto3.client('s3')
-    bucket, key = split_s3_path(s3_path)
-    s3.upload_file(local_path, Bucket=bucket, Key=key)
-
-def check_s3_file_created(s3_path):
-    s3 = boto3.client('s3')
-    bucket, key = split_s3_path(s3_path)
-    try:
-        s3.head_object(Bucket=bucket, Key=key)
-        print(f"File successfully created at: {s3_path}")
-        return True
-    except s3.exceptions.ClientError as e:
-        if e.response['Error']['Code'] == "404":
-            raise RuntimeError(f"Failed to create file at: {s3_path}")
-        else:
-            raise RuntimeError(f"Error accessing S3: {e}")
 
 
+
+
+###################################################################################################
+# Hansenize Functions
+###################################################################################################
 # Function to build a VRT using GDAL with vsis3 paths
     # raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
     # output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is created
@@ -1131,10 +1144,6 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
 
     else:
         print(f"File '{local_vrt}' does not exist.")
-
-
-
-
 
 # Function to read a VRT from S3 using GDAL and vsis3
 def warp_to_hansen_local(source_raster_s3_path, output_raster_s3_path, xmin, ymin, xmax, ymax, dt, no_data, tiled=True,
@@ -1263,6 +1272,9 @@ def delete_build_vrt_input_files(raw_raster_paths_list_s3, vrt):
     os.remove(str(Path(vrt)))
 
 
+###################################################################################################
+# 4km Map Function
+###################################################################################################
 def reaggregate_resolution(data, original_res, target_res):
     #Courtesy of ChatGPT
     #TODO include the ChatGPT conversation link. Useful to come back to it sometimes...
