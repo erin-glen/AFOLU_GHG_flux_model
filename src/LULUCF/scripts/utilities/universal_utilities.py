@@ -5,7 +5,7 @@ import time
 import math
 import numpy as np
 import pandas as pd
-import geopandas as gpd
+from pathlib import Path
 import pytz
 import rasterio
 import rasterio.transform
@@ -16,7 +16,8 @@ import requests
 import concurrent.futures
 from botocore.config import Config
 from dask.distributed import print
-from dask.distributed import Client
+from dask.distributed import Client, LocalCluster
+from dask import delayed
 from datetime import datetime
 from io import BytesIO
 from osgeo import gdal
@@ -25,6 +26,261 @@ from osgeo import gdal
 from . import constants_and_names as cn
 from . import log_utilities as lu
 
+###################################################################################################
+# S3 Utilities
+###################################################################################################
+# Splits a full s3 path "s3://bucket-name/rest_of_path" into "bucket-name" and "rest_of_path"
+def split_s3_path(s3_path):
+    s3_path = s3_path.replace("s3://", "")   # Remove the "s3://" prefix
+    bucket, key = s3_path.split("/", 1)    # Split the remaining string by the first "/"
+    return bucket, key
+
+# List files in an S3 bucket with a certain pattern
+def list_s3_files_with_pattern(s3_path, pattern):
+    s3 = boto3.client("s3")
+    bucket_name, prefix = split_s3_path(s3_path)
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)  # List objects in the bucket with the given prefix
+
+    matching_files = []
+    # Check if any contents are returned
+    if 'Contents' in response:
+        for obj in response['Contents']:
+            key = obj['Key']
+            if key.endswith(pattern):
+                matching_files.append(f"s3://{bucket_name}/{key}")
+        print(f"Files matching pattern '{pattern}':")
+        for file in matching_files:
+            print(file)
+    else:
+        print(f"No files found in the bucket '{bucket_name}' with the prefix '{prefix}'")
+    return matching_files
+
+def download_s3_file(s3_path, local_path):
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    s3.download_file(bucket, key, local_path)
+
+def upload_s3_file(s3_path, local_path):
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    s3.upload_file(local_path, Bucket=bucket, Key=key)
+
+def check_s3_file_created(s3_path):
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        print(f"File successfully created at: {s3_path}")
+        return True
+    except s3.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == "404":
+            raise RuntimeError(f"Failed to create file at: {s3_path}")
+        else:
+            raise RuntimeError(f"Error accessing S3: {e}")
+
+# Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
+def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
+                                     bounds_str, output_dict, is_final, logger, no_data_val=None):
+
+    # Configures S3 client with increased retries; retries can max out for global analyses
+    s3_config = Config(
+        retries={
+            'max_attempts': 10,  # Increases the number of retry attempts
+            'mode': 'standard'
+        }
+    )
+    s3_client = boto3.client("s3", config=s3_config)  # Uses the configured client with more retries
+
+    transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
+
+    file_info = f'{tile_id}__{bounds_str}'
+
+    if is_final:
+        lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
+
+    # This makes it so that all output files are uploaded to a folder of the same date, even if the model run is divided over multiple days
+    output_date = time.strftime('%Y%m%d')
+
+    # For every output file, saves from array to local raster, then to s3.
+    # Can't save directly to s3, unfortunately, so need to save locally first.
+    for key, value in output_dict.items():
+
+        data_array = value[0]
+        data_type = value[1]
+        data_meaning = value[2]
+        year_out = value[3]
+
+        if is_final:
+            file_name = f"{file_info}__{key}.tif"
+        else:
+            file_name = f"{file_info}__{key}__{timestr()}.tif"
+
+        # Only prints if not a final run
+        if not is_final:
+            lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger)
+
+        # Includes NoData value in output raster
+        if no_data_val is not None:
+            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                               height=chunk_length_pixels, count=1,
+                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw', blockxsize=400,
+                               blockysize=400, nodata=no_data_val) as dst:
+                dst.write(data_array, 1)
+
+        # No NoData value in output raster
+        else:
+            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                               height=chunk_length_pixels, count=1,
+                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw', blockxsize=400,
+                               blockysize=400) as dst:
+                dst.write(data_array, 1)
+
+        s3_path = f"{cn.s3_out_dir}/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels/{output_date}"
+
+        # Only prints if not a final run
+        if not is_final:
+            lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {s3_path}: {timestr()}", is_final, logger)
+
+        s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{s3_path}/{file_name}")
+
+        # Deletes the local raster
+        os.remove(f"/tmp/{file_name}")
+
+
+# Returns list of rasters in an s3 folder and returns their names as a list (but not full paths)
+def list_raster_names_in_s3_folder(full_in_folder):
+
+    cmd = ['aws', 's3', 'ls', full_in_folder]
+    s3_contents_bytes = subprocess.check_output(cmd)
+
+    # Converts subprocess results to useful string
+    s3_contents_str = s3_contents_bytes.decode('utf-8')
+    s3_contents_list = s3_contents_str.splitlines()
+    rasters = [line.split()[-1] for line in s3_contents_list]
+    rasters = [i for i in rasters if "tif" in i]
+
+    return rasters
+
+
+# Returns list of rasters (full paths and names) in an s3 folder, and also returns the count of them
+#Per https://chatgpt.com/share/e/67413a39-1b3c-800a-b582-72d1a8a17de1
+def list_raster_full_paths_in_s3_folder_and_count(s3_path):
+    """
+    List all GeoTIFF files from a list of full S3 paths using boto3 and return the count.
+
+    Args:
+        s3_paths (list): List of S3 paths (e.g., "s3://bucket-name/prefix/").
+
+    Returns:
+        tuple: A tuple containing:
+            - A flat list of GeoTIFF file paths.
+            - The total count of GeoTIFF files.
+    """
+
+    # Initialize the S3 client
+    s3_client = boto3.client('s3')
+    geotiff_files = []
+
+    try:
+        # Parses bucket and prefix from the S3 path
+        if s3_path.startswith("s3://"):
+            path_parts = s3_path[5:].split("/", 1)
+            bucket_name = path_parts[0]
+            prefix = path_parts[1] if len(path_parts) > 1 else ""
+        else:
+            raise ValueError(f"Invalid S3 path: {s3_path}")
+
+        # Uses pagination to handle more than 1,000 objects (otherwise, limited to list of 1000 elements)
+        paginator = s3_client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+            if 'Contents' in page:
+                files = [obj['Key'] for obj in page['Contents']]
+                geotiffs = [f"s3://{bucket_name}/{file}" for file in files if file.endswith(('.tif', '.tiff'))]
+                geotiff_files.extend(geotiffs)
+
+    except Exception as e:
+        print(f"Error accessing {s3_path}: {e}")
+
+    return geotiff_files, len(geotiff_files)
+
+
+# Uploads a shapefile to s3
+def upload_shp(in_folder, shp):
+
+    print(f"flm: Uploading to {in_folder}{shp}: {timestr()}")
+
+    shp_pattern = shp[:-4]
+
+    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
+    s3_client.upload_file(f"/tmp/{shp}", "gfw2-data", Key=f"{in_folder[15:]}{shp}")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.dbf", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.dbf")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.prj", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.prj")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.shx", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.shx")
+
+    os.remove(f"/tmp/{shp}")
+    os.remove(f"/tmp/{shp_pattern}.dbf")
+    os.remove(f"/tmp/{shp_pattern}.prj")
+    os.remove(f"/tmp/{shp_pattern}.shx")
+
+    print(f"flm: Uploaded to {in_folder}{shp}: {timestr()}")
+
+# Saves a data array locally as a raster and then uploads it to s3
+def save_and_upload_raster_10x10(**kwargs):
+
+    s3_client = boto3.client("s3") # Needs to be in the same function as the upload_file call
+
+    data_array = kwargs['data']   # The data being saved
+    out_file_name = kwargs['out_file_name']   # The output file name
+    out_folder = kwargs['out_folder']   # The output folder
+
+    print(f"flm: Saving {out_file_name} locally")
+
+    profile_kwargs = {'compress': 'lzw'}   # Adds attribute to compress the output raster
+    # data_array.rio.to_raster(f"{out_file_name}", **profile_kwargs)
+    data_array.rio.to_raster(f"/tmp/{out_file_name}", **profile_kwargs)
+
+    print(f"flm: Saving {out_file_name} to {out_folder[10:]}{out_file_name}")
+
+    s3_client.upload_file(f"/tmp/{out_file_name}", "gfw2-data", Key=f"{out_folder[10:]}{out_file_name}")
+
+    # Deletes the local raster
+    os.remove(f"/tmp/{out_file_name}")
+
+# Gets the name of the first file in a dictionary of dataset names and folders in s3.
+# Returns dictionary of dataset names with the full path of the first file in the s3 folder.
+# From https://chatgpt.com/share/e/9a7bf947-1c32-4898-ba6b-3b932a5220c1
+def first_file_name_in_s3_folder(download_dict):
+
+    s3_client = boto3.client("s3")
+
+    # Initializes the dictionary to hold the first file paths
+    first_tiles = {}
+
+    # Iterates over the download_dict items
+    for key, folder_path in download_dict.items():
+
+        # Splits the path to get the directory part
+        dir_path = os.path.dirname(folder_path)
+
+        # Drops the s3://gfw2-data/ prefix and adds "/" to the end
+        dir_path = dir_path[len(cn.full_bucket_prefix)+1:] + "/"
+
+        # Lists metadata for everything in the bucket
+        response = s3_client.list_objects_v2(Bucket=cn.short_bucket_prefix, Prefix=dir_path, Delimiter='/')
+
+        # Checks if the folder contains any files
+        if 'Contents' in response and len(response['Contents']) > 0:
+            # Uses the first file in the folder (index 0 instead of 1)
+            first_tiles[key] = cn.full_bucket_prefix + "/" + response['Contents'][1]['Key']
+        else:
+            first_tiles[key] = None  # In case no files are found
+
+    return first_tiles
+
+
+###################################################################################################
+# LULUCF model utilities
+###################################################################################################
 # Time in Eastern US timezone as a string
 def timestr():
 
@@ -51,6 +307,33 @@ def connect_to_Coiled_cluster(cluster_name, run_local):
         client = Client(cluster)
 
         return cluster, client
+
+#TODO: @Mel - find usages, change to using create_cluster.py instead. delete here after.
+# Creates a local client using dask or Coiled cluster with a specified name, # of worker, # of CPUs and # GiB
+def get_client_from_cluster_type(cluster_type, cluster_name=None, workers=None, cpu=None, memory=None):
+
+    if cluster_type == 'coiled':
+        coiled_cluster = coiled.Cluster(
+            n_workers=workers,
+            use_best_zone=True,
+            compute_purchase_option="spot_with_fallback",
+            idle_timeout="10 minutes",
+            region="us-east-1",
+            name=cluster_name,
+            workspace='wri-forest-research',
+            worker_cpu=cpu,
+            worker_memory=memory
+        )
+        client = coiled_cluster.get_client()
+
+    elif cluster_type == 'local':
+        local_cluster = LocalCluster()
+        client = Client(local_cluster)
+    else:
+        print("set cluster_type to one of the following: 'coiled', 'local'")
+
+    return client
+
 
 
 # Chunk bounds as a string
@@ -320,153 +603,6 @@ def check_chunk_for_data(required_layers, bounds_str, tile_id, any_or_all, is_fi
         raise Exception("any_or_all argument not valid")
 
 
-# Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
-def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
-                                     bounds_str, output_dict, is_final, logger, no_data_val=None):
-
-    # Configures S3 client with increased retries; retries can max out for global analyses
-    s3_config = Config(
-        retries={
-            'max_attempts': 10,  # Increases the number of retry attempts
-            'mode': 'standard'
-        }
-    )
-    s3_client = boto3.client("s3", config=s3_config)  # Uses the configured client with more retries
-
-    transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
-
-    file_info = f'{tile_id}__{bounds_str}'
-
-    if is_final:
-        lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
-
-    # This makes it so that all output files are uploaded to a folder of the same date, even if the model run is divided over multiple days
-    output_date = time.strftime('%Y%m%d')
-
-    # For every output file, saves from array to local raster, then to s3.
-    # Can't save directly to s3, unfortunately, so need to save locally first.
-    for key, value in output_dict.items():
-
-        data_array = value[0]
-        data_type = value[1]
-        data_meaning = value[2]
-        year_out = value[3]
-
-        if is_final:
-            file_name = f"{file_info}__{key}.tif"
-        else:
-            file_name = f"{file_info}__{key}__{timestr()}.tif"
-
-        # Only prints if not a final run
-        if not is_final:
-            lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger)
-
-        # Includes NoData value in output raster
-        if no_data_val is not None:
-            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                               height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw', blockxsize=400,
-                               blockysize=400, nodata=no_data_val) as dst:
-                dst.write(data_array, 1)
-
-        # No NoData value in output raster
-        else:
-            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                               height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw', blockxsize=400,
-                               blockysize=400) as dst:
-                dst.write(data_array, 1)
-
-        s3_path = f"{cn.s3_out_dir}/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels/{output_date}"
-
-        # Only prints if not a final run
-        if not is_final:
-            lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {s3_path}: {timestr()}", is_final, logger)
-
-        s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{s3_path}/{file_name}")
-
-        # Deletes the local raster
-        os.remove(f"/tmp/{file_name}")
-
-
-# Returns list of rasters in an s3 folder and returns their names as a list (but not full paths)
-def list_raster_names_in_s3_folder(full_in_folder):
-
-    cmd = ['aws', 's3', 'ls', full_in_folder]
-    s3_contents_bytes = subprocess.check_output(cmd)
-
-    # Converts subprocess results to useful string
-    s3_contents_str = s3_contents_bytes.decode('utf-8')
-    s3_contents_list = s3_contents_str.splitlines()
-    rasters = [line.split()[-1] for line in s3_contents_list]
-    rasters = [i for i in rasters if "tif" in i]
-
-    return rasters
-
-
-# Returns list of rasters (full paths and names) in an s3 folder, and also returns the count of them
-#Per https://chatgpt.com/share/e/67413a39-1b3c-800a-b582-72d1a8a17de1
-def list_raster_full_paths_in_s3_folder_and_count(s3_path):
-    """
-    List all GeoTIFF files from a list of full S3 paths using boto3 and return the count.
-
-    Args:
-        s3_paths (list): List of S3 paths (e.g., "s3://bucket-name/prefix/").
-
-    Returns:
-        tuple: A tuple containing:
-            - A flat list of GeoTIFF file paths.
-            - The total count of GeoTIFF files.
-    """
-
-    # Initialize the S3 client
-    s3_client = boto3.client('s3')
-    geotiff_files = []
-
-    try:
-        # Parses bucket and prefix from the S3 path
-        if s3_path.startswith("s3://"):
-            path_parts = s3_path[5:].split("/", 1)
-            bucket_name = path_parts[0]
-            prefix = path_parts[1] if len(path_parts) > 1 else ""
-        else:
-            raise ValueError(f"Invalid S3 path: {s3_path}")
-
-        # Uses pagination to handle more than 1,000 objects (otherwise, limited to list of 1000 elements)
-        paginator = s3_client.get_paginator('list_objects_v2')
-        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
-            if 'Contents' in page:
-                files = [obj['Key'] for obj in page['Contents']]
-                geotiffs = [f"s3://{bucket_name}/{file}" for file in files if file.endswith(('.tif', '.tiff'))]
-                geotiff_files.extend(geotiffs)
-
-    except Exception as e:
-        print(f"Error accessing {s3_path}: {e}")
-
-    return geotiff_files, len(geotiff_files)
-
-
-# Uploads a shapefile to s3
-def upload_shp(in_folder, shp):
-
-    print(f"flm: Uploading to {in_folder}{shp}: {timestr()}")
-
-    shp_pattern = shp[:-4]
-
-    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
-    s3_client.upload_file(f"/tmp/{shp}", "gfw2-data", Key=f"{in_folder[15:]}{shp}")
-    s3_client.upload_file(f"/tmp/{shp_pattern}.dbf", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.dbf")
-    s3_client.upload_file(f"/tmp/{shp_pattern}.prj", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.prj")
-    s3_client.upload_file(f"/tmp/{shp_pattern}.shx", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.shx")
-
-    os.remove(f"/tmp/{shp}")
-    os.remove(f"/tmp/{shp_pattern}.dbf")
-    os.remove(f"/tmp/{shp_pattern}.prj")
-    os.remove(f"/tmp/{shp_pattern}.shx")
-
-    print(f"flm: Uploaded to {in_folder}{shp}: {timestr()}")
-
-
 # Makes a shapefile of the footprints of rasters in a folder, for checking geographical completeness of rasters
 def make_tile_footprint_shp(input_dict, no_upload):
 
@@ -506,29 +642,6 @@ def make_tile_footprint_shp(input_dict, no_upload):
     os.remove(f"/tmp/{file_paths_txt}")
 
     return(f"Completed: {timestr()}")
-
-
-# Saves a data array locally as a raster and then uploads it to s3
-def save_and_upload_raster_10x10(**kwargs):
-
-    s3_client = boto3.client("s3") # Needs to be in the same function as the upload_file call
-
-    data_array = kwargs['data']   # The data being saved
-    out_file_name = kwargs['out_file_name']   # The output file name
-    out_folder = kwargs['out_folder']   # The output folder
-
-    print(f"flm: Saving {out_file_name} locally")
-
-    profile_kwargs = {'compress': 'lzw'}   # Adds attribute to compress the output raster
-    # data_array.rio.to_raster(f"{out_file_name}", **profile_kwargs)
-    data_array.rio.to_raster(f"/tmp/{out_file_name}", **profile_kwargs)
-
-    print(f"flm: Saving {out_file_name} to {out_folder[10:]}{out_file_name}")
-
-    s3_client.upload_file(f"/tmp/{out_file_name}", "gfw2-data", Key=f"{out_folder[10:]}{out_file_name}")
-
-    # Deletes the local raster
-    os.remove(f"/tmp/{out_file_name}")
 
 
 # Creates a list of 10x10 deg tiles to create, where the list is a list of dictionaries of the form
@@ -694,6 +807,13 @@ def convert_lookup_table_to_array(spreadsheet, sheet_name, fields_to_keep):
 
     return filtered_array
 
+# Creates arrays of 0s for any missing inputs and puts them in the corresponding typed dictionary
+def complete_inputs(existing_input_list, typed_dict, datatype, chunk_length_pixels, bounds_str, tile_id, is_final, logger):
+    for dataset_name in existing_input_list:
+        if dataset_name not in typed_dict.keys():
+            typed_dict[dataset_name] = np.full((chunk_length_pixels, chunk_length_pixels), 0, dtype=datatype)
+            lu.print_and_log(f"Created {dataset_name} for chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
+    return typed_dict
 
 # Calculates stats for a chunk (numpy array), mostly using per hectare values
 # but optionally summing per pixel values to get a chunk total.
@@ -844,49 +964,22 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
         s3_client.upload_file(local_spreadsheet, "gfw2-data", Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
 
 
-
-# Gets the name of the first file in a dictionary of dataset names and folders in s3.
-# Returns dictionary of dataset names with the full path of the first file in the s3 folder.
-# From https://chatgpt.com/share/e/9a7bf947-1c32-4898-ba6b-3b932a5220c1
-def first_file_name_in_s3_folder(download_dict):
-
-    s3_client = boto3.client("s3")
-
-    # Initializes the dictionary to hold the first file paths
-    first_tiles = {}
-
-    # Iterates over the download_dict items
-    for key, folder_path in download_dict.items():
-
-        # Splits the path to get the directory part
-        dir_path = os.path.dirname(folder_path)
-
-        # Drops the s3://gfw2-data/ prefix and adds "/" to the end
-        dir_path = dir_path[len(cn.full_bucket_prefix)+1:] + "/"
-
-        # Lists metadata for everything in the bucket
-        response = s3_client.list_objects_v2(Bucket=cn.short_bucket_prefix, Prefix=dir_path, Delimiter='/')
-
-        # Checks if the folder contains any files
-        if 'Contents' in response and len(response['Contents']) > 0:
-            # Uses the first file in the folder (index 0 instead of 1)
-            first_tiles[key] = cn.full_bucket_prefix + "/" + response['Contents'][1]['Key']
-        else:
-            first_tiles[key] = None  # In case no files are found
-
-    return first_tiles
-
-
 # Gets the datatype of a raster in s3.
 # This seems much faster than the rasterio version that ChatGPT suggested later in the chat.
 # From https://chatgpt.com/share/e/a48c768d-0331-43da-9fc6-ef8a84af586c
-def get_dtype_from_s3(file_path):
-
+def get_dtype_from_s3(s3_path):
     # Constructs the /vsis3/ path
-    vsis3_path = f'/vsis3/{file_path[len("s3://"):]}'
-    # print(f"Attempting to open: {vsis3_path}")
+    vsis3_path = f'/vsis3/{s3_path[len("s3://"):]}'
+    data_type = get_dtype_from_raster(vsis3_path)
+    return data_type
 
-    dataset = gdal.Open(vsis3_path)
+def get_dtype_from_coiled(s3_path, local_path):
+    file = download_s3_file(s3_path, local_path)
+    data_type = get_dtype_from_raster(file)
+    return data_type
+
+def get_dtype_from_raster(file_path):
+    dataset = gdal.Open(file_path)
     if dataset:
         # print(f"Opened file: {vsis3_path}")
         band = dataset.GetRasterBand(1)
@@ -894,7 +987,8 @@ def get_dtype_from_s3(file_path):
         # print(f"Data type: {data_type}")
         return data_type
     else:
-        raise ValueError(f"Could not open file {vsis3_path}")
+        raise ValueError(f"Could not open file {file_path}")
+
 
 
 # Creates a dictionary of inputs where the keys are the dataset names and the values are a list with the first
@@ -998,3 +1092,352 @@ def fishnet_with_GADM_iso():
     fishnet_df = gdf[['chunk_id', 'iso']]
 
     return fishnet_df
+
+
+
+
+
+
+###################################################################################################
+# Hansenize Functions
+###################################################################################################
+# Function to build a VRT using GDAL with vsis3 paths
+    # raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
+    # output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is created
+def build_vrt_gdal_local(raw_raster_paths_list_s3, output_vrt_s3):
+    # Set the environment variable to enable random writes for S3 using vsis3
+    os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
+
+    # Convert S3 paths to vsis3 format
+    raw_raster_paths_list_vsis3 = [path.replace("s3://", "/vsis3/") for path in raw_raster_paths_list_s3]
+    output_vrt_vsis3 = output_vrt_s3.replace("s3://", "/vsis3/")
+
+    # Use GDAL to build the VRT
+    gdal.BuildVRT(output_vrt_vsis3, raw_raster_paths_list_vsis3)
+
+    #Check that s3 file exists
+    check_s3_file_created(output_vrt_s3)
+
+
+# Function to build a VRT using GDAL using tmp dir as intermediate step to download input files and build VRT
+    # raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
+    # output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is saved to
+def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
+    # Download input files locally
+    local_files = []
+    for s3_path in raw_raster_paths_list_s3:
+        local_file = s3_path.split('/')[-1]
+        download_s3_file(s3_path, local_file)
+        local_files.append(local_file)
+
+    # Use GDAL to build the VRT
+    gdal.BuildVRT(local_vrt, local_files)
+
+    #Check that local file exists
+    if os.path.exists(local_vrt):
+        print(f"File '{local_vrt}' exists at {os.path.abspath(local_vrt)}.")
+        upload_s3_file(output_vrt_s3, local_vrt)
+        check_s3_file_created(output_vrt_s3)
+
+    else:
+        print(f"File '{local_vrt}' does not exist.")
+
+# Function to read a VRT from S3 using GDAL and vsis3
+def warp_to_hansen_local(source_raster_s3_path, output_raster_s3_path, xmin, ymin, xmax, ymax, dt, no_data, tiled=True,
+                   x_pixel_window=400, y_pixel_window=400):
+    #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
+
+    # Set the environment variable to enable random writes for S3
+    os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
+
+    # Check that pixel window arguments are given if tiled = True
+    if tiled and not (x_pixel_window and y_pixel_window):
+        raise ValueError("If tiled = True, x_pixel_window and y_pixel_window must be passed as arguments")
+
+    # Convert the S3 paths to GDAL's vsis3 paths
+    source_gdal_path = source_raster_s3_path.replace("s3://", "/vsis3/")
+    output_gdal_path = output_raster_s3_path.replace("s3://", "/vsis3/")
+
+    # Open the VRT
+    dataset = gdal.Open(source_gdal_path)
+
+    if dataset:
+        if tiled == True:
+            # Warp the VRT to the new raster
+            options = gdal.WarpOptions(
+                dstSRS='EPSG:4326',  # Reproject to WGS84
+                xRes=0.00025,  # X resolution (10 degrees)
+                yRes=0.00025,  # Y resolution (10 degrees)
+                targetAlignedPixels=True,  # Ensure target aligned pixels (-tap)
+                outputBounds=[xmin, ymin, xmax, ymax],  # Output bounds
+                dstNodata=no_data,  # Set no data to 0
+                outputType=dt,  # Output data type
+                creationOptions=['COMPRESS=DEFLATE', 'TILED=YES',   # Tiling with user-specified dimensions
+                                 f'BLOCKXSIZE={x_pixel_window}',
+                                 f'BLOCKYSIZE={y_pixel_window}'],
+                format='GTiff'  # Output format
+            )
+        else:
+            # Warp the VRT to the new raster
+            options = gdal.WarpOptions(
+                dstSRS='EPSG:4326',
+                xRes=0.00025,
+                yRes=0.00025,
+                targetAlignedPixels=True,
+                outputBounds=[xmin, ymin, xmax, ymax],
+                dstNodata=no_data,
+                outputType=dt,
+                creationOptions=['COMPRESS=DEFLATE', 'TILED=NO'],  # No tiling (i.e. 40,000 x 1)
+                format='GTiff'
+            )
+
+        gdal.Warp(output_gdal_path, source_gdal_path, options=options)
+
+        # Check that file exists
+        check_s3_file_created(output_raster_s3_path)
+
+    else:
+        raise RuntimeError(f"Failed to open VRT: {source_gdal_path}")
+
+
+def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path, xmin, ymin, xmax, ymax, dt, no_data, tiled=True,
+                   x_pixel_window=400, y_pixel_window=400):
+    #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
+
+    # Set the environment variable to enable random writes for S3
+    os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
+
+    # Check that pixel window arguments are given if tiled = True
+    if tiled and not (x_pixel_window and y_pixel_window):
+        raise ValueError("If tiled = True, x_pixel_window and y_pixel_window must be passed as arguments")
+
+    # Open the VRT
+    dataset = gdal.Open(str(Path(source_raster_path)))
+
+    #Code to run gdal warp using Python API
+    if dataset:
+        if tiled == True:
+            # Warp the VRT to the new raster
+            options = gdal.WarpOptions(
+                dstSRS='EPSG:4326',  # Reproject to WGS84
+                xRes=0.00025,  # X resolution (10 degrees)
+                yRes=0.00025,  # Y resolution (10 degrees)
+                targetAlignedPixels=True,  # Ensure target aligned pixels (-tap)
+                outputBounds=[xmin, ymin, xmax, ymax],  # Output bounds
+                dstNodata=no_data,  # Set no data to 0
+                outputType=dt,  # Output data type
+                creationOptions=['COMPRESS=DEFLATE', 'TILED=YES',  # Tiling with user-specified dimensions
+                                 f'BLOCKXSIZE={x_pixel_window}',
+                                 f'BLOCKYSIZE={y_pixel_window}'],
+                format='GTiff'  # Output format
+            )
+        else:
+            # Warp the VRT to the new raster
+            options = gdal.WarpOptions(
+                dstSRS='EPSG:4326',
+                xRes=0.00025,
+                yRes=0.00025,
+                targetAlignedPixels=True,
+                outputBounds=[xmin, ymin, xmax, ymax],
+                dstNodata=no_data,
+                outputType=dt,
+                creationOptions=['COMPRESS=DEFLATE', 'TILED=NO'],  # No tiling (i.e. 40,000 x 1)
+                format='GTiff'
+            )
+
+        gdal.Warp(str(Path(filename)),  str(Path(source_raster_path)), options=options)
+
+        # Uploads tile to s3
+        upload_s3_file(output_raster_s3_path, filename)
+
+        # Check that file exists
+        if check_s3_file_created(output_raster_s3_path):
+            # Remove local 10x10 degree tile after uploading to s3
+            os.remove(str(Path(filename)))
+
+    else:
+        raise RuntimeError(f"Failed to open VRT: {source_raster_path}")
+
+
+def delete_build_vrt_input_files(raw_raster_paths_list_s3, vrt):
+    # Delete local input files
+    for s3_path in raw_raster_paths_list_s3:
+        local_file = s3_path.split('/')[-1]
+        os.remove(str(Path(local_file)))
+
+    # Delete local vrt
+    os.remove(str(Path(vrt)))
+
+
+###################################################################################################
+# 4km Map Function
+###################################################################################################
+def reaggregate_resolution(data, original_res, target_res):
+    #Courtesy of ChatGPT
+    #TODO include the ChatGPT conversation link. Useful to come back to it sometimes...
+    """
+    Reaggregates a numpy array by summing values within the target resolution window.
+
+    Parameters:
+        data (numpy array): The input array at high resolution.
+        original_res (float): The resolution of the input data.
+        target_res (float): The desired resolution for the output data.
+
+    Returns:
+        numpy array: The reaggregated array at the desired resolution.
+    """
+    factor = int(target_res / original_res)
+    new_shape = (
+        data.shape[0] // factor,
+        factor,
+        data.shape[1] // factor,
+        factor
+    )
+    # Reshape and sum
+    return data.reshape(new_shape).sum(axis=(1, 3))
+
+
+###################################################################################################
+# Zonal Stats Functions
+###################################################################################################
+# Function to calculate the number of bits needed to represent the maximum value in the array
+def calculate_bits_needed(max_value):
+    return int(np.ceil(np.log2(max_value + 1)))
+
+
+# Convert numpy arrays to dask arrays if needed
+def ensure_dask_array(array, chunks="auto"):
+    if isinstance(array, np.ndarray):
+        return da.from_array(array, chunks=chunks)
+    return array
+
+
+# Ensure all layers have a consistent data type (int16) for bit-shifting
+def ensure_dtype(layer_array, dtype=np.int16):
+    if layer_array.dtype != dtype:
+        return layer_array.astype(dtype)
+    return layer_array
+
+
+# Dynamically combine layers using bit-shifting
+def combine_zone_layers(sorted_layers):
+    combined_array = None
+    total_shift = 0
+
+    # Loop through each layer
+    for layer_name, layer_array in sorted_layers:
+        # Convert to dask.array if it's a numpy array
+        layer_array = ensure_dask_array(layer_array)
+
+        # Convert layer to int16 if necessary for safe bit-shifting
+        layer_array = ensure_dtype(layer_array)
+
+        # Find the maximum value in the layer
+        max_value = da.max(layer_array).compute()  # Compute to get the actual maximum value
+
+        # Determine the number of bits needed to represent this layer
+        bits_needed = calculate_bits_needed(max_value)
+
+        # Print unique values in the current layer before shifting
+        # print(f"Unique values in layer '{layer_name}' before shifting: {np.unique(layer_array.compute())}")
+
+        # Shift the layer by the cumulative number of bits (based on previous layers)
+        shifted_layer = layer_array << total_shift
+
+        # Print unique values in the current layer after shifting
+        # print(f"Unique values in layer '{layer_name}' after shifting: {np.unique(shifted_layer.compute())}")
+
+        # If this is the first layer, initialize the combined array
+        if combined_array is None:
+            combined_array = shifted_layer
+        else:
+            # Use bitwise OR to combine the shifted layer with the previous layers
+            combined_array = combined_array | shifted_layer
+
+        # Update the total bit shift for the next layer
+        total_shift += bits_needed
+
+    return combined_array
+
+
+# converts all numpy arrays in data dictionary to same type (default set to float32)
+def to_numpy_type(input_dict, check_type=np.float32):
+    out_dict = dict()
+    for key, value in input_dict.items():
+        if value.dtype != check_type:
+            out_dict[key] = value.astype(check_type)
+        else:
+            out_dict[key] = value
+    return out_dict
+
+
+# converts a python dictionary to a numba dictionary (data dictionaries all need to be the same type)
+def to_numba_dict(input_dict):
+    from numba import from_dtype
+    out = None
+
+    for key, value in input_dict.items():
+        if out is None:
+            dict_type = from_dtype(value.dtype)
+            ndim = value.ndim
+            out = Dict.empty(key_type=types.unicode_type, value_type=types.Array(dict_type, ndim, "A"))
+        out[key] = value
+    return out
+
+
+# calculates per-pixel carbon stocks/ fluxes by converting square meter pixel area rasters to hectares and multiplying densities/ factors by pixel area in hectares
+@jit(nopython=True)
+def calculate_total_mgc(numba_dict, input_units="MgC_ha", rep_str="MgC", pixel_area_name="pixel_area_m",
+                        area_ha_name="pixel_area_ha"):
+    output_dict = dict()
+    dense_flux_arrays = dict()
+    pixel_area = numba_dict[pixel_area_name]
+
+    for key, value in numba_dict.items():
+        if key != pixel_area_name:
+            updated_key = key.replace(input_units, rep_str)
+            output_dict[updated_key] = np.zeros_like(value)
+            dense_flux_arrays[updated_key] = value
+    output_dict[area_ha_name] = np.zeros_like(pixel_area)
+
+    # Loop over each pixel
+    for key, value in dense_flux_arrays.items():
+        for i in range(value.shape[0]):
+            for j in range(value.shape[1]):
+                # Convert pixel_area from square meters to hectares
+                square_meters_to_hectares = np.float32(10000.0)
+                area_in_hectares = pixel_area[i, j] / square_meters_to_hectares
+                output_dict[key][i, j] = value[i, j] * area_in_hectares
+                output_dict[area_ha_name][i, j] = area_in_hectares
+
+    return output_dict
+
+
+# Function to reverse the bit-shifting process
+def reverse_bit_shifting(df, column_name, sorted_layers):
+    # Calculate bits_needed_per_layer based on max values from Dask arrays in sorted_layers
+    bits_needed_per_layer = []
+
+    for layer_name, layer_array in sorted_layers:
+        # Ensure the layer is a Dask array and calculate max value
+        layer_array = ensure_dask_array(layer_array)
+        max_value = da.max(layer_array).compute()  # Compute the maximum value
+
+        # Determine the number of bits needed to represent this layer
+        bits_needed = calculate_bits_needed(max_value)
+        bits_needed_per_layer.append(bits_needed)
+
+    total_shift = sum(bits_needed_per_layer)  # Start with the total bits used
+
+    # Reverse bit-shifting: loop through each layer in reverse order
+    layers = [layer_name for layer_name, _ in sorted_layers]  # Get the sorted layer names
+    for i in range(len(layers) - 1, -1, -1):
+        layer = layers[i]
+        bits_needed = bits_needed_per_layer[i]
+        total_shift -= bits_needed
+        # Create a mask for extracting the current layer
+        mask = (1 << bits_needed) - 1
+        # Shift right and apply the mask to extract the current layer's values
+        df[layer] = df[column_name].apply(lambda x: (x >> total_shift) & mask)
+
+    return df

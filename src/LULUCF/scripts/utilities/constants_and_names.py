@@ -194,12 +194,32 @@ r_s_ratio_pattern = "BGB_AGB_ratio"
 continent_ecozone_path = f"{full_bucket_prefix}/climate/carbon_model/fao_ecozones/ecozone_continent/20190116/processed/"
 continent_ecozone_pattern = "fao_ecozones_continents_processed"
 
+#TODO: @Mel - Change in hansenize + pre-processing to use path, pattern, and intervals. Delete after.
+secondary_natural_forest_raw_dir =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/20241004/"
+secondary_natural_forest_0_5_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__0_5_years.tif"   # both the raw raster name and processed pattern for hansenized tiles
+secondary_natural_forest_6_10_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__6_10_years.tif"
+secondary_natural_forest_11_15_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__11_15_years.tif"
+secondary_natural_forest_16_20_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__16_20_years.tif"
+secondary_natural_forest_21_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_100_years.tif"
+secondary_natural_forest_0_5_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_0_5/"
+secondary_natural_forest_6_10_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_6_10/"
+secondary_natural_forest_11_15_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_11_15/"
+secondary_natural_forest_16_20_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_16_20/"
+secondary_natural_forest_21_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_21_100/"
+
 natural_forest_growth_curve_path = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/"
 natural_forest_growth_curve_pattern = "natural_forest_mean_growth_rate__Mg_AGC_ha_yr"
 natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_100']
 
-drivers_path = f"{full_bucket_prefix}/drivers_of_loss/1_km/processed/20241121/"
-drivers_pattern = "drivers_of_TCL_1_km_20241121"
+#TODO: Update to path pattern instead of processed_dir/ pattern in hansenize. Delete processed after.
+drivers_run_date = '20241224'
+drivers_raw_dir = f"{full_bucket_prefix}/drivers_of_loss/1_km/raw/update2023_20241218/"
+drivers_raw_pattern = "drivers_forest_loss_1km_2023_band1.tif"
+drivers_processed_dir = f"{full_bucket_prefix}/drivers_of_loss/1_km/processed/{drivers_run_date}/"
+drivers_processed_pattern = f"drivers_of_TCL_1_km_{drivers_run_date}.tif"
+
+drivers_path = f"{full_bucket_prefix}/drivers_of_loss/1_km/processed/{drivers_run_date}/"
+drivers_pattern = f"drivers_of_TCL_1_km_{drivers_run_date}"
 
 pixel_area_path = f"{full_bucket_prefix}/analyses/area_28m/"
 pixel_area_pattern = "hanson_2013_area"
@@ -255,8 +275,61 @@ burned_area_pattern = "ba"
 organic_soil_extent_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"
 organic_soil_extent_pattern = "peat_mask_processed"
 
+#cropland emissions
+cropland_emis_run_date =  '20241204'
+global_cropland_emissions_raw_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20241126/year_2020/all_sources/"
+global_cropland_emissions_processed_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/cropland_emissions/processed/{cropland_emis_run_date}/year_2020/all_sources"
 
-##### Outputs
+global_cropland_mean_rate_harvest_area_all_crops_peat_2006_raw_pattern = "Global_grid_all_GHGs_cropland_mean_rate_harvest_area_CO2eq_all_crops_2006_kg_ha_CO2.tif"
+global_cropland_mean_rate_harvest_area_all_crops_peat_2006_processed_dir = f"{global_cropland_emissions_processed_dir}/mean_rate/including_peatland/2006/harvest_area/"
+global_cropland_mean_rate_harvest_area_all_crops_peat_2006_processed_pattern = f"all_GHGs_cropland_mean_rate_harvest_area_CO2eq_all_crops_2006_kg_ha_CO2.tif"
+
+global_cropland_mean_rate_harvest_area_all_crops_peat_2019_raw_pattern = "Global_grid_all_GHGs_cropland_mean_rate_harvest_area_CO2eq_all_crops_2019_kg_ha_CO2.tif"
+global_cropland_mean_rate_harvest_area_all_crops_peat_2019_processed_dir = f"{global_cropland_emissions_processed_dir}/mean_rate/including_peatland/2019/harvest_area/"
+global_cropland_mean_rate_harvest_area_all_crops_peat_2019_processed_pattern = f"all_GHGs_cropland_mean_rate_harvest_area_CO2eq_all_crops_2019_kg_ha_CO2.tif"
+
+global_cropland_mean_rate_harvest_area_all_crops_nonpeat_2006_raw_pattern = "Global_grid_all_GHGs_cropland_mean_rate_harvest_area_CO2eq_all_crops_NonPeatland_2006_kg_ha_CO2.tif"
+global_cropland_mean_rate_harvest_area_all_crops_nonpeat_2006_processed_dir = f"{global_cropland_emissions_processed_dir}/mean_rate/non_peatland/2006/harvest_area/"
+global_cropland_mean_rate_harvest_area_all_crops_nonpeat_2006_processed_pattern = f"all_GHGs_cropland_mean_rate_harvest_area_CO2eq_all_crops_nonpeatland_2006_kg_ha_CO2.tif"
+
+global_cropland_mean_rate_harvest_area_all_crops_nonpeat_2019_raw_pattern = "Global_grid_all_GHGs_cropland_mean_rate_harvest_area_CO2eq_all_crops_NonPeatland_2019_kg_ha_CO2.tif"
+global_cropland_mean_rate_harvest_area_all_crops_nonpeat_2019_processed_dir = f"{global_cropland_emissions_processed_dir}/mean_rate/non_peatland/2019/harvest_area/"
+global_cropland_mean_rate_harvest_area_all_crops_nonpeat_2019_processed_pattern = f"all_GHGs_cropland_mean_rate_harvest_area_CO2eq_all_crops_nonpeatland_2019_kg_ha_CO2.tif"
+
+global_cropland_mean_rate_physical_area_all_crops_peat_2006_raw_pattern = "Global_grid_all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_2006_kg_ha_CO2.tif"
+global_cropland_mean_rate_physical_area_all_crops_peat_2006_processed_dir = f"{global_cropland_emissions_processed_dir}/mean_rate/including_peatland/2006/physical_area/"
+global_cropland_mean_rate_physical_area_all_crops_peat_2006_processed_pattern = f"all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_2006_kg_ha_CO2.tif"
+
+global_cropland_mean_rate_physical_area_all_crops_peat_2019_raw_pattern = "Global_grid_all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_2019_kg_ha_CO2.tif"
+global_cropland_mean_rate_physical_area_all_crops_peat_2019_processed_dir = f"{global_cropland_emissions_processed_dir}/mean_rate/including_peatland/2019/physical_area/"
+global_cropland_mean_rate_physical_area_all_crops_peat_2019_processed_pattern = f"all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_2019_kg_ha_CO2.tif"
+
+global_cropland_mean_rate_physical_area_all_crops_nonpeat_2006_raw_pattern = "Global_grid_all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_NonPeatland_2006_kg_ha_CO2.tif"
+global_cropland_mean_rate_physical_area_all_crops_nonpeat_2006_processed_dir = f"{global_cropland_emissions_processed_dir}/mean_rate/non_peatland/2006/physical_area/"
+global_cropland_mean_rate_physical_area_all_crops_nonpeat_2006_processed_pattern = f"all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_nonpeatland_2006_kg_ha_CO2.tif"
+
+global_cropland_mean_rate_physical_area_all_crops_nonpeat_2019_raw_pattern = "Global_grid_all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_NonPeatland_2019_kg_ha_CO2.tif"
+global_cropland_mean_rate_physical_area_all_crops_nonpeat_2019_processed_dir = f"{global_cropland_emissions_processed_dir}/mean_rate/non_peatland/2019/physical_area/"
+global_cropland_mean_rate_physical_area_all_crops_nonpeat_2019_processed_pattern = f"all_GHGs_cropland_mean_rate_physical_area_CO2eq_all_crops_nonpeatland_2019_kg_ha_CO2.tif"
+
+global_cropland_total_amount_all_crops_peat_2006_raw_pattern = "Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_2006_kg_CO2.tif"
+global_cropland_total_amount_all_crops_peat_2006_processed_dir = f"{global_cropland_emissions_processed_dir}/total_amount/including_peatland/2006/"
+global_cropland_total_amount_all_crops_peat_2006_processed_pattern = f"all_GHGs_cropland_total_amount_CO2eq_all_crops_2006_kg_CO2.tif"
+
+global_cropland_total_amount_all_crops_peat_2019_raw_pattern = "Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_2019_kg_CO2.tif"
+global_cropland_total_amount_all_crops_peat_2019_processed_dir = f"{global_cropland_emissions_processed_dir}/total_amount/including_peatland/2019/"
+global_cropland_total_amount_all_crops_peat_2019_processed_pattern = f"all_GHGs_cropland_total_amount_CO2eq_all_crops_2019_kg_CO2.tif"
+
+global_cropland_total_amount_all_crops_nonpeat_2006_raw_pattern = "Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2006_kg_CO2.tif"
+global_cropland_total_amount_all_crops_nonpeat_2006_processed_dir = f"{global_cropland_emissions_processed_dir}/total_amount/non_peatland/2006/"
+global_cropland_total_amount_all_crops_nonpeat_2006_processed_pattern = f"all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2006_kg_CO2.tif"
+
+global_cropland_total_amount_all_crops_nonpeat_2019_raw_pattern = "Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif"
+global_cropland_total_amount_all_crops_nonpeat_2019_processed_dir = f"{global_cropland_emissions_processed_dir}/total_amount/non_peatland/2019/"
+global_cropland_total_amount_all_crops_nonpeat_2019_processed_pattern = f"all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif"
+
+
+### Outputs
 
 outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs/"
 
@@ -428,3 +501,36 @@ LULUCF_output_folders = [
     f"{outputs_path}{land_state_node_path_part}/2010_2015/RES_pixels/DATE/",
     f"{outputs_path}{land_state_node_path_part}/2015_2020/RES_pixels/DATE/"
 ]
+
+tile_id_list = [
+                '00N_000E', '00N_010E', '00N_020E', '00N_030E', '00N_040E', '00N_040W', '00N_050W', '00N_060W', '00N_070E',
+                '00N_070W', '00N_080W', '00N_090E', '00N_090W', '00N_100E', '00N_100W', '00N_110E', '00N_120E', '00N_130E',
+                '00N_140E', '00N_150E', '00N_160E', '10N_000E', '10N_010E', '10N_010W', '10N_020E', '10N_020W', '10N_030E',
+                '10N_040E', '10N_050W', '10N_060W', '10N_070E', '10N_070W', '10N_080E', '10N_080W', '10N_090E', '10N_090W',
+                '10N_100E', '10N_100W', '10N_110E', '10N_120E', '10N_130E', '10N_150E', '10N_160E', '10S_010E', '10S_020E',
+                '10S_030E', '10S_040E', '10S_040W', '10S_050E', '10S_050W', '10S_060W', '10S_070W', '10S_080W', '10S_110E',
+                '10S_120E', '10S_130E', '10S_140E', '10S_150E', '10S_160E', '10S_170E', '10S_180W', '20N_000E', '20N_010E',
+                '20N_010W', '20N_020E', '20N_020W', '20N_030E', '20N_040E', '20N_050E', '20N_060W', '20N_070E', '20N_070W',
+                '20N_080E', '20N_080W', '20N_090E', '20N_090W', '20N_100E', '20N_100W', '20N_110E', '20N_110W', '20N_120E',
+                '20N_120W', '20N_160W', '20S_010E', '20S_020E', '20S_030E', '20S_040E', '20S_050E', '20S_050W', '20S_060W',
+                '20S_070W', '20S_080W', '20S_110E', '20S_120E', '20S_130E', '20S_140E', '20S_150E', '20S_160E', '20S_180W',
+                '30N_000E', '30N_010E', '30N_010W', '30N_020E', '30N_020W', '30N_030E', '30N_040E', '30N_050E', '30N_060E',
+                '30N_070E', '30N_080E', '30N_080W', '30N_090E', '30N_090W', '30N_100E', '30N_100W', '30N_110E', '30N_110W',
+                '30N_120E', '30N_120W', '30N_160W', '30N_170W', '30S_010E', '30S_020E', '30S_030E', '30S_060W', '30S_070W',
+                '30S_080W', '30S_110E', '30S_120E', '30S_130E', '30S_140E', '30S_150E', '30S_170E', '40N_000E', '40N_010E',
+                '40N_010W', '40N_020E', '40N_020W', '40N_030E', '40N_040E', '40N_050E', '40N_060E', '40N_070E', '40N_070W',
+                '40N_080E', '40N_080W', '40N_090E', '40N_090W', '40N_100E', '40N_100W', '40N_110E', '40N_110W', '40N_120E',
+                '40N_120W', '40N_130E', '40N_130W', '40N_140E', '40S_070W', '40S_080W', '40S_140E', '40S_160E', '40S_170E',
+                '50N_000E', '50N_010E', '50N_010W', '50N_020E', '50N_030E', '50N_040E', '50N_050E', '50N_060E', '50N_060W',
+                '50N_070E', '50N_070W', '50N_080E', '50N_080W', '50N_090E', '50N_090W', '50N_100E', '50N_100W', '50N_110E',
+                '50N_110W', '50N_120E', '50N_120W', '50N_130E', '50N_130W', '50N_140E', '50N_150E', '50S_060W', '50S_070W',
+                '50S_080W', '60N_000E', '60N_010E', '60N_010W', '60N_020E', '60N_020W', '60N_030E', '60N_040E', '60N_050E',
+                '60N_060E', '60N_060W', '60N_070E', '60N_070W', '60N_080E', '60N_080W', '60N_090E', '60N_090W', '60N_100E',
+                '60N_100W', '60N_110E', '60N_110W', '60N_120E', '60N_120W', '60N_130E', '60N_130W', '60N_140E', '60N_140W',
+                '60N_150E', '60N_150W', '60N_160E', '60N_160W', '60N_170E', '60N_170W', '60N_180W', '70N_000E', '70N_010E',
+                '70N_020E', '70N_030E', '70N_040E', '70N_050E', '70N_060E', '70N_070E', '70N_070W', '70N_080E', '70N_080W',
+                '70N_090E', '70N_090W', '70N_100E', '70N_100W', '70N_110E', '70N_110W', '70N_120E', '70N_120W', '70N_130E',
+                '70N_130W', '70N_140E', '70N_140W', '70N_150E', '70N_150W', '70N_160E', '70N_160W', '70N_170E', '70N_170W',
+                '70N_180W', '80N_010E', '80N_020E', '80N_030E', '80N_070E', '80N_080E', '80N_090E', '80N_100E', '80N_110E',
+                '80N_120E', '80N_130E', '80N_130W', '80N_140E', '80N_140W', '80N_150E', '80N_150W', '80N_160E', '80N_160W',
+                '80N_170E', '80N_170W']
