@@ -747,6 +747,13 @@ def convert_lookup_table_to_array(spreadsheet, sheet_name, fields_to_keep):
 
     return filtered_array
 
+# Creates arrays of 0s for any missing inputs and puts them in the corresponding typed dictionary
+def complete_inputs(existing_input_list, typed_dict, datatype, chunk_length_pixels, bounds_str, tile_id, is_final, logger):
+    for dataset_name in existing_input_list:
+        if dataset_name not in typed_dict.keys():
+            typed_dict[dataset_name] = np.full((chunk_length_pixels, chunk_length_pixels), 0, dtype=datatype)
+            lu.print_and_log(f"Created {dataset_name} for chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
+    return typed_dict
 
 # Calculates stats for a chunk (numpy array), mostly using per hectare values
 # but optionally summing per pixel values to get a chunk total.
@@ -1280,3 +1287,148 @@ def reaggregate_resolution(data, original_res, target_res):
     # Reshape and sum
     return data.reshape(new_shape).sum(axis=(1, 3))
 
+
+###################################################################################################
+# Zonal Stats Functions
+###################################################################################################
+# Function to calculate the number of bits needed to represent the maximum value in the array
+def calculate_bits_needed(max_value):
+    return int(np.ceil(np.log2(max_value + 1)))
+
+
+# Convert numpy arrays to dask arrays if needed
+def ensure_dask_array(array, chunks="auto"):
+    if isinstance(array, np.ndarray):
+        return da.from_array(array, chunks=chunks)
+    return array
+
+
+# Ensure all layers have a consistent data type (int16) for bit-shifting
+def ensure_dtype(layer_array, dtype=np.int16):
+    if layer_array.dtype != dtype:
+        return layer_array.astype(dtype)
+    return layer_array
+
+
+# Dynamically combine layers using bit-shifting
+def combine_zone_layers(sorted_layers):
+    combined_array = None
+    total_shift = 0
+
+    # Loop through each layer
+    for layer_name, layer_array in sorted_layers:
+        # Convert to dask.array if it's a numpy array
+        layer_array = ensure_dask_array(layer_array)
+
+        # Convert layer to int16 if necessary for safe bit-shifting
+        layer_array = ensure_dtype(layer_array)
+
+        # Find the maximum value in the layer
+        max_value = da.max(layer_array).compute()  # Compute to get the actual maximum value
+
+        # Determine the number of bits needed to represent this layer
+        bits_needed = calculate_bits_needed(max_value)
+
+        # Print unique values in the current layer before shifting
+        # print(f"Unique values in layer '{layer_name}' before shifting: {np.unique(layer_array.compute())}")
+
+        # Shift the layer by the cumulative number of bits (based on previous layers)
+        shifted_layer = layer_array << total_shift
+
+        # Print unique values in the current layer after shifting
+        # print(f"Unique values in layer '{layer_name}' after shifting: {np.unique(shifted_layer.compute())}")
+
+        # If this is the first layer, initialize the combined array
+        if combined_array is None:
+            combined_array = shifted_layer
+        else:
+            # Use bitwise OR to combine the shifted layer with the previous layers
+            combined_array = combined_array | shifted_layer
+
+        # Update the total bit shift for the next layer
+        total_shift += bits_needed
+
+    return combined_array
+
+
+# converts all numpy arrays in data dictionary to same type (default set to float32)
+def to_numpy_type(input_dict, check_type=np.float32):
+    out_dict = dict()
+    for key, value in input_dict.items():
+        if value.dtype != check_type:
+            out_dict[key] = value.astype(check_type)
+        else:
+            out_dict[key] = value
+    return out_dict
+
+
+# converts a python dictionary to a numba dictionary (data dictionaries all need to be the same type)
+def to_numba_dict(input_dict):
+    from numba import from_dtype
+    out = None
+
+    for key, value in input_dict.items():
+        if out is None:
+            dict_type = from_dtype(value.dtype)
+            ndim = value.ndim
+            out = Dict.empty(key_type=types.unicode_type, value_type=types.Array(dict_type, ndim, "A"))
+        out[key] = value
+    return out
+
+
+# calculates per-pixel carbon stocks/ fluxes by converting square meter pixel area rasters to hectares and multiplying densities/ factors by pixel area in hectares
+@jit(nopython=True)
+def calculate_total_mgc(numba_dict, input_units="MgC_ha", rep_str="MgC", pixel_area_name="pixel_area_m",
+                        area_ha_name="pixel_area_ha"):
+    output_dict = dict()
+    dense_flux_arrays = dict()
+    pixel_area = numba_dict[pixel_area_name]
+
+    for key, value in numba_dict.items():
+        if key != pixel_area_name:
+            updated_key = key.replace(input_units, rep_str)
+            output_dict[updated_key] = np.zeros_like(value)
+            dense_flux_arrays[updated_key] = value
+    output_dict[area_ha_name] = np.zeros_like(pixel_area)
+
+    # Loop over each pixel
+    for key, value in dense_flux_arrays.items():
+        for i in range(value.shape[0]):
+            for j in range(value.shape[1]):
+                # Convert pixel_area from square meters to hectares
+                square_meters_to_hectares = np.float32(10000.0)
+                area_in_hectares = pixel_area[i, j] / square_meters_to_hectares
+                output_dict[key][i, j] = value[i, j] * area_in_hectares
+                output_dict[area_ha_name][i, j] = area_in_hectares
+
+    return output_dict
+
+
+# Function to reverse the bit-shifting process
+def reverse_bit_shifting(df, column_name, sorted_layers):
+    # Calculate bits_needed_per_layer based on max values from Dask arrays in sorted_layers
+    bits_needed_per_layer = []
+
+    for layer_name, layer_array in sorted_layers:
+        # Ensure the layer is a Dask array and calculate max value
+        layer_array = ensure_dask_array(layer_array)
+        max_value = da.max(layer_array).compute()  # Compute the maximum value
+
+        # Determine the number of bits needed to represent this layer
+        bits_needed = calculate_bits_needed(max_value)
+        bits_needed_per_layer.append(bits_needed)
+
+    total_shift = sum(bits_needed_per_layer)  # Start with the total bits used
+
+    # Reverse bit-shifting: loop through each layer in reverse order
+    layers = [layer_name for layer_name, _ in sorted_layers]  # Get the sorted layer names
+    for i in range(len(layers) - 1, -1, -1):
+        layer = layers[i]
+        bits_needed = bits_needed_per_layer[i]
+        total_shift -= bits_needed
+        # Create a mask for extracting the current layer
+        mask = (1 << bits_needed) - 1
+        # Shift right and apply the mask to extract the current layer's values
+        df[layer] = df[column_name].apply(lambda x: (x >> total_shift) & mask)
+
+    return df
