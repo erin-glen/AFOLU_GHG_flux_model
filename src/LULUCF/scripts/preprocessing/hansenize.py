@@ -2,6 +2,7 @@
 Run from AFOLU_GHG_flux_model
 
 Local:
+python -m src.LULUCF.scripts.preprocessing.hansenize -cn Hansenize_drivers_2023_TCL_update_data -ct local -p drivers
 python -m src.LULUCF.scripts.preprocessing.hansenize -cn Hansenize_cropland_emissions_data -ct local -p cropland_emissions
 
 Test:
@@ -53,56 +54,56 @@ def main(cluster_name, cluster_type, process, delete_local_files):
     if 'drivers' in process:
         download_upload_dictionary["drivers"] = {
             'raw_dir': cn.drivers_raw_dir,
-            'raw_pattern': cn.drivers_pattern,
+            'raw_pattern': cn.drivers_raw_pattern,
             'vrt': "drivers.vrt",
             'processed_dir': cn.drivers_processed_dir,
             #'processed_dir': "s3://gfw2-data/drivers_of_loss/1_km/processed/coiled_test/",
-            'processed_pattern': cn.drivers_pattern
+            'processed_pattern': cn.drivers_processed_pattern
         }
 
     # Add Robinson et al secondary natural forest growth rates
-    if 'secondary_natural_forest' in process:
-        download_upload_dictionary["secondary_natural_forest_0_5"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
-            'vrt': "secondary_natural_forest_0_5.vrt",
-            'processed_dir': cn.secondary_natural_forest_0_5_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_0_5_pattern
-        }
-
-        download_upload_dictionary["secondary_natural_forest_6_10"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_6_10_pattern,
-            'vrt': "secondary_natural_forest_6_10.vrt",
-            'processed_dir': cn.secondary_natural_forest_6_10_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_6_10_pattern
-        }
-
-        download_upload_dictionary["secondary_natural_forest_11_15"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_11_15_pattern,
-            'vrt': "secondary_natural_forest_11_15.vrt",
-            'processed_dir': cn.secondary_natural_forest_11_15_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_11_15_pattern
-        }
-
-        download_upload_dictionary["secondary_natural_forest_16_20"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_16_20_pattern,
-            'vrt': "secondary_natural_forest_16_20.vrt",
-            'processed_dir': cn.secondary_natural_forest_16_20_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_16_20_pattern
-        }
-
-        download_upload_dictionary["secondary_natural_forest_21_100"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_21_100_pattern,
-            'vrt': "secondary_natural_forest_21_100.vrt",
-            'processed_dir': cn.secondary_natural_forest_21_100_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_21_100_pattern
-        }
-
-    if 'cropland_emissions' in process:
+    # if 'secondary_natural_forest' in process:
+    #     download_upload_dictionary["secondary_natural_forest_0_5"] = {
+    #         'raw_dir': cn.secondary_natural_forest_raw_dir,
+    #         'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
+    #         'vrt': "secondary_natural_forest_0_5.vrt",
+    #         'processed_dir': cn.secondary_natural_forest_0_5_processed_dir,
+    #         'processed_pattern': cn.secondary_natural_forest_0_5_pattern
+    #     }
+    #
+    #     download_upload_dictionary["secondary_natural_forest_6_10"] = {
+    #         'raw_dir': cn.secondary_natural_forest_raw_dir,
+    #         'raw_pattern': cn.secondary_natural_forest_6_10_pattern,
+    #         'vrt': "secondary_natural_forest_6_10.vrt",
+    #         'processed_dir': cn.secondary_natural_forest_6_10_processed_dir,
+    #         'processed_pattern': cn.secondary_natural_forest_6_10_pattern
+    #     }
+    #
+    #     download_upload_dictionary["secondary_natural_forest_11_15"] = {
+    #         'raw_dir': cn.secondary_natural_forest_raw_dir,
+    #         'raw_pattern': cn.secondary_natural_forest_11_15_pattern,
+    #         'vrt': "secondary_natural_forest_11_15.vrt",
+    #         'processed_dir': cn.secondary_natural_forest_11_15_processed_dir,
+    #         'processed_pattern': cn.secondary_natural_forest_11_15_pattern
+    #     }
+    #
+    #     download_upload_dictionary["secondary_natural_forest_16_20"] = {
+    #         'raw_dir': cn.secondary_natural_forest_raw_dir,
+    #         'raw_pattern': cn.secondary_natural_forest_16_20_pattern,
+    #         'vrt': "secondary_natural_forest_16_20.vrt",
+    #         'processed_dir': cn.secondary_natural_forest_16_20_processed_dir,
+    #         'processed_pattern': cn.secondary_natural_forest_16_20_pattern
+    #     }
+    #
+    #     download_upload_dictionary["secondary_natural_forest_21_100"] = {
+    #         'raw_dir': cn.secondary_natural_forest_raw_dir,
+    #         'raw_pattern': cn.secondary_natural_forest_21_100_pattern,
+    #         'vrt': "secondary_natural_forest_21_100.vrt",
+    #         'processed_dir': cn.secondary_natural_forest_21_100_processed_dir,
+    #         'processed_pattern': cn.secondary_natural_forest_21_100_pattern
+    #     }
+    #
+    # if 'cropland_emissions' in process:
         # download_upload_dictionary["global_cropland_mean_rate_harvest_area_all_crops_peat_2006"] = {
         #     'raw_dir': cn.global_cropland_emissions_raw_dir,
         #     'raw_pattern': cn.global_cropland_mean_rate_harvest_area_all_crops_peat_2006_raw_pattern,
@@ -140,15 +141,15 @@ def main(cluster_name, cluster_type, process, delete_local_files):
         #     'processed_dir': cn.global_cropland_mean_rate_physical_area_all_crops_peat_2006_processed_dir,
         #     'processed_pattern': cn.global_cropland_mean_rate_physical_area_all_crops_peat_2006_processed_pattern
         # }
-
-        download_upload_dictionary["global_cropland_mean_rate_physical_area_all_crops_peat_2019"] = {
-            'raw_dir': cn.global_cropland_emissions_raw_dir,
-            'raw_pattern': cn.global_cropland_mean_rate_physical_area_all_crops_peat_2019_raw_pattern,
-            'vrt': "global_cropland_mean_rate_physical_area_all_crops_peat_2019.vrt",
-            'processed_dir': cn.global_cropland_mean_rate_physical_area_all_crops_peat_2019_processed_dir,
-            'processed_pattern': cn.global_cropland_mean_rate_physical_area_all_crops_peat_2019_processed_pattern
-        }
-
+        #
+        # download_upload_dictionary["global_cropland_mean_rate_physical_area_all_crops_peat_2019"] = {
+        #     'raw_dir': cn.global_cropland_emissions_raw_dir,
+        #     'raw_pattern': cn.global_cropland_mean_rate_physical_area_all_crops_peat_2019_raw_pattern,
+        #     'vrt': "global_cropland_mean_rate_physical_area_all_crops_peat_2019.vrt",
+        #     'processed_dir': cn.global_cropland_mean_rate_physical_area_all_crops_peat_2019_processed_dir,
+        #     'processed_pattern': cn.global_cropland_mean_rate_physical_area_all_crops_peat_2019_processed_pattern
+        # }
+        #
         # download_upload_dictionary["global_cropland_mean_rate_physical_area_all_crops_nonpeat_2006"] = {
         #     'raw_dir': cn.global_cropland_emissions_raw_dir,
         #     'raw_pattern': cn.global_cropland_mean_rate_physical_area_all_crops_nonpeat_2006_raw_pattern,

@@ -91,12 +91,17 @@ def boundstr(bounds):
     bounds_str = "_".join([str(round(x)) for x in bounds])
     return bounds_str
 
-
 # Chunk length in pixels
 def calc_chunk_length_pixels(bounds):
     chunk_length_pixels = int((bounds[3] - bounds[1]) * (40000 / 10))
     return chunk_length_pixels
 
+# Creates list of bounding boxes for chunks from a dataframe column structured as W_S_E_N.
+# Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+def process_chunk_id(chunk_id):
+    # Split by underscore
+    bounding_box = list(map(float, chunk_id.split('_')))
+    return bounding_box
 
 # Maps GDAL data type to the appropriate string value
 gdal_dtype_mapping = {
@@ -121,7 +126,6 @@ def map_to_numpy_dtype(data_type):
     }
     return dtype_map.get(data_type, 'float32')  # Defaults to 'float32' if argument not found
 
-
 # Gets the W, S, E, N bounds of a 10x10 degree tile
 def get_10x10_tile_bounds(tile_id):
     if "S" in tile_id:
@@ -142,7 +146,7 @@ def get_10x10_tile_bounds(tile_id):
 
 
 # Returns list of all chunk boundaries within a bounding box for chunks of a given size
-def get_chunk_bounds(bounding_box, chunk_size):
+def get_chunk_bounds_from_bounding_box(bounding_box, chunk_size):
     min_x = bounding_box[0]
     min_y = bounding_box[1]
     max_x = bounding_box[2]
@@ -167,7 +171,6 @@ def get_chunk_bounds(bounding_box, chunk_size):
 
     return chunks
 
-
 # Returns the encompassing tile_id string in the form YYN/S_XXXE/W based on a coordinate
 def xy_to_tile_id(top_left_x, top_left_y):
     lat_ceil = math.ceil(top_left_y / 10.0) * 10
@@ -178,6 +181,7 @@ def xy_to_tile_id(top_left_x, top_left_y):
 
     return f"{lat}_{lng}"
 
+# Returns tile_id from string (i.e. file name)
 def string_to_tile_id(string):
     pattern = "[0-9]{2}[A-Z][_][0-9]{3}[A-Z]"
 
