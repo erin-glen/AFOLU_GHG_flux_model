@@ -78,6 +78,206 @@ def check_s3_file_created(s3_path):
         else:
             raise RuntimeError(f"Error accessing S3: {e}")
 
+# Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
+def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
+                                     bounds_str, output_dict, is_final, logger, no_data_val=None):
+
+    # Configures S3 client with increased retries; retries can max out for global analyses
+    s3_config = Config(
+        retries={
+            'max_attempts': 10,  # Increases the number of retry attempts
+            'mode': 'standard'
+        }
+    )
+    s3_client = boto3.client("s3", config=s3_config)  # Uses the configured client with more retries
+
+    transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
+
+    file_info = f'{tile_id}__{bounds_str}'
+
+    if is_final:
+        lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
+
+    # This makes it so that all output files are uploaded to a folder of the same date, even if the model run is divided over multiple days
+    output_date = time.strftime('%Y%m%d')
+
+    # For every output file, saves from array to local raster, then to s3.
+    # Can't save directly to s3, unfortunately, so need to save locally first.
+    for key, value in output_dict.items():
+
+        data_array = value[0]
+        data_type = value[1]
+        data_meaning = value[2]
+        year_out = value[3]
+
+        if is_final:
+            file_name = f"{file_info}__{key}.tif"
+        else:
+            file_name = f"{file_info}__{key}__{timestr()}.tif"
+
+        # Only prints if not a final run
+        if not is_final:
+            lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger)
+
+        # Includes NoData value in output raster
+        if no_data_val is not None:
+            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                               height=chunk_length_pixels, count=1,
+                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw', blockxsize=400,
+                               blockysize=400, nodata=no_data_val) as dst:
+                dst.write(data_array, 1)
+
+        # No NoData value in output raster
+        else:
+            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                               height=chunk_length_pixels, count=1,
+                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw', blockxsize=400,
+                               blockysize=400) as dst:
+                dst.write(data_array, 1)
+
+        s3_path = f"{cn.s3_out_dir}/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels/{output_date}"
+
+        # Only prints if not a final run
+        if not is_final:
+            lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {s3_path}: {timestr()}", is_final, logger)
+
+        s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{s3_path}/{file_name}")
+
+        # Deletes the local raster
+        os.remove(f"/tmp/{file_name}")
+
+
+# Returns list of rasters in an s3 folder and returns their names as a list (but not full paths)
+def list_raster_names_in_s3_folder(full_in_folder):
+
+    cmd = ['aws', 's3', 'ls', full_in_folder]
+    s3_contents_bytes = subprocess.check_output(cmd)
+
+    # Converts subprocess results to useful string
+    s3_contents_str = s3_contents_bytes.decode('utf-8')
+    s3_contents_list = s3_contents_str.splitlines()
+    rasters = [line.split()[-1] for line in s3_contents_list]
+    rasters = [i for i in rasters if "tif" in i]
+
+    return rasters
+
+
+# Returns list of rasters (full paths and names) in an s3 folder, and also returns the count of them
+#Per https://chatgpt.com/share/e/67413a39-1b3c-800a-b582-72d1a8a17de1
+def list_raster_full_paths_in_s3_folder_and_count(s3_path):
+    """
+    List all GeoTIFF files from a list of full S3 paths using boto3 and return the count.
+
+    Args:
+        s3_paths (list): List of S3 paths (e.g., "s3://bucket-name/prefix/").
+
+    Returns:
+        tuple: A tuple containing:
+            - A flat list of GeoTIFF file paths.
+            - The total count of GeoTIFF files.
+    """
+
+    # Initialize the S3 client
+    s3_client = boto3.client('s3')
+    geotiff_files = []
+
+    try:
+        # Parses bucket and prefix from the S3 path
+        if s3_path.startswith("s3://"):
+            path_parts = s3_path[5:].split("/", 1)
+            bucket_name = path_parts[0]
+            prefix = path_parts[1] if len(path_parts) > 1 else ""
+        else:
+            raise ValueError(f"Invalid S3 path: {s3_path}")
+
+        # Uses pagination to handle more than 1,000 objects (otherwise, limited to list of 1000 elements)
+        paginator = s3_client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+            if 'Contents' in page:
+                files = [obj['Key'] for obj in page['Contents']]
+                geotiffs = [f"s3://{bucket_name}/{file}" for file in files if file.endswith(('.tif', '.tiff'))]
+                geotiff_files.extend(geotiffs)
+
+    except Exception as e:
+        print(f"Error accessing {s3_path}: {e}")
+
+    return geotiff_files, len(geotiff_files)
+
+
+# Uploads a shapefile to s3
+def upload_shp(in_folder, shp):
+
+    print(f"flm: Uploading to {in_folder}{shp}: {timestr()}")
+
+    shp_pattern = shp[:-4]
+
+    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
+    s3_client.upload_file(f"/tmp/{shp}", "gfw2-data", Key=f"{in_folder[15:]}{shp}")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.dbf", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.dbf")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.prj", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.prj")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.shx", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.shx")
+
+    os.remove(f"/tmp/{shp}")
+    os.remove(f"/tmp/{shp_pattern}.dbf")
+    os.remove(f"/tmp/{shp_pattern}.prj")
+    os.remove(f"/tmp/{shp_pattern}.shx")
+
+    print(f"flm: Uploaded to {in_folder}{shp}: {timestr()}")
+
+# Saves a data array locally as a raster and then uploads it to s3
+def save_and_upload_raster_10x10(**kwargs):
+
+    s3_client = boto3.client("s3") # Needs to be in the same function as the upload_file call
+
+    data_array = kwargs['data']   # The data being saved
+    out_file_name = kwargs['out_file_name']   # The output file name
+    out_folder = kwargs['out_folder']   # The output folder
+
+    print(f"flm: Saving {out_file_name} locally")
+
+    profile_kwargs = {'compress': 'lzw'}   # Adds attribute to compress the output raster
+    # data_array.rio.to_raster(f"{out_file_name}", **profile_kwargs)
+    data_array.rio.to_raster(f"/tmp/{out_file_name}", **profile_kwargs)
+
+    print(f"flm: Saving {out_file_name} to {out_folder[10:]}{out_file_name}")
+
+    s3_client.upload_file(f"/tmp/{out_file_name}", "gfw2-data", Key=f"{out_folder[10:]}{out_file_name}")
+
+    # Deletes the local raster
+    os.remove(f"/tmp/{out_file_name}")
+
+# Gets the name of the first file in a dictionary of dataset names and folders in s3.
+# Returns dictionary of dataset names with the full path of the first file in the s3 folder.
+# From https://chatgpt.com/share/e/9a7bf947-1c32-4898-ba6b-3b932a5220c1
+def first_file_name_in_s3_folder(download_dict):
+
+    s3_client = boto3.client("s3")
+
+    # Initializes the dictionary to hold the first file paths
+    first_tiles = {}
+
+    # Iterates over the download_dict items
+    for key, folder_path in download_dict.items():
+
+        # Splits the path to get the directory part
+        dir_path = os.path.dirname(folder_path)
+
+        # Drops the s3://gfw2-data/ prefix and adds "/" to the end
+        dir_path = dir_path[len(cn.full_bucket_prefix)+1:] + "/"
+
+        # Lists metadata for everything in the bucket
+        response = s3_client.list_objects_v2(Bucket=cn.short_bucket_prefix, Prefix=dir_path, Delimiter='/')
+
+        # Checks if the folder contains any files
+        if 'Contents' in response and len(response['Contents']) > 0:
+            # Uses the first file in the folder (index 0 instead of 1)
+            first_tiles[key] = cn.full_bucket_prefix + "/" + response['Contents'][1]['Key']
+        else:
+            first_tiles[key] = None  # In case no files are found
+
+    return first_tiles
+
+
 ###################################################################################################
 # LULUCF model utilities
 ###################################################################################################
@@ -403,153 +603,6 @@ def check_chunk_for_data(required_layers, bounds_str, tile_id, any_or_all, is_fi
         raise Exception("any_or_all argument not valid")
 
 
-# Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
-def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
-                                     bounds_str, output_dict, is_final, logger, no_data_val=None):
-
-    # Configures S3 client with increased retries; retries can max out for global analyses
-    s3_config = Config(
-        retries={
-            'max_attempts': 10,  # Increases the number of retry attempts
-            'mode': 'standard'
-        }
-    )
-    s3_client = boto3.client("s3", config=s3_config)  # Uses the configured client with more retries
-
-    transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
-
-    file_info = f'{tile_id}__{bounds_str}'
-
-    if is_final:
-        lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
-
-    # This makes it so that all output files are uploaded to a folder of the same date, even if the model run is divided over multiple days
-    output_date = time.strftime('%Y%m%d')
-
-    # For every output file, saves from array to local raster, then to s3.
-    # Can't save directly to s3, unfortunately, so need to save locally first.
-    for key, value in output_dict.items():
-
-        data_array = value[0]
-        data_type = value[1]
-        data_meaning = value[2]
-        year_out = value[3]
-
-        if is_final:
-            file_name = f"{file_info}__{key}.tif"
-        else:
-            file_name = f"{file_info}__{key}__{timestr()}.tif"
-
-        # Only prints if not a final run
-        if not is_final:
-            lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger)
-
-        # Includes NoData value in output raster
-        if no_data_val is not None:
-            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                               height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw', blockxsize=400,
-                               blockysize=400, nodata=no_data_val) as dst:
-                dst.write(data_array, 1)
-
-        # No NoData value in output raster
-        else:
-            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                               height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw', blockxsize=400,
-                               blockysize=400) as dst:
-                dst.write(data_array, 1)
-
-        s3_path = f"{cn.s3_out_dir}/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels/{output_date}"
-
-        # Only prints if not a final run
-        if not is_final:
-            lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {s3_path}: {timestr()}", is_final, logger)
-
-        s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{s3_path}/{file_name}")
-
-        # Deletes the local raster
-        os.remove(f"/tmp/{file_name}")
-
-
-# Returns list of rasters in an s3 folder and returns their names as a list (but not full paths)
-def list_raster_names_in_s3_folder(full_in_folder):
-
-    cmd = ['aws', 's3', 'ls', full_in_folder]
-    s3_contents_bytes = subprocess.check_output(cmd)
-
-    # Converts subprocess results to useful string
-    s3_contents_str = s3_contents_bytes.decode('utf-8')
-    s3_contents_list = s3_contents_str.splitlines()
-    rasters = [line.split()[-1] for line in s3_contents_list]
-    rasters = [i for i in rasters if "tif" in i]
-
-    return rasters
-
-
-# Returns list of rasters (full paths and names) in an s3 folder, and also returns the count of them
-#Per https://chatgpt.com/share/e/67413a39-1b3c-800a-b582-72d1a8a17de1
-def list_raster_full_paths_in_s3_folder_and_count(s3_path):
-    """
-    List all GeoTIFF files from a list of full S3 paths using boto3 and return the count.
-
-    Args:
-        s3_paths (list): List of S3 paths (e.g., "s3://bucket-name/prefix/").
-
-    Returns:
-        tuple: A tuple containing:
-            - A flat list of GeoTIFF file paths.
-            - The total count of GeoTIFF files.
-    """
-
-    # Initialize the S3 client
-    s3_client = boto3.client('s3')
-    geotiff_files = []
-
-    try:
-        # Parses bucket and prefix from the S3 path
-        if s3_path.startswith("s3://"):
-            path_parts = s3_path[5:].split("/", 1)
-            bucket_name = path_parts[0]
-            prefix = path_parts[1] if len(path_parts) > 1 else ""
-        else:
-            raise ValueError(f"Invalid S3 path: {s3_path}")
-
-        # Uses pagination to handle more than 1,000 objects (otherwise, limited to list of 1000 elements)
-        paginator = s3_client.get_paginator('list_objects_v2')
-        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
-            if 'Contents' in page:
-                files = [obj['Key'] for obj in page['Contents']]
-                geotiffs = [f"s3://{bucket_name}/{file}" for file in files if file.endswith(('.tif', '.tiff'))]
-                geotiff_files.extend(geotiffs)
-
-    except Exception as e:
-        print(f"Error accessing {s3_path}: {e}")
-
-    return geotiff_files, len(geotiff_files)
-
-
-# Uploads a shapefile to s3
-def upload_shp(in_folder, shp):
-
-    print(f"flm: Uploading to {in_folder}{shp}: {timestr()}")
-
-    shp_pattern = shp[:-4]
-
-    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
-    s3_client.upload_file(f"/tmp/{shp}", "gfw2-data", Key=f"{in_folder[15:]}{shp}")
-    s3_client.upload_file(f"/tmp/{shp_pattern}.dbf", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.dbf")
-    s3_client.upload_file(f"/tmp/{shp_pattern}.prj", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.prj")
-    s3_client.upload_file(f"/tmp/{shp_pattern}.shx", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.shx")
-
-    os.remove(f"/tmp/{shp}")
-    os.remove(f"/tmp/{shp_pattern}.dbf")
-    os.remove(f"/tmp/{shp_pattern}.prj")
-    os.remove(f"/tmp/{shp_pattern}.shx")
-
-    print(f"flm: Uploaded to {in_folder}{shp}: {timestr()}")
-
-
 # Makes a shapefile of the footprints of rasters in a folder, for checking geographical completeness of rasters
 def make_tile_footprint_shp(input_dict, no_upload):
 
@@ -589,29 +642,6 @@ def make_tile_footprint_shp(input_dict, no_upload):
     os.remove(f"/tmp/{file_paths_txt}")
 
     return(f"Completed: {timestr()}")
-
-
-# Saves a data array locally as a raster and then uploads it to s3
-def save_and_upload_raster_10x10(**kwargs):
-
-    s3_client = boto3.client("s3") # Needs to be in the same function as the upload_file call
-
-    data_array = kwargs['data']   # The data being saved
-    out_file_name = kwargs['out_file_name']   # The output file name
-    out_folder = kwargs['out_folder']   # The output folder
-
-    print(f"flm: Saving {out_file_name} locally")
-
-    profile_kwargs = {'compress': 'lzw'}   # Adds attribute to compress the output raster
-    # data_array.rio.to_raster(f"{out_file_name}", **profile_kwargs)
-    data_array.rio.to_raster(f"/tmp/{out_file_name}", **profile_kwargs)
-
-    print(f"flm: Saving {out_file_name} to {out_folder[10:]}{out_file_name}")
-
-    s3_client.upload_file(f"/tmp/{out_file_name}", "gfw2-data", Key=f"{out_folder[10:]}{out_file_name}")
-
-    # Deletes the local raster
-    os.remove(f"/tmp/{out_file_name}")
 
 
 # Creates a list of 10x10 deg tiles to create, where the list is a list of dictionaries of the form
@@ -932,39 +962,6 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
     if not no_upload:
         print(f"Uploading chunk stats spreadsheet to s3 at {timestr()}...")
         s3_client.upload_file(local_spreadsheet, "gfw2-data", Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
-
-
-
-# Gets the name of the first file in a dictionary of dataset names and folders in s3.
-# Returns dictionary of dataset names with the full path of the first file in the s3 folder.
-# From https://chatgpt.com/share/e/9a7bf947-1c32-4898-ba6b-3b932a5220c1
-def first_file_name_in_s3_folder(download_dict):
-
-    s3_client = boto3.client("s3")
-
-    # Initializes the dictionary to hold the first file paths
-    first_tiles = {}
-
-    # Iterates over the download_dict items
-    for key, folder_path in download_dict.items():
-
-        # Splits the path to get the directory part
-        dir_path = os.path.dirname(folder_path)
-
-        # Drops the s3://gfw2-data/ prefix and adds "/" to the end
-        dir_path = dir_path[len(cn.full_bucket_prefix)+1:] + "/"
-
-        # Lists metadata for everything in the bucket
-        response = s3_client.list_objects_v2(Bucket=cn.short_bucket_prefix, Prefix=dir_path, Delimiter='/')
-
-        # Checks if the folder contains any files
-        if 'Contents' in response and len(response['Contents']) > 0:
-            # Uses the first file in the folder (index 0 instead of 1)
-            first_tiles[key] = cn.full_bucket_prefix + "/" + response['Contents'][1]['Key']
-        else:
-            first_tiles[key] = None  # In case no files are found
-
-    return first_tiles
 
 
 # Gets the datatype of a raster in s3.
