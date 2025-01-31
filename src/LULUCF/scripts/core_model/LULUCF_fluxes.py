@@ -5,15 +5,17 @@ Test:
 python -m scripts.utilities.create_cluster -n 1
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 10 49.75 10.25 50 -cs 0.25
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload
-
+python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cl s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1
 
 Full run:
 python -m scripts.utilities.create_cluster -n 200
-python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 1
+python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cl s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/
 """
 
 import argparse
 import concurrent.futures
+import sys
+import re
 import numpy as np
 
 from dask.distributed import print
@@ -24,6 +26,7 @@ from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
 from ..utilities import log_utilities as lu
 from ..utilities import numba_utilities as nu
+from ..utilities import resize_cluster
 
 
 # Function to calculate LULUCF fluxes and carbon densities
@@ -423,7 +426,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 # or partial disturbance.
                 # Can override the pre-existing value.
                 #TODO: This does not seem to work correctly after partial disturbances, at least in primary forest. It doesn't increment the years since disturbance.
-                # Look at ArcMap bookmark "Primary forest->partial disturbance->stable forest->stable forest"
+                # It seems that the disturbance is being recorded correctly and the pixel is being reclassified as
+                # young secondary forest, but calculate_years_of_forest_regrowth isn't being triggered by this multi-interval disturbance.
+                # Look at ArcMap bookmark "Primary forest->partial disturbance->stable forest->stable forest".
+                # Checked this before the second global run and it's still the case (output folder v38).
                 years_of_forest_regrowth = nu.calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_tall_veg, tall_veg_curr, partially_disturbed_in_last_interval, years_of_forest_regrowth)
 
                 # Assigns an AGC RF for natural forest based on years since last time not tall vegetation (years_of_forest_regrowth) (Mg AGC/ha/yr).
@@ -969,7 +975,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     logger = lu.setup_logging()
 
-    bounds_str = uu.boundstr(bounds)  # String form of chunk bounds
+    bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
 
@@ -983,12 +989,6 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
-
-    # Checks whether tile exists at all. Doesn't try to download data in chunk if the tile doesn't exist.
-    tile_exists = uu.check_for_tile(updated_download_dict, is_final, logger)
-
-    if not tile_exists:
-        return f"Skipped chunk {bounds_str} because {tile_id} does not exist for any inputs: {uu.timestr()}", chunk_stats
 
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
     # Thus, this returns a complete set of inputs (missing chunks filled).
@@ -1015,22 +1015,6 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern])
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern].max())
     # print(layers[soil_c_2000_pattern].dtype)
-
-    # List of layers that must be present for the chunk to be run.
-    # All of the listed layers must exist for this chunk in order to proceed.
-    checked_layers = {cn.agc_2000_pattern: layers[cn.agc_2000_pattern], cn.bgc_2000_pattern: layers[cn.bgc_2000_pattern],
-                      cn.deadwood_c_2000_pattern: layers[cn.deadwood_c_2000_pattern],
-                      cn.litter_c_2000_pattern: layers[cn.litter_c_2000_pattern],
-                      f"{cn.land_cover_pattern}_2000": layers[f"{cn.land_cover_pattern}_2000"]}
-
-    # print(f"Layers to check for data: {layers_to_check_for_data}")
-
-    # Checks chunk for data. Skips the chunk if it does not have the required data.
-    # data_in_chunk = uu.check_chunk_for_data(checked_layers, bounds_str, tile_id, "all", is_final, logger)
-    data_in_chunk = uu.check_chunk_for_data(checked_layers, bounds_str, tile_id, "all", is_final, logger)
-
-    if data_in_chunk == False:
-        return f"Skipped chunk {bounds_str} because of missing necessary input data: {uu.timestr()}", chunk_stats
 
 
     ### Part 2: Calculates min, mean, and max for each input chunk.
@@ -1062,10 +1046,12 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     ### Part 4: Calculates LULUCF fluxes and densities
 
     lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+    print(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}")
 
     out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs, is_final)
 
     lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+    print(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}")
 
     # print(out_dict_uint32)
     # print(out_dict_float32)
@@ -1145,17 +1131,26 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
                 + out_dict_all_dtypes[f"{cn.gross_emis_non_CO2_only_pattern}_{year_range}"])
 
 
-    ### Part 7: Calculates min, mean, and max for each output chunk.
+    ### Part 7: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
     ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
+    ### Also useful for a quick sum of outputs without doing zonal stats
 
-    #TODO Add step to calculate per-pixel values and get chunk sums for float32 outputs
+    # The relevant pixel area (m^2) file in s3
+    pixel_area_uri = f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{tile_id}.tif"
+
+    # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
+    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger)
 
     # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
-    for key, array in out_dict_all_dtypes.items():
-        chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'output_layer'))
+    for key, array_per_ha in out_dict_all_dtypes.items():
+
+        # Converts per hectare values to per pixel values for the output numpy array
+        output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
+
+        chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
 
-    ### Part 7: Saves numpy arrays as rasters and uploads to s3
+    ### Part 8: Saves numpy arrays as rasters and uploads to s3
 
     # Only saves arrays to geotifs and uploads them to s3 if enabled
     if not no_upload:
@@ -1182,7 +1177,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     return success_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False, no_log=False, no_upload=False):
+def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=False,
+         bounding_box=None, chunk_size=None, chunk_list=None, first_chunks=None):
 
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -1194,10 +1190,41 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
     start_time = uu.timestr()
     print(f"Stage {stage} started at: {start_time}")  #TODO in all main() functions, add print statements to log
 
-    # Makes list of chunks to analyze
-    chunks = uu.get_chunk_bounds(bounding_box, chunk_size)
+    # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
+    # chunk_ids for making chunk list if shapefile is supplied in command line.
+    # chunk_ids and iso code used for chunk stats.
+    fishnet_iso_df = uu.fishnet_with_GADM_iso()
+
+    # Makes list of chunks to analyze from the bounding box and chunk size (deg)
+    # Outut list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+    if bounding_box and chunk_size:
+
+        print("Using bounding box and chunk size to determine chunks")
+        chunks = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
+
+    # Makes list of chunks to analyze from a shapefile attribute table.
+    # Attribute table column must be formatted as W_S_E_N.
+    # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+    elif chunk_list:
+
+        print("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
+
+        # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
+        fishnet_1x1_chunk_id_df = fishnet_iso_df[['chunk_id']]  # Creates dataframe
+
+        # If argument for number of chunks in shapefile is supplied, limit to that
+        if first_chunks:
+            fishnet_1x1_chunk_id_df = fishnet_1x1_chunk_id_df[:first_chunks]
+
+        # Converts dataframe column of chunk bounds to nested list
+        # Per https://chatgpt.com/share/e/674747ee-d588-800a-995c-1f897a8ace31
+        chunks = fishnet_1x1_chunk_id_df['chunk_id'].apply(uu.process_chunk_id).tolist()
+
+    else:
+        print("Chunk list cannot be determined")
+        sys.exit()
+
     print(f"Processing {len(chunks)} chunks")
-    # print(chunks)
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
@@ -1228,7 +1255,7 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
 
         cn.r_s_ratio_pattern: f"{cn.r_s_ratio_path}{sample_tile_id}_{cn.r_s_ratio_pattern}.tif",
 
-        cn.drivers_pattern: f"{cn.drivers_path}{sample_tile_id}_{cn.drivers_pattern}.tif",  #TODO update to latest version
+        cn.drivers_pattern: f"{cn.drivers_path}{sample_tile_id}_{cn.drivers_pattern}.tif",
 
         cn.planted_forest_type_pattern: f"{cn.planted_forest_type_path}{sample_tile_id}_{cn.planted_forest_type_pattern}.tif",
         cn.planted_forest_AGC_removal_factor_pattern: f"{cn.planted_forest_AGC_removal_factor_path}{sample_tile_id}_{cn.planted_forest_AGC_removal_factor_pattern}.tif",
@@ -1247,7 +1274,8 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
         # "ecozone": f"s3://gfw2-data/fao_ecozones/v2000/raster/epsg-4326/10/40000/class/gdal-geotiff/{sample_tile_id}.tif",   # Originally from gfw-data-lake, so it's in 400x400 windows
         # "iso": f"s3://gfw2-data/gadm_administrative_boundaries/v3.6/raster/epsg-4326/10/40000/adm0/gdal-geotiff/{sample_tile_id}.tif",  # Originally from gfw-data-lake, so it's in 400x400 windows
         cn.ifl_primary_pattern: f"{cn.ifl_primary_path}{sample_tile_id}_{cn.ifl_primary_pattern}.tif",
-        cn.continent_ecozone_pattern: f"{cn.continent_ecozone_path}{sample_tile_id}_{cn.continent_ecozone_pattern}.tif"
+        cn.continent_ecozone_pattern: f"{cn.continent_ecozone_path}{sample_tile_id}_{cn.continent_ecozone_pattern}.tif",
+        cn.pixel_area_pattern: f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{sample_tile_id}.tif"
     }
 
     # Land cover and vegetation height rasters (5-year intervals)
@@ -1284,15 +1312,13 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.
+    # Inputs are Mg AGB/ha/yr. Outputs are Mg AGB/ha/yr. Conversion to Mg AGC/ha/yr is done below.
     primary_forest_RFs = uu.convert_lookup_table_to_array(cn.IPCC_removal_factor_table_full_path,
                                                           cn.IPCC_removal_factor_table_tab,
                                                           ['gainEcoCon', 'growth_primary'])
 
     # Converts primary forest AGB RFs to AGC RFs (Mg AGB/ha/yr -> Mg AGC/ha/yr)
     primary_forest_RFs[:, 1] = primary_forest_RFs[:, 1] * cn.biomass_to_carbon_non_mangrove
-
-    # Returns a dataframe of chunk_id and ISO, to be joined with chunk stats
-    fishnet_iso_df = uu.fishnet_with_GADM_iso()
 
     # Creates list of tasks to run (1 task = 1 chunk)
     print(f"Creating tasks and starting processing: {uu.timestr()}")
@@ -1311,9 +1337,6 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
     success_count = 0
     skipping_chunk_count = 0
 
-    #TODO Can I resize the cluster down to just 1 worker at this point and still do the tile stats and logs?
-    # I shouldn't need all the workers for at least the tile stats spreadsheet creation.
-
     # Processes the chunk stats and returned messages
     # Results are the messages from the chunks and chunk stats
     for result in results:
@@ -1331,36 +1354,61 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
         if chunk_stats is not None:
             all_stats.extend(chunk_stats)
 
-    #TODO Test if including the success_message returns or printing them slows down large runs.
-    # Don't return the success messages or print them if they slow down large runs.
-
-    # Prints the returned messages
-    for message in return_messages:
-        print(message)
+    # Prints the returned messages if not a large (is_final) run
+    if not is_final:
+        for message in return_messages:
+            print(message)
 
     # Print the counts
     print(f"Number of 'Success' chunks: {success_count}")
     print(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
     print(f"Difference between submitted chunks and processed chunks: {len(chunks) - (success_count + skipping_chunk_count)}")
 
+
+
+    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    # cluster, not all the workers.
+    workers = client.scheduler_info()["workers"]
+    n_workers = len(workers)
+
+    # Reduces number of workers in the cluster down to 1 if there is more than 1
+    #TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
+    if n_workers > 1:
+        print("Resizing cluster to 1 worker")
+
+        resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
+
+    # Iterates through output folders and counts the number of output rasters.
+    # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
+    if is_final==True:
+        for LULUCF_output_folder in cn.LULUCF_output_folders:
+
+            LULUCF_output_folder = re.sub('RES_pixels', '4000_pixels', LULUCF_output_folder)
+            LULUCF_output_folder = re.sub('DATE', uu.timestr()[:8], LULUCF_output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
+
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(LULUCF_output_folder)
+            print(f"Output rasters in {LULUCF_output_folder}: {file_count}")
+            # print(geotiff_files)
+
     end_time_1 = uu.timestr()
     print(f"Stage {stage} ended at: {end_time_1}")
     uu.stage_duration(start_time, end_time_1, stage)
 
-    # Prepares chunk stats spreadsheet: min, mean, max for all input and output chunks,
+
+    # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count > 0):
-        uu.calculate_chunk_stats(all_stats, stage, no_upload)
+        uu.aggregate_chunk_stats(all_stats, stage, no_upload)
 
     # Ending time for stage
     end_time_2 = uu.timestr()
     print(f"Stage {stage} tile stats ended at: {end_time_2}")
     uu.stage_duration(start_time, end_time_2, stage)
 
-    #TODO Add step that counts the number of tiles in each output folder, prints that, and saves to the log
-
-    # Creates combined log if not deactivated
+    # Creates combined log from all workers if not deactivated
+    #TODO Figure out how to make it gather worker logs as soon as run finishes so that they're not lost,
+    # then upload the consolidated log at the very end like this.
     log_note = f"{stage} run"
     lu.compile_and_upload_log(no_log, client, cluster, stage, len(chunks), chunk_size, start_time, end_time_1, end_time_2,
                               success_count, skipping_chunk_count, bounding_box, log_note)
@@ -1374,8 +1422,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate LULUCF fluxes.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
-    #TODO add option to use 10x10 deg tile index shapefile to create chunks from for global run
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
+    parser.add_argument('-cl', '--chunk_list', help='Shapefile of chunks')
+    parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
@@ -1384,5 +1433,17 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    cluster_name = args.cluster_name
+    bounding_box = args.bounding_box
+    chunk_size = args.chunk_size
+    chunk_list = args.chunk_list
+    first_chunks = args.first_chunks
+    run_local = args.run_local
+    no_stats = args.no_stats
+    no_log = args.no_log
+    no_upload = args.no_upload
+
     # Create the cluster with command line arguments
-    main(args.cluster_name, args.bounding_box, args.chunk_size, args.run_local, args.no_stats, args.no_log, args.no_upload)
+    main(cluster_name, run_local, no_stats, no_log, no_upload,
+         bounding_box=bounding_box, chunk_size=chunk_size,
+         chunk_list=chunk_list, first_chunks=first_chunks)

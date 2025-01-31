@@ -325,7 +325,7 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
                                                            ['gainEcoCon', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
 
     # Makes list of chunks to analyze
-    chunks = uu.get_chunk_bounds(bounding_box, chunk_size)
+    chunks = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
     print("Processing", len(chunks), "chunks")
     # print(chunks)
 
@@ -359,7 +359,7 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag
     if not no_stats:
-        uu.calculate_chunk_stats(all_stats, stage)
+        uu.aggregate_chunk_stats(all_stats, stage)
 
     # Ending time for stage
     end_time = uu.timestr()

@@ -8,7 +8,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = 0.1
+model_version = 0.2
 
 ### s3 buckets
 s3 = boto3.resource('s3')
@@ -159,7 +159,7 @@ local_chunk_stats_path = "chunk_stats/"
 s3_chunk_stats_path = "climate/AFOLU_flux_model/LULUCF/chunk_stats/"
 
 # 1x1 deg fishnet between 80N and 60N, 180W and 180E that intersects GADM3.6 and has GADM iso joined to it
-fishnet_s3_uri = "s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/"
+fishnet_s3_uri = "s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/"
 
 land_cover_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/composite/"
 land_cover_pattern = "land_cover"
@@ -198,8 +198,8 @@ natural_forest_growth_curve_path = f"{full_bucket_prefix}/climate/secondary_fore
 natural_forest_growth_curve_pattern = "natural_forest_mean_growth_rate__Mg_AGC_ha_yr"
 natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_100']
 
-drivers_path = f"{full_bucket_prefix}/drivers_of_loss/1_km/processed/20241004/"
-drivers_pattern = "drivers_of_TCL_1_km_20241004"
+drivers_path = f"{full_bucket_prefix}/drivers_of_loss/1_km/processed/20241121/"
+drivers_pattern = "drivers_of_TCL_1_km_20241121"
 
 pixel_area_path = f"{full_bucket_prefix}/analyses/area_28m/"
 pixel_area_pattern = "hanson_2013_area"
@@ -324,7 +324,7 @@ n2o_flux_pattern = "N2O_flux__MgCO2e_ha_yr"
 
 gross_emis_all_C_pools_CO2_only_pattern = "gross_emissions_all_C_pools_CO2_only__MgCO2_ha_yr"
 gross_emis_non_CO2_only_pattern = "gross_emissions_non_CO2_only__MgCO2e_ha_yr"
-gross_emis_all_C_pools_all_gases_pattern = "gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr"  #TODO change to MgCO2e
+gross_emis_all_C_pools_all_gases_pattern = "gross_emissions_all_C_pools_all_gases__MgCO2e_ha_yr"
 
 gross_removals_all_C_pools_pattern = "gross_removals_all_C_pools__MgCO2_ha_yr"
 
@@ -341,3 +341,90 @@ first_time_sig_loss_from_max_height_block ="first_time_sig_loss_from_max_height_
 
 intermediate_outputs = [gain_year_count_pattern, most_recent_year_not_tall_veg, years_of_forest_regrowth,
                         year_of_forest_loss, max_height_since_last_time_not_tall_veg, first_time_sig_loss_from_max_height_block]
+
+LULUCF_output_folders = [
+    f"{outputs_path}{AGC_density_path_part}/2005/RES_pixels/DATE/",
+    f"{outputs_path}{AGC_density_path_part}/2010/RES_pixels/DATE/",
+    f"{outputs_path}{AGC_density_path_part}/2015/RES_pixels/DATE/",
+    f"{outputs_path}{AGC_density_path_part}/2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{BGC_density_path_part}/2005/RES_pixels/DATE/",
+    f"{outputs_path}{BGC_density_path_part}/2010/RES_pixels/DATE/",
+    f"{outputs_path}{BGC_density_path_part}/2015/RES_pixels/DATE/",
+    f"{outputs_path}{BGC_density_path_part}/2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{deadwood_c_density_path_part}/2005/RES_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_density_path_part}/2010/RES_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_density_path_part}/2015/RES_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_density_path_part}/2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{litter_c_density_path_part}/2005/RES_pixels/DATE/",
+    f"{outputs_path}{litter_c_density_path_part}/2010/RES_pixels/DATE/",
+    f"{outputs_path}{litter_c_density_path_part}/2015/RES_pixels/DATE/",
+    f"{outputs_path}{litter_c_density_path_part}/2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{agc_net_flux_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{agc_net_flux_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{agc_net_flux_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{agc_net_flux_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{bgc_net_flux_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{bgc_net_flux_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{bgc_net_flux_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{bgc_net_flux_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{deadwood_c_net_flux_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_net_flux_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_net_flux_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_net_flux_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{litter_c_net_flux_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{litter_c_net_flux_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{litter_c_net_flux_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{litter_c_net_flux_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{ch4_flux_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{ch4_flux_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{ch4_flux_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{ch4_flux_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{n2o_flux_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{n2o_flux_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{n2o_flux_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{n2o_flux_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{gross_removals_all_C_pools_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{gross_removals_all_C_pools_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{gross_removals_all_C_pools_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{gross_removals_all_C_pools_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/2015_2020/RES_pixels/DATE/",
+
+    f"{outputs_path}{land_state_node_path_part}/2000_2005/RES_pixels/DATE/",
+    f"{outputs_path}{land_state_node_path_part}/2005_2010/RES_pixels/DATE/",
+    f"{outputs_path}{land_state_node_path_part}/2010_2015/RES_pixels/DATE/",
+    f"{outputs_path}{land_state_node_path_part}/2015_2020/RES_pixels/DATE/"
+]

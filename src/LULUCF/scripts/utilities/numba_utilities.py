@@ -321,11 +321,10 @@ def calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs):
     primary_forest_RF_indices = np.where(primary_forest_RFs[:, 0] == continent_ecozone_cell)
 
     # Checks if there are matching indices and extracts corresponding primary forest RF
-    if primary_forest_RF_indices[0].size > 0:
-        primary_forest_RF = primary_forest_RFs[primary_forest_RF_indices[0][0], 1]
-    else:
-        #TODO Replace 1000 with the mean of primary forest RFs or something
-        primary_forest_RF = 1000  # Absurd number that should show up easily in outputs
+    if primary_forest_RF_indices[0].size > 0:  # If matching continent-ecozone combination...
+        primary_forest_RF = primary_forest_RFs[primary_forest_RF_indices[0][0], 1]  # Uses matching RF
+    else:  # If no matching continent-ecozone combination...
+        primary_forest_RF = np.mean(primary_forest_RFs[:, 1]) # Uses average of all primary forest RFs
     return primary_forest_RF
 
 

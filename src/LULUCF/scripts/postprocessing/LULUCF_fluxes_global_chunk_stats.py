@@ -184,8 +184,6 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     # with the count of tiles in each folder
     for LULUCF_output_folder in LULUCF_output_folders:
 
-        # geotiff_files = uu.list_raster_names_in_folder(LULUCF_output_folder)
-
         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(LULUCF_output_folder)
         # print(geotiff_files)
         lu.print_and_log(f"Output rasters in {LULUCF_output_folder} to process: {file_count}", is_final, logger)
@@ -232,7 +230,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     # print(results)
 
     # Creates a chunk stats spreadsheet and optionally uploads it to s3
-    uu.calculate_chunk_stats(results, stage, no_upload)
+    uu.aggregate_chunk_stats(results, stage, no_upload)
 
     # Ending time for stage
     end_time = uu.timestr()

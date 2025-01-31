@@ -27,7 +27,6 @@ from . import log_utilities as lu
 
 # Time in Eastern US timezone as a string
 def timestr():
-    # return time.strftime("%Y%m%d_%H_%M_%S")
 
     # Define the Eastern Time timezone
     eastern = pytz.timezone('US/Eastern')
@@ -54,7 +53,6 @@ def connect_to_Coiled_cluster(cluster_name, run_local):
         return cluster, client
 
 
-
 # Chunk bounds as a string
 def boundstr(bounds):
     bounds_str = "_".join([str(round(x)) for x in bounds])
@@ -65,6 +63,14 @@ def boundstr(bounds):
 def calc_chunk_length_pixels(bounds):
     chunk_length_pixels = int((bounds[3] - bounds[1]) * (40000 / 10))
     return chunk_length_pixels
+
+
+# Creates list of bounding boxes for chunks from a dataframe column structured as W_S_E_N.
+# Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+def process_chunk_id(chunk_id):
+    # Split by underscore
+    bounding_box = list(map(float, chunk_id.split('_')))
+    return bounding_box
 
 
 # Maps GDAL data type to the appropriate string value
@@ -111,7 +117,7 @@ def get_10x10_tile_bounds(tile_id):
 
 
 # Returns list of all chunk boundaries within a bounding box for chunks of a given size
-def get_chunk_bounds(bounding_box, chunk_size):
+def get_chunk_bounds_from_bounding_box(bounding_box, chunk_size):
     min_x = bounding_box[0]
     min_y = bounding_box[1]
     max_x = bounding_box[2]
@@ -697,24 +703,14 @@ def convert_lookup_table_to_array(spreadsheet, sheet_name, fields_to_keep):
 # def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, fishnet_iso_df, array_per_pixel=None):
 def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_pixel=None):
 
-    # Sums the per pixel totals if supplied
-    if array_per_pixel is None:
-        sum_value = 'no per pixel array supplied'
-    else:
+    # Sums the per pixel totals if relevant
+    if in_out == 'output_layer':
         sum_value = np.sum(array_per_pixel)
+    else:
+        sum_value = 'N/A- input layer or no per-pixel array supplied'
 
-    #TODO Add field for getting year (for stocks) or year range (for fluxes) to output
-    #TODO Add field for getting layer pattern to output
-
-    # # Uses loc to find the iso corresponding to the chunk_id
-    # iso_value = fishnet_iso_df.loc[fishnet_iso_df['chunk_id'] == bounds_str, 'iso'].values
-    #
-    # # Checks if an iso was found
-    # if len(iso_value) > 0:
-    #     iso_value = iso_value[0]  # Extracts the first value (assuming chunk_id is unique)
-    #     print(f"{bounds_str} in {iso_value}")
-    # else:
-    #     iso_value = 'No iso found'  # Handles case where chunk_id is not found
+    # Gets the output file pattern and year/year_range
+    out_pattern, year_range = strip_and_extract_years(name)
 
     if array_per_ha is None or not np.any(array_per_ha):  # Checks if the array is None or empty
         return {
@@ -722,12 +718,13 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'tile_id': tile_id,
             'layer_name': name,
             'in_out': in_out,
+            'pattern': out_pattern,
+            'years': year_range,
             'min_value': 'no data',
             'mean_value': 'no data',
             'max_value': 'no data',
             'count_value': 'no data',
             'sum_value': 'no data',
-            # 'iso_value': 'no data',
             'data_type': 'no data'
         }
     else:    # Only calculates stats if there is data in the array
@@ -736,12 +733,13 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'tile_id': tile_id,
             'layer_name': name,
             'in_out': in_out,
+            'pattern': out_pattern,
+            'years': year_range,
             'min_value': np.min(array_per_ha),
             'mean_value': np.mean(array_per_ha),
             'max_value': np.max(array_per_ha),
             'count_value': np.count_nonzero(array_per_ha),
             'sum_value': sum_value,
-            # 'iso_value': iso_value,
             'data_type': array_per_ha.dtype.name
         }
 
@@ -749,7 +747,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
 # Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet
 # Also calculates the min and max value for each input and output across all chunks
 # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-def calculate_chunk_stats(all_stats, stage, no_upload):
+def aggregate_chunk_stats(all_stats, stage, no_upload):
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
 
@@ -763,28 +761,37 @@ def calculate_chunk_stats(all_stats, stage, no_upload):
     df_all_stats['max_value'] = pd.to_numeric(df_all_stats['max_value'], errors='coerce')
 
     # Sorts the DataFrame by 'in_out' and 'layer_name'
+    print(f"Sorting tile stats by properties at {timestr()}...")
     sorted_stats = df_all_stats.sort_values(by=['in_out', 'layer_name']).reset_index(drop=True)
 
     # Calculates the min and max values for each layer_name across all chunks
+    print(f"Calculating min and max values across all chunks at {timestr()}...")
     min_max_stats = df_all_stats.groupby('layer_name').agg(
         min_value=('min_value', 'min'),
         max_value=('max_value', 'max')
     ).reset_index()
 
-    # Read the shapefile from S3 to extract "chunk_id" and "iso" fields
+    # Reads the shapefile from S3 to extract "chunk_id" and "iso" fields
+    # Based on https://chatgpt.com/share/e/6744de08-6b64-800a-b8c4-6a20833f7e3a
     gdf = gpd.read_file(cn.fishnet_s3_uri)
 
-    # Create a DataFrame with "chunk_id" and "iso" fields
-    shapefile_df = gdf[['chunk_id', 'iso']]
+    # Creates a DataFrame with "chunk_id" and "iso" fields
+    fishnet_shapefile_df = gdf[['chunk_id', 'iso']]
 
-    # Merge the shapefile data with the statistics DataFrame
-    merged_stats = sorted_stats.merge(shapefile_df, on='chunk_id', how='left')
+    # Merges the shapefile data with the statistics DataFrame
+    print(f"Merging country code to chunk stats table at {timestr()}...")
+    merged_stats = sorted_stats.merge(fishnet_shapefile_df, on='chunk_id', how='left')
+
+    # When iso isn't assigned, empty cells are filled.
+    # iso is only assigned when the chunks are 1x1 deg (since that's what the fishnet uses)
+    merged_stats['iso'] = merged_stats['iso'].fillna('no iso assigned')
 
     # Calculates the min and max values for each layer_name for each chunk.
     # There are so many chunks with so many inputs and outputs in a full model run that Excel can't handle all the rows
     # and they need to be split across multiple workbook tabs.
 
     # Separates input rows (in_out == 'input') and output rows (in_out == 'output')
+    print(f"Separating outputs into different tables at {timestr()}...")
     input_rows = merged_stats[merged_stats['in_out'] == 'input_layer']
     output_rows = merged_stats[merged_stats['in_out'] == 'output_layer']
 
@@ -807,14 +814,17 @@ def calculate_chunk_stats(all_stats, stage, no_upload):
     out_spreadsheet = f'{stage}_chunk_statistics_{timestr()}.xlsx'
     local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
 
+    print(f"Writing tile stats to spreadsheet at {timestr()}...")
     try:
         with pd.ExcelWriter(local_spreadsheet) as writer:
 
             # Writes input rows to one sheet
+            print(f"Writing inputs to spreadsheet at {timestr()}...")
             annual_inputs.to_excel(writer, sheet_name='annual_inputs', index=False)
             other_inputs.to_excel(writer, sheet_name='other_inputs', index=False)
 
             # Writes output rows based on layer_name conditions to separate sheets
+            print(f"Writing output to spreadsheet at {timestr()}...")
             gross_flux_output.to_excel(writer, sheet_name='gross_outputs', index=False)
             net_flux_output.to_excel(writer, sheet_name='flux_outputs', index=False)
             other_output.to_excel(writer, sheet_name='other_outputs', index=False)
@@ -830,6 +840,7 @@ def calculate_chunk_stats(all_stats, stage, no_upload):
         print(f"Can't print chunk stats: {e}")
 
     if not no_upload:
+        print(f"Uploading chunk stats spreadsheet to s3 at {timestr()}...")
         s3_client.upload_file(local_spreadsheet, "gfw2-data", Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
 
 
@@ -968,7 +979,11 @@ def fill_missing_input_layers_with_no_data(layers, uint8_list, int16_list, int32
 def strip_and_extract_years(key):
 
     pattern = re.sub(cn.date_date_range_pattern, '', key)
-    year_range = re.search(cn.date_date_range_pattern, key).group()[1:]
+
+    try:
+        year_range = re.search(cn.date_date_range_pattern, key).group()[1:]
+    except:
+        year_range = 'no year range'
 
     return pattern, year_range
 
