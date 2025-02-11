@@ -76,7 +76,7 @@ def process_year(year):
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="Create a Coiled cluster with specified parameters.")
+    parser = argparse.ArgumentParser(description="Transfer geotifs from GLAD web folders to s3 bucket by year")
     parser.add_argument('-cn', '--cluster_name', type=str, help='Coiled cluster name')
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
 
