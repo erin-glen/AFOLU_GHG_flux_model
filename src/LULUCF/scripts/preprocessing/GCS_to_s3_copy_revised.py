@@ -18,30 +18,22 @@ Usage (example):
       --source-root gs://my-gcs-bucket/data \\
       --dest-root s3://my-s3-bucket/data \\
       --task-file my_tasks.json \\
-      --resume
+      --resume  [Optional: to resume a copy that was in process]
 
-  python -m scripts.preprocessing.GCS_to_s3_copy -cn AFOLU_flux_model_scripts --source_root gs://earthenginepartners-hansen/LCLU_2015_2023_v1 --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULULCF/landcover/composite/annual/v1/raw --task_file my_tasks.json
-
-Requirements:
-    `conda env create -f environment.yml` 
+python -m scripts.utilities.create_cluster -n 11 -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.GCS_to_s3_copy -cn AFOLU_flux_model_scripts --source_root gs://earthenginepartners-hansen/LCLU_2015_2023_v1 --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULULCF/landcover/composite/annual/v1/raw --task_file my_tasks.json
 
 Authentication:
-  - GCS: Set `GOOGLE_APPLICATION_CREDENTIALS` or have gcloud creds in your environment.
-    `gcloud auth application-default login` should set this all up for you
-  - AWS: Standard environment variables like `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc.
-    `export AWS_PROFILE=[your_profile]`
-    `aws sso login`
+  - GCS: Didn't need any GCS credentials in environment to run this
+  - AWS: Standard environment variables `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` need to be in Ubuntu
 
 Created by Chris Rowe with the assistance of https://chatgpt.com/share/e/6793f009-3660-8011-bfb4-e131c37acd69.
-Not run in WSL Ubuntu at this point. He ran it in whatever environment he had on his computer.
-##TODO Get this to run in WSL like the rest of the code.
+Modified by David Gibbs to run in WSL2 Ubuntu system with everything else in the AFOLU model.
 """
 
-import os
 import json
 import argparse
 import coiled
-from dask.distributed import Client
 import dask.bag as db
 import gcsfs
 import s3fs
@@ -274,6 +266,7 @@ def main(cluster_name, run_local, source_root, dest_root, task_file, resume):
     print("Starting...")
     
     # 1. Create or load tasks
+    # This takes several minutes.
     if not resume:
         print(f'Listing all files in GCS path: gs://{src_root} ...')
         files = list_all_files_gcs(src_root)
@@ -309,28 +302,12 @@ def main(cluster_name, run_local, source_root, dest_root, task_file, resume):
         print("Aborting.")
         return
 
-    # # 4. Launch Coiled cluster
-    # print("\nStarting Coiled cluster... (this may take a minute)")
-    # cluster = coiled.Cluster(
-    #     name="gcs-to-s3-copy",
-    #     workspace="wri-forest-research",
-    #     region=args.coiled_region,
-    #     spot_policy="spot"
-    #
-    # )
-    # client = Client(cluster)
-    # print("Cluster is up!")
-    # print("Dask Dashboard:", client.dashboard_link)
-
-    # Optionally scale up to some number of workers right away
-    #cluster.scale(10)  # Attempt to spin up 10 workers
-
-    # 5. Create a Dask Bag of tasks and run
+    # 4. Create a Dask Bag of tasks and run
     print("\nStarting the copy operations in parallel...")
     bag = db.from_sequence(tasks, npartitions=len(tasks))
     results = bag.map(copy_file).compute()
 
-    # 6. Save final statuses back to the task file
+    # 5. Save final statuses back to the task file
     #    We need the entire list of tasks (including completed ones).
     #    The simplest approach is to read them all back and re-merge.
     with open(task_file, "r") as f:
@@ -344,10 +321,6 @@ def main(cluster_name, run_local, source_root, dest_root, task_file, resume):
     print(f'\nCopy completed! {completed} succeeded, {failed} failed.')
     if failed > 0:
         print("You can re-run with --resume to retry the failed tasks.")
-
-    # # 7. (Optional) Shut down cluster explicitly
-    # print("Shutting down the cluster...")
-    # cluster.close()
 
 if __name__ == "__main__":
 
