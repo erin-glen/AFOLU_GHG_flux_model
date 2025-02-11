@@ -8,7 +8,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = 0.2
+model_version = 0.3
 
 ### s3 buckets
 s3 = boto3.resource('s3')
@@ -21,31 +21,27 @@ s3_client = boto3.client("s3")
 tile_id_pattern = r"[0-9]{2}[A-Z][_][0-9]{3}[A-Z]"
 small_chunk_pattern = r'__-?\d+_-?\d+_-?\d+_-?\d+__'
 
-### IPCC codes
-forest_IPCC = 1
-cropland_IPCC = 2
-settlement_IPCC = 3
-wetland_IPCC = 4
-grassland_IPCC = 5
-otherland_IPCC = 6
+### m^2 to hectares
+m2_to_ha = 1/10000
 
-IPCC_class_max_val = 6  # Maximum value of IPCC class codes
+### Model years in 5-year intervals
+first_model_year_5_years = 2000  # First year of 5-year interval data
+last_model_year_5_years = 2020   # Last year of 5-year interval data
 
-### Model years
-first_model_year = 2000  # First year of model
-last_model_year = 2020   # Last year of model
-
-# Number of years in interval.
-interval_years = 5    #TODO: calculate programmatically in numba function rather than coded here-- for greater flexibility.
-interval_end_years = list(range(first_model_year, last_model_year + 1, interval_years))[1:]
-
-years_annual = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
-
+# Number of years in interval
+interval_duration = 5    #TODO: calculate programmatically in numba function rather than coded here-- for greater flexibility.
+interval_end_years_5_years = list(range(first_model_year_5_years, last_model_year_5_years + 1, interval_duration))[1:]
 
 # Number of years of removals in a tree cover gain pixel
-NT_T_gain_year_count_default = math.ceil(interval_years / 2)
+NT_T_gain_year_count_default = math.ceil(interval_duration / 2)
 
-m2_to_ha = 1/10000
+### Model years in annual series
+first_model_year_annual = 2015  # First year of annual data
+last_model_year_annual = 2023   # Last year of annual data
+
+years_annual = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+interval_end_years_annual = years_annual[1:]
+
 
 ### Carbon constants
 
@@ -169,15 +165,13 @@ fishnet_1x1deg_all_land_s3_uri = "s3://gfw2-data/climate/AFOLU_flux_model/fishne
 ### Inputs
 
 land_cover_5_year_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/composite/five_year/v1/raw/"
-land_cover_5_year_pattern = "land_cover"
 land_cover_annual_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/composite/annual/v1/raw/"
-land_cover_annual_pattern = ""
+land_cover_pattern = "land_cover"
 
-vegetation_height_5_year_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/"
-vegetation_height_5_year_pattern = "vegetation_height"
+vegetation_height_5_year_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/five_year/v1/raw/"
 vegetation_height_annual_GLAD_path = "https://glad.geog.umd.edu/Potapov/Global_TCH_2015-23"
 vegetation_height_annual_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/annual/20250114/raw/"
-vegetation_height_annual_pattern = ""
+vegetation_height_pattern = "vegetation_height"
 
 forest_disturbance_annual_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/annual_forest_disturbance/raw/"
 forest_disturbance_layer_name = "forest_disturbance"
@@ -351,6 +345,16 @@ IPCC_class_path = "IPCC_basic_classes"
 IPCC_class_pattern = "IPCC_classes"
 IPCC_change_path = "IPCC_basic_change"
 IPCC_change_pattern = "IPCC_change"
+
+### IPCC codes
+forest_IPCC = 1
+cropland_IPCC = 2
+settlement_IPCC = 3
+wetland_IPCC = 4
+grassland_IPCC = 5
+otherland_IPCC = 6
+
+IPCC_class_max_val = 6  # Maximum value of IPCC class codes
 
 land_state_node_path_part = "land_state_node"
 

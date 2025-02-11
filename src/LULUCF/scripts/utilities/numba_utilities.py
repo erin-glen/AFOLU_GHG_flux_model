@@ -118,7 +118,7 @@ def classify_veg_height(LC_curr, LC_prev):
 def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_forest, interval_end_year):
 
     # For the first interval, the land cover in 2000 has to be checked for tall vegetation as well
-    if interval_end_year == (cn.first_model_year + cn.interval_years):
+    if interval_end_year == (cn.first_model_year_5_years + cn.interval_duration):
 
         # Criteria for excluding tall vegetation land cover
         not_tall_veg_condition = (
@@ -129,7 +129,7 @@ def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_f
 
         # Sets cell to the model start year wherever land cover is not tall vegetation
         if not_tall_veg_condition == 1:
-            most_recent_year_not_forest = cn.first_model_year
+            most_recent_year_not_forest = cn.first_model_year_5_years
 
 
     # Checks the current end of interval land cover
@@ -181,7 +181,7 @@ def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_f
     else:
         if (interval_end_year > most_recent_year_not_forest) & (most_recent_year_not_forest > 0):
 
-            years_of_forest_regrowth = years_of_forest_regrowth + cn.interval_years
+            years_of_forest_regrowth = years_of_forest_regrowth + cn.interval_duration
 
         else:  # No change
             years_of_forest_regrowth = years_of_forest_regrowth
@@ -490,12 +490,12 @@ def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c
         # 2 years         13               - ((2015              - 2000)                - 5) - 1   (year t-2)
         # 3 years         14               - ((2015              - 2000)                - 5) - 1   (year t-1)
         # 4 years         15               - ((2015              - 2000)                - 5) - 1   (year t)
-        gain_year_count = forest_dist_last - ((interval_end_year - cn.first_model_year) - cn.interval_years) - 1
+        gain_year_count = forest_dist_last - ((interval_end_year - cn.first_model_year_5_years) - cn.interval_duration) - 1
     else:
         # If a forest disturbance was not detected, the disturbance is assumed to occur in the middle of the interval
         # (year t-2), with removals until then (years t-4 and t-3). There are no removals in the year of assumed
         # disturbance or the years after.
-        gain_year_count = math.floor(cn.interval_years/2)
+        gain_year_count = math.floor(cn.interval_duration / 2)
 
 
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless)
@@ -641,12 +641,12 @@ def calc_T_T_non_stand_disturbs(node, burned_in_last_interval, agc_rf, bgc_rf, c
         # 2 years         13               - ((2015              - 2000)                - 5) - 1   (year t-2)
         # 3 years         14               - ((2015              - 2000)                - 5) - 1   (year t-1)
         # 4 years         15               - ((2015              - 2000)                - 5) - 1   (year t)
-        gain_year_count = forest_dist_last - ((interval_end_year - cn.first_model_year) - cn.interval_years) - 1
+        gain_year_count = forest_dist_last - ((interval_end_year - cn.first_model_year_5_years) - cn.interval_duration) - 1
     else:
         # If a forest disturbance was not detected, the disturbance is assumed to occur in the middle of the interval
         # (year t-2), with removals until then (years t-4 and t-3). There are no removals in the year of assumed
         # disturbance or the years after.
-        gain_year_count = math.floor(cn.interval_years/2)
+        gain_year_count = math.floor(cn.interval_duration / 2)
 
 
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless).
@@ -719,7 +719,7 @@ def calc_T_T_non_stand_disturbs(node, burned_in_last_interval, agc_rf, bgc_rf, c
     # Step 6: Updates gross removals to include post-disturbance gross removals,
     # if applicable (>=5 m height gain) (Mg C/ha/interval).
     # post_dist_gain_year_count here is the number of years between the disturbance and the end of the interval.
-    post_dist_gain_year_count = cn.interval_years - gain_year_count - 1
+    post_dist_gain_year_count = cn.interval_duration - gain_year_count - 1
     post_dist_gross_removals = post_dist_gain_year_count * post_dist_RF
 
     c_gross_removals_out = c_gross_removals_out - post_dist_gross_removals
@@ -801,10 +801,10 @@ def calc_T_T_no_disturbs(node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_
         # 2 years         13               - ((2015              - 2000)                - 5) - 1   (year t-2)
         # 3 years         14               - ((2015              - 2000)                - 5) - 1   (year t-1)
         # 4 years         15               - ((2015              - 2000)                - 5) - 1   (year t)
-        gain_year_count = most_recent_year_burned - ((interval_end_year - cn.first_model_year) - cn.interval_years) - 1
+        gain_year_count = most_recent_year_burned - ((interval_end_year - cn.first_model_year_5_years) - cn.interval_duration) - 1
     else:
         # If no fire was detected, removals occurred every year
-        gain_year_count = cn.interval_years
+        gain_year_count = cn.interval_duration
 
 
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless).
@@ -881,7 +881,7 @@ def calc_T_T_no_disturbs(node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_
     if most_recent_year_burned > 0:
 
         post_dist_RF = np.array([agc_rf, bgc_rf, agc_rf*deadwood_c_ratio, agc_rf*litter_c_ratio]).astype('float32')
-        post_dist_gain_year_count = cn.interval_years - gain_year_count - 1
+        post_dist_gain_year_count = cn.interval_duration - gain_year_count - 1
         post_dist_gross_removals = post_dist_gain_year_count * post_dist_RF
 
         c_gross_removals_out = c_gross_removals_out - post_dist_gross_removals

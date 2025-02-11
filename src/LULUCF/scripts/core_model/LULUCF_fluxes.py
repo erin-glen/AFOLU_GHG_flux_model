@@ -114,13 +114,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
 
     # Iterates through model intervals
-    for interval_end_year in list(range(cn.first_model_year, cn.last_model_year + 1, cn.interval_years))[1:]:
+    for interval_end_year in list(range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1, cn.interval_duration))[1:]:
 
         # print(f"Now at {interval_end_year}:")
 
         # Model intervals so far, including the model start year.
         # Eventually used to determine whether current height has decreased significantly from maximum height since last non-tall veg year over multiple intervals (gradual height loss).
-        years_so_far = list(range(cn.first_model_year, interval_end_year + 1, cn.interval_years))
+        years_so_far = list(range(cn.first_model_year_5_years, interval_end_year + 1, cn.interval_duration))
 
         # Pre-fetches vegetation height data for this chunk and stores in a dictionary or list.
         # Eventually used to determine whether current height has decreased significantly from maximum height since last non-tall veg year over multiple intervals (gradual height loss).
@@ -133,9 +133,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
         ]
 
         # Writes the dictionary entries to a chunk for use in the decision tree
-        LC_prev_block = in_dict_uint8[f"{cn.land_cover_5_year_pattern}_{interval_end_year - cn.interval_years}"]
-        LC_curr_block = in_dict_uint8[f"{cn.land_cover_5_year_pattern}_{interval_end_year}"]
-        veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_5_year_pattern}_{interval_end_year - cn.interval_years}"]
+        LC_prev_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year - cn.interval_duration}"]
+        LC_curr_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year}"]
+        veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_5_year_pattern}_{interval_end_year - cn.interval_duration}"]
         veg_h_curr_block = in_dict_uint8[f"{cn.vegetation_height_5_year_pattern}_{interval_end_year}"]
 
         # Creates a list of all the burned area arrays from 2001 to the end of the interval.
@@ -156,7 +156,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
             year_key = f"{cn.forest_disturbance_layer_name}_{year_offset}"
 
             # Replaces the binary annual disturbance array with the year of disturbance (1, 2, 3...20)
-            year_disturb_array = in_dict_uint8[year_key] * (year_offset - cn.first_model_year)
+            year_disturb_array = in_dict_uint8[year_key] * (year_offset - cn.first_model_year_5_years)
 
             # Makes a list of disturbance arrays with the disturbance year.
             # uint8 is okay because the highest value should be 20 (not 2020).
@@ -930,7 +930,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
         # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
         # This applies even for the outputs that aren't reused in the next interval;
         # they will still get overwritten with the final interval's values, I believe.
-        year_range = f"{interval_end_year - cn.interval_years}_{interval_end_year}"
+        year_range = f"{interval_end_year - cn.interval_duration}_{interval_end_year}"
 
         out_dict_uint32[f"{cn.land_state_pattern}_{year_range}"] = state_out_block.copy()
 
@@ -938,19 +938,19 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
         # Converts carbon pool fluxes from Mg C/ha/interval to Mg CO2/ha/yr.
         # Gross emissions are positive. Gross removals are negative.
-        out_dict_float32[f"{cn.agc_gross_emis_pattern}_{year_range}"] = (agc_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
-        out_dict_float32[f"{cn.bgc_gross_emis_pattern}_{year_range}"] = (bgc_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
-        out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = (deadwood_c_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
-        out_dict_float32[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] = (litter_c_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
+        out_dict_float32[f"{cn.agc_gross_emis_pattern}_{year_range}"] = (agc_gross_emis_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.bgc_gross_emis_pattern}_{year_range}"] = (bgc_gross_emis_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = (deadwood_c_gross_emis_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] = (litter_c_gross_emis_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
 
-        out_dict_float32[f"{cn.agc_gross_removals_pattern}_{year_range}"] = (agc_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
-        out_dict_float32[f"{cn.bgc_gross_removals_pattern}_{year_range}"] = (bgc_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
-        out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"] = (deadwood_c_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
-        out_dict_float32[f"{cn.litter_c_gross_removals_pattern}_{year_range}"] = (litter_c_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
+        out_dict_float32[f"{cn.agc_gross_removals_pattern}_{year_range}"] = (agc_gross_removals_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.bgc_gross_removals_pattern}_{year_range}"] = (bgc_gross_removals_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"] = (deadwood_c_gross_removals_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.litter_c_gross_removals_pattern}_{year_range}"] = (litter_c_gross_removals_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
 
         # Converts non-CO2 emissions from Mg CO2e/ha/interval to Mg CO2e/ha/yr
-        out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = (ch4_gross_emis_out_block/cn.interval_years).copy()
-        out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = (n2o_gross_emis_out_block/cn.interval_years).copy()
+        out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = (ch4_gross_emis_out_block / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = (n2o_gross_emis_out_block / cn.interval_duration).copy()
 
         # Still Mg C/ha
         out_dict_float32[f"{cn.agc_dens_pattern}_{interval_end_year}"] = agc_dens_block.copy()
@@ -961,7 +961,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
         # Test/intermediate outputs only saved if not a large run
         if not is_final:
             out_dict_uint8[f"{cn.gain_year_count_pattern}_{year_range}"] = gain_year_count_out_block.copy()
-            out_dict_uint16[f"{cn.most_recent_year_not_tall_veg}_{cn.first_model_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
+            out_dict_uint16[f"{cn.most_recent_year_not_tall_veg}_{cn.first_model_year_5_years}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
             out_dict_uint8[f"{cn.years_of_forest_regrowth}_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
             out_dict_uint16[f"{cn.year_of_forest_loss}_{year_range}"] = year_of_forest_loss_block.copy()
             out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
@@ -1083,7 +1083,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
     [in_dict.clear() for in_dict in in_dicts]
 
-    for interval_end_year in cn.interval_end_years:
+    for interval_end_year in cn.interval_end_years_5_years:
 
         year_range = f"{interval_end_year-5}_{interval_end_year}"
 
@@ -1280,18 +1280,18 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     }
 
     # Land cover and vegetation height rasters (5-year intervals)
-    for year in range(cn.first_model_year, cn.last_model_year + 1, cn.interval_years):
-        download_dict[f"{cn.land_cover_5_year_pattern}_{year}"] = f"{cn.land_cover_5_year_path}{year}/raw/{sample_tile_id}.tif"
+    for year in range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1, cn.interval_duration):
+        download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_5_year_path}{year}/raw/{sample_tile_id}.tif"
         download_dict[f"{cn.vegetation_height_5_year_pattern}_{year}"] = f"{cn.vegetation_height_5_year_path}{year}/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_{year}.tif"
 
     # Burned area rasters (annual)
     # All years need to be in their own folder
-    for year in range(cn.first_model_year, cn.last_model_year + 1):  # Annual burned area maps start in 2000
+    for year in range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1):  # Annual burned area maps start in 2000
         download_dict[f"{cn.burned_area_pattern}_{year}"] = f"{cn.burned_area_path}{year}/{cn.burned_area_pattern}_{year}_{sample_tile_id}.tif"
 
     # Forest disturbance rasters (annual)
     # All years need to be in their own folder
-    for year in range(cn.first_model_year + 1, cn.last_model_year + 1):  # Annual forest disturbance maps start in 2001 and ends in 2020
+    for year in range(cn.first_model_year_5_years + 1, cn.last_model_year_5_years + 1):  # Annual forest disturbance maps start in 2001 and ends in 2020
         download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.forest_disturbance_annual_path}{year}/{year}_{sample_tile_id}.tif"
 
     # Young natural forest rasters (several age intervals)
