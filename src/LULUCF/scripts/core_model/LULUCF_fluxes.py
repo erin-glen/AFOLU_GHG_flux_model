@@ -1168,7 +1168,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
             out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range]
 
         uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
-                                            is_final, logger, out_no_data_val)
+                                            is_final, logger,
+                                            'standard', 'per_hectare', out_no_data_val)
 
     # Clears memory of unneeded arrays
     del out_dict_all_dtypes

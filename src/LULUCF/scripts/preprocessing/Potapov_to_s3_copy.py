@@ -1,31 +1,34 @@
+"""
+
+Run from src/LULUCF/
+python -m scripts.preprocessing.Potapov_to_s3_copy -cn LULUCF_model
+
 # Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6794049f-2ba0-800a-b6ef-9445cfdd94a8
+
+"""
 
 import os
 import dask
 import dask.bag as db
 import boto3
+import argparse
+import requests
+from bs4 import BeautifulSoup
 import requests
 from coiled import Cluster
+from dask.distributed import print
 
 # Project imports
 from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
-from ..utilities import log_utilities as lu
-from ..utilities import numba_utilities as nu
-from ..utilities import resize_cluster
 
-# AWS S3 Configuration
-S3_BUCKET = "gfw2-data"
-
-# Base URL and year folders
-BASE_URL = "https://glad.geog.umd.edu/Potapov/Global_TCH_2015-23"
-# YEARS = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
-YEARS = [2015]
 
 def download_and_upload_file(file_url, s3_key):
     """
     Download a file from the given URL and upload it to the specified S3 location.
     """
+
+    print(file_url, s3_key)
 
     s3_client = boto3.client("s3")
 
@@ -35,8 +38,8 @@ def download_and_upload_file(file_url, s3_key):
         response.raise_for_status()  # Raise an error for HTTP issues
 
         # Upload to S3
-        s3_client.upload_fileobj(response.raw, S3_BUCKET, s3_key)
-        print(f"Uploaded {file_url} to s3://{S3_BUCKET}/{s3_key}")
+        s3_client.upload_fileobj(response.raw, cn.short_bucket_prefix, s3_key)
+        print(f"Uploaded {file_url} to s3://{cn.short_bucket_prefix}/{s3_key}")
         return True
     except Exception as e:
         print(f"Error processing {file_url}: {e}")
@@ -45,36 +48,51 @@ def download_and_upload_file(file_url, s3_key):
 
 def process_year(year):
     """
-    Process all files for a specific year by downloading and uploading them to S3.
+    Process all files for a specific year by extracting file names from the HTML page
+    and generating download URLs and S3 keys.
     """
-    year_url = f"{BASE_URL}/TCH_filter_{year}/"
+    year_url = f"{cn.vegetation_height_annual_GLAD_path}/TCH_filter_{year}/"
     response = requests.get(year_url)
 
     if response.status_code != 200:
         raise ValueError(f"Unable to access {year_url}")
 
-    # Extract file names from the HTML page (assuming file links end with .tif)
-    file_names = [line.split('"')[1] for line in response.text.splitlines() if '.tif' in line]
+    # Parse the HTML to extract file names
+    soup = BeautifulSoup(response.text, "html.parser")
+    file_names = [a["href"] for a in soup.find_all("a", href=True) if a["href"].endswith(".tif")]
+
+    if not file_names:
+        print(f"No .tif files found in {year_url}")
+        return []
 
     # Create full file URLs and corresponding S3 keys
-    tasks = []
-    for file_name in file_names:
-        file_url = f"{year_url}{file_name}"
-        s3_key = f"landcover/vegetation_height/annual/20250114/{year}/{file_name}"  # Maintain year-based folder structure
-        tasks.append((file_url, s3_key))
+    # tasks = [(f"{year_url}{file_name}", f"{year}/{file_name}") for file_name in file_names]
+    tasks = [
+        (f"{year_url}{file_name}", f"{cn.vegetation_height_annual_path}{year}/{file_name}"[cn.full_bucket_prefix_length:]) for
+        file_name in file_names]
 
     return tasks
 
 
 if __name__ == "__main__":
 
+    parser = argparse.ArgumentParser(description="Create a Coiled cluster with specified parameters.")
+    parser.add_argument('-cn', '--cluster_name', type=str, help='Coiled cluster name')
+    parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
+
+    args = parser.parse_args()
+
+    cluster_name = args.cluster_name
+    run_local = args.run_local
+
     # Connects to Coiled cluster if not running locally
-    cluster, client = uu.connect_to_Coiled_cluster("AFOLU_flux_model_scripts", False)
+    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
 
     # Create tasks for all years
     all_tasks = []
-    for year in YEARS:
+    # for year in cn.years_annual:
+    for year in [2015]:
         all_tasks.extend(process_year(year))
 
     # Create a Dask Bag for parallel processing

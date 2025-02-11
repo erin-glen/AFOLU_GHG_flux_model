@@ -20,6 +20,7 @@ from dask.distributed import Client, LocalCluster
 from dask import delayed
 from datetime import datetime
 from io import BytesIO
+from numba import jit
 from osgeo import gdal
 
 # Project imports
@@ -80,7 +81,8 @@ def check_s3_file_created(s3_path):
 
 # Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
 def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
-                                     bounds_str, output_dict, is_final, logger, no_data_val=None):
+                                     bounds_str, output_dict, is_final, logger,
+                                     model_version, pixel_meaning, no_data_val=None):
 
     # Configures S3 client with increased retries; retries can max out for global analyses
     s3_config = Config(
@@ -135,7 +137,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
                                blockysize=400) as dst:
                 dst.write(data_array, 1)
 
-        s3_path = f"{cn.s3_out_dir}/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels/{output_date}"
+        s3_path = f"{cn.s3_out_dir}/{data_meaning}/{year_out}/{model_version}/{chunk_length_pixels}_pixels/{pixel_meaning}/{output_date}"
 
         # Only prints if not a final run
         if not is_final:
@@ -212,10 +214,10 @@ def upload_shp(in_folder, shp):
     shp_pattern = shp[:-4]
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
-    s3_client.upload_file(f"/tmp/{shp}", "gfw2-data", Key=f"{in_folder[15:]}{shp}")
-    s3_client.upload_file(f"/tmp/{shp_pattern}.dbf", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.dbf")
-    s3_client.upload_file(f"/tmp/{shp_pattern}.prj", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.prj")
-    s3_client.upload_file(f"/tmp/{shp_pattern}.shx", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.shx")
+    s3_client.upload_file(f"/tmp/{shp}", "gfw2-data", Key=f"{in_folder[cn.full_bucket_prefix_length:]}{shp}")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.dbf", "gfw2-data", Key=f"{in_folder[cn.full_bucket_prefix_length:]}{shp_pattern}.dbf")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.prj", "gfw2-data", Key=f"{in_folder[cn.full_bucket_prefix_length:]}{shp_pattern}.prj")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.shx", "gfw2-data", Key=f"{in_folder[cn.full_bucket_prefix_length:]}{shp_pattern}.shx")
 
     os.remove(f"/tmp/{shp}")
     os.remove(f"/tmp/{shp_pattern}.dbf")
@@ -777,7 +779,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
     if not no_upload:
 
         try:
-            s3_client.upload_file(merged_file, "gfw2-data", Key=f"{out_folder[15:]}{out_file_name}")  #[15:] drops s3://gfw2-data/ from front
+            s3_client.upload_file(merged_file, "gfw2-data", Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}")  #[15:] drops s3://gfw2-data/ from front
             lu.print_and_log(f"Successfully uploaded {out_file_name} to s3", is_final, logger)
         except boto3.exceptions.S3UploadFailedError as e:
             lu.print_and_log(f"Error uploading file to s3: {e}", is_final, logger)

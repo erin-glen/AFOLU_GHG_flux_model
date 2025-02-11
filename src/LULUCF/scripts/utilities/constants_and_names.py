@@ -14,6 +14,7 @@ model_version = 0.2
 s3 = boto3.resource('s3')
 short_bucket_prefix = "gfw2-data"
 full_bucket_prefix = "s3://" + short_bucket_prefix
+full_bucket_prefix_length = len(full_bucket_prefix)+1
 s3_client = boto3.client("s3")
 
 ### Pattern for tile_ids in regex form
@@ -37,6 +38,8 @@ last_model_year = 2020   # Last year of model
 # Number of years in interval.
 interval_years = 5    #TODO: calculate programmatically in numba function rather than coded here-- for greater flexibility.
 interval_end_years = list(range(first_model_year, last_model_year + 1, interval_years))[1:]
+
+years_annual = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
 
 
 # Number of years of removals in a tree cover gain pixel
@@ -164,6 +167,8 @@ fishnet_s3_uri = "s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/2024112
 land_cover_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/composite/"
 land_cover_pattern = "land_cover"
 
+vegetation_height_annual_GLAD_path = "https://glad.geog.umd.edu/Potapov/Global_TCH_2015-23"
+vegetation_height_annual_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/annual/20250114/raw/"
 vegetation_height_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/"
 vegetation_height_pattern = "vegetation_height"
 
