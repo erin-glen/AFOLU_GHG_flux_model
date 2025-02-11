@@ -1,6 +1,6 @@
 """
 Run from src/LULUCF/
-python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
+python -m scripts.utilities.create_cluster -n 1 -t 4 -cn AFOLU_flux_model_scripts
 """
 
 import coiled
@@ -55,8 +55,8 @@ if __name__ == "__main__":
     idle_timeout = args.idle_timeout
 
     # Uses the larger workers if requested or if more workers are requested.
-    # Assumes that if using more workers, you want bigger workers. 8 is a semi-arbitrary cutoff.
-    if (args.large_scale_mode) or (n_workers > 8):
+    # Assumes that if using more workers, you want bigger workers. 12 is a semi-arbitrary cutoff.
+    if (args.large_scale_mode) or (n_workers > 12):
 
         worker_memory = '32'
         worker_cpu = 4

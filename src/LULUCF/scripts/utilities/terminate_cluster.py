@@ -1,5 +1,5 @@
 """
-python -m scripts.utilities.terminate_cluster AFOLU_flux_model_scripts
+python -m scripts.utilities.terminate_cluster --cluster_name AFOLU_flux_model_scripts
 """
 
 import coiled

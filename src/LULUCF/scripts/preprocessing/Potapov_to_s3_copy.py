@@ -1,7 +1,10 @@
 """
 
 Run from src/LULUCF/
-python -m scripts.preprocessing.Potapov_to_s3_copy -cn LULUCF_model
+python -m scripts.utilities.create_cluster -n 11 -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.Potapov_to_s3_copy -cn AFOLU_flux_model_scripts
+
+For 2015-2023, there are 2826 files. Takes <10 minutes to transfer them.
 
 # Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6794049f-2ba0-800a-b6ef-9445cfdd94a8
 
@@ -27,8 +30,6 @@ def download_and_upload_file(file_url, s3_key):
     """
     Download a file from the given URL and upload it to the specified S3 location.
     """
-
-    print(file_url, s3_key)
 
     s3_client = boto3.client("s3")
 
@@ -62,11 +63,10 @@ def process_year(year):
     file_names = [a["href"] for a in soup.find_all("a", href=True) if a["href"].endswith(".tif")]
 
     if not file_names:
-        print(f"No .tif files found in {year_url}")
+        print(f"No .tifs found in {year_url}")
         return []
 
     # Create full file URLs and corresponding S3 keys
-    # tasks = [(f"{year_url}{file_name}", f"{year}/{file_name}") for file_name in file_names]
     tasks = [
         (f"{year_url}{file_name}", f"{cn.vegetation_height_annual_path}{year}/{file_name}"[cn.full_bucket_prefix_length:]) for
         file_name in file_names]
@@ -91,8 +91,8 @@ if __name__ == "__main__":
 
     # Create tasks for all years
     all_tasks = []
-    # for year in cn.years_annual:
-    for year in [2015]:
+    for year in cn.years_annual:
+    # for year in [2015]:   # To test one year
         all_tasks.extend(process_year(year))
 
     # Create a Dask Bag for parallel processing
