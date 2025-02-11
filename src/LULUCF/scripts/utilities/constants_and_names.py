@@ -149,6 +149,8 @@ SDPT_other_code = 3
 ### File name paths and patterns
 ########
 
+### Miscellaneous
+
 date_date_range_pattern = r'_\d{4}(_\d{4})?'   # Pattern for date (XXXX) or date range XXXX_YYYY in output file names
 
 s3_out_dir = 'climate/AFOLU_flux_model/LULUCF/outputs'
@@ -162,17 +164,22 @@ local_chunk_stats_path = "chunk_stats/"
 s3_chunk_stats_path = "climate/AFOLU_flux_model/LULUCF/chunk_stats/"
 
 # 1x1 deg fishnet between 80N and 60N, 180W and 180E that intersects GADM3.6 and has GADM iso joined to it
-fishnet_s3_uri = "s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/"
+fishnet_1x1deg_all_land_s3_uri = "s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/"
 
-land_cover_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/composite/"
-land_cover_pattern = "land_cover"
+### Inputs
 
+land_cover_5_year_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/composite/five_year/v1/raw/"
+land_cover_5_year_pattern = "land_cover"
+land_cover_annual_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/composite/annual/v1/raw/"
+land_cover_annual_pattern = ""
+
+vegetation_height_5_year_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/"
+vegetation_height_5_year_pattern = "vegetation_height"
 vegetation_height_annual_GLAD_path = "https://glad.geog.umd.edu/Potapov/Global_TCH_2015-23"
 vegetation_height_annual_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/annual/20250114/raw/"
-vegetation_height_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/"
-vegetation_height_pattern = "vegetation_height"
+vegetation_height_annual_pattern = ""
 
-annual_forest_disturbance_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/annual_forest_disturbance/raw/"
+forest_disturbance_annual_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/annual_forest_disturbance/raw/"
 forest_disturbance_layer_name = "forest_disturbance"
 
 agb_2000_path = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/Processed/"
@@ -507,6 +514,7 @@ LULUCF_output_folders = [
     f"{outputs_path}{land_state_node_path_part}/2015_2020/RES_pixels/DATE/"
 ]
 
+# TODO @Mel We shouldn't need this eventually.
 tile_id_list = [
                 '00N_000E', '00N_010E', '00N_020E', '00N_030E', '00N_040E', '00N_040W', '00N_050W', '00N_060W', '00N_070E',
                 '00N_070W', '00N_080W', '00N_090E', '00N_090W', '00N_100E', '00N_100W', '00N_110E', '00N_120E', '00N_130E',

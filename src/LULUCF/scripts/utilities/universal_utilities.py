@@ -895,7 +895,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
 
     # Reads the shapefile from S3 to extract "chunk_id" and "iso" fields
     # Based on https://chatgpt.com/share/e/6744de08-6b64-800a-b8c4-6a20833f7e3a
-    gdf = gpd.read_file(cn.fishnet_s3_uri)
+    gdf = gpd.read_file(cn.fishnet_1x1deg_all_land_s3_uri)
 
     # Creates a DataFrame with "chunk_id" and "iso" fields
     fishnet_shapefile_df = gdf[['chunk_id', 'iso']]
@@ -1088,7 +1088,7 @@ def strip_and_extract_years(key):
 def fishnet_with_GADM_iso():
 
     # Reads the 1x1 deg fishnet with GADM3.6 iso joined from S3 to extract "chunk_id" and "iso" fields
-    gdf = gpd.read_file(cn.fishnet_s3_uri)
+    gdf = gpd.read_file(cn.fishnet_1x1deg_all_land_s3_uri)
 
     # Creates a DataFrame of the 1x1def fishnet with "chunk_id" and "iso" fields
     fishnet_df = gdf[['chunk_id', 'iso']]

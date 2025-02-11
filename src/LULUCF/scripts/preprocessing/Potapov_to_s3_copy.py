@@ -10,15 +10,12 @@ For 2015-2023, there are 2826 files. Takes <10 minutes to transfer them.
 
 """
 
-import os
 import dask
 import dask.bag as db
 import boto3
 import argparse
-import requests
 from bs4 import BeautifulSoup
 import requests
-from coiled import Cluster
 from dask.distributed import print
 
 # Project imports

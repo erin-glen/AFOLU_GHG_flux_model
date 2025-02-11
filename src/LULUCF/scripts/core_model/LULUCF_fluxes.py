@@ -128,15 +128,15 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
         # and speed the code up. I was trying to get vegetation height so far in a variety of ways and it kept being slow.
         # This approach, in conjunction with some pixel-level operations below, seems to not slow down the code.
         vegetation_heights_so_far_block = [
-            in_dict_uint8[f"{cn.vegetation_height_pattern}_{year}"]
+            in_dict_uint8[f"{cn.vegetation_height_5_year_pattern}_{year}"]
             for year in years_so_far
         ]
 
         # Writes the dictionary entries to a chunk for use in the decision tree
-        LC_prev_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year - cn.interval_years}"]
-        LC_curr_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year}"]
-        veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year - cn.interval_years}"]
-        veg_h_curr_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year}"]
+        LC_prev_block = in_dict_uint8[f"{cn.land_cover_5_year_pattern}_{interval_end_year - cn.interval_years}"]
+        LC_curr_block = in_dict_uint8[f"{cn.land_cover_5_year_pattern}_{interval_end_year}"]
+        veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_5_year_pattern}_{interval_end_year - cn.interval_years}"]
+        veg_h_curr_block = in_dict_uint8[f"{cn.vegetation_height_5_year_pattern}_{interval_end_year}"]
 
         # Creates a list of all the burned area arrays from 2001 to the end of the interval.
         # It works by getting the burned area chunks for the current interval and appending them to a list of chunks
@@ -1281,8 +1281,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Land cover and vegetation height rasters (5-year intervals)
     for year in range(cn.first_model_year, cn.last_model_year + 1, cn.interval_years):
-        download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_path}{year}/raw/{sample_tile_id}.tif"
-        download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_path}{year}/{sample_tile_id}_{cn.vegetation_height_pattern}_{year}.tif"
+        download_dict[f"{cn.land_cover_5_year_pattern}_{year}"] = f"{cn.land_cover_5_year_path}{year}/raw/{sample_tile_id}.tif"
+        download_dict[f"{cn.vegetation_height_5_year_pattern}_{year}"] = f"{cn.vegetation_height_5_year_path}{year}/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_{year}.tif"
 
     # Burned area rasters (annual)
     # All years need to be in their own folder
@@ -1292,7 +1292,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Forest disturbance rasters (annual)
     # All years need to be in their own folder
     for year in range(cn.first_model_year + 1, cn.last_model_year + 1):  # Annual forest disturbance maps start in 2001 and ends in 2020
-        download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.annual_forest_disturbance_path}{year}/{year}_{sample_tile_id}.tif"
+        download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.forest_disturbance_annual_path}{year}/{year}_{sample_tile_id}.tif"
 
     # Young natural forest rasters (several age intervals)
     # Each growth interval's rate is in its own folder
@@ -1361,6 +1361,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
             print(message)
 
     # Print the counts
+    ##TODO Use the GCS_to_s3 status json as a way to check which chunks were skipped
     print(f"Number of 'Success' chunks: {success_count}")
     print(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
     print(f"Difference between submitted chunks and processed chunks: {len(chunks) - (success_count + skipping_chunk_count)}")
