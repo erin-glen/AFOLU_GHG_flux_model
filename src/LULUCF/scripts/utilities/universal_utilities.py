@@ -444,6 +444,8 @@ def xy_to_tile_id(top_left_x, top_left_y):
 # Calculates the elapsed time for a stage
 def stage_duration(start_time_str, end_time_str, stage, logger):
 
+    logger.info(f"Stage {stage} ended at: {end_time_str}")
+
     start_time = datetime.strptime(start_time_str, "%Y%m%d_%H_%M_%S")
     end_time = datetime.strptime(end_time_str, "%Y%m%d_%H_%M_%S")
 
@@ -885,11 +887,11 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, logger):
     df_all_stats['max_value'] = pd.to_numeric(df_all_stats['max_value'], errors='coerce')
 
     # Sorts the DataFrame by 'in_out' and 'layer_name'
-    print(f"Sorting tile stats by properties at {timestr()}...")
+    logger.info(f"Sorting tile stats by properties at {timestr()}...")
     sorted_stats = df_all_stats.sort_values(by=['in_out', 'layer_name']).reset_index(drop=True)
 
     # Calculates the min and max values for each layer_name across all chunks
-    print(f"Calculating min and max values across all chunks at {timestr()}...")
+    logger.info(f"Calculating min and max values across all chunks at {timestr()}...")
     min_max_stats = df_all_stats.groupby('layer_name').agg(
         min_value=('min_value', 'min'),
         max_value=('max_value', 'max')
@@ -1115,6 +1117,34 @@ def fishnet_with_GADM_iso():
     return fishnet_df
 
 
+def get_cluster_info(client, cluster):
+
+    # Retrieves properties of the workers
+    workers = client.scheduler_info()["workers"]
+
+    # Retrieves the number of workers
+    n_workers = len(workers)
+
+    # Retrieves the number of threads per worker
+    # https://chatgpt.com/share/e/672503f1-eef8-800a-9218-281624acf27e
+    first_worker_address = next(iter(workers.keys()))
+    nthreads = workers[first_worker_address]["nthreads"]
+
+    # Retrieves scheduler info for other cluster properties
+    scheduler_info = cluster.scheduler_info  # Access scheduler info directly as a dictionary
+
+    # Gets memory per worker.
+    # Can't get it to report the worker instance type
+    try:
+        worker_memory_bytes = scheduler_info['workers'][next(iter(scheduler_info['workers']))]['memory_limit']
+        worker_memory_gb = worker_memory_bytes / (1024 ** 3)  # Convert bytes to GB
+        worker_memory = f"{worker_memory_gb:.2f} GB"  # Format to 2 decimal places
+        # worker_type = coiled_cluster.config.get('worker_options', {}).get('instance_type', "Unknown")
+    except KeyError:
+        worker_memory = "Unknown"
+        # worker_type = "Unknown"
+
+    return worker_memory, n_workers, nthreads
 
 
 

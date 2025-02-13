@@ -14,8 +14,10 @@ python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cl s3:/
 
 import argparse
 import concurrent.futures
-import sys
+import os
 import re
+import sys
+import time
 import numpy as np
 
 from dask.distributed import print
@@ -973,7 +975,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types, fishnet_iso_df, is_final, no_upload):
 
-    logger = lu.setup_logging_worker()
+    logger_worker = lu.setup_logging_worker()
 
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
@@ -994,12 +996,12 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
     # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
-    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger)
+    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
     # print(futures)
 
     # Only prints if not a final run
     if not is_final:
-        lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+        lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
     # Dictionary that stores the downloaded data
     layers = {}
@@ -1032,7 +1034,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     # Only prints if not a final run
     if not is_final:
-        lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+        lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
     # Creates the typed dictionaries for all input layers (including those that originally had no data)
     typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
@@ -1045,12 +1047,12 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     ### Part 4: Calculates LULUCF fluxes and densities
 
-    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
     print(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}")
 
     out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs, is_final)
 
-    lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+    lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
     print(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}")
 
     # print(out_dict_uint32)
@@ -1139,7 +1141,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     pixel_area_uri = f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{tile_id}.tif"
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
-    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger)
+    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger_worker)
 
     # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
     for key, array_per_ha in out_dict_all_dtypes.items():
@@ -1168,7 +1170,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
             out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range]
 
         uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
-                                            is_final, logger,
+                                            is_final, logger_worker,
                                             'standard', 'per_hectare', out_no_data_val)
 
     # Clears memory of unneeded arrays
@@ -1178,44 +1180,14 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     return success_message, chunk_stats  # Return both the success message and the statistics
 
 
-import os
-import time
-import logging
-import sys
-
-def get_cluster_info(client, cluster):
-
-    # Retrieves properties of the workers
-    workers = client.scheduler_info()["workers"]
-
-    # Retrieves the number of workers
-    n_workers = len(workers)
-
-    # Retrieves the number of threads per worker
-    # https://chatgpt.com/share/e/672503f1-eef8-800a-9218-281624acf27e
-    first_worker_address = next(iter(workers.keys()))
-    nthreads = workers[first_worker_address]["nthreads"]
-
-    # Retrieves scheduler info for other cluster properties
-    scheduler_info = cluster.scheduler_info  # Access scheduler info directly as a dictionary
-
-    # Gets memory per worker.
-    # Can't get it to report the worker instance type
-    try:
-        worker_memory_bytes = scheduler_info['workers'][next(iter(scheduler_info['workers']))]['memory_limit']
-        worker_memory_gb = worker_memory_bytes / (1024 ** 3)  # Convert bytes to GB
-        worker_memory = f"{worker_memory_gb:.2f} GB"  # Format to 2 decimal places
-        # worker_type = coiled_cluster.config.get('worker_options', {}).get('instance_type', "Unknown")
-    except KeyError:
-        worker_memory = "Unknown"
-        # worker_type = "Unknown"
-
-    return worker_memory, n_workers, nthreads
 
 def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
          bounding_box=None, chunk_size=None, chunk_list=None, first_chunks=None, log_note=None):
 
-    log_filename = f"logs/main_{time.strftime('%Y%m%d_%H%M%S')}.log"
+    # Model stage being running
+    stage = 'LULUCF_fluxes'
+
+    log_filename = f"logs/main_{cn.combined_log}_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
     os.makedirs("logs", exist_ok=True)  # Ensure logs directory exists
 
     logger = lu.setup_logging_main(log_filename)  # Set up logging for the main function
@@ -1223,10 +1195,9 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
-    # Model stage being running
-    stage = 'LULUCF_fluxes'
 
-    worker_memory, n_workers, nthreads = get_cluster_info(client, cluster)
+
+    worker_memory, n_workers, nthreads = uu.get_cluster_info(client, cluster)
 
     logger.info(f"Stage: {stage}")
     logger.info(f"Model version: {cn.model_version}")
@@ -1286,7 +1257,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         logger.info("Chunk list cannot be determined")
         sys.exit()
 
-    logger.info(f"Processing {len(chunks)} chunks")
+    logger.info(f"Chunks to process: {len(chunks)}")
     logger.info(f"Chunk size (degrees): {chunk_size}")
 
     # Determines if the output file names for final versions of outputs should be used
@@ -1431,7 +1402,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     logger.info(f"Difference between submitted chunks and processed chunks: {len(chunks) - (success_count + skipping_chunk_count)}")
 
 
-
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
     workers = client.scheduler_info()["workers"]
@@ -1456,9 +1426,9 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
             logger.info(f"Output rasters in {LULUCF_output_folder}: {file_count}")
             # print(geotiff_files)
 
-    end_time_1 = uu.timestr()
-    logger.info(f"Stage {stage} ended at: {end_time_1}")
-    uu.stage_duration(start_time, end_time_1, stage, logger)
+    # end_time_1 = uu.timestr()
+    # logger.info(f"Stage {stage} ended at: {end_time_1}")
+    uu.stage_duration(start_time, uu.timestr(), stage, logger)
 
 
     # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
@@ -1468,15 +1438,17 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         uu.aggregate_chunk_stats(all_stats, stage, no_upload, logger)
 
     # Ending time for stage
-    end_time_2 = uu.timestr()
-    logger.info(f"Stage {stage} tile stats ended at: {end_time_2}")
-    uu.stage_duration(start_time, end_time_2, stage, logger)
-    logger.info(f"Elapsed time for {stage} including tile stats: {end_time_2 - start_time}")
+    # end_time_2 = uu.timestr()
+    # logger.info(f"Stage {stage} tile stats ended at: {end_time_2}")
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", logger)
+    # logger.info(f"Elapsed time for {stage} including tile stats: {end_time_2 - start_time}")
 
     # Creates combined log from all workers if not deactivated
     #TODO Figure out how to make it gather worker logs as soon as run finishes so that they're not lost,
     # then upload the consolidated log at the very end like this.
-    lu.compile_and_upload_log(no_log, cluster, stage, start_time)
+    lu.compile_and_upload_log(no_log, cluster, stage, start_time, logger)
+    # end_time_3 = uu.timestr()
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", logger)
 
     if not run_local:
         # Closes the Dask client if not running locally

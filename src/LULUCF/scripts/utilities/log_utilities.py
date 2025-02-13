@@ -1,10 +1,10 @@
 import boto3
 import logging
+import sys
 import time
 
 from dask.distributed import print
 from datetime import datetime
-
 
 from . import constants_and_names as cn
 from . import universal_utilities as uu
@@ -15,7 +15,7 @@ from . import universal_utilities as uu
 # Gets the logs for all workers
 #TODO Wait to run this until all entries have been added to the Coiled log--
 # running this right after the model finishes means that final log entries haven't made it into Coiled yet.
-def compile_and_upload_log(no_log, cluster, stage, start_time_str):
+def compile_and_upload_log(no_log, cluster, stage, start_time_str, logger):
 
     # Only consolidates the worker logs and uploads to s3 if not deactivated
     if no_log:
@@ -25,7 +25,7 @@ def compile_and_upload_log(no_log, cluster, stage, start_time_str):
     log_name = f"{cn.combined_log}_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.txt"
     local_log = f"{cn.local_log_path}{log_name}"
 
-    print(f"Preparing consolidated log {log_name}")
+    logger.info(f"Preparing consolidated log {log_name}")
 
     # Recovers legs from Coiled
     logs = cluster.get_logs()
@@ -52,15 +52,7 @@ def compile_and_upload_log(no_log, cluster, stage, start_time_str):
                     continue
 
     combined_filtered_logs = (
-            # "\n".join(header_lines) + "\n" +
             "\n".join(filtered_logs) + "\n"
-            # f"Stage {stage} ended at: {end_time_1_str}\n"
-            # f"Elapsed time for {stage}: {end_time_1 - start_time}\n"
-            # f"Number of 'Success' chunks: {success_count}\n"
-            # f"Number of 'Skipped' chunks: {skipping_chunk_count}\n"
-            # f"Difference between submitted chunks and processed chunks: {chunk_count - (success_count + skipping_chunk_count)}\n"
-            # f"Stage {stage} tile stats ended at: {end_time_2_str}\n"
-            # f"Elapsed time for {stage} including tile stats: {end_time_2 - start_time}"
     )
 
     # Save the filtered logs to a text file
@@ -70,7 +62,7 @@ def compile_and_upload_log(no_log, cluster, stage, start_time_str):
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
     s3_client.upload_file(local_log, "gfw2-data", Key=f"{cn.s3_log_path}{log_name}")
 
-    print(f"Log uploaded to {cn.s3_log_path}{log_name}")
+    logger.info(f"Log uploaded to {cn.s3_log_path}{log_name}")
 
 
 # Determines whether statement should be printed to the console as well as logged
@@ -92,8 +84,6 @@ def setup_logging_worker():
         handler.setFormatter(formatter)
         logger.addHandler(handler)
     return logger
-
-import sys
 
 def setup_logging_main(log_filename=None):
     """Setup logging to log both to console and a file."""
