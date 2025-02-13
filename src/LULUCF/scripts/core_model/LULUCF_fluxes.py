@@ -1183,36 +1183,74 @@ import time
 import logging
 import sys
 
+def get_cluster_info(client, cluster):
+
+    # Retrieves properties of the workers
+    workers = client.scheduler_info()["workers"]
+
+    # Retrieves the number of workers
+    n_workers = len(workers)
+
+    # Retrieves the number of threads per worker
+    # https://chatgpt.com/share/e/672503f1-eef8-800a-9218-281624acf27e
+    first_worker_address = next(iter(workers.keys()))
+    nthreads = workers[first_worker_address]["nthreads"]
+
+    # Retrieves scheduler info for other cluster properties
+    scheduler_info = cluster.scheduler_info  # Access scheduler info directly as a dictionary
+
+    # Gets memory per worker.
+    # Can't get it to report the worker instance type
+    try:
+        worker_memory_bytes = scheduler_info['workers'][next(iter(scheduler_info['workers']))]['memory_limit']
+        worker_memory_gb = worker_memory_bytes / (1024 ** 3)  # Convert bytes to GB
+        worker_memory = f"{worker_memory_gb:.2f} GB"  # Format to 2 decimal places
+        # worker_type = coiled_cluster.config.get('worker_options', {}).get('instance_type', "Unknown")
+    except KeyError:
+        worker_memory = "Unknown"
+        # worker_type = "Unknown"
+
+    return worker_memory, n_workers, nthreads
 
 def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         bounding_box=None, chunk_size=None, chunk_list=None, first_chunks=None):
+         bounding_box=None, chunk_size=None, chunk_list=None, first_chunks=None, log_note=None):
 
     log_filename = f"logs/main_{time.strftime('%Y%m%d_%H%M%S')}.log"
     os.makedirs("logs", exist_ok=True)  # Ensure logs directory exists
 
     logger = lu.setup_logging_main(log_filename)  # Set up logging for the main function
     logger.info("Starting main function.")
-
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Model stage being running
     stage = 'LULUCF_fluxes'
 
+    worker_memory, n_workers, nthreads = get_cluster_info(client, cluster)
+
+    logger.info(f"Stage: {stage}")
+    logger.info(f"Model version: {cn.model_version}")
+    logger.info(f"Number of workers: {n_workers}")
+    logger.info(f"Memory per worker: {worker_memory}")
+    logger.info(f"Threads per worker: {nthreads}")
+    logger.info(f"Bounding box: {bounding_box}")
+    logger.info(f"Log note: {log_note}")
+
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],   # 2000-2020
                           [cn.first_model_year_5_years, cn.last_model_year_annual],    # 2000-2023
                           [cn.first_model_year_annual, cn.last_model_year_annual]]:    # 2015-2023
-        print("Year range selection not valid")
+        logger.info("Year range selection not valid")
         sys.exit()
     else:
         start_year = year_range[0]
         end_year = year_range[1]
+        logger.info(f"Start year: {start_year}")
+        logger.info(f"End year: {end_year}")
 
     # Starting time for stage
     start_time = uu.timestr()
-    print(f"Stage {stage} started at: {start_time}")  #TODO in all main() functions, add print statements to log
-    logger.info(f"flm: Stage {stage} started at: {start_time}")
+    logger.info(f"Stage {stage} started at: {start_time}") #TODO in all main() functions, add print statements to log
 
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -1223,7 +1261,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
     if bounding_box and chunk_size:
 
-        print("Using bounding box and chunk size to determine chunks")
+        logger.info("Using bounding box and chunk size to determine chunks")
         chunks = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
 
     # Makes list of chunks to analyze from a shapefile attribute table.
@@ -1231,7 +1269,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
     elif chunk_list:
 
-        print("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
         logger.info("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
 
         # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
@@ -1246,18 +1283,17 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         chunks = fishnet_1x1_chunk_id_df['chunk_id'].apply(uu.process_chunk_id).tolist()
 
     else:
-        print("Chunk list cannot be determined")
         logger.info("Chunk list cannot be determined")
         sys.exit()
 
-    print(f"Processing {len(chunks)} chunks")
     logger.info(f"Processing {len(chunks)} chunks")
+    logger.info(f"Chunk size (degrees): {chunk_size}")
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
     if len(chunks) > 20:
         is_final = True
-        print("Running as final model.")
+        logger.info("Running as final model.")
 
     # Accumulates all statistics and output messages from chunk analysis
     # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
@@ -1328,13 +1364,13 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Returns the first tile in each input so that the datatype can be determined.
     # This is done up front, once per tile set, rather than on each chunk, since
     # all tiles have the same datatype for each input-- it only needs to be done once at the very beginning of the stage.
-    print(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
+    logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
     first_tiles = uu.first_file_name_in_s3_folder(download_dict)
 
     # Creates a download dictionary with the datatype of each input in the values.
     # This is supplied to each chunk that is being analyzed.
     # This also serves as a check of whether all inputs are being found (s3 paths correct)
-    print(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
+    logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
     # download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
 
@@ -1349,8 +1385,8 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     primary_forest_RFs[:, 1] = primary_forest_RFs[:, 1] * cn.biomass_to_carbon_non_mangrove
 
     # Creates list of tasks to run (1 task = 1 chunk)
-    print(f"Creating tasks and starting processing: {uu.timestr()}")
     logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
+    logger.info("Filtered logs from workers:"+ "\n" + "\n")
 
     # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
     futures = []
@@ -1386,13 +1422,13 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Prints the returned messages if not a large (is_final) run
     if not is_final:
         for message in return_messages:
-            print(message)
+            logger.info(message)
 
     # Print the counts
     ##TODO Use the GCS_to_s3 status json as a way to check which chunks were skipped
-    print(f"Number of 'Success' chunks: {success_count}")
-    print(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
-    print(f"Difference between submitted chunks and processed chunks: {len(chunks) - (success_count + skipping_chunk_count)}")
+    logger.info(f"Number of 'Success' chunks: {success_count}")
+    logger.info(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
+    logger.info(f"Difference between submitted chunks and processed chunks: {len(chunks) - (success_count + skipping_chunk_count)}")
 
 
 
@@ -1404,7 +1440,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Reduces number of workers in the cluster down to 1 if there is more than 1
     #TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
     if n_workers > 1:
-        print("Resizing cluster to 1 worker")
+        logger.info("Resizing cluster to 1 worker")
 
         resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
 
@@ -1417,31 +1453,30 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
             LULUCF_output_folder = re.sub('DATE', uu.timestr()[:8], LULUCF_output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
 
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(LULUCF_output_folder)
-            print(f"Output rasters in {LULUCF_output_folder}: {file_count}")
+            logger.info(f"Output rasters in {LULUCF_output_folder}: {file_count}")
             # print(geotiff_files)
 
     end_time_1 = uu.timestr()
-    print(f"Stage {stage} ended at: {end_time_1}")
-    uu.stage_duration(start_time, end_time_1, stage)
+    logger.info(f"Stage {stage} ended at: {end_time_1}")
+    uu.stage_duration(start_time, end_time_1, stage, logger)
 
 
     # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count > 0):
-        uu.aggregate_chunk_stats(all_stats, stage, no_upload)
+        uu.aggregate_chunk_stats(all_stats, stage, no_upload, logger)
 
     # Ending time for stage
     end_time_2 = uu.timestr()
-    print(f"Stage {stage} tile stats ended at: {end_time_2}")
-    uu.stage_duration(start_time, end_time_2, stage)
+    logger.info(f"Stage {stage} tile stats ended at: {end_time_2}")
+    uu.stage_duration(start_time, end_time_2, stage, logger)
+    logger.info(f"Elapsed time for {stage} including tile stats: {end_time_2 - start_time}")
 
     # Creates combined log from all workers if not deactivated
     #TODO Figure out how to make it gather worker logs as soon as run finishes so that they're not lost,
     # then upload the consolidated log at the very end like this.
-    log_note = f"{stage} run"
-    lu.compile_and_upload_log(no_log, client, cluster, stage, len(chunks), chunk_size, start_time, end_time_1, end_time_2,
-                              success_count, skipping_chunk_count, bounding_box, log_note)
+    lu.compile_and_upload_log(no_log, cluster, stage, start_time)
 
     if not run_local:
         # Closes the Dask client if not running locally
@@ -1457,6 +1492,7 @@ if __name__ == "__main__":
     parser.add_argument('-cl', '--chunk_list', help='Shapefile of chunks')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-y', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
+    parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
@@ -1471,6 +1507,8 @@ if __name__ == "__main__":
     chunk_list = args.chunk_list
     first_chunks = args.first_chunks
     year_range = args.year_range
+    log_note = args.log_note
+
     run_local = args.run_local
     no_stats = args.no_stats
     no_log = args.no_log
@@ -1479,4 +1517,4 @@ if __name__ == "__main__":
     # Create the cluster with command line arguments
     main(cluster_name, year_range, run_local, no_stats, no_log, no_upload,
          bounding_box=bounding_box, chunk_size=chunk_size,
-         chunk_list=chunk_list, first_chunks=first_chunks)
+         chunk_list=chunk_list, first_chunks=first_chunks, log_note=log_note)

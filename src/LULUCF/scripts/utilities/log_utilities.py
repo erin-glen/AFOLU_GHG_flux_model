@@ -15,9 +15,7 @@ from . import universal_utilities as uu
 # Gets the logs for all workers
 #TODO Wait to run this until all entries have been added to the Coiled log--
 # running this right after the model finishes means that final log entries haven't made it into Coiled yet.
-def compile_and_upload_log(no_log, client, cluster, stage, chunk_count, chunk_size_deg,
-                           start_time_str, end_time_1_str, end_time_2_str,
-                           success_count, skipping_chunk_count, bounding_box, log_note):
+def compile_and_upload_log(no_log, cluster, stage, start_time_str):
 
     # Only consolidates the worker logs and uploads to s3 if not deactivated
     if no_log:
@@ -35,51 +33,6 @@ def compile_and_upload_log(no_log, client, cluster, stage, chunk_count, chunk_si
     # Converts the start and end times of the stage run from string to datetime.
     # Uses start_time to filter log entries to only those after the start_time
     start_time = datetime.strptime(start_time_str, "%Y%m%d_%H_%M_%S")
-    end_time_1 = datetime.strptime(end_time_1_str, "%Y%m%d_%H_%M_%S")
-    end_time_2 = datetime.strptime(end_time_2_str, "%Y%m%d_%H_%M_%S")
-
-    # Retrieves properties of the workers
-    workers = client.scheduler_info()["workers"]
-
-    # Retrieves the number of workers
-    n_workers = len(workers)
-
-    # Retrieves the number of threads per worker
-    # https://chatgpt.com/share/e/672503f1-eef8-800a-9218-281624acf27e
-    first_worker_address = next(iter(workers.keys()))
-    nthreads = workers[first_worker_address]["nthreads"]
-
-    # Retrieves scheduler info for other cluster properties
-    scheduler_info = cluster.scheduler_info  # Access scheduler info directly as a dictionary
-
-    # Gets memory per worker.
-    # Can't get it to report the worker instance type
-    try:
-        worker_memory_bytes = scheduler_info['workers'][next(iter(scheduler_info['workers']))]['memory_limit']
-        worker_memory_gb = worker_memory_bytes / (1024 ** 3)  # Convert bytes to GB
-        worker_memory = f"{worker_memory_gb:.2f} GB"  # Format to 2 decimal places
-        # worker_type = coiled_cluster.config.get('worker_options', {}).get('instance_type', "Unknown")
-    except KeyError:
-        worker_memory = "Unknown"
-        # worker_type = "Unknown"
-
-    # Create header lines
-    header_lines = [
-        f"Stage: {stage}",
-        f"Model version: {cn.model_version}",
-        f"Number of workers: {n_workers}",
-        f"Memory per worker: {worker_memory}",
-        f"Threads per worker: {nthreads}",
-        f"Bounding box: {bounding_box}",
-        f"Number of chunks: {chunk_count}",
-        f"Chunk size (degrees): {chunk_size_deg}",
-        # f"Worker Type: {worker_type}",
-        f"Log note: {log_note}",
-        f"Starting time: {start_time_str}",
-        "",
-        "Filtered logs:",
-        ""
-    ]
 
     # Filter lines containing both 'distributed.worker' and 'flm',
     # and where the datetime is greater than start_time
@@ -99,15 +52,15 @@ def compile_and_upload_log(no_log, client, cluster, stage, chunk_count, chunk_si
                     continue
 
     combined_filtered_logs = (
-            "\n".join(header_lines) + "\n" +
-            "\n".join(filtered_logs) + "\n" +
-            f"Stage {stage} ended at: {end_time_1_str}\n"
-            f"Elapsed time for {stage}: {end_time_1 - start_time}\n"
-            f"Number of 'Success' chunks: {success_count}\n"
-            f"Number of 'Skipped' chunks: {skipping_chunk_count}\n"
-            f"Difference between submitted chunks and processed chunks: {chunk_count - (success_count + skipping_chunk_count)}\n"
-            f"Stage {stage} tile stats ended at: {end_time_2_str}\n"
-            f"Elapsed time for {stage} including tile stats: {end_time_2 - start_time}"
+            # "\n".join(header_lines) + "\n" +
+            "\n".join(filtered_logs) + "\n"
+            # f"Stage {stage} ended at: {end_time_1_str}\n"
+            # f"Elapsed time for {stage}: {end_time_1 - start_time}\n"
+            # f"Number of 'Success' chunks: {success_count}\n"
+            # f"Number of 'Skipped' chunks: {skipping_chunk_count}\n"
+            # f"Difference between submitted chunks and processed chunks: {chunk_count - (success_count + skipping_chunk_count)}\n"
+            # f"Stage {stage} tile stats ended at: {end_time_2_str}\n"
+            # f"Elapsed time for {stage} including tile stats: {end_time_2 - start_time}"
     )
 
     # Save the filtered logs to a text file
@@ -150,7 +103,7 @@ def setup_logging_main(log_filename=None):
 
     # Ensure no duplicate handlers
     if not logger.hasHandlers():
-        formatter = logging.Formatter('%(asctime)s - %(message)s')
+        formatter = logging.Formatter('flm: %(message)s')
 
         # Console handler
         console_handler = logging.StreamHandler(sys.stdout)

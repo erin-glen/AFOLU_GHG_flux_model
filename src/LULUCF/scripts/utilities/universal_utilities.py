@@ -442,12 +442,12 @@ def xy_to_tile_id(top_left_x, top_left_y):
 
 
 # Calculates the elapsed time for a stage
-def stage_duration(start_time_str, end_time_str, stage):
+def stage_duration(start_time_str, end_time_str, stage, logger):
 
     start_time = datetime.strptime(start_time_str, "%Y%m%d_%H_%M_%S")
     end_time = datetime.strptime(end_time_str, "%Y%m%d_%H_%M_%S")
 
-    print(f"Elapsed time for {stage}: {end_time - start_time}")
+    logger.info(f"Elapsed time for {stage}: {end_time - start_time}")
 
 
 # Lazily opens tile within provided bounds (i.e. one chunk) and returns as a numpy array.
@@ -871,11 +871,11 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
 # Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet
 # Also calculates the min and max value for each input and output across all chunks
 # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-def aggregate_chunk_stats(all_stats, stage, no_upload):
+def aggregate_chunk_stats(all_stats, stage, no_upload, logger):
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
 
-    print(f"Starting to aggregate and export tile stats at {timestr()}...")
+    logger.info(f"Starting to aggregate and export tile stats at {timestr()}...")
 
     # Converts accumulated statistics to a DataFrame
     df_all_stats = pd.DataFrame(all_stats)
@@ -903,7 +903,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
     fishnet_shapefile_df = gdf[['chunk_id', 'iso']]
 
     # Merges the shapefile data with the statistics DataFrame
-    print(f"Merging country code to chunk stats table at {timestr()}...")
+    logger.info(f"Merging country code to chunk stats table at {timestr()}...")
     merged_stats = sorted_stats.merge(fishnet_shapefile_df, on='chunk_id', how='left')
 
     # When iso isn't assigned, empty cells are filled.
@@ -915,7 +915,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
     # and they need to be split across multiple workbook tabs.
 
     # Separates input rows (in_out == 'input') and output rows (in_out == 'output')
-    print(f"Separating outputs into different tables at {timestr()}...")
+    logger.info(f"Separating outputs into different tables at {timestr()}...")
     input_rows = merged_stats[merged_stats['in_out'] == 'input_layer']
     output_rows = merged_stats[merged_stats['in_out'] == 'output_layer']
 
@@ -938,17 +938,17 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
     out_spreadsheet = f'{stage}_chunk_statistics_{timestr()}.xlsx'
     local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
 
-    print(f"Writing tile stats to spreadsheet at {timestr()}...")
+    logger.info(f"Writing tile stats to spreadsheet at {timestr()}...")
     try:
         with pd.ExcelWriter(local_spreadsheet) as writer:
 
             # Writes input rows to one sheet
-            print(f"Writing inputs to spreadsheet at {timestr()}...")
+            logger.info(f"Writing inputs to spreadsheet at {timestr()}...")
             annual_inputs.to_excel(writer, sheet_name='annual_inputs', index=False)
             other_inputs.to_excel(writer, sheet_name='other_inputs', index=False)
 
             # Writes output rows based on layer_name conditions to separate sheets
-            print(f"Writing output to spreadsheet at {timestr()}...")
+            logger.info(f"Writing output to spreadsheet at {timestr()}...")
             gross_flux_output.to_excel(writer, sheet_name='gross_outputs', index=False)
             net_flux_output.to_excel(writer, sheet_name='flux_outputs', index=False)
             other_output.to_excel(writer, sheet_name='other_outputs', index=False)
@@ -956,15 +956,15 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
             # Write the min and max statistics to the second sheet
             min_max_stats.to_excel(writer, sheet_name='min_max_for_layers', index=False)
 
-        print(merged_stats.head())  # Show first few rows of the stats DataFrame for inspection
+        logger.info(merged_stats.head())  # Show first few rows of the stats DataFrame for inspection
 
-        print(f"Done aggregating and exporting tile stats at {timestr()}...")
+        logger.info(f"Done aggregating and exporting tile stats at {timestr()}...")
 
     except Exception as e:
-        print(f"Can't print chunk stats: {e}")
+        logger.info(f"Can't print chunk stats: {e}")
 
     if not no_upload:
-        print(f"Uploading chunk stats spreadsheet to s3 at {timestr()}...")
+        logger.info(f"Uploading chunk stats spreadsheet to s3 at {timestr()}...")
         s3_client.upload_file(local_spreadsheet, "gfw2-data", Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
 
 
