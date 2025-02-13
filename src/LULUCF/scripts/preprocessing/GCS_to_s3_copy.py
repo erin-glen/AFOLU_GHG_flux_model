@@ -325,6 +325,10 @@ def main(cluster_name, run_local, source_root, dest_root, task_file, resume):
     if failed > 0:
         print("You can re-run with --resume to retry the failed tasks.")
 
+    if not run_local:
+        # Closes the Dask client if not running locally
+        client.close()
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Copy data from GCS to S3 using Dask + Coiled.")

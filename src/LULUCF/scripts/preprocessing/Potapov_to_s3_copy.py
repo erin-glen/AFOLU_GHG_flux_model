@@ -97,3 +97,7 @@ if __name__ == "__main__":
     results = bag.map(lambda x: download_and_upload_file(x[0], x[1])).compute()
 
     print("Transfer complete. Success:", sum(results), "Failures:", len(results) - sum(results))
+
+    if not run_local:
+        # Closes the Dask client if not running locally
+        client.close()

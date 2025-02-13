@@ -145,7 +145,7 @@ SDPT_other_code = 3
 ### File name paths and patterns
 ########
 
-### Miscellaneous
+##### Miscellaneous
 
 date_date_range_pattern = r'_\d{4}(_\d{4})?'   # Pattern for date (XXXX) or date range XXXX_YYYY in output file names
 
@@ -160,18 +160,20 @@ local_chunk_stats_path = "chunk_stats/"
 s3_chunk_stats_path = "climate/AFOLU_flux_model/LULUCF/chunk_stats/"
 
 # 1x1 deg fishnet between 80N and 60N, 180W and 180E that intersects GADM3.6 and has GADM iso joined to it
-fishnet_1x1deg_all_land_s3_uri = "s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/"
+fishnet_1x1deg_all_land_s3_uri = f"{full_bucket_prefix}/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/"
 
-### Inputs
+##### Inputs
 
 land_cover_5_year_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/composite/five_year/v1/raw/"
 land_cover_annual_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/composite/annual/v1/raw/"
 land_cover_pattern = "land_cover"
 
-vegetation_height_5_year_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/five_year/v1/raw/"
 vegetation_height_annual_GLAD_path = "https://glad.geog.umd.edu/Potapov/Global_TCH_2015-23"
+vegetation_height_5_year_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/five_year/v1/raw/"
+vegetation_height_5_year_pattern = "vegetation_height"
 vegetation_height_annual_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/annual/20250114/raw/"
-vegetation_height_pattern = "vegetation_height"
+vegetation_height_annual_pattern = ""
+
 
 forest_disturbance_annual_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/annual_forest_disturbance/raw/"
 forest_disturbance_layer_name = "forest_disturbance"
@@ -335,10 +337,9 @@ global_cropland_total_amount_all_crops_nonpeat_2019_processed_dir = f"{global_cr
 global_cropland_total_amount_all_crops_nonpeat_2019_processed_pattern = f"all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif"
 
 
-### Outputs
+##### Outputs
 
 outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs/"
-
 
 ### IPCC classes and change
 IPCC_class_path = "IPCC_basic_classes"

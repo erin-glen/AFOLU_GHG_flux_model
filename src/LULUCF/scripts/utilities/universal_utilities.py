@@ -5,8 +5,10 @@ import time
 import math
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 from pathlib import Path
 import pytz
+import sys
 import rasterio
 import rasterio.transform
 import rasterio.windows
@@ -970,26 +972,43 @@ def aggregate_chunk_stats(all_stats, stage, no_upload):
 # This seems much faster than the rasterio version that ChatGPT suggested later in the chat.
 # From https://chatgpt.com/share/e/a48c768d-0331-43da-9fc6-ef8a84af586c
 def get_dtype_from_s3(s3_path):
-    # Constructs the /vsis3/ path
-    vsis3_path = f'/vsis3/{s3_path[len("s3://"):]}'
-    data_type = get_dtype_from_raster(vsis3_path)
-    return data_type
 
+    # Constructs the /vsis3/ path
+
+    try:
+        vsis3_path = f'/vsis3/{s3_path[len("s3://"):]}'
+        data_type = get_dtype_from_raster(vsis3_path)
+        return data_type
+
+    except Exception as e:
+        print(f"Error: {s3_path}: {e}")
+        sys.exit(1)
+        # return None  # Return None or an appropriate fallback value
+
+# Gets the datatype of a raster in a Coiled cluster
 def get_dtype_from_coiled(s3_path, local_path):
     file = download_s3_file(s3_path, local_path)
     data_type = get_dtype_from_raster(file)
     return data_type
 
+# Gets the datatype of a raster
 def get_dtype_from_raster(file_path):
-    dataset = gdal.Open(file_path)
-    if dataset:
-        # print(f"Opened file: {vsis3_path}")
+
+    try:
+        dataset = gdal.Open(file_path)
+        if dataset is None:
+            raise ValueError(f"Could not open file {file_path}")
+
         band = dataset.GetRasterBand(1)
+        if band is None:
+            raise ValueError(f"No raster bands found in file {file_path}")
+
         data_type = gdal.GetDataTypeName(band.DataType)
-        # print(f"Data type: {data_type}")
         return data_type
-    else:
-        raise ValueError(f"Could not open file {file_path}")
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return None  # Return None or an appropriate fallback value
 
 
 

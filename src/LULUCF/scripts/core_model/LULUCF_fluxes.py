@@ -2,7 +2,7 @@
 Run from src/LULUCF
 
 Test:
-python -m scripts.utilities.create_cluster -n 1
+python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 10 49.75 10.25 50 -cs 0.25
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cl s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1
@@ -1178,7 +1178,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     return success_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
          bounding_box=None, chunk_size=None, chunk_list=None, first_chunks=None):
 
     # Connects to Coiled cluster if not running locally
@@ -1281,7 +1281,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Land cover and vegetation height rasters (5-year intervals)
     for year in range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1, cn.interval_duration):
-        download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_5_year_path}{year}/raw/{sample_tile_id}.tif"
+        download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_5_year_path}{year}/{sample_tile_id}.tif"
         download_dict[f"{cn.vegetation_height_5_year_pattern}_{year}"] = f"{cn.vegetation_height_5_year_path}{year}/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_{year}.tif"
 
     # Burned area rasters (annual)
@@ -1309,6 +1309,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # This is supplied to each chunk that is being analyzed.
     # This also serves as a check of whether all inputs are being found (s3 paths correct)
     print(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
+    # download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
@@ -1420,6 +1421,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         client.close()
 
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate LULUCF fluxes.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
@@ -1427,6 +1429,7 @@ if __name__ == "__main__":
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cl', '--chunk_list', help='Shapefile of chunks')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
+    parser.add_argument('-y', '--year_range', nargs=2, type=int, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
@@ -1440,12 +1443,13 @@ if __name__ == "__main__":
     chunk_size = args.chunk_size
     chunk_list = args.chunk_list
     first_chunks = args.first_chunks
+    year_range = args.year_range
     run_local = args.run_local
     no_stats = args.no_stats
     no_log = args.no_log
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, run_local, no_stats, no_log, no_upload,
+    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload,
          bounding_box=bounding_box, chunk_size=chunk_size,
          chunk_list=chunk_list, first_chunks=first_chunks)
