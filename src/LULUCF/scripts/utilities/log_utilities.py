@@ -130,7 +130,7 @@ def print_and_log(text, is_final, logger):
 
 # Configure logging for the distributed workers
 # https://chatgpt.com/share/e/6f80ccde-6a85-4837-94a0-4fcf09b96e43
-def setup_logging():
+def setup_logging_worker():
     logger = logging.getLogger('distributed.worker')
     logger.setLevel(logging.INFO)
     if not logger.hasHandlers():
@@ -138,4 +138,29 @@ def setup_logging():
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
+    return logger
+
+import sys
+
+def setup_logging_main(log_filename=None):
+    """Setup logging to log both to console and a file."""
+
+    logger = logging.getLogger("flm_logger")  # Unified logger for both workers and main
+    logger.setLevel(logging.INFO)
+
+    # Ensure no duplicate handlers
+    if not logger.hasHandlers():
+        formatter = logging.Formatter('%(asctime)s - %(message)s')
+
+        # Console handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
+        # File handler if filename is provided
+        if log_filename:
+            file_handler = logging.FileHandler(log_filename)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
     return logger

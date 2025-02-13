@@ -973,7 +973,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types, fishnet_iso_df, is_final, no_upload):
 
-    logger = lu.setup_logging()
+    logger = lu.setup_logging_worker()
 
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
@@ -1178,8 +1178,20 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     return success_message, chunk_stats  # Return both the success message and the statistics
 
 
+import os
+import time
+import logging
+import sys
+
+
 def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
          bounding_box=None, chunk_size=None, chunk_list=None, first_chunks=None):
+
+    log_filename = f"logs/main_{time.strftime('%Y%m%d_%H%M%S')}.log"
+    os.makedirs("logs", exist_ok=True)  # Ensure logs directory exists
+
+    logger = lu.setup_logging_main(log_filename)  # Set up logging for the main function
+    logger.info("Starting main function.")
 
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -1187,9 +1199,20 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Model stage being running
     stage = 'LULUCF_fluxes'
 
+    # Determines if arguments for start and end year are valid
+    if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],   # 2000-2020
+                          [cn.first_model_year_5_years, cn.last_model_year_annual],    # 2000-2023
+                          [cn.first_model_year_annual, cn.last_model_year_annual]]:    # 2015-2023
+        print("Year range selection not valid")
+        sys.exit()
+    else:
+        start_year = year_range[0]
+        end_year = year_range[1]
+
     # Starting time for stage
     start_time = uu.timestr()
     print(f"Stage {stage} started at: {start_time}")  #TODO in all main() functions, add print statements to log
+    logger.info(f"flm: Stage {stage} started at: {start_time}")
 
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -1197,7 +1220,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     fishnet_iso_df = uu.fishnet_with_GADM_iso()
 
     # Makes list of chunks to analyze from the bounding box and chunk size (deg)
-    # Outut list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+    # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
     if bounding_box and chunk_size:
 
         print("Using bounding box and chunk size to determine chunks")
@@ -1209,6 +1232,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     elif chunk_list:
 
         print("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
+        logger.info("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
 
         # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
         fishnet_1x1_chunk_id_df = fishnet_iso_df[['chunk_id']]  # Creates dataframe
@@ -1223,9 +1247,11 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     else:
         print("Chunk list cannot be determined")
+        logger.info("Chunk list cannot be determined")
         sys.exit()
 
     print(f"Processing {len(chunks)} chunks")
+    logger.info(f"Processing {len(chunks)} chunks")
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
@@ -1324,6 +1350,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # Creates list of tasks to run (1 task = 1 chunk)
     print(f"Creating tasks and starting processing: {uu.timestr()}")
+    logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
 
     # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
     futures = []
@@ -1429,7 +1456,7 @@ if __name__ == "__main__":
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cl', '--chunk_list', help='Shapefile of chunks')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
-    parser.add_argument('-y', '--year_range', nargs=2, type=int, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
+    parser.add_argument('-y', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
