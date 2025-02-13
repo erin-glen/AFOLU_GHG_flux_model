@@ -1180,22 +1180,20 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     return success_message, chunk_stats  # Return both the success message and the statistics
 
 
-
 def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
          bounding_box=None, chunk_size=None, chunk_list=None, first_chunks=None, log_note=None):
 
     # Model stage being running
     stage = 'LULUCF_fluxes'
 
-    log_filename = f"logs/main_{cn.combined_log}_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
-    os.makedirs("logs", exist_ok=True)  # Ensure logs directory exists
+    main_log_name = f"{cn.combined_log}_main_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
+    main_log_local_path = f"{cn.local_log_path}{main_log_name}"
+    os.makedirs("logs", exist_ok=True)  # Ensures logs directory exists
 
-    logger = lu.setup_logging_main(log_filename)  # Set up logging for the main function
-    logger.info("Starting main function.")
+    logger = lu.setup_logging_main(main_log_local_path)  # Sets up logging for the main function
+
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
-
-
 
     worker_memory, n_workers, nthreads = uu.get_cluster_info(client, cluster)
 
@@ -1221,7 +1219,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # Starting time for stage
     start_time = uu.timestr()
-    logger.info(f"Stage {stage} started at: {start_time}") #TODO in all main() functions, add print statements to log
+    logger.info(f"Stage {stage} started at: {start_time}")
 
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -1357,7 +1355,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # Creates list of tasks to run (1 task = 1 chunk)
     logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
-    logger.info("Filtered logs from workers:"+ "\n" + "\n")
+    logger.info("Workers' logs appended after main function log"+ "\n")
 
     # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
     futures = []
@@ -1395,11 +1393,11 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         for message in return_messages:
             logger.info(message)
 
-    # Print the counts
+    # Print the counts of successful and skipped chunks
     ##TODO Use the GCS_to_s3 status json as a way to check which chunks were skipped
     logger.info(f"Number of 'Success' chunks: {success_count}")
     logger.info(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
-    logger.info(f"Difference between submitted chunks and processed chunks: {len(chunks) - (success_count + skipping_chunk_count)}")
+    logger.info(f"Difference between submitted chunks and processed chunks: {len(chunks) - (success_count + skipping_chunk_count)}" + "\n")
 
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
@@ -1426,8 +1424,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
             logger.info(f"Output rasters in {LULUCF_output_folder}: {file_count}")
             # print(geotiff_files)
 
-    # end_time_1 = uu.timestr()
-    # logger.info(f"Stage {stage} ended at: {end_time_1}")
     uu.stage_duration(start_time, uu.timestr(), stage, logger)
 
 
@@ -1437,21 +1433,17 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     if (not no_stats) and (success_count > 0):
         uu.aggregate_chunk_stats(all_stats, stage, no_upload, logger)
 
-    # Ending time for stage
-    # end_time_2 = uu.timestr()
-    # logger.info(f"Stage {stage} tile stats ended at: {end_time_2}")
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", logger)
-    # logger.info(f"Elapsed time for {stage} including tile stats: {end_time_2 - start_time}")
 
     # Creates combined log from all workers if not deactivated
-    #TODO Figure out how to make it gather worker logs as soon as run finishes so that they're not lost,
-    # then upload the consolidated log at the very end like this.
-    lu.compile_and_upload_log(no_log, cluster, stage, start_time, logger)
-    # end_time_3 = uu.timestr()
+    worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, logger)
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", logger)
 
+    # Adds the workers' logs to the main log and uploads to s3
+    lu.merge_and_upload_logs(main_log_local_path, worker_log_local_path, stage)
+
+    # Closes the Dask client if not running locally
     if not run_local:
-        # Closes the Dask client if not running locally
         client.close()
 
 

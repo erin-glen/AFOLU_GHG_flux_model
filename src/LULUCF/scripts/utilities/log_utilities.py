@@ -15,17 +15,17 @@ from . import universal_utilities as uu
 # Gets the logs for all workers
 #TODO Wait to run this until all entries have been added to the Coiled log--
 # running this right after the model finishes means that final log entries haven't made it into Coiled yet.
-def compile_and_upload_log(no_log, cluster, stage, start_time_str, logger):
+def compile_worker_logs(no_log, cluster, stage, start_time_str, logger):
 
     # Only consolidates the worker logs and uploads to s3 if not deactivated
     if no_log:
         return
 
     #TODO Create log folder if it doesn't exist already
-    log_name = f"{cn.combined_log}_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.txt"
-    local_log = f"{cn.local_log_path}{log_name}"
+    worker_log_name = f"{cn.combined_log}_workers_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
+    worker_log_local_path = f"{cn.local_log_path}{worker_log_name}"
 
-    logger.info(f"Preparing consolidated log {log_name}")
+    logger.info(f"Preparing consolidated log {worker_log_name}")
 
     # Recovers legs from Coiled
     logs = cluster.get_logs()
@@ -56,13 +56,10 @@ def compile_and_upload_log(no_log, cluster, stage, start_time_str, logger):
     )
 
     # Save the filtered logs to a text file
-    with open(local_log, "w") as file:
+    with open(worker_log_local_path, "w") as file:
         file.write(combined_filtered_logs)
 
-    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
-    s3_client.upload_file(local_log, "gfw2-data", Key=f"{cn.s3_log_path}{log_name}")
-
-    logger.info(f"Log uploaded to {cn.s3_log_path}{log_name}")
+    return worker_log_local_path
 
 
 # Determines whether statement should be printed to the console as well as logged
@@ -76,8 +73,10 @@ def print_and_log(text, is_final, logger):
 # Configure logging for the distributed workers
 # https://chatgpt.com/share/e/6f80ccde-6a85-4837-94a0-4fcf09b96e43
 def setup_logging_worker():
+
     logger = logging.getLogger('distributed.worker')
     logger.setLevel(logging.INFO)
+
     if not logger.hasHandlers():
         handler = logging.StreamHandler()
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -85,10 +84,13 @@ def setup_logging_worker():
         logger.addHandler(handler)
     return logger
 
-def setup_logging_main(log_filename=None):
-    """Setup logging to log both to console and a file."""
 
-    logger = logging.getLogger("flm_logger")  # Unified logger for both workers and main
+# Log for main function
+# per https://chatgpt.com/share/e/67ae4ae8-ff64-800a-8b75-484d388e6a43
+def setup_logging_main(log_filename=None):
+    """Set up logging to log both to console and a file."""
+
+    logger = logging.getLogger("flm_logger")
     logger.setLevel(logging.INFO)
 
     # Ensure no duplicate handlers
@@ -107,3 +109,23 @@ def setup_logging_main(log_filename=None):
             logger.addHandler(file_handler)
 
     return logger
+
+
+def merge_and_upload_logs(main_log, worker_log, stage):
+
+    log_name = f"{cn.combined_log}_combined_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
+    local_log = f"{cn.local_log_path}{log_name}"
+
+    # Open the output file in write mode
+    with open(local_log, "w") as outfile:
+        with open(main_log, "r") as infile1:
+            outfile.write(infile1.read())
+            outfile.write("\n")  # Adds blank line between files
+
+        with open(worker_log, "r") as infile2:
+            outfile.write(infile2.read())
+
+    print(f"Combined log saved as {local_log}")  # Does not go in the log because it's closed
+
+    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
+    s3_client.upload_file(local_log, "gfw2-data", Key=f"{cn.s3_log_path}{log_name}")

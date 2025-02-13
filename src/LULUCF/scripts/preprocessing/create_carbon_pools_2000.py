@@ -372,8 +372,8 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
 
     # Creates combined log if not deactivated
     log_note = "Global carbon pool 2000 run"
-    lu.compile_and_upload_log(no_log, client, cluster, stage,
-                              len(chunks), chunk_size, start_time, end_time, log_note)
+    lu.compile_worker_logs(no_log, client, cluster, stage,
+                           len(chunks), chunk_size, start_time, end_time, log_note)
 
     if not run_local:
         # Closes the Dask client if not running locally
