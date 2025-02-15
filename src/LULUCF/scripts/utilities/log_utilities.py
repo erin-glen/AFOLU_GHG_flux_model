@@ -1,5 +1,6 @@
 import boto3
 import logging
+import os
 import sys
 import time
 
@@ -129,3 +130,6 @@ def merge_and_upload_logs(main_log, worker_log, stage):
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
     s3_client.upload_file(local_log, "gfw2-data", Key=f"{cn.s3_log_path}{log_name}")
+
+    os.remove(main_log)
+    os.remove(worker_log)

@@ -977,6 +977,8 @@ def get_dtype_from_s3(s3_path):
 
     # Constructs the /vsis3/ path
 
+    print(s3_path)
+
     try:
         vsis3_path = f'/vsis3/{s3_path[len("s3://"):]}'
         data_type = get_dtype_from_raster(vsis3_path)

@@ -130,15 +130,15 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
         # and speed the code up. I was trying to get vegetation height so far in a variety of ways and it kept being slow.
         # This approach, in conjunction with some pixel-level operations below, seems to not slow down the code.
         vegetation_heights_so_far_block = [
-            in_dict_uint8[f"{cn.vegetation_height_5_year_pattern}_{year}"]
+            in_dict_uint8[f"{cn.vegetation_height_pattern}_{year}"]
             for year in years_so_far
         ]
 
         # Writes the dictionary entries to a chunk for use in the decision tree
         LC_prev_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year - cn.interval_duration}"]
         LC_curr_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year}"]
-        veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_5_year_pattern}_{interval_end_year - cn.interval_duration}"]
-        veg_h_curr_block = in_dict_uint8[f"{cn.vegetation_height_5_year_pattern}_{interval_end_year}"]
+        veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year - cn.interval_duration}"]
+        veg_h_curr_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year}"]
 
         # Creates a list of all the burned area arrays from 2001 to the end of the interval.
         # It works by getting the burned area chunks for the current interval and appending them to a list of chunks
@@ -1195,7 +1195,13 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
-    worker_memory, n_workers, nthreads = uu.get_cluster_info(client, cluster)
+    if run_local:
+        worker_memory = "N/A- local run"
+        n_workers = "N/A- local run"
+        nthreads = "N/A- local run"
+    else:
+        worker_memory, n_workers, nthreads = uu.get_cluster_info(client, cluster)
+
 
     logger.info(f"Stage: {stage}")
     logger.info(f"Model version: {cn.model_version}")
@@ -1279,12 +1285,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Dictionary of data to download (inputs to model)
     download_dict = {
 
-        cn.agc_2000_pattern: f"{cn.agc_2000_path}{sample_tile_id}__{cn.agc_2000_pattern}.tif",
-        cn.bgc_2000_pattern: f"{cn.bgc_2000_path}{sample_tile_id}__{cn.bgc_2000_pattern}.tif",
-        cn.deadwood_c_2000_pattern: f"{cn.deadwood_c_2000_path}{sample_tile_id}__{cn.deadwood_c_2000_pattern}.tif",
-        cn.litter_c_2000_pattern: f"{cn.litter_c_2000_path}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif",
-        cn.soil_c_2000_pattern: f"{cn.soil_c_2000_path}{sample_tile_id}_{cn.soil_c_2000_pattern}.tif",
-
         cn.r_s_ratio_pattern: f"{cn.r_s_ratio_path}{sample_tile_id}_{cn.r_s_ratio_pattern}.tif",
 
         cn.drivers_pattern: f"{cn.drivers_path}{sample_tile_id}_{cn.drivers_pattern}.tif",
@@ -1310,20 +1310,44 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         cn.pixel_area_pattern: f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{sample_tile_id}.tif"
     }
 
-    # Land cover and vegetation height rasters (5-year intervals)
-    for year in range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1, cn.interval_duration):
-        download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_5_year_path}{year}/{sample_tile_id}.tif"
-        download_dict[f"{cn.vegetation_height_5_year_pattern}_{year}"] = f"{cn.vegetation_height_5_year_path}{year}/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_{year}.tif"
+    if start_year == cn.first_model_year_5_years:
+        download_dict[cn.agc_2000_pattern] = f"{cn.agc_2000_path}{sample_tile_id}__{cn.agc_2000_pattern}.tif"
+        download_dict[cn.bgc_2000_pattern] = f"{cn.bgc_2000_path}{sample_tile_id}__{cn.bgc_2000_pattern}.tif"
+        download_dict[cn.deadwood_c_2000_pattern] = f"{cn.deadwood_c_2000_path}{sample_tile_id}__{cn.deadwood_c_2000_pattern}.tif"
+        download_dict[cn.litter_c_2000_pattern] = f"{cn.litter_c_2000_path}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif"
+        download_dict[cn.soil_c_2000_pattern] = f"{cn.soil_c_2000_path}{sample_tile_id}_{cn.soil_c_2000_pattern}.tif"
 
-    # Burned area rasters (annual)
+    ##TODO: Replace with 2015 C density maps
+    if start_year == cn.first_model_year_annual:
+        download_dict[cn.agc_2000_pattern] = f"{cn.agc_2000_path}{sample_tile_id}__{cn.agc_2000_pattern}.tif"
+        download_dict[cn.bgc_2000_pattern] = f"{cn.bgc_2000_path}{sample_tile_id}__{cn.bgc_2000_pattern}.tif"
+        download_dict[cn.deadwood_c_2000_pattern] = f"{cn.deadwood_c_2000_path}{sample_tile_id}__{cn.deadwood_c_2000_pattern}.tif"
+        download_dict[cn.litter_c_2000_pattern] = f"{cn.litter_c_2000_path}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif"
+        download_dict[cn.soil_c_2000_pattern] = f"{cn.soil_c_2000_path}{sample_tile_id}_{cn.soil_c_2000_pattern}.tif"
+
+    if start_year == cn.first_model_year_5_years:
+        # Land cover and vegetation height rasters (5-year intervals)
+        for year in range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1, cn.interval_duration):
+            download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_5_year_path}{year}/{sample_tile_id}.tif"
+            download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_5_year_path}{year}/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_{year}.tif"
+
+    if start_year == cn.first_model_year_annual:
+        # Land cover and vegetation height rasters (5-year intervals)
+        for year in range(cn.first_model_year_annual, cn.last_model_year_annual + 1):
+            download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_annual_path}{year}/{sample_tile_id}.tif"
+            download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_annual_path}{year}/{sample_tile_id}.tif"
+
+
+    # Burned area rasters (every year)-- same code for annual or 5-year model
     # All years need to be in their own folder
-    for year in range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1):  # Annual burned area maps start in 2000
+    for year in range(start_year, end_year + 1):  # Annual burned area maps start in 2000
         download_dict[f"{cn.burned_area_pattern}_{year}"] = f"{cn.burned_area_path}{year}/{cn.burned_area_pattern}_{year}_{sample_tile_id}.tif"
 
-    # Forest disturbance rasters (annual)
+    # Forest disturbance rasters (every year)-- only for 5-year intervals
     # All years need to be in their own folder
-    for year in range(cn.first_model_year_5_years + 1, cn.last_model_year_5_years + 1):  # Annual forest disturbance maps start in 2001 and ends in 2020
-        download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.forest_disturbance_annual_path}{year}/{year}_{sample_tile_id}.tif"
+    if start_year == cn.first_model_year_5_years:
+        for year in range(cn.first_model_year_5_years + 1, cn.last_model_year_5_years + 1):  # Annual forest disturbance maps start in 2001 and ends in 2020
+            download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.forest_disturbance_annual_path}{year}/{year}_{sample_tile_id}.tif"
 
     # Young natural forest rasters (several age intervals)
     # Each growth interval's rate is in its own folder
@@ -1340,8 +1364,9 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # This is supplied to each chunk that is being analyzed.
     # This also serves as a check of whether all inputs are being found (s3 paths correct)
     logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
-    # download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
+    print(download_dict_with_data_types)
+    sys.quit()
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.
