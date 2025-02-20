@@ -49,8 +49,8 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
         vsis3_paths.append(vsis3_path)
 
     # Use GDAL to build the VRT
-    gdal.BuildVRT(local_vrt, "/vsis3/gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/N00E010_ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0.tif")
-    # gdal.BuildVRT(local_vrt, vsis3_paths)
+    # gdal.BuildVRT(local_vrt, "/vsis3/gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/N00E010_ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0.tif")
+    gdal.BuildVRT(local_vrt, vsis3_paths)
     print("Built vrt")
 
     # Various checks that vrt was created and has data in it
@@ -397,9 +397,10 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
     ###########################################################################################################
     #Step 5: Use warp_to_hansen to preprocess each dataset into 10x10 degree tiles
 
-    for tile_id in cn.tile_id_list:
-        tile_futures = []
-        for key,items in download_upload_dictionary.items():
+    for key,items in download_upload_dictionary.items():
+
+        for tile_id in cn.tile_id_list:
+            tile_futures = []
             filename = f"{tile_id}_{items['processed_pattern']}.tif"
             print(filename)
             output_tile_s3 = f"{items['processed_dir']}{filename}"
@@ -428,6 +429,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
 
         # Collect the results once they are finished
         tile_results = client.gather(tile_futures)
+        print(tile_results)
         # TODO see LULUCF model (take a bounding box as a command line argument, and make chunks instead of tile_id)
 
     ###########################################################################################################
