@@ -1365,8 +1365,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # This also serves as a check of whether all inputs are being found (s3 paths correct)
     logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
-    print(download_dict_with_data_types)
-    sys.quit()
+    # print(download_dict_with_data_types)
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.

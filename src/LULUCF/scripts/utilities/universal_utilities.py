@@ -49,13 +49,13 @@ def list_s3_files_with_pattern(s3_path, pattern):
     if 'Contents' in response:
         for obj in response['Contents']:
             key = obj['Key']
-            if key.endswith(pattern):
+            if pattern in key:   #TODO to discuss: This is a functional change. Is it okay?
                 matching_files.append(f"s3://{bucket_name}/{key}")
         print(f"Files matching pattern '{pattern}':")
         for file in matching_files:
             print(file)
     else:
-        print(f"No files found in the bucket '{bucket_name}' with the prefix '{prefix}'")
+        print(f"No files found in the bucket '{bucket_name}' with the path '{prefix}'")
     return matching_files
 
 def download_s3_file(s3_path, local_path):
@@ -1176,24 +1176,41 @@ def build_vrt_gdal_local(raw_raster_paths_list_s3, output_vrt_s3):
     # raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
     # output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is saved to
 def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
-    # Download input files locally
-    local_files = []
+
+    vsis3_paths = []
     for s3_path in raw_raster_paths_list_s3:
-        local_file = s3_path.split('/')[-1]
-        download_s3_file(s3_path, local_file)
-        local_files.append(local_file)
+        vsis3_path = s3_path.replace("s3://", "/vsis3/")
+        vsis3_paths.append(vsis3_path)
 
     # Use GDAL to build the VRT
-    gdal.BuildVRT(local_vrt, local_files)
+    # gdal.BuildVRT(local_vrt, "/vsis3/gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/N00E010_ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0.tif")
+    gdal.BuildVRT(local_vrt, vsis3_paths)
+    print("Built vrt")
 
-    #Check that local file exists
-    if os.path.exists(local_vrt):
-        print(f"File '{local_vrt}' exists at {os.path.abspath(local_vrt)}.")
-        upload_s3_file(output_vrt_s3, local_vrt)
-        check_s3_file_created(output_vrt_s3)
+    # Various checks that vrt was created and has data in it
+    try:
+        vrt_dataset = rasterio.open(local_vrt)
+    except rasterio.errors.RasterioIOError:
+        print("Error: VRT file not found or invalid.")
+        exit()
 
+    if vrt_dataset.count == 0:
+        print("VRT has no data or invalid sources.")
+        exit()
     else:
-        print(f"File '{local_vrt}' does not exist.")
+        print("VRT contains data.")
+
+    if vrt_dataset.bounds:
+        print("VRT contains data or has valid metadata.")
+    else:
+        print("VRT has no data or invalid metadata.")
+        exit()
+
+    vrt_dataset.close()
+
+    print(f"File '{local_vrt}' exists at {os.path.abspath(local_vrt)}.")
+    upload_s3_file(output_vrt_s3, local_vrt)
+    check_s3_file_created(output_vrt_s3)
 
 # Function to read a VRT from S3 using GDAL and vsis3
 def warp_to_hansen_local(source_raster_s3_path, output_raster_s3_path, xmin, ymin, xmax, ymax, dt, no_data, tiled=True,
@@ -1256,6 +1273,8 @@ def warp_to_hansen_local(source_raster_s3_path, output_raster_s3_path, xmin, ymi
 def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path, xmin, ymin, xmax, ymax, dt, no_data, tiled=True,
                    x_pixel_window=400, y_pixel_window=400):
     #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
+
+    print(source_raster_path)
 
     # Set the environment variable to enable random writes for S3
     os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
