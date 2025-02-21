@@ -25,106 +25,6 @@ from ..utilities import universal_utilities as uu
 
 ########################################################################################################################
 
-from osgeo import gdal
-from pathlib import Path
-import rasterio
-import numpy as np
-
-# Checks if a geotif has data in it
-# https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67b8c1d9-c850-800a-8f50-5f0c8edeeb40
-def check_geotiff_has_data(file_path, chunk_size=1000):
-
-    with rasterio.open(file_path) as src:
-        nodata_value = src.nodata
-
-        # Reads the raster in chunks (windows)
-        for j in range(0, src.height, chunk_size):
-            for i in range(0, src.width, chunk_size):
-                window = rasterio.windows.Window(i, j, min(chunk_size, src.width - i), min(chunk_size, src.height - j))
-                band = src.read(1, window=window)  # Read only the chunk
-
-                # Checks for valid data
-                if nodata_value is not None:
-                    if np.any(band != nodata_value):
-                        return True
-                else:
-                    if np.any(~np.isnan(band)):
-                        return True
-
-    print(f"{file_path} is empty or contains only NoData values.")
-    return False
-
-
-def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_name, xmin, ymin, xmax, ymax,
-                          dt, no_data, tiled=True, x_pixel_window=400, y_pixel_window=400):
-    #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
-
-    source_vrt_path = source_vrt_path.replace("s3://", "/vsis3/")  #VRT has to be accessed using /vsis3/
-
-    print(f"Creating {filename}: {uu.timestr()}...")
-
-    # Check that pixel window arguments are given if tiled = True
-    if tiled and not (x_pixel_window and y_pixel_window):
-        raise ValueError("If tiled = True, x_pixel_window and y_pixel_window must be passed as arguments")
-
-    # Open the VRT
-    dataset = gdal.Open(str(Path(source_vrt_path)))
-
-    #Code to run gdal warp using Python API
-    if dataset:
-        if tiled == True:
-            # Warp the VRT to the new raster
-            options = gdal.WarpOptions(
-                dstSRS='EPSG:4326',  # Reproject to WGS84
-                xRes=cn.resolution,  # X resolution (10 degrees)
-                yRes=cn.resolution,  # Y resolution (10 degrees)
-                targetAlignedPixels=True,  # Ensure target aligned pixels (-tap)
-                outputBounds=[xmin, ymin, xmax, ymax],  # Output bounds
-                dstNodata=no_data,  # Set no data to 0
-                outputType=dt,  # Output data type
-                creationOptions=['COMPRESS=DEFLATE', 'TILED=YES',  # Tiling with user-specified dimensions
-                                 f'BLOCKXSIZE={x_pixel_window}',
-                                 f'BLOCKYSIZE={y_pixel_window}'],
-                format='GTiff'  # Output format
-            )
-        else:
-            # Warp the VRT to the new raster
-            options = gdal.WarpOptions(
-                dstSRS='EPSG:4326',
-                xRes=cn.resolution,
-                yRes=cn.resolution,
-                targetAlignedPixels=True,
-                outputBounds=[xmin, ymin, xmax, ymax],
-                dstNodata=no_data,
-                outputType=dt,
-                creationOptions=['COMPRESS=DEFLATE', 'TILED=NO'],  # No tiling (i.e. 40,000 x 1)
-                format='GTiff'
-            )
-
-        gdal.Warp(str(Path(filename)), str(Path(source_vrt_path)), options=options)
-        print(f"{filename} created: {uu.timestr()}")
-
-        print(f"Checking if {filename} contains data: {uu.timestr()}")
-        if check_geotiff_has_data(filename):
-            print(f"{filename} contains data. Uploading to s3: {uu.timestr()}")
-        else:
-            print(f"{filename} is empty or contains only NoData values. Not uploading to s3: {uu.timestr()}")
-            return f"{filename} is empty or contains only NoData values. Not uploading to s3: {uu.timestr()}"
-
-        # Uploads tile to s3
-        uu.upload_s3_file(output_raster_s3_path_and_name, filename)
-        print(f"{filename} uploaded to s3: {uu.timestr()}")
-
-        # Deletes rasters from cluster after uploading to s3
-        os.remove(str(Path(filename)))
-
-        success_message = f"Success for {filename}: {uu.timestr()}"
-        return success_message  # Return both the success message and the statistics
-
-    else:
-        raise RuntimeError(f"Failed to open VRT: {source_vrt_path}")
-
-
 def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_local):
 
     # Step 1: Create download/ upload dictionary from list of processes to run
@@ -387,10 +287,11 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
             # Create 10 x 10 degree hansenized tile for each dataset in dictionary
             if cluster_type == 'coiled' or cluster_type == 'test':
 
-                tile_future = client.submit(warp_to_hansen_coiled, output_vrt_s3, output_filename, output_tile_s3,
+                tile_future = client.submit(uu.warp_to_hansen_coiled, output_vrt_s3, output_filename, output_tile_s3,
                                             xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
                 tile_futures.append(tile_future)
 
+            ## NOT MAINTAINED!!!!!!
             if cluster_type == 'local':
 
                 input_vrt_s3 = f"{items['raw_dir']}{items['vrt']}"
@@ -403,6 +304,7 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
         # Collect the results once they are finished
         tile_results = client.gather(tile_futures)
         print(tile_results)
+        print(f"Completed tile set: {uu.timestr()}")
 
     # Closes the Dask client if not running locally
     if not run_local:

@@ -552,31 +552,30 @@ def check_for_tile(download_dict, is_final, logger):
     return False
 
 
-# Checks if a geotif has data in it
-def check_geotiff_has_data(file_path):
+# Checks if a geotif has data in it.
+# Goes window by window so that the entire raster isn't read into memory.
+# https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67b8c1d9-c850-800a-8f50-5f0c8edeeb40
+def check_geotiff_has_data(file_path, chunk_size=1000):
 
     with rasterio.open(file_path) as src:
-
-        # Reads the first band
-        band = src.read(1)
-
-        # Gets NoData value from metadata
         nodata_value = src.nodata
 
-        # Masks NoData values before computing min/max
-        if nodata_value is not None:
-            valid_data = band[band != nodata_value]
-        else:
-            valid_data = band[~np.isnan(band)]
+        # Reads the raster in chunks (windows)
+        for j in range(0, src.height, chunk_size):
+            for i in range(0, src.width, chunk_size):
+                window = rasterio.windows.Window(i, j, min(chunk_size, src.width - i), min(chunk_size, src.height - j))
+                band = src.read(1, window=window)  # Reads only the chunk
 
-        # Checks if there's any valid data
-        if valid_data.size > 0:
-            min_val = np.min(valid_data)
-            max_val = np.max(valid_data)
-            print(f"{file_path} contains data. Min Value: {min_val}. Max Value: {max_val}")
-            return True
-        else:
-            return False
+                # Checks for valid data
+                if nodata_value is not None:
+                    if np.any(band != nodata_value):
+                        return True
+                else:
+                    if np.any(~np.isnan(band)):
+                        return True
+
+    print(f"{file_path} is empty or contains only NoData values.")
+    return False
 
 
 # Checks whether a chunk has data in it.
@@ -1014,9 +1013,6 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, logger):
 def get_dtype_from_s3(s3_path):
 
     # Constructs the /vsis3/ path
-
-    print(s3_path)
-
     try:
         vsis3_path = f'/vsis3/{s3_path[len("s3://"):]}'
         data_type = get_dtype_from_raster(vsis3_path)
@@ -1308,14 +1304,14 @@ def warp_to_hansen_local(source_raster_s3_path, output_raster_s3_path, xmin, ymi
     else:
         raise RuntimeError(f"Failed to open VRT: {source_gdal_path}")
 
-
+# Creates a 10x10 deg raster at 0.00025x0.00025 resolution from a VRT for a specified bounding box
 def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_name, xmin, ymin, xmax, ymax,
                           dt, no_data, tiled=True, x_pixel_window=400, y_pixel_window=400):
     #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
 
     source_vrt_path = source_vrt_path.replace("s3://", "/vsis3/")  #VRT has to be accessed using /vsis3/
 
-    print(f"Creating {filename} at {timestr()}...")
+    print(f"Creating {filename}: {timestr()}...")
 
     # Check that pixel window arguments are given if tiled = True
     if tiled and not (x_pixel_window and y_pixel_window):
@@ -1358,10 +1354,12 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
         gdal.Warp(str(Path(filename)), str(Path(source_vrt_path)), options=options)
         print(f"{filename} created: {timestr()}")
 
-        # if check_geotiff_has_data(filename):
-        #     print(f"{filename} contains data. Will upload to s3.")
-        # else:
-        #     return(f"{filename} is empty or contains only NoData values. Will not upload to s3.")
+        print(f"Checking if {filename} contains data: {timestr()}")
+        if check_geotiff_has_data(filename):
+            print(f"{filename} contains data. Uploading to s3: {timestr()}")
+        else:
+            print(f"{filename} is empty or contains only NoData values. Not uploading to s3: {timestr()}")
+            return f"{filename} is empty or contains only NoData values. Not uploading to s3: {timestr()}"
 
         # Uploads tile to s3
         upload_s3_file(output_raster_s3_path_and_name, filename)
