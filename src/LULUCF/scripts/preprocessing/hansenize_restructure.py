@@ -178,39 +178,31 @@ def main(cluster_name, cluster_type, process, run_local):
                 download_upload_dictionary[key]["raw_raster_list"] = input_raster_list_s3
 
             # Create a vrt from all raw input rasters
-            print(f"Building vrt for {key}:")
+            print(f"Building vrt for {key}...")
             uu.build_vrt_gdal_coiled(input_raster_list_s3, output_vrt_s3, items["vrt"])
 
 
-        # Step 4: Get GDAL datatype of each VRT
+        # Step 4: Get GDAL datatype of each dataset using the first tile in that dataset
         for key, items in download_upload_dictionary.items():
 
+            # Dictionary that matches format expected by function that gets name of first tile in an s3 folder
             simple_dict = {}
             simple_dict_key = key
             simple_dict_value = items["raw_dir"]
-            print(simple_dict_key)
-            print(simple_dict_value)
-            simple_dict[key][simple_dict_key] = simple_dict_value
-            print(simple_dict)
+            simple_dict[simple_dict_key] = simple_dict_value
 
-            sys.quit()
+            # Path of first tile in the dataset
+            first_tile = uu.first_file_name_in_s3_folder(simple_dict)
 
-            download_upload_dictionary[key]["dt"] = gdal.GDT_Int16  #TODO placeholder
+            # Gets datatype of first tile in input dataset and converts it to GDAL format
+            download_dict_with_data_types = uu.add_file_type_to_dict(first_tile)
+            dtype = download_dict_with_data_types[simple_dict_key][1]
+            gdal_dtype = uu.string_to_gdal_dtype_mapping.get(dtype)
 
-            # # Get raster data type from vrt
-            # print(f"Attempting to get data type from {items['output_vrt_s3']}")
-            # # TODO: Can we persist vrt instead of re-downloading
-            #
-            # # If running in coiled, get data type from downloading vrt
-            # dt = get_dtype_from_coiled(items['output_vrt_s3'], items['vrt'])
-            # #TODO: Can we persist vrt instead of re-downloading
-            #
-            # # Add GDAL data type to download_upload dictionary
-            # if dt:
-            #     gdal_dt = next(key for key, value in uu.gdal_dtype_mapping.items() if value == dt)  # Convert dt into GDAL data type
-            #     download_upload_dictionary[key]["dt"] = gdal_dt
-            #     print(f"vrt for {key} has data type: {dt} ({gdal_dt})")
-
+            # Adds the dtype of the dataset to the processing dictionary
+            # download_upload_dictionary[key]["dt"] = gdal.GDT_Int16  #TODO placeholder
+            download_upload_dictionary[key]["dt"] = gdal_dtype  #TODO placeholder
+            print(download_upload_dictionary)
 
     # # -------------------------------------------------------------------------------------------------------------------
     # # LOCAL PIPELINE

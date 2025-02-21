@@ -247,7 +247,7 @@ def main(cluster_name, cluster_type, process, delete_local_files):
 
         # Add GDAL data type to download_upload dictionary
         if dt:
-            gdal_dt = next(key for key, value in uu.gdal_dtype_mapping.items() if value == dt)  # Convert dt into GDAL data type
+            gdal_dt = next(key for key, value in uu.gdal_to_string_dtype_mapping.items() if value == dt)  # Convert dt into GDAL data type
             download_upload_dictionary[key]["dt"] = gdal_dt
             print(f"vrt for {key} has data type: {dt} ({gdal_dt})")
 

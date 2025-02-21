@@ -361,7 +361,7 @@ def process_chunk_id(chunk_id):
 
 
 # Maps GDAL data type to the appropriate string value
-gdal_dtype_mapping = {
+gdal_to_string_dtype_mapping = {
     gdal.GDT_Byte: 'Byte',
     gdal.GDT_UInt16: 'UInt16',
     gdal.GDT_Int16: 'Int16',
@@ -369,6 +369,17 @@ gdal_dtype_mapping = {
     gdal.GDT_Int32: 'Int32',
     gdal.GDT_Float32: 'Float32',
     gdal.GDT_Float64: 'Float64'
+}
+
+# Maps GDAL data type to the appropriate string value
+string_to_gdal_dtype_mapping = {
+     'Byte': gdal.GDT_Byte,
+     'UInt16': gdal.GDT_UInt16,
+     'Int16': gdal.GDT_Int16,
+     'UInt32': gdal.GDT_UInt32,
+     'Int32': gdal.GDT_Int32,
+     'Float32': gdal.GDT_Float32,
+     'Float64': gdal.GDT_Float64
 }
 
 # Maps GDAL datatypes to numpy datatypes
@@ -746,7 +757,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
     ds = None
 
     # Defaults to Float32 if not found
-    dtype_str = gdal_dtype_mapping.get(raster_datatype, 'Float32')
+    dtype_str = gdal_to_string_dtype_mapping.get(raster_datatype, 'Float32')
 
     # Merges the rasters (courtesy of ChatGPT: https://chatgpt.com/share/e/13158ebb-dd0a-41d8-8dfb-9ee12e4c804e)
     # This is the only system I found that maintains the extent of all the constituent rasters and doesn't change their resolution or pixel size or shift them.
