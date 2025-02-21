@@ -6,13 +6,12 @@ python -m src.LULUCF.scripts.preprocessing.hansenize -ct local -p drivers
 
 Coiled (Test):
 python -m scripts.utilities.create_cluster -cn hansenize_drivers_test -n 1 -m 8 -t 4
-python -m src.LULUCF.scripts.preprocessing.hansenize_restructure -cn hansenize_drivers_test -ct coiled -p drivers --delete_local_files
+python -m src.LULUCF.scripts.preprocessing.hansenize_restructure -cn hansenize_drivers_test -ct coiled -p drivers
 
 #QC
 cluster_name = 'Hansenize_drivers_data'
 cluster_type = 'test'
 process = ['drivers']
-delete_local_files = True
 
 
 """
@@ -71,7 +70,6 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
     uu.upload_s3_file(output_vrt_s3, local_vrt)
     uu.check_s3_file_created(output_vrt_s3)
 
-    return local_vrt
 
 # Gets the datatype of a raster in a Coiled cluster
 def get_dtype_from_coiled(s3_path, local_path):
@@ -80,11 +78,13 @@ def get_dtype_from_coiled(s3_path, local_path):
     return data_type
 
 
-def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path, xmin, ymin, xmax, ymax,
-                   dt, no_data, tiled=True, x_pixel_window=400, y_pixel_window=400):
+def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path_and_name, xmin, ymin, xmax, ymax,
+                          dt, no_data, tiled=True, x_pixel_window=400, y_pixel_window=400):
     #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
 
     source_raster_path = source_raster_path.replace("s3://", "/vsis3/")
+
+    print(f"Attempting to create {filename}...")
 
     # Check that pixel window arguments are given if tiled = True
     if tiled and not (x_pixel_window and y_pixel_window):
@@ -127,17 +127,17 @@ def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path, x
         gdal.Warp(str(Path(filename)),  str(Path(source_raster_path)), options=options)
 
         # Uploads tile to s3
-        uu.upload_s3_file(output_raster_s3_path, filename)
+        uu.upload_s3_file(output_raster_s3_path_and_name, filename)
 
         # Check that file exists
-        if uu.check_s3_file_created(output_raster_s3_path):
+        if uu.check_s3_file_created(output_raster_s3_path_and_name):
             # Remove local 10x10 degree tile after uploading to s3
             os.remove(str(Path(filename)))
 
     else:
         raise RuntimeError(f"Failed to open VRT: {source_raster_path}")
 
-def main(cluster_name, cluster_type, process, delete_local_files, run_local):
+def main(cluster_name, cluster_type, process, run_local):
 
     # Step 1: Create download/ upload dictionary from list of processes to run
     # Create empty dictionary
@@ -278,7 +278,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
 
             # Add output_vrt_s3 to dictionary
             output_vrt_s3 = f"{items['raw_dir']}{os.path.basename(items['vrt'])}"
-            print("output_vrt_s3:", output_vrt_s3)
+            # print("output_vrt_s3:", output_vrt_s3)
             download_upload_dictionary[key]["output_vrt_s3"] = output_vrt_s3
             print("download_upload_dictionary:", download_upload_dictionary)
 
@@ -289,11 +289,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
 
             # Create a vrt from all raw input rasters
             print(f"Building vrt for {key}:")
-            local_vrt = build_vrt_gdal_coiled(input_raster_list_s3, output_vrt_s3, items["vrt"])
-
-            # # Upload the VRT file to all Coiled workers
-            # client.upload_file(local_vrt)
-            # print(f"Uploaded {local_vrt} to Coiled workers.")
+            build_vrt_gdal_coiled(input_raster_list_s3, output_vrt_s3, items["vrt"])
 
 
         # Step 4: Get GDAL datatype of each VRT
@@ -378,6 +374,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
     # Iterates through all input datasets
     for key,items in download_upload_dictionary.items():
 
+        # Separate tile_futures list for each dataset being processed
         tile_futures = []
 
         # Iterates through all tiles in a given dataset
@@ -391,9 +388,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
             dt = items['dt']
 
             # Create 10 x 10 degree hansenized tile for each dataset in dictionary
-            print(f"Attempting to create {key} tile for {tile_id}...")
             if cluster_type == 'coiled' or cluster_type == 'test':
-                vrt = items["vrt"]
 
                 # if not os.path.exists(vrt):
                 #     raise FileNotFoundError(f"Outside warping function: VRT file not found at {vrt}")
@@ -403,6 +398,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
                 tile_future = client.submit(warp_to_hansen_coiled, output_vrt_s3, output_filename, output_tile_s3,
                                             xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
                 tile_futures.append(tile_future)
+
             if cluster_type == 'local':
                 input_vrt_s3 = f"{items['raw_dir']}{items['vrt']}"
                 tile_future = client.submit(uu.warp_to_hansen_local, input_vrt_s3, output_tile_s3,
@@ -415,15 +411,6 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
         print(tile_results)
         # TODO see LULUCF model (take a bounding box as a command line argument, and make chunks instead of tile_id)
 
-        ###########################################################################################################
-        #Step 6: Delete files that were downloaded. Does for each tile set.
-        # Remove vrt and raw rasters after tile creation step
-        if delete_local_files and (cluster_type == 'full' or cluster_type == 'test'):
-            for key,items in download_upload_dictionary.items():
-                print(f"Deleting local copy of input rasters and vrt for {key}:")
-                raw_raster_list = items["raw_raster_list"]
-                vrt = items["vrt"]
-                uu.delete_build_vrt_input_files(raw_raster_list, vrt)
 
     ###########################################################################################################
     # Closes the Dask client if not running locally
@@ -436,10 +423,9 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-ct', '--cluster_type', action='store', help='Run locally with Dask (local), test with 1 worker in coiled (test), or run with full coiled cluster (full)')
     parser.add_argument('-p', '--processes', action='store', nargs='+', help='What datasets do you want to hansenize? Options: drivers, secondary_natural_forest, AGB2015')
-    parser.add_argument('--delete_local_files', action='store_true', help='When running in Coiled, deletes raw input rasters and vrt after hansenized tiles have been uploaded')
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
 
     args = parser.parse_args()
 
     # Create the cluster with command line arguments
-    main(args.cluster_name, args.cluster_type, args.processes, args.delete_local_files, args.run_local)
+    main(args.cluster_name, args.cluster_type, args.processes, args.run_local)
