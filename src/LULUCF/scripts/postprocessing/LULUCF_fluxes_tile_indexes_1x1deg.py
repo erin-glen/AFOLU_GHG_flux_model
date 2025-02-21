@@ -119,7 +119,8 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/4000_pixels/{date}/"
     ]
 
-    # Creates dictionary of s3 tile set paths with corresponding tile index shapefile names
+    # Creates a list of dictionaries of s3 tile set path with corresponding tile index shapefile names,
+    # e.g., [{'s3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/processed/20250217/': 'AGB_2015_ESA_CCI_Mg_AGB_ha'}]
     s3_in_folders_list_of_dicts = []
 
     for path in LULUCF_output_folders:
@@ -129,6 +130,8 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         # Replaces '/' with '__'
         value = path_suffix.rstrip('/').replace("/", "__")
 
+        # Creatres the dictionary,
+        # e.g., {'s3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/processed/20250217/': 'AGB_2015_ESA_CCI_Mg_AGB_ha'}
         s3_in_folders_list_of_dicts.append({path: value})
 
     # Make raster footprint shapefiles from output rasters

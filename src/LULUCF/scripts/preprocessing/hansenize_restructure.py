@@ -17,7 +17,7 @@ process = ['drivers']
 """
 import os
 import argparse
-import boto3
+import dask
 from dask.distributed import print
 from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
@@ -25,7 +25,7 @@ from ..utilities import universal_utilities as uu
 
 ########################################################################################################################
 
-def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_local):
+def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_local, no_upload):
 
     # Step 1: Create download/ upload dictionary from list of processes to run
     # Create empty dictionary
@@ -269,42 +269,68 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
     # Iterates through all input datasets
     for key,items in download_upload_dictionary.items():
 
-        # Separate tile_futures list for each dataset being processed
-        tile_futures = []
+        # # Separate tile_futures list for each dataset being processed
+        # tile_futures = []
+        #
+        # # Iterates through all tiles in a given dataset
+        # for chunk in chunk_list:
+        #
+        #     tile_id = uu.xy_to_tile_id(chunk[0], chunk[3])  # tile_id in YYN/S_XXXE/W
+        #
+        #     output_filename = f"{tile_id}_{items['processed_pattern']}.tif"
+        #     # print(output_filename)
+        #     output_tile_s3 = f"{items['processed_dir']}{output_filename}"
+        #     # print(output_tile_s3)
+        #     xmin, ymin, xmax, ymax = uu.get_10x10_tile_bounds(tile_id)
+        #     dt = items['dt']
+        #
+        #     # Create 10 x 10 degree hansenized tile for each dataset in dictionary
+        #     if cluster_type == 'coiled' or cluster_type == 'test':
+        #
+        #         tile_future = client.submit(uu.warp_to_hansen_coiled, output_vrt_s3, output_filename, output_tile_s3,
+        #                                     xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
+        #         tile_futures.append(tile_future)
+        #
+        #     ## NOT MAINTAINED!!!!!!
+        #     if cluster_type == 'local':
+        #
+        #         input_vrt_s3 = f"{items['raw_dir']}{items['vrt']}"
+        #         tile_future = client.submit(uu.warp_to_hansen_local, input_vrt_s3, output_tile_s3,
+        #                                     xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
+        #         tile_futures.append(tile_future)
+        #
+        # print(f"Tiles to process: {len(tile_futures)}")
+        #
+        # # Collect the results once they are finished
+        # tile_results = client.gather(tile_futures)
+        # print(tile_results)
+        # print(f"Completed tile set: {uu.timestr()}")
 
-        # Iterates through all tiles in a given dataset
-        for chunk in chunk_list:
 
-            tile_id = uu.xy_to_tile_id(chunk[0], chunk[3])  # tile_id in YYN/S_XXXE/W
+        # Step 6: Creates a tile index shapefile of the output rasters to check completeness of Hansenization
 
-            output_filename = f"{tile_id}_{items['processed_pattern']}.tif"
-            # print(output_filename)
-            output_tile_s3 = f"{items['processed_dir']}{output_filename}"
-            # print(output_tile_s3)
-            xmin, ymin, xmax, ymax = uu.get_10x10_tile_bounds(tile_id)
-            dt = items['dt']
+        # Creates a list of dictionaries of s3 tile set path with corresponding tile index shapefile names,
+        # e.g., [{'s3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/processed/20250217/': 'AGB_2015_ESA_CCI_Mg_AGB_ha'}]
+        tile_index_dict = []
 
-            # Create 10 x 10 degree hansenized tile for each dataset in dictionary
-            if cluster_type == 'coiled' or cluster_type == 'test':
+        # The key for the dictionary: the s3 path with a tile set that will be indexed
+        path = items['processed_dir'].replace(cn.outputs_path, "")
 
-                tile_future = client.submit(uu.warp_to_hansen_coiled, output_vrt_s3, output_filename, output_tile_s3,
-                                            xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
-                tile_futures.append(tile_future)
+        # The value for the dictionary: the pattern to use for naming the output shapefile
+        value = items['processed_pattern']
 
-            ## NOT MAINTAINED!!!!!!
-            if cluster_type == 'local':
+        # Creates the dictionary:
+        # e.g., {'s3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/processed/20250217/': 'AGB_2015_ESA_CCI_Mg_AGB_ha'}
+        tile_index_dict.append({path: value})
+        # print(tile_index_dict)
 
-                input_vrt_s3 = f"{items['raw_dir']}{items['vrt']}"
-                tile_future = client.submit(uu.warp_to_hansen_local, input_vrt_s3, output_tile_s3,
-                                            xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
-                tile_futures.append(tile_future)
+        # Makes raster footprint shapefile from output raster set
+        delayed_result = [dask.delayed(uu.make_tile_footprint_shp)(input_dict, no_upload)
+                          for input_dict in tile_index_dict]
 
-        print(f"Tiles to process: {len(tile_futures)}")
-
-        # Collect the results once they are finished
-        tile_results = client.gather(tile_futures)
-        print(tile_results)
-        print(f"Completed tile set: {uu.timestr()}")
+        # Actually runs analysis
+        results = dask.compute(*delayed_result)
+        print(results)
 
     # Closes the Dask client if not running locally
     if not run_local:
@@ -316,6 +342,7 @@ if __name__ == "__main__":
     parser.add_argument('-ct', '--cluster_type', action='store', help='Run locally with Dask (local), test with 1 worker in coiled (test), or run with full coiled cluster (full)')
     parser.add_argument('-p', '--processes', action='store', nargs='+', help='What datasets do you want to hansenize? Options: drivers, secondary_natural_forest, AGB2015')
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
+    parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
@@ -326,9 +353,10 @@ if __name__ == "__main__":
     cluster_type = args.cluster_type
     processes = args.processes
     run_local = args.run_local
+    no_upload = args.no_upload
 
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
 
     # Create the cluster with command line arguments
-    main(cluster_name, cluster_type, processes, bounding_box, chunk_size, run_local)
+    main(cluster_name, cluster_type, processes, bounding_box, chunk_size, run_local, no_upload)
