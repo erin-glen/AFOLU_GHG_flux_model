@@ -426,7 +426,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
                 tile_future = client.submit(uu.warp_to_hansen_local, input_vrt_s3, output_tile_s3, xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
                 tile_futures.append(tile_future)
 
-
+        print(f"Tiles to process: {len(tile_futures)}")
         # Collect the results once they are finished
         tile_results = client.gather(tile_futures)
         print(tile_results)
