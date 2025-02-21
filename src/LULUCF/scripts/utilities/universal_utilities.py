@@ -51,9 +51,9 @@ def list_s3_files_with_pattern(s3_path, pattern):
             key = obj['Key']
             if pattern in key:   #TODO to discuss: This is a functional change. Is it okay?
                 matching_files.append(f"s3://{bucket_name}/{key}")
-        print(f"Files matching pattern '{pattern}':")
-        for file in matching_files:
-            print(file)
+        # print(f"Files matching pattern '{pattern}':")
+        # for file in matching_files:
+        #     print(file)
     else:
         print(f"No files found in the bucket '{bucket_name}' with the path '{prefix}'")
     return matching_files
@@ -550,6 +550,33 @@ def check_for_tile(download_dict, is_final, logger):
     lu.print_and_log(f"Tile id {tile_id} does not exist. Skipped chunk: {timestr()}", is_final, logger)
 
     return False
+
+
+# Checks if a geotif has data in it
+def check_geotiff_has_data(file_path):
+
+    with rasterio.open(file_path) as src:
+
+        # Reads the first band
+        band = src.read(1)
+
+        # Gets NoData value from metadata
+        nodata_value = src.nodata
+
+        # Masks NoData values before computing min/max
+        if nodata_value is not None:
+            valid_data = band[band != nodata_value]
+        else:
+            valid_data = band[~np.isnan(band)]
+
+        # Checks if there's any valid data
+        if valid_data.size > 0:
+            min_val = np.min(valid_data)
+            max_val = np.max(valid_data)
+            print(f"{file_path} contains data. Min Value: {min_val}. Max Value: {max_val}")
+            return True
+        else:
+            return False
 
 
 # Checks whether a chunk has data in it.
@@ -1196,7 +1223,7 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
     # Use GDAL to build the VRT
     # gdal.BuildVRT(local_vrt, "/vsis3/gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/N00E010_ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0.tif")
     gdal.BuildVRT(local_vrt, vsis3_paths)
-    print("Built vrt")
+    print(f"Built vrt: {timestr()}")
 
     # Various checks that vrt was created and has data in it
     try:
@@ -1288,7 +1315,7 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
 
     source_vrt_path = source_vrt_path.replace("s3://", "/vsis3/")  #VRT has to be accessed using /vsis3/
 
-    print(f"Creating {filename}...")
+    print(f"Creating {filename} at {timestr()}...")
 
     # Check that pixel window arguments are given if tiled = True
     if tiled and not (x_pixel_window and y_pixel_window):
@@ -1329,16 +1356,22 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
             )
 
         gdal.Warp(str(Path(filename)), str(Path(source_vrt_path)), options=options)
+        print(f"{filename} created: {timestr()}")
+
+        # if check_geotiff_has_data(filename):
+        #     print(f"{filename} contains data. Will upload to s3.")
+        # else:
+        #     return(f"{filename} is empty or contains only NoData values. Will not upload to s3.")
 
         # Uploads tile to s3
         upload_s3_file(output_raster_s3_path_and_name, filename)
+        print(f"{filename} uploaded to s3: {timestr()}")
 
-        print(f"   {filename} created")
+        # Deletes rasters from cluster after uploading to s3
+        os.remove(str(Path(filename)))
 
-        # Check that file exists
-        if check_s3_file_created(output_raster_s3_path_and_name):
-            # Remove local 10x10 degree tile after uploading to s3
-            os.remove(str(Path(filename)))
+        success_message = f"Success for {filename}: {timestr()}"
+        return success_message  # Return both the success message and the statistics
 
     else:
         raise RuntimeError(f"Failed to open VRT: {source_vrt_path}")
