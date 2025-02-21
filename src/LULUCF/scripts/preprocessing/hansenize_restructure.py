@@ -399,8 +399,8 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
 
     for key,items in download_upload_dictionary.items():
 
+        tile_futures = []
         for tile_id in cn.tile_id_list:
-            tile_futures = []
             filename = f"{tile_id}_{items['processed_pattern']}.tif"
             print(filename)
             output_tile_s3 = f"{items['processed_dir']}{filename}"
