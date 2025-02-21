@@ -24,6 +24,8 @@ small_chunk_pattern = r'__-?\d+_-?\d+_-?\d+_-?\d+__'
 ### m^2 to hectares
 m2_to_ha = 1/10000
 
+resolution = 0.00025
+
 ### Model years in 5-year intervals
 first_model_year_5_years = 2000  # First year of 5-year interval data
 last_model_year_5_years = 2020   # Last year of 5-year interval data

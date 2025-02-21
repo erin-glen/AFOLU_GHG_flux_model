@@ -1275,13 +1275,21 @@ def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path, x
     #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
 
     print(source_raster_path)
+    source_raster_path = source_raster_path.replace("s3://", "/vsis3/")
 
     # Set the environment variable to enable random writes for S3
     os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
+    os.environ['GDAL_DISABLE_READDIR_ON_OPEN'] = 'YES'
 
     # Check that pixel window arguments are given if tiled = True
     if tiled and not (x_pixel_window and y_pixel_window):
         raise ValueError("If tiled = True, x_pixel_window and y_pixel_window must be passed as arguments")
+
+    # # if not os.path.exists(source_raster_path):
+    # if not os.path.exists('s3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/N00E000_ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0.tif'):
+    #     raise FileNotFoundError(f"Inside warping function: VRT file not found at {source_raster_path}")
+    # else:
+    #     print("VRT found in warping function")
 
     # Open the VRT
     dataset = gdal.Open(str(Path(source_raster_path)))

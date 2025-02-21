@@ -1,17 +1,12 @@
 """
-Run from AFOLU_GHG_flux_model
+Run from src/LULUCF
 
 Local:
 python -m src.LULUCF.scripts.preprocessing.hansenize -ct local -p drivers
 
 Coiled (Test):
-python -m scripts.utilities.create_cluster -cn hansenize_drivers_test -n 1 -m 8 -c 2
+python -m scripts.utilities.create_cluster -cn hansenize_drivers_test -n 1 -m 8 -t 4
 python -m src.LULUCF.scripts.preprocessing.hansenize_restructure -cn hansenize_drivers_test -ct coiled -p drivers --delete_local_files
-
-Coiled (Full):
-python -m scripts.utilities.create_cluster -cn hansenize_drivers_full -n 40 -m 16 -c 4
-python -m src.LULUCF.scripts.preprocessing.hansenize_restructure -cn hansenize_drivers_full -ct coiled -p drivers --delete_local_files
-#TODO change from hansenize_restructure to hansenize
 
 #QC
 cluster_name = 'Hansenize_drivers_data'
@@ -27,9 +22,7 @@ import boto3
 from dask.distributed import print
 from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
-from ..utilities import log_utilities as lu
-from ..utilities import numba_utilities as nu
-from ..utilities import resize_cluster
+
 
 ########################################################################################################################
 
@@ -87,26 +80,15 @@ def get_dtype_from_coiled(s3_path, local_path):
     return data_type
 
 
-def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path, xmin, ymin, xmax, ymax, dt, no_data, tiled=True,
-                   x_pixel_window=400, y_pixel_window=400):
+def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path, xmin, ymin, xmax, ymax,
+                   dt, no_data, tiled=True, x_pixel_window=400, y_pixel_window=400):
     #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
 
-    print(source_raster_path)
     source_raster_path = source_raster_path.replace("s3://", "/vsis3/")
-
-    # Set the environment variable to enable random writes for S3
-    os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
-    os.environ['GDAL_DISABLE_READDIR_ON_OPEN'] = 'YES'
 
     # Check that pixel window arguments are given if tiled = True
     if tiled and not (x_pixel_window and y_pixel_window):
         raise ValueError("If tiled = True, x_pixel_window and y_pixel_window must be passed as arguments")
-
-    # # if not os.path.exists(source_raster_path):
-    # if not os.path.exists('s3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/N00E000_ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0.tif'):
-    #     raise FileNotFoundError(f"Inside warping function: VRT file not found at {source_raster_path}")
-    # else:
-    #     print("VRT found in warping function")
 
     # Open the VRT
     dataset = gdal.Open(str(Path(source_raster_path)))
@@ -117,8 +99,8 @@ def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path, x
             # Warp the VRT to the new raster
             options = gdal.WarpOptions(
                 dstSRS='EPSG:4326',  # Reproject to WGS84
-                xRes=0.00025,  # X resolution (10 degrees)
-                yRes=0.00025,  # Y resolution (10 degrees)
+                xRes=cn.resolution,  # X resolution (10 degrees)
+                yRes=cn.resolution,  # Y resolution (10 degrees)
                 targetAlignedPixels=True,  # Ensure target aligned pixels (-tap)
                 outputBounds=[xmin, ymin, xmax, ymax],  # Output bounds
                 dstNodata=no_data,  # Set no data to 0
@@ -132,8 +114,8 @@ def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path, x
             # Warp the VRT to the new raster
             options = gdal.WarpOptions(
                 dstSRS='EPSG:4326',
-                xRes=0.00025,
-                yRes=0.00025,
+                xRes=cn.resolution,
+                yRes=cn.resolution,
                 targetAlignedPixels=True,
                 outputBounds=[xmin, ymin, xmax, ymax],
                 dstNodata=no_data,
@@ -166,7 +148,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
         download_upload_dictionary["drivers"] = {
             'raw_dir': cn.drivers_raw_dir,
             'raw_pattern': cn.drivers_pattern,
-            'vrt': "drivers.vrt",
+            'vrt': f"/tmp/drivers.vrt",
             # 'processed_dir': cn.drivers_processed_dir,
             # TODO: Switch back processed dir
             'processed_dir': "s3://gfw2-data/drivers_of_loss/1_km/processed/coiled_test/",
@@ -178,7 +160,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
         download_upload_dictionary["secondary_natural_forest_0_5"] = {
             'raw_dir': cn.secondary_natural_forest_raw_dir,
             'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
-            'vrt': "secondary_natural_forest_0_5.vrt",
+            'vrt': f"/tmp/secondary_natural_forest_0_5.vrt",
             'processed_dir': cn.secondary_natural_forest_0_5_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_0_5_pattern
         }
@@ -186,7 +168,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
         download_upload_dictionary["secondary_natural_forest_6_10"] = {
             'raw_dir': cn.secondary_natural_forest_raw_dir,
             'raw_pattern': cn.secondary_natural_forest_6_10_pattern,
-            'vrt': "secondary_natural_forest_6_10.vrt",
+            'vrt': f"/tmp/secondary_natural_forest_6_10.vrt",
             'processed_dir': cn.secondary_natural_forest_6_10_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_6_10_pattern
         }
@@ -194,7 +176,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
         download_upload_dictionary["secondary_natural_forest_11_15"] = {
             'raw_dir': cn.secondary_natural_forest_raw_dir,
             'raw_pattern': cn.secondary_natural_forest_11_15_pattern,
-            'vrt': "secondary_natural_forest_11_15.vrt",
+            'vrt': f"/tmp/secondary_natural_forest_11_15.vrt",
             'processed_dir': cn.secondary_natural_forest_11_15_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_11_15_pattern
         }
@@ -202,7 +184,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
         download_upload_dictionary["secondary_natural_forest_16_20"] = {
             'raw_dir': cn.secondary_natural_forest_raw_dir,
             'raw_pattern': cn.secondary_natural_forest_16_20_pattern,
-            'vrt': "secondary_natural_forest_16_20.vrt",
+            'vrt': f"/tmp/secondary_natural_forest_16_20.vrt",
             'processed_dir': cn.secondary_natural_forest_16_20_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_16_20_pattern
         }
@@ -210,7 +192,7 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
         download_upload_dictionary["secondary_natural_forest_21_100"] = {
             'raw_dir': cn.secondary_natural_forest_raw_dir,
             'raw_pattern': cn.secondary_natural_forest_21_100_pattern,
-            'vrt': "secondary_natural_forest_21_100.vrt",
+            'vrt': f"/tmp/secondary_natural_forest_21_100.vrt",
             'processed_dir': cn.secondary_natural_forest_21_100_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_21_100_pattern
         }
@@ -221,8 +203,6 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
             'raw_pattern': cn.agb_2015_pattern_raw,
             'vrt': f"/tmp/agb2015.vrt",
             'processed_dir': cn.agb_2015_path_processed,
-            # TODO: Switch back processed dir
-            # 'processed_dir': "s3://gfw2-data/drivers_of_loss/1_km/processed/coiled_test/",
             'processed_pattern': cn.agb_2015_pattern
         }
 
@@ -309,13 +289,11 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
 
             # Create a vrt from all raw input rasters
             print(f"Building vrt for {key}:")
-
-            # local_vrt = uu.build_vrt_gdal_coiled(input_raster_list_s3, output_vrt_s3, items["vrt"])
             local_vrt = build_vrt_gdal_coiled(input_raster_list_s3, output_vrt_s3, items["vrt"])
 
-            # Upload the VRT file to all Coiled workers
-            client.upload_file(local_vrt)
-            print(f"Uploaded {local_vrt} to Coiled workers.")
+            # # Upload the VRT file to all Coiled workers
+            # client.upload_file(local_vrt)
+            # print(f"Uploaded {local_vrt} to Coiled workers.")
 
 
         # Step 4: Get GDAL datatype of each VRT
@@ -391,39 +369,44 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
 
     # -------------------------------------------------------------------------------------------------------------------
     else:
-        print("set cluster_type to one of the following: 'coiled', 'local'")
+        print("Set cluster_type to one of the following: 'coiled', 'local'")
 
 
     ###########################################################################################################
     #Step 5: Use warp_to_hansen to preprocess each dataset into 10x10 degree tiles
 
+    # Iterates through all input datasets
     for key,items in download_upload_dictionary.items():
 
         tile_futures = []
+
+        # Iterates through all tiles in a given dataset
         for tile_id in cn.tile_id_list:
-            filename = f"{tile_id}_{items['processed_pattern']}.tif"
-            print(filename)
-            output_tile_s3 = f"{items['processed_dir']}{filename}"
-            print(output_tile_s3)
+
+            output_filename = f"{tile_id}_{items['processed_pattern']}.tif"
+            # print(output_filename)
+            output_tile_s3 = f"{items['processed_dir']}{output_filename}"
+            # print(output_tile_s3)
             xmin, ymin, xmax, ymax = uu.get_10x10_tile_bounds(tile_id)
             dt = items['dt']
 
             # Create 10 x 10 degree hansenized tile for each dataset in dictionary
-            print(f"Attempting to create {key} tile for {tile_id}:")
+            print(f"Attempting to create {key} tile for {tile_id}...")
             if cluster_type == 'coiled' or cluster_type == 'test':
                 vrt = items["vrt"]
 
-                if not os.path.exists(vrt):
-                    raise FileNotFoundError(f"Outside warping function: VRT file not found at {vrt}")
-                else:
-                    print("VRT found outside warping function")
+                # if not os.path.exists(vrt):
+                #     raise FileNotFoundError(f"Outside warping function: VRT file not found at {vrt}")
+                # else:
+                #     print("VRT found outside warping function")
 
-                # tile_future = client.submit(uu.warp_to_hansen_coiled, vrt, filename, output_tile_s3,  xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
-                tile_future = client.submit(warp_to_hansen_coiled, output_vrt_s3, filename, output_tile_s3,  xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
+                tile_future = client.submit(warp_to_hansen_coiled, output_vrt_s3, output_filename, output_tile_s3,
+                                            xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
                 tile_futures.append(tile_future)
             if cluster_type == 'local':
                 input_vrt_s3 = f"{items['raw_dir']}{items['vrt']}"
-                tile_future = client.submit(uu.warp_to_hansen_local, input_vrt_s3, output_tile_s3, xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
+                tile_future = client.submit(uu.warp_to_hansen_local, input_vrt_s3, output_tile_s3,
+                                            xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
                 tile_futures.append(tile_future)
 
         print(f"Tiles to process: {len(tile_futures)}")
@@ -432,19 +415,20 @@ def main(cluster_name, cluster_type, process, delete_local_files, run_local):
         print(tile_results)
         # TODO see LULUCF model (take a bounding box as a command line argument, and make chunks instead of tile_id)
 
-    ###########################################################################################################
-    #Step 6: Delete files that were downloaded
-    # Remove vrt and raw rasters after tile creation step
-    if delete_local_files and (cluster_type == 'full' or cluster_type == 'test'):
-        for key,items in download_upload_dictionary.items():
-            print(f"Deleting local copy of input rasters and vrt for {key}:")
-            raw_raster_list = items["raw_raster_list"]
-            vrt = items["vrt"]
-            uu.delete_build_vrt_input_files(raw_raster_list, vrt)
+        ###########################################################################################################
+        #Step 6: Delete files that were downloaded. Does for each tile set.
+        # Remove vrt and raw rasters after tile creation step
+        if delete_local_files and (cluster_type == 'full' or cluster_type == 'test'):
+            for key,items in download_upload_dictionary.items():
+                print(f"Deleting local copy of input rasters and vrt for {key}:")
+                raw_raster_list = items["raw_raster_list"]
+                vrt = items["vrt"]
+                uu.delete_build_vrt_input_files(raw_raster_list, vrt)
 
     ###########################################################################################################
-    #Step 7: Close the cluster
-    client.close()
+    # Closes the Dask client if not running locally
+    if not run_local:
+        client.close()
     ###########################################################################################################
 
 if __name__ == "__main__":
