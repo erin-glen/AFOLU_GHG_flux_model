@@ -31,22 +31,28 @@ import rasterio
 import numpy as np
 
 # Checks if a geotif has data in it
-def check_geotiff_has_data(file_path):
+# https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67b8c1d9-c850-800a-8f50-5f0c8edeeb40
+def check_geotiff_has_data(file_path, chunk_size=1000):
 
     with rasterio.open(file_path) as src:
-        # Reads the first band
-        band = src.read(1)
-
-        # Gets NoData value from metadata
         nodata_value = src.nodata
 
-        # Checks if the entire array is NoData or NaN
-        if nodata_value is not None:
-            has_data = np.any(band != nodata_value)  # Check if any value is not NoData
-        else:
-            has_data = np.any(~np.isnan(band))  # If NoData is not defined, check for NaN values
+        # Reads the raster in chunks (windows)
+        for j in range(0, src.height, chunk_size):
+            for i in range(0, src.width, chunk_size):
+                window = rasterio.windows.Window(i, j, min(chunk_size, src.width - i), min(chunk_size, src.height - j))
+                band = src.read(1, window=window)  # Read only the chunk
 
-        return has_data
+                # Checks for valid data
+                if nodata_value is not None:
+                    if np.any(band != nodata_value):
+                        return True
+                else:
+                    if np.any(~np.isnan(band)):
+                        return True
+
+    print(f"{file_path} is empty or contains only NoData values.")
+    return False
 
 
 def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_name, xmin, ymin, xmax, ymax,
@@ -55,7 +61,7 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
 
     source_vrt_path = source_vrt_path.replace("s3://", "/vsis3/")  #VRT has to be accessed using /vsis3/
 
-    print(f"Creating {filename} at {uu.timestr()}...")
+    print(f"Creating {filename}: {uu.timestr()}...")
 
     # Check that pixel window arguments are given if tiled = True
     if tiled and not (x_pixel_window and y_pixel_window):
@@ -98,10 +104,12 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
         gdal.Warp(str(Path(filename)), str(Path(source_vrt_path)), options=options)
         print(f"{filename} created: {uu.timestr()}")
 
-        # if check_geotiff_has_data(filename):
-        #     print(f"{filename} contains data. Uploading to s3: {uu.timestr()}")
-        # else:
-        #     return f"{filename} is empty or contains only NoData values. Not uploading to s3: {uu.timestr()}"
+        print(f"Checking if {filename} contains data: {uu.timestr()}")
+        if check_geotiff_has_data(filename):
+            print(f"{filename} contains data. Uploading to s3: {uu.timestr()}")
+        else:
+            print(f"{filename} is empty or contains only NoData values. Not uploading to s3: {uu.timestr()}")
+            return f"{filename} is empty or contains only NoData values. Not uploading to s3: {uu.timestr()}"
 
         # Uploads tile to s3
         uu.upload_s3_file(output_raster_s3_path_and_name, filename)
@@ -296,8 +304,7 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
             gdal_dtype = uu.string_to_gdal_dtype_mapping.get(dtype)
 
             # Adds the dtype of the dataset to the processing dictionary
-            # download_upload_dictionary[key]["dt"] = gdal.GDT_Int16  #TODO placeholder
-            download_upload_dictionary[key]["dt"] = gdal_dtype  #TODO placeholder
+            download_upload_dictionary[key]["dt"] = gdal_dtype
             # print(download_upload_dictionary)
 
     # # -------------------------------------------------------------------------------------------------------------------

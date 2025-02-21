@@ -49,7 +49,7 @@ def list_s3_files_with_pattern(s3_path, pattern):
     if 'Contents' in response:
         for obj in response['Contents']:
             key = obj['Key']
-            if pattern in key:   #TODO to discuss: This is a functional change. Is it okay?
+            if pattern in key:
                 matching_files.append(f"s3://{bucket_name}/{key}")
         # print(f"Files matching pattern '{pattern}':")
         # for file in matching_files:
