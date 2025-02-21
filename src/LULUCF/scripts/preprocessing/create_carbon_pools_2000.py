@@ -1,7 +1,7 @@
 """
 Run from src/LULUCF/
 python -m scripts.preprocessing.create_carbon_pools_2000 -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats
--bb -180 -60 180 80 -cs 2   # entire world (12600 chunks) (60x 32GB r6i.2xlarge workers= 22 minutes; around 90 Coiled credits and $4 dollars of AWS costs)
+python -m scripts.preprocessing.create_carbon_pools_2000 -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 2   # entire world (12600 chunks) (60x 32GB r6i.2xlarge workers= 22 minutes; around 90 Coiled credits and $4 dollars of AWS costs)
 """
 
 import argparse
@@ -9,6 +9,8 @@ import concurrent.futures
 import coiled
 import dask
 import os
+import sys
+import time
 import numpy as np
 
 from dask.distributed import Client
@@ -158,7 +160,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_int16, in_dict_int32, in_
 # All steps for creating starting non-soil carbon pools in a chunk: download chunks, calculate carbon densities, upload to s3
 def create_and_upload_starting_C_densities(bounds, is_final, mangrove_C_ratio_array):
 
-    logger = lu.setup_logging()
+    logger_worker = lu.setup_logging_worker()
 
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
@@ -179,14 +181,14 @@ def create_and_upload_starting_C_densities(bounds, is_final, mangrove_C_ratio_ar
     }
 
     # Checks whether the tile exists at all for any of the inputs (not just the necessary inputs)
-    tile_exists = uu.check_for_tile(download_dict, is_final, logger)
+    tile_exists = uu.check_for_tile(download_dict, is_final, logger_worker)
 
     if not tile_exists:
         return f"Skipped chunk {bounds_str} because {tile_id} does not exist for any inputs: {uu.timestr()}"
 
-    futures = uu.prepare_to_download_chunk(bounds, download_dict, is_final, logger)
+    futures = uu.prepare_to_download_chunk(bounds, download_dict, is_final, logger_worker)
 
-    lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+    lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
     # Dictionary that stores the downloaded data
     layers = {}
@@ -203,7 +205,7 @@ def create_and_upload_starting_C_densities(bounds, is_final, mangrove_C_ratio_ar
 
     # Checks chunk for data. Skips the chunk if it has no data in it.
     # Only one of the checked layers must exist for this chunk.
-    data_in_chunk = uu.check_chunk_for_data(checked_layers, bounds_str, tile_id, "any", is_final, logger)
+    data_in_chunk = uu.check_chunk_for_data(checked_layers, bounds_str, tile_id, "any", is_final, logger_worker)
 
     if not data_in_chunk:
         return f"Skipped chunk {bounds_str} because of a lack of data: {uu.timestr()}"
@@ -241,7 +243,7 @@ def create_and_upload_starting_C_densities(bounds, is_final, mangrove_C_ratio_ar
     # print("float32_list:", float32_list)
 
     filled_layers = uu.fill_missing_input_layers_with_no_data(layers, uint8_list, int16_list, int32_list, float32_list,
-                                                              bounds_str, tile_id, is_final, logger)
+                                                              bounds_str, tile_id, is_final, logger_worker)
 
     ### Part 4: Creates a separate dictionary for each chunk datatype so that they can be passed to Numba as separate arguments.
     ### Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type (e.g., uint8, float32).
@@ -258,7 +260,7 @@ def create_and_upload_starting_C_densities(bounds, is_final, mangrove_C_ratio_ar
 
     ### Part 5: Creates starting carbon pool densities
 
-    lu.print_and_log(f"Creating starting C densities for {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+    lu.print_and_log(f"Creating starting C densities for {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
     # Create AGC, BGC, deadwood C and litter C densities in 2000
     out_dict_float32 = create_starting_C_densities(
@@ -300,7 +302,7 @@ def create_and_upload_starting_C_densities(bounds, is_final, mangrove_C_ratio_ar
         out_dict_all_dtypes[key] = [value, data_type, out_pattern, cn.first_model_year_5_years]
 
     uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
-                                        is_final, logger, out_no_data_val)
+                                        is_final, logger_worker, out_no_data_val)
 
     # Clears memory of unneeded arrays
     del out_dict_all_dtypes
@@ -308,17 +310,30 @@ def create_and_upload_starting_C_densities(bounds, is_final, mangrove_C_ratio_ar
     success_message = f"Success for {bounds_str}: {uu.timestr()}"
     return success_message, stats  # Return both the success message and the statistics
 
-def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False, no_log=False):
+
+def main(cluster_name, bounding_box, chunk_size, year,
+         run_local=False, no_stats=False, no_log=False, log_note=None):
+
+    # Model stage being running
+    stage = f'carbon_pools_{year}'
+
+    # Determines if argument for year is valid
+    if year in ['2000', '2015']:
+        print("Year selection valid")
+    else:
+        print("Year selection not valid")
+        sys.exit()
 
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
-    # Model stage being running
-    stage = 'carbon_pool_2000'
+    # Creates the log for the main function and populates it with basic run information
+    main_logger = lu.populate_main_log_header(bounding_box, client, cluster, log_note, run_local, stage)
 
     # Starting time for stage
     start_time = uu.timestr()
-    print(f"Stage {stage} started at: {start_time}")
+    main_logger.info(f"Stage {stage} started at: {start_time}")
+    main_logger.info(f"Year for carbon pools: {year}")
 
     # Creates numpy array of ratios of BGC, deadwood C, and litter C relative to AGC. Relevant columns must be specified.
     mangrove_C_ratio_array = uu.convert_lookup_table_to_array(cn.rate_ratio_spreadsheet, cn.mangrove_rate_ratio_tab,
@@ -326,14 +341,14 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
 
     # Makes list of chunks to analyze
     chunks = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
-    print("Processing", len(chunks), "chunks")
+    main_logger.info(f"Processing {len(chunks)} chunks")
     # print(chunks)
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
     if len(chunks) > 20:
         is_final = True
-        print("Running as final model.")
+        main_logger.info("Running as final model.")
 
     # Accumulates all statistics and output messages from chunk analysis
     # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
@@ -359,12 +374,12 @@ def main(cluster_name, bounding_box, chunk_size, run_local=False, no_stats=False
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag
     if not no_stats:
-        uu.aggregate_chunk_stats(all_stats, stage)
+        uu.aggregate_chunk_stats(all_stats, stage, main_logger)
 
     # Ending time for stage
     end_time = uu.timestr()
     print(f"Stage {stage} ended at: {end_time}")
-    uu.stage_duration(start_time, end_time, stage)
+    uu.stage_duration(start_time, end_time, stage, main_logger)
 
     # Prints the returned messages
     for message in return_messages:
@@ -389,9 +404,23 @@ if __name__ == "__main__":
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
     parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
+    parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
+
+    parser.add_argument('--year', required=True, help='Year for carbon pools')
 
     args = parser.parse_args()
 
+    cluster_name = args.cluster_name
+    bounding_box = args.bounding_box
+    chunk_size = args.chunk_size
+
+    run_local = args.run_local
+    no_stats = args.no_stats
+    no_log = args.no_log
+    log_note = args.log_note
+
+    year = args.year
+
     # Create the cluster with command line arguments
-    main(args.cluster_name, args.bounding_box, args.chunk_size, args.run_local, args.no_stats, args.no_log)
+    main(cluster_name, bounding_box, chunk_size, year, run_local, no_stats, no_log, log_note)
 
