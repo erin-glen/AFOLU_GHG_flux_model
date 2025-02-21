@@ -5,7 +5,7 @@ Local:
 python -m src.LULUCF.scripts.preprocessing.hansenize -ct local -p drivers
 
 Coiled (Test):
-python -m scripts.utilities.create_cluster -cn hansenize_drivers_test -n 1 -m 8 -t 4
+python -m scripts.utilities.create_cluster -cn hansenize_drivers_test -n 1 -m 8 -t 8
 python -m src.LULUCF.scripts.preprocessing.hansenize_restructure -cn hansenize_drivers_test -ct coiled -p drivers
 
 #QC
@@ -26,116 +26,6 @@ from ..utilities import universal_utilities as uu
 ########################################################################################################################
 
 from osgeo import gdal
-import rasterio
-import numpy as np
-from pathlib import Path
-
-# Function to build a VRT using GDAL using tmp dir as intermediate step to download input files and build VRT
-    # raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
-    # output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is saved to
-def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
-
-    vsis3_paths = []
-    for s3_path in raw_raster_paths_list_s3:
-        vsis3_path = s3_path.replace("s3://", "/vsis3/")
-        vsis3_paths.append(vsis3_path)
-
-    # Use GDAL to build the VRT
-    # gdal.BuildVRT(local_vrt, "/vsis3/gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/N00E010_ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0.tif")
-    gdal.BuildVRT(local_vrt, vsis3_paths)
-    print("Built vrt")
-
-    # Various checks that vrt was created and has data in it
-    try:
-        vrt_dataset = rasterio.open(local_vrt)
-    except rasterio.errors.RasterioIOError:
-        print("Error: VRT file not found or invalid.")
-        exit()
-
-    if vrt_dataset.count == 0:
-        print("VRT has no data or invalid sources.")
-        exit()
-    else:
-        print("VRT contains data.")
-
-    if vrt_dataset.bounds:
-        print("VRT contains data or has valid metadata.")
-    else:
-        print("VRT has no data or invalid metadata.")
-        exit()
-
-    vrt_dataset.close()
-
-    print(f"File '{local_vrt}' exists at {os.path.abspath(local_vrt)}.")
-    uu.upload_s3_file(output_vrt_s3, local_vrt)
-    uu.check_s3_file_created(output_vrt_s3)
-
-
-# Gets the datatype of a raster in a Coiled cluster
-def get_dtype_from_coiled(s3_path, local_path):
-    file = uu.download_s3_file(s3_path, local_path)
-    data_type = uu.get_dtype_from_raster(file)
-    return data_type
-
-
-def warp_to_hansen_coiled(source_raster_path, filename, output_raster_s3_path_and_name, xmin, ymin, xmax, ymax,
-                          dt, no_data, tiled=True, x_pixel_window=400, y_pixel_window=400):
-    #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
-
-    source_raster_path = source_raster_path.replace("s3://", "/vsis3/")
-
-    print(f"Attempting to create {filename}...")
-
-    # Check that pixel window arguments are given if tiled = True
-    if tiled and not (x_pixel_window and y_pixel_window):
-        raise ValueError("If tiled = True, x_pixel_window and y_pixel_window must be passed as arguments")
-
-    # Open the VRT
-    dataset = gdal.Open(str(Path(source_raster_path)))
-
-    #Code to run gdal warp using Python API
-    if dataset:
-        if tiled == True:
-            # Warp the VRT to the new raster
-            options = gdal.WarpOptions(
-                dstSRS='EPSG:4326',  # Reproject to WGS84
-                xRes=cn.resolution,  # X resolution (10 degrees)
-                yRes=cn.resolution,  # Y resolution (10 degrees)
-                targetAlignedPixels=True,  # Ensure target aligned pixels (-tap)
-                outputBounds=[xmin, ymin, xmax, ymax],  # Output bounds
-                dstNodata=no_data,  # Set no data to 0
-                outputType=dt,  # Output data type
-                creationOptions=['COMPRESS=DEFLATE', 'TILED=YES',  # Tiling with user-specified dimensions
-                                 f'BLOCKXSIZE={x_pixel_window}',
-                                 f'BLOCKYSIZE={y_pixel_window}'],
-                format='GTiff'  # Output format
-            )
-        else:
-            # Warp the VRT to the new raster
-            options = gdal.WarpOptions(
-                dstSRS='EPSG:4326',
-                xRes=cn.resolution,
-                yRes=cn.resolution,
-                targetAlignedPixels=True,
-                outputBounds=[xmin, ymin, xmax, ymax],
-                dstNodata=no_data,
-                outputType=dt,
-                creationOptions=['COMPRESS=DEFLATE', 'TILED=NO'],  # No tiling (i.e. 40,000 x 1)
-                format='GTiff'
-            )
-
-        gdal.Warp(str(Path(filename)),  str(Path(source_raster_path)), options=options)
-
-        # Uploads tile to s3
-        uu.upload_s3_file(output_raster_s3_path_and_name, filename)
-
-        # Check that file exists
-        if uu.check_s3_file_created(output_raster_s3_path_and_name):
-            # Remove local 10x10 degree tile after uploading to s3
-            os.remove(str(Path(filename)))
-
-    else:
-        raise RuntimeError(f"Failed to open VRT: {source_raster_path}")
 
 def main(cluster_name, cluster_type, process, run_local):
 
@@ -289,11 +179,21 @@ def main(cluster_name, cluster_type, process, run_local):
 
             # Create a vrt from all raw input rasters
             print(f"Building vrt for {key}:")
-            build_vrt_gdal_coiled(input_raster_list_s3, output_vrt_s3, items["vrt"])
+            uu.build_vrt_gdal_coiled(input_raster_list_s3, output_vrt_s3, items["vrt"])
 
 
         # Step 4: Get GDAL datatype of each VRT
         for key, items in download_upload_dictionary.items():
+
+            simple_dict = {}
+            simple_dict_key = key
+            simple_dict_value = items["raw_dir"]
+            print(simple_dict_key)
+            print(simple_dict_value)
+            simple_dict[key][simple_dict_key] = simple_dict_value
+            print(simple_dict)
+
+            sys.quit()
 
             download_upload_dictionary[key]["dt"] = gdal.GDT_Int16  #TODO placeholder
 
@@ -395,9 +295,10 @@ def main(cluster_name, cluster_type, process, run_local):
                 # else:
                 #     print("VRT found outside warping function")
 
-                tile_future = client.submit(warp_to_hansen_coiled, output_vrt_s3, output_filename, output_tile_s3,
+                tile_future = client.submit(uu.warp_to_hansen_coiled, output_vrt_s3, output_filename, output_tile_s3,
                                             xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
                 tile_futures.append(tile_future)
+
 
             if cluster_type == 'local':
                 input_vrt_s3 = f"{items['raw_dir']}{items['vrt']}"
@@ -406,6 +307,7 @@ def main(cluster_name, cluster_type, process, run_local):
                 tile_futures.append(tile_future)
 
         print(f"Tiles to process: {len(tile_futures)}")
+
         # Collect the results once they are finished
         tile_results = client.gather(tile_futures)
         print(tile_results)
