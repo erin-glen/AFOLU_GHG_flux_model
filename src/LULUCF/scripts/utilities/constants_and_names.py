@@ -217,6 +217,8 @@ deadwood_c_dens_pattern = "deadwood_C_density_MgC_ha"
 litter_c_dens_pattern = "litter_C_density_MgC_ha"
 soil_c_dens_pattern = "soil_c_MgC_ha"
 
+### Starting carbon pools (2000/2015)
+
 carbon_pool_2000_date = "20240821"
 
 agc_2000_path = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{AGC_density_path_part}/{carbon_pool_2000_date}/"

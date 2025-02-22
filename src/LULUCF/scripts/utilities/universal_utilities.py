@@ -452,6 +452,40 @@ def xy_to_tile_id(top_left_x, top_left_y):
     return f"{lat}_{lng}"
 
 
+# Creates the list of chunks to process given an approach: a bounding box or a shapefile attribute table
+def create_chunk_list(bounding_box, chunk_list, chunk_size, first_chunks, fishnet_iso_df, main_logger):
+
+    # Makes list of chunks to analyze from the bounding box and chunk size (deg)
+    # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+    if bounding_box and chunk_size:
+
+        main_logger.info("Using bounding box and chunk size to determine chunks")
+        chunks = get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
+
+    # Makes list of chunks to analyze from a shapefile attribute table.
+    # Attribute table column must be formatted as W_S_E_N.
+    # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+    elif chunk_list:
+
+        main_logger.info("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
+
+        # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
+        fishnet_1x1_chunk_id_df = fishnet_iso_df[['chunk_id']]  # Creates dataframe
+
+        # If argument for number of chunks in shapefile is supplied, limit to that
+        if first_chunks:
+            fishnet_1x1_chunk_id_df = fishnet_1x1_chunk_id_df[:first_chunks]
+
+        # Converts dataframe column of chunk bounds to nested list
+        # Per https://chatgpt.com/share/e/674747ee-d588-800a-995c-1f897a8ace31
+        chunks = fishnet_1x1_chunk_id_df['chunk_id'].apply(uu.process_chunk_id).tolist()
+
+    else:
+        main_logger.info("Chunk list cannot be determined")
+        sys.exit()
+    return chunks
+
+
 # Calculates the elapsed time for a stage
 def stage_duration(start_time_str, end_time_str, stage, logger):
 
@@ -857,6 +891,46 @@ def complete_inputs(existing_input_list, typed_dict, datatype, chunk_length_pixe
             typed_dict[dataset_name] = np.full((chunk_length_pixels, chunk_length_pixels), 0, dtype=datatype)
             lu.print_and_log(f"Created {dataset_name} for chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
     return typed_dict
+
+
+# Counts the number of successful and skipped chunks after processing
+def count_successful_chunks(all_stats, chunk_list, is_final, main_logger, results, return_messages):
+
+    # Initializes counters for different types of return messages
+    success_count = 0
+    skipping_chunk_count = 0
+
+    # Processes the chunk stats and returned messages
+    # Results are the messages from the chunks and chunk stats
+    for result in results:
+        return_message, chunk_stats = result
+
+        if "Success" in return_message:
+            success_count += 1
+
+        if "Skipped chunk" in return_message:
+            skipping_chunk_count += 1
+
+        if return_message:
+            return_messages.append(return_message)
+
+        if chunk_stats is not None:
+            all_stats.extend(chunk_stats)
+
+    # Prints the returned messages if not a large (is_final) run
+    if not is_final:
+        for message in return_messages:
+            main_logger.info(message)
+
+    # Print the counts of successful and skipped chunks
+    ##TODO Use the GCS_to_s3 status json as a way to check which chunks were skipped
+    main_logger.info(f"Number of 'Success' chunks: {success_count}")
+    main_logger.info(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
+    main_logger.info(f"Difference between submitted chunks and processed chunks: {len(chunk_list) - (success_count + skipping_chunk_count)}" + "\n")
+
+    return success_count
+
+
 
 # Calculates stats for a chunk (numpy array), mostly using per hectare values
 # but optionally summing per pixel values to get a chunk total.

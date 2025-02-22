@@ -5,11 +5,11 @@ Test:
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 10 49.75 10.25 50 -cs 0.25
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload
-python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cl s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1
+python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1
 
 Full run:
 python -m scripts.utilities.create_cluster -n 200
-python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cl s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/
+python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/
 """
 
 import argparse
@@ -973,7 +973,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
 
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
-def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types, fishnet_iso_df, is_final, no_upload):
+def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types, start_year, end_year,
+                                       fishnet_iso_df, is_final, no_upload):
 
     logger_worker = lu.setup_logging_worker()
 
@@ -985,9 +986,9 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     chunk_stats = []
 
 
-    ### Part 1: Checks if tile exists at all, downloads data in chunk if it does exist, and checks if chunk actually has relevant data.
-    ### I haven't figured out a good way to check if the chunk has relevant data before downloading,
-    ### so inputs are downloaded and then checked.
+    ### Part 1: Downloads chunk.
+    ### No checks about whether the chunk has data because the way the chunk_list is constructed,
+    ### every chunk is relevant and should be processed, so they don't need to be checked.
 
     # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
@@ -1181,7 +1182,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
 
 def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         bounding_box=None, chunk_size=None, chunk_list=None, first_chunks=None, log_note=None):
+         bounding_box=None, chunk_size=None, chunk_shapefile=None, first_chunks=None, log_note=None):
 
     # Model stage being running
     stage = 'LULUCF_fluxes'
@@ -1190,13 +1191,13 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
                           [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2023
                           [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2023
-        print.info("Year range selection not valid")
+        print("Year range selection not valid")
         sys.exit()
     else:
         start_year = year_range[0]
         end_year = year_range[1]
-        print.info(f"Start year: {start_year}")
-        print.info(f"End year: {end_year}")
+        print(f"Start year: {start_year}")
+        print(f"End year: {end_year}")
 
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -1207,49 +1208,22 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Starting time for stage
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
-    main_logger.info(f"Start year: {start_year}")
-    main_logger.info(f"End year: {end_year}")
+    main_logger.info(f"Start year: {start_year}; end year: {end_year}")
 
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
     fishnet_iso_df = uu.fishnet_with_GADM_iso()
 
-    # Makes list of chunks to analyze from the bounding box and chunk size (deg)
-    # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
-    if bounding_box and chunk_size:
+    # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
+    chunk_list = uu.create_chunk_list(bounding_box, chunk_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
-        main_logger.info("Using bounding box and chunk size to determine chunks")
-        chunks = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
-
-    # Makes list of chunks to analyze from a shapefile attribute table.
-    # Attribute table column must be formatted as W_S_E_N.
-    # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
-    elif chunk_list:
-
-        main_logger.info("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
-
-        # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
-        fishnet_1x1_chunk_id_df = fishnet_iso_df[['chunk_id']]  # Creates dataframe
-
-        # If argument for number of chunks in shapefile is supplied, limit to that
-        if first_chunks:
-            fishnet_1x1_chunk_id_df = fishnet_1x1_chunk_id_df[:first_chunks]
-
-        # Converts dataframe column of chunk bounds to nested list
-        # Per https://chatgpt.com/share/e/674747ee-d588-800a-995c-1f897a8ace31
-        chunks = fishnet_1x1_chunk_id_df['chunk_id'].apply(uu.process_chunk_id).tolist()
-
-    else:
-        main_logger.info("Chunk list cannot be determined")
-        sys.exit()
-
-    main_logger.info(f"Chunks to process: {len(chunks)}")
+    main_logger.info(f"Chunks to process: {len(chunk_list)}")
     main_logger.info(f"Chunk size (degrees): {chunk_size}")
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
-    if len(chunks) > 20:
+    if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model.")
 
@@ -1353,12 +1327,12 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.
     # Inputs are Mg AGB/ha/yr. Outputs are Mg AGB/ha/yr. Conversion to Mg AGC/ha/yr is done below.
-    primary_forest_RFs = uu.convert_lookup_table_to_array(cn.IPCC_removal_factor_table_full_path,
+    primary_forest_RF_array = uu.convert_lookup_table_to_array(cn.IPCC_removal_factor_table_full_path,
                                                           cn.IPCC_removal_factor_table_tab,
                                                           ['gainEcoCon', 'growth_primary'])
 
     # Converts primary forest AGB RFs to AGC RFs (Mg AGB/ha/yr -> Mg AGC/ha/yr)
-    primary_forest_RFs[:, 1] = primary_forest_RFs[:, 1] * cn.biomass_to_carbon_non_mangrove
+    primary_forest_RF_array[:, 1] = primary_forest_RF_array[:, 1] * cn.biomass_to_carbon_non_mangrove
 
     # Creates list of tasks to run (1 task = 1 chunk)
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
@@ -1366,46 +1340,16 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
     futures = []
-    for chunk in chunks:
-        future = client.submit(calculate_and_upload_LULUCF_fluxes, chunk, primary_forest_RFs,
-                               download_dict_with_data_types, fishnet_iso_df, is_final, no_upload)
+    for chunk in chunk_list:
+        future = client.submit(calculate_and_upload_LULUCF_fluxes,
+                               chunk, primary_forest_RF_array, download_dict_with_data_types, start_year, end_year,
+                               fishnet_iso_df, is_final, no_upload)
         futures.append(future)
 
     # Collect the results once they are finished
     results = client.gather(futures)
 
-    # Initializes counters for different types of return messages
-    success_count = 0
-    skipping_chunk_count = 0
-
-    # Processes the chunk stats and returned messages
-    # Results are the messages from the chunks and chunk stats
-    for result in results:
-        return_message, chunk_stats = result
-
-        if "Success" in return_message:
-            success_count += 1
-
-        if "Skipped chunk" in return_message:
-            skipping_chunk_count += 1
-
-        if return_message:
-            return_messages.append(return_message)
-
-        if chunk_stats is not None:
-            all_stats.extend(chunk_stats)
-
-    # Prints the returned messages if not a large (is_final) run
-    if not is_final:
-        for message in return_messages:
-            main_logger.info(message)
-
-    # Print the counts of successful and skipped chunks
-    ##TODO Use the GCS_to_s3 status json as a way to check which chunks were skipped
-    main_logger.info(f"Number of 'Success' chunks: {success_count}")
-    main_logger.info(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
-    main_logger.info(f"Difference between submitted chunks and processed chunks: {len(chunks) - (success_count + skipping_chunk_count)}" + "\n")
-
+    success_count = uu.count_successful_chunks(all_stats, chunk_list, is_final, main_logger, results, return_messages)
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
@@ -1422,13 +1366,13 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Iterates through output folders and counts the number of output rasters.
     # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
     if is_final==True:
-        for LULUCF_output_folder in cn.LULUCF_output_folders:
+        for output_folder in cn.LULUCF_output_folders:
 
-            LULUCF_output_folder = re.sub('RES_pixels', '4000_pixels', LULUCF_output_folder)
-            LULUCF_output_folder = re.sub('DATE', uu.timestr()[:8], LULUCF_output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
+            output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
+            output_folder = re.sub('DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
 
-            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(LULUCF_output_folder)
-            main_logger.info(f"Output rasters in {LULUCF_output_folder}: {file_count}")
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
             # print(geotiff_files)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
@@ -1460,7 +1404,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('-cl', '--chunk_list', help='Shapefile of chunks')
+    parser.add_argument('-cshp', '--chunk_shapefile', help='Shapefile of chunks')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-y', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
@@ -1475,7 +1419,7 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
-    chunk_list = args.chunk_list
+    chunk_shapefile = args.chunk_shapefile
     first_chunks = args.first_chunks
     year_range = args.year_range
     log_note = args.log_note
@@ -1488,4 +1432,4 @@ if __name__ == "__main__":
     # Create the cluster with command line arguments
     main(cluster_name, year_range, run_local, no_stats, no_log, no_upload,
          bounding_box=bounding_box, chunk_size=chunk_size,
-         chunk_list=chunk_list, first_chunks=first_chunks, log_note=log_note)
+         chunk_shapefile=chunk_shapefile, first_chunks=first_chunks, log_note=log_note)

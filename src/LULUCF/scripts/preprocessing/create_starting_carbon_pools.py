@@ -8,6 +8,7 @@ import argparse
 import concurrent.futures
 import coiled
 import dask
+import re
 import os
 import sys
 import time
@@ -22,6 +23,7 @@ from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
 from ..utilities import log_utilities as lu
 from ..utilities import numba_utilities as nu
+from ..utilities import resize_cluster
 
 
 # Function to create initial (year 2000) non-soil carbon pool densities
@@ -158,7 +160,8 @@ def create_starting_C_densities(in_dict_uint8, in_dict_int16, in_dict_int32, in_
 
 
 # All steps for creating starting non-soil carbon pools in a chunk: download chunks, calculate carbon densities, upload to s3
-def create_and_upload_starting_C_densities(bounds, is_final, mangrove_C_ratio_array):
+def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, download_dict_with_data_types, year,
+                                           is_final, no_upload):
 
     logger_worker = lu.setup_logging_worker()
 
@@ -166,27 +169,28 @@ def create_and_upload_starting_C_densities(bounds, is_final, mangrove_C_ratio_ar
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
 
-    ### Part 1: downloads chunks and checks for data
 
-    # Dictionary of data to download
-    download_dict = {
+    ### Part 1: Checks if tile exists at all, downloads data in chunk if it does exist, and checks if chunk actually has relevant data.
+    ### I haven't figured out a good way to check if the chunk has relevant data before downloading,
+    ### so inputs are downloaded and then checked.
 
-        cn.agb_2000_pattern: f"{cn.agb_2000_path}{tile_id}_{cn.agb_2000_pattern}.tif",
-        cn.mangrove_agb_2000_pattern: f"{cn.mangrove_agb_2000_path}{tile_id}_{cn.mangrove_agb_2000_pattern}.tif",
-        cn.elevation_pattern: f"{cn.elevation_path}{tile_id}_{cn.elevation_pattern}.tif",
-        cn.climate_domain_pattern: f"{cn.climate_domain_path}{tile_id}_{cn.climate_domain_pattern}.tif",
-        cn.precipitation_pattern: f"{cn.precipitation_path}{tile_id}_{cn.precipitation_pattern}.tif",
-        cn.r_s_ratio_pattern: f"{cn.r_s_ratio_path}{tile_id}_{cn.r_s_ratio_pattern}.tif",
-        cn.continent_ecozone_pattern: f"{cn.continent_ecozone_path}{tile_id}_{cn.continent_ecozone_pattern}.tif"
-    }
+    # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
+    updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
 
     # Checks whether the tile exists at all for any of the inputs (not just the necessary inputs)
-    tile_exists = uu.check_for_tile(download_dict, is_final, logger_worker)
+    tile_exists = uu.check_for_tile(updated_download_dict, is_final, logger_worker)
 
     if not tile_exists:
         return f"Skipped chunk {bounds_str} because {tile_id} does not exist for any inputs: {uu.timestr()}"
+    else:
+        lu.print_and_log(f"Proceeding with {bounds_str} because {tile_id} does exist: {uu.timestr()}", is_final, logger_worker)
 
-    futures = uu.prepare_to_download_chunk(bounds, download_dict, is_final, logger_worker)
+    # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
+    # Thus, this returns a complete set of inputs (missing chunks filled).
+    # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
+    # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
+    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
+    # print(futures)
 
     lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
@@ -311,11 +315,11 @@ def create_and_upload_starting_C_densities(bounds, is_final, mangrove_C_ratio_ar
     return success_message, stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, bounding_box, chunk_size, year,
-         run_local=False, no_stats=False, no_log=False, log_note=None):
+def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_upload=False,
+         bounding_box=None, chunk_size=None, chunk_shapefile=None, first_chunks=None, log_note=None):
 
     # Model stage being running
-    stage = f'carbon_pools_{year}'
+    stage = f'starting_carbon_pools_{year}'
 
     # Determines if argument for year is valid
     if year in ['2000', '2015']:
@@ -335,18 +339,20 @@ def main(cluster_name, bounding_box, chunk_size, year,
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Year for carbon pools: {year}")
 
-    # Creates numpy array of ratios of BGC, deadwood C, and litter C relative to AGC. Relevant columns must be specified.
-    mangrove_C_ratio_array = uu.convert_lookup_table_to_array(cn.rate_ratio_spreadsheet, cn.mangrove_rate_ratio_tab,
-                                                           ['gainEcoCon', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
+    # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
+    # chunk_ids for making chunk list if shapefile is supplied in command line.
+    # chunk_ids and iso code used for chunk stats.
+    fishnet_iso_df = uu.fishnet_with_GADM_iso()
 
-    # Makes list of chunks to analyze
-    chunks = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
-    main_logger.info(f"Processing {len(chunks)} chunks")
-    # print(chunks)
+    # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
+    chunk_list = uu.create_chunk_list(bounding_box, chunk_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+
+    main_logger.info(f"Chunks to process: {len(chunk_list)}")
+    main_logger.info(f"Chunk size (degrees): {chunk_size}")
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
-    if len(chunks) > 20:
+    if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model.")
 
@@ -355,43 +361,112 @@ def main(cluster_name, bounding_box, chunk_size, year,
     all_stats = []
     return_messages = []
 
+    # This is just a placeholder tile_id that is used to obtain the datatype of each tile set.
+    # It is overwritten when chunks are assigned and analyzed.
+    # Using this placeholder allows the full path and tile name to be specified up front, which simplifies things.
+    # Otherwise, we'd have just the path but not the file name now and would have to add in the file name later
+    # (probably at the chunk level).
+    sample_tile_id = "00N_000E"
+
+    # Dictionary of data to download (inputs to model)
+    download_dict = {
+        cn.elevation_pattern: f"{cn.elevation_path}{sample_tile_id}_{cn.elevation_pattern}.tif",
+        cn.climate_domain_pattern: f"{cn.climate_domain_path}{sample_tile_id}_{cn.climate_domain_pattern}.tif",
+        cn.precipitation_pattern: f"{cn.precipitation_path}{sample_tile_id}_{cn.precipitation_pattern}.tif",
+        cn.r_s_ratio_pattern: f"{cn.r_s_ratio_path}{sample_tile_id}_{cn.r_s_ratio_pattern}.tif",
+        cn.continent_ecozone_pattern: f"{cn.continent_ecozone_path}{sample_tile_id}_{cn.continent_ecozone_pattern}.tif"
+    }
+
+    # Dictionary of data to download
+    if year == 2000:
+        download_dict[cn.agb_2000_pattern] = f"{cn.agb_2000_path}{sample_tile_id}_{cn.agb_2000_pattern}.tif",
+        download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_path}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
+        starting_C_pool_output_folders = [cn.agc_2000_path, cn.bgc_2000_path, cn.deadwood_c_2000_path, cn.litter_c_2000_path]
+
+    elif year == 2015:
+        download_dict[cn.agb_2015_pattern] = f"{cn.agb_2015_path_processed}{sample_tile_id}_{cn.agb_2015_pattern}.tif",
+        download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_path}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
+        starting_C_pool_output_folders = [cn.agc_2015_path, cn.bgc_2015_path, cn.deadwood_c_2015_path, cn.litter_c_2015_path]
+
+    else:
+        print(f"Year input {year} not valid. Terminating.")
+        sys.exit()
+
+    # Returns the first tile in each input so that the datatype can be determined.
+    # This is done up front, once per tile set, rather than on each chunk, since
+    # all tiles have the same datatype for each input-- it only needs to be done once at the very beginning of the stage.
+    main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
+    first_tiles = uu.first_file_name_in_s3_folder(download_dict)
+
+    # Creates a download dictionary with the datatype of each input in the values.
+    # This is supplied to each chunk that is being analyzed.
+    # This also serves as a check of whether all inputs are being found (s3 paths correct)
+    main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
+    download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
+    # print(download_dict_with_data_types)
+
+    # Creates numpy array of ratios of BGC, deadwood C, and litter C relative to AGC. Relevant columns must be specified.
+    mangrove_C_ratio_array = uu.convert_lookup_table_to_array(cn.rate_ratio_spreadsheet, cn.mangrove_rate_ratio_tab,
+                                                           ['gainEcoCon', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
+
     # Creates list of tasks to run (1 task = 1 chunk)
-    delayed_results = [dask.delayed(create_and_upload_starting_C_densities)(chunk, is_final, mangrove_C_ratio_array) for chunk in chunks]
+    main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
+    main_logger.info("Workers' logs appended after main function log"+ "\n")
+
+    # Creates list of tasks to run (1 task = 1 chunk)
+    delayed_results = [dask.delayed(create_and_upload_starting_C_densities)
+                       (chunk, mangrove_C_ratio_array, download_dict_with_data_types, year, is_final, no_upload)
+                       for chunk in chunk_list]
 
     # Runs analysis and gathers results
     results = dask.compute(*delayed_results)
 
-    # Processes the chunk stats and returned messages
-    # Results are the messages from the chunks and chunk stats
-    for result in results:
-        success_message, chunk_stats = result
-        if success_message:
-            return_messages.append(success_message)
-        if chunk_stats is not None:
-            all_stats.extend(chunk_stats)
+    success_count = uu.count_successful_chunks(all_stats, chunk_list, is_final, main_logger, results, return_messages)
 
-    # Prepares chunk stats spreadsheet: min, mean, max for all input and output chunks,
+    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    # cluster, not all the workers.
+    workers = client.scheduler_info()["workers"]
+    n_workers = len(workers)
+
+    # Reduces number of workers in the cluster down to 1 if there is more than 1
+    # TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
+    if n_workers > 1:
+        main_logger.info("Resizing cluster to 1 worker")
+
+        resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
+
+    # Iterates through output folders and counts the number of output rasters.
+    # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
+    if is_final == True:
+        for output_folder in starting_C_pool_output_folders:
+            output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
+            output_folder = re.sub('DATE', uu.timestr()[:8],
+                                          output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
+
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+            # print(geotiff_files)
+
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+
+
+    # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
-    # only if not suppressed by the --no_stats flag
-    if not no_stats:
-        uu.aggregate_chunk_stats(all_stats, stage, main_logger)
+    # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
+    if (not no_stats) and (success_count > 0):
+        uu.aggregate_chunk_stats(all_stats, stage, no_upload, main_logger)
 
-    # Ending time for stage
-    end_time = uu.timestr()
-    print(f"Stage {stage} ended at: {end_time}")
-    uu.stage_duration(start_time, end_time, stage, main_logger)
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
-    # Prints the returned messages
-    for message in return_messages:
-        print(message)
+    # Creates combined log from all workers if not deactivated
+    worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
 
-    # Creates combined log if not deactivated
-    log_note = "Global carbon pool 2000 run"
-    lu.compile_worker_logs(no_log, client, cluster, stage,
-                           len(chunks), chunk_size, start_time, end_time, log_note)
+    # Adds the workers' logs to the main log and uploads to s3
+    lu.merge_main_and_worker_upload_logs(main_log_local_path, worker_log_local_path, stage)
 
+    # Closes the Dask client if not running locally
     if not run_local:
-        # Closes the Dask client if not running locally
         client.close()
 
 
@@ -400,27 +475,33 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
+    parser.add_argument('-cshp', '--chunk_shapefile', help='Shapefile of chunks')
+    parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
+    parser.add_argument('--year', required=True, help='Year for carbon pools')
+    parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
     parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
-    parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
-
-    parser.add_argument('--year', required=True, help='Year for carbon pools')
+    parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
+    chunk_shapefile = args.chunk_shapefile
+    first_chunks = args.first_chunks
+    year = args.year
+    log_note = args.log_note
 
     run_local = args.run_local
     no_stats = args.no_stats
     no_log = args.no_log
-    log_note = args.log_note
-
-    year = args.year
+    no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, bounding_box, chunk_size, year, run_local, no_stats, no_log, log_note)
+    main(cluster_name, year, run_local, no_stats, no_log, no_upload,
+         bounding_box=bounding_box, chunk_size=chunk_size,
+         chunk_shapefile=chunk_shapefile, first_chunks=first_chunks, log_note=log_note)
 
