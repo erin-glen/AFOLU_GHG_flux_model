@@ -135,7 +135,7 @@ def populate_main_log_header(bounding_box, client, cluster, log_note, run_local,
     main_logger.info(f"Bounding box: {bounding_box}")
     main_logger.info(f"Log note: {log_note}")
 
-    return main_logger
+    return main_logger, main_log_local_path
 
 
 # Merges the log from main() with all the worker logs after all processing and uploads to s3

@@ -328,7 +328,7 @@ def main(cluster_name, bounding_box, chunk_size, year,
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger = lu.populate_main_log_header(bounding_box, client, cluster, log_note, run_local, stage)
+    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, client, cluster, log_note, run_local, stage)
 
     # Starting time for stage
     start_time = uu.timestr()
