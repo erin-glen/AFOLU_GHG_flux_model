@@ -1026,7 +1026,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # Calculates stats for the input layers
     for key, array in layers.items():
         chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer', fishnet_iso_df))
-    # print(stats)
+    # print(chunk_stats)
 
 
     ### Part 3: Creates a separate dictionary for each chunk datatype so that they can be passed to Numba as separate arguments.
@@ -1038,9 +1038,10 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
     # Creates the typed dictionaries for all input layers (including those that originally had no data)
-    typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
+    typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
 
     # print("uint8_typed_list:", typed_dict_uint8)
+    # print("uint16_typed_list:", typed_dict_uint16)
     # print("int16_typed_list:", typed_dict_int16)
     # print("int32_typed_list:", typed_dict_int32)
     # print("float32_typed_list:", out_dict_float32)
@@ -1318,14 +1319,14 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # all tiles have the same datatype for each input-- it only needs to be done once at the very beginning of the stage.
     main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
     first_tiles = uu.first_file_name_in_s3_folder(download_dict)
-    print(first_tiles)
+    # print(first_tiles)
 
     # Creates a download dictionary with the datatype of each input in the values.
     # This is supplied to each chunk that is being analyzed.
     # This also serves as a check of whether all inputs are being found (s3 paths correct)
     main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
-    print(download_dict_with_data_types)
+    # print(download_dict_with_data_types)
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.
@@ -1357,15 +1358,16 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
-    workers = client.scheduler_info()["workers"]
-    n_workers = len(workers)
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
 
-    # Reduces number of workers in the cluster down to 1 if there is more than 1
-    #TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
-    if n_workers > 1:
-        main_logger.info("Resizing cluster to 1 worker")
+        # Reduces number of workers in the cluster down to 1 if there is more than 1
+        # TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
+        if n_workers > 1:
+            main_logger.info("Resizing cluster to 1 worker")
 
-        resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
+            resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
 
     # Iterates through output folders and counts the number of output rasters.
     # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
@@ -1390,12 +1392,14 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
-    # Creates combined log from all workers if not deactivated
-    worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
+    # Sets it so that no worker logs are created if doing a local run
+    if not run_local:
+        # Creates combined log from all workers if not deactivated
+        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
 
-    # Adds the workers' logs to the main log and uploads to s3
-    lu.merge_main_and_worker_upload_logs(main_log_local_path, worker_log_local_path, stage)
+        # Adds the workers' logs to the main log and uploads to s3
+        lu.merge_main_and_worker_upload_logs(main_log_local_path, worker_log_local_path, stage)
 
     # Closes the Dask client if not running locally
     if not run_local:

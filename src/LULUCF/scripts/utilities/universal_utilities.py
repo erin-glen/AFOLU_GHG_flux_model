@@ -127,16 +127,16 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
         if no_data_val is not None:
             with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
                                height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw', blockxsize=400,
-                               blockysize=400, nodata=no_data_val) as dst:
+                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                               tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
                 dst.write(data_array, 1)
 
         # No NoData value in output raster
         else:
             with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
                                height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw', blockxsize=400,
-                               blockysize=400) as dst:
+                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                               tiled=True, blockxsize=400, blockysize=400) as dst:
                 dst.write(data_array, 1)
 
         s3_path = f"{cn.s3_out_dir}/{data_meaning}/{year_out}/{model_version}/{chunk_length_pixels}_pixels/{pixel_meaning}/{output_date}"
@@ -1084,7 +1084,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, logger):
 # Gets the datatype of a raster in s3.
 # This seems much faster than the rasterio version that ChatGPT suggested later in the chat.
 # From https://chatgpt.com/share/e/a48c768d-0331-43da-9fc6-ef8a84af586c
-def get_dtype_from_s3(s3_path):
+def get_dtype_from_s3(key, s3_path):
 
     # Constructs the /vsis3/ path
     try:
@@ -1093,9 +1093,8 @@ def get_dtype_from_s3(s3_path):
         return data_type
 
     except Exception as e:
-        print(f"Error: {s3_path}: {e}")
+        print(f"Error: s3 path not available for getting datatype of first tile in {key}: {e}")
         sys.exit(1)
-        # return None  # Return None or an appropriate fallback value
 
 # Gets the datatype of a raster in a Coiled cluster
 def get_dtype_from_coiled(s3_path, local_path):
@@ -1139,7 +1138,7 @@ def add_file_type_to_dict(first_tiles):
     for key, file_path in first_tiles.items():
 
         # Gets the datatype from the first tile of the dataset in s3
-        dtype = get_dtype_from_s3(file_path)
+        dtype = get_dtype_from_s3(key, file_path)
         # Adds file path and dtype as a list as the value in the dictionary
         download_dict_with_data_types[key] = [file_path, dtype]
 

@@ -21,6 +21,7 @@ def accrete_node(combo, new):
 def create_typed_dicts(layers):
     # Initializes empty dictionaries for each type
     uint8_dict_layers = {}
+    uint16_dict_layers = {}
     int16_dict_layers = {}
     int32_dict_layers = {}
     float32_dict_layers = {}
@@ -39,6 +40,8 @@ def create_typed_dicts(layers):
         # If there is data, it puts the data in the corresponding dictionary for that datatype
         if array.dtype == np.uint8:
             uint8_dict_layers[key] = contig_array
+        elif array.dtype == np.uint16:
+            uint16_dict_layers[key] = contig_array
         elif array.dtype == np.int16:
             int16_dict_layers[key] = contig_array
         elif array.dtype == np.int32:
@@ -50,6 +53,7 @@ def create_typed_dicts(layers):
             # raise TypeError(f"{key} dtype not in list")
 
     # print(f"uint8 datasets: {uint8_dict_layers.keys()}")
+    # print(f"uint16 datasets: {uint16_dict_layers.keys()}")
     # print(f"int16 datasets: {int16_dict_layers.keys()}")
     # print(f"int32 datasets: {int32_dict_layers.keys()}")
     # print(f"float32 datasets: {float32_dict_layers.keys()}")
@@ -58,6 +62,11 @@ def create_typed_dicts(layers):
     typed_dict_uint8 = Dict.empty(
         key_type=types.unicode_type,
         value_type=types.Array(types.uint8, 2, 'C')  # Assuming 2D arrays of uint8
+    )
+
+    typed_dict_uint16 = Dict.empty(
+        key_type=types.unicode_type,
+        value_type=types.Array(types.uint16, 2, 'C')  # Assuming 2D arrays of int16
     )
 
     typed_dict_int16 = Dict.empty(
@@ -79,6 +88,9 @@ def create_typed_dicts(layers):
     for key, array in uint8_dict_layers.items():
         typed_dict_uint8[key] = array
 
+    for key, array in uint16_dict_layers.items():
+        typed_dict_uint16[key] = array
+
     for key, array in int16_dict_layers.items():
         typed_dict_int16[key] = array
 
@@ -88,7 +100,7 @@ def create_typed_dicts(layers):
     for key, array in float32_dict_layers.items():
         typed_dict_float32[key] = array
 
-    return typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32
+    return typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32
 
 
 # Classifies vegetation height classes for start and end of current interval

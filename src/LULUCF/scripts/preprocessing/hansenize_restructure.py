@@ -269,42 +269,42 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
     # Iterates through all input datasets
     for key,items in download_upload_dictionary.items():
 
-        # # Separate tile_futures list for each dataset being processed
-        # tile_futures = []
-        #
-        # # Iterates through all tiles in a given dataset
-        # for chunk in chunk_list:
-        #
-        #     tile_id = uu.xy_to_tile_id(chunk[0], chunk[3])  # tile_id in YYN/S_XXXE/W
-        #
-        #     output_filename = f"{tile_id}_{items['processed_pattern']}.tif"
-        #     # print(output_filename)
-        #     output_tile_s3 = f"{items['processed_dir']}{output_filename}"
-        #     # print(output_tile_s3)
-        #     xmin, ymin, xmax, ymax = uu.get_10x10_tile_bounds(tile_id)
-        #     dt = items['dt']
-        #
-        #     # Create 10 x 10 degree hansenized tile for each dataset in dictionary
-        #     if cluster_type == 'coiled' or cluster_type == 'test':
-        #
-        #         tile_future = client.submit(uu.warp_to_hansen_coiled, output_vrt_s3, output_filename, output_tile_s3,
-        #                                     xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
-        #         tile_futures.append(tile_future)
-        #
-        #     ## NOT MAINTAINED!!!!!!
-        #     if cluster_type == 'local':
-        #
-        #         input_vrt_s3 = f"{items['raw_dir']}{items['vrt']}"
-        #         tile_future = client.submit(uu.warp_to_hansen_local, input_vrt_s3, output_tile_s3,
-        #                                     xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
-        #         tile_futures.append(tile_future)
-        #
-        # print(f"Tiles to process: {len(tile_futures)}")
-        #
-        # # Collect the results once they are finished
-        # tile_results = client.gather(tile_futures)
-        # print(tile_results)
-        # print(f"Completed tile set: {uu.timestr()}")
+        # Separate tile_futures list for each dataset being processed
+        tile_futures = []
+
+        # Iterates through all tiles in a given dataset
+        for chunk in chunk_list:
+
+            tile_id = uu.xy_to_tile_id(chunk[0], chunk[3])  # tile_id in YYN/S_XXXE/W
+
+            output_filename = f"{tile_id}_{items['processed_pattern']}.tif"
+            # print(output_filename)
+            output_tile_s3 = f"{items['processed_dir']}{output_filename}"
+            # print(output_tile_s3)
+            xmin, ymin, xmax, ymax = uu.get_10x10_tile_bounds(tile_id)
+            dt = items['dt']
+
+            # Create 10 x 10 degree hansenized tile for each dataset in dictionary
+            if cluster_type == 'coiled' or cluster_type == 'test':
+
+                tile_future = client.submit(uu.warp_to_hansen_coiled, output_vrt_s3, output_filename, output_tile_s3,
+                                            xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
+                tile_futures.append(tile_future)
+
+            ## NOT MAINTAINED!!!!!!
+            if cluster_type == 'local':
+
+                input_vrt_s3 = f"{items['raw_dir']}{items['vrt']}"
+                tile_future = client.submit(uu.warp_to_hansen_local, input_vrt_s3, output_tile_s3,
+                                            xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
+                tile_futures.append(tile_future)
+
+        print(f"Tiles to process: {len(tile_futures)}")
+
+        # Collect the results once they are finished
+        tile_results = client.gather(tile_futures)
+        print(tile_results)
+        print(f"Completed tile set: {uu.timestr()}")
 
 
         # Step 6: Creates a tile index shapefile of the output rasters to check completeness of Hansenization

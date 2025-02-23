@@ -28,8 +28,9 @@ from ..utilities import resize_cluster
 
 # Function to create initial (year 2000) non-soil carbon pool densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-@jit(nopython=True)
-def create_starting_C_densities(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, mangrove_C_ratio_array):
+# @jit(nopython=True)
+def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
+                                in_dict_int32, in_dict_float32, mangrove_C_ratio_array, year):
 
     # Separate dictionaries for output numpy arrays of each datatype, named by output data type.
     # This is because a dictionary in a Numba function cannot have arrays with multiple data types, so each dictionary has to store only one data type,
@@ -37,13 +38,22 @@ def create_starting_C_densities(in_dict_uint8, in_dict_int16, in_dict_int32, in_
     out_dict_float32 = {}
 
     # print(in_dict_uint8)
+    # print(in_dict_uint16)
     # print(in_dict_int16)
     # print(in_dict_int32)
     # print(in_dict_float32)
 
-    # Input blocks for remaining inputs, now that they definitely exist (either originally or have been created)
-    whrc_agb_2000_block = in_dict_int16[cn.agb_2000_pattern]
-    mangrove_agb_2000_block = in_dict_float32[cn.mangrove_agb_2000_pattern]
+    # Input blocks
+    # AGB block sources (mangrove and non-mangrove) depend on the starting year
+    if year == 2000:
+        agb_non_mang_block = in_dict_int16[cn.agb_2000_pattern]
+        mangrove_agb_block = in_dict_float32[cn.mangrove_agb_2000_pattern]
+    elif year == 2015:
+        agb_non_mang_block = in_dict_uint16[cn.agb_2015_pattern]
+        mangrove_agb_block = in_dict_float32[cn.mangrove_agb_2000_pattern]
+    else:
+        sys.exit()
+
     r_s_ratio_block = in_dict_float32[cn.r_s_ratio_pattern]
     elevation_block = in_dict_int16[cn.elevation_pattern]
     climate_domain_block = in_dict_int16[cn.climate_domain_pattern]
@@ -51,29 +61,29 @@ def create_starting_C_densities(in_dict_uint8, in_dict_int16, in_dict_int32, in_
     continent_ecozone_block = in_dict_int16[cn.continent_ecozone_pattern]
 
     mangrove_in_chunk = True  # Flag for whether chunk has mangrove in it
-    whrc_agb_2000_in_chunk = True  # Flag for whether chunk has WHRC AGB 2000 in it
+    agb_non_mang_in_chunk = True  # Flag for whether chunk has WHRC AGB 2000 in it
 
     # Checks if the chunk has various inputs by seeing if the max value is 0.
     # If the max value is 0, it assumed that input doesn't exist.
-    if whrc_agb_2000_block.max() == 0:
-        whrc_agb_2000_in_chunk = False
-    if mangrove_agb_2000_block.max() == 0:
+    if agb_non_mang_block.max() == 0:
+        agb_non_mang_in_chunk = False
+    if mangrove_agb_block.max() == 0:
         mangrove_in_chunk = False
 
     # Output blocks
     # Need to specify the output datatype or it will default to float32
-    agc_2000_out_block = np.zeros(in_dict_float32["r_s_ratio"].shape).astype('float32')
-    bgc_2000_out_block = np.zeros(in_dict_float32["r_s_ratio"].shape).astype('float32')
-    deadwood_c_2000_out_block = np.zeros(in_dict_float32["r_s_ratio"].shape).astype('float32')
-    litter_c_2000_out_block = np.zeros(in_dict_float32["r_s_ratio"].shape).astype('float32')
+    agc_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_pattern].shape).astype('float32')
+    bgc_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_pattern].shape).astype('float32')
+    deadwood_c_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_pattern].shape).astype('float32')
+    litter_c_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_pattern].shape).astype('float32')
 
     # Iterates through all pixels in the chunk
     for row in range(continent_ecozone_block.shape[0]):
         for col in range(continent_ecozone_block.shape[1]):
 
             # Input values for this specific cell
-            whrc_agb_2000 = whrc_agb_2000_block[row, col]
-            mangrove_agb_2000 = mangrove_agb_2000_block[row, col]
+            agb_non_mang = agb_non_mang_block[row, col]
+            mangrove_agb = mangrove_agb_block[row, col]
             elevation = elevation_block[row, col]
             climate_domain = climate_domain_block[row, col]
             precipitation = precipitation_block[row, col]
@@ -82,23 +92,23 @@ def create_starting_C_densities(in_dict_uint8, in_dict_int16, in_dict_int32, in_
 
             # If mangrove AGB is present, AGC 2000 is calculated from it, overwriting any AGC that is based on WHRC that is already there
             if (mangrove_in_chunk) and (
-                    mangrove_agb_2000 > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
-                agc_2000_out_block[row, col] = mangrove_agb_2000 * cn.biomass_to_carbon_mangrove
+                    mangrove_agb > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
+                agc_out_block[row, col] = mangrove_agb * cn.biomass_to_carbon_mangrove
 
             # If WHRC AGB is present, AGC 2000 is calculated from it
-            elif (whrc_agb_2000_in_chunk) and (
-                    whrc_agb_2000 > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
-                agc_2000_out_block[row, col] = whrc_agb_2000 * cn.biomass_to_carbon_non_mangrove
+            elif (agb_non_mang_in_chunk) and (
+                    agb_non_mang > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
+                agc_out_block[row, col] = agb_non_mang * cn.biomass_to_carbon_non_mangrove
 
             else:
-                agc_2000_out_block[row, col] = 0
+                agc_out_block[row, col] = 0
 
             # Separate branches for assigning BGC, deadwood C, and litter C ratios depending on whether the pixel has mangroves.
             # Calculation of BGC, deadwood C, and litter C are done after the decision tree assigns the ratios.
 
             # Mangrove carbon pool ratio branch
             # From IPCC 2013 Wetland Supplement
-            if (mangrove_in_chunk) and (mangrove_agb_2000 > 0):  # Only replaces WHRC AGB if mangrove chunk exists and if mangrove value in that pixel
+            if (mangrove_in_chunk) and (mangrove_agb > 0):  # Only replaces WHRC AGB if mangrove chunk exists and if mangrove value in that pixel
                 bgc_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone)][0, 1]
                 deadwood_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone)][0, 2]
                 litter_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone)][0, 3]
@@ -110,7 +120,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_int16, in_dict_int32, in_
             # Estimation of carbon stocks and change in carbon stocks in dead wood and litter in A/R CDM project activities version 03.0"
             # Tables on pages 18 (deadwood) and 19 (litter).
             # They depend on the climate domain, elevation, and precipitation.
-            elif (whrc_agb_2000_in_chunk) and (whrc_agb_2000 > 0):  # Non-mangrove
+            elif (agb_non_mang_in_chunk) and (agb_non_mang > 0):  # Non-mangrove
 
                 # If no mapped R:S, uses the global default value instead
                 if r_s_ratio == 0:
@@ -144,16 +154,16 @@ def create_starting_C_densities(in_dict_uint8, in_dict_int16, in_dict_int32, in_
                 litter_c_ratio = -20
 
             # Actually calculates BGC, deadwood C, and litter C using the ratios assigned in the above decision tree
-            bgc_2000_out_block[row, col] = agc_2000_out_block[row, col] * bgc_ratio
-            deadwood_c_2000_out_block[row, col] = agc_2000_out_block[row, col] * deadwood_c_ratio
-            litter_c_2000_out_block[row, col] = agc_2000_out_block[row, col] * litter_c_ratio
+            bgc_out_block[row, col] = agc_out_block[row, col] * bgc_ratio
+            deadwood_c_out_block[row, col] = agc_out_block[row, col] * deadwood_c_ratio
+            litter_c_out_block[row, col] = agc_out_block[row, col] * litter_c_ratio
 
     # Adds the output arrays to the dictionary with the appropriate data type
-    # Outputs need .copy() so that previous intervals' arrays in dicationary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
-    out_dict_float32[f"{cn.agc_dens_pattern}_{cn.first_model_year_5_years}"] = agc_2000_out_block.copy()
-    out_dict_float32[f"{cn.bgc_dens_pattern}_{cn.first_model_year_5_years}"] = bgc_2000_out_block.copy()
-    out_dict_float32[f"{cn.deadwood_c_dens_pattern}_{cn.first_model_year_5_years}"] = deadwood_c_2000_out_block.copy()
-    out_dict_float32[f"{cn.litter_c_dens_pattern}_{cn.first_model_year_5_years}"] = litter_c_2000_out_block.copy()
+    # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
+    out_dict_float32[f"{cn.agc_dens_pattern}_{cn.first_model_year_5_years}"] = agc_out_block.copy()
+    out_dict_float32[f"{cn.bgc_dens_pattern}_{cn.first_model_year_5_years}"] = bgc_out_block.copy()
+    out_dict_float32[f"{cn.deadwood_c_dens_pattern}_{cn.first_model_year_5_years}"] = deadwood_c_out_block.copy()
+    out_dict_float32[f"{cn.litter_c_dens_pattern}_{cn.first_model_year_5_years}"] = litter_c_out_block.copy()
 
     # return output dictionary/ies
     return out_dict_float32
@@ -161,7 +171,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_int16, in_dict_int32, in_
 
 # All steps for creating starting non-soil carbon pools in a chunk: download chunks, calculate carbon densities, upload to s3
 def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, download_dict_with_data_types, year,
-                                           is_final, no_upload):
+                                           fishnet_iso_df, is_final, no_upload):
 
     logger_worker = lu.setup_logging_worker()
 
@@ -201,10 +211,10 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
     # Test prints
     # print(layers)
-    # print(layers['burned_area_2002'].max())
+    # print(layers['AGB_2015_ESA_CCI_Mg_AGB_ha'].max())
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern])
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern].max())
-    # print(layers[soil_c_2000_pattern].dtype)
+    # print(layers['AGB_2015_ESA_CCI_Mg_AGB_ha'].dtype)
 
 
     ### Part 2: Calculates min, mean, and max for each input chunk.
@@ -213,7 +223,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
     # Calculates stats for the input layers
     for key, array in layers.items():
         chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer', fishnet_iso_df))
-    # print(stats)
+    # print(chunk_stats)
 
 
     ### Part 3: Creates a separate dictionary for each chunk datatype so that they can be passed to Numba as separate arguments.
@@ -225,12 +235,13 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
     # Creates the typed dictionaries for all input layers (including those that originally had no data)
-    typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
+    typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
 
     # print("uint8_typed_list:", typed_dict_uint8)
+    # print("uint16_typed_list:", typed_dict_uint16)
     # print("int16_typed_list:", typed_dict_int16)
     # print("int32_typed_list:", typed_dict_int32)
-    # print("float32_typed_list:", out_dict_float32)
+    # print("float32_typed_list:", typed_dict_float32)
 
 
     ### Part 4: Creates starting carbon pool densities
@@ -238,10 +249,10 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
     lu.print_and_log(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
     print(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}")
 
-
-    # Create AGC, BGC, deadwood C and litter C densities in 2000
+    # Create AGC, BGC, deadwood C and litter C densities in selected starting year
     out_dict_float32 = create_starting_C_densities(
-        typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, mangrove_C_ratio_array
+        typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32,
+        mangrove_C_ratio_array, year
     )
 
     # Fresh non-Numba-constrained dictionary that stores all output numpy arrays of all datatypes.
@@ -321,7 +332,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     stage = f'starting_carbon_pools_{year}'
 
     # Determines if argument for year is valid
-    if year in ['2000', '2015']:
+    if year in [2000, 2015]:
         print("Year selection valid")
     else:
         print("Year selection not valid")
@@ -377,12 +388,12 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     }
 
     # Dictionary of data to download
-    if year == '2000':
+    if year == 2000:
         download_dict[cn.agb_2000_pattern] = f"{cn.agb_2000_path}{sample_tile_id}_{cn.agb_2000_pattern}.tif"
         download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_path}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
         starting_C_pool_output_folders = [cn.agc_2000_path, cn.bgc_2000_path, cn.deadwood_c_2000_path, cn.litter_c_2000_path]
 
-    elif year == '2015':
+    elif year == 2015:
         download_dict[cn.agb_2015_pattern] = f"{cn.agb_2015_path_processed}{sample_tile_id}_{cn.agb_2015_pattern}.tif"
         download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_path}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
         starting_C_pool_output_folders = [cn.agc_2015_path, cn.bgc_2015_path, cn.deadwood_c_2015_path, cn.litter_c_2015_path]
@@ -414,9 +425,8 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     main_logger.info("Workers' logs appended after main function log"+ "\n")
 
 
-    # Creates list of tasks to run (1 task = 1 chunk)
     delayed_results = [dask.delayed(create_and_upload_starting_C_densities)
-                       (chunk, mangrove_C_ratio_array, download_dict_with_data_types, year, is_final, no_upload)
+                       (chunk, mangrove_C_ratio_array, download_dict_with_data_types, year, fishnet_iso_df, is_final, no_upload)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results
@@ -426,15 +436,16 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
-    workers = client.scheduler_info()["workers"]
-    n_workers = len(workers)
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
 
-    # Reduces number of workers in the cluster down to 1 if there is more than 1
-    # TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
-    if n_workers > 1:
-        main_logger.info("Resizing cluster to 1 worker")
+        # Reduces number of workers in the cluster down to 1 if there is more than 1
+        # TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
+        if n_workers > 1:
+            main_logger.info("Resizing cluster to 1 worker")
 
-        resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
+            resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
 
     # Iterates through output folders and counts the number of output rasters.
     # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
@@ -459,12 +470,15 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
-    # Creates combined log from all workers if not deactivated
-    worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
+    # Sets it so that no worker logs are created if doing a local run
+    if not run_local:
 
-    # Adds the workers' logs to the main log and uploads to s3
-    lu.merge_main_and_worker_upload_logs(main_log_local_path, worker_log_local_path, stage)
+        # Creates combined log from all workers if not deactivated
+        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
+
+        # Adds the workers' logs to the main log and uploads to s3
+        lu.merge_main_and_worker_upload_logs(main_log_local_path, worker_log_local_path, stage)
 
     # Closes the Dask client if not running locally
     if not run_local:
@@ -478,7 +492,7 @@ if __name__ == "__main__":
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--chunk_shapefile', help='Shapefile of chunks')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
-    parser.add_argument('--year', required=True, help='Year for carbon pools')
+    parser.add_argument('--year', type=int, required=True, help='Year for carbon pools')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
