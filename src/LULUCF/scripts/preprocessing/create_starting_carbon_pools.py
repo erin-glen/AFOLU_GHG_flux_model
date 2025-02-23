@@ -28,7 +28,7 @@ from ..utilities import resize_cluster
 
 # Function to create initial (year 2000) non-soil carbon pool densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-# @jit(nopython=True)
+@jit(nopython=True)
 def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                                 in_dict_int32, in_dict_float32, mangrove_C_ratio_array, year):
 
@@ -44,24 +44,27 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     # print(in_dict_float32)
 
     # Input blocks
-    # AGB block sources (mangrove and non-mangrove) depend on the starting year
-    if year == 2000:
-        agb_non_mang_block = in_dict_int16[cn.agb_2000_pattern]
-        mangrove_agb_block = in_dict_float32[cn.mangrove_agb_2000_pattern]
-    elif year == 2015:
-        agb_non_mang_block = in_dict_uint16[cn.agb_2015_pattern]
-        mangrove_agb_block = in_dict_float32[cn.mangrove_agb_2000_pattern]
-    else:
-        sys.exit()
-
     r_s_ratio_block = in_dict_float32[cn.r_s_ratio_pattern]
     elevation_block = in_dict_int16[cn.elevation_pattern]
     climate_domain_block = in_dict_int16[cn.climate_domain_pattern]
     precipitation_block = in_dict_int32[cn.precipitation_pattern]
     continent_ecozone_block = in_dict_int16[cn.continent_ecozone_pattern]
 
+    # AGB block sources (mangrove and non-mangrove) depend on the starting year
+    # Numba can't handle two different possible datatypes for agb_non_mang_block,
+    # so both options need to be recast to the same type
+    if year == 2000:
+        agb_non_mang_block = in_dict_int16[cn.agb_2000_pattern].astype(np.int16)
+        mangrove_agb_block = in_dict_float32[cn.mangrove_agb_2000_pattern]
+    elif year == 2015:
+        agb_non_mang_block = in_dict_uint16[cn.agb_2015_pattern].astype(np.int16)
+        mangrove_agb_block = in_dict_float32[cn.mangrove_agb_2000_pattern]
+    else:
+        out_dict_float32[f"{cn.agc_dens_pattern}_{year}"] = np.full(in_dict_float32[cn.r_s_ratio_pattern].shape, 9999).astype('float32')
+        return out_dict_float32
+
     mangrove_in_chunk = True  # Flag for whether chunk has mangrove in it
-    agb_non_mang_in_chunk = True  # Flag for whether chunk has WHRC AGB 2000 in it
+    agb_non_mang_in_chunk = True  # Flag for whether chunk has non-mangrove AGB in it
 
     # Checks if the chunk has various inputs by seeing if the max value is 0.
     # If the max value is 0, it assumed that input doesn't exist.
@@ -160,10 +163,10 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
     # Adds the output arrays to the dictionary with the appropriate data type
     # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
-    out_dict_float32[f"{cn.agc_dens_pattern}_{cn.first_model_year_5_years}"] = agc_out_block.copy()
-    out_dict_float32[f"{cn.bgc_dens_pattern}_{cn.first_model_year_5_years}"] = bgc_out_block.copy()
-    out_dict_float32[f"{cn.deadwood_c_dens_pattern}_{cn.first_model_year_5_years}"] = deadwood_c_out_block.copy()
-    out_dict_float32[f"{cn.litter_c_dens_pattern}_{cn.first_model_year_5_years}"] = litter_c_out_block.copy()
+    out_dict_float32[f"{cn.agc_dens_pattern}_{year}"] = agc_out_block.copy()
+    out_dict_float32[f"{cn.bgc_dens_pattern}_{year}"] = bgc_out_block.copy()
+    out_dict_float32[f"{cn.deadwood_c_dens_pattern}_{year}"] = deadwood_c_out_block.copy()
+    out_dict_float32[f"{cn.litter_c_dens_pattern}_{year}"] = litter_c_out_block.copy()
 
     # return output dictionary/ies
     return out_dict_float32
@@ -310,9 +313,12 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
             out_pattern, year_range = uu.strip_and_extract_years(key)
+            print(out_pattern)
+            print(year_range)
 
             # Dictionary with metadata for each array
             out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range]
+            # print(out_dict_all_dtypes)
 
         uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
                                             is_final, logger_worker,
