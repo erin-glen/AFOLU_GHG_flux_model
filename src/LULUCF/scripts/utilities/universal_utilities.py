@@ -113,6 +113,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
         data_type = value[1]
         data_meaning = value[2]
         year_out = value[3]
+        full_s3_path = value[4]
 
         if is_final:
             file_name = f"{file_info}__{key}.tif"
@@ -139,13 +140,11 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
                                tiled=True, blockxsize=400, blockysize=400) as dst:
                 dst.write(data_array, 1)
 
-        s3_path = f"{cn.s3_out_dir}/{data_meaning}/{year_out}/{model_version}/{chunk_length_pixels}_pixels/{pixel_meaning}/{output_date}"
-
         # Only prints if not a final run
         if not is_final:
-            lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {s3_path}: {timestr()}", is_final, logger)
+            lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {timestr()}", is_final, logger)
 
-        s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{s3_path}/{file_name}")
+        s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}/{file_name}")
 
         # Deletes the local raster
         os.remove(f"/tmp/{file_name}")

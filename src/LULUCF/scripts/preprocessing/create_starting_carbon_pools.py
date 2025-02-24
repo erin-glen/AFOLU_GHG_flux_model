@@ -174,7 +174,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
 # All steps for creating starting non-soil carbon pools in a chunk: download chunks, calculate carbon densities, upload to s3
 def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, download_dict_with_data_types, year,
-                                           fishnet_iso_df, is_final, no_upload):
+                                           fishnet_iso_df, is_final, no_upload, starting_C_pool_output_folders):
 
     logger_worker = lu.setup_logging_worker()
 
@@ -313,12 +313,17 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
             out_pattern, year_range = uu.strip_and_extract_years(key)
-            print(out_pattern)
-            print(year_range)
+
+            # Retrieves the relevant output s3 path for this specific output  (list of one element)
+            matched_output_s3_folder = [item for item in starting_C_pool_output_folders if out_pattern in item][0]
+
+            # Full output path in s3
+            pixel_meaning = 'per_hectare'
+            output_date = time.strftime('%Y%m%d')
+            full_s3_path = f"{matched_output_s3_folder}{chunk_length_pixels}_pixels/{pixel_meaning}/{output_date}"
 
             # Dictionary with metadata for each array
-            out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range]
-            # print(out_dict_all_dtypes)
+            out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, full_s3_path]
 
         uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
                                             is_final, logger_worker,
@@ -432,7 +437,8 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
 
     delayed_results = [dask.delayed(create_and_upload_starting_C_densities)
-                       (chunk, mangrove_C_ratio_array, download_dict_with_data_types, year, fishnet_iso_df, is_final, no_upload)
+                       (chunk, mangrove_C_ratio_array, download_dict_with_data_types, year,
+                        fishnet_iso_df, is_final, no_upload, starting_C_pool_output_folders)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results

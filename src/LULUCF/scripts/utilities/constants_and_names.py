@@ -219,35 +219,31 @@ soil_c_dens_pattern = "soil_c_MgC_ha"
 
 ### Starting carbon pools (2000/2015)
 
-carbon_pool_2000_date = "20240821"
-
-agc_2000_path = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{AGC_density_path_part}/{carbon_pool_2000_date}/"
+agc_2000_path = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{AGC_density_path_part}/"
 agc_2000_pattern = f"{agc_dens_pattern}_2000"
 
-bgc_2000_path = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{BGC_density_path_part}/{carbon_pool_2000_date}/"
+bgc_2000_path = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{BGC_density_path_part}/"
 bgc_2000_pattern = f"{bgc_dens_pattern}_2000"
 
-deadwood_c_2000_path = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{deadwood_c_density_path_part}/{carbon_pool_2000_date}/"
+deadwood_c_2000_path = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{deadwood_c_density_path_part}/"
 deadwood_c_2000_pattern = f"{deadwood_c_dens_pattern}_2000"
 
-litter_c_2000_path = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{litter_c_density_path_part}/{carbon_pool_2000_date}/"
+litter_c_2000_path = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{litter_c_density_path_part}/"
 litter_c_2000_pattern = f"{litter_c_dens_pattern}_2000"
 
-soil_c_2000_path = f"{full_bucket_prefix}/climate/carbon_model/carbon_pools/soil_carbon/intermediate_full_extent/standard/20231108/"
+soil_c_2000_path = f"climate/carbon_model/carbon_pools/soil_carbon/intermediate_full_extent/standard/20231108/"
 soil_c_2000_pattern = "soil_C_full_extent_2000_Mg_C_ha"
 
-carbon_pool_2015_date = "20250221"
-
-agc_2015_path = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/{AGC_density_path_part}/{carbon_pool_2015_date}/"
+agc_2015_path = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{AGC_density_path_part}/"
 agc_2015_pattern = f"{agc_dens_pattern}_2015"
 
-bgc_2015_path = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/{BGC_density_path_part}/{carbon_pool_2015_date}/"
+bgc_2015_path = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{BGC_density_path_part}/"
 bgc_2015_pattern = f"{bgc_dens_pattern}_2015"
 
-deadwood_c_2015_path = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/{deadwood_c_density_path_part}/{carbon_pool_2015_date}/"
+deadwood_c_2015_path = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{deadwood_c_density_path_part}/"
 deadwood_c_2015_pattern = f"{deadwood_c_dens_pattern}_2015"
 
-litter_c_2015_path = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/{litter_c_density_path_part}/{carbon_pool_2015_date}/"
+litter_c_2015_path = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{litter_c_density_path_part}/"
 litter_c_2015_pattern = f"{litter_c_dens_pattern}_2015"
 
 mangrove_agb_2000_path = f"{full_bucket_prefix}/climate/carbon_model/mangrove_biomass/processed/standard/20190220/"
