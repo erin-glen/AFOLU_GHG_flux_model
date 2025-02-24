@@ -388,7 +388,9 @@ def map_to_numpy_dtype(data_type):
         'Float64': 'float64',
         'Byte': 'uint8',
         'Int32': 'int32',
+        'UInt32': 'uint32',
         'Int16': 'int16',
+        'UInt16': 'uint16',
         # Add more mappings as needed
     }
     return dtype_map.get(data_type, 'float32')  # Defaults to 'float32' if argument not found

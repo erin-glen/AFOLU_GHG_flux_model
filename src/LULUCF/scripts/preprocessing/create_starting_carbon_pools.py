@@ -28,7 +28,7 @@ from ..utilities import resize_cluster
 
 # Function to create initial (year 2000) non-soil carbon pool densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-@jit(nopython=True)
+# @jit(nopython=True)
 def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                                 in_dict_int32, in_dict_float32, mangrove_C_ratio_array, year):
 
@@ -212,11 +212,9 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         layer = futures[future]
         layers[layer] = future.result()
 
-    # Test prints
+    # # Test prints
     # print(layers)
     # print(layers['AGB_2015_ESA_CCI_Mg_AGB_ha'].max())
-    # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern])
-    # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern].max())
     # print(layers['AGB_2015_ESA_CCI_Mg_AGB_ha'].dtype)
 
 
