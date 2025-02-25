@@ -138,24 +138,29 @@ def populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_n
 
 
 # Merges the log from main() with all the worker logs after all processing and uploads to s3
-def merge_main_and_worker_upload_logs(main_log, worker_log, stage):
+def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
 
-    log_name = f"{cn.combined_log}_combined_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
-    local_log = f"{cn.local_log_path}{log_name}"
+    combined_log_name = f"{cn.combined_log}_combined_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
+    combined_local_log = f"{cn.local_log_path}{combined_log_name}"
 
     # Open the output file in write mode
-    with open(local_log, "w") as outfile:
+    with open(combined_local_log, "w") as outfile:
         with open(main_log, "r") as infile1:
             outfile.write(infile1.read())
             outfile.write("\n")  # Adds blank line between files
 
-        with open(worker_log, "r") as infile2:
-            outfile.write(infile2.read())
+            # Only adds worker logs if no_log not selected
+            if not no_log:
 
-    print(f"Combined log saved as {local_log}")  # Does not go in the log because it's closed
+                with open(worker_log, "r") as infile2:
+                    outfile.write(infile2.read())
+
+        print(f"Combined log saved as {combined_local_log}")  # Does not go in the log because it's closed
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
-    s3_client.upload_file(local_log, "gfw2-data", Key=f"{cn.s3_log_path}{log_name}")
+    s3_client.upload_file(combined_local_log, "gfw2-data", Key=f"{cn.s3_log_path}{combined_log_name}")
 
     os.remove(main_log)
-    os.remove(worker_log)
+
+    if not no_log:
+        os.remove(worker_log)

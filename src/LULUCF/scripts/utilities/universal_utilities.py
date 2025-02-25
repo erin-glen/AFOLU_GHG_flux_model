@@ -1011,7 +1011,8 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, logger):
     logger.info(f"Calculating min and max values across all chunks at {timestr()}...")
     min_max_stats = df_all_stats.groupby('layer_name').agg(
         min_value=('min_value', 'min'),
-        max_value=('max_value', 'max')
+        max_value=('max_value', 'max'),
+        count=('layer_name', 'count')
     ).reset_index()
 
     # Reads the shapefile from S3 to extract "chunk_id" and "iso" fields

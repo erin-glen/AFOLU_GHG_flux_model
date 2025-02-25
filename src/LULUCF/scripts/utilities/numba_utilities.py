@@ -14,6 +14,25 @@ def accrete_node(combo, new):
     combo = combo*10 + new
     return combo
 
+# Calculates a backup continent-ecozone value in case pixels don't have one
+@jit(nopython=True)
+def backup_continent_ecozone(continent_ecozone, continent_ecozone_block):
+
+    # When the pixel doesn't have a continent-ecozone value, it first uses the mode of the chunk
+    if continent_ecozone == 0:
+
+        # print(continent_ecozone)
+        continent_ecozone_block_flat = continent_ecozone_block.ravel()  # Need to flatten 2D array to 1D
+        counts = np.bincount(continent_ecozone_block_flat)  # Counts the number of pixels with that value
+        continent_ecozone = np.argmax(counts)  #
+        # print("Reassigned:", continent_ecozone)
+
+    # If the mode of the chunk is also 0 (no continent-ecozone values in the chunk at all),
+    # it just assigns a continent-ecozone value so that there is something
+    if continent_ecozone == 0:
+        continent_ecozone = 2020
+
+    return continent_ecozone
 
 # Creates a separate dictionary for each chunk datatype so that they can be passed to Numba as separate arguments.
 # Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type (e.g., uint8, float32)
@@ -950,3 +969,4 @@ def calc_T_T_no_disturbs(node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_
     non_co2_fluxes_out = np.array([ch4_flux_out, n2o_flux_out]).astype('float32')
 
     return state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out, gain_year_count
+

@@ -4,17 +4,23 @@ python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp -f 1 --year YYYY
 
-python -m scripts.utilities.create_cluster -n 100
-python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year YYYY
+python -m scripts.utilities.create_cluster -n 70 -t 7 -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2000
+Max memory usage: ~ GB/worker (so perhaps could use more than 7 threads (8 simultaneous tasks))
+Time:  through calculation,  with tile stats; Credits: ; Cost: $
+
+python -m scripts.utilities.create_cluster -n 70 -t 7 -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015
+
 """
 
 import argparse
 import concurrent.futures
 import dask
+import numpy as np
 import re
 import sys
 import time
-import numpy as np
 
 from dask.distributed import print
 from numba import jit
@@ -86,23 +92,21 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
         for col in range(continent_ecozone_block.shape[1]):
 
             # Input values for this specific cell
-            agb_non_mang = agb_non_mang_block[row, col]
-            mangrove_agb = mangrove_agb_block[row, col]
+            agb_non_mang_cell = agb_non_mang_block[row, col]
+            mangrove_agb_cell = mangrove_agb_block[row, col]
             elevation = elevation_block[row, col]
             climate_domain = climate_domain_block[row, col]
             precipitation = precipitation_block[row, col]
             r_s_ratio = r_s_ratio_block[row, col]
-            continent_ecozone = continent_ecozone_block[row, col]
+            continent_ecozone_cell = continent_ecozone_block[row, col]
 
-            # If mangrove AGB is present, AGC 2000 is calculated from it, overwriting any AGC that is based on WHRC that is already there
-            if (mangrove_in_chunk) and (
-                    mangrove_agb > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
-                agc_out_block[row, col] = mangrove_agb * cn.biomass_to_carbon_mangrove
+            # If mangrove AGB is present, AGC is calculated from it, overwriting any AGC that is based on non-mang AGB that is already there
+            if (mangrove_in_chunk) and (mangrove_agb_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
+                agc_out_block[row, col] = mangrove_agb_cell * cn.biomass_to_carbon_mangrove
 
-            # If WHRC AGB is present, AGC 2000 is calculated from it
-            elif (agb_non_mang_in_chunk) and (
-                    agb_non_mang > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
-                agc_out_block[row, col] = agb_non_mang * cn.biomass_to_carbon_non_mangrove
+            # If non-mang AGB is present, AGC is calculated from it
+            elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
+                agc_out_block[row, col] = agb_non_mang_cell * cn.biomass_to_carbon_non_mangrove
 
             else:
                 agc_out_block[row, col] = 0
@@ -112,10 +116,15 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
             # Mangrove carbon pool ratio branch
             # From IPCC 2013 Wetland Supplement
-            if (mangrove_in_chunk) and (mangrove_agb > 0):  # Only replaces WHRC AGB if mangrove chunk exists and if mangrove value in that pixel
-                bgc_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone)][0, 1]
-                deadwood_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone)][0, 2]
-                litter_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone)][0, 3]
+            if (mangrove_in_chunk) and (mangrove_agb_cell > 0):  # Only replaces non-mangrove AGB if mangrove chunk exists and if mangrove value in that pixel
+
+                # Gets a value for continent_ecozone in case the pixel doesn't have one
+                continent_ecozone_cell = nu.backup_continent_ecozone(continent_ecozone_cell, continent_ecozone_block)
+
+                bgc_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 1]
+                deadwood_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 2]
+                litter_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 3]
+
 
             # Non-mangrove carbon pool ratio branch
             # Deadwood and litter carbon as fractions of AGC are from
@@ -124,7 +133,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             # Estimation of carbon stocks and change in carbon stocks in dead wood and litter in A/R CDM project activities version 03.0"
             # Tables on pages 18 (deadwood) and 19 (litter).
             # They depend on the climate domain, elevation, and precipitation.
-            elif (agb_non_mang_in_chunk) and (agb_non_mang > 0):  # Non-mangrove
+            elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Non-mangrove
 
                 # If no mapped R:S, uses the global default value instead
                 if r_s_ratio == 0:
@@ -171,6 +180,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
     # return output dictionary/ies
     return out_dict_float32
+
 
 
 # All steps for creating starting non-soil carbon pools in a chunk: download chunks, calculate carbon densities, upload to s3
@@ -495,7 +505,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
 
         # Adds the workers' logs to the main log and uploads to s3
-        lu.merge_main_and_worker_upload_logs(main_log_local_path, worker_log_local_path, stage)
+        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
 
     # Closes the Dask client if not running locally
     if not run_local:

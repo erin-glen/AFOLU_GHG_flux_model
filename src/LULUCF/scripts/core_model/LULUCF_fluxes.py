@@ -225,6 +225,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 continent_ecozone_cell = continent_ecozone_block[row, col]
                 climate_zone_cell = climate_zone_block[row, col]
 
+                # Gets a value for continent_ecozone in case the pixel doesn't have one
+                continent_ecozone_cell = nu.backup_continent_ecozone(continent_ecozone_cell, continent_ecozone_block)
+
                 # Determines the removal factor for primary forests/IFL based on the ecozone (Mg AGC/ha/yr)
                 primary_forest_AGC_RF = nu.calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs)
 
@@ -1406,7 +1409,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
 
         # Adds the workers' logs to the main log and uploads to s3
-        lu.merge_main_and_worker_upload_logs(main_log_local_path, worker_log_local_path, stage)
+        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
 
     # Closes the Dask client if not running locally
     if not run_local:
