@@ -454,21 +454,25 @@ def xy_to_tile_id(top_left_x, top_left_y):
 
 
 # Creates the list of chunks to process given an approach: a bounding box or a shapefile attribute table
-def create_chunk_list(bounding_box, chunk_list, chunk_size, first_chunks, fishnet_iso_df, main_logger):
+def create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger):
 
     # Makes list of chunks to analyze from the bounding box and chunk size (deg)
     # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
     if bounding_box and chunk_size:
 
         main_logger.info("Using bounding box and chunk size to determine chunks")
-        chunks = get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
+        main_logger.info(f"Chunk source: Bounding box {bounding_box}")
+        main_logger.info(f"Chunk size: {chunk_size} degree")
+        chunk_list = get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
 
     # Makes list of chunks to analyze from a shapefile attribute table.
     # Attribute table column must be formatted as W_S_E_N.
     # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
-    elif chunk_list:
+    elif use_shapefile:
 
         main_logger.info("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
+        main_logger.info(f"Chunk source: 1x1 tile index shapefile {cn.fishnet_1x1deg_all_land_s3_uri}{cn.fishnet_1x1deg_all_land_name}")
+        main_logger.info(f"Chunk size: 1 degree")
 
         # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
         fishnet_1x1_chunk_id_df = fishnet_iso_df[['chunk_id']]  # Creates dataframe
@@ -479,12 +483,12 @@ def create_chunk_list(bounding_box, chunk_list, chunk_size, first_chunks, fishne
 
         # Converts dataframe column of chunk bounds to nested list
         # Per https://chatgpt.com/share/e/674747ee-d588-800a-995c-1f897a8ace31
-        chunks = fishnet_1x1_chunk_id_df['chunk_id'].apply(uu.process_chunk_id).tolist()
+        chunk_list = fishnet_1x1_chunk_id_df['chunk_id'].apply(process_chunk_id).tolist()
 
     else:
         main_logger.info("Chunk list cannot be determined")
         sys.exit()
-    return chunks
+    return chunk_list
 
 
 # Calculates the elapsed time for a stage

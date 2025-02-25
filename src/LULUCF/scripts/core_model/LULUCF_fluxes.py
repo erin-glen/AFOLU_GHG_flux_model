@@ -1184,8 +1184,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     return success_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         bounding_box=None, chunk_size=None, chunk_shapefile=None, first_chunks=None, log_note=None):
+def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False, use_shapefile=False,
+         bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     # Model stage being running
     stage = 'LULUCF_fluxes'
@@ -1206,7 +1206,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, client, cluster, log_note, run_local, stage)
+    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note, run_local, stage)
 
     # Starting time for stage
     start_time = uu.timestr()
@@ -1219,10 +1219,9 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     fishnet_iso_df = uu.fishnet_with_GADM_iso()
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_list = uu.create_chunk_list(bounding_box, chunk_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+    chunk_list = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
-    main_logger.info(f"Chunk size (degrees): {chunk_size}")
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
@@ -1362,9 +1361,9 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         workers = client.scheduler_info()["workers"]
         n_workers = len(workers)
 
-        # Reduces number of workers in the cluster down to 1 if there is more than 1
+        # Reduces number of workers in the cluster down to 1 if there is more than 10
         # TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
-        if n_workers > 1:
+        if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 
             resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
@@ -1412,7 +1411,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('-cshp', '--chunk_shapefile', help='Shapefile of chunks')
+    parser.add_argument('-cshp', '--use_shapefile', help='Shapefile of chunks')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-y', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
@@ -1427,7 +1426,7 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
-    chunk_shapefile = args.chunk_shapefile
+    use_shapefile = args.use_shapefile
     first_chunks = args.first_chunks
     year_range = args.year_range
     log_note = args.log_note
@@ -1438,6 +1437,6 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload,
+    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, use_shapefile,
          bounding_box=bounding_box, chunk_size=chunk_size,
-         chunk_shapefile=chunk_shapefile, first_chunks=first_chunks, log_note=log_note)
+         first_chunks=first_chunks, log_note=log_note)

@@ -166,6 +166,7 @@ s3_chunk_stats_path = "climate/AFOLU_flux_model/LULUCF/chunk_stats/"
 
 # 1x1 deg fishnet between 80N and 60N, 180W and 180E that intersects GADM3.6 and has GADM iso joined to it
 fishnet_1x1deg_all_land_s3_uri = f"{AFOLU_path}fishnet_1x1deg/20241125/"
+fishnet_1x1deg_all_land_name = "fishnet_GADM36_1x1deg__spatial_join_intersect__20241125.shp"
 
 ##### Inputs
 

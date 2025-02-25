@@ -113,7 +113,7 @@ def setup_logging_main(log_filename=None):
 
 
 # Populates the log for the main function with various header and run information
-def populate_main_log_header(bounding_box, client, cluster, log_note, run_local, stage):
+def populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note, run_local, stage):
 
     main_log_name = f"{cn.combined_log}_main_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
     main_log_local_path = f"{cn.local_log_path}{main_log_name}"
@@ -132,7 +132,6 @@ def populate_main_log_header(bounding_box, client, cluster, log_note, run_local,
     main_logger.info(f"Number of workers: {n_workers}")
     main_logger.info(f"Memory per worker: {worker_memory}")
     main_logger.info(f"Threads per worker: {nthreads}")
-    main_logger.info(f"Bounding box: {bounding_box}")
     main_logger.info(f"Log note: {log_note}")
 
     return main_logger, main_log_local_path

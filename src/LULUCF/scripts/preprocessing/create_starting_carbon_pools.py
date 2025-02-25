@@ -1,7 +1,11 @@
 """
 Run from src/LULUCF/
-python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats
-python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 2   # entire world (12600 chunks) (60x 32GB r6i.2xlarge workers= 22 minutes; around 90 Coiled credits and $4 dollars of AWS costs)
+python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
+python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp -f 1 --year YYYY
+
+python -m scripts.utilities.create_cluster -n 100
+python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year YYYY
 """
 
 import argparse
@@ -331,8 +335,8 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
     return success_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         bounding_box=None, chunk_size=None, chunk_shapefile=None, first_chunks=None, log_note=None):
+def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_upload=False, use_shapefile=False,
+         bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     # Model stage being running
     stage = f'starting_carbon_pools_{year}'
@@ -348,7 +352,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, client, cluster, log_note, run_local, stage)
+    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note, run_local, stage)
 
     # Starting time for stage
     start_time = uu.timestr()
@@ -361,10 +365,9 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     fishnet_iso_df = uu.fishnet_with_GADM_iso()
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_list = uu.create_chunk_list(bounding_box, chunk_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+    chunk_list = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
-    main_logger.info(f"Chunk size (degrees): {chunk_size}")
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
@@ -448,24 +451,24 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         workers = client.scheduler_info()["workers"]
         n_workers = len(workers)
 
-        # Reduces number of workers in the cluster down to 1 if there is more than 1
+        # Reduces number of workers in the cluster down to 1 if there is more than 10
         # TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
-        if n_workers > 1:
+        if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 
             resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
 
     # Iterates through output folders and counts the number of output rasters.
     # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
-    if is_final == True:
+    if chunk_size == 1:
         for output_folder in starting_C_pool_output_folders:
             output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
             output_folder = re.sub('DATE', uu.timestr()[:8],
                                           output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
+            output_folder = f"{cn.full_bucket_prefix}/{output_folder}"   # Need to prepend s3 and bucket name for counting
 
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-            # print(geotiff_files)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
@@ -498,7 +501,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('-cshp', '--chunk_shapefile', help='Shapefile of chunks')
+    parser.add_argument('-cshp', '--use_shapefile', action='store_true', help='Use shapefile to determine chunks')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('--year', type=int, required=True, help='Year for carbon pools')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
@@ -513,7 +516,7 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
-    chunk_shapefile = args.chunk_shapefile
+    use_shapefile = args.use_shapefile
     first_chunks = args.first_chunks
     year = args.year
     log_note = args.log_note
@@ -524,7 +527,7 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, year, run_local, no_stats, no_log, no_upload,
+    main(cluster_name, year, run_local, no_stats, no_log, no_upload, use_shapefile,
          bounding_box=bounding_box, chunk_size=chunk_size,
-         chunk_shapefile=chunk_shapefile, first_chunks=first_chunks, log_note=log_note)
+         first_chunks=first_chunks, log_note=log_note)
 
