@@ -6,15 +6,12 @@ python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_mode
 
 import argparse
 import concurrent.futures
-import coiled
 import dask
 import re
-import os
 import sys
 import time
 import numpy as np
 
-from dask.distributed import Client
 from dask.distributed import print
 from numba import jit
 
@@ -28,7 +25,7 @@ from ..utilities import resize_cluster
 
 # Function to create initial (year 2000) non-soil carbon pool densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-# @jit(nopython=True)
+@jit(nopython=True)
 def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                                 in_dict_int32, in_dict_float32, mangrove_C_ratio_array, year):
 
@@ -404,6 +401,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     elif year == 2015:
         download_dict[cn.agb_2015_pattern] = f"{cn.agb_2015_path_processed}{sample_tile_id}_{cn.agb_2015_pattern}.tif"
+        ##TODO Using mangrove AGB2000 for 2015 model start! Need to use something else for 2015!!!!!!
         download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_path}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
         starting_C_pool_output_folders = [cn.agc_2015_path, cn.bgc_2015_path, cn.deadwood_c_2015_path, cn.litter_c_2015_path]
 
