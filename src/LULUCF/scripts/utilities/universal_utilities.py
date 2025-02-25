@@ -500,13 +500,14 @@ def stage_duration(start_time_str, end_time_str, stage, logger):
 
 
 # Lazily opens tile within provided bounds (i.e. one chunk) and returns as a numpy array.
-# If it can't open the uri for the chunk (tile does not exist), it creates a numpy array
+# If it can't open the uri for the chunk (tile does not exist), it creates a numpy array of all 0s
 # of the correct datatype for that input.
 # The returned chunk needs to have the correct datatype because it'll eventually be used in a
 # numba function, which is very particular about datatypes.
 # For example, a dataset that's float32 can't have NoData chunks that are uint8 because
 # the Numba functions won't be able to handle that (since they're so particular about datatypes).
-# So, that is addressed here.
+# So, that is addressed here through setting the array of 0s to the datatype of the dataset.
+# Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
 def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, logger_worker):
 
     bounds_str = boundstr(bounds)
@@ -517,20 +518,21 @@ def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, 
         with rasterio.open(uri) as ds:
             window = rasterio.windows.from_bounds(*bounds, ds.transform)
             data = ds.read(1, window=window)
+            status = "success"
 
     # If the uri doesn't exist, a numpy array of the correct size and datatype populated with 0s is returned.
     except Exception as e:
 
         numpy_dtype = map_to_numpy_dtype(data_type)   # Translates the GDAL-style datatype to numpy-style datatype
         data = np.full((chunk_length_pixels, chunk_length_pixels), 0).astype(numpy_dtype)
+        status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}"
 
-        lu.print_and_log(f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}", is_final, logger_worker)
-
-    return data
+    return data, status
 
 
 # Prepares list of chunks to download.
 # Chunks are defined by a bounding box.
+# Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
 def prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger):
 
     futures = {}
@@ -538,13 +540,15 @@ def prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels
     bounds_str = boundstr(bounds)
     tile_id = xy_to_tile_id(bounds[0], bounds[3])
 
-    # Submit requests to S3 for input chunks but don't actually download them yet. This queueing of the requests before downloading them speeds up the downloading
-    # Approach is to download all the input chunks up front for every year to make downloading more efficient, even though it means storing more upfront
+    # Submits requests to S3 for input chunks but doesn't actually download them yet.
+    # This queueing of the requests before downloading then speeds up the downloading.
+    # Approach is to download all the input chunks up front for every year to make downloading more efficient, even though it means storing more upfront.
     with concurrent.futures.ThreadPoolExecutor() as executor:
         lu.print_and_log(f"Requesting data in chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
 
         for key, value in updated_download_dict.items():
-            futures[executor.submit(get_tile_dataset_rio, value[0], value[1], bounds, chunk_length_pixels, is_final, logger)] = key
+            future = executor.submit(get_tile_dataset_rio, value[0], value[1], bounds, chunk_length_pixels, is_final, logger)
+            futures[future] = key  # Stores Future objects (data ans status) as keys, layer names as values
 
     return futures
 

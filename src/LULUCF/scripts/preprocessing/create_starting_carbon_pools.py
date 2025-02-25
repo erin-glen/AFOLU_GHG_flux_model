@@ -202,16 +202,20 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
     # Only prints if not a final run
     if not is_final:
-        lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final,
-                         logger_worker)
+        lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}",
+                         is_final, logger_worker)
 
-    # Dictionary that stores the downloaded data
+    # Dictionary that stores the dataset name (key) and downloaded data and download status (values)
     layers = {}
 
-    # Waits for requests to come back with data from S3
+    # Ensures futures stores Future objects
+    # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages for chunks
     for future in concurrent.futures.as_completed(futures):
-        layer = futures[future]
-        layers[layer] = future.result()
+        layer = futures[future]  # Gets the corresponding key
+        data, status = future.result()  # Unpacks the tuple result
+        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+            lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
+        layers[layer] = data
 
     # # Test prints
     # print(layers)
@@ -289,6 +293,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
     pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger_worker)
+    pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
     # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
     for key, array_per_ha in out_dict_all_dtypes.items():

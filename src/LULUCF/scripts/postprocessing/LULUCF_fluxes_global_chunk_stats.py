@@ -50,6 +50,7 @@ def get_chunk_stats(tile_to_process_uri):
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
     pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds_list, 4000, is_final, logger)
+    pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
     try:
         tile_to_process_chunk_per_ha = uu.get_tile_dataset_rio(tile_to_process_uri, 'Float32', bounds_list, 4000, is_final, logger)
