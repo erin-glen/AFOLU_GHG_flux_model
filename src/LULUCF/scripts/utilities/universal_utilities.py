@@ -83,7 +83,7 @@ def check_s3_file_created(s3_path):
 
 # Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
 def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
-                                     bounds_str, output_dict, is_final, logger,
+                                     bounds_str, output_dict, is_final, logger_worker,
                                      model_version, pixel_meaning, no_data_val=None):
 
     # Configures S3 client with increased retries; retries can max out for global analyses
@@ -100,10 +100,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
     file_info = f'{tile_id}__{bounds_str}'
 
     if is_final:
-        lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
-
-    # This makes it so that all output files are uploaded to a folder of the same date, even if the model run is divided over multiple days
-    output_date = time.strftime('%Y%m%d')
+        lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
 
     # For every output file, saves from array to local raster, then to s3.
     # Can't save directly to s3, unfortunately, so need to save locally first.
@@ -122,7 +119,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
 
         # Only prints if not a final run
         if not is_final:
-            lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger)
+            lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger_worker)
 
         # Includes NoData value in output raster
         if no_data_val is not None:
@@ -142,7 +139,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
 
         # Only prints if not a final run
         if not is_final:
-            lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {timestr()}", is_final, logger)
+            lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {timestr()}", is_final, logger_worker)
 
         s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}/{file_name}")
 
@@ -510,7 +507,7 @@ def stage_duration(start_time_str, end_time_str, stage, logger):
 # For example, a dataset that's float32 can't have NoData chunks that are uint8 because
 # the Numba functions won't be able to handle that (since they're so particular about datatypes).
 # So, that is addressed here.
-def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, logger):
+def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, logger_worker):
 
     bounds_str = boundstr(bounds)
 
@@ -527,7 +524,7 @@ def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, 
         numpy_dtype = map_to_numpy_dtype(data_type)   # Translates the GDAL-style datatype to numpy-style datatype
         data = np.full((chunk_length_pixels, chunk_length_pixels), 0).astype(numpy_dtype)
 
-        lu.print_and_log(f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}", is_final, logger)
+        lu.print_and_log(f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}", is_final, logger_worker)
 
     return data
 

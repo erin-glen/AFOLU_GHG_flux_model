@@ -318,6 +318,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
             # Full output path in s3
             pixel_meaning = 'per_hectare'
+            # This makes it so that all output files are uploaded to a folder of the same date, even if the model run is divided over multiple days
             output_date = time.strftime('%Y%m%d')
             full_s3_path = f"{matched_output_s3_folder}{chunk_length_pixels}_pixels/{pixel_meaning}/{output_date}"
 
