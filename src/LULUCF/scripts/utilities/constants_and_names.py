@@ -168,6 +168,8 @@ s3_chunk_stats_path = "climate/AFOLU_flux_model/LULUCF/chunk_stats/"
 fishnet_1x1deg_all_land_s3_uri = f"{AFOLU_path}fishnet_1x1deg/20241125/"
 fishnet_1x1deg_all_land_name = "fishnet_GADM36_1x1deg__spatial_join_intersect__20241125.shp"
 
+progress_tracking_path = "climate/AFOLU_flux_model/task_progress_txts/"
+
 ##### Inputs
 
 land_cover_5_year_path = f"{LULUCF_path}landcover/composite/five_year/v1/raw/"

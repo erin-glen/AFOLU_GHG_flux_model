@@ -80,6 +80,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
     climate_domain_block = in_dict_int16[cn.climate_domain_pattern]
     precipitation_block = in_dict_int32[cn.precipitation_pattern]
 
+    # Gets a fallback value for continent_ecozone for the chunk in case some pixels don't have one
+    # TODO make sure this is working right and applied in the right places
+    continent_ecozone_fallback = nu.backup_continent_ecozone(continent_ecozone_block)
+
 
     ## Test/intermediate outputs blocks
 

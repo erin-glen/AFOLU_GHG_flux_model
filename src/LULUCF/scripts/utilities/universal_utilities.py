@@ -990,11 +990,11 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
 # Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet
 # Also calculates the min and max value for each input and output across all chunks
 # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-def aggregate_chunk_stats(all_stats, stage, no_upload, logger):
+def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger):
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
 
-    logger.info(f"Starting to aggregate and export tile stats at {timestr()}...")
+    main_logger.info(f"Starting to aggregate and export tile stats at {timestr()}...")
 
     # Converts accumulated statistics to a DataFrame
     df_all_stats = pd.DataFrame(all_stats)
@@ -1004,11 +1004,11 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, logger):
     df_all_stats['max_value'] = pd.to_numeric(df_all_stats['max_value'], errors='coerce')
 
     # Sorts the DataFrame by 'in_out' and 'layer_name'
-    logger.info(f"Sorting tile stats by properties at {timestr()}...")
+    main_logger.info(f"Sorting tile stats by properties at {timestr()}...")
     sorted_stats = df_all_stats.sort_values(by=['in_out', 'layer_name']).reset_index(drop=True)
 
     # Calculates the min and max values for each layer_name across all chunks
-    logger.info(f"Calculating min and max values across all chunks at {timestr()}...")
+    main_logger.info(f"Calculating min and max values across all chunks at {timestr()}...")
     min_max_stats = df_all_stats.groupby('layer_name').agg(
         min_value=('min_value', 'min'),
         max_value=('max_value', 'max'),
@@ -1023,7 +1023,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, logger):
     fishnet_shapefile_df = gdf[['chunk_id', 'iso']]
 
     # Merges the shapefile data with the statistics DataFrame
-    logger.info(f"Merging country code to chunk stats table at {timestr()}...")
+    main_logger.info(f"Merging country code to chunk stats table at {timestr()}...")
     merged_stats = sorted_stats.merge(fishnet_shapefile_df, on='chunk_id', how='left')
 
     # When iso isn't assigned, empty cells are filled.
@@ -1035,7 +1035,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, logger):
     # and they need to be split across multiple workbook tabs.
 
     # Separates input rows (in_out == 'input') and output rows (in_out == 'output')
-    logger.info(f"Separating outputs into different tables at {timestr()}...")
+    main_logger.info(f"Separating outputs into different tables at {timestr()}...")
     input_rows = merged_stats[merged_stats['in_out'] == 'input_layer']
     output_rows = merged_stats[merged_stats['in_out'] == 'output_layer']
 
@@ -1058,17 +1058,17 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, logger):
     out_spreadsheet = f'{stage}_chunk_statistics_{timestr()}.xlsx'
     local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
 
-    logger.info(f"Writing tile stats to spreadsheet at {timestr()}...")
+    main_logger.info(f"Writing tile stats to spreadsheet at {timestr()}...")
     try:
         with pd.ExcelWriter(local_spreadsheet) as writer:
 
             # Writes input rows to one sheet
-            logger.info(f"Writing inputs to spreadsheet at {timestr()}...")
+            main_logger.info(f"Writing inputs to spreadsheet at {timestr()}...")
             annual_inputs.to_excel(writer, sheet_name='annual_inputs', index=False)
             other_inputs.to_excel(writer, sheet_name='other_inputs', index=False)
 
             # Writes output rows based on layer_name conditions to separate sheets
-            logger.info(f"Writing output to spreadsheet at {timestr()}...")
+            main_logger.info(f"Writing output to spreadsheet at {timestr()}...")
             gross_flux_output.to_excel(writer, sheet_name='gross_outputs', index=False)
             net_flux_output.to_excel(writer, sheet_name='flux_outputs', index=False)
             other_output.to_excel(writer, sheet_name='other_outputs', index=False)
@@ -1076,16 +1076,17 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, logger):
             # Write the min and max statistics to the second sheet
             min_max_stats.to_excel(writer, sheet_name='min_max_for_layers', index=False)
 
-        logger.info(merged_stats.head())  # Show first few rows of the stats DataFrame for inspection
+        main_logger.info(merged_stats.head())  # Show first few rows of the stats DataFrame for inspection
 
-        logger.info(f"Done aggregating and exporting tile stats at {timestr()}...")
+        main_logger.info(f"Done aggregating and exporting tile stats at {timestr()}...")
 
     except Exception as e:
-        logger.info(f"Can't print chunk stats: {e}")
+        main_logger.info(f"Can't print chunk stats: {e}")
 
     if not no_upload:
-        logger.info(f"Uploading chunk stats spreadsheet to s3 at {timestr()}...")
+        main_logger.info(f"Uploading chunk stats spreadsheet to s3 at {timestr()}...")
         s3_client.upload_file(local_spreadsheet, "gfw2-data", Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
+        main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.s3_chunk_stats_path}{out_spreadsheet}")
 
 
 # Gets the datatype of a raster in s3.
@@ -1263,61 +1264,78 @@ def get_cluster_info(client, cluster):
     return worker_memory, n_workers, nthreads
 
 
+# Creates an empty txt file for each chunk in s3
+# Based on https://chatgpt.com/share/e/67bf0fd9-7cb0-800a-8666-2becd97d45a7
+def create_s3_task_files(stage, chunk_list):
 
-import json
-import threading
-
-# Lock to prevent race conditions when writing JSON
-file_lock = threading.Lock()
-
-def generate_task_file(chunk_list, task_filename):
-
-    tasks = []
-
-    # By default, assume status is pending
-    status = "pending"
-    error = None
+    s3 = boto3.client("s3")
 
     for chunk in chunk_list:
+        chunk_id_str = boundstr(chunk)  # Converts chunk ID to string
+        key = f"{cn.progress_tracking_path}pending_{chunk_id_str}_{stage}.txt"
 
-        # Add the task entry
-        tasks.append({
-            "chunk_id": chunk,
-            "status": status,
-            "error": error
-        })
+        # Creates an empty file
+        s3.put_object(Bucket=cn.short_bucket_prefix, Key=key, Body="")
 
-
-    with open(task_filename, "w") as f:
-        json.dump(tasks, f, indent=2)
-
-    return tasks
+    print(f"Created {len(chunk_list)} task tracking files in {cn.progress_tracking_path}")
 
 
-def update_task_file(task_filename, chunk_id, status, error=None):
-    """
-    Updates the task file with new status for a completed chunk.
-    Uses a lock to prevent concurrent writes.
-    """
-    with file_lock:
+# Renames the tracking file from 'pending' to 'in_progress' when a task starts
+def rename_s3_task_file(stage, chunk_id, new_status, is_final, logger_worker):
+
+    s3 = boto3.client("s3")
+    chunk_id_str = boundstr(chunk_id)  # Converts chunk ID to string
+
+    # Possible existing statuses (order matters: first one found is renamed)
+    possible_statuses = ["pending_", "preprocessing_", "calculating_"]
+
+    for prefix in possible_statuses:
+        old_key = f"{cn.progress_tracking_path}{prefix}{chunk_id_str}_{stage}.txt"
+        new_key = f"{cn.progress_tracking_path}{new_status}{chunk_id_str}_{stage}.txt"
+
         try:
-            with open(task_filename, "r") as f:
-                tasks = json.load(f)
+            # Copies to new name and delete the old file
+            s3.copy_object(Bucket=cn.short_bucket_prefix,
+                           CopySource={'Bucket': cn.short_bucket_prefix, 'Key': old_key}, Key=new_key)
+            s3.delete_object(Bucket=cn.short_bucket_prefix, Key=old_key)
+            return  # Stop after renaming the first matching file
+        except s3.exceptions.ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                continue  # Try the next possible prefix
+            else:
+                print(f"Error renaming task file {old_key}: {e}")
+                return
 
-            # Find the task and update it
-            for task in tasks:
-                if task["chunk_id"] == chunk_id:
-                    task["status"] = status
-                    task["error"] = error
-                    break
+    lu.print_and_log(f"No existing task file found for chunk {chunk_id}. Skipping rename.", is_final, logger_worker)
 
-            # Save updated tasks back to the file
-            with open(task_filename, "w") as f:
-                json.dump(tasks, f, indent=2)
 
-        except Exception as e:
-            print(f"Error updating task file for {chunk_id}: {e}")
+# Deletes the tracking txt file from S3 when a task is completed
+def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
 
+    s3 = boto3.client("s3")
+
+    chunk_id_str = boundstr(chunk_id)  # Converts chunk ID to string
+
+    possible_statuses = ["pending_", "preprocessing_", "calculating_"]
+
+    for prefix in possible_statuses:
+        key = f"{cn.progress_tracking_path}{prefix}{chunk_id_str}_{stage}.txt"
+
+        try:
+            s3.delete_object(Bucket=cn.short_bucket_prefix, Key=key)
+            # print(f"Deleted: {key}")
+            deleted = True  # Marks that at least one file was deleted
+        except s3.exceptions.ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                continue  # Moves to the next possible file if a file with that status doesn't exist
+            else:
+                # print(f"Error deleting task file {key}: {e}")
+                return  # Exit if there's a real error
+
+    # Logs if no files were deleted
+    if not deleted:
+
+        lu.print_and_log(f"No task file found for chunk {chunk_id}. Nothing to delete.", is_final, logger_worker)
 
 
 ###################################################################################################
