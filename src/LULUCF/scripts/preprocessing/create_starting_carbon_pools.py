@@ -4,9 +4,9 @@ python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp -f 1 --year YYYY
 
-python -m scripts.utilities.create_cluster -n 70 -t 7 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 70 -t 4 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2000
-Max memory usage: ~ GB/worker (so perhaps could use more than 7 threads (8 simultaneous tasks))
+Max memory usage: ~ GB/worker (running with -t 5 led to it running almost all tasks, freezing, and then redoing tasks)
 Time:  through calculation,  with tile stats; Credits: ; Cost: $
 
 python -m scripts.utilities.create_cluster -n 70 -t 7 -cn AFOLU_flux_model_scripts
@@ -357,6 +357,8 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # Model stage being running
     stage = f'starting_carbon_pools_{year}'
 
+    task_json = f"{stage}_tasks.json"
+
     # Determines if argument for year is valid
     if year in [2000, 2015]:
         print("Year selection valid")
@@ -382,6 +384,8 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
     chunk_list = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+
+    task_json = uu.generate_task_file(chunk_list, task_json)
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 

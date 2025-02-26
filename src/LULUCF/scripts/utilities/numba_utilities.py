@@ -27,10 +27,10 @@ def backup_continent_ecozone(continent_ecozone, continent_ecozone_block):
         continent_ecozone = np.argmax(counts)  #
         # print("Reassigned:", continent_ecozone)
 
-    # If the mode of the chunk is also 0 (no continent-ecozone values in the chunk at all),
-    # it just assigns a continent-ecozone value so that there is something
-    if continent_ecozone == 0:
-        continent_ecozone = 2020
+    # # If the mode of the chunk is also 0 (no continent-ecozone values in the chunk at all),
+    # # it just assigns a continent-ecozone value so that there is something
+    # if continent_ecozone == 0:
+    #     continent_ecozone = 2020
 
     return continent_ecozone
 

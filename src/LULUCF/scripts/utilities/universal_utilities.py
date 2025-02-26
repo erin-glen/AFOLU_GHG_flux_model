@@ -1264,6 +1264,61 @@ def get_cluster_info(client, cluster):
 
 
 
+import json
+import threading
+
+# Lock to prevent race conditions when writing JSON
+file_lock = threading.Lock()
+
+def generate_task_file(chunk_list, task_filename):
+
+    tasks = []
+
+    # By default, assume status is pending
+    status = "pending"
+    error = None
+
+    for chunk in chunk_list:
+
+        # Add the task entry
+        tasks.append({
+            "chunk_id": chunk,
+            "status": status,
+            "error": error
+        })
+
+
+    with open(task_filename, "w") as f:
+        json.dump(tasks, f, indent=2)
+
+    return tasks
+
+
+def update_task_file(task_filename, chunk_id, status, error=None):
+    """
+    Updates the task file with new status for a completed chunk.
+    Uses a lock to prevent concurrent writes.
+    """
+    with file_lock:
+        try:
+            with open(task_filename, "r") as f:
+                tasks = json.load(f)
+
+            # Find the task and update it
+            for task in tasks:
+                if task["chunk_id"] == chunk_id:
+                    task["status"] = status
+                    task["error"] = error
+                    break
+
+            # Save updated tasks back to the file
+            with open(task_filename, "w") as f:
+                json.dump(tasks, f, indent=2)
+
+        except Exception as e:
+            print(f"Error updating task file for {chunk_id}: {e}")
+
+
 
 ###################################################################################################
 # Hansenize Functions
