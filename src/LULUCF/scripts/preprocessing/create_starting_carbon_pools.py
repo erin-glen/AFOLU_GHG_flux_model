@@ -4,14 +4,15 @@ python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp -f 1 --year YYYY
 
-python -m scripts.utilities.create_cluster -n 70 -t 7 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2000
-Max memory usage: ~12 GB/worker
+python -m scripts.utilities.create_cluster -n 70 -t 8 -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
+Max memory usage: ~22 GB/worker
 Time:  through calculation,  with tile stats; Credits: ; Cost: $
 
 python -m scripts.utilities.create_cluster -n 70 -t 7 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015
-
+python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
+Max memory usage: ~ GB/worker
+Time:  through calculation,  with tile stats; Credits: ; Cost: $
 """
 
 import argparse
@@ -139,7 +140,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             # They depend on the climate domain, elevation, and precipitation.
             elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Non-mangrove
 
-                # If no mapped R:S, uses the global default value instead
+                # If no mapped R:S (=0), uses the global default value instead
                 if r_s_ratio == 0:
                     r_s_ratio = cn.default_r_s_non_mang
                 bgc_ratio = r_s_ratio  # Uses R:S for BGC
@@ -165,7 +166,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             else:
 
                 # Ridiculous default BGC, deadwood C, and litter C ratios that will make it very clear if they are being used instead of
-                # something being assigned in the decision treea above
+                # something being assigned in the decision tree above
                 bgc_ratio = -5
                 deadwood_c_ratio = -10
                 litter_c_ratio = -20
@@ -194,11 +195,11 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
 
+    logger_worker = lu.setup_logging_worker()
+
     try:
 
-        logger_worker = lu.setup_logging_worker()
-
-        uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
+        # uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
 
         bounds_str = uu.boundstr(bounds)  # String form of chunk bounds
         tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
@@ -271,7 +272,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         ### Part 4: Creates starting carbon pool densities
 
         lu.print_and_log(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
-        # print(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}")
+        print(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}")
         uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
         # Create AGC, BGC, deadwood C and litter C densities in selected starting year
@@ -356,15 +357,18 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         # Clears memory of unneeded arrays
         del out_dict_all_dtypes
 
-        success_message = f"Success for {bounds_str}: {uu.timestr()}"
+        return_message = f"Success for {bounds_str}: {uu.timestr()}"
 
         # Removes task tracking file from S3 once task is successful
         uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
 
     except Exception as e:
-        success_message = f"Error processing chunk {bounds}: {e}"
 
-    return success_message, chunk_stats  # Return both the success message and the statistics
+        lu.print_and_log(f"Error processing chunk {bounds}: {e}: {uu.timestr()}", is_final, logger_worker)
+        print(f"Error processing chunk {bounds}: {e}: {uu.timestr()}")
+        return_message = f"Error processing chunk {bounds}: {e}"
+
+    return return_message, chunk_stats  # Return both the success message and the statistics
 
 
 def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_upload=False, use_shapefile=False,
@@ -462,9 +466,9 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     mangrove_C_ratio_array = uu.convert_lookup_table_to_array(cn.rate_ratio_spreadsheet, cn.mangrove_rate_ratio_tab,
                                                            ['gainEcoCon', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
 
-    # Makes a txt for each task in the list. These are deleted as tasks are completed.
-    main_logger.info("Creating task txts in s3...")
-    uu.create_s3_task_files(stage, chunk_list)
+    # # Makes a txt for each task in the list. These are deleted as tasks are completed.
+    # main_logger.info("Creating task txts in s3...")
+    # uu.create_s3_task_files(stage, chunk_list)
 
     # Creates list of tasks to run (1 task = 1 chunk)
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")

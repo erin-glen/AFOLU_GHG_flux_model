@@ -1086,7 +1086,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger):
     if not no_upload:
         main_logger.info(f"Uploading chunk stats spreadsheet to s3 at {timestr()}...")
         s3_client.upload_file(local_spreadsheet, "gfw2-data", Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
-        main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.s3_chunk_stats_path}{out_spreadsheet}")
+        main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}")
 
 
 # Gets the datatype of a raster in s3.
@@ -1295,10 +1295,12 @@ def create_s3_task_files(stage, chunk_list):
 
     s3 = boto3.client("s3")
 
+    # Uploads a single task file to S3.
     def upload_task_file(chunk):
-        """Uploads a single task file to S3."""
+
         chunk_id_str = boundstr(chunk)  # Converts chunk ID to string
-        key = f"{cn.progress_tracking_path}pending_{chunk_id_str}_{stage}.txt"
+        tile_id = xy_to_tile_id(chunk[0], chunk[3])
+        key = f"{cn.progress_tracking_path}pending_{tile_id}_{chunk_id_str}_{stage}.txt"
 
         try:
             s3.put_object(Bucket=cn.short_bucket_prefix, Key=key, Body="")
@@ -1307,7 +1309,7 @@ def create_s3_task_files(stage, chunk_list):
             return f"Error creating task file {key}: {e}"
 
     # Uses ThreadPoolExecutor for parallel uploads
-    max_workers = min(100, len(chunk_list))  # Limits workers to 50 or chunk count
+    max_workers = min(10, len(chunk_list))  # Limits workers to 50 or chunk count
 
     start_time = time.time()
 
@@ -1327,12 +1329,13 @@ def rename_s3_task_file(stage, chunk_id, new_status, is_final, logger_worker):
 
     s3 = boto3.client("s3")
     chunk_id_str = boundstr(chunk_id)  # Converts chunk ID to string
+    tile_id = xy_to_tile_id(chunk_id[0], chunk_id[3])
 
     # Iterates through the task status prefixes to find the status of the specific chunk .
     # Order of statuses matters: first one found is renamed.
     for prefix in cn.possible_task_statuses:
-        old_key = f"{cn.progress_tracking_path}{prefix}{chunk_id_str}_{stage}.txt"
-        new_key = f"{cn.progress_tracking_path}{new_status}{chunk_id_str}_{stage}.txt"
+        old_key = f"{cn.progress_tracking_path}{prefix}{tile_id}_{chunk_id_str}_{stage}.txt"
+        new_key = f"{cn.progress_tracking_path}{new_status}{tile_id}_{chunk_id_str}_{stage}.txt"
 
         try:
             # Copies to new name and delete the old file
@@ -1354,12 +1357,12 @@ def rename_s3_task_file(stage, chunk_id, new_status, is_final, logger_worker):
 def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
 
     s3 = boto3.client("s3")
-
     chunk_id_str = boundstr(chunk_id)  # Converts chunk ID to string
+    tile_id = xy_to_tile_id(chunk_id[0], chunk_id[3])
 
     # Iterates through the task status prefixes to find the status of the specific chunk
     for prefix in cn.possible_task_statuses:
-        key = f"{cn.progress_tracking_path}{prefix}{chunk_id_str}_{stage}.txt"
+        key = f"{cn.progress_tracking_path}{prefix}{tile_id}_{chunk_id_str}_{stage}.txt"
 
         try:
             s3.delete_object(Bucket=cn.short_bucket_prefix, Key=key)
