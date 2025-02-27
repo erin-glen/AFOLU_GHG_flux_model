@@ -28,19 +28,13 @@ def backup_continent_ecozone(continent_ecozone_block):
     # Removes 0s so that the mode of the remaining pixels can be determined
     non_zero_values = continent_ecozone_block_flat[continent_ecozone_block_flat > 0]
     counts = np.bincount(non_zero_values)  # Counts the number of pixels with that value
-    continent_ecozone_fallback = np.argmax(counts)  #
+    # print("Counts:", counts)
+    if len(counts) == 0:   # If the only values in the chunk are 0 -> there are no counts of non-zero pixels
+        continent_ecozone_fallback = 2020
+    else:   # Otherwise, there are non-zero values in the chunk -> uses the most common non-zero value
+        continent_ecozone_fallback = np.argmax(counts)
+
     # print("Fallback 1 continent_ecozone for chunk:", continent_ecozone_fallback)
-
-    # If the max value of the chunk is also 0 (no continent-ecozone values in the chunk at all),
-    # it just assigns a continent-ecozone value so that there is some fallback
-    if np.max(continent_ecozone_block) == 0:
-        continent_ecozone_fallback = 2020
-    # print("Fallback 2 continent_ecozone for chunk:", continent_ecozone_fallback)
-
-    # If all else fails...
-    if continent_ecozone_fallback == 0:
-        continent_ecozone_fallback = 2020
-
     return continent_ecozone_fallback
 
 

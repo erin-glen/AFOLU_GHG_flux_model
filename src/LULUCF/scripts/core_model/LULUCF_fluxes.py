@@ -983,6 +983,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types, start_year, end_year,
                                        fishnet_iso_df, is_final, no_upload):
 
+    #TODO Add try-except from create_starting_carbon_pools
+
     logger_worker = lu.setup_logging_worker()
 
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0

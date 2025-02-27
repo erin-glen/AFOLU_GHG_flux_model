@@ -6,7 +6,7 @@ python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_mode
 
 python -m scripts.utilities.create_cluster -n 70 -t 8 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
-Max memory usage: ~22 GB/worker
+Max memory usage: ~ GB/worker
 Time:  through calculation,  with tile stats; Credits: ; Cost: $
 
 python -m scripts.utilities.create_cluster -n 70 -t 7 -cn AFOLU_flux_model_scripts
@@ -199,7 +199,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
     try:
 
-        # uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
+        uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
 
         bounds_str = uu.boundstr(bounds)  # String form of chunk bounds
         tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
@@ -466,9 +466,9 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     mangrove_C_ratio_array = uu.convert_lookup_table_to_array(cn.rate_ratio_spreadsheet, cn.mangrove_rate_ratio_tab,
                                                            ['gainEcoCon', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
 
-    # # Makes a txt for each task in the list. These are deleted as tasks are completed.
-    # main_logger.info("Creating task txts in s3...")
-    # uu.create_s3_task_files(stage, chunk_list)
+    # Makes a txt for each task in the list. These are deleted as tasks are completed.
+    main_logger.info("Creating task txts in s3...")
+    uu.create_s3_task_files(stage, chunk_list)
 
     # Creates list of tasks to run (1 task = 1 chunk)
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
