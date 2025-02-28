@@ -1309,7 +1309,7 @@ def create_s3_task_files(stage, chunk_list):
             return f"Error creating task file {key}: {e}"
 
     # Uses ThreadPoolExecutor for parallel uploads
-    max_workers = min(10, len(chunk_list))  # Limits workers to 50 or chunk count
+    max_workers = min(100, len(chunk_list))  # Limits workers to 100 or chunk count
 
     start_time = time.time()
 

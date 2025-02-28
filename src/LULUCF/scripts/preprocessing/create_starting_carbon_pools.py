@@ -4,15 +4,15 @@ python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp -f 1 --year YYYY
 
-python -m scripts.utilities.create_cluster -n 70 -t 8 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 70 -t 9 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
-Max memory usage: ~ GB/worker
-Time:  through calculation,  with tile stats; Credits: ; Cost: $
+Max memory usage: ~20 GB/worker
+Time: 21:21 through calculation, 22:17 with tile stats; Credits: 110; Cost: $3.60
 
-python -m scripts.utilities.create_cluster -n 70 -t 7 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 70 -t 9 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
-Max memory usage: ~ GB/worker
-Time:  through calculation,  with tile stats; Credits: ; Cost: $
+Max memory usage: ~XXX GB/worker
+Time: 190:00 through calculation, 20:03 with tile stats; Credits: 103; Cost: $3.50
 """
 
 import argparse
@@ -272,7 +272,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         ### Part 4: Creates starting carbon pool densities
 
         lu.print_and_log(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
-        print(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}")
+        print(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}")  # Need this in order to print during full runs
         uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
         # Create AGC, BGC, deadwood C and litter C densities in selected starting year
@@ -366,6 +366,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
         lu.print_and_log(f"Error processing chunk {bounds}: {e}: {uu.timestr()}", is_final, logger_worker)
         print(f"Error processing chunk {bounds}: {e}: {uu.timestr()}")
+        uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
         return_message = f"Error processing chunk {bounds}: {e}"
 
     return return_message, chunk_stats  # Return both the success message and the statistics
@@ -499,7 +500,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Iterates through output folders and counts the number of output rasters.
     # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
-    if chunk_size == 1:
+    if chunk_size == 1.0:
         for output_folder in starting_C_pool_output_folders:
             output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
             output_folder = re.sub('DATE', uu.timestr()[:8],
