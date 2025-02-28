@@ -2,20 +2,22 @@
 Run from src/LULUCF
 
 Test:
-python -m scripts.utilities.create_cluster -n 1
+python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 10 49.75 10.25 50 -cs 0.25
 python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload
-python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cl s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1
+python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1
 
 Full run:
 python -m scripts.utilities.create_cluster -n 200
-python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cl s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/
+python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/
 """
 
 import argparse
 import concurrent.futures
-import sys
+import os
 import re
+import sys
+import time
 import numpy as np
 
 from dask.distributed import print
@@ -78,6 +80,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
     climate_domain_block = in_dict_int16[cn.climate_domain_pattern]
     precipitation_block = in_dict_int32[cn.precipitation_pattern]
 
+    # Gets a fallback value for continent_ecozone for the chunk in case some pixels don't have one
+    # TODO make sure this is working right and applied in the right places
+    continent_ecozone_fallback = nu.backup_continent_ecozone(continent_ecozone_block)
+
 
     ## Test/intermediate outputs blocks
 
@@ -114,13 +120,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
 
     # Iterates through model intervals
-    for interval_end_year in list(range(cn.first_model_year, cn.last_model_year + 1, cn.interval_years))[1:]:
+    for interval_end_year in list(range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1, cn.interval_duration))[1:]:
 
         # print(f"Now at {interval_end_year}:")
 
         # Model intervals so far, including the model start year.
         # Eventually used to determine whether current height has decreased significantly from maximum height since last non-tall veg year over multiple intervals (gradual height loss).
-        years_so_far = list(range(cn.first_model_year, interval_end_year + 1, cn.interval_years))
+        years_so_far = list(range(cn.first_model_year_5_years, interval_end_year + 1, cn.interval_duration))
 
         # Pre-fetches vegetation height data for this chunk and stores in a dictionary or list.
         # Eventually used to determine whether current height has decreased significantly from maximum height since last non-tall veg year over multiple intervals (gradual height loss).
@@ -133,9 +139,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
         ]
 
         # Writes the dictionary entries to a chunk for use in the decision tree
-        LC_prev_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year - cn.interval_years}"]
+        LC_prev_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year - cn.interval_duration}"]
         LC_curr_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year}"]
-        veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year - cn.interval_years}"]
+        veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year - cn.interval_duration}"]
         veg_h_curr_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year}"]
 
         # Creates a list of all the burned area arrays from 2001 to the end of the interval.
@@ -156,7 +162,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
             year_key = f"{cn.forest_disturbance_layer_name}_{year_offset}"
 
             # Replaces the binary annual disturbance array with the year of disturbance (1, 2, 3...20)
-            year_disturb_array = in_dict_uint8[year_key] * (year_offset - cn.first_model_year)
+            year_disturb_array = in_dict_uint8[year_key] * (year_offset - cn.first_model_year_5_years)
 
             # Makes a list of disturbance arrays with the disturbance year.
             # uint8 is okay because the highest value should be 20 (not 2020).
@@ -222,6 +228,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 drivers_cell = drivers_block[row, col]
                 continent_ecozone_cell = continent_ecozone_block[row, col]
                 climate_zone_cell = climate_zone_block[row, col]
+
+                # Gets a value for continent_ecozone in case the pixel doesn't have one
+                continent_ecozone_cell = nu.backup_continent_ecozone(continent_ecozone_cell, continent_ecozone_block)
 
                 # Determines the removal factor for primary forests/IFL based on the ecozone (Mg AGC/ha/yr)
                 primary_forest_AGC_RF = nu.calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs)
@@ -930,7 +939,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
         # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
         # This applies even for the outputs that aren't reused in the next interval;
         # they will still get overwritten with the final interval's values, I believe.
-        year_range = f"{interval_end_year - cn.interval_years}_{interval_end_year}"
+        year_range = f"{interval_end_year - cn.interval_duration}_{interval_end_year}"
 
         out_dict_uint32[f"{cn.land_state_pattern}_{year_range}"] = state_out_block.copy()
 
@@ -938,19 +947,19 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
         # Converts carbon pool fluxes from Mg C/ha/interval to Mg CO2/ha/yr.
         # Gross emissions are positive. Gross removals are negative.
-        out_dict_float32[f"{cn.agc_gross_emis_pattern}_{year_range}"] = (agc_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
-        out_dict_float32[f"{cn.bgc_gross_emis_pattern}_{year_range}"] = (bgc_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
-        out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = (deadwood_c_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
-        out_dict_float32[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] = (litter_c_gross_emis_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
+        out_dict_float32[f"{cn.agc_gross_emis_pattern}_{year_range}"] = (agc_gross_emis_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.bgc_gross_emis_pattern}_{year_range}"] = (bgc_gross_emis_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = (deadwood_c_gross_emis_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] = (litter_c_gross_emis_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
 
-        out_dict_float32[f"{cn.agc_gross_removals_pattern}_{year_range}"] = (agc_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
-        out_dict_float32[f"{cn.bgc_gross_removals_pattern}_{year_range}"] = (bgc_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
-        out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"] = (deadwood_c_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
-        out_dict_float32[f"{cn.litter_c_gross_removals_pattern}_{year_range}"] = (litter_c_gross_removals_out_block*cn.C_to_CO2_numba/cn.interval_years).copy()
+        out_dict_float32[f"{cn.agc_gross_removals_pattern}_{year_range}"] = (agc_gross_removals_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.bgc_gross_removals_pattern}_{year_range}"] = (bgc_gross_removals_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"] = (deadwood_c_gross_removals_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.litter_c_gross_removals_pattern}_{year_range}"] = (litter_c_gross_removals_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
 
         # Converts non-CO2 emissions from Mg CO2e/ha/interval to Mg CO2e/ha/yr
-        out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = (ch4_gross_emis_out_block/cn.interval_years).copy()
-        out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = (n2o_gross_emis_out_block/cn.interval_years).copy()
+        out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = (ch4_gross_emis_out_block / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = (n2o_gross_emis_out_block / cn.interval_duration).copy()
 
         # Still Mg C/ha
         out_dict_float32[f"{cn.agc_dens_pattern}_{interval_end_year}"] = agc_dens_block.copy()
@@ -961,7 +970,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
         # Test/intermediate outputs only saved if not a large run
         if not is_final:
             out_dict_uint8[f"{cn.gain_year_count_pattern}_{year_range}"] = gain_year_count_out_block.copy()
-            out_dict_uint16[f"{cn.most_recent_year_not_tall_veg}_{cn.first_model_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
+            out_dict_uint16[f"{cn.most_recent_year_not_tall_veg}_{cn.first_model_year_5_years}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
             out_dict_uint8[f"{cn.years_of_forest_regrowth}_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
             out_dict_uint16[f"{cn.year_of_forest_loss}_{year_range}"] = year_of_forest_loss_block.copy()
             out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
@@ -971,9 +980,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
 
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
-def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types, fishnet_iso_df, is_final, no_upload):
+def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types, start_year, end_year,
+                                       fishnet_iso_df, is_final, no_upload):
 
-    logger = lu.setup_logging()
+    #TODO Add try-except from create_starting_carbon_pools
+
+    logger_worker = lu.setup_logging_worker()
 
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
@@ -983,9 +995,9 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     chunk_stats = []
 
 
-    ### Part 1: Checks if tile exists at all, downloads data in chunk if it does exist, and checks if chunk actually has relevant data.
-    ### I haven't figured out a good way to check if the chunk has relevant data before downloading,
-    ### so inputs are downloaded and then checked.
+    ### Part 1: Downloads chunk.
+    ### No checks about whether the chunk has data because the way the chunk_list is constructed,
+    ### every chunk is relevant and should be processed, so they don't need to be checked.
 
     # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
@@ -994,20 +1006,25 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
     # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
-    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger)
+    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
     # print(futures)
 
     # Only prints if not a final run
     if not is_final:
-        lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+        lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}",
+                         is_final, logger_worker)
 
-    # Dictionary that stores the downloaded data
+    # Dictionary that stores the dataset name (key) and downloaded data and their statuses (values)
     layers = {}
 
-    # Waits for requests to come back with data from S3
+    # Ensures futures stores Future objects
+    # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages for chunks
     for future in concurrent.futures.as_completed(futures):
-        layer = futures[future]
-        layers[layer] = future.result()
+        layer = futures[future]  # Gets the corresponding key
+        data, status = future.result()  # Unpacks the tuple result
+        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+            lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
+        layers[layer] = data
 
     # Test prints
     # print(layers)
@@ -1023,7 +1040,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # Calculates stats for the input layers
     for key, array in layers.items():
         chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer', fishnet_iso_df))
-    # print(stats)
+    # print(chunk_stats)
 
 
     ### Part 3: Creates a separate dictionary for each chunk datatype so that they can be passed to Numba as separate arguments.
@@ -1032,12 +1049,13 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     # Only prints if not a final run
     if not is_final:
-        lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+        lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
     # Creates the typed dictionaries for all input layers (including those that originally had no data)
-    typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
+    typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
 
     # print("uint8_typed_list:", typed_dict_uint8)
+    # print("uint16_typed_list:", typed_dict_uint16)
     # print("int16_typed_list:", typed_dict_int16)
     # print("int32_typed_list:", typed_dict_int32)
     # print("float32_typed_list:", out_dict_float32)
@@ -1045,12 +1063,13 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     ### Part 4: Calculates LULUCF fluxes and densities
 
-    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
     print(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}")
 
-    out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs, is_final)
+    out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(
+        typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs, is_final)
 
-    lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger)
+    lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
     print(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}")
 
     # print(out_dict_uint32)
@@ -1075,7 +1094,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         del out_dict
 
 
-    ### Part 6: Calculates combined gross fluxes and net fluxes.
+    ### Part 5: Calculates combined gross fluxes and net fluxes.
+    ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
     ### Doing this outside numba function to minimize pixel-level calculations and chunks being returned by numba function.
 
     # Deletes all unnecessary input dictionaries before the memory-intensive derived output calculations
@@ -1083,7 +1103,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
     [in_dict.clear() for in_dict in in_dicts]
 
-    for interval_end_year in cn.interval_end_years:
+    for interval_end_year in cn.interval_end_years_5_years:
 
         year_range = f"{interval_end_year-5}_{interval_end_year}"
 
@@ -1131,7 +1151,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
                 + out_dict_all_dtypes[f"{cn.gross_emis_non_CO2_only_pattern}_{year_range}"])
 
 
-    ### Part 7: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
+    ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
     ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
     ### Also useful for a quick sum of outputs without doing zonal stats
 
@@ -1139,7 +1159,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     pixel_area_uri = f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{tile_id}.tif"
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
-    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger)
+    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger_worker)
+    pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
     # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
     for key, array_per_ha in out_dict_all_dtypes.items():
@@ -1150,7 +1171,9 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
 
-    ### Part 8: Saves numpy arrays as rasters and uploads to s3
+    ### Part 7: Saves numpy arrays as rasters and uploads to s3
+    #TODO This needs to be made to match create_starting_carbon_pools upload. It shouldn't work.
+    sys.quit()
 
     # Only saves arrays to geotifs and uploads them to s3 if enabled
     if not no_upload:
@@ -1168,7 +1191,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
             out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range]
 
         uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
-                                            is_final, logger, out_no_data_val)
+                                            is_final, logger_worker,
+                                            'standard', 'per_hectare', out_no_data_val)
 
     # Clears memory of unneeded arrays
     del out_dict_all_dtypes
@@ -1177,60 +1201,50 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     return success_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         bounding_box=None, chunk_size=None, chunk_list=None, first_chunks=None):
-
-    # Connects to Coiled cluster if not running locally
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False, use_shapefile=False,
+         bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     # Model stage being running
     stage = 'LULUCF_fluxes'
 
+    # Determines if arguments for start and end year are valid
+    if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
+                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2023
+                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2023
+        print("Year range selection not valid")
+        sys.exit()
+    else:
+        start_year = year_range[0]
+        end_year = year_range[1]
+        print(f"Start year: {start_year}")
+        print(f"End year: {end_year}")
+
+    # Connects to Coiled cluster if not running locally
+    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+
+    # Creates the log for the main function and populates it with basic run information
+    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note, run_local, stage)
+
     # Starting time for stage
     start_time = uu.timestr()
-    print(f"Stage {stage} started at: {start_time}")  #TODO in all main() functions, add print statements to log
+    main_logger.info(f"Stage {stage} started at: {start_time}")
+    main_logger.info(f"Start year: {start_year}; end year: {end_year}")
 
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
     fishnet_iso_df = uu.fishnet_with_GADM_iso()
 
-    # Makes list of chunks to analyze from the bounding box and chunk size (deg)
-    # Outut list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
-    if bounding_box and chunk_size:
+    # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
+    chunk_list = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
-        print("Using bounding box and chunk size to determine chunks")
-        chunks = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
-
-    # Makes list of chunks to analyze from a shapefile attribute table.
-    # Attribute table column must be formatted as W_S_E_N.
-    # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
-    elif chunk_list:
-
-        print("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
-
-        # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
-        fishnet_1x1_chunk_id_df = fishnet_iso_df[['chunk_id']]  # Creates dataframe
-
-        # If argument for number of chunks in shapefile is supplied, limit to that
-        if first_chunks:
-            fishnet_1x1_chunk_id_df = fishnet_1x1_chunk_id_df[:first_chunks]
-
-        # Converts dataframe column of chunk bounds to nested list
-        # Per https://chatgpt.com/share/e/674747ee-d588-800a-995c-1f897a8ace31
-        chunks = fishnet_1x1_chunk_id_df['chunk_id'].apply(uu.process_chunk_id).tolist()
-
-    else:
-        print("Chunk list cannot be determined")
-        sys.exit()
-
-    print(f"Processing {len(chunks)} chunks")
+    main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
-    if len(chunks) > 20:
+    if len(chunk_list) > 20:
         is_final = True
-        print("Running as final model.")
+        main_logger.info("Running as final model.")
 
     # Accumulates all statistics and output messages from chunk analysis
     # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
@@ -1246,12 +1260,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Dictionary of data to download (inputs to model)
     download_dict = {
-
-        cn.agc_2000_pattern: f"{cn.agc_2000_path}{sample_tile_id}__{cn.agc_2000_pattern}.tif",
-        cn.bgc_2000_pattern: f"{cn.bgc_2000_path}{sample_tile_id}__{cn.bgc_2000_pattern}.tif",
-        cn.deadwood_c_2000_pattern: f"{cn.deadwood_c_2000_path}{sample_tile_id}__{cn.deadwood_c_2000_pattern}.tif",
-        cn.litter_c_2000_pattern: f"{cn.litter_c_2000_path}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif",
-        cn.soil_c_2000_pattern: f"{cn.soil_c_2000_path}{sample_tile_id}_{cn.soil_c_2000_pattern}.tif",
 
         cn.r_s_ratio_pattern: f"{cn.r_s_ratio_path}{sample_tile_id}_{cn.r_s_ratio_pattern}.tif",
 
@@ -1278,20 +1286,44 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         cn.pixel_area_pattern: f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{sample_tile_id}.tif"
     }
 
-    # Land cover and vegetation height rasters (5-year intervals)
-    for year in range(cn.first_model_year, cn.last_model_year + 1, cn.interval_years):
-        download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_path}{year}/raw/{sample_tile_id}.tif"
-        download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_path}{year}/{sample_tile_id}_{cn.vegetation_height_pattern}_{year}.tif"
+    if start_year == cn.first_model_year_5_years:
+        download_dict[cn.agc_2000_pattern] = f"{cn.agc_2000_path}{sample_tile_id}__{cn.agc_2000_pattern}.tif"
+        download_dict[cn.bgc_2000_pattern] = f"{cn.bgc_2000_path}{sample_tile_id}__{cn.bgc_2000_pattern}.tif"
+        download_dict[cn.deadwood_c_2000_pattern] = f"{cn.deadwood_c_2000_path}{sample_tile_id}__{cn.deadwood_c_2000_pattern}.tif"
+        download_dict[cn.litter_c_2000_pattern] = f"{cn.litter_c_2000_path}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif"
+        download_dict[cn.soil_c_2000_pattern] = f"{cn.soil_c_2000_path}{sample_tile_id}_{cn.soil_c_2000_pattern}.tif"
 
-    # Burned area rasters (annual)
+    ##TODO: Replace with 2015 C density maps
+    if start_year == cn.first_model_year_annual:
+        download_dict[cn.agc_2000_pattern] = f"{cn.agc_2000_path}{sample_tile_id}__{cn.agc_2000_pattern}.tif"
+        download_dict[cn.bgc_2000_pattern] = f"{cn.bgc_2000_path}{sample_tile_id}__{cn.bgc_2000_pattern}.tif"
+        download_dict[cn.deadwood_c_2000_pattern] = f"{cn.deadwood_c_2000_path}{sample_tile_id}__{cn.deadwood_c_2000_pattern}.tif"
+        download_dict[cn.litter_c_2000_pattern] = f"{cn.litter_c_2000_path}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif"
+        download_dict[cn.soil_c_2000_pattern] = f"{cn.soil_c_2000_path}{sample_tile_id}_{cn.soil_c_2000_pattern}.tif"
+
+    if start_year == cn.first_model_year_5_years:
+        # Land cover and vegetation height rasters (5-year intervals)
+        for year in range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1, cn.interval_duration):
+            download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_5_year_path}{year}/{sample_tile_id}.tif"
+            download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_5_year_path}{year}/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_{year}.tif"
+
+    if start_year == cn.first_model_year_annual:
+        # Land cover and vegetation height rasters (5-year intervals)
+        for year in range(cn.first_model_year_annual, cn.last_model_year_annual + 1):
+            download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_annual_path}{year}/{sample_tile_id}.tif"
+            download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_annual_path}{year}/{sample_tile_id}.tif"
+
+
+    # Burned area rasters (every year)-- same code for annual or 5-year model
     # All years need to be in their own folder
-    for year in range(cn.first_model_year, cn.last_model_year + 1):  # Annual burned area maps start in 2000
+    for year in range(start_year, end_year + 1):  # Annual burned area maps start in 2000
         download_dict[f"{cn.burned_area_pattern}_{year}"] = f"{cn.burned_area_path}{year}/{cn.burned_area_pattern}_{year}_{sample_tile_id}.tif"
 
-    # Forest disturbance rasters (annual)
+    # Forest disturbance rasters (every year)-- only for 5-year intervals
     # All years need to be in their own folder
-    for year in range(cn.first_model_year + 1, cn.last_model_year + 1):  # Annual forest disturbance maps start in 2001 and ends in 2020
-        download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.annual_forest_disturbance_path}{year}/{year}_{sample_tile_id}.tif"
+    if start_year == cn.first_model_year_5_years:
+        for year in range(cn.first_model_year_5_years + 1, cn.last_model_year_5_years + 1):  # Annual forest disturbance maps start in 2001 and ends in 2020
+            download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.forest_disturbance_annual_path}{year}/{year}_{sample_tile_id}.tif"
 
     # Young natural forest rasters (several age intervals)
     # Each growth interval's rate is in its own folder
@@ -1301,121 +1333,94 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Returns the first tile in each input so that the datatype can be determined.
     # This is done up front, once per tile set, rather than on each chunk, since
     # all tiles have the same datatype for each input-- it only needs to be done once at the very beginning of the stage.
-    print(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
+    main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
     first_tiles = uu.first_file_name_in_s3_folder(download_dict)
+    # print(first_tiles)
 
     # Creates a download dictionary with the datatype of each input in the values.
     # This is supplied to each chunk that is being analyzed.
     # This also serves as a check of whether all inputs are being found (s3 paths correct)
-    print(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
+    main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
+    # print(download_dict_with_data_types)
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.
     # Inputs are Mg AGB/ha/yr. Outputs are Mg AGB/ha/yr. Conversion to Mg AGC/ha/yr is done below.
-    primary_forest_RFs = uu.convert_lookup_table_to_array(cn.IPCC_removal_factor_table_full_path,
+    primary_forest_RF_array = uu.convert_lookup_table_to_array(cn.IPCC_removal_factor_table_full_path,
                                                           cn.IPCC_removal_factor_table_tab,
                                                           ['gainEcoCon', 'growth_primary'])
 
     # Converts primary forest AGB RFs to AGC RFs (Mg AGB/ha/yr -> Mg AGC/ha/yr)
-    primary_forest_RFs[:, 1] = primary_forest_RFs[:, 1] * cn.biomass_to_carbon_non_mangrove
+    primary_forest_RF_array[:, 1] = primary_forest_RF_array[:, 1] * cn.biomass_to_carbon_non_mangrove
 
     # Creates list of tasks to run (1 task = 1 chunk)
-    print(f"Creating tasks and starting processing: {uu.timestr()}")
+    main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
+    main_logger.info("Workers' logs appended after main function log"+ "\n")
+
 
     # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
     futures = []
-    for chunk in chunks:
-        future = client.submit(calculate_and_upload_LULUCF_fluxes, chunk, primary_forest_RFs,
-                               download_dict_with_data_types, fishnet_iso_df, is_final, no_upload)
+    for chunk in chunk_list:
+        future = client.submit(calculate_and_upload_LULUCF_fluxes,
+                               chunk, primary_forest_RF_array, download_dict_with_data_types, start_year, end_year,
+                               fishnet_iso_df, is_final, no_upload)
         futures.append(future)
 
     # Collect the results once they are finished
     results = client.gather(futures)
 
-    # Initializes counters for different types of return messages
-    success_count = 0
-    skipping_chunk_count = 0
-
-    # Processes the chunk stats and returned messages
-    # Results are the messages from the chunks and chunk stats
-    for result in results:
-        return_message, chunk_stats = result
-
-        if "Success" in return_message:
-            success_count += 1
-
-        if "Skipped chunk" in return_message:
-            skipping_chunk_count += 1
-
-        if return_message:
-            return_messages.append(return_message)
-
-        if chunk_stats is not None:
-            all_stats.extend(chunk_stats)
-
-    # Prints the returned messages if not a large (is_final) run
-    if not is_final:
-        for message in return_messages:
-            print(message)
-
-    # Print the counts
-    print(f"Number of 'Success' chunks: {success_count}")
-    print(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
-    print(f"Difference between submitted chunks and processed chunks: {len(chunks) - (success_count + skipping_chunk_count)}")
-
-
+    success_count = uu.count_successful_chunks(all_stats, chunk_list, is_final, main_logger, results, return_messages)
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
-    workers = client.scheduler_info()["workers"]
-    n_workers = len(workers)
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
 
-    # Reduces number of workers in the cluster down to 1 if there is more than 1
-    #TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
-    if n_workers > 1:
-        print("Resizing cluster to 1 worker")
+        # Reduces number of workers in the cluster down to 1 if there is more than 10
+        # TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
+        if n_workers > 10:
+            main_logger.info("Resizing cluster to 1 worker")
 
-        resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
+            resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
 
     # Iterates through output folders and counts the number of output rasters.
     # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
-    if is_final==True:
-        for LULUCF_output_folder in cn.LULUCF_output_folders:
+    if chunk_size == 1.0:
+        for output_folder in cn.LULUCF_output_folders:
 
-            LULUCF_output_folder = re.sub('RES_pixels', '4000_pixels', LULUCF_output_folder)
-            LULUCF_output_folder = re.sub('DATE', uu.timestr()[:8], LULUCF_output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
+            output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
+            output_folder = re.sub('DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
 
-            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(LULUCF_output_folder)
-            print(f"Output rasters in {LULUCF_output_folder}: {file_count}")
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
             # print(geotiff_files)
 
-    end_time_1 = uu.timestr()
-    print(f"Stage {stage} ended at: {end_time_1}")
-    uu.stage_duration(start_time, end_time_1, stage)
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
     # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count > 0):
-        uu.aggregate_chunk_stats(all_stats, stage, no_upload)
+        uu.aggregate_chunk_stats(all_stats, stage, no_upload, main_logger)
 
-    # Ending time for stage
-    end_time_2 = uu.timestr()
-    print(f"Stage {stage} tile stats ended at: {end_time_2}")
-    uu.stage_duration(start_time, end_time_2, stage)
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
-    # Creates combined log from all workers if not deactivated
-    #TODO Figure out how to make it gather worker logs as soon as run finishes so that they're not lost,
-    # then upload the consolidated log at the very end like this.
-    log_note = f"{stage} run"
-    lu.compile_and_upload_log(no_log, client, cluster, stage, len(chunks), chunk_size, start_time, end_time_1, end_time_2,
-                              success_count, skipping_chunk_count, bounding_box, log_note)
-
+    # Sets it so that no worker logs are created if doing a local run
     if not run_local:
-        # Closes the Dask client if not running locally
+        # Creates combined log from all workers if not deactivated
+        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
+
+        # Adds the workers' logs to the main log and uploads to s3
+        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
+
+    # Closes the Dask client if not running locally
+    if not run_local:
         client.close()
+
 
 
 if __name__ == "__main__":
@@ -1423,8 +1428,10 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('-cl', '--chunk_list', help='Shapefile of chunks')
+    parser.add_argument('-cshp', '--use_shapefile', help='Shapefile of chunks')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
+    parser.add_argument('-y', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
+    parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
@@ -1436,14 +1443,17 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
-    chunk_list = args.chunk_list
+    use_shapefile = args.use_shapefile
     first_chunks = args.first_chunks
+    year_range = args.year_range
+    log_note = args.log_note
+
     run_local = args.run_local
     no_stats = args.no_stats
     no_log = args.no_log
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, run_local, no_stats, no_log, no_upload,
+    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, use_shapefile,
          bounding_box=bounding_box, chunk_size=chunk_size,
-         chunk_list=chunk_list, first_chunks=first_chunks)
+         first_chunks=first_chunks, log_note=log_note)

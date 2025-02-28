@@ -15,12 +15,36 @@ def accrete_node(combo, new):
     return combo
 
 
+# Calculates a backup continent-ecozone value in case pixels don't have one.
+# There are many ways that are more efficient or at least succinct to calculate the mode of an array in Python,
+# but they don't work with Numba. So, I'm going with this.
+# https://chatgpt.com/share/e/67bf7958-351c-800a-bd00-259213586471
+@jit(nopython=True)
+def backup_continent_ecozone(continent_ecozone_block):
+
+    # Flattens 2D array to 1D for counting
+    continent_ecozone_block_flat = continent_ecozone_block.ravel()
+
+    # Removes 0s so that the mode of the remaining pixels can be determined
+    non_zero_values = continent_ecozone_block_flat[continent_ecozone_block_flat > 0]
+    counts = np.bincount(non_zero_values)  # Counts the number of pixels with that value
+    # print("Counts:", counts)
+    if len(counts) == 0:   # If the only values in the chunk are 0 -> there are no counts of non-zero pixels
+        continent_ecozone_fallback = 2020
+    else:   # Otherwise, there are non-zero values in the chunk -> uses the most common non-zero value
+        continent_ecozone_fallback = np.argmax(counts)
+
+    # print("Fallback 1 continent_ecozone for chunk:", continent_ecozone_fallback)
+    return continent_ecozone_fallback
+
+
 # Creates a separate dictionary for each chunk datatype so that they can be passed to Numba as separate arguments.
 # Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type (e.g., uint8, float32)
 # Note: need to add new code if inputs with other data types are added
 def create_typed_dicts(layers):
     # Initializes empty dictionaries for each type
     uint8_dict_layers = {}
+    uint16_dict_layers = {}
     int16_dict_layers = {}
     int32_dict_layers = {}
     float32_dict_layers = {}
@@ -39,6 +63,8 @@ def create_typed_dicts(layers):
         # If there is data, it puts the data in the corresponding dictionary for that datatype
         if array.dtype == np.uint8:
             uint8_dict_layers[key] = contig_array
+        elif array.dtype == np.uint16:
+            uint16_dict_layers[key] = contig_array
         elif array.dtype == np.int16:
             int16_dict_layers[key] = contig_array
         elif array.dtype == np.int32:
@@ -50,6 +76,7 @@ def create_typed_dicts(layers):
             # raise TypeError(f"{key} dtype not in list")
 
     # print(f"uint8 datasets: {uint8_dict_layers.keys()}")
+    # print(f"uint16 datasets: {uint16_dict_layers.keys()}")
     # print(f"int16 datasets: {int16_dict_layers.keys()}")
     # print(f"int32 datasets: {int32_dict_layers.keys()}")
     # print(f"float32 datasets: {float32_dict_layers.keys()}")
@@ -58,6 +85,11 @@ def create_typed_dicts(layers):
     typed_dict_uint8 = Dict.empty(
         key_type=types.unicode_type,
         value_type=types.Array(types.uint8, 2, 'C')  # Assuming 2D arrays of uint8
+    )
+
+    typed_dict_uint16 = Dict.empty(
+        key_type=types.unicode_type,
+        value_type=types.Array(types.uint16, 2, 'C')  # Assuming 2D arrays of int16
     )
 
     typed_dict_int16 = Dict.empty(
@@ -79,6 +111,9 @@ def create_typed_dicts(layers):
     for key, array in uint8_dict_layers.items():
         typed_dict_uint8[key] = array
 
+    for key, array in uint16_dict_layers.items():
+        typed_dict_uint16[key] = array
+
     for key, array in int16_dict_layers.items():
         typed_dict_int16[key] = array
 
@@ -88,7 +123,7 @@ def create_typed_dicts(layers):
     for key, array in float32_dict_layers.items():
         typed_dict_float32[key] = array
 
-    return typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32
+    return typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32
 
 
 # Classifies vegetation height classes for start and end of current interval
@@ -118,7 +153,7 @@ def classify_veg_height(LC_curr, LC_prev):
 def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_forest, interval_end_year):
 
     # For the first interval, the land cover in 2000 has to be checked for tall vegetation as well
-    if interval_end_year == (cn.first_model_year + cn.interval_years):
+    if interval_end_year == (cn.first_model_year_5_years + cn.interval_duration):
 
         # Criteria for excluding tall vegetation land cover
         not_tall_veg_condition = (
@@ -129,7 +164,7 @@ def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_f
 
         # Sets cell to the model start year wherever land cover is not tall vegetation
         if not_tall_veg_condition == 1:
-            most_recent_year_not_forest = cn.first_model_year
+            most_recent_year_not_forest = cn.first_model_year_5_years
 
 
     # Checks the current end of interval land cover
@@ -181,7 +216,7 @@ def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_f
     else:
         if (interval_end_year > most_recent_year_not_forest) & (most_recent_year_not_forest > 0):
 
-            years_of_forest_regrowth = years_of_forest_regrowth + cn.interval_years
+            years_of_forest_regrowth = years_of_forest_regrowth + cn.interval_duration
 
         else:  # No change
             years_of_forest_regrowth = years_of_forest_regrowth
@@ -490,12 +525,12 @@ def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c
         # 2 years         13               - ((2015              - 2000)                - 5) - 1   (year t-2)
         # 3 years         14               - ((2015              - 2000)                - 5) - 1   (year t-1)
         # 4 years         15               - ((2015              - 2000)                - 5) - 1   (year t)
-        gain_year_count = forest_dist_last - ((interval_end_year - cn.first_model_year) - cn.interval_years) - 1
+        gain_year_count = forest_dist_last - ((interval_end_year - cn.first_model_year_5_years) - cn.interval_duration) - 1
     else:
         # If a forest disturbance was not detected, the disturbance is assumed to occur in the middle of the interval
         # (year t-2), with removals until then (years t-4 and t-3). There are no removals in the year of assumed
         # disturbance or the years after.
-        gain_year_count = math.floor(cn.interval_years/2)
+        gain_year_count = math.floor(cn.interval_duration / 2)
 
 
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless)
@@ -641,12 +676,12 @@ def calc_T_T_non_stand_disturbs(node, burned_in_last_interval, agc_rf, bgc_rf, c
         # 2 years         13               - ((2015              - 2000)                - 5) - 1   (year t-2)
         # 3 years         14               - ((2015              - 2000)                - 5) - 1   (year t-1)
         # 4 years         15               - ((2015              - 2000)                - 5) - 1   (year t)
-        gain_year_count = forest_dist_last - ((interval_end_year - cn.first_model_year) - cn.interval_years) - 1
+        gain_year_count = forest_dist_last - ((interval_end_year - cn.first_model_year_5_years) - cn.interval_duration) - 1
     else:
         # If a forest disturbance was not detected, the disturbance is assumed to occur in the middle of the interval
         # (year t-2), with removals until then (years t-4 and t-3). There are no removals in the year of assumed
         # disturbance or the years after.
-        gain_year_count = math.floor(cn.interval_years/2)
+        gain_year_count = math.floor(cn.interval_duration / 2)
 
 
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless).
@@ -719,7 +754,7 @@ def calc_T_T_non_stand_disturbs(node, burned_in_last_interval, agc_rf, bgc_rf, c
     # Step 6: Updates gross removals to include post-disturbance gross removals,
     # if applicable (>=5 m height gain) (Mg C/ha/interval).
     # post_dist_gain_year_count here is the number of years between the disturbance and the end of the interval.
-    post_dist_gain_year_count = cn.interval_years - gain_year_count - 1
+    post_dist_gain_year_count = cn.interval_duration - gain_year_count - 1
     post_dist_gross_removals = post_dist_gain_year_count * post_dist_RF
 
     c_gross_removals_out = c_gross_removals_out - post_dist_gross_removals
@@ -801,10 +836,10 @@ def calc_T_T_no_disturbs(node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_
         # 2 years         13               - ((2015              - 2000)                - 5) - 1   (year t-2)
         # 3 years         14               - ((2015              - 2000)                - 5) - 1   (year t-1)
         # 4 years         15               - ((2015              - 2000)                - 5) - 1   (year t)
-        gain_year_count = most_recent_year_burned - ((interval_end_year - cn.first_model_year) - cn.interval_years) - 1
+        gain_year_count = most_recent_year_burned - ((interval_end_year - cn.first_model_year_5_years) - cn.interval_duration) - 1
     else:
         # If no fire was detected, removals occurred every year
-        gain_year_count = cn.interval_years
+        gain_year_count = cn.interval_duration
 
 
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless).
@@ -881,7 +916,7 @@ def calc_T_T_no_disturbs(node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_
     if most_recent_year_burned > 0:
 
         post_dist_RF = np.array([agc_rf, bgc_rf, agc_rf*deadwood_c_ratio, agc_rf*litter_c_ratio]).astype('float32')
-        post_dist_gain_year_count = cn.interval_years - gain_year_count - 1
+        post_dist_gain_year_count = cn.interval_duration - gain_year_count - 1
         post_dist_gross_removals = post_dist_gain_year_count * post_dist_RF
 
         c_gross_removals_out = c_gross_removals_out - post_dist_gross_removals
@@ -938,3 +973,4 @@ def calc_T_T_no_disturbs(node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_
     non_co2_fluxes_out = np.array([ch4_flux_out, n2o_flux_out]).astype('float32')
 
     return state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out, gain_year_count
+

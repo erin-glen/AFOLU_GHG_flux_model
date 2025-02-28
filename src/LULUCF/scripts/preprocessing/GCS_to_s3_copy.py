@@ -1,6 +1,5 @@
-#!/usr/bin/env python3
 """
-cloud-copy.py
+GCS_to_s3_copy.py
 
 A script to copy data from a Google Cloud Storage bucket/folder
 to an AWS S3 bucket/folder using Dask for parallelism on a Coiled cluster.
@@ -15,43 +14,42 @@ Features:
 
 Usage (example):
 
-  python cloud-copy.py \\
+  python -m scripts.preprocessing.GCS_to_s3_copy \\
       --source-root gs://my-gcs-bucket/data \\
       --dest-root s3://my-s3-bucket/data \\
       --task-file my_tasks.json \\
-      --resume
+      --resume  [Optional: to resume a copy that was in process]
 
-Requirements:
-    `conda env create -f environment.yml` 
+python -m scripts.utilities.create_cluster -n 11 -t 4 -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.GCS_to_s3_copy -cn AFOLU_flux_model_scripts --source_root gs://earthenginepartners-hansen/LCLU_2015_2023_v1 --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULULCF/landcover/composite/annual/v1/raw --task_file my_tasks.json
 
 Authentication:
-  - GCS: Set `GOOGLE_APPLICATION_CREDENTIALS` or have gcloud creds in your environment.
-    `gcloud auth application-default login` should set this all up for you
-  - AWS: Standard environment variables like `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc.
-    `export AWS_PROFILE=[your_profile]`
-    `aws sso login`
+  - GCS: Didn't need any GCS credentials in environment to run this
+  - AWS: Standard environment variables `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` need to be in Ubuntu
 
 Created by Chris Rowe with the assistance of https://chatgpt.com/share/e/6793f009-3660-8011-bfb4-e131c37acd69.
-Not run in WSL Ubuntu at this point. He ran it in whatever environment he had on his computer.
-##TODO Get this to run in WSL like the rest of the code.
+Modified by David Gibbs to run in WSL2 Ubuntu system with everything else in the AFOLU model.
 """
 
-import os
 import json
 import argparse
 import coiled
-from dask.distributed import Client
 import dask.bag as db
 import gcsfs
 import s3fs
 from botocore.exceptions import ClientError
+from dask.distributed import print
+
+# Project imports
+from ..utilities import constants_and_names as cn
+from ..utilities import universal_utilities as uu
 
 
 def list_all_files_gcs(source_path: str):
     """
     Recursively list all files in a GCS "directory".
     Returns a list of dicts: [{'src': <full_path>, 'src_size': <bytes>}]
-    
+
     Assumes source_path is either:
         - "gs://bucket/subdir"
         - "bucket/subdir"
@@ -62,14 +60,14 @@ def list_all_files_gcs(source_path: str):
     # Clean up source_path if it starts with "gs://"
     if source_path.startswith("gs://"):
         source_path = source_path.replace("gs://", "")
-    
+
     all_files = []
     # fsspec's find returns just files, not directories
     for dirpath, dirs, files in gcs_fs.walk(source_path):
         for fname in files:
             full_path = f"{dirpath}/{fname}"
             info = gcs_fs.info(full_path)
-            
+
             # Only proceed if it's actually a file
             if info.get("type") == "file":
                 # This is a file, so you can add it to tasks
@@ -90,14 +88,14 @@ def generate_task_file(source_files, src_root, dst_root, task_filename, check_de
         "dst_size": <bytes>,
         "status": "pending"
       }
-    
+
     The dst path is computed by replacing 'src_root' in the file's path
     with 'dst_root' (keeping the relative path).
-    
+
     Returns the list of tasks.
     """
     tasks = []
-    
+
     # Ensure we don't have trailing slashes
     src_root = src_root.rstrip("/")
     dst_root = dst_root.rstrip("/")
@@ -128,7 +126,7 @@ def generate_task_file(source_files, src_root, dst_root, task_filename, check_de
             try:
                 info = s3_fs.info(dst_path)  # will raise FileNotFoundError if not present
                 dest_size = info.get("size", 0)
-                
+
                 # If sizes match, mark it as completed
                 if dest_size == src_size:
                     status = "completed"
@@ -153,13 +151,13 @@ def generate_task_file(source_files, src_root, dst_root, task_filename, check_de
         })
 
         # Print progess on a single line
-        print(f'Check existing: {src_path} ({status}) {counter}', end="\r")
+        print(f'Check existing: {src_path} {dst_path} ({status}) {counter}', end="\r")
     print("\n")
 
-    
+
     with open(task_filename, "w") as f:
         json.dump(tasks, f, indent=2)
-    
+
     return tasks
 
 def load_task_file(task_filename):
@@ -183,6 +181,8 @@ def copy_file(task):
     gcs_fs = gcsfs.GCSFileSystem()
     s3_fs = s3fs.S3FileSystem()
 
+    print(f"Starting on {src_path}...")
+
     try:
         # 1. Check if file already exists in S3
         if s3_fs.exists(dst_path):
@@ -204,7 +204,7 @@ def copy_file(task):
                     if not chunk:
                         break
                     dst_f.write(chunk)
-        
+
         # Get the size of the newly written object
         dst_info = s3_fs.info(dst_path)
         task["dst_size"] = dst_info.get("size", 0)
@@ -227,7 +227,7 @@ def save_progress(task_filename, updated_tasks, all_tasks):
     """
     # Convert all_tasks to a dict by 'src' for quick lookup
     task_map = {t["src"]: t for t in all_tasks}
-    
+
     for ut in updated_tasks:
         src_key = ut["src"]
         task_map[src_key]["status"] = ut["status"]
@@ -238,10 +238,10 @@ def save_progress(task_filename, updated_tasks, all_tasks):
         # If a dest_size is present, store it in the master list
         if "dest_size" in ut:
             task_map[src_key]["dest_size"] = ut["dst_size"]
-    
+
     # Convert back to a list
     updated_list = list(task_map.values())
-    
+
     # Save to disk
     with open(task_filename, "w") as f:
         json.dump(updated_list, f, indent=2)
@@ -257,106 +257,100 @@ def estimate_time(total_bytes, concurrency, rate_per_worker=50e6):
         concurrency = 1
     return total_bytes / (concurrency * rate_per_worker)
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Copy data from GCS to S3 using Dask + Coiled."
-    )
-    parser.add_argument("--source-root", required=True,
-                        help="GCS bucket/folder (e.g., gs://my-bucket/data).")
-    parser.add_argument("--dest-root", required=True,
-                        help="S3 bucket/folder (e.g., s3://my-bucket/data).")
-    parser.add_argument("--task-file", default="copy_tasks.json",
-                        help="File to store tasks (JSON). Default: copy_tasks.json")
-    parser.add_argument("--resume", action="store_true",
-                        help="Resume from an existing task file, skipping completed tasks.")
-    parser.add_argument("--coiled-region", default="us-east-1",
-                        help="Coiled cluster region. Default: us-east-1")
-    
-    args = parser.parse_args()
-    
-    # Clean up user-provided paths
-    src_root = args.source_root.replace("gs://", "")
-    dst_root = args.dest_root.replace("s3://", "")
+def main(cluster_name, run_local, source_root, dest_root, task_file, resume):
 
-    # Check if we have access to s3
-    s3_fs = s3fs.S3FileSystem()
-    s3_fs.ls(dst_root)
-    
+    # Connects to Coiled cluster if not running locally
+    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+
+    # Clean up user-provided paths
+    src_root = source_root.replace("gs://", "")
+    dst_root = dest_root.replace("s3://", "")
+
+    print("Starting...")
     
     # 1. Create or load tasks
-    if not args.resume:
+    # This takes several minutes.
+    if not resume:
         print(f'Listing all files in GCS path: gs://{src_root} ...')
         files = list_all_files_gcs(src_root)
         total_size = sum(f["src_size"] for f in files)
+        print(files)
         print(f'  Found {len(files)} files, total size = {total_size/1e9:.2f} GB.\n')
-        
+
         tasks = generate_task_file(
             source_files=files,
             src_root=src_root,
             dst_root=dst_root,
-            task_filename=args.task_file
+            task_filename=task_file
         )
-        tasks = load_task_file(args.task_file)
+        tasks = load_task_file(task_file)
         total_size = sum(t["src_size"] for t in tasks)
         print(f'  Pending/failed tasks: {len(tasks)}, total size = {total_size/1e9:.2f} GB.\n')
 
     else:
-        print(f'Resuming from existing task file: {args.task_file}')
-        tasks = load_task_file(args.task_file)
+        print(f'Resuming from existing task file: {task_file}')
+        tasks = load_task_file(task_file)
         total_size = sum(t["src_size"] for t in tasks)
         print(f'  Pending/failed tasks: {len(tasks)}, total size = {total_size/1e9:.2f} GB.\n')
-    
+
     # 2. Provide a rough time estimate
     concurrency_guess = 10
     estimated_seconds = estimate_time(total_size, concurrency_guess)
     estimated_minutes = estimated_seconds / 60
     print(f'Estimated time (rough): {estimated_minutes:.1f} minutes (assuming ~{concurrency_guess} workers).')
-    
+
     # 3. Confirmation prompt
     choice = input("Continue with the copy? [y/N]: ")
     if choice.lower() not in ("y", "yes"):
         print("Aborting.")
         return
-    
-    # 4. Launch Coiled cluster
-    print("\nStarting Coiled cluster... (this may take a minute)")
-    cluster = coiled.Cluster(
-        name="gcs-to-s3-copy",
-        workspace="wri-forest-research",
-        region=args.coiled_region,
-        spot_policy="spot"
-        
-    )
-    client = Client(cluster)
-    print("Cluster is up!")
-    print("Dask Dashboard:", client.dashboard_link)
-    
-    # Optionally scale up to some number of workers right away
-    #cluster.scale(10)  # Attempt to spin up 10 workers
-    
-    # 5. Create a Dask Bag of tasks and run
+
+    # 4. Create a Dask Bag of tasks and run
     print("\nStarting the copy operations in parallel...")
     bag = db.from_sequence(tasks, npartitions=len(tasks))
     results = bag.map(copy_file).compute()
-    
-    # 6. Save final statuses back to the task file
+
+    # 5. Save final statuses back to the task file
     #    We need the entire list of tasks (including completed ones).
     #    The simplest approach is to read them all back and re-merge.
-    with open(args.task_file, "r") as f:
+    with open(task_file, "r") as f:
         all_tasks = json.load(f)
-    
-    save_progress(args.task_file, results, all_tasks)
-    
+
+    save_progress(task_file, results, all_tasks)
+
     # Summarize
     completed = sum(1 for r in results if r["status"] == "completed")
     failed = sum(1 for r in results if r["status"] == "failed")
     print(f'\nCopy completed! {completed} succeeded, {failed} failed.')
     if failed > 0:
         print("You can re-run with --resume to retry the failed tasks.")
-    
-    # 7. (Optional) Shut down cluster explicitly
-    print("Shutting down the cluster...")
-    cluster.close()
+
+    if not run_local:
+        # Closes the Dask client if not running locally
+        client.close()
 
 if __name__ == "__main__":
-    main()
+
+    parser = argparse.ArgumentParser(description="Copy data from GCS to S3 using Dask + Coiled.")
+    parser.add_argument('-cn', '--cluster_name', type=str, help='Coiled cluster name')
+    parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
+
+    parser.add_argument("--source_root", required=True,
+                        help="GCS bucket/folder (e.g., gs://my-bucket/data).")
+    parser.add_argument("--dest_root", required=True,
+                        help="S3 bucket/folder (e.g., s3://my-bucket/data).")
+    parser.add_argument("--task_file", default="copy_tasks.json",
+                        help="File to store tasks (JSON). Default: copy_tasks.json")
+    parser.add_argument("--resume", action="store_true",
+                        help="Resume from an existing task file, skipping completed tasks.")
+
+    args = parser.parse_args()
+
+    cluster_name = args.cluster_name
+    run_local = args.run_local
+    source_root = args.source_root
+    dest_root = args.dest_root
+    task_file = args.task_file
+    resume = args.resume
+
+    main(cluster_name, run_local, source_root, dest_root, task_file, resume)

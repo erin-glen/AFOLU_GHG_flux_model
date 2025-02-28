@@ -50,6 +50,7 @@ def get_chunk_stats(tile_to_process_uri):
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
     pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds_list, 4000, is_final, logger)
+    pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
     try:
         tile_to_process_chunk_per_ha = uu.get_tile_dataset_rio(tile_to_process_uri, 'Float32', bounds_list, 4000, is_final, logger)
@@ -230,7 +231,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     # print(results)
 
     # Creates a chunk stats spreadsheet and optionally uploads it to s3
-    uu.aggregate_chunk_stats(results, stage, no_upload)
+    uu.aggregate_chunk_stats(results, stage, no_upload, logger)
 
     # Ending time for stage
     end_time = uu.timestr()
@@ -240,9 +241,9 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     # Creates combined log if not deactivated
     if not run_local:
         log_note = f"{stage} run"
-        lu.compile_and_upload_log(no_log, client, cluster, stage, len(tiles_to_process), '1x1deg',
-                                  start_time, end_time, end_time,
-                                  0, 0, 'N/A', log_note)
+        lu.compile_worker_logs(no_log, client, cluster, stage, len(tiles_to_process), '1x1deg',
+                               start_time, end_time, end_time,
+                               0, 0, 'N/A', log_note)
 
     if not run_local:
         # Closes the Dask client if not running locally

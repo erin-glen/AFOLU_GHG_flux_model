@@ -8,41 +8,44 @@ import numpy as np
 ########
 
 ### Model version
-model_version = 0.2
+model_version = 0.3
 
 ### s3 buckets
 s3 = boto3.resource('s3')
 short_bucket_prefix = "gfw2-data"
 full_bucket_prefix = "s3://" + short_bucket_prefix
+full_bucket_prefix_length = len(full_bucket_prefix)+1
 s3_client = boto3.client("s3")
 
 ### Pattern for tile_ids in regex form
 tile_id_pattern = r"[0-9]{2}[A-Z][_][0-9]{3}[A-Z]"
 small_chunk_pattern = r'__-?\d+_-?\d+_-?\d+_-?\d+__'
 
-### IPCC codes
-forest_IPCC = 1
-cropland_IPCC = 2
-settlement_IPCC = 3
-wetland_IPCC = 4
-grassland_IPCC = 5
-otherland_IPCC = 6
+### m^2 to hectares
+m2_to_ha = 1/10000
 
-IPCC_class_max_val = 6  # Maximum value of IPCC class codes
+resolution = 0.00025
 
-### Model years
-first_model_year = 2000  # First year of model
-last_model_year = 2020   # Last year of model
+### Model years in 5-year intervals
+first_model_year_5_years = 2000  # First year of 5-year interval data
+last_model_year_5_years = 2020   # Last year of 5-year interval data
 
-# Number of years in interval.
-interval_years = 5    #TODO: calculate programmatically in numba function rather than coded here-- for greater flexibility.
-interval_end_years = list(range(first_model_year, last_model_year + 1, interval_years))[1:]
-
+# Number of years in interval
+interval_duration = 5    #TODO: calculate programmatically in numba function rather than coded here-- for greater flexibility.
+interval_end_years_5_years = list(range(first_model_year_5_years, last_model_year_5_years + 1, interval_duration))[1:]
 
 # Number of years of removals in a tree cover gain pixel
-NT_T_gain_year_count_default = math.ceil(interval_years / 2)
+NT_T_gain_year_count_default = math.ceil(interval_duration / 2)
 
-m2_to_ha = 1/10000
+### Model years in annual series
+first_model_year_annual = 2015  # First year of annual data
+last_model_year_annual = 2023   # Last year of annual data
+
+years_annual = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+interval_end_years_annual = years_annual[1:]
+
+possible_task_statuses = ["pending_", "preprocessing_", "calculating_", "error_"]
+
 
 ### Carbon constants
 
@@ -146,9 +149,14 @@ SDPT_other_code = 3
 ### File name paths and patterns
 ########
 
+##### Miscellaneous
+
 date_date_range_pattern = r'_\d{4}(_\d{4})?'   # Pattern for date (XXXX) or date range XXXX_YYYY in output file names
 
-s3_out_dir = 'climate/AFOLU_flux_model/LULUCF/outputs'
+AFOLU_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/"
+LULUCF_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/"
+
+s3_out_dir = 'climate/AFOLU_flux_model/LULUCF/outputs'   # Deliberate that it doesn't have / at the end
 
 local_log_path = "logs/"
 s3_log_path = "climate/AFOLU_flux_model/LULUCF/model_logs/"
@@ -159,22 +167,95 @@ local_chunk_stats_path = "chunk_stats/"
 s3_chunk_stats_path = "climate/AFOLU_flux_model/LULUCF/chunk_stats/"
 
 # 1x1 deg fishnet between 80N and 60N, 180W and 180E that intersects GADM3.6 and has GADM iso joined to it
-fishnet_s3_uri = "s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/"
+fishnet_1x1deg_all_land_s3_uri = f"{AFOLU_path}fishnet_1x1deg/20241125/"
+fishnet_1x1deg_all_land_name = "fishnet_GADM36_1x1deg__spatial_join_intersect__20241125.shp"
 
-land_cover_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/composite/"
-land_cover_pattern = "land_cover"
+progress_tracking_path = "climate/AFOLU_flux_model/task_progress_txts/"
 
-vegetation_height_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/"
-vegetation_height_pattern = "vegetation_height"
+##### Inputs
 
-annual_forest_disturbance_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/landcover/annual_forest_disturbance/raw/"
+land_cover_5_year_path = f"{LULUCF_path}landcover/composite/five_year/v1/raw/"
+land_cover_annual_path = f"{LULUCF_path}landcover/composite/annual/v1/raw/"
+land_cover_pattern = "land_cover_composite"  # Raw tifs don't have a pattern; this is just for use in the numba data dictionary
+
+vegetation_height_annual_GLAD_path = "https://glad.geog.umd.edu/Potapov/Global_TCH_2015-23"
+vegetation_height_5_year_path = f"{LULUCF_path}landcover/vegetation_height/five_year/v1/raw/"
+vegetation_height_5_year_pattern = "vegetation_height"
+vegetation_height_annual_path = f"{LULUCF_path}landcover/vegetation_height/annual/20250114/raw/"
+vegetation_height_annual_pattern = ""
+vegetation_height_pattern = "vegetation_height"  # This is just for use in the numba data dictionary
+
+
+forest_disturbance_annual_path = f"{LULUCF_path}landcover/annual_forest_disturbance/raw/"
 forest_disturbance_layer_name = "forest_disturbance"
+
+### Biomass and carbon densities
 
 agb_2000_path = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/Processed/"
 agb_2000_pattern = "t_aboveground_biomass_ha_2000"
 
+# From https://catalogue.ceda.ac.uk/uuid/bf535053562141c6bb7ad831f5998d77/
+# https://data.ceda.ac.uk/neodc/esacci/biomass/data/agb/maps/v5.01/geotiff
+# Bulk downloaded to computer (/mnt/c/GIS/AFOLU_flux_model/ESA_CCI_2015/) using WSL Ubuntu:
+# wget -e robots=off --mirror --no-parent -r https://dap.ceda.ac.uk/neodc/esacci/biomass/data/agb/maps/v5.01/geotiff/2015/
+agb_2015_path_raw = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/"
+agb_2015_pattern_raw = "ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0"
+agb_2015_path_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB/processed/20250217/"
+agb_2015_pattern = "AGB_2015_ESA_CCI_Mg_AGB_ha"
+
+agb_stdev_2015_path_raw = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB_stdev/raw/"
+agb_stdev_2015_pattern_raw = "ESACCI-BIOMASS-L4-AGB_SD-MERGED-100m-2015-fv5.0"
+agb_stdev_2015_path_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB_stdev/processed/20250217/"
+agb_stdev_2015_pattern = "AGB_stdev_2015_ESA_CCI_Mg_AGB_ha"
+
+
+AGC_density_path_part = "AGC_density_MgC_ha"
+BGC_density_path_part = "BGC_density_MgC_ha"
+deadwood_c_density_path_part = "deadwood_C_density_MgC_ha"
+litter_c_density_path_part = "litter_C_density_MgC_ha"
+
+# Carbon density patterns
+agb_dens_pattern = "AGB_density_MgAGB_ha"
+agc_dens_pattern = "AGC_density_MgC_ha"
+bgc_dens_pattern = "BGC_density_MgC_ha"
+deadwood_c_dens_pattern = "deadwood_C_density_MgC_ha"
+litter_c_dens_pattern = "litter_C_density_MgC_ha"
+soil_c_dens_pattern = "soil_c_MgC_ha"
+
+### Starting carbon pools (2000/2015)
+
+agc_2000_path = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{AGC_density_path_part}/"
+agc_2000_pattern = f"{agc_dens_pattern}_2000"
+
+bgc_2000_path = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{BGC_density_path_part}/"
+bgc_2000_pattern = f"{bgc_dens_pattern}_2000"
+
+deadwood_c_2000_path = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{deadwood_c_density_path_part}/"
+deadwood_c_2000_pattern = f"{deadwood_c_dens_pattern}_2000"
+
+litter_c_2000_path = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{litter_c_density_path_part}/"
+litter_c_2000_pattern = f"{litter_c_dens_pattern}_2000"
+
+soil_c_2000_path = f"climate/carbon_model/carbon_pools/soil_carbon/intermediate_full_extent/standard/20231108/"
+soil_c_2000_pattern = "soil_C_full_extent_2000_Mg_C_ha"
+
+agc_2015_path = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{AGC_density_path_part}/"
+agc_2015_pattern = f"{agc_dens_pattern}_2015"
+
+bgc_2015_path = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{BGC_density_path_part}/"
+bgc_2015_pattern = f"{bgc_dens_pattern}_2015"
+
+deadwood_c_2015_path = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{deadwood_c_density_path_part}/"
+deadwood_c_2015_pattern = f"{deadwood_c_dens_pattern}_2015"
+
+litter_c_2015_path = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{litter_c_density_path_part}/"
+litter_c_2015_pattern = f"{litter_c_dens_pattern}_2015"
+
 mangrove_agb_2000_path = f"{full_bucket_prefix}/climate/carbon_model/mangrove_biomass/processed/standard/20190220/"
 mangrove_agb_2000_pattern = "mangrove_agb_t_ha_2000"
+
+
+### Other inputs
 
 elevation_path = f"{full_bucket_prefix}/climate/carbon_model/inputs_for_carbon_pools/processed/elevation/20190418/"
 elevation_pattern = "elevation"
@@ -262,7 +343,7 @@ planted_forest_AGC_BGC_removal_factor_pattern = "annual_gain_rate_AGC_BGC_Mg_ha_
 oil_palm_2000_extent_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/IDN_MYS_plantation_pre_2000/processed/20200724/"
 oil_palm_2000_extent_pattern = "plantation_2000_or_earlier_processed"
 
-oil_palm_first_year_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/organic_soils/inputs/processed/descals_plantation/year/20241105/"
+oil_palm_first_year_path = f"{AFOLU_path}organic_soils/inputs/processed/descals_plantation/year/20241105/"
 oil_palm_first_year_pattern = "descals_year"
 
 # Originally from gfw-data-lake, so it's in 400x400 windows
@@ -277,8 +358,8 @@ organic_soil_extent_pattern = "peat_mask_processed"
 
 #cropland emissions
 cropland_emis_run_date =  '20241204'
-global_cropland_emissions_raw_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20241126/year_2020/all_sources/"
-global_cropland_emissions_processed_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/cropland_emissions/processed/{cropland_emis_run_date}/year_2020/all_sources"
+global_cropland_emissions_raw_dir = f"{AFOLU_path}cropland_emissions/raw__from_Cornell/20241126/year_2020/all_sources/"
+global_cropland_emissions_processed_dir = f"{AFOLU_path}cropland_emissions/processed/{cropland_emis_run_date}/year_2020/all_sources"
 
 global_cropland_mean_rate_harvest_area_all_crops_peat_2006_raw_pattern = "Global_grid_all_GHGs_cropland_mean_rate_harvest_area_CO2eq_all_crops_2006_kg_ha_CO2.tif"
 global_cropland_mean_rate_harvest_area_all_crops_peat_2006_processed_dir = f"{global_cropland_emissions_processed_dir}/mean_rate/including_peatland/2006/harvest_area/"
@@ -329,10 +410,9 @@ global_cropland_total_amount_all_crops_nonpeat_2019_processed_dir = f"{global_cr
 global_cropland_total_amount_all_crops_nonpeat_2019_processed_pattern = f"all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif"
 
 
-### Outputs
+##### Outputs
 
 outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs/"
-
 
 ### IPCC classes and change
 IPCC_class_path = "IPCC_basic_classes"
@@ -340,37 +420,17 @@ IPCC_class_pattern = "IPCC_classes"
 IPCC_change_path = "IPCC_basic_change"
 IPCC_change_pattern = "IPCC_change"
 
+### IPCC codes
+forest_IPCC = 1
+cropland_IPCC = 2
+settlement_IPCC = 3
+wetland_IPCC = 4
+grassland_IPCC = 5
+otherland_IPCC = 6
+
+IPCC_class_max_val = 6  # Maximum value of IPCC class codes
+
 land_state_node_path_part = "land_state_node"
-
-AGC_density_path_part = "AGC_density_MgC_ha"
-BGC_density_path_part = "BGC_density_MgC_ha"
-deadwood_c_density_path_part = "deadwood_C_density_MgC_ha"
-litter_c_density_path_part = "litter_C_density_MgC_ha"
-
-# Carbon density patterns
-agb_dens_pattern = "AGB_density_MgAGB_ha"
-agc_dens_pattern = "AGC_density_MgC_ha"
-bgc_dens_pattern = "BGC_density_MgC_ha"
-deadwood_c_dens_pattern = "deadwood_C_density_MgC_ha"
-litter_c_dens_pattern = "litter_C_density_MgC_ha"
-soil_c_dens_pattern = "soil_c_MgC_ha"
-
-carbon_pool_2000_date = "20240821"
-
-agc_2000_path = f"{outputs_path}{AGC_density_path_part}/2000/40000_pixels/{carbon_pool_2000_date}/"
-agc_2000_pattern = f"{agc_dens_pattern}_2000"
-
-bgc_2000_path = f"{outputs_path}{BGC_density_path_part}/2000/40000_pixels/{carbon_pool_2000_date}/"
-bgc_2000_pattern = f"{bgc_dens_pattern}_2000"
-
-deadwood_c_2000_path = f"{outputs_path}{deadwood_c_density_path_part}/2000/40000_pixels/{carbon_pool_2000_date}/"
-deadwood_c_2000_pattern = f"{deadwood_c_dens_pattern}_2000"
-
-litter_c_2000_path = f"{outputs_path}{litter_c_density_path_part}/2000/40000_pixels/{carbon_pool_2000_date}/"
-litter_c_2000_pattern = f"{litter_c_dens_pattern}_2000"
-
-soil_c_2000_path = f"{full_bucket_prefix}/climate/carbon_model/carbon_pools/soil_carbon/intermediate_full_extent/standard/20231108/"
-soil_c_2000_pattern = "soil_C_full_extent_2000_Mg_C_ha"
 
 land_state_pattern = "land_state_node"
 
@@ -502,6 +562,7 @@ LULUCF_output_folders = [
     f"{outputs_path}{land_state_node_path_part}/2015_2020/RES_pixels/DATE/"
 ]
 
+# TODO @Mel We shouldn't need this eventually.
 tile_id_list = [
                 '00N_000E', '00N_010E', '00N_020E', '00N_030E', '00N_040E', '00N_040W', '00N_050W', '00N_060W', '00N_070E',
                 '00N_070W', '00N_080W', '00N_090E', '00N_090W', '00N_100E', '00N_100W', '00N_110E', '00N_120E', '00N_130E',
