@@ -55,30 +55,26 @@ import re
 import io
 import boto3
 import dask.array as da
-import dask.bag as db
-import numpy as np
-import tempfile
-import rasterio
-from pyhdf.SD import SD, SDC
-from rasterio.warp import calculate_default_transform, reproject, Resampling
-from rasterio.transform import from_bounds
-from rasterio.enums import Compression
-from dask.distributed import Client
-import coiled
 import dask
 from dask import delayed
-
-import io
-import os
-import boto3
+from dask.distributed import Client
+import numpy as np
+import rasterio
+from rasterio.enums import Resampling
+from rasterio.transform import from_bounds
 import tempfile
 from pyhdf.SD import SD, SDC
+from dask import bag as db
 
 import argparse
 from dask.distributed import print
 
+# Project imports
 from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
+from ..utilities import log_utilities as lu
+from ..utilities import numba_utilities as nu
+from ..utilities import resize_cluster
 
 # S3 Configuration
 BUCKET_NAME = "gfw2-data"
@@ -86,7 +82,10 @@ BUCKET_NAME = "gfw2-data"
 S3_RAW_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/tiny_test/"
 # S3_OUTPUT_PATH = "fires/MODIS_burned_area/MCD64A1.061/processed_geotiffs/"
 S3_OUTPUT_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/tiny_test/outputs/"
+S3_INTERMEDIATE_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/tiny_test/outputs/intermediate_hv_year/"
+S3_FINAL_OUTPUT_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/tiny_test/outputs/final_10x10/"
 
+s3 = boto3.client("s3")
 
 def test_hdf_access():
     global BUCKET_NAME, s3, datasets
@@ -132,132 +131,112 @@ def test_hdf_access():
     except Exception as e:
         print(f"❌ Error opening HDF4 file: {e}")
 
+### 🔹 Utility Functions ###
+from collections import defaultdict
 
-def list_hdf_files_from_s3():
-    """Lists all MODIS HDF files in the S3 bucket using pagination."""
-    s3 = boto3.client("s3")  # Ensure client is initialized inside function
-    paginator = s3.get_paginator("list_objects_v2")  # ✅ Use paginator
+def extract_hv_from_filename(filename):
+    """Extracts the horizontal (h) and vertical (v) tile numbers from the filename."""
+    match = re.search(r"\.h(\d{2})v(\d{2})\.", filename)
+    if match:
+        h, v = int(match.group(1)), int(match.group(2))
+        return h, v
+    return None, None
 
-    hdf_files = []
+import re
+
+def extract_year_from_filename(filename):
+    """Extracts the year (YYYY) from the MODIS burned area filename."""
+    match = re.search(r"MCD64A1\.A(\d{4})", filename)
+    if match:
+        return int(match.group(1))
+    return None  # Return None if no match found
+
+
+def modis_tile_bounds(h, v):
+    """Computes geographic bounds for a given MODIS tile index (h, v)."""
+    tile_size = 10  # MODIS tiles are roughly 10° x 10°
+
+    lon_min = h * tile_size - 180
+    lon_max = lon_min + tile_size
+    lat_max = 90 - v * tile_size
+    lat_min = lat_max - tile_size
+
+    return [lon_min, lat_min, lon_max, lat_max]
+
+def list_hv_year_files_from_s3(selected_years):
+    """Lists and groups all MODIS HDFs by (h, v, year) from S3."""
+    s3 = boto3.client("s3")
+    paginator = s3.get_paginator("list_objects_v2")
+    hv_year_dict = defaultdict(list)  # Use a dictionary to group by (h, v, year)
+
     for page in paginator.paginate(Bucket=BUCKET_NAME, Prefix=S3_RAW_PATH):
         if "Contents" in page:
-            hdf_files.extend([obj["Key"] for obj in page["Contents"] if obj["Key"].endswith(".hdf")])
+            for obj in page["Contents"]:
+                key = obj["Key"]
+                year = extract_year_from_filename(key)
 
-    print(f"✅ Found {len(hdf_files)} HDF files in S3")
-    return hdf_files
+                if year in selected_years and key.endswith(".hdf"):
+                    # Extract h and v from filename (MCD64A1.AYYYYDDD.hXXvYY...)
+                    match = re.search(r"h(\d{2})v(\d{2})", key)
+                    if match:
+                        h, v = match.groups()
+                        hv_year = f"{year}_h{h}v{v}"
+                        hv_year_dict[hv_year].append(key)  # Group files by h-v-year
 
-
-# Function to extract year from MODIS HDF filename
-def extract_year_from_filename(filename):
-    """Extracts the year from the MODIS filename (MCD64A1.AYYYYDDD.hXXvYY...)."""
-    match = re.search(r"MCD64A1.A(\d{4})", filename)
-    return int(match.group(1)) if match else None
-
-def read_modis_hdf_s3(hdf_s3_key):
-    """Downloads an HDF4 file from S3, extracts Burn Date band, and converts to binary burned/not burned."""
-    try:
-        s3 = boto3.client("s3")
-        print(f"📂 Downloading {hdf_s3_key}")
-
-        # Download file from S3 to memory
-        file_stream = io.BytesIO()
-        s3.download_fileobj(BUCKET_NAME, hdf_s3_key, file_stream)
-        file_stream.seek(0)
-
-        # Write to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".hdf") as tmp_file:
-            tmp_path = tmp_file.name
-            tmp_file.write(file_stream.read())
-
-        print(f"✅ Temporary file created at {tmp_path}")
-
-        # Open HDF4 file
-        hdf4_file = SD(tmp_path, SDC.READ)
-
-        # Read 'Burn Date' dataset
-        if "Burn Date" in hdf4_file.datasets():
-            burn_date_data = hdf4_file.select("Burn Date")[:]
-
-            # ✅ Ensure masking of no-data values (-1)
-            burn_date_data = np.where(burn_date_data > 0, 1, 0)  # Burned = 1, Not burned = 0
-            burn_date_data = np.where(burn_date_data == -1, np.nan, burn_date_data)  # Mask no-data (-1)
-
-            print(f"✅ Successfully extracted 'Burn Date' from {hdf_s3_key}")
-        else:
-            print(f"⚠️ 'Burn Date' dataset is missing in {hdf_s3_key}")
-            os.remove(tmp_path)
-            return da.full((2400, 2400), np.nan, dtype=np.float32)  # Return a full NaN array
-
-        os.remove(tmp_path)
-        return da.from_array(burn_date_data, chunks=(1000, 1000))
-
-    except Exception as e:
-        print(f"❌ Error reading {hdf_s3_key}: {e}")
-        return da.full((2400, 2400), np.nan, dtype=np.float32)  # Ensure return is NaN-filled
+    print(f"✅ Found {len(hv_year_dict)} grouped h-v-year datasets in S3")
+    return list(hv_year_dict.items())  # Convert dictionary to a list of tuples
 
 
 
-# Function to reproject and resample to EPSG:4326 with 0.00025° resolution
-def reproject_resample(data, src_crs="ESRI:54008", dst_crs="EPSG:4326", bounds=None, resolution=0.00025):
-    """Reprojects and resamples MODIS raster to EPSG:4326 with 0.00025° resolution, handling NaN properly."""
-    if bounds is None:
-        raise ValueError("🚨 ERROR: Tile bounding box (bounds) must be provided!")
-
-    left, bottom, right, top = bounds  # Extract tile bounding box
-
-    print(f"🌍 Reprojecting tile {bounds} at resolution {resolution}")
-
-    # Calculate width and height based on resolution
-    width = int((right - left) / resolution)
-    height = int((top - bottom) / resolution)
-
-    print(f"✅ Target Reprojection Size: {width} x {height}")
-
-    dst_data = np.full((height, width), np.nan, dtype=np.float32)  # Initialize with NaN
-
-    transform, _, _ = calculate_default_transform(
-        src_crs, dst_crs, width, height, left=left, bottom=bottom, right=right, top=top
-    )
-
-    reproject(
-        source=data.compute(),  # Convert to NumPy before reprojecting
-        destination=dst_data,
-        src_transform=transform,
-        src_crs=src_crs,
-        dst_transform=transform,
-        dst_crs=dst_crs,
-        resampling=Resampling.nearest
-    )
-
-    return np.nan_to_num(dst_data, nan=0)  # Replace NaN with 0 for correct burned area values
-
-
-
-
-
-# Function to save raster data as Cloud Optimized GeoTIFF to S3
-def save_geotiff_to_s3(data, bounds, s3_key):
-    """Saves raster data as Cloud Optimized GeoTIFF to S3, ensuring NaN is properly handled."""
+def list_year_files_from_s3(selected_years):
+    """Lists all final 10x10-degree GeoTIFFs from S3 for selected years."""
     s3 = boto3.client("s3")
+    paginator = s3.get_paginator("list_objects_v2")
+    year_files = []
 
+    for page in paginator.paginate(Bucket=BUCKET_NAME, Prefix=S3_FINAL_OUTPUT_PATH):
+        if "Contents" in page:
+            for obj in page["Contents"]:
+                key = obj["Key"]
+                if any(str(year) in key for year in selected_years) and key.endswith(".tif"):
+                    year_files.append(key)
+
+    print(f"✅ Found {len(year_files)} final 10x10-degree files for selected years in S3")
+    return year_files
+
+
+def read_geotiff_from_s3(s3_key):
+    """Reads a GeoTIFF from S3 and returns it as a NumPy array."""
+    s3 = boto3.client("s3")
+    file_stream = io.BytesIO()
+    s3.download_fileobj(BUCKET_NAME, s3_key, file_stream)
+    file_stream.seek(0)
+
+    with rasterio.open(file_stream) as src:
+        return src.read(1)  # Read the first band
+
+
+def save_geotiff_to_s3(data, s3_folder, s3_key, bounds, crs="EPSG:4326"):
+    """Saves raster data as a GeoTIFF to S3 with correct bounds."""
+    s3 = boto3.client("s3")
     transform = from_bounds(*bounds, data.shape[1], data.shape[0])
 
     profile = {
-        "driver": "COG",
+        "driver": "GTiff",
         "dtype": "uint8",
-        "nodata": 0,  # ✅ Set nodata to 0 (ensures ocean remains 0)
+        "nodata": 0,
         "count": 1,
         "height": data.shape[0],
         "width": data.shape[1],
         "transform": transform,
-        "crs": "EPSG:4326",
+        "crs": crs,
         "compress": "DEFLATE",
-        "tiled": True
+        "tiled": True,
     }
 
     with rasterio.MemoryFile() as memfile:
         with memfile.open(**profile) as dataset:
-            dataset.write(data.astype(np.uint8), 1)  # Ensure correct dtype
+            dataset.write(data, 1)
 
         # Upload to S3
         s3.upload_fileobj(memfile, BUCKET_NAME, s3_key)
@@ -265,59 +244,128 @@ def save_geotiff_to_s3(data, bounds, s3_key):
 
 
 
-def process_year(year_hdf_files):
-    """Processes and mosaics HDFs for a single year into 10x10 degree GeoTIFFs."""
-    year, hdf_files = year_hdf_files
-    print(f"📅 Processing Year: {year} with {len(hdf_files)} files")
+### 🔹 Step 1: Process & Stack HDFs for Each h-v-Year ###
+def read_modis_hdf_s3(hdf_s3_key):
+    """Reads an HDF file from S3 and extracts the Burn Date band."""
+    s3 = boto3.client("s3")
+    file_stream = io.BytesIO()
+    s3.download_fileobj(BUCKET_NAME, hdf_s3_key, file_stream)
+    file_stream.seek(0)
 
-    if not hdf_files:
-        print(f"⚠️ No HDF files found for year {year}. Skipping...")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".hdf") as tmp_file:
+        tmp_file.write(file_stream.read())
+        tmp_path = tmp_file.name
+
+    try:
+        hdf4_file = SD(tmp_path, SDC.READ)
+        if "Burn Date" in hdf4_file.datasets():
+            burn_date_data = hdf4_file.select("Burn Date")[:]
+            burn_date_data = np.where(burn_date_data > 0, 1, 0)
+        else:
+            burn_date_data = np.zeros((2400, 2400), dtype=np.uint8)
+
+        return da.from_array(burn_date_data, chunks=(1000, 1000))
+    finally:
+        os.remove(tmp_path)
+
+
+def process_hv_year(hv_year_hdf_files):
+    """Processes and stacks all HDFs for a given h-v-year."""
+    hv_year, hdf_files = hv_year_hdf_files
+    print(f"📦 Processing {hv_year} with {len(hdf_files)} files")
+
+    # Extract h, v, and year from filename
+    h, v = extract_hv_from_filename(hdf_files[0])
+    year = extract_year_from_filename(hdf_files[0])
+
+    if h is None or v is None or year is None:
+        print(f"⚠️ Could not extract h, v, or year from {hv_year}. Skipping...")
         return
 
-    # Convert each file into a Dask task
-    print(f"🔄 Creating Dask Delayed tasks for {year}...")
+    # Compute correct geographic bounds
+    bounds = modis_tile_bounds(h, v)
+    print(f"🌍 Computed bounds for {hv_year}: {bounds}")
+
+    # Process HDFs
     tasks = [delayed(read_modis_hdf_s3)(f) for f in hdf_files]
+    dask_arrays = dask.compute(*tasks)
+    merged_data = da.stack(dask_arrays, axis=0).max(axis=0)
 
-    # Compute tasks in parallel
-    print(f"🚀 Running Dask Delayed computation for {year}...")
-    data_arrays = dask.compute(*tasks)
-
-    # Remove None values from the list
-    data_arrays = [arr for arr in data_arrays if arr is not None]
-
-    print(f"✅ Done creating data_arrays for {year}: {len(data_arrays)} elements")
-
-    if not data_arrays:
-        print(f"⚠️ No valid data found for year {year}. Skipping...")
-        return
-
-    # Stack arrays properly instead of concatenate (to preserve 2D shape)
-    print(f"🛠 Concatenating {year}...")
-    stacked_data = da.stack(data_arrays, axis=0)  # Shape (N, 2400, 2400)
-    print(f"🔍 Stacked Data Shape Before Merging: {stacked_data.shape}")
-
-    merged_data = stacked_data.max(axis=0)  # Merge across time to find all burned areas
-    print(f"✅ Merged Data Shape: {merged_data.shape}")
-
-    print(f"💾 Exporting TIFFs for {year}...")
-
-    for lon in range(-180, 180, 10):
-        for lat in range(-90, 90, 10):
-            bounds = [lon, lat, lon + 10, lat + 10]  # Define tile bounding box
-
-            print(f"📦 Processing tile {lon}, {lat} for {year} with bounds {bounds}...")
-
-            # 🔹 Pass `bounds` correctly
-            reprojected_data = reproject_resample(merged_data, "ESRI:54008", dst_crs="EPSG:4326", bounds=bounds)
-            print(f"✅ Reprojected Data Shape: {reprojected_data.shape}")
-
-            if reprojected_data.size > 0:
-                s3_key = f"{S3_OUTPUT_PATH}{year}/tile_{lon}_{lat}.tif"
-                save_geotiff_to_s3(reprojected_data, bounds, s3_key)
-
-    print(f"🎉 Finished processing {year}!")
+    s3_key = f"{S3_INTERMEDIATE_PATH}{year}/h{h}v{v}.tif"  # Organize outputs by year
+    save_geotiff_to_s3(merged_data.compute(), S3_INTERMEDIATE_PATH, s3_key, bounds)
+    print(f"🎉 Finished processing {hv_year}!")
 
 
+
+### 🔹 Step 2: Merge h-v-Year Rasters into 10x10-degree Rasters ###
+def merge_hv_years_to_10x10(year_files):
+    """Merges h-v-year rasters into final 10x10-degree burned area rasters."""
+    year = year_files[0].split("/")[-1].split("_")[0]
+    print(f"🔄 Merging {len(year_files)} rasters for {year}...")
+
+    tasks = [delayed(read_geotiff_from_s3)(f) for f in year_files]
+    dask_arrays = dask.compute(*tasks)
+    merged_data = da.stack(dask_arrays, axis=0).max(axis=0)
+
+    s3_key = f"{S3_FINAL_OUTPUT_PATH}{year}.tif"
+    save_geotiff_to_s3(merged_data.compute(), S3_FINAL_OUTPUT_PATH, s3_key, bounds=[-180, -90, 180, 90])
+    print(f"🎉 Finished merging h-v-year rasters for {year}!")
+
+
+def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=False,
+         # bounding_box=None,
+         log_note=None):
+
+    selected_years = [2000]  # <-- Modify this list as needed
+
+    use_shapefile = False
+    bounding_box = [-180, -60, 180, 80]
+
+    # Model stage being running
+    stage = f'burned_area_{selected_years}'
+
+    # Connects to Coiled cluster if not running locally
+    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+
+    # # Creates the log for the main function and populates it with basic run information
+    # main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note, run_local, stage)
+    #
+    # # Starting time for stage
+    # start_time = uu.timestr()
+    # main_logger.info(f"Stage {stage} started at: {start_time}")
+    # main_logger.info(f"Years for burned area: {selected_years}")
+
+    # test_hdf_access()
+
+
+    # main_logger.info(f"Chunks to process: {len(hdf_files_by_year)}")
+    #
+    # # Determines if the output file names for final versions of outputs should be used
+    # is_final = False
+    # if len(hdf_files_by_year) > 2000:
+    #     is_final = True
+    #     main_logger.info("Running as final model.")
+
+    # Accumulates all statistics and output messages from chunk analysis
+    # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
+    all_stats = []
+    return_messages = []
+
+    # ✅ Step 1: Group and process h-v-year stacks
+    hv_year_files = list_hv_year_files_from_s3(selected_years)
+    print(f"🔹 Processing {len(hv_year_files)} h-v-year stacks...")
+    print(f"🔹 Processing {hv_year_files} h-v-year stacks...")
+    db.from_sequence(hv_year_files).map(process_hv_year).compute()
+    # db.from_sequence(hv_year_files).map(delayed(process_hv_year)).compute()
+
+    # # ✅ Step 2: Merge h-v-Year Stacks into 10x10° Rasters
+    # year_files = list_year_files_from_s3(selected_years)
+    # # db.from_sequence(year_files).map(merge_hv_years_to_10x10).compute()
+    # db.from_sequence(year_files).map(delayed(merge_hv_years_to_10x10)).compute()
+
+    if not run_local:
+        # Closes the Dask client if not running locally
+        client.close()
 
 
 
@@ -326,40 +374,25 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Transfer geotifs from GLAD web folders to s3 bucket by year")
     parser.add_argument('-cn', '--cluster_name', type=str, help='Coiled cluster name')
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
+    parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
+    parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
+    parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
+    parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
     run_local = args.run_local
+    no_stats = args.no_stats
+    no_log = args.no_log
+    no_upload = args.no_upload
+    log_note = args.log_note
 
-    # Connects to Coiled cluster if not running locally
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    main(cluster_name, run_local, no_stats, no_log, no_upload,
+         # bounding_box=bounding_box,
+        log_note=log_note)
 
-    # test_hdf_access()
 
-    selected_years = [2000]  # <-- Modify this list as needed
-
-    # Fetch HDF files from S3
-    hdf_files = list_hdf_files_from_s3()
-    # print(hdf_files)
-
-    # Run pipeline
-    hdf_files_by_year = {y: [] for y in selected_years}
-    for f in hdf_files:
-        y = extract_year_from_filename(f)
-        if y in selected_years:
-            hdf_files_by_year[y].append(f)
-    # print(hdf_files_by_year)
-
-    print(f"✅ Processing {len(hdf_files_by_year)} years...")
-
-    # ✅ Run sequentially instead of using Dask Bag
-    for year, hdf_files in hdf_files_by_year.items():
-        process_year((year, hdf_files))
-
-    if not run_local:
-        # Closes the Dask client if not running locally
-        client.close()
 
 
 
