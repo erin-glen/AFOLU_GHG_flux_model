@@ -1386,16 +1386,14 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
             resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
 
     # Iterates through output folders and counts the number of output rasters.
-    # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
-    if chunk_size == 1.0:
-        for output_folder in cn.LULUCF_output_folders:
+    for output_folder in cn.LULUCF_output_folders:
 
-            output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
-            output_folder = re.sub('DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
+        output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
+        output_folder = re.sub('DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
 
-            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-            # print(geotiff_files)
+        geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+        main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+        # print(geotiff_files)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
