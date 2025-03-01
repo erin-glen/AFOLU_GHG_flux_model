@@ -44,115 +44,71 @@ Deleted 2020-2024 downloaded hdfs.
 
 
 hdf processing based on https://chatgpt.com/c/67b0d477-1fc0-800a-b41e-44d954cb9b3e
+I have not made this code align with other model components for the most part, e.g., no logs, no output stats, etc.
 
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.burned_area -cn AFOLU_flux_model_scripts
 
+6163 h-v stacks for 2001-2024  (268 h-v tiles in many years)
+
 """
 
+import argparse
 import os
 import re
 import io
 import boto3
 import dask.array as da
 import dask
-from dask import delayed
-from dask.distributed import Client
 import numpy as np
 import rasterio
+import tempfile
+from dask import delayed
+from dask.distributed import Client
 from rasterio.enums import Resampling
 from rasterio.transform import from_bounds
-import tempfile
-import re
 from pyhdf.SD import SD, SDC
 from dask import bag as db
-
+from rasterio.crs import CRS
 from collections import defaultdict
-import argparse
-from dask.distributed import print
 
 # Project imports
-from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
-from ..utilities import log_utilities as lu
-from ..utilities import numba_utilities as nu
-from ..utilities import resize_cluster
 
 # S3 Configuration
 BUCKET_NAME = "gfw2-data"
-# S3_RAW_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/"
-S3_RAW_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/2000_test/"
-# S3_RAW_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/2001_test/"
-# S3_OUTPUT_PATH = "fires/MODIS_burned_area/MCD64A1.061/processed_geotiffs/"
-# S3_OUTPUT_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/2000_test/outputs/"
-S3_INTERMEDIATE_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/2000_test/outputs/"
-# S3_INTERMEDIATE_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/2001_test/outputs/"
-S3_FINAL_OUTPUT_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/2000_test/outputs/final_10x10/"
+S3_RAW_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/"
+S3_INTERMEDIATE_PATH = "fires/MODIS_burned_area/MCD64A1.061/intermediate_outputs__hv_converted_to_raster/"
+S3_FINAL_OUTPUT_PATH = "fires/MODIS_burned_area/MCD64A1.061/final_outputs__Hansenized/"
+
+MODIS_SINUSOIDAL_PROJ4 = (
+    "+proj=sinu +lon_0=0 +datum=WGS84 +a=6371007.181 +b=6371007.181 +units=m +no_defs"
+)
 
 s3 = boto3.client("s3")
 
-def test_hdf_access():
-    global BUCKET_NAME, s3, datasets
-    # S3 Bucket Info
-    BUCKET_NAME = "gfw2-data"
-    S3_KEY = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/MCD64A1.A2001001.h00v08.061.2021307220352.hdf"
-    # Initialize Boto3 S3 Client
-    s3 = boto3.client("s3")
-    try:
-        print(f"📂 Attempting to open s3://{BUCKET_NAME}/{S3_KEY}")
-
-        # **Step 1: Download HDF4 file from S3 into memory**
-        file_stream = io.BytesIO()
-        s3.download_fileobj(BUCKET_NAME, S3_KEY, file_stream)
-        file_stream.seek(0)  # Reset pointer
-
-        # **Step 2: Write to a Temporary File**
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".hdf") as tmp_file:
-            tmp_path = tmp_file.name
-            tmp_file.write(file_stream.read())  # Write the full file to disk
-
-        print(f"✅ Temporary file created at {tmp_path}")
-
-        # **Step 3: Open the HDF4 file using PyHDF**
-        hdf4_file = SD(tmp_path, SDC.READ)
-
-        # **Step 4: List available datasets**
-        datasets = hdf4_file.datasets()
-        print("✅ Available datasets:", datasets)
-
-        # **Step 5: Read 'Burn Date' dataset**
-        if "Burn Date" in datasets:
-            burn_date_data = hdf4_file.select("Burn Date")[:]  # Read all data
-            print("✅ Sample Burn Date values:", burn_date_data[:5, :5])
-        else:
-            print("⚠️ 'Burn Date' dataset is missing!")
-
-        # **Step 6: Cleanup - Remove Temporary File**
-        os.remove(tmp_path)
-
-    except boto3.exceptions.S3UploadFailedError:
-        print(f"❌ FileNotFoundError: s3://{BUCKET_NAME}/{S3_KEY} does not exist!")
-    except Exception as e:
-        print(f"❌ Error opening HDF4 file: {e}")
-
-### Utility Functions ###
-
+### Utility Functions
 def extract_hv_from_filename(filename):
-    """Extracts the horizontal (h) and vertical (v) tile numbers from the MODIS filename."""
     match = re.search(r"h(\d{2})v(\d{2})", filename)
     if match:
         return int(match.group(1)), int(match.group(2))  # h, v
     return None, None
 
-
+def modis_tile_bounds(h, v):
+    """Returns MODIS tile boundaries in meters using the sinusoidal grid."""
+    tile_size_m = 1111950  # MODIS tile size in meters
+    x_min = -20015109 + (h * tile_size_m)
+    y_max = 10007555 - (v * tile_size_m)
+    x_max = x_min + tile_size_m
+    y_min = y_max - tile_size_m
+    return x_min, y_min, x_max, y_max
 
 def extract_year_from_filename(filename):
     """Extracts the year (YYYY) from the MODIS burned area filename."""
     match = re.search(r"MCD64A1\.A(\d{4})", filename)
     if match:
         return int(match.group(1))
-    return None  # Return None if no match found
-
+    return None
 
 def extract_bounds_from_hdf(hdf_s3_key):
     """Extracts spatial bounds and CRS from an HDF file."""
@@ -167,108 +123,51 @@ def extract_bounds_from_hdf(hdf_s3_key):
 
     try:
         hdf4_file = SD(tmp_path, SDC.READ)
-
-        # Check if metadata contains geolocation attributes
         metadata = hdf4_file.attributes()
+
         if "WESTBOUNDINGCOORDINATE" in metadata:
-            west = metadata["WESTBOUNDINGCOORDINATE"]
-            east = metadata["EASTBOUNDINGCOORDINATE"]
-            north = metadata["NORTHBOUNDINGCOORDINATE"]
-            south = metadata["SOUTHBOUNDINGCOORDINATE"]
-            crs = MODIS_SINUSOIDAL_PROJ4  # Use the PROJ4 string
-            print(f"✅ Extracted MODIS Bounds for {hdf_s3_key}: {west, south, east, north}, CRS: {crs}")
+            west, east = metadata["WESTBOUNDINGCOORDINATE"], metadata["EASTBOUNDINGCOORDINATE"]
+            north, south = metadata["NORTHBOUNDINGCOORDINATE"], metadata["SOUTHBOUNDINGCOORDINATE"]
+            crs = MODIS_SINUSOIDAL_PROJ4
             return [west, south, east, north], crs
 
-        # If metadata missing, fall back to MODIS Tile grid calculations
+        # Fallback to MODIS Tile grid calculations
         h, v = extract_hv_from_filename(hdf_s3_key)
-        bounds = modis_tile_bounds(h, v)
-        crs = MODIS_SINUSOIDAL_PROJ4  # Use the PROJ4 string
-        print(f"⚠️ Metadata missing for {hdf_s3_key}, falling back to MODIS grid calculations.")
-        print(f"🌍 Extracted bounds: {bounds}, CRS: {crs}")
-
-        return bounds, crs
+        return modis_tile_bounds(h, v), MODIS_SINUSOIDAL_PROJ4
 
     except Exception as e:
-        print(f"🚨 Error extracting bounds from {hdf_s3_key}: {e}")
-        return None, None  # Ensure a fallback behavior
-
+        print(f"Error extracting bounds from {hdf_s3_key}: {e}")
+        return None, None
     finally:
         os.remove(tmp_path)
 
-
-
-def list_hv_year_files_from_s3(selected_years):
-    """Lists and groups all MODIS HDFs by (h, v, year) from S3."""
+def list_hv_year_files_from_s3(year):
+    """Lists and groups all MODIS HDFs by (h, v) for a given year."""
     s3 = boto3.client("s3")
     paginator = s3.get_paginator("list_objects_v2")
-    hv_year_dict = defaultdict(list)  # Use a dictionary to group by (h, v, year)
+    hv_year_dict = defaultdict(list)
 
     for page in paginator.paginate(Bucket=BUCKET_NAME, Prefix=S3_RAW_PATH):
         if "Contents" in page:
             for obj in page["Contents"]:
                 key = obj["Key"]
-                year = extract_year_from_filename(key)
+                file_year = extract_year_from_filename(key)
+                if file_year == year and key.endswith(".hdf"):
+                    h, v = extract_hv_from_filename(key)
+                    hv_year = f"{year}_h{h}v{v}"
+                    hv_year_dict[hv_year].append(key)
 
-                if year in selected_years and key.endswith(".hdf"):
-                    # Extract h and v from filename (MCD64A1.AYYYYDDD.hXXvYY...)
-                    match = re.search(r"h(\d{2})v(\d{2})", key)
-                    if match:
-                        h, v = match.groups()
-                        hv_year = f"{year}_h{h}v{v}"
-                        hv_year_dict[hv_year].append(key)  # Group files by h-v-year
+    return list(hv_year_dict.items())
 
-    print(f"Found {len(hv_year_dict)} grouped h-v-year datasets in S3")
-    return list(hv_year_dict.items())  # Convert dictionary to a list of tuples
-
-
-
-def list_year_files_from_s3(selected_years):
-    """Lists all final 10x10-degree GeoTIFFs from S3 for selected years."""
-    s3 = boto3.client("s3")
-    paginator = s3.get_paginator("list_objects_v2")
-    year_files = []
-
-    for page in paginator.paginate(Bucket=BUCKET_NAME, Prefix=S3_FINAL_OUTPUT_PATH):
-        if "Contents" in page:
-            for obj in page["Contents"]:
-                key = obj["Key"]
-                if any(str(year) in key for year in selected_years) and key.endswith(".tif"):
-                    year_files.append(key)
-
-    print(f"✅ Found {len(year_files)} final 10x10-degree files for selected years in S3")
-    return year_files
-
-
-def read_geotiff_from_s3(s3_key):
-    """Reads a GeoTIFF from S3 and returns it as a NumPy array."""
-    s3 = boto3.client("s3")
-    file_stream = io.BytesIO()
-    s3.download_fileobj(BUCKET_NAME, s3_key, file_stream)
-    file_stream.seek(0)
-
-    with rasterio.open(file_stream) as src:
-        return src.read(1)  # Read the first band
-
-
-import rasterio
-from rasterio.crs import CRS
-
-MODIS_SINUSOIDAL_PROJ4 = (
-    "+proj=sinu +lon_0=0 +datum=WGS84 +a=6371007.181 +b=6371007.181 +units=m +no_defs"
-)
-
-def save_geotiff_to_s3(data, s3_folder, s3_key, bounds, crs=MODIS_SINUSOIDAL_PROJ4):
-    """Saves raster data as a GeoTIFF to S3, ensuring a valid CRS is used."""
+def save_geotiff_to_s3(data, s3_key, bounds, crs=MODIS_SINUSOIDAL_PROJ4):
+    """Saves raster data as a GeoTIFF to S3."""
     s3 = boto3.client("s3")
 
-    # Validate CRS using PROJ string
     try:
         crs = CRS.from_string(crs)
     except rasterio.errors.CRSError:
-        print(f"🚨 Invalid CRS provided, defaulting to MODIS Sinusoidal.")
-        crs = CRS.from_string(MODIS_SINUSOIDAL_PROJ4)  # Use the proper PROJ4 string
+        crs = CRS.from_string(MODIS_SINUSOIDAL_PROJ4)
 
-    # Create transformation matrix
     transform = from_bounds(*bounds, data.shape[1], data.shape[0])
 
     profile = {
@@ -279,7 +178,7 @@ def save_geotiff_to_s3(data, s3_folder, s3_key, bounds, crs=MODIS_SINUSOIDAL_PRO
         "height": data.shape[0],
         "width": data.shape[1],
         "transform": transform,
-        "crs": crs,  # Ensure this is valid
+        "crs": crs,
         "compress": "DEFLATE",
         "tiled": True,
     }
@@ -287,14 +186,9 @@ def save_geotiff_to_s3(data, s3_folder, s3_key, bounds, crs=MODIS_SINUSOIDAL_PRO
     with rasterio.MemoryFile() as memfile:
         with memfile.open(**profile) as dataset:
             dataset.write(data, 1)
-
-        # Upload to S3
         s3.upload_fileobj(memfile, BUCKET_NAME, s3_key)
-        print(f"✅ Saved GeoTIFF to s3://{BUCKET_NAME}/{s3_key}")
 
-
-
-### 🔹 Step 1: Process & Stack HDFs for Each h-v-Year ###
+### Processing Functions
 def read_modis_hdf_s3(hdf_s3_key):
     """Reads an HDF file from S3 and extracts Burn Date band, along with its bounds and CRS."""
     s3 = boto3.client("s3")
@@ -308,178 +202,55 @@ def read_modis_hdf_s3(hdf_s3_key):
 
     try:
         hdf4_file = SD(tmp_path, SDC.READ)
-        if "Burn Date" in hdf4_file.datasets():
-            burn_date_data = hdf4_file.select("Burn Date")[:]
+        burn_date_data = hdf4_file.select("Burn Date")[:] if "Burn Date" in hdf4_file.datasets() else np.zeros((2400, 2400), dtype=np.uint8)
+        burned_data = np.where(burn_date_data > 0, 1, 0)
 
-            # ✅ Mask out no-data values (-1)
-            burn_date_data = np.where(burn_date_data == -1, 0, burn_date_data)
-
-            # ✅ Convert burned pixels (1-366) to 1, and unburned to 0
-            burned_data = np.where(burn_date_data > 0, 1, 0)
-
-            print(f"📊 HDF: {hdf_s3_key}")
-            print(f"   🔹 Unique Values: {np.unique(burned_data, return_counts=True)}")
-            print(f"   🔹 Data Shape: {burned_data.shape}")
-
-        else:
-            print(f"⚠️ Missing 'Burn Date' dataset in {hdf_s3_key}")
-            burned_data = np.zeros((2400, 2400), dtype=np.uint8)
-
-        # ✅ Always return bounds and CRS along with data
         bounds, crs = extract_bounds_from_hdf(hdf_s3_key)
         return da.from_array(burned_data, chunks=(1000, 1000)), bounds, crs
 
     finally:
         os.remove(tmp_path)
 
-
-
-
-def modis_tile_bounds(h, v):
-    """Returns the approximate MODIS tile boundaries in meters using the sinusoidal grid."""
-    tile_size_m = 1111950  # MODIS tile size in meters
-    x_min = -20015109 + (h * tile_size_m)
-    y_max = 10007555 - (v * tile_size_m)
-    x_max = x_min + tile_size_m
-    y_min = y_max - tile_size_m
-    return x_min, y_min, x_max, y_max
-
-
 def process_hv_year(hv_year_hdf_files):
-    """Processes and stacks all HDFs for a given h-v-year."""
+    """Processes all HDFs for a given h-v-year."""
     hv_year, hdf_files = hv_year_hdf_files
-    print(f"Processing {hv_year} with {len(hdf_files)} files")
-
-    # Create Dask Delayed tasks
     tasks = [delayed(read_modis_hdf_s3)(f) for f in hdf_files]
-
-    # Compute all tasks in parallel
     results = dask.compute(*tasks)
 
-    # Ensure every result contains three elements (data, bounds, crs)
-    valid_results = [res for res in results if len(res) == 3]
+    print("  Done with reading hdfs for year")
 
-    if not valid_results:
-        print(f"🚨 No valid results for {hv_year}, skipping...")
-        return
-
-    dask_arrays, bounds_list, crs_list = zip(*valid_results)
-
-    # Ensure all rasters have the same CRS
-    unique_crs = set(crs_list)
-    if len(unique_crs) > 1:
-        print(f"⚠️ CRS mismatch in {hv_year}: {unique_crs}, using first CRS {crs_list[0]}")
-    crs = crs_list[0]  # Use the first valid CRS
-
-    # Ensure all rasters have the same bounds
-    unique_bounds = set(tuple(b) for b in bounds_list)
-    if len(unique_bounds) > 1:
-        print(f"⚠️ Bounds mismatch in {hv_year}, using first bounds {bounds_list[0]}")
-    bounds = bounds_list[0]  # Use the first valid bounds
-
-    # Merge all layers
+    dask_arrays, bounds_list, crs_list = zip(*results)
+    bounds, crs = bounds_list[0], crs_list[0]
     merged_data = da.stack(dask_arrays, axis=0).max(axis=0)
 
-    # Save the merged tile
+    print("  Done merging dask arrays for year")
+
     s3_key = f"{S3_INTERMEDIATE_PATH}{hv_year}.tif"
-    save_geotiff_to_s3(merged_data.compute(), S3_INTERMEDIATE_PATH, s3_key, bounds, crs=crs)
-    print(f"🎉 Finished processing {hv_year}!")
+    save_geotiff_to_s3(merged_data.compute(), s3_key, bounds, crs)
 
+    print("  Done uploading rasters for year")
 
-### 🔹 Step 2: Merge h-v-Year Rasters into 10x10-degree Rasters ###
-def merge_hv_years_to_10x10(year_files):
-    """Merges h-v-year rasters into final 10x10-degree burned area rasters."""
-    year = year_files[0].split("/")[-1].split("_")[0]
-    print(f"🔄 Merging {len(year_files)} rasters for {year}...")
+### Main Function
+def main(cluster_name, run_local, selected_years):
+    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, False)
 
-    tasks = [delayed(read_geotiff_from_s3)(f) for f in year_files]
-    dask_arrays = dask.compute(*tasks)
-    merged_data = da.stack(dask_arrays, axis=0).max(axis=0)
+    for year in selected_years:
+        hv_year_files = list_hv_year_files_from_s3(year)
+        print(f"Processing {year} with {len(hv_year_files)} h-v tiles...")
+        db.from_sequence(hv_year_files).map(process_hv_year).compute()
 
-    s3_key = f"{S3_FINAL_OUTPUT_PATH}{year}.tif"
-    save_geotiff_to_s3(merged_data.compute(), S3_FINAL_OUTPUT_PATH, s3_key, bounds=[-180, -90, 180, 90])
-    print(f"🎉 Finished merging h-v-year rasters for {year}!")
-
-
-def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         # bounding_box=None,
-         log_note=None):
-
-    selected_years = [2000]  # <-- Modify this list as needed
-
-    use_shapefile = False
-    bounding_box = [-180, -60, 180, 80]
-
-    # Model stage being running
-    stage = f'burned_area_{selected_years}'
-
-    # Connects to Coiled cluster if not running locally
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
-
-    # # Creates the log for the main function and populates it with basic run information
-    # main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note, run_local, stage)
-    #
-    # # Starting time for stage
-    # start_time = uu.timestr()
-    # main_logger.info(f"Stage {stage} started at: {start_time}")
-    # main_logger.info(f"Years for burned area: {selected_years}")
-
-    # test_hdf_access()
-
-
-    # main_logger.info(f"Chunks to process: {len(hdf_files_by_year)}")
-    #
-    # # Determines if the output file names for final versions of outputs should be used
-    # is_final = False
-    # if len(hdf_files_by_year) > 2000:
-    #     is_final = True
-    #     main_logger.info("Running as final model.")
-
-    # Accumulates all statistics and output messages from chunk analysis
-    # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-    all_stats = []
-    return_messages = []
-
-    # Step 1: Group and process h-v-year stacks
-    hv_year_files = list_hv_year_files_from_s3(selected_years)
-    print(f"Processing {len(hv_year_files)} h-v-year stacks...")
-    # print(f"Processing {hv_year_files} h-v-year stacks...")
-    db.from_sequence(hv_year_files).map(process_hv_year).compute()
-    # db.from_sequence(hv_year_files).map(delayed(process_hv_year)).compute()
-
-    # # Step 2: Merge h-v-Year Stacks into 10x10° Rasters
-    # year_files = list_year_files_from_s3(selected_years)
-    # # db.from_sequence(year_files).map(merge_hv_years_to_10x10).compute()
-    # db.from_sequence(year_files).map(delayed(merge_hv_years_to_10x10)).compute()
-
+    # Closes the Dask client if not running locally
     if not run_local:
-        # Closes the Dask client if not running locally
         client.close()
 
-
-
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser(description="Transfer geotifs from GLAD web folders to s3 bucket by year")
-    parser.add_argument('-cn', '--cluster_name', type=str, help='Coiled cluster name')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-cn', '--cluster_name', type=str, required=True)
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
-    parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
-    parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
-    parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
-    parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
-
     args = parser.parse_args()
 
-    cluster_name = args.cluster_name
-    run_local = args.run_local
-    no_stats = args.no_stats
-    no_log = args.no_log
-    no_upload = args.no_upload
-    log_note = args.log_note
+    main(args.cluster_name, args.run_local, list(range(2001, 2024)))  # Sequentially process each year
 
-    main(cluster_name, run_local, no_stats, no_log, no_upload,
-         # bounding_box=bounding_box,
-        log_note=log_note)
 
 
 
