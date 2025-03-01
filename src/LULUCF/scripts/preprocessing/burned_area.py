@@ -217,7 +217,7 @@ def list_hv_year_files_from_s3(selected_years):
                         hv_year = f"{year}_h{h}v{v}"
                         hv_year_dict[hv_year].append(key)  # Group files by h-v-year
 
-    print(f"✅ Found {len(hv_year_dict)} grouped h-v-year datasets in S3")
+    print(f"Found {len(hv_year_dict)} grouped h-v-year datasets in S3")
     return list(hv_year_dict.items())  # Convert dictionary to a list of tuples
 
 
@@ -348,7 +348,7 @@ def modis_tile_bounds(h, v):
 def process_hv_year(hv_year_hdf_files):
     """Processes and stacks all HDFs for a given h-v-year."""
     hv_year, hdf_files = hv_year_hdf_files
-    print(f"📦 Processing {hv_year} with {len(hdf_files)} files")
+    print(f"Processing {hv_year} with {len(hdf_files)} files")
 
     # Create Dask Delayed tasks
     tasks = [delayed(read_modis_hdf_s3)(f) for f in hdf_files]
