@@ -1,5 +1,14 @@
 """
 
+This script converts monthly stacks of burned area hdfs into annual geotifs of the original extent, projection, and resolution.
+Each hdf represents burned area for a given month in a given year, for a given horizontal-vertical (h-v) area.
+Annual output rasters show everywhere that was burned in that year (1 for burned).
+
+Part 1: Transfer hdfs for relevant years from DAAC to s3. Download to computer first, then upload to s3.
+I couldn't figure out a way to directly transfer from DAAC to s3.
+I also was having trouble getting the hdf processing code to use the hdfs directly on DAAC,
+so I decided to copy them to s3 for simplicity.
+
 MODIS burned area v6.1 data landing page: https://lpdaac.usgs.gov/products/mcd64a1v061/
 Site to download hdfs from: https://e4ftl01.cr.usgs.gov/MOTA/MCD64A1.061/
 These are hdf4, not hdf5. This affects what Python libraries to use with them.
@@ -42,14 +51,22 @@ time wget -r -np -nH --cut-dirs=2 -R "index.html*" -P MCD64A1_data -e robots=off
 170 minutes to upload
 Deleted 2020-2024 downloaded hdfs.
 
+Part 2: Run this preprocessing code on the hdfs in s3. The years to run are chosen in main().
 
 hdf processing based on https://chatgpt.com/c/67b0d477-1fc0-800a-b41e-44d954cb9b3e
 I have not made this code align with other model components for the most part, e.g., no logs, no output stats, etc.
 
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.burned_area -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.burned_area_hdf_to_raw_raster -cn AFOLU_flux_model_scripts
 
-6163 h-v stacks for 2001-2024  (268 h-v tiles in many years)
+python -m scripts.utilities.create_cluster -n 100 -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.burned_area_hdf_to_raw_raster -cn AFOLU_flux_model_scripts
+
+268 h-v stacks for every year 2001-2024, except for 2005, which has 267 h-v stacks (missing h01v08 in original hdf site)
+2001-2024: took about 1.5 hours to run, used about 600 Coiled credits, cost about $20 on AWS.
+
+Part 3: Hansenize rasters annual burned area rasters that are in MODIS projection/resolution.
+Uses the separate Hansenization preprocessing script for that.
 
 """
 
@@ -64,8 +81,7 @@ import numpy as np
 import rasterio
 import tempfile
 from dask import delayed
-from dask.distributed import Client
-from rasterio.enums import Resampling
+from dask.distributed import Client, print
 from rasterio.transform import from_bounds
 from pyhdf.SD import SD, SDC
 from dask import bag as db
@@ -73,13 +89,12 @@ from rasterio.crs import CRS
 from collections import defaultdict
 
 # Project imports
+from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
 
 # S3 Configuration
 BUCKET_NAME = "gfw2-data"
-S3_RAW_PATH = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/"
-S3_INTERMEDIATE_PATH = "fires/MODIS_burned_area/MCD64A1.061/intermediate_outputs__hv_converted_to_raster/"
-S3_FINAL_OUTPUT_PATH = "fires/MODIS_burned_area/MCD64A1.061/final_outputs__Hansenized/"
+
 
 MODIS_SINUSOIDAL_PROJ4 = (
     "+proj=sinu +lon_0=0 +datum=WGS84 +a=6371007.181 +b=6371007.181 +units=m +no_defs"
@@ -147,7 +162,7 @@ def list_hv_year_files_from_s3(year):
     paginator = s3.get_paginator("list_objects_v2")
     hv_year_dict = defaultdict(list)
 
-    for page in paginator.paginate(Bucket=BUCKET_NAME, Prefix=S3_RAW_PATH):
+    for page in paginator.paginate(Bucket=BUCKET_NAME, Prefix=cn.burned_area_hdf_path):
         if "Contents" in page:
             for obj in page["Contents"]:
                 key = obj["Key"]
@@ -217,26 +232,30 @@ def process_hv_year(hv_year_hdf_files):
     tasks = [delayed(read_modis_hdf_s3)(f) for f in hdf_files]
     results = dask.compute(*tasks)
 
-    print("  Done with reading hdfs for year")
+    print(f"  Done with reading {hv_year}")
 
     dask_arrays, bounds_list, crs_list = zip(*results)
     bounds, crs = bounds_list[0], crs_list[0]
     merged_data = da.stack(dask_arrays, axis=0).max(axis=0)
 
-    print("  Done merging dask arrays for year")
+    print(f"  Done merging dask arrays for {hv_year}")
 
-    s3_key = f"{S3_INTERMEDIATE_PATH}{hv_year}.tif"
+    s3_key = f"{cn.burned_area_hdf_converted_to_raw_raster_path}{hv_year}.tif"
     save_geotiff_to_s3(merged_data.compute(), s3_key, bounds, crs)
 
-    print("  Done uploading rasters for year")
+    print(f"  Done uploading rasters for {hv_year}")
 
 ### Main Function
 def main(cluster_name, run_local, selected_years):
+
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, False)
 
+    # Iterates through years. All h-v chunks are parallelized within a year.
+    # Years are not parallelized because it was too many tasks for Dask, I think.
+    # It was working better to iterate through years rather than try to do all h-v-year combos together.
     for year in selected_years:
         hv_year_files = list_hv_year_files_from_s3(year)
-        print(f"Processing {year} with {len(hv_year_files)} h-v tiles...")
+        print(f"Processing {year} with {len(hv_year_files)} h-v tiles: {uu.timestr()}...")
         db.from_sequence(hv_year_files).map(process_hv_year).compute()
 
     # Closes the Dask client if not running locally
@@ -249,7 +268,7 @@ if __name__ == "__main__":
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     args = parser.parse_args()
 
-    main(args.cluster_name, args.run_local, list(range(2001, 2024)))  # Sequentially process each year
+    main(args.cluster_name, args.run_local, list(range(2001, 2025)))  # Sequentially process each year
 
 
 

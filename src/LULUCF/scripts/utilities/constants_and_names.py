@@ -353,6 +353,10 @@ planted_forest_tree_crop_pattern = "planted_forest_tree_crop"
 burned_area_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/burn_year/burn_year_10x10_clip_by_year/"
 burned_area_pattern = "ba"
 
+# hdf and raw raster paths don't include bucket prefix because of special processing code
+burned_area_hdf_path = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/"
+burned_area_hdf_converted_to_raw_raster_path = "fires/MODIS_burned_area/MCD64A1.061/intermediate_outputs__hv_converted_to_raster/"
+
 organic_soil_extent_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"
 organic_soil_extent_pattern = "peat_mask_processed"
 
