@@ -356,8 +356,7 @@ burned_area_pattern = "ba"
 # hdf and raw raster paths don't include bucket prefix because of special processing code
 burned_area_hdf_dir = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/"
 burned_area_hdf_converted_to_raw_raster_dir = "fires/MODIS_burned_area/MCD64A1.061/1_intermediate_outputs__hdf_converted_to_raster/"
-burned_area_WGS84_dir = "fires/MODIS_burned_area/MCD64A1.061/2_intermediate_outputs__WGS84/"
-burned_area_final_dir = f"{full_bucket_prefix}/fires/MODIS_burned_area/MCD64A1.061/3_Hansenized_final/"
+burned_area_final_dir = "fires/MODIS_burned_area/MCD64A1.061/2_final_outputs__Hansenized/"
 burned_area_final_pattern = "burned_area_final"
 
 organic_soil_extent_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"

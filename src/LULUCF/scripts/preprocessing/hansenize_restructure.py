@@ -6,7 +6,7 @@ python -m scripts.preprocessing.hansenize -ct local -p drivers
 
 Coiled test area:
 python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
-python -m scripts.preprocessing.hansenize_restructure -cn AFOLU_flux_model_scripts -ct coiled -p burned_area -bb -120 30 -110 40 -cs 10
+python -m scripts.preprocessing.hansenize_restructure -cn AFOLU_flux_model_scripts -ct coiled -p drivers -bb -120 30 -110 40 -cs 10
 
 Coiled full run:
 python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 20 -m 8 -t 8
@@ -98,23 +98,6 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
             'processed_pattern': cn.agb_2015_pattern
         }
 
-    # Add MODIS burned area
-    if 'burned_area' in process:
-        download_upload_dictionary["burned_area_2001"] = {
-            'raw_dir': f"{cn.full_bucket_prefix}/{cn.burned_area_WGS84_dir}",
-            'raw_pattern': "2001_",
-            'vrt': f"/tmp/burned_area_2001.vrt",
-            'processed_dir': f"{cn.burned_area_final_dir}2001/",
-            'processed_pattern': f"{cn.burned_area_final_pattern}_2001"
-        }
-
-        # download_upload_dictionary["burned_area_2002"] = {
-        #     'raw_dir': f"{cn.full_bucket_prefix}/{cn.burned_area_hdf_converted_to_raw_raster_dir}",
-        #     'raw_pattern': "2002_",
-        #     'vrt': f"/tmp/burned_area_2002.vrt",
-        #     'processed_dir': f"{cn.burned_area_final_dir}2002/",
-        #     'processed_pattern': f"{cn.burned_area_final_pattern}_2002"
-        # }
 
     # Step 2: Create chunk list
     # Makes list of chunks to analyze from the bounding box and chunk size (deg)

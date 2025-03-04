@@ -1,10 +1,11 @@
 """
+Burned area preprocessing Step 1:
+
 This script converts monthly stacks of burned area hdfs into annual geotifs of the original extent, projection, and resolution.
 Each hdf represents burned area for a given month in a given year, for a given horizontal-vertical (h-v) area.
 Annual output rasters show everywhere that was burned in that year (1 for burned).
 
----Step 1: Run this preprocessing code on the hdfs in s3. The years to run are chosen in main().
-
+Run this preprocessing code on the hdfs in s3. The years to run are chosen in main().
 hdf processing based on https://chatgpt.com/c/67b0d477-1fc0-800a-b41e-44d954cb9b3e
 I have not made this code align with other model components for the most part, e.g., no logs, no output stats, etc.
 
