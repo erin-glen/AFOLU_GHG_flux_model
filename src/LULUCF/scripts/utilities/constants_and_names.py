@@ -200,7 +200,7 @@ agb_2000_pattern = "t_aboveground_biomass_ha_2000"
 # wget -e robots=off --mirror --no-parent -r https://dap.ceda.ac.uk/neodc/esacci/biomass/data/agb/maps/v5.01/geotiff/2015/
 agb_2015_path_raw = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/"
 agb_2015_pattern_raw = "ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0"
-agb_2015_path_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB/processed/20250217/"
+agb_2015_path_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB/processed/20250217test/"
 agb_2015_pattern = "AGB_2015_ESA_CCI_Mg_AGB_ha"
 
 agb_stdev_2015_path_raw = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB_stdev/raw/"
@@ -354,8 +354,11 @@ burned_area_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_i
 burned_area_pattern = "ba"
 
 # hdf and raw raster paths don't include bucket prefix because of special processing code
-burned_area_hdf_path = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/"
-burned_area_hdf_converted_to_raw_raster_path = "fires/MODIS_burned_area/MCD64A1.061/intermediate_outputs__hv_converted_to_raster/"
+burned_area_hdf_dir = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/"
+burned_area_hdf_converted_to_raw_raster_dir = "fires/MODIS_burned_area/MCD64A1.061/1_intermediate_outputs__hdf_converted_to_raster/"
+burned_area_WGS84_dir = "fires/MODIS_burned_area/MCD64A1.061/2_intermediate_outputs__WGS84/"
+burned_area_final_dir = f"{full_bucket_prefix}/fires/MODIS_burned_area/MCD64A1.061/3_Hansenized_final/"
+burned_area_final_pattern = "burned_area_final"
 
 organic_soil_extent_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"
 organic_soil_extent_pattern = "peat_mask_processed"

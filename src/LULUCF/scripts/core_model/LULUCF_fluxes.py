@@ -1173,6 +1173,9 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     ### Part 7: Saves numpy arrays as rasters and uploads to s3
     #TODO This needs to be made to match create_starting_carbon_pools upload. It shouldn't work.
+    #TODO Try using Rasterio memfile: https://gis.stackexchange.com/questions/332757/creating-an-in-memory-raster-with-rasterio
+    #         with rasterio.MemoryFile() as memfile:
+    #             with memfile.open(**profile) as dst:
     sys.quit()
 
     # Only saves arrays to geotifs and uploads them to s3 if enabled
