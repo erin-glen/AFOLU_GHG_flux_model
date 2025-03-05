@@ -499,6 +499,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
             resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
 
+
     # Iterates through output folders and counts the number of output rasters.
     for output_folder in starting_C_pool_output_folders:
         output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
