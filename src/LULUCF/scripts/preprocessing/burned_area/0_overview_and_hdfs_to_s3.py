@@ -52,6 +52,7 @@ Deleted local 2020-2024 downloaded hdfs.
 
 
 ---Step 1:
+1_burned_area_hdf_to_raw_raster.py
 This script converts monthly stacks of burned area hdfs into annual geotifs of the original extent, projection, and resolution.
 Each hdf represents burned area for a given month in a given year, for a given horizontal-vertical (h-v) area.
 Annual output rasters show everywhere that was burned in that year (1 for burned).
@@ -59,31 +60,14 @@ Annual output rasters show everywhere that was burned in that year (1 for burned
 hdf processing based on https://chatgpt.com/c/67b0d477-1fc0-800a-b41e-44d954cb9b3e
 I have not made this code align with other model components for the most part, e.g., no logs, no output stats, etc.
 
-python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.1_burned_area.1_burned_area_hdf_to_raw_raster -cn AFOLU_flux_model_scripts
-
-python -m scripts.utilities.create_cluster -n 100 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.1_burned_area.1_burned_area_hdf_to_raw_raster -cn AFOLU_flux_model_scripts
-
-268 h-v stacks for every year 2001-2024, except for 2005, which has 267 h-v stacks (missing h01v08 in original hdf site)
-2001-2024: took about 1.5 hours to run, used about 600 Coiled credits, cost about $20 on AWS.
-
-To download a set of monthly raw h-v hdfs locally from s3 for one year for checking:
-aws s3 cp s3://gfw2-data/fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/ . --recursive --exclude "*" --include "*A2024*h24v02*"
-
 
 ---Step 2: Convert annual burned area rasters to final Hansen rasters (10x10 deg, 0.00025x0.00025 deg, WGS84).
+2_reproject_resample_Hansenize.py
 
 The vrt-based general Hansenize script we have didn't work on MODIS burned area rasters for unclear reasons.
 I was able to make vrts of the MODIS BA rasters but then the vrts couldn't be read, perhaps because the
 alignment of the rasters inside them were off. I would've liked to be able to use the Hansenize script on
 the outputs of Step 1 (raw annual rasters) rather than making a separate burned area script but just couldn't get that working.
-
-python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.1_burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts
-
-python -m scripts.utilities.create_cluster -n 100 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.1_burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts
 """
 
 
