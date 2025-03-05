@@ -2,11 +2,15 @@
 Run from src/LULUCF
 
 Local:
-python -m src.LULUCF.scripts.preprocessing.hansenize -ct local -p drivers
+python -m scripts.preprocessing.hansenize -ct local -p drivers
 
-Coiled (Test):
-python -m scripts.utilities.create_cluster -cn hansenize_drivers_test -n 1 -m 8 -t 8
-python -m src.LULUCF.scripts.preprocessing.hansenize_restructure -cn hansenize_drivers_test -ct coiled -p drivers -bb -180 -60 180 80 -cs 10
+Coiled test area:
+python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
+python -m scripts.preprocessing.hansenize_restructure -cn AFOLU_flux_model_scripts -ct coiled -p drivers -bb -120 30 -110 40 -cs 10
+
+Coiled full run:
+python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 20 -m 8 -t 8
+python -m scripts.preprocessing.hansenize_restructure -cn AFOLU_flux_model_scripts -ct coiled -p drivers -bb -180 -60 180 80 -cs 10
 
 #QC
 cluster_name = 'Hansenize_drivers_data'
@@ -93,6 +97,7 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
             'processed_dir': cn.agb_2015_path_processed,
             'processed_pattern': cn.agb_2015_pattern
         }
+
 
     # Step 2: Create chunk list
     # Makes list of chunks to analyze from the bounding box and chunk size (deg)
@@ -340,7 +345,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Hansenize AFOLU model raster inputs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-ct', '--cluster_type', action='store', help='Run locally with Dask (local), test with 1 worker in coiled (test), or run with full coiled cluster (full)')
-    parser.add_argument('-p', '--processes', action='store', nargs='+', help='What datasets do you want to hansenize? Options: drivers, secondary_natural_forest, AGB2015')
+    parser.add_argument('-p', '--processes', action='store', nargs='+', help='What datasets do you want to hansenize? Options: drivers, secondary_natural_forest, AGB2015, burned_area')
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 

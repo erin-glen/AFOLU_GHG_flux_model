@@ -1173,6 +1173,9 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     ### Part 7: Saves numpy arrays as rasters and uploads to s3
     #TODO This needs to be made to match create_starting_carbon_pools upload. It shouldn't work.
+    #TODO Try using Rasterio memfile: https://gis.stackexchange.com/questions/332757/creating-an-in-memory-raster-with-rasterio
+    #         with rasterio.MemoryFile() as memfile:
+    #             with memfile.open(**profile) as dst:
     sys.quit()
 
     # Only saves arrays to geotifs and uploads them to s3 if enabled
@@ -1386,16 +1389,14 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
             resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
 
     # Iterates through output folders and counts the number of output rasters.
-    # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
-    if chunk_size == 1.0:
-        for output_folder in cn.LULUCF_output_folders:
+    for output_folder in cn.LULUCF_output_folders:
 
-            output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
-            output_folder = re.sub('DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
+        output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
+        output_folder = re.sub('DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
 
-            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-            # print(geotiff_files)
+        geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+        main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+        # print(geotiff_files)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
@@ -1430,7 +1431,7 @@ if __name__ == "__main__":
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--use_shapefile', help='Shapefile of chunks')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
-    parser.add_argument('-y', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
+    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')

@@ -1267,29 +1267,6 @@ def get_cluster_info(client, cluster):
 # Creates an empty txt file for each chunk in s3.
 # Uses concurrent.futures to parallelize the txt creation. Otherwise, it's very slow.
 # Based on https://chatgpt.com/share/e/67bf0fd9-7cb0-800a-8666-2becd97d45a7
-# def create_s3_task_files(stage, chunk_list):
-#
-#     s3 = boto3.client("s3")
-#
-#     def upload_task_file(chunk):
-#         """Uploads a single task file to S3."""
-#         chunk_id_str = boundstr(chunk)  # Converts chunk ID to string
-#         key = f"{cn.progress_tracking_path}pending_{chunk_id_str}_{stage}.txt"
-#
-#         try:
-#             s3.put_object(Bucket=cn.short_bucket_prefix, Key=key, Body="")
-#         except Exception as e:
-#             print(f"Error creating task file {key}: {e}")
-#
-#     # Uses ThreadPoolExecutor for parallel uploads
-#     max_workers = min(50, len(chunk_list))  # Limits workers to 50 or chunk count. With max_workers = 200, it stopped printing to the console after.
-#     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-#         executor.map(upload_task_file, chunk_list)
-#
-#     print(f"Created task tracking files in {cn.progress_tracking_path}")
-
-# Creates an empty txt file for each chunk in s3.
-# Uses concurrent.futures to parallelize the txt creation. Otherwise, it's very slow.
 # Uses ThreadPoolExecutor and `as_completed()` to avoid blocking.
 def create_s3_task_files(stage, chunk_list):
 

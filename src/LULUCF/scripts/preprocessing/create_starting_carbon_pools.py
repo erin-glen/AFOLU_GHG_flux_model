@@ -12,7 +12,7 @@ Time: 21:21 through calculation, 22:17 with tile stats; Credits: 110; Cost: $3.6
 python -m scripts.utilities.create_cluster -n 70 -t 9 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
 Max memory usage: ~XXX GB/worker
-Time: 190:00 through calculation, 20:03 with tile stats; Credits: 103; Cost: $3.50
+Time: 19:00 through calculation, 20:03 with tile stats; Credits: 103; Cost: $3.50
 """
 
 import argparse
@@ -272,7 +272,8 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         ### Part 4: Creates starting carbon pool densities
 
         lu.print_and_log(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
-        print(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}")  # Need this in order to print during full runs
+        if is_final:
+            print(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}")  # Need this in order to print during full runs
         uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
         # Create AGC, BGC, deadwood C and litter C densities in selected starting year
@@ -364,10 +365,11 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
     except Exception as e:
 
-        lu.print_and_log(f"Error processing chunk {bounds}: {e}: {uu.timestr()}", is_final, logger_worker)
-        print(f"Error processing chunk {bounds}: {e}: {uu.timestr()}")
+        return_message = f"Error processing chunk {bounds}: {e}: {uu.timestr()}"
+
+        lu.print_and_log(return_message, is_final, logger_worker)
+        print(return_message)
         uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
-        return_message = f"Error processing chunk {bounds}: {e}"
 
     return return_message, chunk_stats  # Return both the success message and the statistics
 
@@ -498,17 +500,15 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
             resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
 
-    # Iterates through output folders and counts the number of output rasters.
-    # Only useful when doing a global run (1x1 deg, 4000x4000 pixels).
-    if chunk_size == 1.0:
-        for output_folder in starting_C_pool_output_folders:
-            output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
-            output_folder = re.sub('DATE', uu.timestr()[:8],
-                                          output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
-            output_folder = f"{cn.full_bucket_prefix}/{output_folder}"   # Need to prepend s3 and bucket name for counting
 
-            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+    # Iterates through output folders and counts the number of output rasters.
+    for output_folder in starting_C_pool_output_folders:
+        output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
+        output_folder = re.sub('DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
+        output_folder = f"{cn.full_bucket_prefix}/{output_folder}"   # Need to prepend s3 and bucket name for counting
+
+        geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+        main_logger.info(f"Output rasters in {output_folder}: {file_count}")
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
@@ -566,7 +566,6 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    # Create the cluster with command line arguments
     main(cluster_name, year, run_local, no_stats, no_log, no_upload, use_shapefile,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)
