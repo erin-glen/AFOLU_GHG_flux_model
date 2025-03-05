@@ -364,10 +364,11 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
     except Exception as e:
 
-        lu.print_and_log(f"Error processing chunk {bounds}: {e}: {uu.timestr()}", is_final, logger_worker)
-        print(f"Error processing chunk {bounds}: {e}: {uu.timestr()}")
+        return_message = f"Error processing chunk {bounds}: {e}: {uu.timestr()}"
+
+        lu.print_and_log(return_message, is_final, logger_worker)
+        print(return_message)
         uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
-        return_message = f"Error processing chunk {bounds}: {e}"
 
     return return_message, chunk_stats  # Return both the success message and the statistics
 
