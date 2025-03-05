@@ -200,7 +200,7 @@ def process_hv_year(hv_year_hdf_files):
 ### Main Function
 def main(cluster_name, run_local, selected_years):
 
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, False)
+    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Iterates through years. All h-v chunks are parallelized within a year.
     # Years are not parallelized because it was too many tasks for Dask, I think.

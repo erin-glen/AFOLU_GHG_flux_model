@@ -160,7 +160,7 @@ s3_out_dir = 'climate/AFOLU_flux_model/LULUCF/outputs'   # Deliberate that it do
 
 local_log_path = "logs/"
 s3_log_path = "climate/AFOLU_flux_model/LULUCF/model_logs/"
-combined_log = "AFOLU_model_log"
+combined_log = "AFOLU"
 
 # Local path for chunk stats
 local_chunk_stats_path = "chunk_stats/"
