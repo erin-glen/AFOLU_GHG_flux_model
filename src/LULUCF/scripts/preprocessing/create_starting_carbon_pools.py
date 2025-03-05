@@ -272,7 +272,8 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         ### Part 4: Creates starting carbon pool densities
 
         lu.print_and_log(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
-        print(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}")  # Need this in order to print during full runs
+        if is_final:
+            print(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}")  # Need this in order to print during full runs
         uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
         # Create AGC, BGC, deadwood C and litter C densities in selected starting year
