@@ -12,7 +12,7 @@ Time: 21:21 through calculation, 22:17 with tile stats; Credits: 110; Cost: $3.6
 python -m scripts.utilities.create_cluster -n 70 -t 9 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
 Max memory usage: ~XXX GB/worker
-Time: 190:00 through calculation, 20:03 with tile stats; Credits: 103; Cost: $3.50
+Time: 19:00 through calculation, 20:03 with tile stats; Credits: 103; Cost: $3.50
 """
 
 import argparse
