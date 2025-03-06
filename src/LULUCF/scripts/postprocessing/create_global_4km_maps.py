@@ -178,7 +178,7 @@ def main(cluster_name):
             print(f"Stage {stage} started at: {start_time}")
 
             mg_ha_yr_tile = f"{items['mg_ha_yr_dir']}{tile_id}{items['mg_ha_yr_pattern']}"
-            pixel_area_tile = f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{tile_id}.tif"
+            pixel_area_tile = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
             per_pixel_tile_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
             per_pixel_output_path = items["mg_per_pixel_dir"]
 

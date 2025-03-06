@@ -451,25 +451,30 @@ def xy_to_tile_id(top_left_x, top_left_y):
 
 
 # Creates the list of chunks to process given an approach: a bounding box or a shapefile attribute table
-def create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger):
+def create_chunk_list(bounding_box, use_shapefile, chunk_size_deg, first_chunks, fishnet_iso_df, main_logger):
 
     # Makes list of chunks to analyze from the bounding box and chunk size (deg)
     # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
-    if bounding_box and chunk_size:
+    if bounding_box and chunk_size_deg:
+
+        chunk_size_pixels = int(cn.full_raster_dims * chunk_size_deg / 10)
 
         main_logger.info("Using bounding box and chunk size to determine chunks")
         main_logger.info(f"Chunk source: Bounding box {bounding_box}")
-        main_logger.info(f"Chunk size: {chunk_size} degree")
-        chunk_list = get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
+        main_logger.info(f"Chunk size: {chunk_size_deg} degree, {chunk_size_pixels} pixels")
+        chunk_list = get_chunk_bounds_from_bounding_box(bounding_box, chunk_size_deg)
 
-    # Makes list of chunks to analyze from a shapefile attribute table.
+
+    # Makes list of chunks to analyze from an attribute table of a shapefile of 1x1 degree chunks.
     # Attribute table column must be formatted as W_S_E_N.
     # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
     elif use_shapefile:
 
+        chunk_size_pixels = int(cn.full_raster_dims * 1/10)
+
         main_logger.info("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
-        main_logger.info(f"Chunk source: 1x1 tile index shapefile {cn.fishnet_1x1deg_all_land_s3_uri}{cn.fishnet_1x1deg_all_land_name}")
-        main_logger.info(f"Chunk size: 1 degree")
+        main_logger.info(f"Chunk source: 1x1 degree tile index shapefile {cn.fishnet_1x1deg_all_land_s3_uri}{cn.fishnet_1x1deg_all_land_name}")
+        main_logger.info(f"Chunk size: 1 degree, {chunk_size_pixels} pixels")
 
         # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
         fishnet_1x1_chunk_id_df = fishnet_iso_df[['chunk_id']]  # Creates dataframe
@@ -485,7 +490,8 @@ def create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fis
     else:
         main_logger.info("Chunk list cannot be determined")
         sys.exit()
-    return chunk_list
+
+    return chunk_list, chunk_size_pixels
 
 
 # Calculates the elapsed time for a stage
@@ -590,6 +596,53 @@ def check_for_tile(download_dict, is_final, logger):
     lu.print_and_log(f"Tile id {tile_id} does not exist. Skipped chunk: {timestr()}", is_final, logger)
 
     return False
+
+
+# Turns a list of basic output directory names into a list of fully specified directories based on output chunk size, run date, model type, and output years
+def create_output_dir_name_list(interval_type, chunk_size_pixels, model_type, main_logger):
+
+    # List of directories for outputs
+    output_full_dirs = []
+
+    # Establishes the years of outputs (ends of intervals) and the interval durations for different model interval types
+    if interval_type == cn.intervals_five_years:
+        output_years = cn.interval_end_years_5_years
+        intervals = cn.interval_duration - 1  # -1 because the interval really starts one year after the end of the previous interval
+    elif interval_type == cn.intervals_annual:
+        output_years = cn.interval_end_years_annual
+        intervals = 1
+    else:  # Hybrid model (2000-2023)
+        output_years = cn.interval_end_years_5_years[:-1] + cn.interval_end_years_annual
+        # Intervals for hybrid model are a combination of 4-years (for the 5-year intervals) and annual
+        intervals = [cn.interval_duration-1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
+        # intervals = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]
+
+    main_logger.info(f"Model output years: {output_years}")
+
+    # Replaces the DATE, CHUNK_SIZE, and MODEL_TYPE parts of the directories with values specific to the run
+    core_output_dirs = [path.replace("DATE", timestr()[:8]) for path in cn.LULUCF_core_output_dirs]
+    core_output_dirs = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in core_output_dirs]
+    core_output_dirs = [path.replace("MODEL_TYPE", model_type) for path in core_output_dirs]
+
+    # Iterates through the list of core output directories and adds the correct output years (stocks) or year ranges (fluxes) to each
+    for basic_output in core_output_dirs:
+        for count, output_year in enumerate(output_years):
+
+            # For outputs that are a specific year (stocks)
+            if "YEAR" in basic_output:
+                output_dir = basic_output.replace('YEAR', str(output_year))
+            # For outputs that cover a range of years (fluxes)
+            else:
+                if interval_type == cn.intervals_five_years:
+                    output_dir = basic_output.replace('START_END', f"{str(output_year-intervals)}_{str(output_year)}")
+                elif interval_type == cn.intervals_annual:
+                    output_dir = basic_output.replace('START_END',f"{str(output_year-intervals)}_{str(output_year)}")
+                else:  # Hybrid model (2000-2023)
+                    output_dir = basic_output.replace('START_END', f"{str(output_year-intervals[count])}_{str(output_year)}")
+
+            output_full_dirs.append(output_dir)
+
+    return output_full_dirs
 
 
 # Checks if a geotif has data in it.

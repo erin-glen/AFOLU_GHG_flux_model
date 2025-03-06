@@ -233,11 +233,12 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # Model stage being running
     stage = f'Hansenize_burned_area_{start_year}_{end_year}'
+    model_type = 'standard'
 
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header("N/A", False, client, cluster, log_note, run_local, stage)
+    main_logger, main_log_local_path = lu.populate_main_log_header("N/A", False, client, cluster, log_note, run_local, model_type, stage)
 
     # Starting time for stage
     start_time = uu.timestr()
@@ -250,7 +251,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     fishnet_iso_df = uu.fishnet_with_GADM_iso()
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_list = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
     # chunk_list = get_10x10_grid()
     # chunk_list = [[40, 50, 50, 60]]  # Test area in central Russia that originally wasn't getting all the MODIS tiles within this 10x10 deg area

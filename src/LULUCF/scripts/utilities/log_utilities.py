@@ -113,7 +113,7 @@ def setup_logging_main(log_filename=None):
 
 
 # Populates the log for the main function with various header and run information
-def populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note, run_local, stage):
+def populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note, run_local, model_type, stage):
 
     main_log_name = f"{cn.combined_log}_main_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
     main_log_local_path = f"{cn.local_log_path}{main_log_name}"
@@ -127,6 +127,7 @@ def populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_n
     else:
         worker_memory, n_workers, nthreads = uu.get_cluster_info(client, cluster)
 
+    main_logger.info(f"Model type: {model_type}")
     main_logger.info(f"Stage: {stage}")
     main_logger.info(f"Model version: {cn.model_version}")
     main_logger.info(f"Number of workers: {n_workers}")

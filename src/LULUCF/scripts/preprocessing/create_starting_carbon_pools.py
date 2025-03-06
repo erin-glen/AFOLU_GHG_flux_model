@@ -310,7 +310,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         [in_dict.clear() for in_dict in in_dicts]
 
         # The relevant pixel area (m^2) file in s3
-        pixel_area_uri = f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{tile_id}.tif"
+        pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
 
         # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
         pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger_worker)
@@ -379,6 +379,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Model stage being running
     stage = f'starting_carbon_pools_{year}'
+    model_type = 'standard'
 
     # Determines if argument for year is valid
     if year in [2000, 2015]:
@@ -391,7 +392,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note, run_local, stage)
+    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note, run_local, model_type, stage)
 
     # Starting time for stage
     start_time = uu.timestr()
@@ -404,7 +405,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     fishnet_iso_df = uu.fishnet_with_GADM_iso()
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_list = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
@@ -428,24 +429,24 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Dictionary of data to download (inputs to model)
     download_dict = {
-        cn.elevation_pattern: f"{cn.elevation_path}{sample_tile_id}_{cn.elevation_pattern}.tif",
-        cn.climate_domain_pattern: f"{cn.climate_domain_path}{sample_tile_id}_{cn.climate_domain_pattern}.tif",
-        cn.precipitation_pattern: f"{cn.precipitation_path}{sample_tile_id}_{cn.precipitation_pattern}.tif",
-        cn.r_s_ratio_pattern: f"{cn.r_s_ratio_path}{sample_tile_id}_{cn.r_s_ratio_pattern}.tif",
-        cn.continent_ecozone_pattern: f"{cn.continent_ecozone_path}{sample_tile_id}_{cn.continent_ecozone_pattern}.tif"
+        cn.elevation_pattern: f"{cn.elevation_dir}{sample_tile_id}_{cn.elevation_pattern}.tif",
+        cn.climate_domain_pattern: f"{cn.climate_domain_dir}{sample_tile_id}_{cn.climate_domain_pattern}.tif",
+        cn.precipitation_pattern: f"{cn.precipitation_dir}{sample_tile_id}_{cn.precipitation_pattern}.tif",
+        cn.r_s_ratio_pattern: f"{cn.r_s_ratio_dir}{sample_tile_id}_{cn.r_s_ratio_pattern}.tif",
+        cn.continent_ecozone_pattern: f"{cn.continent_ecozone_dir}{sample_tile_id}_{cn.continent_ecozone_pattern}.tif"
     }
 
     # Dictionary of data to download
     if year == 2000:
-        download_dict[cn.agb_2000_pattern] = f"{cn.agb_2000_path}{sample_tile_id}_{cn.agb_2000_pattern}.tif"
-        download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_path}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
-        starting_C_pool_output_folders = [cn.agc_2000_path, cn.bgc_2000_path, cn.deadwood_c_2000_path, cn.litter_c_2000_path]
+        download_dict[cn.agb_2000_pattern] = f"{cn.agb_2000_dir}{sample_tile_id}_{cn.agb_2000_pattern}.tif"
+        download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_dir}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
+        starting_C_pool_output_folders = [cn.agc_2000_dir, cn.bgc_2000_dir, cn.deadwood_c_2000_dir, cn.litter_c_2000_dir]
 
     elif year == 2015:
         download_dict[cn.agb_2015_pattern] = f"{cn.agb_2015_path_processed}{sample_tile_id}_{cn.agb_2015_pattern}.tif"
         ##TODO Using mangrove AGB2000 for 2015 model start! Need to use something else for 2015!!!!!!
-        download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_path}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
-        starting_C_pool_output_folders = [cn.agc_2015_path, cn.bgc_2015_path, cn.deadwood_c_2015_path, cn.litter_c_2015_path]
+        download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_dir}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
+        starting_C_pool_output_folders = [cn.agc_2015_dir, cn.bgc_2015_dir, cn.deadwood_c_2015_dir, cn.litter_c_2015_dir]
 
     else:
         print(f"Year input {year} not valid. Terminating.")
@@ -502,6 +503,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
 
     # Iterates through output folders and counts the number of output rasters.
+    # TODO Can potentially align this with LULUCF_fluxes if I switch to creating list of output C pools programmatically
     for output_folder in starting_C_pool_output_folders:
         output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
         output_folder = re.sub('DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD

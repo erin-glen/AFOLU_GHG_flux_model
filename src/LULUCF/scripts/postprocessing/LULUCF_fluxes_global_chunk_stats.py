@@ -46,7 +46,7 @@ def get_chunk_stats(tile_to_process_uri):
     lu.print_and_log(f"Calculating chunk stats in {bounds_str} for {file_name} in {tile_id}: {uu.timestr()}", is_final, logger)
 
     # The relevant pixel area (m^2) file in s3
-    pixel_area_uri = f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{tile_id}.tif"
+    pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
     pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds_list, 4000, is_final, logger)

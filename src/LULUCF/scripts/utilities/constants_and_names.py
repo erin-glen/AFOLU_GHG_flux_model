@@ -32,7 +32,7 @@ last_model_year_5_years = 2020   # Last year of 5-year interval data
 
 # Number of years in interval
 interval_duration = 5    #TODO: calculate programmatically in numba function rather than coded here-- for greater flexibility.
-interval_end_years_5_years = list(range(first_model_year_5_years, last_model_year_5_years + 1, interval_duration))[1:]
+interval_end_years_5_years = list(range(first_model_year_5_years, last_model_year_5_years + 1, interval_duration))[1:]  # 2005, 2010, 2015, 2020
 
 # Number of years of removals in a tree cover gain pixel
 NT_T_gain_year_count_default = math.ceil(interval_duration / 2)
@@ -45,6 +45,11 @@ years_annual = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
 interval_end_years_annual = years_annual[1:]
 
 possible_task_statuses = ["pending_", "preprocessing_", "calculating_", "error_"]
+
+# Model interval types
+intervals_five_years = "five_years"
+intervals_annual = "annual"
+intervals_hybrid = "hybrid"
 
 
 ### Carbon constants
@@ -186,12 +191,12 @@ vegetation_height_annual_pattern = ""
 vegetation_height_pattern = "vegetation_height"  # This is just for use in the numba data dictionary
 
 
-forest_disturbance_annual_path = f"{LULUCF_path}landcover/annual_forest_disturbance/raw/"
+forest_disturbance_annual_dir = f"{LULUCF_path}landcover/annual_forest_disturbance/raw/"
 forest_disturbance_layer_name = "forest_disturbance"
 
 ### Biomass and carbon densities
 
-agb_2000_path = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/Processed/"
+agb_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/Processed/"
 agb_2000_pattern = "t_aboveground_biomass_ha_2000"
 
 # From https://catalogue.ceda.ac.uk/uuid/bf535053562141c6bb7ad831f5998d77/
@@ -224,55 +229,55 @@ soil_c_dens_pattern = "soil_c_MgC_ha"
 
 ### Starting carbon pools (2000/2015)
 
-agc_2000_path = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{AGC_density_path_part}/"
+agc_2000_dir = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{AGC_density_path_part}/"
 agc_2000_pattern = f"{agc_dens_pattern}_2000"
 
-bgc_2000_path = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{BGC_density_path_part}/"
+bgc_2000_dir = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{BGC_density_path_part}/"
 bgc_2000_pattern = f"{bgc_dens_pattern}_2000"
 
-deadwood_c_2000_path = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{deadwood_c_density_path_part}/"
+deadwood_c_2000_dir = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{deadwood_c_density_path_part}/"
 deadwood_c_2000_pattern = f"{deadwood_c_dens_pattern}_2000"
 
-litter_c_2000_path = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{litter_c_density_path_part}/"
+litter_c_2000_dir = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{litter_c_density_path_part}/"
 litter_c_2000_pattern = f"{litter_c_dens_pattern}_2000"
 
-soil_c_2000_path = f"climate/carbon_model/carbon_pools/soil_carbon/intermediate_full_extent/standard/20231108/"
+soil_c_2000_dir = f"climate/carbon_model/carbon_pools/soil_carbon/intermediate_full_extent/standard/20231108/"
 soil_c_2000_pattern = "soil_C_full_extent_2000_Mg_C_ha"
 
-agc_2015_path = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{AGC_density_path_part}/"
+agc_2015_dir = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{AGC_density_path_part}/"
 agc_2015_pattern = f"{agc_dens_pattern}_2015"
 
-bgc_2015_path = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{BGC_density_path_part}/"
+bgc_2015_dir = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{BGC_density_path_part}/"
 bgc_2015_pattern = f"{bgc_dens_pattern}_2015"
 
-deadwood_c_2015_path = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{deadwood_c_density_path_part}/"
+deadwood_c_2015_dir = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{deadwood_c_density_path_part}/"
 deadwood_c_2015_pattern = f"{deadwood_c_dens_pattern}_2015"
 
-litter_c_2015_path = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{litter_c_density_path_part}/"
+litter_c_2015_dir = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{litter_c_density_path_part}/"
 litter_c_2015_pattern = f"{litter_c_dens_pattern}_2015"
 
-mangrove_agb_2000_path = f"{full_bucket_prefix}/climate/carbon_model/mangrove_biomass/processed/standard/20190220/"
+mangrove_agb_2000_dir = f"{full_bucket_prefix}/climate/carbon_model/mangrove_biomass/processed/standard/20190220/"
 mangrove_agb_2000_pattern = "mangrove_agb_t_ha_2000"
 
 
 ### Other inputs
 
-elevation_path = f"{full_bucket_prefix}/climate/carbon_model/inputs_for_carbon_pools/processed/elevation/20190418/"
+elevation_dir = f"{full_bucket_prefix}/climate/carbon_model/inputs_for_carbon_pools/processed/elevation/20190418/"
 elevation_pattern = "elevation"
 
-climate_domain_path = f"{full_bucket_prefix}/climate/carbon_model/inputs_for_carbon_pools/processed/fao_ecozones_bor_tem_tro/20190418/"
+climate_domain_dir = f"{full_bucket_prefix}/climate/carbon_model/inputs_for_carbon_pools/processed/fao_ecozones_bor_tem_tro/20190418/"
 climate_domain_pattern = "fao_ecozones_bor_tem_tro_processed"
 
-climate_zone_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/climate_zone/processed/20200724/"
+climate_zone_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/climate_zone/processed/20200724/"
 climate_zone_pattern = "climate_zone_processed"
 
-precipitation_path = f"{full_bucket_prefix}/climate/carbon_model/inputs_for_carbon_pools/processed/precip/20190418/"
+precipitation_dir = f"{full_bucket_prefix}/climate/carbon_model/inputs_for_carbon_pools/processed/precip/20190418/"
 precipitation_pattern = "precip_mm_annual"
 
-r_s_ratio_path = f"{full_bucket_prefix}/climate/carbon_model/BGB_AGB_ratio/processed/20230216/"
+r_s_ratio_dir = f"{full_bucket_prefix}/climate/carbon_model/BGB_AGB_ratio/processed/20230216/"
 r_s_ratio_pattern = "BGB_AGB_ratio"
 
-continent_ecozone_path = f"{full_bucket_prefix}/climate/carbon_model/fao_ecozones/ecozone_continent/20190116/processed/"
+continent_ecozone_dir = f"{full_bucket_prefix}/climate/carbon_model/fao_ecozones/ecozone_continent/20190116/processed/"
 continent_ecozone_pattern = "fao_ecozones_continents_processed"
 
 #TODO: @Mel - Change in hansenize + pre-processing to use path, pattern, and intervals. Delete after.
@@ -288,7 +293,7 @@ secondary_natural_forest_11_15_processed_dir = f"{full_bucket_prefix}/climate/se
 secondary_natural_forest_16_20_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_16_20/"
 secondary_natural_forest_21_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_21_100/"
 
-natural_forest_growth_curve_path = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/"
+natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/"
 natural_forest_growth_curve_pattern = "natural_forest_mean_growth_rate__Mg_AGC_ha_yr"
 natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_100']
 
@@ -302,7 +307,7 @@ drivers_processed_pattern = f"drivers_of_TCL_1_km_{drivers_run_date}.tif"
 drivers_path = f"{full_bucket_prefix}/drivers_of_loss/1_km/processed/{drivers_run_date}/"
 drivers_pattern = f"drivers_of_TCL_1_km_{drivers_run_date}"
 
-pixel_area_path = f"{full_bucket_prefix}/analyses/area_28m/"
+pixel_area_dir = f"{full_bucket_prefix}/analyses/area_28m/"
 pixel_area_pattern = "hanson_2013_area"
 
 '''
@@ -328,30 +333,27 @@ other_natural_disturbances = 7
 drivers_biomass_C_only = (forest_management, wildfire, other_natural_disturbances)
 drivers_non_soil_C = (permanent_agriculture, hard_commodities, shifting_cultivation, settlements_and_infrastruct)
 
-ifl_primary_path = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged/processed/20200724/"
+ifl_primary_dir = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged/processed/20200724/"
 ifl_primary_pattern = "ifl_2000_primary_2001_merged"
 
-planted_forest_type_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/plantation_type/SDPTv2/20230911/"
+planted_forest_type_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/plantation_type/SDPTv2/20230911/"
 planted_forest_type_pattern = "plantation_type_oilpalm_woodfiber_other"
 
-planted_forest_AGC_removal_factor_path = f"{full_bucket_prefix}/climate/carbon_model/annual_removal_factor_planted_forest/SDPTv2_AGC/20230911/"
+planted_forest_AGC_removal_factor_dir = f"{full_bucket_prefix}/climate/carbon_model/annual_removal_factor_planted_forest/SDPTv2_AGC/20230911/"
 planted_forest_AGC_removal_factor_pattern = "annual_gain_rate_AGC_Mg_ha_planted_forest"
 
-planted_forest_AGC_BGC_removal_factor_path = f"{full_bucket_prefix}/climate/carbon_model/annual_removal_factor_planted_forest/SDPTv2_AGC_BGC/20230911/"
+planted_forest_AGC_BGC_removal_factor_dir = f"{full_bucket_prefix}/climate/carbon_model/annual_removal_factor_planted_forest/SDPTv2_AGC_BGC/20230911/"
 planted_forest_AGC_BGC_removal_factor_pattern = "annual_gain_rate_AGC_BGC_Mg_ha_planted_forest"
 
-oil_palm_2000_extent_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/IDN_MYS_plantation_pre_2000/processed/20200724/"
+oil_palm_2000_extent_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/IDN_MYS_plantation_pre_2000/processed/20200724/"
 oil_palm_2000_extent_pattern = "plantation_2000_or_earlier_processed"
 
-oil_palm_first_year_path = f"{AFOLU_path}organic_soils/inputs/processed/descals_plantation/year/20241105/"
+oil_palm_first_year_dir = f"{AFOLU_path}organic_soils/inputs/processed/descals_plantation/year/20241105/"
 oil_palm_first_year_pattern = "descals_year"
 
 # Originally from gfw-data-lake, so it's in 400x400 windows
-planted_forest_tree_crop_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/plantation_simpleType__planted_forest_tree_crop/SDPTv2/20230911/"
+planted_forest_tree_crop_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/plantation_simpleType__planted_forest_tree_crop/SDPTv2/20230911/"
 planted_forest_tree_crop_pattern = "planted_forest_tree_crop"
-
-burned_area_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/burn_year/burn_year_10x10_clip_by_year/"
-burned_area_pattern = "ba"
 
 # hdf and raw raster paths don't include bucket prefix because of special processing code
 burned_area_hdf_dir = "fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/"
@@ -359,7 +361,7 @@ burned_area_hdf_converted_to_raw_raster_dir = "fires/MODIS_burned_area/MCD64A1.0
 burned_area_final_dir = "fires/MODIS_burned_area/MCD64A1.061/2_final_outputs__Hansenized/"  # With each year in its own folder
 burned_area_final_pattern = "burned_area_final"
 
-organic_soil_extent_path = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"
+organic_soil_extent_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"
 organic_soil_extent_pattern = "peat_mask_processed"
 
 #cropland emissions
@@ -481,91 +483,25 @@ first_time_sig_loss_from_max_height_block ="first_time_sig_loss_from_max_height_
 intermediate_outputs = [gain_year_count_pattern, most_recent_year_not_tall_veg, years_of_forest_regrowth,
                         year_of_forest_loss, max_height_since_last_time_not_tall_veg, first_time_sig_loss_from_max_height_block]
 
-LULUCF_output_folders = [
-    f"{outputs_path}{AGC_density_path_part}/2005/RES_pixels/DATE/",
-    f"{outputs_path}{AGC_density_path_part}/2010/RES_pixels/DATE/",
-    f"{outputs_path}{AGC_density_path_part}/2015/RES_pixels/DATE/",
-    f"{outputs_path}{AGC_density_path_part}/2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{BGC_density_path_part}/2005/RES_pixels/DATE/",
-    f"{outputs_path}{BGC_density_path_part}/2010/RES_pixels/DATE/",
-    f"{outputs_path}{BGC_density_path_part}/2015/RES_pixels/DATE/",
-    f"{outputs_path}{BGC_density_path_part}/2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{deadwood_c_density_path_part}/2005/RES_pixels/DATE/",
-    f"{outputs_path}{deadwood_c_density_path_part}/2010/RES_pixels/DATE/",
-    f"{outputs_path}{deadwood_c_density_path_part}/2015/RES_pixels/DATE/",
-    f"{outputs_path}{deadwood_c_density_path_part}/2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{litter_c_density_path_part}/2005/RES_pixels/DATE/",
-    f"{outputs_path}{litter_c_density_path_part}/2010/RES_pixels/DATE/",
-    f"{outputs_path}{litter_c_density_path_part}/2015/RES_pixels/DATE/",
-    f"{outputs_path}{litter_c_density_path_part}/2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{agc_net_flux_pattern}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{agc_net_flux_pattern}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{agc_net_flux_pattern}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{agc_net_flux_pattern}/2015_2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{bgc_net_flux_pattern}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{bgc_net_flux_pattern}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{bgc_net_flux_pattern}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{bgc_net_flux_pattern}/2015_2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{deadwood_c_net_flux_pattern}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{deadwood_c_net_flux_pattern}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{deadwood_c_net_flux_pattern}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{deadwood_c_net_flux_pattern}/2015_2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{litter_c_net_flux_pattern}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{litter_c_net_flux_pattern}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{litter_c_net_flux_pattern}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{litter_c_net_flux_pattern}/2015_2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{ch4_flux_pattern}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{ch4_flux_pattern}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{ch4_flux_pattern}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{ch4_flux_pattern}/2015_2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{n2o_flux_pattern}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{n2o_flux_pattern}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{n2o_flux_pattern}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{n2o_flux_pattern}/2015_2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/2015_2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/2015_2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{gross_removals_all_C_pools_pattern}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{gross_removals_all_C_pools_pattern}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{gross_removals_all_C_pools_pattern}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{gross_removals_all_C_pools_pattern}/2015_2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/2015_2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/2015_2020/RES_pixels/DATE/",
-
-    f"{outputs_path}{land_state_node_path_part}/2000_2005/RES_pixels/DATE/",
-    f"{outputs_path}{land_state_node_path_part}/2005_2010/RES_pixels/DATE/",
-    f"{outputs_path}{land_state_node_path_part}/2010_2015/RES_pixels/DATE/",
-    f"{outputs_path}{land_state_node_path_part}/2015_2020/RES_pixels/DATE/"
+# List of output directories with placeholders for parts of the directory
+LULUCF_core_output_dirs = [
+    f"{outputs_path}{AGC_density_path_part}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{BGC_density_path_part}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_density_path_part}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{litter_c_density_path_part}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{agc_net_flux_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{bgc_net_flux_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_net_flux_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{litter_c_net_flux_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{ch4_flux_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{n2o_flux_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{gross_emis_non_CO2_only_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{gross_removals_all_C_pools_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{land_state_node_path_part}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/"
 ]
 
 # TODO @Mel We shouldn't need this eventually.
