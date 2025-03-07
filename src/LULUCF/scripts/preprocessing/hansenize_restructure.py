@@ -91,10 +91,10 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
 
     if 'AGB2015' in process:
         download_upload_dictionary["AGB2015"] = {
-            'raw_dir': cn.agb_2015_path_raw,
+            'raw_dir': cn.agb_2015_dir_raw,
             'raw_pattern': cn.agb_2015_pattern_raw,
             'vrt': f"/tmp/agb2015.vrt",
-            'processed_dir': cn.agb_2015_path_processed,
+            'processed_dir': cn.agb_2015_dir_processed,
             'processed_pattern': cn.agb_2015_pattern
         }
 

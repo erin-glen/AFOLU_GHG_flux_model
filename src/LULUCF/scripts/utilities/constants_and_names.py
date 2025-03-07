@@ -203,23 +203,21 @@ agb_2000_pattern = "t_aboveground_biomass_ha_2000"
 # https://data.ceda.ac.uk/neodc/esacci/biomass/data/agb/maps/v5.01/geotiff
 # Bulk downloaded to computer (/mnt/c/GIS/AFOLU_flux_model/ESA_CCI_2015/) using WSL Ubuntu:
 # wget -e robots=off --mirror --no-parent -r https://dap.ceda.ac.uk/neodc/esacci/biomass/data/agb/maps/v5.01/geotiff/2015/
-agb_2015_path_raw = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/"
+agb_2015_dir_raw = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/"
 agb_2015_pattern_raw = "ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0"
-agb_2015_path_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB/processed/20250217test/"
+agb_2015_dir_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB/processed/20250217test/"
 agb_2015_pattern = "AGB_2015_ESA_CCI_Mg_AGB_ha"
 
-agb_stdev_2015_path_raw = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB_stdev/raw/"
+agb_stdev_2015_dir_raw = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB_stdev/raw/"
 agb_stdev_2015_pattern_raw = "ESACCI-BIOMASS-L4-AGB_SD-MERGED-100m-2015-fv5.0"
-agb_stdev_2015_path_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB_stdev/processed/20250217/"
+agb_stdev_2015_dir_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/AGB_stdev/processed/20250217/"
 agb_stdev_2015_pattern = "AGB_stdev_2015_ESA_CCI_Mg_AGB_ha"
 
+mangrove_agb_2000_dir = f"{full_bucket_prefix}/climate/carbon_model/mangrove_biomass/processed/standard/20190220/"
+mangrove_agb_2000_pattern = "mangrove_agb_t_ha_2000"
 
-AGC_density_path_part = "AGC_density_MgC_ha"
-BGC_density_path_part = "BGC_density_MgC_ha"
-deadwood_c_density_path_part = "deadwood_C_density_MgC_ha"
-litter_c_density_path_part = "litter_C_density_MgC_ha"
 
-# Carbon density patterns
+# Carbon density patterns (also used in path names)
 agb_dens_pattern = "AGB_density_MgAGB_ha"
 agc_dens_pattern = "AGC_density_MgC_ha"
 bgc_dens_pattern = "BGC_density_MgC_ha"
@@ -229,35 +227,32 @@ soil_c_dens_pattern = "soil_c_MgC_ha"
 
 ### Starting carbon pools (2000/2015)
 
-agc_2000_dir = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{AGC_density_path_part}/"
+agc_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{agc_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
 agc_2000_pattern = f"{agc_dens_pattern}_2000"
 
-bgc_2000_dir = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{BGC_density_path_part}/"
+bgc_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{bgc_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
 bgc_2000_pattern = f"{bgc_dens_pattern}_2000"
 
-deadwood_c_2000_dir = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{deadwood_c_density_path_part}/"
+deadwood_c_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{deadwood_c_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
 deadwood_c_2000_pattern = f"{deadwood_c_dens_pattern}_2000"
 
-litter_c_2000_dir = f"climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{litter_c_density_path_part}/"
+litter_c_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{litter_c_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
 litter_c_2000_pattern = f"{litter_c_dens_pattern}_2000"
 
-soil_c_2000_dir = f"climate/carbon_model/carbon_pools/soil_carbon/intermediate_full_extent/standard/20231108/"
+soil_c_2000_dir = f"{full_bucket_prefix}/climate/carbon_model/carbon_pools/soil_carbon/intermediate_full_extent/standard/20231108/CHUNK_SIZE_pixels/DATE/"
 soil_c_2000_pattern = "soil_C_full_extent_2000_Mg_C_ha"
 
-agc_2015_dir = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{AGC_density_path_part}/"
+agc_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{agc_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
 agc_2015_pattern = f"{agc_dens_pattern}_2015"
 
-bgc_2015_dir = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{BGC_density_path_part}/"
+bgc_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{bgc_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
 bgc_2015_pattern = f"{bgc_dens_pattern}_2015"
 
-deadwood_c_2015_dir = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{deadwood_c_density_path_part}/"
+deadwood_c_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{deadwood_c_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
 deadwood_c_2015_pattern = f"{deadwood_c_dens_pattern}_2015"
 
-litter_c_2015_dir = f"climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{litter_c_density_path_part}/"
+litter_c_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{litter_c_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
 litter_c_2015_pattern = f"{litter_c_dens_pattern}_2015"
-
-mangrove_agb_2000_dir = f"{full_bucket_prefix}/climate/carbon_model/mangrove_biomass/processed/standard/20190220/"
-mangrove_agb_2000_pattern = "mangrove_agb_t_ha_2000"
 
 
 ### Other inputs
@@ -485,10 +480,10 @@ intermediate_outputs = [gain_year_count_pattern, most_recent_year_not_tall_veg, 
 
 # List of output directories with placeholders for parts of the directory
 LULUCF_core_output_dirs = [
-    f"{outputs_path}{AGC_density_path_part}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{BGC_density_path_part}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{deadwood_c_density_path_part}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{litter_c_density_path_part}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{agc_dens_pattern}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{bgc_dens_pattern}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{deadwood_c_dens_pattern}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{litter_c_dens_pattern}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{agc_net_flux_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{bgc_net_flux_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{deadwood_c_net_flux_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",

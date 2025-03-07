@@ -4,15 +4,18 @@ python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp -f 1 --year YYYY
 
-python -m scripts.utilities.create_cluster -n 70 -t 9 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 60 -t 10 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
-Max memory usage: ~20 GB/worker
-Time: 21:21 through calculation, 22:17 with tile stats; Credits: 110; Cost: $3.60
+Max memory usage: ~ GB/worker
+Time:  through calculation;  through aggregation ;  through tile stats; Credits: ; Cost: $
 
-python -m scripts.utilities.create_cluster -n 70 -t 9 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 60 -t 10 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
-Max memory usage: ~XXX GB/worker
-Time: 19:00 through calculation, 20:03 with tile stats; Credits: 103; Cost: $3.50
+Max memory usage: ~ GB/worker
+Time:  through calculation;  through aggregation ;  through tile stats; Credits: ; Cost: $
+
+NOTE: Maybe there's some way to configure this to output 10x10 deg tiles but I can't figure it out.
+Instead, it creates 1x1 deg tiles and then merges them to 10x10 deg tiles.
 """
 
 import argparse
@@ -342,14 +345,11 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
                 # Retrieves the relevant output s3 path for this specific output  (list of one element)
                 matched_output_s3_folder = [item for item in starting_C_pool_output_folders if out_pattern in item][0]
 
-                # Full output path in s3
-                pixel_meaning = 'per_hectare'
-                # This makes it so that all output files are uploaded to a folder of the same date, even if the model run is divided over multiple days
-                output_date = time.strftime('%Y%m%d')
-                full_s3_path = f"{matched_output_s3_folder}{chunk_length_pixels}_pixels/{pixel_meaning}/{output_date}"
+                # Output paths without bucket (s3://gfw2-data)
+                s3_path_without_bucket = f"{matched_output_s3_folder[cn.full_bucket_prefix_length:]}"
 
                 # Dictionary with metadata for each array
-                out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, full_s3_path]
+                out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
 
             uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
                                                 is_final, logger_worker,
@@ -376,6 +376,8 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
 def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_upload=False, use_shapefile=False,
          bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
+
+    ### Step 1: Precursors and download inputs
 
     # Model stage being running
     stage = f'starting_carbon_pools_{year}'
@@ -440,17 +442,22 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     if year == 2000:
         download_dict[cn.agb_2000_pattern] = f"{cn.agb_2000_dir}{sample_tile_id}_{cn.agb_2000_pattern}.tif"
         download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_dir}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
-        starting_C_pool_output_folders = [cn.agc_2000_dir, cn.bgc_2000_dir, cn.deadwood_c_2000_dir, cn.litter_c_2000_dir]
+        output_dir_list = [cn.agc_2000_dir, cn.bgc_2000_dir, cn.deadwood_c_2000_dir, cn.litter_c_2000_dir]
 
     elif year == 2015:
-        download_dict[cn.agb_2015_pattern] = f"{cn.agb_2015_path_processed}{sample_tile_id}_{cn.agb_2015_pattern}.tif"
+        download_dict[cn.agb_2015_pattern] = f"{cn.agb_2015_dir_processed}{sample_tile_id}_{cn.agb_2015_pattern}.tif"
         ##TODO Using mangrove AGB2000 for 2015 model start! Need to use something else for 2015!!!!!!
         download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_dir}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
-        starting_C_pool_output_folders = [cn.agc_2015_dir, cn.bgc_2015_dir, cn.deadwood_c_2015_dir, cn.litter_c_2015_dir]
+        output_dir_list = [cn.agc_2015_dir, cn.bgc_2015_dir, cn.deadwood_c_2015_dir, cn.litter_c_2015_dir]
 
     else:
         print(f"Year input {year} not valid. Terminating.")
         sys.exit()
+
+    # Creates list of output directories specific to the run
+    output_dir_list = [path.replace("DATE", uu.timestr()[:8]) for path in output_dir_list]
+    output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
+    # print(output_dir_list)
 
     # Returns the first tile in each input so that the datatype can be determined.
     # This is done up front, once per tile set, rather than on each chunk, since
@@ -474,19 +481,46 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
 
+    ### Step 2: Create 1x1 degree outputs
+
     # Creates list of tasks to run (1 task = 1 chunk)
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
     main_logger.info("Workers' logs appended after main function log"+ "\n")
 
-    delayed_results = [dask.delayed(create_and_upload_starting_C_densities)
+    C_pool_1x1_deg_delayed_results = [dask.delayed(create_and_upload_starting_C_densities)
                        (chunk, mangrove_C_ratio_array, download_dict_with_data_types, year,
-                        fishnet_iso_df, is_final, no_upload, starting_C_pool_output_folders, stage)
+                        fishnet_iso_df, is_final, no_upload, output_dir_list, stage)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results
-    results = dask.compute(*delayed_results)
+    C_pool_1x1_deg_results = dask.compute(*C_pool_1x1_deg_delayed_results)
 
-    success_count = uu.count_successful_chunks(all_stats, chunk_list, is_final, main_logger, results, return_messages)
+    success_count = uu.count_successful_chunks(all_stats, chunk_list, is_final, main_logger, C_pool_1x1_deg_results, return_messages)
+
+    # Iterates through 1x1 deg output folders and counts the number of output rasters.
+    for output_folder in output_dir_list:
+
+        geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+        main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+
+    ### Step 3: Aggregates 1x1 degree outputs to 10x10 degree outputs
+
+    # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
+    # These are the basis for the aggregation tasks.
+    list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
+    # print(list_of_s3_name_dicts_total)
+
+    # Each task is a single 10x10 deg aggregated geotif
+    C_pool_10x10_deg_delayed_results = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload, no_log) for s3_name_dict in list_of_s3_name_dicts_total]
+
+    C_pool_10x10_deg_results = dask.compute(*C_pool_10x10_deg_delayed_results)
+    lu.print_and_log(C_pool_10x10_deg_results, is_final, main_logger)
+
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with 10x10 deg aggregation", main_logger)
+
+    ### Step 4: Chunk stats for 1x1 degree outputs, aggregates logs
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
@@ -501,34 +535,20 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
             resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
 
-
-    # Iterates through output folders and counts the number of output rasters.
-    # TODO Can potentially align this with LULUCF_fluxes if I switch to creating list of output C pools programmatically
-    for output_folder in starting_C_pool_output_folders:
-        output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
-        output_folder = re.sub('DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
-        output_folder = f"{cn.full_bucket_prefix}/{output_folder}"   # Need to prepend s3 and bucket name for counting
-
-        geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-        main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-
-    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
-
-
-    # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
+    # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count > 0):
         uu.aggregate_chunk_stats(all_stats, stage, no_upload, main_logger)
 
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with aggregation and tile stats", main_logger)
 
     # Sets it so that no worker logs are created if doing a local run
     if not run_local:
 
         # Creates combined log from all workers if not deactivated
         worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
-        uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with aggregation, tile stats, and worker log compilation", main_logger)
 
         # Adds the workers' logs to the main log and uploads to s3
         lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)

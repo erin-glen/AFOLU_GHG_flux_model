@@ -137,7 +137,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 
     # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
     # These are the basis for the tasks.
-    list_of_s3_name_dicts_total = uu.create_list_for_aggregation(LULUCF_output_folders)
+    list_of_s3_name_dicts_total = uu.create_list_for_aggregation(LULUCF_output_folders, main_logger)
 
     # For testing. Limits the number of output rasters
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:1]  # First 1 tile

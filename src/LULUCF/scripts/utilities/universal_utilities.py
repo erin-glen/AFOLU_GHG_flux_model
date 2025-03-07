@@ -141,7 +141,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
         if not is_final:
             lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {timestr()}", is_final, logger_worker)
 
-        s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}/{file_name}")
+        s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}{file_name}")
 
         # Deletes the local raster
         os.remove(f"/tmp/{file_name}")
@@ -599,7 +599,7 @@ def check_for_tile(download_dict, is_final, logger):
 
 
 # Turns a list of basic output directory names into a list of fully specified directories based on output chunk size, run date, model type, and output years
-def create_output_dir_name_list(interval_type, chunk_size_pixels, model_type, main_logger):
+def create_output_dir_name_list(core_output_dirs, interval_type, chunk_size_pixels, model_type, main_logger):
 
     # List of directories for outputs
     output_full_dirs = []
@@ -611,16 +611,20 @@ def create_output_dir_name_list(interval_type, chunk_size_pixels, model_type, ma
     elif interval_type == cn.intervals_annual:
         output_years = cn.interval_end_years_annual
         intervals = 1
-    else:  # Hybrid model (2000-2023)
+    elif interval_type == cn.intervals_hybrid:  # Hybrid model (2000-2023)
         output_years = cn.interval_end_years_5_years[:-1] + cn.interval_end_years_annual
         # Intervals for hybrid model are a combination of 4-years (for the 5-year intervals) and annual
         intervals = [cn.interval_duration-1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
         # intervals = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]
+    else:
+        main_logger.error("interval_type not valid")
+        sys.exit(1)
+
 
     main_logger.info(f"Model output years: {output_years}")
 
     # Replaces the DATE, CHUNK_SIZE, and MODEL_TYPE parts of the directories with values specific to the run
-    core_output_dirs = [path.replace("DATE", timestr()[:8]) for path in cn.LULUCF_core_output_dirs]
+    core_output_dirs = [path.replace("DATE", timestr()[:8]) for path in core_output_dirs]
     core_output_dirs = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in core_output_dirs]
     core_output_dirs = [path.replace("MODEL_TYPE", model_type) for path in core_output_dirs]
 
@@ -784,14 +788,14 @@ def make_tile_footprint_shp(input_dict, no_upload):
 # [{'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_000E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']},
 # {'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_010E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']}, ... ]
 # The keys are s3 destination foldes and the values are the output 10x10 deg file names
-def create_list_for_aggregation(s3_in_folders):
+def create_list_for_aggregation(s3_in_folders, main_logger):
 
     list_of_s3_names_total = []  # Final list of dictionaries of input s3 paths and output aggregated 10x10 raster names
 
     # Iterates through all the input s3 folders
     for s3_in_folder in s3_in_folders:
 
-        print(f"Listing files in {s3_in_folder}")
+        main_logger.info(f"Listing files in {s3_in_folder}")
 
         simple_output_file_names = []  # List of output aggregated output 10x10 rasters
 
@@ -826,7 +830,7 @@ def create_list_for_aggregation(s3_in_folders):
     # {'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_010E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']}, ... ]
     list_of_s3_names_total = flatten_list(list_of_s3_names_total)
 
-    print(f"There are {len(list_of_s3_names_total)} 10x10 deg rasters to create across {len(s3_in_folders)} input folders.")
+    main_logger.info(f"There are {len(list_of_s3_names_total)} 10x10 deg rasters to create across {len(s3_in_folders)} input folders.")
 
     return list_of_s3_names_total
 
@@ -840,7 +844,7 @@ def flatten_list(nested_list):
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
 def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
 
-    logger = lu.setup_logging()
+    logger_worker = lu.setup_logging_worker()
 
     in_folder = list(s3_name_dict.keys())[0]  # The input s3 folder for the small rasters
     out_file_name = list(s3_name_dict.values())[0][0]  # The output file name for the combined rasters
@@ -860,7 +864,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
     # Lists the tile paths for the relevant rasters
     tile_paths = [vsis3_in_folder + filename for filename in filenames_in_focus_area]
 
-    lu.print_and_log(f"Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger)
+    lu.print_and_log(f"Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger_worker)
 
     # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
     out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
@@ -901,22 +905,22 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
 
     try:
         subprocess.check_call(merge_command)
-        lu.print_and_log(f"Successfully merged rasters into {merged_file}", is_final, logger)
+        lu.print_and_log(f"Successfully merged rasters into {merged_file}", is_final, logger_worker)
     except subprocess.CalledProcessError as e:
-        lu.print_and_log(f"Error merging rasters: {e}", is_final, logger)
+        lu.print_and_log(f"Error merging rasters: {e}", is_final, logger_worker)
         return f"failure for {s3_name_dict}"
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
 
-    lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}", is_final, logger)
+    lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}", is_final, logger_worker)
 
     if not no_upload:
 
         try:
             s3_client.upload_file(merged_file, "gfw2-data", Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}")  #[15:] drops s3://gfw2-data/ from front
-            lu.print_and_log(f"Successfully uploaded {out_file_name} to s3", is_final, logger)
+            lu.print_and_log(f"Successfully uploaded {out_file_name} to s3", is_final, logger_worker)
         except boto3.exceptions.S3UploadFailedError as e:
-            lu.print_and_log(f"Error uploading file to s3: {e}", is_final, logger)
+            lu.print_and_log(f"Error uploading file to s3: {e}", is_final, logger_worker)
             return f"failure for {s3_name_dict}"
 
     # Deletes the local merged raster

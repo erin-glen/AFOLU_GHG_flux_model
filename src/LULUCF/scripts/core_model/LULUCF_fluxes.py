@@ -1181,7 +1181,6 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         #TODO Try using Rasterio memfile: https://gis.stackexchange.com/questions/332757/creating-an-in-memory-raster-with-rasterio
         #         with rasterio.MemoryFile() as memfile:
         #             with memfile.open(**profile) as dst:
-        sys.quit()
 
         # Only saves arrays to geotifs and uploads them to s3 if enabled
         if not no_upload:
@@ -1216,7 +1215,6 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
 
     return return_message, chunk_stats  # Return both the success message and the statistics
-
 
 
 
@@ -1322,6 +1320,9 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         download_dict[cn.litter_c_dens_pattern] = f"{cn.full_bucket_prefix}/{cn.litter_c_2000_dir}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif"
         # download_dict[cn.soil_c_2000_pattern] = f"{cn.soil_c_2000_path}{sample_tile_id}_{cn.soil_c_2000_pattern}.tif"
 
+    print(download_dict[cn.agc_dens_pattern])
+    sys.quit()
+
     ##TODO: 2015 carbon maps are still using the 2000 mangrove carbon map!!
     if interval_type == cn.intervals_annual:
         download_dict[cn.agc_dens_pattern] = f"{cn.full_bucket_prefix}/{cn.agc_2015_dir}{sample_tile_id}__{cn.agc_2015_pattern}.tif"
@@ -1360,7 +1361,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # print(download_dict)
 
-    output_dir_list = uu.create_output_dir_name_list(interval_type, chunk_size_pixels, model_type, main_logger)
+    output_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, chunk_size_pixels, model_type, main_logger)
     # print(output_dir_list)
 
     # Returns the first tile in each input so that the datatype can be determined.
@@ -1368,7 +1369,8 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # all tiles have the same datatype for each input-- it only needs to be done once at the very beginning of the stage.
     main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
     first_tiles = uu.first_file_name_in_s3_folder(download_dict)
-    # print(first_tiles)
+    print(first_tiles)
+    sys.quit()
 
     # Creates a download dictionary with the datatype of each input in the values.
     # This is supplied to each chunk that is being analyzed.
