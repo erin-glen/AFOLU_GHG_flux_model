@@ -12,10 +12,10 @@ when all chunks in a list are expected to be uploaded to s3. Here, only outputs 
 so there'd be lots of chunks left over in s3 that were processed but just didn't have data.
 
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts -yr 2001 -bb 40 50 50 60 -cs 10
+python -m scripts.preprocessing.burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts -yr 2001 -bb 40 50 50 60 -cs 10 -yr 2000 2024
 
 python -m scripts.utilities.create_cluster -n 30 -t 5 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 10
+python -m scripts.preprocessing.burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 10 -yr 2000 2024
 Max memory usage: ~20 GB/worker
 Time: 1.5 hours through calculation, 1.5 hours with tile stats; Credits: 190; Cost: $9.30
 
@@ -278,7 +278,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         output_folders.append(f"{cn.burned_area_final_dir}{year}/")
 
     # Creates list of tasks to run (1 task = 1 chunk)
-    main_logger.info("Workers' logs appended after main function log"+ "\n")
+    main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
     # Iterates through selected years
     for year in processed_years:

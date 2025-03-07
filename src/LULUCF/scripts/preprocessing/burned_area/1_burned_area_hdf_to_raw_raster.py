@@ -18,6 +18,9 @@ python -m scripts.preprocessing.burned_area.1_burned_area_hdf_to_raw_raster -cn 
 268 h-v stacks for every year 2001-2024, except for 2005, which has 267 h-v stacks (missing h01v08 in original hdf site)
 2001-2024: took about 1.5 hours to run, used about 600 Coiled credits, cost about $20 on AWS.
 
+NOTE: Processed 2000 separately later (only last two months available).
+Not actually using in the model but inputs for 2000 are expected anyhow.
+
 To download a set of monthly raw h-v hdfs locally from s3 for one year for checking against geotif:
 aws s3 cp s3://gfw2-data/fires/MODIS_burned_area/MCD64A1.061/raw_hdfs/ . --recursive --exclude "*" --include "*A2024*h24v02*"
 """
@@ -220,7 +223,8 @@ if __name__ == "__main__":
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     args = parser.parse_args()
 
-    main(args.cluster_name, args.run_local, list(range(2001, 2025)))  # Sequentially process each year
+    # Sequentially process each year. Upper year is +1 the actual final year to process.
+    main(args.cluster_name, args.run_local, list(range(2000, 2025)))
 
 
 

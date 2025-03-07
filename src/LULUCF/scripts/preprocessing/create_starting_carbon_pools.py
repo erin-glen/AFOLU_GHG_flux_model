@@ -6,13 +6,13 @@ python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_mode
 
 python -m scripts.utilities.create_cluster -n 60 -t 10 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
-Max memory usage: ~ GB/worker
-Time:  through calculation;  through aggregation ;  through tile stats; Credits: ; Cost: $
+Max memory usage: ~18 GB/worker
+Time: 23:17 through calculation; 39:26 through aggregation; 40:25 through tile stats; Credits: 170; Cost: $6.00
 
-python -m scripts.utilities.create_cluster -n 60 -t 10 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 50 -t 12 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
-Max memory usage: ~ GB/worker
-Time:  through calculation;  through aggregation ;  through tile stats; Credits: ; Cost: $
+Max memory usage: ~18 GB/worker
+Time: 26:00 through calculation; 40:44 through aggregation; 41:43 through tile stats; Credits: 155; Cost: $5.30
 
 NOTE: Maybe there's some way to configure this to output 10x10 deg tiles but I can't figure it out.
 Instead, it creates 1x1 deg tiles and then merges them to 10x10 deg tiles.
@@ -22,9 +22,7 @@ import argparse
 import concurrent.futures
 import dask
 import numpy as np
-import re
 import sys
-import time
 
 from dask.distributed import print
 from numba import jit
@@ -481,11 +479,12 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
 
+
     ### Step 2: Create 1x1 degree outputs
 
     # Creates list of tasks to run (1 task = 1 chunk)
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
-    main_logger.info("Workers' logs appended after main function log"+ "\n")
+    main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
     C_pool_1x1_deg_delayed_results = [dask.delayed(create_and_upload_starting_C_densities)
                        (chunk, mangrove_C_ratio_array, download_dict_with_data_types, year,
@@ -505,6 +504,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
+
     ### Step 3: Aggregates 1x1 degree outputs to 10x10 degree outputs
 
     # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
@@ -513,12 +513,13 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # print(list_of_s3_name_dicts_total)
 
     # Each task is a single 10x10 deg aggregated geotif
-    C_pool_10x10_deg_delayed_results = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload, no_log) for s3_name_dict in list_of_s3_name_dicts_total]
+    C_pool_10x10_deg_delayed_results = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload) for s3_name_dict in list_of_s3_name_dicts_total]
 
     C_pool_10x10_deg_results = dask.compute(*C_pool_10x10_deg_delayed_results)
     lu.print_and_log(C_pool_10x10_deg_results, is_final, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with 10x10 deg aggregation", main_logger)
+
 
     ### Step 4: Chunk stats for 1x1 degree outputs, aggregates logs
 

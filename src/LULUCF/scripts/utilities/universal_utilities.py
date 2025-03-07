@@ -842,7 +842,7 @@ def flatten_list(nested_list):
 
 # Merges rasters that are <10x10 degrees into 10x10 degree rasters in the standard grid.
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
-def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
+def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
     logger_worker = lu.setup_logging_worker()
 
@@ -865,6 +865,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
     tile_paths = [vsis3_in_folder + filename for filename in filenames_in_focus_area]
 
     lu.print_and_log(f"Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger_worker)
+    if is_final:   # Prints to console if it is a final run
+        f"Merging small rasters in {tile_id} in {vsis3_in_folder}"
 
     # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
     out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)

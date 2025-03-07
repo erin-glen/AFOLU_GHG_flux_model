@@ -150,7 +150,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 
     # TODO Output as COGs, not just geotifs? Need to ask AJ first.
     # Each task is a single 10x10 deg aggregated geotif
-    delayed_result = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload, no_log) for s3_name_dict in list_of_s3_name_dicts_total]
+    delayed_result = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload) for s3_name_dict in list_of_s3_name_dicts_total]
 
     results = dask.compute(*delayed_result)
     lu.print_and_log(results, is_final, logger)

@@ -3,9 +3,10 @@ Run from src/LULUCF
 
 Test:
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 10 49.75 10.25 50 -cs 0.25
-python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload
-python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1
+python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 10 49.75 10.25 50 -cs 0.25 -yr 2015 2023
+python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload -yr 2015 2023
+python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023
+python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1 -yr 2015 2023
 
 Full run:
 python -m scripts.utilities.create_cluster -n 200
@@ -49,7 +50,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
     bgc_dens_block = in_dict_float32[cn.bgc_dens_pattern].astype('float32')
     deadwood_c_dens_block = in_dict_float32[cn.deadwood_c_dens_pattern].astype('float32')
     litter_c_dens_block = in_dict_float32[cn.litter_c_dens_pattern].astype('float32')
-    # soil_c_dens_block = in_dict_int16[cn.soil_c_2000_pattern].astype('float32')
 
     r_s_ratio_block = in_dict_float32[cn.r_s_ratio_pattern].astype('float32')
 
@@ -63,7 +63,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
     # Because this is used to store the RF from the previous interval,
     # it persists from one interval to the next. Therefore, it must be defined before the first iteration.
     # That way, removal factors can be over-written by those used in the latest interval.
-    agc_rf_pre_dist_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
+    agc_rf_pre_dist_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
 
     planted_forest_type_block = in_dict_uint8[cn.planted_forest_type_pattern]
     planted_forest_tree_crop_block = in_dict_uint8[cn.planted_forest_tree_crop_pattern]
@@ -97,16 +97,16 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
     # 0=Always tall vegetation so far. Other values represent the last year of non-tall vegetation.
     # This is assessed at the pixel level because numba wouldn't allow the needed logical operations on numpy arrays (chunks).
     # Tall vegetation is basd on the composite land cover maps, not the canopy height maps.
-    most_recent_year_not_tall_veg_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('uint16')
+    most_recent_year_not_tall_veg_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint16')
 
     # Number of years of regrowth for new forest
-    years_of_forest_regrowth_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('uint8')
+    years_of_forest_regrowth_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
 
     # Year in which forest loss occurs/is assigned during an interval (0 if no loss)
-    year_of_forest_loss_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('uint16')
+    year_of_forest_loss_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint16')
 
     # Maximum height of vegetation since the last interval in which there was not forest
-    max_height_since_last_time_not_tall_veg_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('uint8')
+    max_height_since_last_time_not_tall_veg_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
 
     # Tracks whether the height has already decreased more than the signif. height loss threshold compared to
     # maximum vegetation height since the last time the pixel was non-tall vegetation land cover.
@@ -116,7 +116,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
     # 0=no significant height loss relative to the maximum vegetation height since last non-tall vegetation.
     # 1=height loss relative to the maximum vegetation height occurred in this interval.
     # 2=height loss relative to the maximum vegetation height occurred in a previous interval.
-    first_time_sig_loss_from_max_height_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('uint8')
+    first_time_sig_loss_from_max_height_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
 
 
     # Iterates through model intervals
@@ -170,25 +170,25 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
 
         # Numpy arrays for outputs that don't depend on previous interval's values
-        state_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('uint32')  # Land cover state at end of interval
+        state_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint32')  # Land cover state at end of interval
 
         # Number of years of canopy growth.
         # First digit is pre-disturbance years of growth.
         # Second digit (if it exists) is post-disturbance years of growth
-        gain_year_count_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('uint8')
+        gain_year_count_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
 
-        agc_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
-        bgc_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
-        deadwood_c_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
-        litter_c_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
+        agc_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
+        bgc_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
+        deadwood_c_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
+        litter_c_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
 
-        ch4_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
-        n2o_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
+        ch4_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
+        n2o_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
 
-        agc_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
-        bgc_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
-        deadwood_c_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
-        litter_c_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_2000_pattern].shape).astype('float32')
+        agc_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
+        bgc_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
+        deadwood_c_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
+        litter_c_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
 
 
         # Iterates through all pixels in the chunk
@@ -230,7 +230,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 climate_zone_cell = climate_zone_block[row, col]
 
                 # Gets a value for continent_ecozone in case the pixel doesn't have one
-                continent_ecozone_cell = nu.backup_continent_ecozone(continent_ecozone_cell, continent_ecozone_block)
+                continent_ecozone_fallback = nu.backup_continent_ecozone(continent_ecozone_block)
 
                 # Determines the removal factor for primary forests/IFL based on the ecozone (Mg AGC/ha/yr)
                 primary_forest_AGC_RF = nu.calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs)
@@ -312,7 +312,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
                 bgc_dens_in = bgc_dens_block[row, col]
                 deadwood_c_dens_in = deadwood_c_dens_block[row, col]
                 litter_c_dens_in = litter_c_dens_block[row, col]
-                soil_c_dens = soil_c_dens_block[row, col]
+                # soil_c_dens = soil_c_dens_block[row, col]
 
                 # Makes a list of carbon densities to save space in the decision tree below.
                 # This list is input to flux calculation functions as one argument, rather than a separate argument
@@ -976,6 +976,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
             out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
             out_dict_uint8[f"{cn.first_time_sig_loss_from_max_height_block}_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()
 
+    print(out_dict_float32)
+
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
 
@@ -1061,7 +1063,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         # print("uint16_typed_list:", typed_dict_uint16)
         # print("int16_typed_list:", typed_dict_int16)
         # print("int32_typed_list:", typed_dict_int32)
-        # print("float32_typed_list:", out_dict_float32)
+        # print("float32_typed_list:", typed_dict_float32)
 
 
         ### Part 4: Calculates LULUCF fluxes and densities
@@ -1097,7 +1099,6 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
             # Clear memory of unneeded arrays
             del out_dict
-
 
         ### Part 5: Calculates combined gross fluxes and net fluxes.
         ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
@@ -1314,22 +1315,29 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     }
 
     if interval_type == cn.intervals_five_years:
-        download_dict[cn.agc_dens_pattern] = f"{cn.full_bucket_prefix}/{cn.agc_2000_dir}{sample_tile_id}__{cn.agc_2000_pattern}.tif"
-        download_dict[cn.bgc_dens_pattern] = f"{cn.full_bucket_prefix}/{cn.bgc_2000_dir}{sample_tile_id}__{cn.bgc_2000_pattern}.tif"
-        download_dict[cn.deadwood_c_dens_pattern] = f"{cn.full_bucket_prefix}/{cn.deadwood_c_2000_dir}{sample_tile_id}__{cn.deadwood_c_2000_pattern}.tif"
-        download_dict[cn.litter_c_dens_pattern] = f"{cn.full_bucket_prefix}/{cn.litter_c_2000_dir}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif"
-        # download_dict[cn.soil_c_2000_pattern] = f"{cn.soil_c_2000_path}{sample_tile_id}_{cn.soil_c_2000_pattern}.tif"
-
-    print(download_dict[cn.agc_dens_pattern])
-    sys.quit()
+        download_dict[cn.agc_dens_pattern] = f"{cn.agc_2000_dir}{sample_tile_id}__{cn.agc_2000_pattern}.tif"
+        download_dict[cn.bgc_dens_pattern] = f"{cn.bgc_2000_dir}{sample_tile_id}__{cn.bgc_2000_pattern}.tif"
+        download_dict[cn.deadwood_c_dens_pattern] = f"{cn.deadwood_c_2000_dir}{sample_tile_id}__{cn.deadwood_c_2000_pattern}.tif"
+        download_dict[cn.litter_c_dens_pattern] = f"{cn.litter_c_2000_dir}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif"
+        # download_dict[cn.soil_c_2000_pattern] = f"{sample_tile_id}_{cn.soil_c_2000_pattern}.tif"
 
     ##TODO: 2015 carbon maps are still using the 2000 mangrove carbon map!!
     if interval_type == cn.intervals_annual:
-        download_dict[cn.agc_dens_pattern] = f"{cn.full_bucket_prefix}/{cn.agc_2015_dir}{sample_tile_id}__{cn.agc_2015_pattern}.tif"
-        download_dict[cn.bgc_dens_pattern] = f"{cn.full_bucket_prefix}/{cn.bgc_2015_dir}{sample_tile_id}__{cn.bgc_2015_pattern}.tif"
-        download_dict[cn.deadwood_c_dens_pattern] = f"{cn.full_bucket_prefix}/{cn.deadwood_c_2015_dir}{sample_tile_id}__{cn.deadwood_c_2015_pattern}.tif"
-        download_dict[cn.litter_c_dens_pattern] = f"{cn.full_bucket_prefix}/{cn.litter_c_2015_dir}{sample_tile_id}__{cn.litter_c_2015_pattern}.tif"
-        # download_dict[cn.soil_c_2000_pattern] = f"{cn.soil_c_2000_path}{sample_tile_id}_{cn.soil_c_2000_pattern}.tif"
+        download_dict[cn.agc_dens_pattern] = f"{cn.agc_2015_dir}{sample_tile_id}__{cn.agc_2015_pattern}.tif"
+        download_dict[cn.bgc_dens_pattern] = f"{cn.bgc_2015_dir}{sample_tile_id}__{cn.bgc_2015_pattern}.tif"
+        download_dict[cn.deadwood_c_dens_pattern] = f"{cn.deadwood_c_2015_dir}{sample_tile_id}__{cn.deadwood_c_2015_pattern}.tif"
+        download_dict[cn.litter_c_dens_pattern] = f"{cn.litter_c_2015_dir}{sample_tile_id}__{cn.litter_c_2015_pattern}.tif"
+        # download_dict[cn.soil_c_2000_pattern] = f"{sample_tile_id}_{cn.soil_c_2000_pattern}.tif"
+
+    # Replaces the CHUNK_SIZE_pixels and DATE parts of the initial carbon rasters
+    download_dict = {
+        key: value.replace("CHUNK_SIZE", '40000')
+        for key, value in download_dict.items()
+    }
+    download_dict = {
+        key: value.replace("DATE", '20250307')   # Date of initial carbon pool creation
+        for key, value in download_dict.items()
+    }
 
     if interval_type == cn.intervals_five_years:
         # Land cover and vegetation height rasters (5-year intervals)
@@ -1369,8 +1377,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # all tiles have the same datatype for each input-- it only needs to be done once at the very beginning of the stage.
     main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
     first_tiles = uu.first_file_name_in_s3_folder(download_dict)
-    print(first_tiles)
-    sys.quit()
+    # print(first_tiles)
 
     # Creates a download dictionary with the datatype of each input in the values.
     # This is supplied to each chunk that is being analyzed.
@@ -1395,7 +1402,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # Creates list of tasks to run (1 task = 1 chunk)
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
-    main_logger.info("Workers' logs appended after main function log"+ "\n")
+    main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
 
     # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
