@@ -101,6 +101,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
     years_of_forest_regrowth_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
 
     # Year in which forest loss occurs/is assigned during an interval (0 if no loss)
+    ### TODO Never actually used. What did I intend to do with this?
     year_of_forest_loss_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint16')
 
     # Maximum height of vegetation since the last interval in which there was not forest
@@ -980,8 +981,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types, start_year, end_year,
                                        fishnet_iso_df, is_final, no_upload, output_folders, stage):
-
-    #TODO Add try-except from create_starting_carbon_pools
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []

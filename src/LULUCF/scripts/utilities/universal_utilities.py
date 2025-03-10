@@ -82,8 +82,10 @@ def check_s3_file_created(s3_path):
             raise RuntimeError(f"Error accessing S3: {e}")
 
 # Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
+# Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
 def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
-                                     bounds_str, output_dict, is_final, logger_worker, no_data_val=None):
+                                     bounds_str, output_dict, is_final, logger_worker,
+                                     no_data_val=None):
 
     # Configures S3 client with increased retries; retries can max out for global analyses
     s3_config = Config(
@@ -116,11 +118,11 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
             if is_final:
                 file_name = f"{file_info}__{key}.tif"
             else:
-                file_name = f"{file_info}__{key}__{timestr()}.tif"
+                file_name = f"{file_info}__{key}__{uu.timestr()}.tif"
 
             # Only prints if not a final run
             if not is_final:
-                lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger_worker)
+                lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {uu.timestr()}", is_final, logger_worker)
 
             # Includes NoData value in output raster
             if no_data_val is not None:
@@ -140,16 +142,16 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
 
             # Only prints if not a final run
             if not is_final:
-                lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {timestr()}", is_final, logger_worker)
+                lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {uu.timestr()}", is_final, logger_worker)
 
             s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}{file_name}")
 
             # Deletes the local raster
             os.remove(f"/tmp/{file_name}")
 
-    except Exception as e:
+    except Exception:
 
-        print(f"Could not upload {bounds_str} in {tile_id}: {timestr()}")
+        print(f"Could not upload {bounds_str} in {tile_id}: {uu.timestr()}")
 
 
 # Returns list of rasters in an s3 folder and returns their names as a list (but not full paths)
