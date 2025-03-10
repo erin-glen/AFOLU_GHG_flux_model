@@ -191,7 +191,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
 # All steps for creating starting non-soil carbon pools in a chunk: download chunks, calculate carbon densities, upload to s3
 def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, download_dict_with_data_types, year,
-                                           fishnet_iso_df, is_final, no_upload, starting_C_pool_output_folders, stage):
+                                           fishnet_iso_df, is_final, no_upload, output_folders, stage):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -341,7 +341,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
                 out_pattern, year_range = uu.strip_and_extract_years(key)
 
                 # Retrieves the relevant output s3 path for this specific output  (list of one element)
-                matched_output_s3_folder = [item for item in starting_C_pool_output_folders if out_pattern in item][0]
+                matched_output_s3_folder = [item for item in output_folders if out_pattern in item][0]
 
                 # Output paths without bucket (s3://gfw2-data)
                 s3_path_without_bucket = f"{matched_output_s3_folder[cn.full_bucket_prefix_length:]}"
@@ -350,8 +350,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
                 out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
 
             uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
-                                                is_final, logger_worker,
-                                                'standard', 'per_hectare', out_no_data_val)
+                                                is_final, logger_worker, out_no_data_val)
 
         # Clears memory of unneeded arrays
         del out_dict_all_dtypes

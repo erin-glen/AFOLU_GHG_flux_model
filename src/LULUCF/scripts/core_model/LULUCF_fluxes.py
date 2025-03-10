@@ -16,9 +16,7 @@ python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cshp s3
 import argparse
 import concurrent.futures
 import os
-import re
 import sys
-import time
 import numpy as np
 
 from dask.distributed import print
@@ -34,7 +32,7 @@ from ..utilities import resize_cluster
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-# @jit(nopython=True)
+@jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, primary_forest_RFs, is_final):
 
     # Separate dictionaries for output numpy arrays of each datatype, named by output data type).
@@ -117,12 +115,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
     # 1=height loss relative to the maximum vegetation height occurred in this interval.
     # 2=height loss relative to the maximum vegetation height occurred in a previous interval.
     first_time_sig_loss_from_max_height_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
-    print(first_time_sig_loss_from_max_height_block)
 
     # Iterates through model intervals
     for interval_end_year in list(range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1, cn.interval_duration))[1:]:
 
-        print(f"Now at {interval_end_year}:")
+        # print(f"Now at {interval_end_year}:")
 
         # Model intervals so far, including the model start year.
         # Eventually used to determine whether current height has decreased significantly from maximum height since last non-tall veg year over multiple intervals (gradual height loss).
@@ -940,7 +937,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
         # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
         # This applies even for the outputs that aren't reused in the next interval;
         # they will still get overwritten with the final interval's values, I believe.
-        year_range = f"{interval_end_year - cn.interval_duration}_{interval_end_year}"
+        year_range = f"{interval_end_year - cn.interval_duration + 1}_{interval_end_year}"
 
         out_dict_uint32[f"{cn.land_state_pattern}_{year_range}"] = state_out_block.copy()
 
@@ -982,7 +979,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
 
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types, start_year, end_year,
-                                       fishnet_iso_df, is_final, no_upload, stage):
+                                       fishnet_iso_df, is_final, no_upload, output_folders, stage):
 
     #TODO Add try-except from create_starting_carbon_pools
 
@@ -1110,7 +1107,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
         for interval_end_year in cn.interval_end_years_5_years:
 
-            year_range = f"{interval_end_year-5}_{interval_end_year}"
+            year_range = f"{interval_end_year-cn.interval_duration+1}_{interval_end_year}"
 
             # Gross emissions across all carbon pools
             out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"] = (
@@ -1120,14 +1117,14 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
                     + out_dict_all_dtypes[f"{cn.litter_c_gross_emis_pattern}_{year_range}"])
 
             # Gross emissions for non-CO2 emissions
-            out_dict_all_dtypes[f"{cn.gross_emis_non_CO2_only_pattern}_{year_range}"] = (
+            out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"] = (
                     out_dict_all_dtypes[f"{cn.ch4_flux_pattern}_{year_range}"]
                     + out_dict_all_dtypes[f"{cn.n2o_flux_pattern}_{year_range}"])
 
             # Gross emissions for all carbon pools and all gases
             out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_all_gases_pattern}_{year_range}"] = (
                 out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"]
-                + out_dict_all_dtypes[f"{cn.gross_emis_non_CO2_only_pattern}_{year_range}"]
+                + out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"]
             )
 
             # Gross removals across all carbon pools
@@ -1153,7 +1150,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
             # Net flux across all carbon pools, plus non-pool non-CO2 emissions
             out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_all_gases_pattern}_{year_range}"] = (
                     out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_{year_range}"]
-                    + out_dict_all_dtypes[f"{cn.gross_emis_non_CO2_only_pattern}_{year_range}"])
+                    + out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"])
 
 
         ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
@@ -1194,12 +1191,24 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
                 # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
                 out_pattern, year_range = uu.strip_and_extract_years(key)
 
-                # Dictionary with metadata for each array
-                out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range]
+                # Retrieves the relevant output s3 path for this specific output (list of one element).
+                # First, finds the output folders for all intervals with the relevant patterns
+                matched_output_s3_folders = [item for item in output_folders if out_pattern in item]
+                # print(matched_output_s3_folders)
+                # Second, finds the output folder with the right interval for that pattern
+                matched_output_s3_folder_list = [item for item in matched_output_s3_folders if year_range in item]
+                # print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
 
-            uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
-                                                is_final, logger_worker,
-                                                'standard', 'per_hectare', out_no_data_val)
+                # Output paths without bucket (s3://gfw2-data).
+                # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
+                s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
+
+                # Dictionary with metadata for each array
+                out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
+
+            # uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
+            save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
+                                                is_final, logger_worker, out_no_data_val)
 
         # Clears memory of unneeded arrays
         del out_dict_all_dtypes
@@ -1215,6 +1224,82 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
 
     return return_message, chunk_stats  # Return both the success message and the statistics
+
+
+from botocore.config import Config
+import boto3
+import rasterio
+
+# Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
+def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
+                                     bounds_str, output_dict, is_final, logger_worker,
+                                     no_data_val=None):
+
+    # Configures S3 client with increased retries; retries can max out for global analyses
+    s3_config = Config(
+        retries={
+            'max_attempts': 10,  # Increases the number of retry attempts
+            'mode': 'standard'
+        }
+    )
+    s3_client = boto3.client("s3", config=s3_config)  # Uses the configured client with more retries
+
+    try:
+
+        transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
+
+        file_info = f'{tile_id}__{bounds_str}'
+
+        if is_final:
+            lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
+
+        # For every output file, saves from array to local raster, then to s3.
+        # Can't save directly to s3, unfortunately, so need to save locally first.
+        for key, value in output_dict.items():
+
+            data_array = value[0]
+            data_type = value[1]
+            data_meaning = value[2]
+            year_out = value[3]
+            full_s3_path = value[4]
+
+            if is_final:
+                file_name = f"{file_info}__{key}.tif"
+            else:
+                file_name = f"{file_info}__{key}__{uu.timestr()}.tif"
+
+            # Only prints if not a final run
+            if not is_final:
+                lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {uu.timestr()}", is_final, logger_worker)
+
+            # Includes NoData value in output raster
+            if no_data_val is not None:
+                with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                                   height=chunk_length_pixels, count=1,
+                                   dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                                   tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
+                    dst.write(data_array, 1)
+
+            # No NoData value in output raster
+            else:
+                with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                                   height=chunk_length_pixels, count=1,
+                                   dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                                   tiled=True, blockxsize=400, blockysize=400) as dst:
+                    dst.write(data_array, 1)
+
+            # Only prints if not a final run
+            if not is_final:
+                lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {uu.timestr()}", is_final, logger_worker)
+
+            s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}{file_name}")
+
+            # Deletes the local raster
+            os.remove(f"/tmp/{file_name}")
+
+    except Exception:
+
+        print(f"Could not upload {bounds_str} in {tile_id}: {uu.timestr()}")
 
 
 
@@ -1368,7 +1453,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # print(download_dict)
 
-    output_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, chunk_size_pixels, model_type, main_logger)
+    output_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year, chunk_size_pixels, model_type, main_logger)
     # print(output_dir_list)
 
     # Returns the first tile in each input so that the datatype can be determined.
@@ -1409,7 +1494,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     for chunk in chunk_list:
         future = client.submit(calculate_and_upload_LULUCF_fluxes,
                                chunk, primary_forest_RF_array, download_dict_with_data_types, start_year, end_year,
-                               fishnet_iso_df, is_final, no_upload, stage)
+                               fishnet_iso_df, is_final, no_upload, output_dir_list, stage)
         futures.append(future)
 
     # Collect the results once they are finished

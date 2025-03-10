@@ -83,8 +83,7 @@ def check_s3_file_created(s3_path):
 
 # Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
 def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
-                                     bounds_str, output_dict, is_final, logger_worker,
-                                     model_version, pixel_meaning, no_data_val=None):
+                                     bounds_str, output_dict, is_final, logger_worker, no_data_val=None):
 
     # Configures S3 client with increased retries; retries can max out for global analyses
     s3_config = Config(
@@ -95,56 +94,62 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
     )
     s3_client = boto3.client("s3", config=s3_config)  # Uses the configured client with more retries
 
-    transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
+    try:
 
-    file_info = f'{tile_id}__{bounds_str}'
+        transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
 
-    if is_final:
-        lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
-
-    # For every output file, saves from array to local raster, then to s3.
-    # Can't save directly to s3, unfortunately, so need to save locally first.
-    for key, value in output_dict.items():
-
-        data_array = value[0]
-        data_type = value[1]
-        data_meaning = value[2]
-        year_out = value[3]
-        full_s3_path = value[4]
+        file_info = f'{tile_id}__{bounds_str}'
 
         if is_final:
-            file_name = f"{file_info}__{key}.tif"
-        else:
-            file_name = f"{file_info}__{key}__{timestr()}.tif"
+            lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
 
-        # Only prints if not a final run
-        if not is_final:
-            lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger_worker)
+        # For every output file, saves from array to local raster, then to s3.
+        # Can't save directly to s3, unfortunately, so need to save locally first.
+        for key, value in output_dict.items():
 
-        # Includes NoData value in output raster
-        if no_data_val is not None:
-            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                               height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                               tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
-                dst.write(data_array, 1)
+            data_array = value[0]
+            data_type = value[1]
+            data_meaning = value[2]
+            year_out = value[3]
+            full_s3_path = value[4]
 
-        # No NoData value in output raster
-        else:
-            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                               height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                               tiled=True, blockxsize=400, blockysize=400) as dst:
-                dst.write(data_array, 1)
+            if is_final:
+                file_name = f"{file_info}__{key}.tif"
+            else:
+                file_name = f"{file_info}__{key}__{timestr()}.tif"
 
-        # Only prints if not a final run
-        if not is_final:
-            lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {timestr()}", is_final, logger_worker)
+            # Only prints if not a final run
+            if not is_final:
+                lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger_worker)
 
-        s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}{file_name}")
+            # Includes NoData value in output raster
+            if no_data_val is not None:
+                with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                                   height=chunk_length_pixels, count=1,
+                                   dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                                   tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
+                    dst.write(data_array, 1)
 
-        # Deletes the local raster
-        os.remove(f"/tmp/{file_name}")
+            # No NoData value in output raster
+            else:
+                with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                                   height=chunk_length_pixels, count=1,
+                                   dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                                   tiled=True, blockxsize=400, blockysize=400) as dst:
+                    dst.write(data_array, 1)
+
+            # Only prints if not a final run
+            if not is_final:
+                lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {timestr()}", is_final, logger_worker)
+
+            s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}{file_name}")
+
+            # Deletes the local raster
+            os.remove(f"/tmp/{file_name}")
+
+    except Exception as e:
+
+        print(f"Could not upload {bounds_str} in {tile_id}: {timestr()}")
 
 
 # Returns list of rasters in an s3 folder and returns their names as a list (but not full paths)
@@ -599,7 +604,7 @@ def check_for_tile(download_dict, is_final, logger):
 
 
 # Turns a list of basic output directory names into a list of fully specified directories based on output chunk size, run date, model type, and output years
-def create_output_dir_name_list(core_output_dirs, interval_type, chunk_size_pixels, model_type, main_logger):
+def create_output_dir_name_list(core_output_dirs, interval_type, start_year, chunk_size_pixels, model_type, main_logger):
 
     # List of directories for outputs
     output_full_dirs = []
@@ -635,6 +640,9 @@ def create_output_dir_name_list(core_output_dirs, interval_type, chunk_size_pixe
             # For outputs that are a specific year (stocks)
             if "YEAR" in basic_output:
                 output_dir = basic_output.replace('YEAR', str(output_year))
+            # For outputs that cover the start of the model to the end of the current interval
+            elif "RUNSTART_END" in basic_output:
+                output_dir = basic_output.replace('RUNSTART_END', f"{str(start_year)}_{str(output_year)}")
             # For outputs that cover a range of years (fluxes)
             else:
                 if interval_type == cn.intervals_five_years:
@@ -1106,7 +1114,7 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger):
     output_rows = merged_stats[merged_stats['in_out'] == 'output_layer']
 
     # Splits input rows based on 'layer_name' containing 'ba_' or 'forest_disturbance'
-    annual_inputs = input_rows[input_rows['layer_name'].str.contains('ba_|forest_disturbance', case=False, na=False)]
+    annual_inputs = input_rows[input_rows['layer_name'].str.contains(f'{cn.burned_area_final_pattern}|forest_disturbance', case=False, na=False)]
 
     # Puts output rows that don't contain 'ba_' or 'forest_disturbance' in a separate tab
     other_inputs = input_rows[~input_rows['layer_name'].str.contains('ba_|forest_disturbance', case=False, na=False)]

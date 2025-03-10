@@ -173,10 +173,10 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",
         f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2015_2020/4000_pixels/{date}/"
 
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/4000_pixels/{date}/"
+        # f"{cn.outputs_path}{cn.land_state_pattern}/2000_2005/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.land_state_pattern}/2005_2010/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.land_state_pattern}/2010_2015/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.land_state_pattern}/2015_2020/4000_pixels/{date}/"
     ]
 
     tiles_to_process = []
