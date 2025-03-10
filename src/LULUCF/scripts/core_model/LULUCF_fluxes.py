@@ -19,6 +19,8 @@ import os
 import sys
 import numpy as np
 
+from concurrent.futures import ThreadPoolExecutor
+
 from dask.distributed import print
 from numba import jit
 
@@ -1206,8 +1208,14 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
                 out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
 
             # uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
-            save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
+            upload_tasks = save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
                                                 is_final, logger_worker, out_no_data_val)
+
+            print(upload_tasks)
+
+            # Execute uploads in parallel
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                executor.map(lambda args: upload_raster_to_s3(*args), upload_tasks)
 
         # Clears memory of unneeded arrays
         del out_dict_all_dtypes
@@ -1223,6 +1231,15 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
 
     return return_message, chunk_stats  # Return both the success message and the statistics
+
+def upload_raster_to_s3(file_path, bucket, s3_key):
+    s3_client = boto3.client("s3")
+    """Handles uploading raster files to S3 and deletes local copy after upload."""
+    try:
+        s3_client.upload_file(file_path, bucket, s3_key)
+        os.remove(file_path)  # Remove local temp file after upload
+    except Exception as e:
+        print(f"Upload failed for {s3_key}: {e}")
 
 
 from botocore.config import Config
@@ -1244,6 +1261,8 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
     s3_client = boto3.client("s3", config=s3_config)  # Uses the configured client with more retries
 
     # try:
+
+    upload_tasks = []
 
     transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
 
@@ -1287,14 +1306,18 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
                                tiled=True, blockxsize=400, blockysize=400) as dst:
                 dst.write(data_array, 1)
 
-        # Only prints if not a final run
-        if not is_final:
-            lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {uu.timestr()}", is_final, logger_worker)
+        upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
 
-        s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}{file_name}")
+    return upload_tasks
 
-        # Deletes the local raster
-        os.remove(f"/tmp/{file_name}")
+        # # Only prints if not a final run
+        # if not is_final:
+        #     lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {uu.timestr()}", is_final, logger_worker)
+        #
+        # s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}{file_name}")
+        #
+        # # Deletes the local raster
+        # os.remove(f"/tmp/{file_name}")
 
     # except Exception:
     #
