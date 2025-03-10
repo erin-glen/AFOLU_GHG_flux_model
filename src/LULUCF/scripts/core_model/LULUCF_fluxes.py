@@ -1243,62 +1243,62 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
     )
     s3_client = boto3.client("s3", config=s3_config)  # Uses the configured client with more retries
 
-    try:
+    # try:
 
-        transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
+    transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
 
-        file_info = f'{tile_id}__{bounds_str}'
+    file_info = f'{tile_id}__{bounds_str}'
+
+    if is_final:
+        lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+
+    # For every output file, saves from array to local raster, then to s3.
+    # Can't save directly to s3, unfortunately, so need to save locally first.
+    for key, value in output_dict.items():
+
+        data_array = value[0]
+        data_type = value[1]
+        data_meaning = value[2]
+        year_out = value[3]
+        full_s3_path = value[4]
 
         if is_final:
-            lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
+            file_name = f"{file_info}__{key}.tif"
+        else:
+            file_name = f"{file_info}__{key}__{uu.timestr()}.tif"
 
-        # For every output file, saves from array to local raster, then to s3.
-        # Can't save directly to s3, unfortunately, so need to save locally first.
-        for key, value in output_dict.items():
+        # Only prints if not a final run
+        if not is_final:
+            lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {uu.timestr()}", is_final, logger_worker)
 
-            data_array = value[0]
-            data_type = value[1]
-            data_meaning = value[2]
-            year_out = value[3]
-            full_s3_path = value[4]
+        # Includes NoData value in output raster
+        if no_data_val is not None:
+            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                               height=chunk_length_pixels, count=1,
+                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                               tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
+                dst.write(data_array, 1)
 
-            if is_final:
-                file_name = f"{file_info}__{key}.tif"
-            else:
-                file_name = f"{file_info}__{key}__{uu.timestr()}.tif"
+        # No NoData value in output raster
+        else:
+            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                               height=chunk_length_pixels, count=1,
+                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                               tiled=True, blockxsize=400, blockysize=400) as dst:
+                dst.write(data_array, 1)
 
-            # Only prints if not a final run
-            if not is_final:
-                lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {uu.timestr()}", is_final, logger_worker)
+        # Only prints if not a final run
+        if not is_final:
+            lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {uu.timestr()}", is_final, logger_worker)
 
-            # Includes NoData value in output raster
-            if no_data_val is not None:
-                with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                                   height=chunk_length_pixels, count=1,
-                                   dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                                   tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
-                    dst.write(data_array, 1)
+        s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}{file_name}")
 
-            # No NoData value in output raster
-            else:
-                with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                                   height=chunk_length_pixels, count=1,
-                                   dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                                   tiled=True, blockxsize=400, blockysize=400) as dst:
-                    dst.write(data_array, 1)
+        # Deletes the local raster
+        os.remove(f"/tmp/{file_name}")
 
-            # Only prints if not a final run
-            if not is_final:
-                lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {uu.timestr()}", is_final, logger_worker)
-
-            s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}{file_name}")
-
-            # Deletes the local raster
-            os.remove(f"/tmp/{file_name}")
-
-    except Exception:
-
-        print(f"Could not upload {bounds_str} in {tile_id}: {uu.timestr()}")
+    # except Exception:
+    #
+    #     print(f"Could not upload {bounds_str} in {tile_id}: {uu.timestr()}")
 
 
 

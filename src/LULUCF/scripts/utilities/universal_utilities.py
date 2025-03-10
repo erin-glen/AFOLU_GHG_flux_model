@@ -118,11 +118,11 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
             if is_final:
                 file_name = f"{file_info}__{key}.tif"
             else:
-                file_name = f"{file_info}__{key}__{uu.timestr()}.tif"
+                file_name = f"{file_info}__{key}__{timestr()}.tif"
 
             # Only prints if not a final run
             if not is_final:
-                lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {uu.timestr()}", is_final, logger_worker)
+                lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger_worker)
 
             # Includes NoData value in output raster
             if no_data_val is not None:
@@ -142,7 +142,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
 
             # Only prints if not a final run
             if not is_final:
-                lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {uu.timestr()}", is_final, logger_worker)
+                lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {timestr()}", is_final, logger_worker)
 
             s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}{file_name}")
 
@@ -151,7 +151,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
 
     except Exception:
 
-        print(f"Could not upload {bounds_str} in {tile_id}: {uu.timestr()}")
+        print(f"Could not upload {bounds_str} in {tile_id}: {timestr()}")
 
 
 # Returns list of rasters in an s3 folder and returns their names as a list (but not full paths)
