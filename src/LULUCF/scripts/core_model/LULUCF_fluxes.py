@@ -20,6 +20,7 @@ import sys
 import numpy as np
 
 from concurrent.futures import ThreadPoolExecutor
+from rasterio.io import MemoryFile
 
 from dask.distributed import print
 from numba import jit
@@ -1211,7 +1212,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
             upload_tasks = save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
                                                 is_final, logger_worker, out_no_data_val)
 
-            print(upload_tasks)
+            # print(upload_tasks)
+            print(f"Uploading outputs to s3 in parallel: {uu.timestr()}")
 
             # Execute uploads in parallel
             with ThreadPoolExecutor(max_workers=5) as executor:
@@ -1231,6 +1233,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
 
     return return_message, chunk_stats  # Return both the success message and the statistics
+
+
 
 def upload_raster_to_s3(file_path, bucket, s3_key):
     s3_client = boto3.client("s3")
@@ -1290,23 +1294,57 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
         if not is_final:
             lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {uu.timestr()}", is_final, logger_worker)
 
-        # Includes NoData value in output raster
-        if no_data_val is not None:
-            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                               height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                               tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
-                dst.write(data_array, 1)
+        estimated_size = chunk_length_pixels * chunk_length_pixels * np.dtype(data_type).itemsize
+        # print(f"{key}: {estimated_size}")
+        use_memory = estimated_size < 100 * 1024 * 1024
+        # print(f"{key}: {use_memory}")
 
-        # No NoData value in output raster
+        if use_memory:
+            with MemoryFile() as memfile:
+                with memfile.open(driver='GTiff', width=chunk_length_pixels,
+                                  height=chunk_length_pixels, count=1,
+                                  dtype=data_type, crs='EPSG:4326',
+                                  transform=transform, compress='lzw',
+                                  tiled=True, blockxsize=400, blockysize=400,
+                                  nodata=no_data_val) as dst:
+                    dst.write(data_array, 1)
+
+                # print(f"Using memfile for {key}: {uu.timestr()}")
+                # Upload in-memory file to S3
+                s3_client.put_object(Bucket="gfw2-data", Key=f"{full_s3_path}{file_name}", Body=memfile.read())
+
         else:
-            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                               height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                               tiled=True, blockxsize=400, blockysize=400) as dst:
+            # Fall back to local disk storage for larger rasters
+            file_path = f"/tmp/{file_name}"
+            with rasterio.open(file_path, 'w', driver='GTiff',
+                               width=chunk_length_pixels, height=chunk_length_pixels,
+                               count=1, dtype=data_type, crs='EPSG:4326',
+                               transform=transform, compress='lzw',
+                               tiled=True, blockxsize=400, blockysize=400,
+                               nodata=no_data_val) as dst:
                 dst.write(data_array, 1)
 
-        upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
+            # print(f"Locally rasterizing {key} and adding to upload queue: {uu.timestr()}")
+            # Queue upload task
+            upload_tasks.append((file_path, "gfw2-data", f"{full_s3_path}{file_name}"))
+
+        # # Includes NoData value in output raster
+        # if no_data_val is not None:
+        #     with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+        #                        height=chunk_length_pixels, count=1,
+        #                        dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+        #                        tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
+        #         dst.write(data_array, 1)
+        #
+        # # No NoData value in output raster
+        # else:
+        #     with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+        #                        height=chunk_length_pixels, count=1,
+        #                        dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+        #                        tiled=True, blockxsize=400, blockysize=400) as dst:
+        #         dst.write(data_array, 1)
+        #
+        # upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
 
     return upload_tasks
 
