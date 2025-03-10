@@ -964,6 +964,8 @@ def count_successful_chunks(all_stats, chunk_list, is_final, main_logger, result
     # Initializes counters for different types of return messages
     success_count = 0
     skipping_chunk_count = 0
+    error_chunk_count = 0
+    other_message_count = 0
 
     # Processes the chunk stats and returned messages
     # Results are the messages from the chunks and chunk stats
@@ -972,9 +974,12 @@ def count_successful_chunks(all_stats, chunk_list, is_final, main_logger, result
 
         if "Success" in return_message:
             success_count += 1
-
-        if "Skipped chunk" in return_message:
+        elif "Skipped chunk" in return_message:
             skipping_chunk_count += 1
+        elif "Error" in return_message:
+            error_chunk_count += 1
+        else:
+            other_message_count += 1
 
         if return_message:
             return_messages.append(return_message)
@@ -991,7 +996,9 @@ def count_successful_chunks(all_stats, chunk_list, is_final, main_logger, result
     ##TODO Use the GCS_to_s3 status json as a way to check which chunks were skipped
     main_logger.info(f"Number of 'Success' chunks: {success_count}")
     main_logger.info(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
-    main_logger.info(f"Difference between submitted chunks and processed chunks: {len(chunk_list) - (success_count + skipping_chunk_count)}" + "\n")
+    main_logger.info(f"Number of 'Error' chunks: {error_chunk_count}")
+    main_logger.info(f"Number of 'Other message' chunks: {other_message_count}")
+    main_logger.info(f"Difference between submitted chunks and processed chunks: {len(chunk_list) - (success_count + skipping_chunk_count + error_chunk_count + other_message_count)}" + "\n")
 
     return success_count
 

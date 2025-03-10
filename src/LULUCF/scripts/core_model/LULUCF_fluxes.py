@@ -34,7 +34,7 @@ from ..utilities import resize_cluster
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-@jit(nopython=True)
+# @jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, primary_forest_RFs, is_final):
 
     # Separate dictionaries for output numpy arrays of each datatype, named by output data type).
@@ -117,12 +117,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, 
     # 1=height loss relative to the maximum vegetation height occurred in this interval.
     # 2=height loss relative to the maximum vegetation height occurred in a previous interval.
     first_time_sig_loss_from_max_height_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
-
+    print(first_time_sig_loss_from_max_height_block)
 
     # Iterates through model intervals
     for interval_end_year in list(range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1, cn.interval_duration))[1:]:
 
-        # print(f"Now at {interval_end_year}:")
+        print(f"Now at {interval_end_year}:")
 
         # Model intervals so far, including the model start year.
         # Eventually used to determine whether current height has decreased significantly from maximum height since last non-tall veg year over multiple intervals (gradual height loss).
