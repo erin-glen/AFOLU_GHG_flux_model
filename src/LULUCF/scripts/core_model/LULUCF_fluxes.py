@@ -15,7 +15,6 @@ python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cshp s3
 
 import argparse
 import concurrent.futures
-import os
 import sys
 import numpy as np
 
@@ -35,7 +34,8 @@ from ..utilities import resize_cluster
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
 @jit(nopython=True)
-def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32, primary_forest_RFs, is_final):
+def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
+                  primary_forest_RFs, start_year, end_year, is_final):
 
     # Separate dictionaries for output numpy arrays of each datatype, named by output data type).
     # This is because a dictionary in a Numba function cannot have arrays with multiple data types, so each dictionary has to store only one data type,
@@ -1071,7 +1071,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
         out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(
-            typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs, is_final)
+            typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs, start_year, end_year, is_final)
 
         lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
         print(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}")
@@ -1272,14 +1272,9 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
 
-    # Interval type for model
-    if start_year == 2000 and end_year == 2020:
-        interval_type = cn.intervals_five_years
-    elif start_year == 2015 and end_year == 2023:
-        interval_type = cn.intervals_annual
-    else:
-        interval_type = cn.intervals_hybrid
-    main_logger.info(f"Interval type: {interval_type}")
+    # Calculates the interval type, difference between start and end years of intervals, and the model output years
+    # for the model run
+    interval_type, interval_year_diff, output_years = uu.get_interval_info(end_year, main_logger, start_year)
 
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -1392,8 +1387,8 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # print(download_dict)
 
-    output_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year, chunk_size_pixels, model_type, main_logger)
-    # print(output_dir_list)
+    output_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year, chunk_size_pixels, model_type, output_years, interval_year_diff)
+    print(output_dir_list)
 
     # Returns the first tile in each input so that the datatype can be determined.
     # This is done up front, once per tile set, rather than on each chunk, since
@@ -1486,7 +1481,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Closes the Dask client if not running locally
     if not run_local:
         client.close()
-
 
 
 if __name__ == "__main__":
