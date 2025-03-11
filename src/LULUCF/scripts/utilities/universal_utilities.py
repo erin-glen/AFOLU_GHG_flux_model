@@ -93,7 +93,8 @@ def upload_raster_to_s3(file_path, bucket, s3_key):
 
 
 # Saves arrays as rasters locally, then makes a list of tasks of rasters to upload. Does not actually upload.
-# NoData value for outputs is optional
+# NoData value for outputs is optional.
+# Parallelization based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67cf3a32-1bdc-800a-89c9-3ac153d999d4
 def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
                                      bounds_str, output_dict, is_final, logger_worker,
                                      no_data_val=None):
@@ -459,14 +460,17 @@ def get_interval_info(end_year, main_logger, start_year):
     if start_year == 2000 and end_year == 2020:
         interval_type = cn.intervals_five_years
         interval_year_diff = cn.interval_duration - 1  # -1 because the interval really starts one year after the end of the previous interval
+        interval_length = cn.interval_duration
         output_years = cn.interval_end_years_5_years
     elif start_year == 2015 and end_year == 2023:
         interval_type = cn.intervals_annual
         interval_year_diff = 1
+        interval_length = 1
         output_years = cn.interval_end_years_annual
     elif start_year == 2000 and end_year == 2023:  # Hybrid model (2000-2023)
         interval_type = cn.intervals_hybrid
         interval_year_diff = [cn.interval_duration - 1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
+        interval_length = [cn.interval_duration] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
         # intervals = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]
         output_years = cn.interval_end_years_5_years[:-1] + cn.interval_end_years_annual
     else:
@@ -475,9 +479,9 @@ def get_interval_info(end_year, main_logger, start_year):
 
     main_logger.info(f"Interval type: {interval_type}")
     main_logger.info(f"Interval duration: {interval_year_diff+1} years")
-    main_logger.info(f"Output years: {output_years}")
+    main_logger.info(f"Interval end years/Output years: {output_years}")
 
-    return interval_type, interval_year_diff, output_years
+    return interval_type, interval_year_diff, interval_length, output_years
 
 
 # Creates the list of chunks to process given an approach: a bounding box or a shapefile attribute table

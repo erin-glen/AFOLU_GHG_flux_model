@@ -33,9 +33,9 @@ from ..utilities import resize_cluster
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-@jit(nopython=True)
+# @jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
-                  primary_forest_RFs, start_year, end_year, is_final):
+                  primary_forest_RFs, start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years, is_final):
 
     # Separate dictionaries for output numpy arrays of each datatype, named by output data type).
     # This is because a dictionary in a Numba function cannot have arrays with multiple data types, so each dictionary has to store only one data type,
@@ -45,14 +45,16 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     out_dict_uint32 = {}
     out_dict_float32 = {}
 
-    # Numpy arrays for outputs that do depend on previous interval's values
+    # Carbon density arrays determined by the starting year of the model (Mg C/ha)
     agc_dens_block = in_dict_float32[cn.agc_dens_pattern].astype('float32')
     bgc_dens_block = in_dict_float32[cn.bgc_dens_pattern].astype('float32')
     deadwood_c_dens_block = in_dict_float32[cn.deadwood_c_dens_pattern].astype('float32')
     litter_c_dens_block = in_dict_float32[cn.litter_c_dens_pattern].astype('float32')
 
+    # Root:shoot (unitless)
     r_s_ratio_block = in_dict_float32[cn.r_s_ratio_pattern].astype('float32')
 
+    # Natural forest regrowth curves (Mg C/ha/yr)
     natrl_forest_curve_0_5_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__0_5_years"].astype('float32')
     natrl_forest_curve_6_10_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__6_10_years"].astype('float32')
     natrl_forest_curve_11_15_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__11_15_years"].astype('float32')
@@ -120,13 +122,18 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     first_time_sig_loss_from_max_height_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
 
     # Iterates through model intervals
-    for interval_end_year in list(range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1, cn.interval_duration))[1:]:
+    for interval_end_year in interval_end_years:
 
-        # print(f"Now at {interval_end_year}:")
+        print(f"Now at {interval_end_year}:")
 
-        # Model intervals so far, including the model start year.
+        # Model years so far, including the model start year.
         # Eventually used to determine whether current height has decreased significantly from maximum height since last non-tall veg year over multiple intervals (gradual height loss).
-        years_so_far = list(range(cn.first_model_year_5_years, interval_end_year + 1, cn.interval_duration))
+        if interval_type in [cn.intervals_five_years, cn.intervals_annual]:
+            years_so_far = list(range(start_year, interval_end_year + 1, interval_length))
+        else:
+            sys.exit("interval_type not valid: 'hybrid' not supported yet")
+
+        # print(years_so_far)
 
         # Pre-fetches vegetation height data for this chunk and stores in a dictionary or list.
         # Eventually used to determine whether current height has decreased significantly from maximum height since last non-tall veg year over multiple intervals (gradual height loss).
@@ -137,36 +144,48 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
             in_dict_uint8[f"{cn.vegetation_height_pattern}_{year}"]
             for year in years_so_far
         ]
+        # print(vegetation_heights_so_far_block)
 
         # Writes the dictionary entries to a chunk for use in the decision tree
-        LC_prev_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year - cn.interval_duration}"]
+        LC_prev_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year - interval_length}"]
         LC_curr_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year}"]
-        veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year - cn.interval_duration}"]
+        veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}"]
         veg_h_curr_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year}"]
+
+        # print(f"{cn.land_cover_pattern}_{interval_end_year - interval_length}:", LC_prev_block)
+        # print(f"{cn.land_cover_pattern}_{interval_end_year}:", LC_curr_block)
+        # print(f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}:", veg_h_prev_block)
+        # print(f"{cn.vegetation_height_pattern}_{interval_end_year}:", veg_h_curr_block)
 
         # Creates a list of all the burned area arrays from 2001 to the end of the interval.
         # It works by getting the burned area chunks for the current interval and appending them to a list of chunks
         # from previous intervals.
-        for year_offset in range(interval_end_year-4, interval_end_year+1):
+        for year_offset in range(interval_end_year-interval_year_diff, interval_end_year+1):
             year_key = f"{cn.burned_area_final_pattern}_{year_offset}"
             burned_area_blocks_all_intervals_so_far.append(in_dict_uint8[year_key])
+
+        # print("burned_area_blocks_all_intervals_so_far")
+        # print(burned_area_blocks_all_intervals_so_far)
 
 
         # Creates a list of all the forest disturbance arrays from 2001 to the end of the interval.
         # The values in the list are the disturbance year starting from 1, e.g., 2001=1, 2008=8, 2017=17.
         # It works by getting the annual disturbance chunks for the current interval and appending them to a list of
         # chunks from previous intervals.
-        for year_offset in range(interval_end_year-4, interval_end_year+1):
+        for year_offset in range(interval_end_year-interval_year_diff, interval_end_year+1):
 
             # The name of the disturbance layer in the input dictionary
             year_key = f"{cn.forest_disturbance_layer_name}_{year_offset}"
 
             # Replaces the binary annual disturbance array with the year of disturbance (1, 2, 3...20)
-            year_disturb_array = in_dict_uint8[year_key] * (year_offset - cn.first_model_year_5_years)
+            year_disturb_array = in_dict_uint8[year_key] * (year_offset - start_year)
 
             # Makes a list of disturbance arrays with the disturbance year.
             # uint8 is okay because the highest value should be 20 (not 2020).
             forest_dist_blocks_all_intervals_so_far.append(year_disturb_array.astype('uint8'))
+
+        # print("forest_dist_blocks_all_intervals_so_far")
+        # print(forest_dist_blocks_all_intervals_so_far)
 
 
         # Numpy arrays for outputs that don't depend on previous interval's values
@@ -195,7 +214,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         for row in range(LC_curr_block.shape[0]):
             for col in range(LC_curr_block.shape[1]):
 
-                ### Defines pixel values
+                ### Defines pixel/cell values
 
                 LC_prev = LC_prev_block[row, col]
                 LC_curr = LC_curr_block[row, col]
@@ -940,7 +959,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
         # This applies even for the outputs that aren't reused in the next interval;
         # they will still get overwritten with the final interval's values, I believe.
-        year_range = f"{interval_end_year - cn.interval_duration + 1}_{interval_end_year}"
+        year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
 
         out_dict_uint32[f"{cn.land_state_pattern}_{year_range}"] = state_out_block.copy()
 
@@ -981,7 +1000,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
 
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
-def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types, start_year, end_year,
+def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types,
+                                       start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
                                        fishnet_iso_df, is_final, no_upload, output_folders, stage):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
@@ -1071,7 +1091,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
         out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(
-            typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs, start_year, end_year, is_final)
+            typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs,
+            start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years, is_final)
 
         lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
         print(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}")
@@ -1274,7 +1295,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # Calculates the interval type, difference between start and end years of intervals, and the model output years
     # for the model run
-    interval_type, interval_year_diff, output_years = uu.get_interval_info(end_year, main_logger, start_year)
+    interval_type, interval_year_diff, interval_length, interval_end_years = uu.get_interval_info(end_year, main_logger, start_year)
 
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -1387,8 +1408,9 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # print(download_dict)
 
-    output_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year, chunk_size_pixels, model_type, output_years, interval_year_diff)
-    print(output_dir_list)
+    # Creates a list of output directories for all outputs and intervals based on specifics of the model run
+    output_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year, chunk_size_pixels, model_type, interval_end_years, interval_year_diff)
+    # print(output_dir_list)
 
     # Returns the first tile in each input so that the datatype can be determined.
     # This is done up front, once per tile set, rather than on each chunk, since
@@ -1427,7 +1449,8 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     futures = []
     for chunk in chunk_list:
         future = client.submit(calculate_and_upload_LULUCF_fluxes,
-                               chunk, primary_forest_RF_array, download_dict_with_data_types, start_year, end_year,
+                               chunk, primary_forest_RF_array, download_dict_with_data_types,
+                               start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
                                fishnet_iso_df, is_final, no_upload, output_dir_list, stage)
         futures.append(future)
 
