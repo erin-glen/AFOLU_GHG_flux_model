@@ -22,12 +22,12 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory, s
         idle_timeout=idle_timeout,
         region="us-east-1",
         name=cluster_name,
-        worker_vm_types=['r7i.large'],
+        # worker_vm_types=['r7i.large'],
         workspace='wri-forest-research',
         # mount_bucket="s3://gfw2-data",
         scheduler_memory = scheduler_memory_str,
-        # worker_memory = worker_memory_str,
-        # worker_cpu = worker_cpu,
+        worker_memory = worker_memory_str,
+        worker_cpu = worker_cpu,
         worker_options={
             "nthreads": threads_per_worker
         }

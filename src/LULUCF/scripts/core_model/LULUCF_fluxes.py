@@ -1177,6 +1177,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
         ### Part 7: Saves numpy arrays as rasters and uploads to s3
 
+        uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
+
         # Only saves arrays to geotifs and uploads them to s3 if enabled
         if not no_upload:
 
@@ -1205,20 +1207,30 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
                 out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
 
             # uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
-            upload_tasks = save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
+            upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
                                                             out_dict_all_dtypes,
                                                             is_final, logger_worker, out_no_data_val)
 
-            print(f"Upload tasks created for {bounds_str} in {tile_id}. Ready to upload: {uu.timestr()}")
+            # Only prints if not a final run
+            if not is_final:
+                lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Ready to upload: {uu.timestr()}",
+                                 is_final, logger_worker)
 
             # Execute uploads in parallel
             with ThreadPoolExecutor(max_workers=5) as executor:
-                executor.map(lambda args: upload_raster_to_s3(*args), upload_tasks)
+                executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
-            # Clears memory of unneeded arrays
+            # Only prints if not a final run
+            if not is_final:
+                lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+
+        # Clears memory of unneeded arrays
         del out_dict_all_dtypes
 
         return_message = f"Success for {bounds_str}: {uu.timestr()}"
+
+        # Removes task tracking file from S3 once task is successful
+        uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
 
     except Exception as e:
 
@@ -1229,100 +1241,6 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
 
     return return_message, chunk_stats  # Return both the success message and the statistics
-
-
-def upload_raster_to_s3(file_path, bucket, s3_key):
-    s3_client = boto3.client("s3")
-    """Handles uploading raster files to S3 and deletes local copy after upload."""
-    try:
-        s3_client.upload_file(file_path, bucket, s3_key)
-        os.remove(file_path)  # Remove local temp file after upload
-    except Exception as e:
-        print(f"Upload failed for {s3_key}: {e}")
-
-
-from botocore.config import Config
-import boto3
-import rasterio
-
-# Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
-def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
-                                     bounds_str, output_dict, is_final, logger_worker,
-                                     no_data_val=None):
-
-    # Configures S3 client with increased retries; retries can max out for global analyses
-    s3_config = Config(
-        retries={
-            'max_attempts': 10,  # Increases the number of retry attempts
-            'mode': 'standard'
-        }
-    )
-    s3_client = boto3.client("s3", config=s3_config)  # Uses the configured client with more retries
-
-    # try:
-
-    upload_tasks = []
-
-    transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
-
-    file_info = f'{tile_id}__{bounds_str}'
-
-    if is_final:
-        lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
-
-    # For every output file, saves from array to local raster, then to s3.
-    # Can't save directly to s3, unfortunately, so need to save locally first.
-    for key, value in output_dict.items():
-
-        data_array = value[0]
-        data_type = value[1]
-        data_meaning = value[2]
-        year_out = value[3]
-        full_s3_path = value[4]
-
-        if is_final:
-            file_name = f"{file_info}__{key}.tif"
-        else:
-            file_name = f"{file_info}__{key}__{uu.timestr()}.tif"
-
-        # Only prints if not a final run
-        if not is_final:
-            lu.print_and_log(f"Saving {key} for {bounds_str} in {tile_id} for {year_out}: {uu.timestr()}", is_final, logger_worker)
-
-        # Includes NoData value in output raster
-        if no_data_val is not None:
-            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                               height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                               tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
-                dst.write(data_array, 1)
-
-        # No NoData value in output raster
-        else:
-            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                               height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                               tiled=True, blockxsize=400, blockysize=400) as dst:
-                dst.write(data_array, 1)
-
-        upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
-
-    return upload_tasks
-
-
-
-        # # Only prints if not a final run
-        # if not is_final:
-        #     lu.print_and_log(f"Uploading {bounds_str} in {tile_id} for {year_out} to {full_s3_path}: {uu.timestr()}", is_final, logger_worker)
-        #
-        # s3_client.upload_file(f"/tmp/{file_name}", "gfw2-data", Key=f"{full_s3_path}{file_name}")
-        #
-        # # Deletes the local raster
-        # os.remove(f"/tmp/{file_name}")
-
-    # except Exception:
-    #
-    #     print(f"Could not upload {bounds_str} in {tile_id}: {uu.timestr()}")
 
 
 
