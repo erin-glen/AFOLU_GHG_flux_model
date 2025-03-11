@@ -20,7 +20,6 @@ import sys
 import numpy as np
 
 from concurrent.futures import ThreadPoolExecutor
-from rasterio.io import MemoryFile
 
 from dask.distributed import print
 from numba import jit
@@ -1206,10 +1205,9 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
                 # Dictionary with metadata for each array
                 out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
 
-            # uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
+            # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
             upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
-                                                            out_dict_all_dtypes,
-                                                            is_final, logger_worker, out_no_data_val)
+                                                            out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
 
             # Only prints if not a final run
             if not is_final:

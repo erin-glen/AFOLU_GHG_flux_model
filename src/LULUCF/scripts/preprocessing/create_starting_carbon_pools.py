@@ -23,6 +23,7 @@ import concurrent.futures
 import dask
 import numpy as np
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 from dask.distributed import print
 from numba import jit
@@ -328,6 +329,8 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
         ### Part 6: Saves numpy arrays as rasters and uploads to s3
 
+        uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
+
         # Only saves arrays to geotifs and uploads them to s3 if enabled
         if not no_upload:
 
@@ -349,8 +352,23 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
                 # Dictionary with metadata for each array
                 out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
 
-            uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str, out_dict_all_dtypes,
-                                                is_final, logger_worker, out_no_data_val)
+            # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
+            ### NOTE: I haven't tested this parallel upload ability with create_starting_carbon_pools
+            upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
+                                                               out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
+
+            # Only prints if not a final run
+            if not is_final:
+                lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Ready to upload: {uu.timestr()}",
+                    is_final, logger_worker)
+
+            # Executes uploads in parallel
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
+
+            # Only prints if not a final run
+            if not is_final:
+                lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
         # Clears memory of unneeded arrays
         del out_dict_all_dtypes
