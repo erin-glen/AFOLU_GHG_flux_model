@@ -1213,7 +1213,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
                                                 is_final, logger_worker, out_no_data_val)
 
             # print(upload_tasks)
-            print(f"Uploading outputs to s3 in parallel: {uu.timestr()}")
+            # print(f"Uploading outputs to s3 in parallel: {uu.timestr()}")
 
             # Execute uploads in parallel
             with ThreadPoolExecutor(max_workers=5) as executor:
