@@ -16,6 +16,10 @@ Time: 26:00 through calculation; 40:44 through aggregation; 41:43 through tile s
 
 NOTE: Maybe there's some way to configure this to output 10x10 deg tiles but I can't figure it out.
 Instead, it creates 1x1 deg tiles and then merges them to 10x10 deg tiles.
+
+To create a vrt of the 10x10 deg outputs, do:
+aws s3 ls s3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/litter_C_density_MgC_ha/40000_pixels/ --recursive | grep .tif$ | awk '{print "/vsis3/gfw2-data/"$4}' > litter_C_2015_file_list.txt
+gdalbuildvrt -input_file_list litter_C_2015_file_list.txt deadwood_C2015_mosaic.vrt
 """
 
 import argparse
@@ -432,10 +436,13 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         is_final = True
         main_logger.info("Running as final model.")
 
-    # Accumulates all statistics and output messages from chunk analysis
+    # Accumulates all statistics and output messages from chunk analysis, for 1x1 chunks and aggregated 10x10 chunks
     # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-    all_stats = []
-    return_messages = []
+    all_1x1_stats = []
+    return_1x1_messages = []
+
+    all_10x10_stats = []
+    return_10x10_messages = []
 
     # This is just a placeholder tile_id that is used to obtain the datatype of each tile set.
     # It is overwritten when chunks are assigned and analyzed.
@@ -511,15 +518,16 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # Runs analysis and gathers results
     C_pool_1x1_deg_results = dask.compute(*C_pool_1x1_deg_delayed_results)
 
-    success_count = uu.count_successful_chunks(all_stats, chunk_list, is_final, main_logger, C_pool_1x1_deg_results, return_messages)
+    success_count_1x1 = uu.count_successful_chunks(all_1x1_stats, chunk_list, is_final, main_logger, C_pool_1x1_deg_results, return_1x1_messages)
 
-    # Iterates through 1x1 deg output folders and counts the number of output rasters.
-    for output_folder in output_dir_list:
+    # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
+    if not no_upload:
+        for output_folder in output_dir_list:
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+            # print(geotiff_files)
 
-        geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-        main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-
-    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+        uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
     ### Step 3: Aggregates 1x1 degree outputs to 10x10 degree outputs
@@ -530,12 +538,17 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # print(list_of_s3_name_dicts_total)
 
     # Each task is a single 10x10 deg aggregated geotif
-    C_pool_10x10_deg_delayed_results = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload) for s3_name_dict in list_of_s3_name_dicts_total]
+    C_pool_10x10_deg_delayed_results = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
+                                        for s3_name_dict in list_of_s3_name_dicts_total]
 
     C_pool_10x10_deg_results = dask.compute(*C_pool_10x10_deg_delayed_results)
-    lu.print_and_log(C_pool_10x10_deg_results, is_final, main_logger)
 
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with 10x10 deg aggregation", main_logger)
+    # success_count_10x10 = uu.count_successful_chunks(all_1x1_stats, chunk_list, is_final, main_logger,
+    #                                                C_pool_10x10_deg_results, return_10x10_messages)
+    #
+    # lu.print_and_log(C_pool_10x10_deg_results, is_final, main_logger)
+    #
+    # uu.stage_duration(start_time, uu.timestr(), f"{stage} with 10x10 deg aggregation", main_logger)
 
 
     ### Step 4: Chunk stats for 1x1 degree outputs, aggregates logs
@@ -556,8 +569,8 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
-    if (not no_stats) and (success_count > 0):
-        uu.aggregate_chunk_stats(all_stats, stage, no_upload, main_logger)
+    if (not no_stats) and (success_count_1x1 > 0):
+        uu.aggregate_chunk_stats(all_1x1_stats, stage, no_upload, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with aggregation and tile stats", main_logger)
 

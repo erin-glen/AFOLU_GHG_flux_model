@@ -271,11 +271,20 @@ def first_file_name_in_s3_folder(download_dict):
         response = s3_client.list_objects_v2(Bucket=cn.short_bucket_prefix, Prefix=dir_path, Delimiter='/')
 
         # Checks if the folder contains any files
-        if 'Contents' in response and len(response['Contents']) > 0:
-            # Uses the first file in the folder (index 0 instead of 1)
-            first_tiles[key] = cn.full_bucket_prefix + "/" + response['Contents'][1]['Key']
+        if 'Contents' in response:
+            # Filters the files to include only .tif files
+            tif_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.tif')]
+
+            # Check if any .tif files exist in the folder
+            if tif_files:
+                # Uses the first .tif file found
+                first_tiles[key] = cn.full_bucket_prefix + "/" + tif_files[0]
+            else:
+                first_tiles[key] = None  # No .tif files found
+                sys.exit(f"No tif files found in {first_tiles[key]}")
         else:
-            first_tiles[key] = None  # In case no files are found
+            first_tiles[key] = None  # No files found in the folder
+            sys.exit(f"No files found in {first_tiles[key]}")
 
     return first_tiles
 
@@ -1136,6 +1145,22 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger):
     # Puts output rows that don't contain 'flux|gross|net' in a separate tab
     other_output = output_rows[~output_rows['layer_name'].str.contains('flux|gross|net', case=False, na=False)]
 
+    # Calculates pixel count and sums for each layer for each 10x10 deg output
+    main_logger.info(f"Calculating totals for 10x10 deg at {timestr()}...")
+
+    # Ensure count_value and sum_value exist and are numeric
+    if 'count_value' in output_rows.columns and 'sum_value' in output_rows.columns:
+        output_rows['count_value'] = pd.to_numeric(output_rows['count_value'], errors='coerce').fillna(0)
+        output_rows['sum_value'] = pd.to_numeric(output_rows['sum_value'], errors='coerce').fillna(0)
+
+        # Group by tile_id and layer_name, summing count_value and sum_value
+        totals_10x10 = output_rows.groupby(['tile_id', 'layer_name']).agg(
+            total_count=('count_value', 'sum'),
+            total_sum=('sum_value', 'sum')
+        ).reset_index()
+    else:
+        totals_10x10 = pd.DataFrame()  # Creates empty DataFrame if columns don't exist
+
     # Writes the data to a single Excel file with separate sheets.
     # Should continue with model post-processing even if chunk stats don't work for some reason
     # (e.g., more many rows output than rows in an Excel spreadsheet)
@@ -1152,13 +1177,17 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger):
             other_inputs.to_excel(writer, sheet_name='other_inputs', index=False)
 
             # Writes output rows based on layer_name conditions to separate sheets
-            main_logger.info(f"Writing output to spreadsheet at {timestr()}...")
+            main_logger.info(f"Writing outputs to spreadsheet at {timestr()}...")
             gross_flux_output.to_excel(writer, sheet_name='gross_outputs', index=False)
             net_flux_output.to_excel(writer, sheet_name='flux_outputs', index=False)
             other_output.to_excel(writer, sheet_name='other_outputs', index=False)
 
             # Write the min and max statistics to the second sheet
             min_max_stats.to_excel(writer, sheet_name='min_max_for_layers', index=False)
+
+            # Write the 10x10 totals if available
+            if not totals_10x10.empty:
+                totals_10x10.to_excel(writer, sheet_name='10x10_totals', index=False)
 
         main_logger.info(merged_stats.head())  # Show first few rows of the stats DataFrame for inspection
 
