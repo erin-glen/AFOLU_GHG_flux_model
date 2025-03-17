@@ -10,82 +10,6 @@ from datetime import datetime
 from . import constants_and_names as cn
 from . import universal_utilities as uu
 
-
-# Log compilation and uploading
-# From https://chatgpt.com/share/e/4fe1e9c8-05a0-4e9d-8eee-64168891b5e2
-# Gets the logs for all workers
-#TODO Wait to run this until all entries have been added to the Coiled log--
-# running this right after the model finishes means that final log entries haven't made it into Coiled yet.
-def compile_worker_logs(no_log, cluster, stage, start_time_str, logger):
-
-    # Only consolidates the worker logs and uploads to s3 if not deactivated
-    if no_log:
-        return
-
-    #TODO Create log folder if it doesn't exist already
-    worker_log_name = f"{cn.combined_log}_workers_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
-    worker_log_local_path = f"{cn.local_log_path}{worker_log_name}"
-
-    logger.info(f"Preparing consolidated log {worker_log_name}")
-
-    # Recovers legs from Coiled
-    logs = cluster.get_logs()
-
-    # Converts the start and end times of the stage run from string to datetime.
-    # Uses start_time to filter log entries to only those after the start_time
-    start_time = datetime.strptime(start_time_str, "%Y%m%d_%H_%M_%S")
-
-    # Filter lines containing both 'distributed.worker' and 'flm',
-    # and where the datetime is greater than start_time
-    filtered_logs = []
-    for worker_id, log in logs.items():
-        for line in log.split('\n'):
-            if 'distributed.worker' in line and 'flm' in line:
-                # Extract the datetime from the end of the log line
-                log_time_str = line.split()[-1]
-                try:
-                    log_time = datetime.strptime(log_time_str, "%Y%m%d_%H_%M_%S")
-                    # Include the line only if log_time is greater than start_time
-                    if log_time > start_time:
-                        filtered_logs.append(line)
-                except ValueError:
-                    # If the datetime format is incorrect, skip this line
-                    continue
-
-    combined_filtered_logs = (
-            "\n".join(filtered_logs) + "\n"
-    )
-
-    # Save the filtered logs to a text file
-    with open(worker_log_local_path, "w") as file:
-        file.write(combined_filtered_logs)
-
-    return worker_log_local_path
-
-
-# Determines whether statement should be printed to the console as well as logged
-def print_and_log(text, is_final, logger):
-
-    logger.info(f"flm: {text}")
-    if not is_final:
-        print(f"flm: {text}", flush=True)   # flush=True is necessary for when the print is inside try-except
-
-
-# Configure logging for the distributed workers
-# https://chatgpt.com/share/e/6f80ccde-6a85-4837-94a0-4fcf09b96e43
-def setup_logging_worker():
-
-    logger = logging.getLogger('distributed.worker')
-    logger.setLevel(logging.INFO)
-
-    if not logger.hasHandlers():
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-    return logger
-
-
 # Log for main function
 # per https://chatgpt.com/share/e/67ae4ae8-ff64-800a-8b75-484d388e6a43
 def setup_logging_main(log_filename=None):
@@ -136,6 +60,72 @@ def populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_n
     main_logger.info(f"Log note: {log_note}")
 
     return main_logger, main_log_local_path
+
+# Configure logging for the distributed workers
+# https://chatgpt.com/share/e/6f80ccde-6a85-4837-94a0-4fcf09b96e43
+def setup_logging_worker():
+    logger = logging.getLogger('distributed.worker')
+    logger.setLevel(logging.INFO)
+
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    # Apply formatter to existing handlers (Dask may have already added handlers)
+    for handler in logger.handlers:
+        handler.setFormatter(formatter)
+
+    # Ensure there's at least one handler
+    if not logger.hasHandlers():
+        handler = logging.StreamHandler()
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+    return logger
+
+
+# Determines whether statement should be printed to the console as well as logged
+def print_and_log(text, is_final, logger):
+    logger.info(f"flm: {text}")
+    if not is_final:
+        print(f"flm: {text}", flush=True)  # flush=True is necessary for when the print is inside try-except
+
+
+# Log compilation and uploading
+# From https://chatgpt.com/share/e/4fe1e9c8-05a0-4e9d-8eee-64168891b5e2
+# Gets the logs for all workers
+#TODO Wait to run this until all entries have been added to the Coiled log--
+# running this right after the model finishes means that final log entries haven't made it into Coiled yet.
+def compile_worker_logs(no_log, cluster, stage, start_time_str, logger):
+
+    # Only consolidates the worker logs and uploads to s3 if not deactivated
+    if no_log:
+        return
+
+    #TODO Create log folder if it doesn't exist already
+    worker_log_name = f"{cn.combined_log}_workers_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
+    worker_log_local_path = f"{cn.local_log_path}{worker_log_name}"
+
+    logger.info(f"Preparing consolidated log {worker_log_name}")
+
+    # Recovers legs from Coiled
+    logs = cluster.get_logs()
+
+    # Filters lines containing 'flm',
+    filtered_logs = []
+    for worker_id, log in logs.items():
+        for line in log.split('\n'):
+            if 'flm' in line:
+                filtered_logs.append(line)
+
+
+    combined_filtered_logs = (
+            "\n".join(filtered_logs) + "\n"
+    )
+
+    # Saves the filtered logs to a text file
+    with open(worker_log_local_path, "w") as file:
+        file.write(combined_filtered_logs)
+
+    return worker_log_local_path
 
 
 # Merges the log from main() with all the worker logs after all processing and uploads to s3

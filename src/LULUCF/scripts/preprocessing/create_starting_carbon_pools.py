@@ -239,7 +239,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
             layer = futures[future]  # Gets the corresponding key
             data, status = future.result()  # Unpacks the tuple result
             if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
-                lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
+                lu.print_and_log(f"{status}", is_final, logger_worker)
             layers[layer] = data
 
         # # Test prints
@@ -279,7 +279,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
         lu.print_and_log(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
         if is_final:
-            print(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}")  # Need this in order to print during full runs
+            print(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}")  # Need this in order to print during full runs
         uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
         # Create AGC, BGC, deadwood C and litter C densities in selected starting year
@@ -396,7 +396,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_aggregate=False, no_upload= False,
          use_shapefile=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
-    ### Step 1: Precursors and downloads inputs
+    ### Step 1: Preparation
 
     # Model stage being running
     stage = f'starting_carbon_pools_{year}'

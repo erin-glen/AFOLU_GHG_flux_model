@@ -14,6 +14,7 @@ python -m scripts.core_model.LULUCF_fluxes -cn AFOLU_flux_model_scripts -cshp s3
 """
 
 import argparse
+import dask
 import concurrent.futures
 import sys
 import numpy as np
@@ -1285,8 +1286,10 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
 
 
-def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False, use_shapefile=False,
-         bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
+def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_aggregate=False, no_upload=False,
+         use_shapefile=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
+
+    ### Step 1: Preparation
 
     # Model stage being running
     stage = 'LULUCF_fluxes'
@@ -1462,10 +1465,12 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
 
+
+    ### Step 2: Create 1x1 degree outputs
+
     # Creates list of tasks to run (1 task = 1 chunk)
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
     main_logger.info("Workers' logs to be appended after main function log"+ "\n")
-
 
     # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
     futures = []
@@ -1479,7 +1484,46 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Collect the results once they are finished
     results = client.gather(futures)
 
-    success_count = uu.count_successful_chunks(all_stats, chunk_list, is_final, main_logger, results, return_messages)
+    success_count = uu.count_successful_chunks(chunk_list, is_final, main_logger, results)
+
+    # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
+    if not no_upload:
+        for output_folder in output_dir_list:
+
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+            # print(geotiff_files)
+
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+
+
+    ### Step 3: Aggregates 1x1 degree outputs to 10x10 degree outputs (if not disabled)
+
+    all_10x10_stats = None
+
+    if not no_aggregate:
+        # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
+        # These are the basis for the aggregation tasks.
+        list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
+        # print(list_of_s3_name_dicts_total)
+
+        main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
+
+        # Each task is a single 10x10 deg aggregated geotif
+        C_pool_10x10_deg_delayed_results = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
+                                            for s3_name_dict in list_of_s3_name_dicts_total]
+
+        C_pool_10x10_deg_results = dask.compute(*C_pool_10x10_deg_delayed_results)
+
+        success_count_10x10, all_10x10_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, C_pool_10x10_deg_results)
+
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with 10x10 deg aggregation", main_logger)
+
+    else:
+        main_logger.info(f"Skipping aggregation of 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
+
+
+    ### Step 4: Chunk stats for 1x1 degree and 10x10 degree outputs, aggregates logs
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
@@ -1494,32 +1538,20 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
             resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
 
-
-    # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-    if not no_upload:
-        for output_folder in output_dir_list:
-
-            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-            # print(geotiff_files)
-
-    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
-
-
     # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count > 0):
         uu.aggregate_chunk_stats(all_stats, stage, no_upload, main_logger)
 
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with aggregation and tile stats", main_logger)
 
     # Sets it so that no worker logs are created if doing a local run
     if not run_local:
 
         # Creates combined log from all workers if not deactivated
         worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
-        uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with aggregation, tile stats, and worker log compilation", main_logger)
 
         # Adds the workers' logs to the main log and uploads to s3
         lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
@@ -1542,6 +1574,7 @@ if __name__ == "__main__":
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
     parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
+    parser.add_argument('--no_aggregate', action='store_true', help='Do not aggregate 1x1 degrees outputs to 10x10 degree outputs')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 
     args = parser.parse_args()
@@ -1557,9 +1590,10 @@ if __name__ == "__main__":
     run_local = args.run_local
     no_stats = args.no_stats
     no_log = args.no_log
+    no_aggregate = args.no_aggregate
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, use_shapefile,
+    main(cluster_name, year_range, run_local, no_stats, no_log, no_aggregate, no_upload, use_shapefile,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)
