@@ -871,6 +871,10 @@ def flatten_list(nested_list):
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
 def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
+    ### Part 1: Merges 1x1 deg rasters to 10x10 deg
+
+    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
+
     logger_worker = lu.setup_logging_worker()
 
     in_folder = list(s3_name_dict.keys())[0]  # The input s3 folder for the small rasters
@@ -939,6 +943,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         lu.print_and_log(f"Error merging rasters: {e}", is_final, logger_worker)
         return f"failure for {s3_name_dict}"
 
+    ### Part 2: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters)
+
     # Computes valid pixel count in the output 10x10 raster for comparison with the sum of the constituent 1x1s
     lu.print_and_log(f"Counting pixels in {tile_id} for {out_file_name}: {timestr()}", is_final, logger_worker)
 
@@ -977,9 +983,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     # Gets the output file pattern and year/year_range
     out_pattern, year_range = strip_and_extract_years(out_file_name)
 
-    #TODO get the right layer name, tile_name, and out_pattern
-
-    # Most stats for the 10x10 aren't calculated. Only the count is.
+    # Most stats for the 10x10 aren't calculated.
+    # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
     # Dictionary is in a list because it's necessary for chunk stats processing later.
     chunk_stats = [{
         'chunk_id': 'N/A',
@@ -997,18 +1002,48 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         'data_type': 'no data'
     }]
 
-    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
+    ### Part 3: Uploads 10x10 to s3 using multipart uploading
+    ### https://chatgpt.com/share/e/67d848cf-8b08-800a-b0e8-79a72c9eb49a
 
     lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}: {timestr()}", is_final, logger_worker)
 
     if not no_upload:
 
         try:
-            s3_client.upload_file(merged_file, "gfw2-data", Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}")  #[15:] drops s3://gfw2-data/ from front
-            lu.print_and_log(f"Successfully uploaded {out_file_name} to s3: {timestr()}", is_final, logger_worker)
-        except boto3.exceptions.S3UploadFailedError as e:
+            lu.print_and_log(f"Uploading {out_file_name} to s3: {timestr()}", is_final, logger_worker)
+            part_size = 50 * 1024 * 1024  # 50MB chunks (adjust as needed)
+
+            # Start multipart upload
+            response = s3_client.create_multipart_upload(Bucket=cn.short_bucket_prefix, Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}")
+            upload_id = response['UploadId']
+
+            parts = []
+            with open(merged_file, 'rb') as f:
+                part_number = 1
+                while chunk := f.read(part_size):
+                    response = s3_client.upload_part(
+                        Bucket=cn.short_bucket_prefix,
+                        Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}",
+                        PartNumber=part_number,
+                        UploadId=upload_id,
+                        Body=chunk
+                    )
+                    parts.append({'PartNumber': part_number, 'ETag': response['ETag']})
+                    part_number += 1
+
+            # Complete the multipart upload
+            s3_client.complete_multipart_upload(
+                Bucket=cn.short_bucket_prefix,
+                Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}",
+                UploadId=upload_id,
+                MultipartUpload={'Parts': parts}
+            )
+            lu.print_and_log(f"Uploaded {out_file_name} to s3: {timestr()}", is_final, logger_worker)
+
+
+        except Exception as e:
             lu.print_and_log(f"Error uploading file to s3: {e}: {timestr()}", is_final, logger_worker)
-            return f"failure for {s3_name_dict}"
+            return f"Failure for {s3_name_dict}"
 
     # Deletes the local merged raster
     os.remove(merged_file)
