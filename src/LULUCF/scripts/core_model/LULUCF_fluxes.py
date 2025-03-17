@@ -1503,7 +1503,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
             main_logger.info(f"Output rasters in {output_folder}: {file_count}")
             # print(geotiff_files)
 
-        uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
     # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,

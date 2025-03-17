@@ -545,7 +545,7 @@ def stage_duration(start_time_str, end_time_str, stage, logger):
     start_time = datetime.strptime(start_time_str, "%Y%m%d_%H_%M_%S")
     end_time = datetime.strptime(end_time_str, "%Y%m%d_%H_%M_%S")
 
-    logger.info(f"Elapsed time for {stage}: {end_time - start_time}")
+    logger.info(f"Elapsed time for {stage}: {end_time - start_time}" + "\n")
 
 
 # Lazily opens tile within provided bounds (i.e. one chunk) and returns as a numpy array.
@@ -939,23 +939,80 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         lu.print_and_log(f"Error merging rasters: {e}", is_final, logger_worker)
         return f"failure for {s3_name_dict}"
 
+    # Computes valid pixel count in the output 10x10 raster for comparison with the sum of the constituent 1x1s
+    lu.print_and_log(f"Counting pixels in {tile_id} for {out_file_name}: {timestr()}", is_final, logger_worker)
+
+    # Computes count of valid pixels by reading raster in chunks (can't read full 10x10 into memory all at once
+    try:
+        ds = gdal.Open(merged_file)
+        if ds is not None:
+            band = ds.GetRasterBand(1)
+            valid_pixel_count = 0
+
+            # Gets raster dimensions
+            x_size = band.XSize
+            y_size = band.YSize
+
+            # Reads in chunks to avoid high memory usage
+            block_size_x, block_size_y = band.GetBlockSize()
+
+            for y in range(0, y_size, block_size_y):
+                rows_to_read = min(block_size_y, y_size - y)
+                for x in range(0, x_size, block_size_x):
+                    cols_to_read = min(block_size_x, x_size - x)
+
+                    # Reads only a portion of the raster at a time
+                    block = band.ReadAsArray(x, y, cols_to_read, rows_to_read)
+
+                    if block is not None:
+                        valid_pixel_count += np.count_nonzero(block != raster_nodata_value)
+
+            ds = None  # Closes dataset
+        else:
+            valid_pixel_count = -1  # Failed to open file
+    except Exception as e:
+        lu.print_and_log(f"Error calculating pixel count for {merged_file}: {e}", is_final, logger_worker)
+        valid_pixel_count = -1  # Indicate failure
+
+    # Gets the output file pattern and year/year_range
+    out_pattern, year_range = strip_and_extract_years(out_file_name)
+
+    #TODO get the right layer name, tile_name, and out_pattern
+
+    # Most stats for the 10x10 aren't calculated. Only the count is.
+    chunk_stats = {
+        'chunk_id': 'N/A',
+        'tile_id': tile_id,
+        'layer_name': out_file_name,
+        'tile_name': out_file_name,
+        'in_out': 'output_layer',
+        'pattern': out_pattern,
+        'years': year_range,
+        'min_value': 'no data',
+        'mean_value': 'no data',
+        'max_value': 'no data',
+        'count_value': valid_pixel_count,
+        'sum_value': 'no data',
+        'data_type': 'no data'
+    }
+
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
 
-    lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}", is_final, logger_worker)
+    lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}: {timestr()}", is_final, logger_worker)
 
     if not no_upload:
 
         try:
             s3_client.upload_file(merged_file, "gfw2-data", Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}")  #[15:] drops s3://gfw2-data/ from front
-            lu.print_and_log(f"Successfully uploaded {out_file_name} to s3", is_final, logger_worker)
+            lu.print_and_log(f"Successfully uploaded {out_file_name} to s3: {timestr()}", is_final, logger_worker)
         except boto3.exceptions.S3UploadFailedError as e:
-            lu.print_and_log(f"Error uploading file to s3: {e}", is_final, logger_worker)
+            lu.print_and_log(f"Error uploading file to s3: {e}: {timestr()}", is_final, logger_worker)
             return f"failure for {s3_name_dict}"
 
     # Deletes the local merged raster
     os.remove(merged_file)
 
-    return f"success for {s3_name_dict}"
+    return f"Success merging {s3_name_dict}", chunk_stats
 
 
 # Creates numpy array of rates or ratios from a tab in an Excel spreadsheet, e.g., removal factors or carbon pool ratios
@@ -986,7 +1043,12 @@ def complete_inputs(existing_input_list, typed_dict, datatype, chunk_length_pixe
 
 
 # Counts the number of successful and skipped chunks after processing
-def count_successful_chunks(all_stats, chunk_list, is_final, main_logger, results, return_messages):
+# Based on https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
+def count_successful_chunks(chunk_list, is_final, main_logger, results):
+
+    # Arrays of chunk stats and return messages
+    all_stats = []
+    return_messages = []
 
     # Initializes counters for different types of return messages
     success_count = 0
@@ -1025,9 +1087,14 @@ def count_successful_chunks(all_stats, chunk_list, is_final, main_logger, result
     main_logger.info(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
     main_logger.info(f"Number of 'Error' chunks: {error_chunk_count}")
     main_logger.info(f"Number of 'Other message' chunks: {other_message_count}")
-    main_logger.info(f"Difference between submitted chunks and processed chunks: {len(chunk_list) - (success_count + skipping_chunk_count + error_chunk_count + other_message_count)}" + "\n")
 
-    return success_count
+    # Doesn't compare the difference between submitted and processed chunks if it is reporting on
+    # merging 1x1 deg rasters because calculating the difference is too complicated.
+    if "Success merging" not in return_messages[0]:
+        main_logger.info(f"Difference between submitted chunks and processed chunks: {len(chunk_list) - (success_count + skipping_chunk_count + error_chunk_count + other_message_count)}")
+    main_logger.info("\n")
+
+    return success_count, all_stats
 
 
 
@@ -1053,6 +1120,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'chunk_id': bounds_str,
             'tile_id': tile_id,
             'layer_name': name,
+            'tile_name': f'{tile_id}__{out_pattern}.tif',
             'in_out': in_out,
             'pattern': out_pattern,
             'years': year_range,
@@ -1068,6 +1136,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'chunk_id': bounds_str,
             'tile_id': tile_id,
             'layer_name': name,
+            'tile_name': f'{tile_id}__{out_pattern}.tif',
             'in_out': in_out,
             'pattern': out_pattern,
             'years': year_range,
@@ -1082,12 +1151,12 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
 
 # Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet
 # Also calculates the min and max value for each input and output across all chunks
-# From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger):
+# From https://chatgpt.com/share/e/67d5d68d-7168-800a-ada1-e42f8c3e9253
+def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger, all_10x10_stats=None):
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
 
-    main_logger.info(f"Starting to aggregate and export tile stats at {timestr()}...")
+    main_logger.info(f"Starting to aggregate and export tile stats: {timestr()}")
 
     # Converts accumulated statistics to a DataFrame
     df_all_stats = pd.DataFrame(all_stats)
@@ -1097,11 +1166,11 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger):
     df_all_stats['max_value'] = pd.to_numeric(df_all_stats['max_value'], errors='coerce')
 
     # Sorts the DataFrame by 'in_out' and 'layer_name'
-    main_logger.info(f"Sorting tile stats by properties at {timestr()}...")
+    main_logger.info(f"Sorting 1x1 tile stats by properties: {timestr()}")
     sorted_stats = df_all_stats.sort_values(by=['in_out', 'layer_name']).reset_index(drop=True)
 
     # Calculates the min and max values for each layer_name across all chunks
-    main_logger.info(f"Calculating min and max values across all chunks at {timestr()}...")
+    main_logger.info(f"Calculating min and max values across all 1x1 chunks: {timestr()}")
     min_max_stats = df_all_stats.groupby('layer_name').agg(
         min_value=('min_value', 'min'),
         max_value=('max_value', 'max'),
@@ -1116,19 +1185,19 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger):
     fishnet_shapefile_df = gdf[['chunk_id', 'iso']]
 
     # Merges the shapefile data with the statistics DataFrame
-    main_logger.info(f"Merging country code to chunk stats table at {timestr()}...")
+    main_logger.info(f"Merging country code to 1x1 chunk stats table: {timestr()}")
     merged_stats = sorted_stats.merge(fishnet_shapefile_df, on='chunk_id', how='left')
 
     # When iso isn't assigned, empty cells are filled.
     # iso is only assigned when the chunks are 1x1 deg (since that's what the fishnet uses)
     merged_stats['iso'] = merged_stats['iso'].fillna('no iso assigned')
 
-    # Calculates the min and max values for each layer_name for each chunk.
+
     # There are so many chunks with so many inputs and outputs in a full model run that Excel can't handle all the rows
     # and they need to be split across multiple workbook tabs.
 
     # Separates input rows (in_out == 'input') and output rows (in_out == 'output')
-    main_logger.info(f"Separating outputs into different tables at {timestr()}...")
+    main_logger.info(f"Separating 1x1 outputs into different tables: {timestr()}")
     input_rows = merged_stats[merged_stats['in_out'] == 'input_layer']
     output_rows = merged_stats[merged_stats['in_out'] == 'output_layer']
 
@@ -1145,21 +1214,19 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger):
     # Puts output rows that don't contain 'flux|gross|net' in a separate tab
     other_output = output_rows[~output_rows['layer_name'].str.contains('flux|gross|net', case=False, na=False)]
 
-    # Calculates pixel count and sums for each layer for each 10x10 deg output
-    main_logger.info(f"Calculating totals for 10x10 deg at {timestr()}...")
+    # Counts the number of pixels in 1x1 chunks within each 10x10 chunk
+    main_logger.info(f"Calculating number of pixels in 1x1 chunk within each 10x10 chunk: {timestr()}")
 
     # Ensure count_value and sum_value exist and are numeric
     if 'count_value' in output_rows.columns and 'sum_value' in output_rows.columns:
-        output_rows['count_value'] = pd.to_numeric(output_rows['count_value'], errors='coerce').fillna(0)
-        output_rows['sum_value'] = pd.to_numeric(output_rows['sum_value'], errors='coerce').fillna(0)
+        output_rows.loc[:, 'count_value'] = pd.to_numeric(output_rows['count_value'], errors='coerce').fillna(0)
 
         # Group by tile_id and layer_name, summing count_value and sum_value
         totals_10x10 = output_rows.groupby(['tile_id', 'layer_name']).agg(
-            total_count=('count_value', 'sum'),
-            total_sum=('sum_value', 'sum')
+            total_count=('count_value', 'sum')
         ).reset_index()
     else:
-        totals_10x10 = pd.DataFrame()  # Creates empty DataFrame if columns don't exist
+        totals_10x10 = pd.DataFrame()  # Create empty DataFrame if columns don't exist
 
     # Writes the data to a single Excel file with separate sheets.
     # Should continue with model post-processing even if chunk stats don't work for some reason
@@ -1167,39 +1234,39 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger):
     out_spreadsheet = f'{stage}_chunk_statistics_{timestr()}.xlsx'
     local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
 
-    main_logger.info(f"Writing tile stats to spreadsheet at {timestr()}...")
+    main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
     try:
         with pd.ExcelWriter(local_spreadsheet) as writer:
 
             # Writes input rows to one sheet
-            main_logger.info(f"Writing inputs to spreadsheet at {timestr()}...")
+            main_logger.info(f"Writing inputs to spreadsheet: {timestr()}")
             annual_inputs.to_excel(writer, sheet_name='annual_inputs', index=False)
             other_inputs.to_excel(writer, sheet_name='other_inputs', index=False)
 
             # Writes output rows based on layer_name conditions to separate sheets
-            main_logger.info(f"Writing outputs to spreadsheet at {timestr()}...")
-            gross_flux_output.to_excel(writer, sheet_name='gross_outputs', index=False)
-            net_flux_output.to_excel(writer, sheet_name='flux_outputs', index=False)
-            other_output.to_excel(writer, sheet_name='other_outputs', index=False)
+            main_logger.info(f"Writing outputs to spreadsheet: {timestr()}")
+            gross_flux_output.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
+            net_flux_output.to_excel(writer, sheet_name='flux_outputs_1x1', index=False)
+            other_output.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
 
             # Write the min and max statistics to the second sheet
-            min_max_stats.to_excel(writer, sheet_name='min_max_for_layers', index=False)
+            min_max_stats.to_excel(writer, sheet_name='min_max_for_layers_1x1', index=False)
 
             # Write the 10x10 totals if available
             if not totals_10x10.empty:
-                totals_10x10.to_excel(writer, sheet_name='10x10_totals', index=False)
+                totals_10x10.to_excel(writer, sheet_name='1x1_counts_in_10x10', index=False)
 
         main_logger.info(merged_stats.head())  # Show first few rows of the stats DataFrame for inspection
 
-        main_logger.info(f"Done aggregating and exporting tile stats at {timestr()}...")
+        main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
 
     except Exception as e:
         main_logger.info(f"Can't print chunk stats: {e}")
 
     if not no_upload:
-        main_logger.info(f"Uploading chunk stats spreadsheet to s3 at {timestr()}...")
+        main_logger.info(f"Uploading chunk stats spreadsheet to s3: {timestr()}")
         s3_client.upload_file(local_spreadsheet, "gfw2-data", Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
-        main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}")
+        main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}")
 
 
 # Gets the datatype of a raster in s3.
