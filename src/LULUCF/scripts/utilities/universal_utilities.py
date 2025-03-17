@@ -980,7 +980,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     #TODO get the right layer name, tile_name, and out_pattern
 
     # Most stats for the 10x10 aren't calculated. Only the count is.
-    chunk_stats = {
+    # Dictionary is in a list because it's necessary for chunk stats processing later.
+    chunk_stats = [{
         'chunk_id': 'N/A',
         'tile_id': tile_id,
         'layer_name': out_file_name,
@@ -994,7 +995,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         'count_value': valid_pixel_count,
         'sum_value': 'no data',
         'data_type': 'no data'
-    }
+    }]
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
 
@@ -1059,6 +1060,7 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
     # Processes the chunk stats and returned messages
     # Results are the messages from the chunks and chunk stats
     for result in results:
+
         return_message, chunk_stats = result
 
         if "Success" in return_message:
@@ -1073,8 +1075,12 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
         if return_message:
             return_messages.append(return_message)
 
+        # Ensures chunk_stats is a list. Needs to be a list for further processing.
+        chunk_stats = chunk_stats if isinstance(chunk_stats, list) else [chunk_stats]
+
         if chunk_stats is not None:
             all_stats.extend(chunk_stats)
+
 
     # Prints the returned messages if not a large (is_final) run
     if not is_final:
@@ -1152,26 +1158,26 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
 # Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet
 # Also calculates the min and max value for each input and output across all chunks
 # From https://chatgpt.com/share/e/67d5d68d-7168-800a-ada1-e42f8c3e9253
-def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger, all_10x10_stats=None):
+def aggregate_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x10_stats=None):
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
 
     main_logger.info(f"Starting to aggregate and export tile stats: {timestr()}")
 
-    # Converts accumulated statistics to a DataFrame
-    df_all_stats = pd.DataFrame(all_stats)
+    # Converts accumulated 1x1 chunk statistics to a DataFrame
+    df_all_1x1_stats = pd.DataFrame(all_1x1_stats)
 
     # Converts problematic non-numeric values to NaN
-    df_all_stats['min_value'] = pd.to_numeric(df_all_stats['min_value'], errors='coerce')
-    df_all_stats['max_value'] = pd.to_numeric(df_all_stats['max_value'], errors='coerce')
+    df_all_1x1_stats['min_value'] = pd.to_numeric(df_all_1x1_stats['min_value'], errors='coerce')
+    df_all_1x1_stats['max_value'] = pd.to_numeric(df_all_1x1_stats['max_value'], errors='coerce')
 
     # Sorts the DataFrame by 'in_out' and 'layer_name'
     main_logger.info(f"Sorting 1x1 tile stats by properties: {timestr()}")
-    sorted_stats = df_all_stats.sort_values(by=['in_out', 'layer_name']).reset_index(drop=True)
+    sorted_1x1_stats = df_all_1x1_stats.sort_values(by=['in_out', 'layer_name']).reset_index(drop=True)
 
     # Calculates the min and max values for each layer_name across all chunks
     main_logger.info(f"Calculating min and max values across all 1x1 chunks: {timestr()}")
-    min_max_stats = df_all_stats.groupby('layer_name').agg(
+    min_max_1x1_stats = df_all_1x1_stats.groupby('layer_name').agg(
         min_value=('min_value', 'min'),
         max_value=('max_value', 'max'),
         count=('layer_name', 'count')
@@ -1186,11 +1192,11 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger, all_10x10_st
 
     # Merges the shapefile data with the statistics DataFrame
     main_logger.info(f"Merging country code to 1x1 chunk stats table: {timestr()}")
-    merged_stats = sorted_stats.merge(fishnet_shapefile_df, on='chunk_id', how='left')
+    merged_1x1_stats = sorted_1x1_stats.merge(fishnet_shapefile_df, on='chunk_id', how='left')
 
     # When iso isn't assigned, empty cells are filled.
     # iso is only assigned when the chunks are 1x1 deg (since that's what the fishnet uses)
-    merged_stats['iso'] = merged_stats['iso'].fillna('no iso assigned')
+    merged_1x1_stats['iso'] = merged_1x1_stats['iso'].fillna('no iso assigned')
 
 
     # There are so many chunks with so many inputs and outputs in a full model run that Excel can't handle all the rows
@@ -1198,35 +1204,48 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger, all_10x10_st
 
     # Separates input rows (in_out == 'input') and output rows (in_out == 'output')
     main_logger.info(f"Separating 1x1 outputs into different tables: {timestr()}")
-    input_rows = merged_stats[merged_stats['in_out'] == 'input_layer']
-    output_rows = merged_stats[merged_stats['in_out'] == 'output_layer']
+    input_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'] == 'input_layer']
+    output_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'] == 'output_layer']
 
     # Splits input rows based on 'layer_name' containing 'ba_' or 'forest_disturbance'
-    annual_inputs = input_rows[input_rows['layer_name'].str.contains(f'{cn.burned_area_final_pattern}|forest_disturbance', case=False, na=False)]
+    annual_1x1_inputs = input_1x1_rows[input_1x1_rows['layer_name'].str.contains(f'{cn.burned_area_final_pattern}|forest_disturbance', case=False, na=False)]
 
     # Puts output rows that don't contain 'ba_' or 'forest_disturbance' in a separate tab
-    other_inputs = input_rows[~input_rows['layer_name'].str.contains('ba_|forest_disturbance', case=False, na=False)]
+    other_1x1_inputs = input_1x1_rows[~input_1x1_rows['layer_name'].str.contains('ba_|forest_disturbance', case=False, na=False)]
 
     # Splits output rows based on 'layer_name' containing 'flux', 'gross', or 'net'
-    gross_flux_output = output_rows[output_rows['layer_name'].str.contains('gross', case=False, na=False)]
-    net_flux_output = output_rows[output_rows['layer_name'].str.contains('net|flux', case=False, na=False)]
+    gross_flux_1x1_outputs = output_1x1_rows[output_1x1_rows['layer_name'].str.contains('gross', case=False, na=False)]
+    net_flux_1x1_outputs = output_1x1_rows[output_1x1_rows['layer_name'].str.contains('net|flux', case=False, na=False)]
 
     # Puts output rows that don't contain 'flux|gross|net' in a separate tab
-    other_output = output_rows[~output_rows['layer_name'].str.contains('flux|gross|net', case=False, na=False)]
+    other_1x1_outputs = output_1x1_rows[~output_1x1_rows['layer_name'].str.contains('flux|gross|net', case=False, na=False)]
 
     # Counts the number of pixels in 1x1 chunks within each 10x10 chunk
     main_logger.info(f"Calculating number of pixels in 1x1 chunk within each 10x10 chunk: {timestr()}")
 
-    # Ensure count_value and sum_value exist and are numeric
-    if 'count_value' in output_rows.columns and 'sum_value' in output_rows.columns:
-        output_rows.loc[:, 'count_value'] = pd.to_numeric(output_rows['count_value'], errors='coerce').fillna(0)
+    # Forces pixel counts to numeric if they're not
+    output_1x1_rows.loc[:, 'count_value'] = pd.to_numeric(output_1x1_rows['count_value'], errors='coerce').fillna(0)
 
-        # Group by tile_id and layer_name, summing count_value and sum_value
-        totals_10x10 = output_rows.groupby(['tile_id', 'layer_name']).agg(
-            total_count=('count_value', 'sum')
-        ).reset_index()
-    else:
-        totals_10x10 = pd.DataFrame()  # Create empty DataFrame if columns don't exist
+    # Groups by tile_id and layer_name, summing count_value and sum_value
+    sum_1x1_to_10x10 = output_1x1_rows.groupby(['tile_id', 'layer_name']).agg(total_count=('count_value', 'sum')).reset_index()
+
+    # Creates the tile_name column
+    sum_1x1_to_10x10['tile_name'] = sum_1x1_to_10x10['tile_id'] + '__' + sum_1x1_to_10x10['layer_name'] + '.tif'
+
+    # Reorders columns to place tile_name between layer_name and total_count
+    sum_1x1_to_10x10 = sum_1x1_to_10x10[['tile_id', 'layer_name', 'tile_name', 'total_count']]
+
+    # Gets pixel counts in 10x10 deg chunks and joins the 1x1 pixel counts summed to 10x10 to their table
+    if all_10x10_stats:
+
+        # Converts accumulated 1x1 chunk statistics to a DataFrame
+        df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
+
+        # Merge totals_10x10 with df_all_10x10_stats on tile_name
+        merged_10x10_stats = sum_1x1_to_10x10.merge(df_all_10x10_stats[['tile_name', 'count_value']], on='tile_name', how='left')
+
+        # Compute the difference between total_count and count_value
+        merged_10x10_stats['count_difference'] = merged_10x10_stats['total_count'] - merged_10x10_stats['count_value']
 
     # Writes the data to a single Excel file with separate sheets.
     # Should continue with model post-processing even if chunk stats don't work for some reason
@@ -1240,23 +1259,26 @@ def aggregate_chunk_stats(all_stats, stage, no_upload, main_logger, all_10x10_st
 
             # Writes input rows to one sheet
             main_logger.info(f"Writing inputs to spreadsheet: {timestr()}")
-            annual_inputs.to_excel(writer, sheet_name='annual_inputs', index=False)
-            other_inputs.to_excel(writer, sheet_name='other_inputs', index=False)
+            annual_1x1_inputs.to_excel(writer, sheet_name='annual_1x1_inputs', index=False)
+            other_1x1_inputs.to_excel(writer, sheet_name='other_1x1_inputs', index=False)
 
             # Writes output rows based on layer_name conditions to separate sheets
             main_logger.info(f"Writing outputs to spreadsheet: {timestr()}")
-            gross_flux_output.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
-            net_flux_output.to_excel(writer, sheet_name='flux_outputs_1x1', index=False)
-            other_output.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
+            gross_flux_1x1_outputs.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
+            net_flux_1x1_outputs.to_excel(writer, sheet_name='flux_outputs_1x1', index=False)
+            other_1x1_outputs.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
 
-            # Write the min and max statistics to the second sheet
-            min_max_stats.to_excel(writer, sheet_name='min_max_for_layers_1x1', index=False)
+            # Writes the min and max statistics to the second sheet
+            min_max_1x1_stats.to_excel(writer, sheet_name='min_max_for_layers_1x1', index=False)
 
-            # Write the 10x10 totals if available
-            if not totals_10x10.empty:
-                totals_10x10.to_excel(writer, sheet_name='1x1_counts_in_10x10', index=False)
+            # Writes the 1x1s summed to 10x10, if available
+            sum_1x1_to_10x10.to_excel(writer, sheet_name='1x1_counts_in_10x10', index=False)
 
-        main_logger.info(merged_stats.head())  # Show first few rows of the stats DataFrame for inspection
+            # Writes the 10x10 pixel counts, if calculated
+            if all_10x10_stats:
+                df_all_10x10_stats.to_excel(writer, sheet_name='pix_counts_compa_10x10_1x1', index=False)
+
+        main_logger.info(merged_1x1_stats.head())  # Show first few rows of the stats DataFrame for inspection
 
         main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
 

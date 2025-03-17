@@ -539,12 +539,13 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_a
                                             for s3_name_dict in list_of_s3_name_dicts_total]
 
         C_pool_10x10_deg_results = dask.compute(*C_pool_10x10_deg_delayed_results)
-        # print(C_pool_10x10_deg_results)
 
-        success_count_10x10, all_10x10_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger,
-                                                       C_pool_10x10_deg_results)
+        success_count_10x10, all_10x10_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, C_pool_10x10_deg_results)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with 10x10 deg aggregation", main_logger)
+
+    else:
+        main_logger.info(f"Skipping aggregation of 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
 
 
     ### Step 4: Chunk stats for 1x1 degree and 10x10 degree outputs, aggregates logs
