@@ -396,7 +396,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_aggregate=False, no_upload= False,
          use_shapefile=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
-    ### Step 1: Precursors and download inputs
+    ### Step 1: Precursors and downloads inputs
 
     # Model stage being running
     stage = f'starting_carbon_pools_{year}'
@@ -527,12 +527,12 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_a
     all_10x10_stats = None
 
     if not no_aggregate:
-        main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
-
         # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
         # These are the basis for the aggregation tasks.
         list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
         # print(list_of_s3_name_dicts_total)
+
+        main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
 
         # Each task is a single 10x10 deg aggregated geotif
         C_pool_10x10_deg_delayed_results = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)

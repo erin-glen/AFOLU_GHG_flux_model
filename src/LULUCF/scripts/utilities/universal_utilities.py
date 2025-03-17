@@ -897,7 +897,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
     lu.print_and_log(f"Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger_worker)
     if is_final:   # Prints to console if it is a final run
-        f"Merging small rasters in {tile_id} in {vsis3_in_folder}"
+        print(f"Merging small rasters in {tile_id} in {vsis3_in_folder}")
 
     # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
     out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
@@ -1003,15 +1003,17 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     }]
 
     ### Part 3: Uploads 10x10 to s3 using multipart uploading
-    ### https://chatgpt.com/share/e/67d848cf-8b08-800a-b0e8-79a72c9eb49a
+    ### https://chatgpt.com/share/e/67d848cf-8b08-800a-b0e8-79a72c9eb49a.
 
     lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}: {timestr()}", is_final, logger_worker)
 
     if not no_upload:
 
+        #Because boto3 does multipart uploading for files >100MB, this only adds multipart uploading for files
+        # between part_size and 100MB.
         try:
             lu.print_and_log(f"Uploading {out_file_name} to s3: {timestr()}", is_final, logger_worker)
-            part_size = 50 * 1024 * 1024  # 50MB chunks (adjust as needed)
+            part_size = 20 * 1024 * 1024  # 20MB chunks
 
             # Starts multipart upload
             response = s3_client.create_multipart_upload(Bucket=cn.short_bucket_prefix, Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}")
@@ -1190,10 +1192,14 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
         }
 
 
-# Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet
-# Also calculates the min and max value for each input and output across all chunks
+# Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet.
+# Calculates the min and max value for each input and output across all chunks.
+# Calculates difference between pixel counts in all 1x1s in a 10x10 vs. the corresponding 10x10
+# to make sure that aggregation of 1x1s didn't lose any data (difference should be 0).
 # From https://chatgpt.com/share/e/67d5d68d-7168-800a-ada1-e42f8c3e9253
 def aggregate_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x10_stats=None):
+
+    ### Part 1: Organizes chunk stats for 1x1 degree chunks (inputs and outputs)
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
 
@@ -1233,7 +1239,6 @@ def aggregate_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x1
     # iso is only assigned when the chunks are 1x1 deg (since that's what the fishnet uses)
     merged_1x1_stats['iso'] = merged_1x1_stats['iso'].fillna('no iso assigned')
 
-
     # There are so many chunks with so many inputs and outputs in a full model run that Excel can't handle all the rows
     # and they need to be split across multiple workbook tabs.
 
@@ -1255,6 +1260,9 @@ def aggregate_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x1
     # Puts output rows that don't contain 'flux|gross|net' in a separate tab
     other_1x1_outputs = output_1x1_rows[~output_1x1_rows['layer_name'].str.contains('flux|gross|net', case=False, na=False)]
 
+
+    ### Part 2: Sums pixel counts for 1x1 degree outputs to their 10x10s, to make sure pixels aren't being lost in aggregation
+
     # Counts the number of pixels in 1x1 chunks within each 10x10 chunk
     main_logger.info(f"Calculating number of pixels in 1x1 chunk within each 10x10 chunk: {timestr()}")
 
@@ -1270,17 +1278,31 @@ def aggregate_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x1
     # Reorders columns to place tile_name between layer_name and total_count
     sum_1x1_to_10x10 = sum_1x1_to_10x10[['tile_id', 'layer_name', 'tile_name', 'total_count']]
 
+
+    ### Part 3: Organizes pixel counts for aggregated 10x10 outputs (if created).
+    ### Calculates the difference between the pixel counts. Difference should be 0 for every 10x10 output.
+
     # Gets pixel counts in 10x10 deg chunks and joins the 1x1 pixel counts summed to 10x10 to their table
     if all_10x10_stats:
 
         # Converts accumulated 1x1 chunk statistics to a DataFrame
         df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
 
-        # Merge totals_10x10 with df_all_10x10_stats on tile_name
-        merged_10x10_stats = sum_1x1_to_10x10.merge(df_all_10x10_stats[['tile_name', 'count_value']], on='tile_name', how='left')
+        # Merges totals_10x10 with df_all_10x10_stats on tile_name
+        merged_1x1_10x10_counts = sum_1x1_to_10x10.merge(df_all_10x10_stats[['tile_name', 'count_value']], on='tile_name', how='left')
 
-        # Compute the difference between total_count and count_value
-        merged_10x10_stats['count_difference'] = merged_10x10_stats['total_count'] - merged_10x10_stats['count_value']
+        # Computes the difference between the pixel counts in the summed 1x1s and the corresponding 10x10
+        merged_1x1_10x10_counts['count_difference'] = merged_1x1_10x10_counts['total_count'] - merged_1x1_10x10_counts['count_value']
+        merged_1x1_10x10_counts = merged_1x1_10x10_counts.rename(columns={'total_count': 'pixel_count_1x1_summed', 'count_value': 'pixel_count_10x10'})
+
+        sum_difference = merged_1x1_10x10_counts['count_difference'].sum()
+        if sum_difference == 0:
+            main_logger.info(f"Difference between pixel counts in 1x1s vs. their respective 10x10s: {sum_difference} pixels: {timestr()}")
+        else:
+            main_logger.warning(f"WARNING: Difference between pixel counts in 1x1s vs. their respective 10x10s: {sum_difference} pixels: {timestr()}")
+
+
+    ### Part 4: Saves dataframes to Excel spreadsheet
 
     # Writes the data to a single Excel file with separate sheets.
     # Should continue with model post-processing even if chunk stats don't work for some reason
@@ -1311,7 +1333,7 @@ def aggregate_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x1
 
             # Writes the 10x10 pixel counts, if calculated
             if all_10x10_stats:
-                df_all_10x10_stats.to_excel(writer, sheet_name='pix_counts_compa_10x10_1x1', index=False)
+                merged_1x1_10x10_counts.to_excel(writer, sheet_name='pix_counts_compa_10x10_1x1', index=False)
 
         main_logger.info(merged_1x1_stats.head())  # Show first few rows of the stats DataFrame for inspection
 
