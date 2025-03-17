@@ -1013,7 +1013,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
             lu.print_and_log(f"Uploading {out_file_name} to s3: {timestr()}", is_final, logger_worker)
             part_size = 50 * 1024 * 1024  # 50MB chunks (adjust as needed)
 
-            # Start multipart upload
+            # Starts multipart upload
             response = s3_client.create_multipart_upload(Bucket=cn.short_bucket_prefix, Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}")
             upload_id = response['UploadId']
 
@@ -1031,7 +1031,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
                     parts.append({'PartNumber': part_number, 'ETag': response['ETag']})
                     part_number += 1
 
-            # Complete the multipart upload
+            # Completes the multipart upload
             s3_client.complete_multipart_upload(
                 Bucket=cn.short_bucket_prefix,
                 Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}",
