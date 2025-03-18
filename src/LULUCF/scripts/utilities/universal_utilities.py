@@ -1197,7 +1197,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
 # Calculates difference between pixel counts in all 1x1s in a 10x10 vs. the corresponding 10x10
 # to make sure that aggregation of 1x1s didn't lose any data (difference should be 0).
 # From https://chatgpt.com/share/e/67d5d68d-7168-800a-ada1-e42f8c3e9253
-def aggregate_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x10_stats=None):
+def aggregate_1x1_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
 
     ### Part 1: Organizes chunk stats for 1x1 degree chunks (inputs and outputs)
 
@@ -1307,7 +1307,7 @@ def aggregate_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x1
     # Writes the data to a single Excel file with separate sheets.
     # Should continue with model post-processing even if chunk stats don't work for some reason
     # (e.g., more many rows output than rows in an Excel spreadsheet)
-    out_spreadsheet = f'{stage}_chunk_statistics_{timestr()}.xlsx'
+    out_spreadsheet = f'{stage}_1x1_chunk_statistics_{timestr()}.xlsx'
     local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
 
     main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
@@ -1344,7 +1344,43 @@ def aggregate_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x1
 
     if not no_upload:
         main_logger.info(f"Uploading chunk stats spreadsheet to s3: {timestr()}")
-        s3_client.upload_file(local_spreadsheet, "gfw2-data", Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
+        s3_client.upload_file(local_spreadsheet, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
+        main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}")
+
+
+def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
+
+    ### Part 1: Organizes chunk stats for 1x1 degree chunks (inputs and outputs)
+
+    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
+
+    main_logger.info(f"Starting to aggregate and export tile stats: {timestr()}")
+
+    # Converts accumulated 1x1 chunk statistics to a DataFrame
+    df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
+
+    # Writes the data to a single Excel file with separate sheets.
+    # Should continue with model post-processing even if chunk stats don't work for some reason
+    # (e.g., more many rows output than rows in an Excel spreadsheet)
+    out_spreadsheet = f'{stage}_10x10_chunk_statistics_{timestr()}.xlsx'
+    local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+
+    main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
+    try:
+        with pd.ExcelWriter(local_spreadsheet) as writer:
+
+            df_all_10x10_stats.to_excel(writer, sheet_name='pix_counts_compa_10x10_1x1', index=False)
+
+        main_logger.info(df_all_10x10_stats.head())  # Show first few rows of the stats DataFrame for inspection
+
+        main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
+
+    except Exception as e:
+        main_logger.info(f"Can't print chunk stats: {e}")
+
+    if not no_upload:
+        main_logger.info(f"Uploading chunk stats spreadsheet to s3: {timestr()}")
+        s3_client.upload_file(local_spreadsheet, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
         main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}")
 
 

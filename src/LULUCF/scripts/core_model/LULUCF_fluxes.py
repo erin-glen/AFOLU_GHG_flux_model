@@ -1482,9 +1482,9 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         futures.append(future)
 
     # Collect the results once they are finished
-    results = client.gather(futures)
+    flux_1x1_results = client.gather(futures)
 
-    success_count = uu.count_successful_chunks(chunk_list, is_final, main_logger, results)
+    success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, flux_1x1_results)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
     if not no_upload:
@@ -1542,7 +1542,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count > 0):
-        uu.aggregate_chunk_stats(all_stats, stage, no_upload, main_logger)
+        uu.aggregate_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x10_stats)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with aggregation and tile stats", main_logger)
 

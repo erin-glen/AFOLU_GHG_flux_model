@@ -11,8 +11,8 @@ Time: 23:17 through calculation; 39:26 through aggregation; 40:25 through tile s
 
 python -m scripts.utilities.create_cluster -n 50 -t 12 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
-Max memory usage: ~18 GB/worker
-Time: 26:00 through calculation; 40:44 through aggregation; 41:43 through tile stats; Credits: 155; Cost: $5.30
+Max memory usage: ~20 GB/worker
+Time:  through calculation;  through aggregation;  through tile stats; Credits: ; Cost: $
 
 NOTE: Maybe there's some way to configure this to output 10x10 deg tiles but I can't figure it out.
 Instead, it creates 1x1 deg tiles and then merges them to 10x10 deg tiles.
@@ -567,7 +567,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_a
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count_1x1 > 0):
-        uu.aggregate_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x10_stats)
+        uu.aggregate_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x10_stats)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with aggregation and tile stats", main_logger)
 
