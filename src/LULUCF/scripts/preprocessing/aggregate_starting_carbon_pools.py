@@ -131,7 +131,7 @@ def main(cluster_name, year, input_date, run_local=False, no_stats=False, no_log
     uu.stage_duration(start_time, uu.timestr(), f"{stage}", main_logger)
 
 
-    ### Step 3: Chunk stats for 10x10 degree outputs, aggregates logs
+    ### Step 3: Chunk stats (i.e. pixel counts) for 10x10 degree outputs, aggregates logs
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.

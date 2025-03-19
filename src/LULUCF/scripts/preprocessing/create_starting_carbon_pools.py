@@ -7,12 +7,13 @@ python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_mode
 python -m scripts.utilities.create_cluster -n 60 -t 10 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
 Max memory usage: ~18 GB/worker
-Time: 23:17 through calculation; 39:26 through aggregation; 40:25 through tile stats; Credits: 170; Cost: $6.00
+Time: 23:17 through calculation; 40:25 through tile stats; Credits: 170; Cost: $6.00
 
 python -m scripts.utilities.create_cluster -n 50 -t 12 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
 Max memory usage: ~20 GB/worker
-Time:  through calculation;  through aggregation;  through tile stats; Credits: ; Cost: $
+Time: 29:26 through calculation; 31:11 through tile stats; Credits: 116; Cost: $3.94
+-t 14 seemed high, so may be better to go back down to -t 12.
 
 NOTE: Maybe there's some way to configure this to output 10x10 deg tiles but I can't figure it out.
 Instead, it creates 1x1 deg tiles and then merges them to 10x10 deg tiles.
@@ -399,7 +400,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_a
     ### Step 1: Preparation
 
     # Model stage being running
-    stage = f'starting_carbon_pools_{year}'
+    stage = f'starting_carbon_pools_{year}_1x1_deg'
     model_type = 'standard'
 
     # Determines if argument for year is valid
@@ -522,30 +523,30 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_a
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
-    ### Step 3: Aggregates 1x1 degree outputs to 10x10 degree outputs (if not disabled)
-
-    all_10x10_stats = None
-
-    if not no_aggregate:
-        # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
-        # These are the basis for the aggregation tasks.
-        list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
-        # print(list_of_s3_name_dicts_total)
-
-        main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
-
-        # Each task is a single 10x10 deg aggregated geotif
-        C_pool_10x10_deg_delayed_results = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
-                                            for s3_name_dict in list_of_s3_name_dicts_total]
-
-        C_pool_10x10_deg_results = dask.compute(*C_pool_10x10_deg_delayed_results)
-
-        success_count_10x10, all_10x10_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, C_pool_10x10_deg_results)
-
-        uu.stage_duration(start_time, uu.timestr(), f"{stage} with 10x10 deg aggregation", main_logger)
-
-    else:
-        main_logger.info(f"Skipping aggregation of 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
+    # ### Step 3: Aggregates 1x1 degree outputs to 10x10 degree outputs (if not disabled)
+    #
+    # all_10x10_stats = None
+    #
+    # if not no_aggregate:
+    #     # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
+    #     # These are the basis for the aggregation tasks.
+    #     list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
+    #     # print(list_of_s3_name_dicts_total)
+    #
+    #     main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
+    #
+    #     # Each task is a single 10x10 deg aggregated geotif
+    #     C_pool_10x10_deg_delayed_results = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
+    #                                         for s3_name_dict in list_of_s3_name_dicts_total]
+    #
+    #     C_pool_10x10_deg_results = dask.compute(*C_pool_10x10_deg_delayed_results)
+    #
+    #     success_count_10x10, all_10x10_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, C_pool_10x10_deg_results)
+    #
+    #     uu.stage_duration(start_time, uu.timestr(), f"{stage} with 10x10 deg aggregation", main_logger)
+    #
+    # else:
+    #     main_logger.info(f"Skipping aggregation of 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
 
 
     ### Step 4: Chunk stats for 1x1 degree and 10x10 degree outputs, aggregates logs
@@ -567,7 +568,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_a
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count_1x1 > 0):
-        uu.aggregate_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x10_stats)
+        uu.aggregate_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with aggregation and tile stats", main_logger)
 
