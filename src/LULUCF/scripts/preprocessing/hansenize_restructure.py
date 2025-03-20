@@ -4,7 +4,11 @@ Run from src/LULUCF
 Local:
 python -m scripts.preprocessing.hansenize -ct local -p drivers
 
-Coiled test area:
+Coiled test area with no data:
+python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
+python -m scripts.preprocessing.hansenize_restructure -cn AFOLU_flux_model_scripts -ct coiled -p drivers -bb -120 30 -110 40 -cs 10
+
+Coiled test area with data:
 python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
 python -m scripts.preprocessing.hansenize_restructure -cn AFOLU_flux_model_scripts -ct coiled -p drivers -bb -120 30 -110 40 -cs 10
 
@@ -20,10 +24,12 @@ process = ['drivers']
 
 """
 import os
+import sys
 import argparse
 import dask
 from dask.distributed import print
 from ..utilities import constants_and_names as cn
+from ..utilities import log_utilities as lu
 from ..utilities import universal_utilities as uu
 
 
@@ -99,14 +105,6 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
         }
 
 
-    # Step 2: Create chunk list
-    # Makes list of chunks to analyze from the bounding box and chunk size (deg)
-    # Output list form is [[110, -10, 120, 0], [...], [...], ...]  (W, S, E, N)
-    print("Using bounding box and chunk size to determine chunks")
-    chunk_list = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
-    print(f"Chunks identified: {len(chunk_list)}")
-
-
     # if 'cropland_fertilizer' in process:
     #     download_upload_dictionary[""] = {
     #         'raw_dir': cn.x_raw_dir,
@@ -170,6 +168,18 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
             cluster, client = uu.connect_to_Coiled_cluster(cluster_name, False)
             client
 
+        # Creates the log for the main function and populates it with basic run information
+        main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, False, client, cluster,
+                                                                       f"Preprocessing: {process}", run_local,
+                                                                       'standard', 'Hansenize')
+
+        # Step 2: Create chunk list
+        # Makes list of chunks to analyze from the bounding box and chunk size (deg)
+        # Output list form is [[110, -10, 120, 0], [...], [...], ...]  (W, S, E, N)
+        main_logger.info("Using bounding box and chunk size to determine chunks")
+        chunk_list = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
+        main_logger.info(f"Chunks identified: {len(chunk_list)}")
+
 
         # Step 3: Create a VRT for each dataset
 
@@ -177,18 +187,20 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
 
             # Add output_vrt_s3 to dictionary
             output_vrt_s3 = f"{items['raw_dir']}{os.path.basename(items['vrt'])}"
-            # print("output_vrt_s3:", output_vrt_s3)
+            # main_logger.info("output_vrt_s3:", output_vrt_s3)
             download_upload_dictionary[key]["output_vrt_s3"] = output_vrt_s3
-            print("download_upload_dictionary:", download_upload_dictionary)
+            main_logger.info("download_upload_dictionary:", download_upload_dictionary)
 
             # Find all files in s3 that match the raw pattern (w/ '*.tif') and add s3 paths to download_upload_dictionary
             input_raster_list_s3 = uu.list_s3_files_with_pattern(items["raw_dir"], items["raw_pattern"])
+            main_logger.info(f"There are {len(input_raster_list_s3)} rasters in the folder to include in the vrt")
             if input_raster_list_s3:
                 download_upload_dictionary[key]["raw_raster_list"] = input_raster_list_s3
 
             # Create a vrt from all raw input rasters
-            print(f"Building vrt for {key}: {uu.timestr()}")
+            main_logger.info(f"Building vrt for {key}: {uu.timestr()}")
             uu.build_vrt_gdal_coiled(input_raster_list_s3, output_vrt_s3, items["vrt"])
+            main_logger.info(f"Done building vrt for {key}: {uu.timestr()}")
 
 
         # Step 4: Get GDAL datatype of each dataset using the first tile in that dataset
@@ -265,7 +277,7 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
 
     # -------------------------------------------------------------------------------------------------------------------
     else:
-        print("Set cluster_type to one of the following: 'coiled', 'local'")
+        main_logger.info("Set cluster_type to one of the following: 'coiled', 'local'")
 
 
     ###########################################################################################################
@@ -304,12 +316,12 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
                                             xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
                 tile_futures.append(tile_future)
 
-        print(f"Tiles to process: {len(tile_futures)}")
+        main_logger.info(f"Tiles to process: {len(tile_futures)}")
 
         # Collect the results once they are finished
         tile_results = client.gather(tile_futures)
         print(tile_results)
-        print(f"Completed tile set: {uu.timestr()}")
+        main_logger.info(f"Completed tile set: {uu.timestr()}")
 
 
         # Step 6: Creates a tile index shapefile of the output rasters to check completeness of Hansenization
@@ -335,7 +347,7 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
 
         # Actually runs analysis
         results = dask.compute(*delayed_result)
-        print(results)
+        main_logger.info(results)
 
     # Closes the Dask client if not running locally
     if not run_local:
@@ -345,7 +357,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Hansenize AFOLU model raster inputs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-ct', '--cluster_type', action='store', help='Run locally with Dask (local), test with 1 worker in coiled (test), or run with full coiled cluster (full)')
-    parser.add_argument('-p', '--processes', action='store', nargs='+', help='What datasets do you want to hansenize? Options: drivers, secondary_natural_forest, AGB2015, burned_area')
+    parser.add_argument('-p', '--processes', action='store', nargs='+', help='What datasets do you want to hansenize? Options: drivers, secondary_natural_forest, AGB2015')
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 

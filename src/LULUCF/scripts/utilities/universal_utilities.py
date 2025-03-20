@@ -42,20 +42,36 @@ def split_s3_path(s3_path):
 def list_s3_files_with_pattern(s3_path, pattern):
     s3 = boto3.client("s3")
     bucket_name, prefix = split_s3_path(s3_path)
-    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)  # List objects in the bucket with the given prefix
 
     matching_files = []
-    # Check if any contents are returned
-    if 'Contents' in response:
-        for obj in response['Contents']:
-            key = obj['Key']
-            if pattern in key:
-                matching_files.append(f"s3://{bucket_name}/{key}")
-        # print(f"Files matching pattern '{pattern}':")
-        # for file in matching_files:
-        #     print(file)
-    else:
-        print(f"No files found in the bucket '{bucket_name}' with the path '{prefix}'")
+    continuation_token = None  # For pagination
+
+    while True:
+        if continuation_token:
+            response = s3.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=prefix,
+                ContinuationToken=continuation_token
+            )
+        else:
+            response = s3.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=prefix
+            )
+
+        # Check if there are any contents
+        if "Contents" in response:
+            for obj in response["Contents"]:
+                key = obj["Key"]
+                if pattern in key:
+                    matching_files.append(f"s3://{bucket_name}/{key}")
+
+        # Check if there's more data to retrieve
+        if response.get("IsTruncated"):  # If True, there are more pages to fetch
+            continuation_token = response["NextContinuationToken"]
+        else:
+            break  # No more pages left
+
     return matching_files
 
 def download_s3_file(s3_path, local_path):
@@ -1673,11 +1689,37 @@ def build_vrt_gdal_local(raw_raster_paths_list_s3, output_vrt_s3):
     #Check that s3 file exists
     check_s3_file_created(output_vrt_s3)
 
+# Checks if a VRT already exists in s3
+# https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67dc3f96-40f0-800a-9c89-2895c332bd01
+def vrt_exists_in_s3(output_vrt_s3):
+
+    s3 = boto3.client("s3")
+
+    # Parse the S3 path
+    s3_path_parts = output_vrt_s3.replace("s3://", "").split("/", 1)
+    bucket_name = s3_path_parts[0]
+    object_key = s3_path_parts[1]
+
+    try:
+        # Check if the file exists in S3
+        s3.head_object(Bucket=bucket_name, Key=object_key)
+        return True  # File exists
+    except s3.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return False  # File does not exist
+        else:
+            raise  # Some other error occurred
+
 
 # Function to build a VRT using GDAL using tmp dir as intermediate step to download input files and build VRT
-    # raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
-    # output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is saved to
+# raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
+# output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is saved to
 def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
+
+    # Check if the VRT file already exists in S3
+    if vrt_exists_in_s3(output_vrt_s3):
+        print(f"VRT file already exists in S3: {output_vrt_s3}. Skipping creation.")
+        return
 
     vsis3_paths = []
     for s3_path in raw_raster_paths_list_s3:
