@@ -1291,7 +1291,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     ### Step 1: Preparation
 
-    # Model stage being running
+    # Model stage being run
     stage = 'LULUCF_fluxes'
     model_type = 'standard_model'
 

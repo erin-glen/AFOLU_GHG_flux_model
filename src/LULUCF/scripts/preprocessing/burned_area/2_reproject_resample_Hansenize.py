@@ -231,7 +231,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     end_year = year_range[1]
     processed_years = list(range(start_year, end_year+1))
 
-    # Model stage being running
+    # Model stage being run
     stage = f'Hansenize_burned_area_{start_year}_{end_year}'
     model_type = 'standard'
 

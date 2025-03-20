@@ -399,7 +399,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_a
 
     ### Step 1: Preparation
 
-    # Model stage being running
+    # Model stage being run
     stage = f'starting_carbon_pools_{year}_1x1_deg'
     model_type = 'standard'
 
