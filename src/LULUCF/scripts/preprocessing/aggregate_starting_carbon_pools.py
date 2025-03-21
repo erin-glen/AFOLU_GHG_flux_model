@@ -1,11 +1,11 @@
 """
 Run from src/LULUCF/
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.aggregate_starting_carbon_pools -cn AFOLU_flux_model_scripts --no_stats --year 2015 --first_chunks 2 --run_local --input_date YYYYMMDD
+python -m scripts.preprocessing.aggregate_starting_carbon_pools -cn AFOLU_flux_model_scripts --year 2015 --first_chunks 2 --run_local --input_date YYYYMMDD
 
-python -m scripts.utilities.create_cluster -n 30 -t 5 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.aggregate_starting_carbon_pools -cn AFOLU_flux_model_scripts --no_stats --year 2015 --input_date YYYYMMDD
-
+python -m scripts.utilities.create_cluster -n 40 -t 5 -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.aggregate_starting_carbon_pools -cn AFOLU_flux_model_scripts --year 2015 --input_date YYYYMMDD
+Time: 16:32 through calculation; 16:48 through tile stats; Credits: 59; Cost: $1.90
 """
 
 import argparse
@@ -37,6 +37,7 @@ def main(cluster_name, year, input_date, run_local=False, no_stats=False, no_log
         output_dir_list = [cn.agc_2000_dir, cn.bgc_2000_dir, cn.deadwood_c_2000_dir, cn.litter_c_2000_dir]
     elif year == 2015:
         output_dir_list = [cn.agc_2015_dir, cn.bgc_2015_dir, cn.deadwood_c_2015_dir, cn.litter_c_2015_dir]
+        # output_dir_list = [cn.deadwood_c_2015_dir]  # To test a specific carbon pool
     else:
         print(f"Year input {year} not valid. Terminating.")
         sys.exit()
@@ -67,6 +68,8 @@ def main(cluster_name, year, input_date, run_local=False, no_stats=False, no_log
     # For testing. Limits the number of output rasters to that given in the command line
     if first_chunks:
         list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:first_chunks]
+
+    # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[338:339]  # To limit it to a specific tile
 
     # Extracts and lists unique tile_ids, the target for aggregation
     tile_ids = set()

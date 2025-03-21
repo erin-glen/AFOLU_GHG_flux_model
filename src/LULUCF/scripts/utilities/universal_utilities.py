@@ -957,7 +957,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         lu.print_and_log(f"Successfully merged rasters into {merged_file}", is_final, logger_worker)
     except subprocess.CalledProcessError as e:
         lu.print_and_log(f"Error merging rasters: {e}", is_final, logger_worker)
-        return f"failure for {s3_name_dict}"
+        print(f"Error merging rasters: {e}")
+        return f"failure merging {s3_name_dict}"
 
     ### Part 2: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters)
 
@@ -993,8 +994,9 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         else:
             valid_pixel_count = -1  # Failed to open file
     except Exception as e:
-        lu.print_and_log(f"Error calculating pixel count for {merged_file}: {e}", is_final, logger_worker)
-        valid_pixel_count = -1  # Indicate failure
+        lu.print_and_log(f"Error counting pixels for {merged_file}: {e}", is_final, logger_worker)
+        print(f"Error counting pixels for {merged_file}: {e}")
+        return f"failure counting pixels for {s3_name_dict}"
 
     # Gets the output file pattern and year/year_range
     out_pattern, year_range = strip_and_extract_years(out_file_name)
@@ -1061,7 +1063,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
         except Exception as e:
             lu.print_and_log(f"Error uploading file to s3: {e}: {timestr()}", is_final, logger_worker)
-            return f"Failure for {s3_name_dict}"
+            print(f"Error uploading file to s3: {e}: {timestr()}")
+            return f"failure uploading {s3_name_dict}"
 
     # Deletes the local merged raster
     os.remove(merged_file)
@@ -1113,6 +1116,8 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
     # Processes the chunk stats and returned messages
     # Results are the messages from the chunks and chunk stats
     for result in results:
+
+        main_logger.info(result)
 
         return_message, chunk_stats = result
 
