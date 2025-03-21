@@ -6,6 +6,8 @@ python -m scripts.preprocessing.aggregate_starting_carbon_pools -cn AFOLU_flux_m
 python -m scripts.utilities.create_cluster -n 40 -t 5 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.aggregate_starting_carbon_pools -cn AFOLU_flux_model_scripts --year 2015 --input_date YYYYMMDD
 Time: 16:32 through calculation; 16:48 through tile stats; Credits: 59; Cost: $1.90
+Using more than -t 5 seemed to cause some tile_ids to randomly fail, even though memory usage was not high.
+So, best to stay with -t 5 even though the Dask dashboard indicates low memory usage compared to what's available (e.g., 5 out of 32 GB being used).
 """
 
 import argparse

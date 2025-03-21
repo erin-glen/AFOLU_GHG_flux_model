@@ -1399,7 +1399,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         for key, value in download_dict.items()
     }
     download_dict = {
-        key: value.replace("DATE", '20250307')   # Date of initial carbon pool creation
+        key: value.replace("DATE", '20250320')   # Date of initial carbon pool creation
         for key, value in download_dict.items()
     }
 
@@ -1497,30 +1497,30 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
-    ### Step 3: Aggregates 1x1 degree outputs to 10x10 degree outputs (if not disabled)
-
-    all_10x10_stats = None
-
-    if not no_aggregate:
-        # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
-        # These are the basis for the aggregation tasks.
-        list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
-        # print(list_of_s3_name_dicts_total)
-
-        main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
-
-        # Each task is a single 10x10 deg aggregated geotif
-        C_pool_10x10_deg_delayed_results = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
-                                            for s3_name_dict in list_of_s3_name_dicts_total]
-
-        C_pool_10x10_deg_results = dask.compute(*C_pool_10x10_deg_delayed_results)
-
-        success_count_10x10, all_10x10_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, C_pool_10x10_deg_results)
-
-        uu.stage_duration(start_time, uu.timestr(), f"{stage} with 10x10 deg aggregation", main_logger)
-
-    else:
-        main_logger.info(f"Skipping aggregation of 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
+    # ### Step 3: Aggregates 1x1 degree outputs to 10x10 degree outputs (if not disabled)
+    #
+    # all_10x10_stats = None
+    #
+    # if not no_aggregate:
+    #     # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
+    #     # These are the basis for the aggregation tasks.
+    #     list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
+    #     # print(list_of_s3_name_dicts_total)
+    #
+    #     main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
+    #
+    #     # Each task is a single 10x10 deg aggregated geotif
+    #     C_pool_10x10_deg_delayed_results = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
+    #                                         for s3_name_dict in list_of_s3_name_dicts_total]
+    #
+    #     C_pool_10x10_deg_results = dask.compute(*C_pool_10x10_deg_delayed_results)
+    #
+    #     success_count_10x10, all_10x10_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, C_pool_10x10_deg_results)
+    #
+    #     uu.stage_duration(start_time, uu.timestr(), f"{stage} with 10x10 deg aggregation", main_logger)
+    #
+    # else:
+    #     main_logger.info(f"Skipping aggregation of 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
 
 
     ### Step 4: Chunk stats for 1x1 degree and 10x10 degree outputs, aggregates logs
@@ -1541,8 +1541,8 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
-    if (not no_stats) and (success_count > 0):
-        uu.aggregate_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger, all_10x10_stats)
+    if (not no_stats) and (success_count_1x1 > 0):
+        uu.aggregate_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with aggregation and tile stats", main_logger)
 
