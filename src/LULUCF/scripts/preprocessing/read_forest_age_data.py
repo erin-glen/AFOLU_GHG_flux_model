@@ -105,7 +105,7 @@ if __name__ == "__main__":
     da_2010 = da.sel(time="2010-01-01", latitude=slice(lat_max, lat_min), longitude=slice(lon_min, lon_max))
 
     print("computing")
-    da_subset = da_2010.mean(dim="members").compute()
+    da_subset = da_2010.median(dim="members").compute()
 
     # # Select the 'forest_age' variable
     # print("defining data")
@@ -159,7 +159,7 @@ if __name__ == "__main__":
 
     # Save 2010 map
     print("saving 2010 map")
-    output_path_2010 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2010_int8_30m_near_v3.tif"
+    output_path_2010 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2010_int8_30m_near_v4.tif"
     da_subset_2010.rio.to_raster(
         output_path_2010,
         compress="LZW",
@@ -172,7 +172,7 @@ if __name__ == "__main__":
     # Create synthetic 2015 map by adding 5 years
     print("creating 2015 map")
     da_subset_2015 = (da_subset_2010 + 5).clip(min=0, max=100)  # prevent negative ages just in case
-    output_path_2015 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2015_int8_30m_near_v3.tif"
+    output_path_2015 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2015_int8_30m_near_v4.tif"
 
     print("saving 2015 map")
     da_subset_2015.rio.to_raster(
