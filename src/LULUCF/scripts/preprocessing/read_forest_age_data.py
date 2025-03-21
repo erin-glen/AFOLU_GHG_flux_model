@@ -3,6 +3,7 @@
 Also needs zarr package
 """
 
+import numpy as np
 import xarray as xr
 import pystac
 import fsspec
@@ -93,6 +94,10 @@ if __name__ == "__main__":
     lat_min, lat_max = 49.0, 50.0
     lon_min, lon_max = 10.0, 11.0
 
+    # Create new target coords at 0.00025° resolution
+    new_lat = np.arange(lat_max, lat_min, -0.00025)  # descending
+    new_lon = np.arange(lon_min, lon_max, 0.00025)  # ascending
+
     print("defining data")
     da = ds["forest_age"]
 
@@ -129,10 +134,29 @@ if __name__ == "__main__":
     # Write CRS (already EPSG:4326 per metadata)
     da_subset = da_subset.rio.write_crs("EPSG:4326")
 
-    print("Writing to raster")
+    # print("rounding")
+    # # Round to nearest integer and cast to int16
+    # da_subset_2010 = da_subset.round().astype("int16")
 
-    # Save as GeoTIFF
-    output_path = "forest_age_2010_50N_10E_1deg.tif"
-    da_subset.rio.to_raster(output_path)
+    # Replace fill value (-9999) with 0
+    print("replacing -9999 with 0")
+    da_cleaned = da_subset.where(da_subset != -9999, 0)
 
-    print(f"Saved: {output_path}")
+    # Round values, clip to max 100, convert to int8
+    print("clipping max to 100")
+    da_subset_2010 = da_cleaned.round().clip(min=0, max=100).astype("int8")
+
+    # Save 2010 map
+    print("saving 2010 map")
+    output_path_2010 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2010_int8_30m.tif"
+    da_subset_2010.rio.to_raster(output_path_2010)
+    print(f"Saved: {output_path_2010}")
+
+    # Create synthetic 2015 map by adding 5 years
+    print("creating 2015 map")
+    da_subset_2015 = (da_subset_2010 + 5) # .clip(min=0)  # prevent negative ages just in case
+    output_path_2015 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2015_int8_30m.tif"
+
+    print("saving 2015 map")
+    da_subset_2015.rio.to_raster(output_path_2015)
+    print(f"Saved: {output_path_2015}")
