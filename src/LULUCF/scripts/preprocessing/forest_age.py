@@ -16,6 +16,7 @@ Also needs zarr package
 """
 
 import argparse
+import dask
 import numpy as np
 import xarray as xr
 import pystac
@@ -23,6 +24,7 @@ import fsspec
 import json
 
 from affine import Affine
+from dask.distributed import print
 
 # Project imports
 from ..utilities import constants_and_names as cn
@@ -97,6 +99,91 @@ class S3STACReader:
         return xr.open_zarr(store, consolidated=consolidated)
 
 
+def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
+
+    # Stores the min, mean, and max chunks for inputs and outputs for the chunk
+    chunk_stats = []
+
+    logger_worker = lu.setup_logging_worker()
+
+    bounds_str = uu.boundstr(bounds)  # String form of chunk bounds
+    tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
+    chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
+
+    age_bucket_uri = "s3://dog.atlaseo-glm.eo-gridded-data/collections/catalog.json"
+    lu.print_and_log(f"s3 bucket for data: {age_bucket_uri}", is_final, logger_worker)
+    reader = S3STACReader(age_bucket_uri)
+
+    # List collections and items
+    print("Collections:", reader.list_collections())
+    print("GAMI Items:", reader.list_items("GAMI"))
+
+    # Load a Zarr dataset
+    GAMI_ds = reader.load_zarr_dataset("GAMI", "GAMI_v2.1")
+    lu.print_and_log(GAMI_ds, is_final, logger_worker)
+
+    GAMI_dask_array = GAMI_ds["forest_age"]
+
+    # Select the 1x1° region with top-left corner at 50N, 10E
+    lon_min, lon_max = bounds[0], bounds[2]
+    lat_min, lat_max = bounds[1], bounds[3]
+
+
+    print("slicing")
+    da_2010 = GAMI_dask_array.sel(time="2010-01-01", latitude=slice(lat_max, lat_min), longitude=slice(lon_min, lon_max))
+
+    print("computing")
+    da_subset = da_2010.median(dim="members").compute()
+    print("Finished computing")
+
+    # Write CRS (already EPSG:4326 per metadata)
+    da_subset = da_subset.rio.write_crs("EPSG:4326")
+
+    # Replace -9999 (fill value) with 0
+    print("replacing -9999s with 0s")
+    da_cleaned = da_subset.where(da_subset != -9999, 0)
+    resolution = 0.00025
+    # Create new target coords at 0.00025° resolution
+    new_lat = np.arange(lat_max - resolution / 2, lat_min, -resolution)
+    new_lon = np.arange(lon_min + resolution / 2, lon_max, resolution)
+    # Interpolate to new resolution
+    print("resampling")
+    da_resampled = da_cleaned.interp(latitude=new_lat, longitude=new_lon, method="nearest")
+    print("Applying affine transform and CRS...")
+    transform = Affine.translation(lon_min, lat_max) * Affine.scale(resolution, -resolution)
+    da_resampled.rio.write_crs("EPSG:4326", inplace=True)
+    da_resampled.rio.write_transform(transform, inplace=True)
+    # Round, clip to 0–100, and cast to int8
+    print("truncating to 100")
+    da_subset_2010 = da_resampled.round().clip(min=0, max=100).fillna(0).astype(
+        "int8")  # prevent negative ages just in case
+
+    # Save 2010 map
+    print("saving 2010 map")
+    output_path_2010 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2010_int8_30m_near_v5.tif"
+    da_subset_2010.rio.to_raster(
+        output_path_2010,
+        compress="LZW",
+        tiled=True,
+        blockxsize=400,
+        blockysize=400
+    )
+    print(f"Saved: {output_path_2010}")
+
+    # Create synthetic 2015 map by adding 5 years
+    print("creating 2015 map")
+    da_subset_2015 = (da_subset_2010 + 5).clip(min=0, max=100).fillna(0)  # prevent negative ages just in case
+    output_path_2015 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2015_int8_30m_near_v5.tif"
+    print("saving 2015 map")
+    da_subset_2015.rio.to_raster(
+        output_path_2015,
+        compress="LZW",
+        tiled=True,
+        blockxsize=400,
+        blockysize=400
+    )
+    return(f"Saved: {output_path_2015}")
+
 # Example usage
 def main(cluster_name, bounding_box, chunk_size, run_local=None, no_upload=None, log_note=None):
 
@@ -118,20 +205,6 @@ def main(cluster_name, bounding_box, chunk_size, run_local=None, no_upload=None,
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Years for age maps: {age_years}")
 
-    age_bucket_uri = "s3://dog.atlaseo-glm.eo-gridded-data/collections/catalog.json"
-    main_logger.info(f"s3 bucket for data: {age_bucket_uri}")
-    reader = S3STACReader(age_bucket_uri)
-
-    # List collections and items
-    main_logger.info("Collections:", reader.list_collections())
-    print("GAMI Items:", reader.list_items("GAMI"))
-
-    # Load a Zarr dataset
-    GAMI_ds = reader.load_zarr_dataset("GAMI", "GAMI_v2.1")
-    main_logger.info(GAMI_ds)
-
-    GAMI_dask_array = GAMI_ds["forest_age"]
-
     chunk_list = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
@@ -144,92 +217,21 @@ def main(cluster_name, bounding_box, chunk_size, run_local=None, no_upload=None,
 
     output_dir_list = [cn.forest_age_2010_dir, cn.forest_age_2015_dir]
 
-    # Select the 1x1° region with top-left corner at 50N, 10E
-    lat_min, lat_max = 49.0, 50.0
-    lon_min, lon_max = 10.0, 11.0
 
-    print("slicing")
-    da_2010 = GAMI_dask_array.sel(time="2010-01-01", latitude=slice(lat_max, lat_min), longitude=slice(lon_min, lon_max))
+    ### Step 2: Create 1x1 degree outputs
 
-    print("computing")
-    da_subset = da_2010.median(dim="members").compute()
+    # Creates list of tasks to run (1 task = 1 chunk)
+    main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
+    main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
-    # # Select the 'forest_age' variable
-    # print("defining data")
-    # da = ds["forest_age"]
-    #
-    # # Use the ensemble mean across all members
-    # da_mean = da.mean(dim="members")
-    #
-    # # Select the 2010-01-01 time slice
-    # da_2010 = da_mean.sel(time="2010-01-01")
-    #
-    # print("Selected year")
-    #
-    # print("Creating subset...")
-    #
-    # # Spatial subset
-    # da_subset = da_2010.sel(latitude=slice(lat_max, lat_min), longitude=slice(lon_min, lon_max))
-    #
-    # print("Created subset and computing")
-    #
-    # # Load data into memory (since it's a Dask array)
-    # da_subset = da_subset.compute()
+    forest_age_delayed_results = [dask.delayed(calculate_forest_age)
+                                  (chunk, is_final, no_upload, output_dir_list, stage) for chunk in chunk_list]
 
-    print("Finished computing")
+    # Runs analysis and gathers results
+    forest_age_results = dask.compute(*forest_age_delayed_results)
+    print(forest_age_results)
 
-    # Write CRS (already EPSG:4326 per metadata)
-    da_subset = da_subset.rio.write_crs("EPSG:4326")
 
-    # Replace -9999 (fill value) with 0
-    print("replacing -9999s with 0s")
-    da_cleaned = da_subset.where(da_subset != -9999, 0)
-
-    resolution= 0.00025
-
-    # Create new target coords at 0.00025° resolution
-    new_lat = np.arange(lat_max - resolution / 2, lat_min, -resolution)
-    new_lon = np.arange(lon_min + resolution / 2, lon_max, resolution)
-
-    # Interpolate to new resolution
-    print("resampling")
-    da_resampled = da_cleaned.interp(latitude=new_lat, longitude=new_lon, method="nearest")
-
-    print("Applying affine transform and CRS...")
-    transform = Affine.translation(lon_min, lat_max) * Affine.scale(resolution, -resolution)
-    da_resampled.rio.write_crs("EPSG:4326", inplace=True)
-    da_resampled.rio.write_transform(transform, inplace=True)
-
-    # Round, clip to 0–100, and cast to int8
-    print("truncating to 100")
-    da_subset_2010 = da_resampled.round().clip(min=0, max=100).fillna(0).astype("int8") # prevent negative ages just in case
-
-    # Save 2010 map
-    print("saving 2010 map")
-    output_path_2010 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2010_int8_30m_near_v5.tif"
-    da_subset_2010.rio.to_raster(
-        output_path_2010,
-        compress="LZW",
-        tiled=True,
-        blockxsize=400,
-        blockysize=400
-    )
-    print(f"Saved: {output_path_2010}")
-
-    # Create synthetic 2015 map by adding 5 years
-    print("creating 2015 map")
-    da_subset_2015 = (da_subset_2010 + 5).clip(min=0, max=100).fillna(0)  # prevent negative ages just in case
-    output_path_2015 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2015_int8_30m_near_v5.tif"
-
-    print("saving 2015 map")
-    da_subset_2015.rio.to_raster(
-        output_path_2015,
-        compress="LZW",
-        tiled=True,
-        blockxsize=400,
-        blockysize=400
-    )
-    print(f"Saved: {output_path_2015}")
 
 
 if __name__ == "__main__":
