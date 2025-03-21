@@ -25,6 +25,7 @@ import json
 
 from affine import Affine
 from dask.distributed import print
+from concurrent.futures import ThreadPoolExecutor
 
 # Project imports
 from ..utilities import constants_and_names as cn
@@ -110,17 +111,20 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
 
+    if not is_final:
+        lu.print_and_log(f"Processing data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+
     age_bucket_uri = "s3://dog.atlaseo-glm.eo-gridded-data/collections/catalog.json"
-    lu.print_and_log(f"s3 bucket for data: {age_bucket_uri}", is_final, logger_worker)
+    # lu.print_and_log(f"s3 bucket for data: {age_bucket_uri}", is_final, logger_worker)
     reader = S3STACReader(age_bucket_uri)
 
-    # List collections and items
-    print("Collections:", reader.list_collections())
-    print("GAMI Items:", reader.list_items("GAMI"))
+    # # List collections and items
+    # print("Collections:", reader.list_collections())
+    # print("GAMI Items:", reader.list_items("GAMI"))
 
     # Load a Zarr dataset
     GAMI_ds = reader.load_zarr_dataset("GAMI", "GAMI_v2.1")
-    lu.print_and_log(GAMI_ds, is_final, logger_worker)
+    # lu.print_and_log(GAMI_ds, is_final, logger_worker)
 
     GAMI_dask_array = GAMI_ds["forest_age"]
 
@@ -129,60 +133,91 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
     lat_min, lat_max = bounds[1], bounds[3]
 
 
-    print("slicing")
+    print(f"slicing {bounds}: {uu.timestr()}")
     da_2010 = GAMI_dask_array.sel(time="2010-01-01", latitude=slice(lat_max, lat_min), longitude=slice(lon_min, lon_max))
 
-    print("computing")
-    da_subset = da_2010.median(dim="members").compute()
-    print("Finished computing")
+    print(f"computing {bounds}: {uu.timestr()}")
+    da_subset = da_2010.median(dim="members").persist()
+    print(f"Finished computing {bounds}: {uu.timestr()}")
 
     # Write CRS (already EPSG:4326 per metadata)
     da_subset = da_subset.rio.write_crs("EPSG:4326")
 
     # Replace -9999 (fill value) with 0
-    print("replacing -9999s with 0s")
+    print(f"replacing -9999s with 0s {bounds}: {uu.timestr()}")
     da_cleaned = da_subset.where(da_subset != -9999, 0)
     resolution = 0.00025
+
     # Create new target coords at 0.00025° resolution
     new_lat = np.arange(lat_max - resolution / 2, lat_min, -resolution)
     new_lon = np.arange(lon_min + resolution / 2, lon_max, resolution)
+
     # Interpolate to new resolution
-    print("resampling")
+    print(f"resampling {bounds}: {uu.timestr()}")
     da_resampled = da_cleaned.interp(latitude=new_lat, longitude=new_lon, method="nearest")
-    print("Applying affine transform and CRS...")
+
+    print(f"Applying affine transform and CRS {bounds}: {uu.timestr()}")
     transform = Affine.translation(lon_min, lat_max) * Affine.scale(resolution, -resolution)
     da_resampled.rio.write_crs("EPSG:4326", inplace=True)
     da_resampled.rio.write_transform(transform, inplace=True)
     # Round, clip to 0–100, and cast to int8
-    print("truncating to 100")
-    da_subset_2010 = da_resampled.round().clip(min=0, max=100).fillna(0).astype(
-        "int8")  # prevent negative ages just in case
+
+    print(f"truncating to 100 {bounds}: {uu.timestr()}")
+    da_subset_2010 = da_resampled.round().clip(min=0, max=100).fillna(0).astype("int8")  # prevent negative ages just in case
+
+    out_dict = {}
 
     # Save 2010 map
-    print("saving 2010 map")
+    print(f"saving 2010 map {bounds}: {uu.timestr()}")
     output_path_2010 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2010_int8_30m_near_v5.tif"
-    da_subset_2010.rio.to_raster(
-        output_path_2010,
-        compress="LZW",
-        tiled=True,
-        blockxsize=400,
-        blockysize=400
-    )
-    print(f"Saved: {output_path_2010}")
+
+    # Output paths without bucket (s3://gfw2-data)
+    s3_path_without_bucket = f"{cn.forest_age_2010_dir[cn.full_bucket_prefix_length:]}"
+
+    out_dict['forest_age_2010'] = [da_subset_2010, 'int8', cn.forest_age_2010_pattern, 2010, s3_path_without_bucket]
+
+    # da_subset_2010.rio.to_raster(
+    #     output_path_2010,
+    #     compress="LZW",
+    #     tiled=True,
+    #     blockxsize=400,
+    #     blockysize=400
+    # )
 
     # Create synthetic 2015 map by adding 5 years
-    print("creating 2015 map")
     da_subset_2015 = (da_subset_2010 + 5).clip(min=0, max=100).fillna(0)  # prevent negative ages just in case
+
     output_path_2015 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2015_int8_30m_near_v5.tif"
-    print("saving 2015 map")
-    da_subset_2015.rio.to_raster(
-        output_path_2015,
-        compress="LZW",
-        tiled=True,
-        blockxsize=400,
-        blockysize=400
-    )
-    return(f"Saved: {output_path_2015}")
+
+    # Output paths without bucket (s3://gfw2-data)
+    s3_path_without_bucket = f"{cn.forest_age_2015_dir[cn.full_bucket_prefix_length:]}"
+
+    out_dict['forest_age_2015'] = [da_subset_2015, 'int8', cn.forest_age_2015_pattern, 2015, s3_path_without_bucket]
+
+    print(f"Saving {bounds} locally: {uu.timestr()}")
+    # da_subset_2015.rio.to_raster(
+    #     output_path_2015,
+    #     compress="LZW",
+    #     tiled=True,
+    #     blockxsize=400,
+    #     blockysize=400
+    # )
+
+    # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
+    upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
+                                                       out_dict, is_final, logger_worker, 0)
+
+    # Only prints if not a final run
+    if not is_final:
+        lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Ready to upload: {uu.timestr()}",
+                         is_final, logger_worker)
+
+    # Executes uploads in parallel
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
+
+    return (f"Processed {bounds}: {uu.timestr()}")
+
 
 # Example usage
 def main(cluster_name, bounding_box, chunk_size, run_local=None, no_upload=None, log_note=None):

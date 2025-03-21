@@ -362,7 +362,6 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
                 out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
 
             # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
-            ### NOTE: I haven't tested this parallel upload ability with create_starting_carbon_pools
             upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
                                                                out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
 
