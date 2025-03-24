@@ -16,204 +16,295 @@ Also needs zarr package
 """
 
 import argparse
+import boto3
 import dask
 import numpy as np
 import xarray as xr
 import pystac
 import fsspec
 import json
+import os
+import rasterio
 
 from affine import Affine
 from dask.distributed import print
 from concurrent.futures import ThreadPoolExecutor
+from rioxarray import open_rasterio
+from fsspec.implementations.cached import CachingFileSystem
+import shutil
+from pathlib import Path
 
 # Project imports
 from ..utilities import constants_and_names as cn
 from ..utilities import log_utilities as lu
 from ..utilities import universal_utilities as uu
 
-class S3STACReader:
-    def __init__(self, bucket_url: str, endpoint_url: str = "https://s3.gfz-potsdam.de", anon: bool = True):
-        """
-        Initialize the S3STACReader class.
+# class S3STACReader:
+#     def __init__(self, bucket_url: str, endpoint_url: str = "https://s3.gfz-potsdam.de", anon: bool = True):
+#         """
+#         Initialize the S3STACReader class.
+#
+#         Args:
+#             bucket_url (str): S3 URL of the STAC catalog.
+#             endpoint_url (str): S3 endpoint URL.
+#             anon (bool): Set to True for public buckets, False for authenticated access.
+#         """
+#         self.bucket_url = bucket_url
+#         s3_fs = fsspec.filesystem(
+#             "s3",
+#             anon=True,
+#             endpoint_url="https://s3.gfz-potsdam.de"
+#         )
+#
+#         # Wrap it in a caching filesystem
+#         self.s3_fs = CachingFileSystem(
+#             fs=s3_fs,
+#             cache_storage="/tmp/zarr_cache",  # where to store cached chunks
+#             block_size=0  # cache whole files (good for Zarr chunks)
+#         )
+#         self._register_stac_io()
+#         self.catalog = self._load_catalog()
+#
+#     def _register_stac_io(self):
+#         """Register a custom STAC I/O handler for reading from S3."""
+#         class S3StacIO(pystac.StacIO):
+#             s3_fs = self.s3_fs
+#
+#             def read_text(self, href: str) -> str:
+#                 with self.s3_fs.open(href, "r") as f:
+#                     return f.read()
+#
+#             def write_text(self, href: str, txt: str) -> None:
+#                 with self.s3_fs.open(href, "w") as f:
+#                     f.write(txt)
+#
+#             def exists(self, href: str) -> bool:
+#                 return self.s3_fs.exists(href)
+#
+#         pystac.StacIO.set_default(S3StacIO)
+#
+#     def _load_catalog(self) -> pystac.Catalog:
+#         """Load the STAC catalog from the S3 bucket."""
+#         with self.s3_fs.open(self.bucket_url, 'r') as f:
+#             catalog_json = json.load(f)
+#         return pystac.Catalog.from_dict(catalog_json)
+#
+#     def list_collections(self):
+#         """List all collections in the catalog."""
+#         return [collection.id for collection in self.catalog.get_children()]
+#
+#     def list_items(self, collection_id: str):
+#         """List all items in a specified collection."""
+#         collection = self.catalog.get_child(collection_id)
+#         return [item.id for item in collection.get_items()]
+#
+#     def load_zarr_dataset(self, collection_id: str, item_id: str, consolidated: bool = True) -> xr.Dataset:
+#         """
+#         Load a Zarr dataset from the STAC catalog.
+#
+#         Args:
+#             collection_id (str): ID of the collection.
+#             item_id (str): ID of the item.
+#             consolidated (bool): Set to True if metadata is consolidated.
+#
+#         Returns:
+#             xr.Dataset: The opened xarray dataset.
+#         """
+#         collection = self.catalog.get_child(collection_id)
+#         item = collection.get_item(item_id)
+#         zarr_asset = item.assets["zarr"]
+#
+#         store = self.s3_fs.get_mapper(zarr_asset.href)
+#         return xr.open_zarr(store, consolidated=consolidated)
 
-        Args:
-            bucket_url (str): S3 URL of the STAC catalog.
-            endpoint_url (str): S3 endpoint URL.
-            anon (bool): Set to True for public buckets, False for authenticated access.
-        """
-        self.bucket_url = bucket_url
-        self.s3_fs = fsspec.filesystem("s3", anon=anon, endpoint_url=endpoint_url)
-        self._register_stac_io()
-        self.catalog = self._load_catalog()
+import json
+import pystac
+import fsspec
+from fsspec.implementations.cached import CachingFileSystem
+import xarray as xr
+#
+#
+# class S3STACReader:
+#     def __init__(self, bucket_url: str, endpoint_url: str = "https://s3.gfz-potsdam.de", anon: bool = True):
+#         """
+#         Initialize the S3STACReader class.
+#
+#         Args:
+#             bucket_url (str): S3 URL of the STAC catalog (e.g., s3://bucket/path/catalog.json)
+#             endpoint_url (str): S3 endpoint URL
+#             anon (bool): Set to True for public buckets
+#         """
+#         self.bucket_url = bucket_url
+#         self.endpoint_url = endpoint_url
+#
+#         # Use plain S3 FS for both metadata and Zarr access
+#         self.s3_fs = fsspec.filesystem("s3", anon=anon, endpoint_url=self.endpoint_url)
+#
+#         self._register_stac_io()
+#         self.catalog = self._load_catalog()
+#
+#     def _register_stac_io(self):
+#         """Register custom STAC I/O using the plain S3 FS."""
+#
+#         class S3StacIO(pystac.StacIO):
+#             def read_text(self_inner, href: str) -> str:
+#                 with self.s3_fs.open(href, "r") as f:
+#                     return f.read()
+#
+#             def write_text(self_inner, href: str, txt: str) -> None:
+#                 with self.s3_fs.open(href, "w") as f:
+#                     f.write(txt)
+#
+#             def exists(self_inner, href: str) -> bool:
+#                 return self.s3_fs.exists(href)
+#
+#         pystac.StacIO.set_default(S3StacIO)
+#
+#     def _load_catalog(self) -> pystac.Catalog:
+#         """Load the STAC catalog from the S3 bucket."""
+#         with self.s3_fs.open(self.bucket_url, "r") as f:
+#             catalog_json = json.load(f)
+#         return pystac.Catalog.from_dict(catalog_json)
+#
+#     def list_collections(self):
+#         """List all collections in the catalog."""
+#         return [collection.id for collection in self.catalog.get_children()]
+#
+#     def list_items(self, collection_id: str):
+#         """List all items in a specified collection."""
+#         collection = self.catalog.get_child(collection_id)
+#         return [item.id for item in collection.get_items()]
+#
+#     def load_zarr_dataset(self, collection_id: str, item_id: str, consolidated: bool = True) -> xr.Dataset:
+#         """
+#         Load a Zarr dataset from the STAC catalog.
+#
+#         Args:
+#             collection_id (str): ID of the collection.
+#             item_id (str): ID of the item.
+#             consolidated (bool): Set to True if metadata is consolidated.
+#
+#         Returns:
+#             xr.Dataset: The opened xarray dataset.
+#         """
+#         collection = self.catalog.get_child(collection_id)
+#         item = collection.get_item(item_id)
+#         zarr_asset = item.assets["zarr"]
+#
+#         store = self.s3_fs.get_mapper(zarr_asset.href)
+#         return xr.open_zarr(store, consolidated=consolidated)
 
-    def _register_stac_io(self):
-        """Register a custom STAC I/O handler for reading from S3."""
-        class S3StacIO(pystac.StacIO):
-            s3_fs = self.s3_fs
+import fsspec
+import xarray as xr
 
-            def read_text(self, href: str) -> str:
-                with self.s3_fs.open(href, "r") as f:
-                    return f.read()
-
-            def write_text(self, href: str, txt: str) -> None:
-                with self.s3_fs.open(href, "w") as f:
-                    f.write(txt)
-
-            def exists(self, href: str) -> bool:
-                return self.s3_fs.exists(href)
-
-        pystac.StacIO.set_default(S3StacIO)
-
-    def _load_catalog(self) -> pystac.Catalog:
-        """Load the STAC catalog from the S3 bucket."""
-        with self.s3_fs.open(self.bucket_url, 'r') as f:
-            catalog_json = json.load(f)
-        return pystac.Catalog.from_dict(catalog_json)
-
-    def list_collections(self):
-        """List all collections in the catalog."""
-        return [collection.id for collection in self.catalog.get_children()]
-
-    def list_items(self, collection_id: str):
-        """List all items in a specified collection."""
-        collection = self.catalog.get_child(collection_id)
-        return [item.id for item in collection.get_items()]
-
-    def load_zarr_dataset(self, collection_id: str, item_id: str, consolidated: bool = True) -> xr.Dataset:
-        """
-        Load a Zarr dataset from the STAC catalog.
-
-        Args:
-            collection_id (str): ID of the collection.
-            item_id (str): ID of the item.
-            consolidated (bool): Set to True if metadata is consolidated.
-
-        Returns:
-            xr.Dataset: The opened xarray dataset.
-        """
-        collection = self.catalog.get_child(collection_id)
-        item = collection.get_item(item_id)
-        zarr_asset = item.assets["zarr"]
-
-        store = self.s3_fs.get_mapper(zarr_asset.href)
-        return xr.open_zarr(store, consolidated=consolidated)
 
 
 def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
+    import os
+    import boto3
+    import numpy as np
+    import rasterio
+    import xarray as xr
+    from affine import Affine
+    import fsspec
+    from fsspec.implementations.cached import CachingFileSystem
 
-    # Stores the min, mean, and max chunks for inputs and outputs for the chunk
-    chunk_stats = []
+    from ..utilities import log_utilities as lu
+    from ..utilities import universal_utilities as uu
+    from ..utilities import constants_and_names as cn
 
     logger_worker = lu.setup_logging_worker()
+    s3 = boto3.client("s3")
 
-    bounds_str = uu.boundstr(bounds)  # String form of chunk bounds
-    tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
-    chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
+    bounds_str = uu.boundstr(bounds)
+    tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])
+    chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
 
     if not is_final:
-        lu.print_and_log(f"Processing data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"Processing chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
-    # Bucket where age maps are stored
-    age_bucket_uri = "s3://dog.atlaseo-glm.eo-gridded-data/collections/catalog.json"
-    # lu.print_and_log(f"s3 bucket for data: {age_bucket_uri}", is_final, logger_worker)
-    reader = S3STACReader(age_bucket_uri)
+    ### ZARR SETUP (optimized)
+    zarr_url = "s3://dog.atlaseo-glm.eo-gridded-data/collections/GAMI/GAMI_v2.1.zarr"
+    cache_dir = f"/tmp/zarr_cache_{tile_id}"  # Unique cache per worker chunk
+    os.makedirs(cache_dir, exist_ok=True)
 
-    # # Lists collections and items
-    # print("Collections:", reader.list_collections())
-    # print("GAMI Items:", reader.list_items("GAMI"))
-
-    # Loads a Zarr dataset-- GAMI v2.1
-    GAMI_ds = reader.load_zarr_dataset("GAMI", "GAMI_v2.1")
-    # lu.print_and_log(GAMI_ds, is_final, logger_worker)
-
-    # Gets the forest age dataset
-    GAMI_dask_array = GAMI_ds["forest_age"]
-
-    # Bounding box for chunk
-    lon_min, lon_max = bounds[0], bounds[2]
-    lat_min, lat_max = bounds[1], bounds[3]
-
-    lu.print_and_log(f"slicing {bounds}: {uu.timestr()}", is_final, logger_worker)
-
-    # Gets the age map for the chunk.
-    # The chunk needs to be buffered by +/- double the pixel resolution so that the resampled output extends all the way
-    # to the edge of the bounding box. Without cn.resolution*2, there was a one pixel-wide border around the edge with
-    # no values in it. I believe that's because the resampling was only for pixels with their centers in the targeted
-    # slice, so the slice has to be extended a bit so that the outermost resampled pixels have their center within
-    # the (expanded) bounding box. The output raster is still the exact right size.
-    da_2010 = GAMI_dask_array.sel(
-        time="2010-01-01",
-        latitude=slice(lat_max + cn.resolution*2, lat_min - cn.resolution*2),
-        longitude=slice(lon_min - cn.resolution*2, lon_max + cn.resolution*2)
+    cached_fs = CachingFileSystem(
+        fs=fsspec.filesystem("s3", anon=True, endpoint_url="https://s3.gfz-potsdam.de"),
+        cache_storage=cache_dir,
+        block_size=0,  # cache whole chunks
+        check_files=False
     )
 
-    lu.print_and_log(f"Computing {bounds}: {uu.timestr()}", is_final, logger_worker)
-    da_subset = da_2010.mean(dim="members").persist()
-    lu.print_and_log(f"Finished computing {bounds}: {uu.timestr()}", is_final, logger_worker)
+    store = cached_fs.get_mapper(zarr_url)
+    ds = xr.open_zarr(store, consolidated=True)
 
-    da_subset = da_subset.rio.write_crs("EPSG:4326")
+    forest_age = ds["forest_age"]
 
-    # Replaces -9999 (fill value) with 0
-    lu.print_and_log(f"Replacing -9999s with 0s {bounds}: {uu.timestr()}", is_final, logger_worker)
-    da_cleaned = da_subset.where(da_subset != -9999, 0)
+    # Bounding box and buffering
+    lon_min, lon_max = bounds[0], bounds[2]
+    lat_min, lat_max = bounds[1], bounds[3]
+    buffer = cn.resolution * 2
 
-    # Creates new target coords at 0.00025° resolution
+    lu.print_and_log(f"Loading data into memory {bounds_str}: {uu.timestr()}", is_final, logger_worker)
+    da_chunk = forest_age.sel(
+        time="2010-01-01",
+        latitude=slice(lat_max + buffer, lat_min - buffer),
+        longitude=slice(lon_min - buffer, lon_max + buffer)
+    ).load()  # load only selected chunk
+
+    lu.print_and_log(f"Cleaning {bounds_str}: {uu.timestr()}", is_final, logger_worker)
+    da_cleaned = da_chunk.where(da_chunk != -9999, 0)
+    da_median = da_cleaned.median(dim="members")
+
+    # Target high-res lat/lon grid
     new_lat = np.arange(lat_max - cn.resolution / 2, lat_min, -cn.resolution)
     new_lon = np.arange(lon_min + cn.resolution / 2, lon_max, cn.resolution)
 
-    # Interpolates to new resolution
-    lu.print_and_log(f"Resampling {bounds}: {uu.timestr()}", is_final, logger_worker)
-    da_resampled = da_cleaned.interp(latitude=new_lat, longitude=new_lon, method="nearest")
+    lu.print_and_log(f"Interpolating {bounds_str}: {uu.timestr()}", is_final, logger_worker)
+    da_resampled = da_median.interp(latitude=new_lat, longitude=new_lon, method="nearest")
 
-    lu.print_and_log(f"Applying affine transform and CRS {bounds}: {uu.timestr()}", is_final, logger_worker)
+    da_2010 = da_resampled.round().clip(0, 100).fillna(0).astype("int8")
+    arr_2010 = da_2010.values
+
+    arr_2015 = np.where(arr_2010 != 0, arr_2010 + 5, 0).clip(0, 100).astype("int8")
+
     transform = Affine.translation(lon_min, lat_max) * Affine.scale(cn.resolution, -cn.resolution)
-    da_resampled.rio.write_crs("EPSG:4326", inplace=True)
-    da_resampled.rio.write_transform(transform, inplace=True)
+    crs = "EPSG:4326"
+    bucket_name = "gfw2-data"
 
-    lu.print_and_log(f"Truncating to 100 {bounds}: {uu.timestr()}", is_final, logger_worker)
-    da_subset_2010 = da_resampled.round().clip(min=0, max=100).fillna(0).astype("int8")  # prevent negative ages just in case
+    # Output paths
+    file_2010 = f"/tmp/{tile_id}__{bounds_str}__forest_age_2010.tif"
+    file_2015 = f"/tmp/{tile_id}__{bounds_str}__forest_age_2015.tif"
 
-    # Dictionary of outputs
-    out_dict = {}
+    # Write 2010
+    lu.print_and_log(f"Saving 2010 raster {file_2010}: {uu.timestr()}", is_final, logger_worker)
+    with rasterio.open(file_2010, 'w', driver='GTiff',
+        height=arr_2010.shape[0], width=arr_2010.shape[1],
+        count=1, dtype="int8", crs=crs, transform=transform,
+        compress="LZW", tiled=True, blockxsize=400, blockysize=400
+    ) as dst:
+        dst.write(arr_2010, 1)
 
-    # Saves 2010 map
-    lu.print_and_log(f"Saving 2010 map {bounds}: {uu.timestr()}", is_final, logger_worker)
+    # Write 2015
+    lu.print_and_log(f"Saving 2015 raster {file_2015}: {uu.timestr()}", is_final, logger_worker)
+    with rasterio.open(file_2015, 'w', driver='GTiff',
+        height=arr_2015.shape[0], width=arr_2015.shape[1],
+        count=1, dtype="int8", crs=crs, transform=transform,
+        compress="LZW", tiled=True, blockxsize=400, blockysize=400
+    ) as dst:
+        dst.write(arr_2015, 1)
 
-    # Output path without bucket (s3://gfw2-data)
-    s3_path_2010_without_bucket = f"{cn.forest_age_2010_dir[cn.full_bucket_prefix_length:]}"
-    s3_path_2015_without_bucket = f"{cn.forest_age_2015_dir[cn.full_bucket_prefix_length:]}"
+    # Upload to S3
+    s3_key_2010 = f"{cn.forest_age_2010_dir[cn.full_bucket_prefix_length:]}{os.path.basename(file_2010)}"
+    s3_key_2015 = f"{cn.forest_age_2015_dir[cn.full_bucket_prefix_length:]}{os.path.basename(file_2015)}"
 
-    # Output dictionary used for uploading to s3
-    out_dict['forest_age_2010'] = [da_subset_2010, 'int8', cn.forest_age_2010_pattern, 2010, s3_path_2010_without_bucket]
+    lu.print_and_log(f"Uploading to S3: {s3_key_2010}, {s3_key_2015}", is_final, logger_worker)
+    s3.upload_file(file_2010, bucket_name, s3_key_2010)
+    s3.upload_file(file_2015, bucket_name, s3_key_2015)
 
-    # Creates synthetic 2015 map by adding 5 years to non-NoData pixels.
-    # Caps maximum age at 100 and prevents negative ages
-    lu.print_and_log(f"Creating 2015 age map for {bounds}: {uu.timestr()}", is_final, logger_worker)
-    da_subset_2015 = xr.where(
-        da_subset_2010 != 0,
-        da_subset_2010 + 5,
-        0
-    ).clip(min=0, max=100).astype("int8")  # prevent negative ages just in case
+    lu.print_and_log(f"Finished chunk {bounds_str}: {uu.timestr()}", is_final, logger_worker)
+    return f"Processed {bounds_str}: {uu.timestr()}"
 
-    out_dict['forest_age_2015'] = [da_subset_2015, 'int8', cn.forest_age_2015_pattern, 2015, s3_path_2015_without_bucket]
-
-    lu.print_and_log(f"Saving {bounds} locally: {uu.timestr()}", is_final, logger_worker)
-
-    # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
-    upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
-                                                       out_dict, is_final, logger_worker, 0)
-
-    # Only prints if not a final run
-    if not is_final:
-        lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Ready to upload: {uu.timestr()}",
-                         is_final, logger_worker)
-
-    # Executes uploads in parallel
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
-
-    return (f"Processed {bounds}: {uu.timestr()}")
 
 
 def main(cluster_name, bounding_box, chunk_size, run_local=None, no_upload=None, log_note=None):
@@ -255,12 +346,14 @@ def main(cluster_name, bounding_box, chunk_size, run_local=None, no_upload=None,
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
     main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
-    forest_age_delayed_results = [dask.delayed(calculate_forest_age)
-                                  (chunk, is_final, no_upload, output_dir_list, stage) for chunk in chunk_list]
+    futures = []
 
-    # Runs analysis and gathers results
-    forest_age_results = dask.compute(*forest_age_delayed_results)
-    main_logger.info(forest_age_results)
+    for chunk in chunk_list:
+        future = client.submit(calculate_forest_age, chunk, is_final, no_upload, output_dir_list, stage)
+        futures.append(future)
+
+    results = client.gather(futures)
+    main_logger.info(results)
 
 
 
