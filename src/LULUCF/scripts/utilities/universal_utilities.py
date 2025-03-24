@@ -1117,8 +1117,6 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
     # Results are the messages from the chunks and chunk stats
     for result in results:
 
-        main_logger.info(result)
-
         return_message, chunk_stats = result
 
         if "Success" in return_message:
@@ -1146,7 +1144,6 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
             main_logger.info(message)
 
     # Print the counts of successful and skipped chunks
-    ##TODO Use the GCS_to_s3 status json as a way to check which chunks were skipped
     main_logger.info(f"Number of 'Success' chunks: {success_count}")
     main_logger.info(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
     main_logger.info(f"Number of 'Error' chunks: {error_chunk_count}")
@@ -1171,7 +1168,7 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
 def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_pixel=None):
 
     # Sums the per pixel totals if relevant
-    if in_out == 'output_layer':
+    if in_out == 'output_layer' and array_per_pixel is not None:
         sum_value = np.sum(array_per_pixel)
     else:
         sum_value = 'N/A- input layer or no per-pixel array supplied'

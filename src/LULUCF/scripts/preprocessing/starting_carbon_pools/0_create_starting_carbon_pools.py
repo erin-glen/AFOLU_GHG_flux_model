@@ -38,11 +38,11 @@ from dask.distributed import print
 from numba import jit
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import universal_utilities as uu
-from ..utilities import log_utilities as lu
-from ..utilities import numba_utilities as nu
-from ..utilities import resize_cluster
+from src.LULUCF.scripts.utilities import constants_and_names as cn
+from src.LULUCF.scripts.utilities import universal_utilities as uu
+from src.LULUCF.scripts.utilities import log_utilities as lu
+from src.LULUCF.scripts.utilities import numba_utilities as nu
+from src.LULUCF.scripts.utilities import resize_cluster
 
 
 # Function to create initial (year 2000) non-soil carbon pool densities

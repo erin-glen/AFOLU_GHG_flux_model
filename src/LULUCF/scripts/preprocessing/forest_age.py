@@ -4,15 +4,26 @@ Run from src/LULUCF
 Local:
 python -m scripts.preprocessing.forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
 
-Coiled test:
+Coiled tiny test:
 python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
 python -m scripts.preprocessing.forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
+
+Coiled larger test (because this doesn't always scale beyond 1 chunk well):
+python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 4 -t 4
+python -m scripts.preprocessing.forest_age -cn AFOLU_flux_model_scripts -bb 10 47 13 50 -cs 1
+
+Full run:
+python -m scripts.utilities.create_cluster -n 6 -t 8 -cn AFOLU_flux_model_scripts
 
 
 https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=8f5974e7-3ece-11ef-967a-4ffbfe06208e
 https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/
 Metadata: https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/2023-006_Besnard-et-al_Data-Description-v2.1.pdf
 Also needs zarr package
+
+Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67dcb99b-edb8-800a-abd8-f718de76043c
+https://chatgpt.com/share/e/67e1b7f6-c0d4-800a-a945-3133de9bf3a0
+
 """
 
 import argparse
@@ -33,7 +44,7 @@ from ..utilities import universal_utilities as uu
 from ..utilities import resize_cluster
 
 
-def calculate_forest_age(bounds, is_final, no_upload, stage, fishnet_iso_df):
+def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -122,7 +133,7 @@ def calculate_forest_age(bounds, is_final, no_upload, stage, fishnet_iso_df):
         file_2010 = f"/tmp/{tile_id}__{bounds_str}__forest_age_2010.tif"
         file_2015 = f"/tmp/{tile_id}__{bounds_str}__forest_age_2015.tif"
 
-        # Writes 2010
+        # Writes 2010 age to raster
         lu.print_and_log(f"Saving 2010 raster {file_2010}: {uu.timestr()}", is_final, logger_worker)
         with rasterio.open(file_2010, 'w', driver='GTiff',
             height=arr_2010.shape[0], width=arr_2010.shape[1],
@@ -131,7 +142,7 @@ def calculate_forest_age(bounds, is_final, no_upload, stage, fishnet_iso_df):
         ) as dst:
             dst.write(arr_2010, 1)
 
-        # Writes 2015
+        # Writes 2015 age to raster
         lu.print_and_log(f"Saving 2015 raster {file_2015}: {uu.timestr()}", is_final, logger_worker)
         with rasterio.open(file_2015, 'w', driver='GTiff',
             height=arr_2015.shape[0], width=arr_2015.shape[1],
@@ -140,16 +151,16 @@ def calculate_forest_age(bounds, is_final, no_upload, stage, fishnet_iso_df):
         ) as dst:
             dst.write(arr_2015, 1)
 
-        chunk_stats.append(uu.calculate_stats(arr_2010, f"forest_age_2010", bounds_str, tile_id, 'output_layer', fishnet_iso_df))
-        chunk_stats.append(uu.calculate_stats(arr_2015, f"forest_age_2015", bounds_str, tile_id, 'output_layer', fishnet_iso_df))
+        chunk_stats.append(uu.calculate_stats(arr_2010, f"forest_age_2010", bounds_str, tile_id, 'output_layer'))
+        chunk_stats.append(uu.calculate_stats(arr_2015, f"forest_age_2015", bounds_str, tile_id, 'output_layer'))
 
         uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
 
         if not no_upload:
 
             # Uploads to S3
-            s3_key_2010 = f"{cn.forest_age_2010_dir[cn.full_bucket_prefix_length:]}{os.path.basename(file_2010)}"
-            s3_key_2015 = f"{cn.forest_age_2015_dir[cn.full_bucket_prefix_length:]}{os.path.basename(file_2015)}"
+            s3_key_2010 = f"{output_dir_list[0][cn.full_bucket_prefix_length:]}{os.path.basename(file_2010)}"
+            s3_key_2015 = f"{output_dir_list[1][cn.full_bucket_prefix_length:]}{os.path.basename(file_2015)}"
 
             lu.print_and_log(f"Uploading to S3: {s3_key_2010}, {s3_key_2015}", is_final, logger_worker)
             s3.upload_file(file_2010, cn.short_bucket_prefix, s3_key_2010)
@@ -164,12 +175,12 @@ def calculate_forest_age(bounds, is_final, no_upload, stage, fishnet_iso_df):
 
     except Exception as e:
 
-        return_message = f"Error processing chunk {bounds}: {e}: {uu.timestr()}"
+        return_message = f"Error creating 2010/2015 age maps for chunk {bounds}: {e}: {uu.timestr()}"
 
         lu.print_and_log(return_message, False, logger_worker)
         uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
 
-    return return_message, chunk_stats  # Return both the success message and the statistics
+    return return_message, chunk_stats  # Returns both the success message and the chunk statistics
 
 
 
@@ -179,7 +190,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = f'starting_forest_age_10x10_deg'
+    stage = f'create_forest_age_2010_2015__1x1_deg'
     model_type = 'standard'
     age_years = [2010, 2015]
 
@@ -212,6 +223,9 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     output_dir_list = [cn.forest_age_2010_dir, cn.forest_age_2015_dir]
 
+    output_dir_list = [path.replace("DATE", uu.timestr()[:8]) for path in output_dir_list]
+    output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
+
 
     ### Step 2: Create 1x1 degree outputs
 
@@ -226,7 +240,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     futures = []
 
     for chunk in chunk_list:
-        future = client.submit(calculate_forest_age, chunk, is_final, no_upload, stage, fishnet_iso_df)
+        future = client.submit(calculate_forest_age, chunk, is_final, no_upload, output_dir_list, stage)
         futures.append(future)
 
     forest_age_results = client.gather(futures)
@@ -279,8 +293,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Closes the Dask client if not running locally
     if not run_local:
         client.close()
-
-
 
 
 if __name__ == "__main__":
