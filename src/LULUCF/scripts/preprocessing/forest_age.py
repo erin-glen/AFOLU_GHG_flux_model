@@ -114,91 +114,91 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
     if not is_final:
         lu.print_and_log(f"Processing data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
+    # Bucket where age maps are stored
     age_bucket_uri = "s3://dog.atlaseo-glm.eo-gridded-data/collections/catalog.json"
     # lu.print_and_log(f"s3 bucket for data: {age_bucket_uri}", is_final, logger_worker)
     reader = S3STACReader(age_bucket_uri)
 
-    # # List collections and items
+    # # Lists collections and items
     # print("Collections:", reader.list_collections())
     # print("GAMI Items:", reader.list_items("GAMI"))
 
-    # Load a Zarr dataset
+    # Loads a Zarr dataset-- GAMI v2.1
     GAMI_ds = reader.load_zarr_dataset("GAMI", "GAMI_v2.1")
     # lu.print_and_log(GAMI_ds, is_final, logger_worker)
 
+    # Gets the forest age dataset
     GAMI_dask_array = GAMI_ds["forest_age"]
 
-    # Select the 1x1° region with top-left corner at 50N, 10E
+    # Bounding box for chunk
     lon_min, lon_max = bounds[0], bounds[2]
     lat_min, lat_max = bounds[1], bounds[3]
 
+    lu.print_and_log(f"slicing {bounds}: {uu.timestr()}", is_final, logger_worker)
 
-    print(f"slicing {bounds}: {uu.timestr()}")
-
-    buffer = 0.00025  # match your output resolution
-
-    # da_2010 = GAMI_dask_array.sel(time="2010-01-01", latitude=slice(lat_max, lat_min), longitude=slice(lon_min, lon_max))
+    # Gets the age map for the chunk.
+    # The chunk needs to be buffered by +/- double the pixel resolution so that the resampled output extends all the way
+    # to the edge of the bounding box. Without cn.resolution*2, there was a one pixel-wide border around the edge with
+    # no values in it. I believe that's because the resampling was only for pixels with their centers in the targeted
+    # slice, so the slice has to be extended a bit so that the outermost resampled pixels have their center within
+    # the (expanded) bounding box. The output raster is still the exact right size.
     da_2010 = GAMI_dask_array.sel(
         time="2010-01-01",
-        latitude=slice(lat_max + buffer*2, lat_min - buffer*2),
-        longitude=slice(lon_min - buffer*2, lon_max + buffer*2)
+        latitude=slice(lat_max + cn.resolution*2, lat_min - cn.resolution*2),
+        longitude=slice(lon_min - cn.resolution*2, lon_max + cn.resolution*2)
     )
 
-    print(f"computing {bounds}: {uu.timestr()}")
-    da_subset = da_2010.median(dim="members").persist()
-    print(f"Finished computing {bounds}: {uu.timestr()}")
+    lu.print_and_log(f"Computing {bounds}: {uu.timestr()}", is_final, logger_worker)
+    da_subset = da_2010.mean(dim="members").persist()
+    lu.print_and_log(f"Finished computing {bounds}: {uu.timestr()}", is_final, logger_worker)
 
-    # Write CRS (already EPSG:4326 per metadata)
     da_subset = da_subset.rio.write_crs("EPSG:4326")
 
-    # Replace -9999 (fill value) with 0
-    print(f"replacing -9999s with 0s {bounds}: {uu.timestr()}")
+    # Replaces -9999 (fill value) with 0
+    lu.print_and_log(f"Replacing -9999s with 0s {bounds}: {uu.timestr()}", is_final, logger_worker)
     da_cleaned = da_subset.where(da_subset != -9999, 0)
-    resolution = 0.00025
 
-    # Create new target coords at 0.00025° resolution
-    new_lat = np.arange(lat_max - resolution / 2, lat_min, -resolution)
-    new_lon = np.arange(lon_min + resolution / 2, lon_max, resolution)
+    # Creates new target coords at 0.00025° resolution
+    new_lat = np.arange(lat_max - cn.resolution / 2, lat_min, -cn.resolution)
+    new_lon = np.arange(lon_min + cn.resolution / 2, lon_max, cn.resolution)
 
-    # Interpolate to new resolution
-    print(f"resampling {bounds}: {uu.timestr()}")
+    # Interpolates to new resolution
+    lu.print_and_log(f"Resampling {bounds}: {uu.timestr()}", is_final, logger_worker)
     da_resampled = da_cleaned.interp(latitude=new_lat, longitude=new_lon, method="nearest")
 
-
-    print(f"Applying affine transform and CRS {bounds}: {uu.timestr()}")
-    transform = Affine.translation(lon_min, lat_max) * Affine.scale(resolution, -resolution)
+    lu.print_and_log(f"Applying affine transform and CRS {bounds}: {uu.timestr()}", is_final, logger_worker)
+    transform = Affine.translation(lon_min, lat_max) * Affine.scale(cn.resolution, -cn.resolution)
     da_resampled.rio.write_crs("EPSG:4326", inplace=True)
     da_resampled.rio.write_transform(transform, inplace=True)
-    # Round, clip to 0–100, and cast to int8
 
-    print(f"truncating to 100 {bounds}: {uu.timestr()}")
+    lu.print_and_log(f"Truncating to 100 {bounds}: {uu.timestr()}", is_final, logger_worker)
     da_subset_2010 = da_resampled.round().clip(min=0, max=100).fillna(0).astype("int8")  # prevent negative ages just in case
 
+    # Dictionary of outputs
     out_dict = {}
 
-    # Save 2010 map
-    print(f"saving 2010 map {bounds}: {uu.timestr()}")
+    # Saves 2010 map
+    lu.print_and_log(f"Saving 2010 map {bounds}: {uu.timestr()}", is_final, logger_worker)
 
-    # Output paths without bucket (s3://gfw2-data)
-    s3_path_without_bucket = f"{cn.forest_age_2010_dir[cn.full_bucket_prefix_length:]}"
+    # Output path without bucket (s3://gfw2-data)
+    s3_path_2010_without_bucket = f"{cn.forest_age_2010_dir[cn.full_bucket_prefix_length:]}"
+    s3_path_2015_without_bucket = f"{cn.forest_age_2015_dir[cn.full_bucket_prefix_length:]}"
 
-    out_dict['forest_age_2010'] = [da_subset_2010, 'int8', cn.forest_age_2010_pattern, 2010, s3_path_without_bucket]
+    # Output dictionary used for uploading to s3
+    out_dict['forest_age_2010'] = [da_subset_2010, 'int8', cn.forest_age_2010_pattern, 2010, s3_path_2010_without_bucket]
 
-
-
-    # Create synthetic 2015 map by adding 5 years
+    # Creates synthetic 2015 map by adding 5 years to non-NoData pixels.
+    # Caps maximum age at 100 and prevents negative ages
+    lu.print_and_log(f"Creating 2015 age map for {bounds}: {uu.timestr()}", is_final, logger_worker)
     da_subset_2015 = xr.where(
         da_subset_2010 != 0,
         da_subset_2010 + 5,
         0
     ).clip(min=0, max=100).astype("int8")  # prevent negative ages just in case
 
-    # Output paths without bucket (s3://gfw2-data)
-    s3_path_without_bucket = f"{cn.forest_age_2015_dir[cn.full_bucket_prefix_length:]}"
+    out_dict['forest_age_2015'] = [da_subset_2015, 'int8', cn.forest_age_2015_pattern, 2015, s3_path_2015_without_bucket]
 
-    out_dict['forest_age_2015'] = [da_subset_2015, 'int8', cn.forest_age_2015_pattern, 2015, s3_path_without_bucket]
-
-    print(f"Saving {bounds} locally: {uu.timestr()}")
+    lu.print_and_log(f"Saving {bounds} locally: {uu.timestr()}", is_final, logger_worker)
 
     # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
     upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
@@ -216,7 +216,6 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
     return (f"Processed {bounds}: {uu.timestr()}")
 
 
-# Example usage
 def main(cluster_name, bounding_box, chunk_size, run_local=None, no_upload=None, log_note=None):
 
     ### Step 1: Preparation
@@ -261,7 +260,7 @@ def main(cluster_name, bounding_box, chunk_size, run_local=None, no_upload=None,
 
     # Runs analysis and gathers results
     forest_age_results = dask.compute(*forest_age_delayed_results)
-    print(forest_age_results)
+    main_logger.info(forest_age_results)
 
 
 
