@@ -16,202 +16,23 @@ Also needs zarr package
 """
 
 import argparse
-import boto3
 import dask
 import numpy as np
-import xarray as xr
-import pystac
-import fsspec
-import json
-import os
 import rasterio
-
+import os
+import boto3
+import xarray as xr
 from affine import Affine
-from dask.distributed import print
-from concurrent.futures import ThreadPoolExecutor
-from rioxarray import open_rasterio
+import fsspec
 from fsspec.implementations.cached import CachingFileSystem
-import shutil
-from pathlib import Path
 
 # Project imports
 from ..utilities import constants_and_names as cn
 from ..utilities import log_utilities as lu
 from ..utilities import universal_utilities as uu
 
-# class S3STACReader:
-#     def __init__(self, bucket_url: str, endpoint_url: str = "https://s3.gfz-potsdam.de", anon: bool = True):
-#         """
-#         Initialize the S3STACReader class.
-#
-#         Args:
-#             bucket_url (str): S3 URL of the STAC catalog.
-#             endpoint_url (str): S3 endpoint URL.
-#             anon (bool): Set to True for public buckets, False for authenticated access.
-#         """
-#         self.bucket_url = bucket_url
-#         s3_fs = fsspec.filesystem(
-#             "s3",
-#             anon=True,
-#             endpoint_url="https://s3.gfz-potsdam.de"
-#         )
-#
-#         # Wrap it in a caching filesystem
-#         self.s3_fs = CachingFileSystem(
-#             fs=s3_fs,
-#             cache_storage="/tmp/zarr_cache",  # where to store cached chunks
-#             block_size=0  # cache whole files (good for Zarr chunks)
-#         )
-#         self._register_stac_io()
-#         self.catalog = self._load_catalog()
-#
-#     def _register_stac_io(self):
-#         """Register a custom STAC I/O handler for reading from S3."""
-#         class S3StacIO(pystac.StacIO):
-#             s3_fs = self.s3_fs
-#
-#             def read_text(self, href: str) -> str:
-#                 with self.s3_fs.open(href, "r") as f:
-#                     return f.read()
-#
-#             def write_text(self, href: str, txt: str) -> None:
-#                 with self.s3_fs.open(href, "w") as f:
-#                     f.write(txt)
-#
-#             def exists(self, href: str) -> bool:
-#                 return self.s3_fs.exists(href)
-#
-#         pystac.StacIO.set_default(S3StacIO)
-#
-#     def _load_catalog(self) -> pystac.Catalog:
-#         """Load the STAC catalog from the S3 bucket."""
-#         with self.s3_fs.open(self.bucket_url, 'r') as f:
-#             catalog_json = json.load(f)
-#         return pystac.Catalog.from_dict(catalog_json)
-#
-#     def list_collections(self):
-#         """List all collections in the catalog."""
-#         return [collection.id for collection in self.catalog.get_children()]
-#
-#     def list_items(self, collection_id: str):
-#         """List all items in a specified collection."""
-#         collection = self.catalog.get_child(collection_id)
-#         return [item.id for item in collection.get_items()]
-#
-#     def load_zarr_dataset(self, collection_id: str, item_id: str, consolidated: bool = True) -> xr.Dataset:
-#         """
-#         Load a Zarr dataset from the STAC catalog.
-#
-#         Args:
-#             collection_id (str): ID of the collection.
-#             item_id (str): ID of the item.
-#             consolidated (bool): Set to True if metadata is consolidated.
-#
-#         Returns:
-#             xr.Dataset: The opened xarray dataset.
-#         """
-#         collection = self.catalog.get_child(collection_id)
-#         item = collection.get_item(item_id)
-#         zarr_asset = item.assets["zarr"]
-#
-#         store = self.s3_fs.get_mapper(zarr_asset.href)
-#         return xr.open_zarr(store, consolidated=consolidated)
-
-import json
-import pystac
-import fsspec
-from fsspec.implementations.cached import CachingFileSystem
-import xarray as xr
-#
-#
-# class S3STACReader:
-#     def __init__(self, bucket_url: str, endpoint_url: str = "https://s3.gfz-potsdam.de", anon: bool = True):
-#         """
-#         Initialize the S3STACReader class.
-#
-#         Args:
-#             bucket_url (str): S3 URL of the STAC catalog (e.g., s3://bucket/path/catalog.json)
-#             endpoint_url (str): S3 endpoint URL
-#             anon (bool): Set to True for public buckets
-#         """
-#         self.bucket_url = bucket_url
-#         self.endpoint_url = endpoint_url
-#
-#         # Use plain S3 FS for both metadata and Zarr access
-#         self.s3_fs = fsspec.filesystem("s3", anon=anon, endpoint_url=self.endpoint_url)
-#
-#         self._register_stac_io()
-#         self.catalog = self._load_catalog()
-#
-#     def _register_stac_io(self):
-#         """Register custom STAC I/O using the plain S3 FS."""
-#
-#         class S3StacIO(pystac.StacIO):
-#             def read_text(self_inner, href: str) -> str:
-#                 with self.s3_fs.open(href, "r") as f:
-#                     return f.read()
-#
-#             def write_text(self_inner, href: str, txt: str) -> None:
-#                 with self.s3_fs.open(href, "w") as f:
-#                     f.write(txt)
-#
-#             def exists(self_inner, href: str) -> bool:
-#                 return self.s3_fs.exists(href)
-#
-#         pystac.StacIO.set_default(S3StacIO)
-#
-#     def _load_catalog(self) -> pystac.Catalog:
-#         """Load the STAC catalog from the S3 bucket."""
-#         with self.s3_fs.open(self.bucket_url, "r") as f:
-#             catalog_json = json.load(f)
-#         return pystac.Catalog.from_dict(catalog_json)
-#
-#     def list_collections(self):
-#         """List all collections in the catalog."""
-#         return [collection.id for collection in self.catalog.get_children()]
-#
-#     def list_items(self, collection_id: str):
-#         """List all items in a specified collection."""
-#         collection = self.catalog.get_child(collection_id)
-#         return [item.id for item in collection.get_items()]
-#
-#     def load_zarr_dataset(self, collection_id: str, item_id: str, consolidated: bool = True) -> xr.Dataset:
-#         """
-#         Load a Zarr dataset from the STAC catalog.
-#
-#         Args:
-#             collection_id (str): ID of the collection.
-#             item_id (str): ID of the item.
-#             consolidated (bool): Set to True if metadata is consolidated.
-#
-#         Returns:
-#             xr.Dataset: The opened xarray dataset.
-#         """
-#         collection = self.catalog.get_child(collection_id)
-#         item = collection.get_item(item_id)
-#         zarr_asset = item.assets["zarr"]
-#
-#         store = self.s3_fs.get_mapper(zarr_asset.href)
-#         return xr.open_zarr(store, consolidated=consolidated)
-
-import fsspec
-import xarray as xr
-
-
 
 def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
-    import os
-    import boto3
-    import numpy as np
-    import rasterio
-    import xarray as xr
-    from affine import Affine
-    import fsspec
-    from fsspec.implementations.cached import CachingFileSystem
-
-    from ..utilities import log_utilities as lu
-    from ..utilities import universal_utilities as uu
-    from ..utilities import constants_and_names as cn
 
     logger_worker = lu.setup_logging_worker()
     s3 = boto3.client("s3")
@@ -220,10 +41,9 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
 
-    if not is_final:
-        lu.print_and_log(f"Processing chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"Processing chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
-    ### ZARR SETUP (optimized)
+    ### ZARR setup
     zarr_url = "s3://dog.atlaseo-glm.eo-gridded-data/collections/GAMI/GAMI_v2.1.zarr"
     cache_dir = f"/tmp/zarr_cache_{tile_id}"  # Unique cache per worker chunk
     os.makedirs(cache_dir, exist_ok=True)
@@ -238,6 +58,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
     store = cached_fs.get_mapper(zarr_url)
     ds = xr.open_zarr(store, consolidated=True)
 
+    # Gets the forest age dimension of the ZARR
     forest_age = ds["forest_age"]
 
     # Bounding box and buffering
