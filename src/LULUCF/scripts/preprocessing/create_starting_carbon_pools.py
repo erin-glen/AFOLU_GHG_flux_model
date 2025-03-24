@@ -230,10 +230,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
         # print(futures)
 
-        # Only prints if not a final run
-        if not is_final:
-            lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}",
-                             is_final, logger_worker)
+        lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
         # Dictionary that stores the dataset name (key) and downloaded data and download status (values)
         layers = {}
@@ -266,9 +263,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         ### Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type (e.g., uint8, float32).
         ### Note: need to add new code if inputs with other data types are added
 
-        # Only prints if not a final run
-        if not is_final:
-            lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
         # Creates the typed dictionaries for all input layers (including those that originally had no data)
         typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
@@ -282,9 +277,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
         ### Part 4: Creates starting carbon pool densities
 
-        lu.print_and_log(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
-        if is_final:
-            print(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}")  # Need this in order to print during full runs
+        lu.print_and_log(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker) # Prints during full runs
         uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
         # Create AGC, BGC, deadwood C and litter C densities in selected starting year
@@ -366,17 +359,14 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
                                                                out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
 
             # Only prints if not a final run
-            if not is_final:
-                lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Ready to upload: {uu.timestr()}",
-                    is_final, logger_worker)
+            lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Ready to upload: {uu.timestr()}", is_final, logger_worker)
 
             # Executes uploads in parallel
             with ThreadPoolExecutor(max_workers=5) as executor:
                 executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
             # Only prints if not a final run
-            if not is_final:
-                lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+            lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
         # Clears memory of unneeded arrays
         del out_dict_all_dtypes

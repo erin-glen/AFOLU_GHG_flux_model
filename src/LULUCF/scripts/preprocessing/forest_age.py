@@ -66,7 +66,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
     lat_min, lat_max = bounds[1], bounds[3]
     buffer = cn.resolution * 2
 
-    lu.print_and_log(f"Loading data into memory {bounds_str}: {uu.timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"Loading data into memory {bounds_str}: {uu.timestr()}", False, logger_worker)
     da_chunk = forest_age.sel(
         time="2010-01-01",
         latitude=slice(lat_max + buffer, lat_min - buffer),
