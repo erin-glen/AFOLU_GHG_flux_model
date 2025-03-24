@@ -275,10 +275,11 @@ r_s_ratio_pattern = "BGB_AGB_ratio"
 continent_ecozone_dir = f"{full_bucket_prefix}/climate/carbon_model/fao_ecozones/ecozone_continent/20190116/processed/"
 continent_ecozone_pattern = "fao_ecozones_continents_processed"
 
-forest_age_2010_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2010/standard/processed/20250321/"
+forest_age_run_date = '20250324'
+forest_age_2010_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2010/standard/processed/{forest_age_run_date}/"
 forest_age_2010_pattern = "forest_age_median_2010"
 
-forest_age_2015_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2015/standard/processed/20250321/"
+forest_age_2015_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2015/standard/processed/{forest_age_run_date}/"
 forest_age_2015_pattern = "forest_age_median_2015"
 
 #TODO: @Mel - Change in hansenize + pre-processing to use path, pattern, and intervals. Delete after.

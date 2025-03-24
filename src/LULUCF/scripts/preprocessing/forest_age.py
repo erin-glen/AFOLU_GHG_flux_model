@@ -6,7 +6,7 @@ python -m scripts.preprocessing.forest_age -cn AFOLU_flux_model_scripts -bb 10 4
 
 Coiled test:
 python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
-python -m scripts.preprocessing.forest_age -bb 10 49 11 50 -cs 1
+python -m scripts.preprocessing.forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
 
 
 https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=8f5974e7-3ece-11ef-967a-4ffbfe06208e
@@ -134,7 +134,15 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
 
 
     print(f"slicing {bounds}: {uu.timestr()}")
-    da_2010 = GAMI_dask_array.sel(time="2010-01-01", latitude=slice(lat_max, lat_min), longitude=slice(lon_min, lon_max))
+
+    buffer = 0.00025  # match your output resolution
+
+    # da_2010 = GAMI_dask_array.sel(time="2010-01-01", latitude=slice(lat_max, lat_min), longitude=slice(lon_min, lon_max))
+    da_2010 = GAMI_dask_array.sel(
+        time="2010-01-01",
+        latitude=slice(lat_max + buffer*2, lat_min - buffer*2),
+        longitude=slice(lon_min - buffer*2, lon_max + buffer*2)
+    )
 
     print(f"computing {bounds}: {uu.timestr()}")
     da_subset = da_2010.median(dim="members").persist()
@@ -156,6 +164,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
     print(f"resampling {bounds}: {uu.timestr()}")
     da_resampled = da_cleaned.interp(latitude=new_lat, longitude=new_lon, method="nearest")
 
+
     print(f"Applying affine transform and CRS {bounds}: {uu.timestr()}")
     transform = Affine.translation(lon_min, lat_max) * Affine.scale(resolution, -resolution)
     da_resampled.rio.write_crs("EPSG:4326", inplace=True)
@@ -169,25 +178,20 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
 
     # Save 2010 map
     print(f"saving 2010 map {bounds}: {uu.timestr()}")
-    output_path_2010 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2010_int8_30m_near_v5.tif"
 
     # Output paths without bucket (s3://gfw2-data)
     s3_path_without_bucket = f"{cn.forest_age_2010_dir[cn.full_bucket_prefix_length:]}"
 
     out_dict['forest_age_2010'] = [da_subset_2010, 'int8', cn.forest_age_2010_pattern, 2010, s3_path_without_bucket]
 
-    # da_subset_2010.rio.to_raster(
-    #     output_path_2010,
-    #     compress="LZW",
-    #     tiled=True,
-    #     blockxsize=400,
-    #     blockysize=400
-    # )
+
 
     # Create synthetic 2015 map by adding 5 years
-    da_subset_2015 = (da_subset_2010 + 5).clip(min=0, max=100).fillna(0)  # prevent negative ages just in case
-
-    output_path_2015 = f"50N_010E__{lon_min}_{lat_min}_{lon_max}_{lat_max}__forest_age_2015_int8_30m_near_v5.tif"
+    da_subset_2015 = xr.where(
+        da_subset_2010 != 0,
+        da_subset_2010 + 5,
+        0
+    ).clip(min=0, max=100).astype("int8")  # prevent negative ages just in case
 
     # Output paths without bucket (s3://gfw2-data)
     s3_path_without_bucket = f"{cn.forest_age_2015_dir[cn.full_bucket_prefix_length:]}"
@@ -195,13 +199,6 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
     out_dict['forest_age_2015'] = [da_subset_2015, 'int8', cn.forest_age_2015_pattern, 2015, s3_path_without_bucket]
 
     print(f"Saving {bounds} locally: {uu.timestr()}")
-    # da_subset_2015.rio.to_raster(
-    #     output_path_2015,
-    #     compress="LZW",
-    #     tiled=True,
-    #     blockxsize=400,
-    #     blockysize=400
-    # )
 
     # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
     upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
