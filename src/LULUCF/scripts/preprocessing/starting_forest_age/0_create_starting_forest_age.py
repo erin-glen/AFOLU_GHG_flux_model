@@ -229,9 +229,9 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = f'create_forest_age_2010_2015__1x1_deg'
-    model_type = 'standard'
     age_years = [2010, 2015]
+    stage = f'create_forest_age_{age_years[0]}_{age_years[1]}__1x1_deg'
+    model_type = 'standard'
 
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -260,9 +260,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         is_final = True
         main_logger.info("Running as final model.")
 
+    # Creates list of output directories specific to the run
     output_dir_list = [cn.forest_age_2010_dir, cn.forest_age_2015_dir]
-
-    output_dir_list = [path.replace("DATE", uu.timestr()[:8]) for path in output_dir_list]
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
 
 

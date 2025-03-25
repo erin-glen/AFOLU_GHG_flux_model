@@ -1,10 +1,11 @@
 """
 Run from src/LULUCF/
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn AFOLU_flux_model_scripts --year 2015 --first_chunks 2 --run_local --input_date YYYYMMDD
+python -m scripts.preprocessing.starting_forest_age.1_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts --first_chunks 2 --run_local
 
 python -m scripts.utilities.create_cluster -n 40 -t 5 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn AFOLU_flux_model_scripts --year 2015 --input_date YYYYMMDD
+python -m scripts.preprocessing.starting_forest_age.1_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts
+
 Time: 16:32 through calculation; 16:48 through tile stats; Credits: 59; Cost: $1.90
 Using more than -t 5 seemed to cause some tile_ids to randomly fail, even though memory usage was not high.
 So, best to stay with -t 5 even though the Dask dashboard indicates low memory usage compared to what's available (e.g., 5 out of 32 GB being used).
@@ -13,7 +14,6 @@ So, best to stay with -t 5 even though the Dask dashboard indicates low memory u
 import argparse
 import dask
 import re
-import sys
 
 # Project imports
 from src.LULUCF.scripts.utilities import constants_and_names as cn
@@ -22,25 +22,15 @@ from src.LULUCF.scripts.utilities import log_utilities as lu
 from src.LULUCF.scripts.utilities import resize_cluster
 
 
-
-def main(cluster_name, year, input_date, run_local=False, no_stats=False, no_log=False, no_upload= False,
+def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload= False,
          first_chunks=None, log_note=None):
 
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = f'starting_carbon_pools_{year}_10x10_deg_aggreg'
+    age_years = [2010, 2015]
+    stage = f'starting_forest_age_{age_years[0]}_{age_years[1]}_10x10_deg_aggreg'
     model_type = 'standard'
-
-    # Directories to process
-    if year == 2000:
-        output_dir_list = [cn.agc_2000_dir, cn.bgc_2000_dir, cn.deadwood_c_2000_dir, cn.litter_c_2000_dir]
-    elif year == 2015:
-        output_dir_list = [cn.agc_2015_dir, cn.bgc_2015_dir, cn.deadwood_c_2015_dir, cn.litter_c_2015_dir]
-        # output_dir_list = [cn.deadwood_c_2015_dir]  # To test a specific carbon pool
-    else:
-        print(f"Year input {year} not valid. Terminating.")
-        sys.exit()
 
     # Connects to Coiled cluster if not running locally
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -50,11 +40,10 @@ def main(cluster_name, year, input_date, run_local=False, no_stats=False, no_log
 
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
-    main_logger.info(f"Year for initial carbon pools: {year}")
-    main_logger.info(f"Date for 1x1 deg rasters being aggregated: {input_date}")
+    main_logger.info(f"Year for initial carbon pools: {age_years}")
 
     # Creates list of output directories specific to the run
-    output_dir_list = [path.replace("DATE", input_date) for path in output_dir_list]
+    output_dir_list = [cn.forest_age_2010_dir, cn.forest_age_2015_dir]
     output_dir_list = [path.replace("CHUNK_SIZE", str(4000)) for path in output_dir_list]
     main_logger.info(f"Directories to aggregate: {output_dir_list}")
 
@@ -69,7 +58,7 @@ def main(cluster_name, year, input_date, run_local=False, no_stats=False, no_log
     if first_chunks:
         list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:first_chunks]
 
-    # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[338:339]  # To limit it to a specific tile
+    # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[338:339]  # To limit it to a specific 10x10 deg tile
 
     # Extracts and lists unique tile_ids, the target for aggregation
     tile_ids = set()
@@ -143,8 +132,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create carbon pools in 2000.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
-    parser.add_argument('--year', type=int, required=True, help='Year for carbon pools')
-    parser.add_argument('--input_date', required=True, help='Date YYYYMMDD of carbon pool 1x1s to process')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
@@ -156,8 +143,6 @@ if __name__ == "__main__":
 
     cluster_name = args.cluster_name
     first_chunks = args.first_chunks
-    year = args.year
-    input_date = args.input_date
     log_note = args.log_note
 
     run_local = args.run_local
@@ -165,5 +150,5 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, year, input_date, run_local, no_stats, no_log, no_upload, first_chunks=first_chunks, log_note=log_note)
+    main(cluster_name, run_local, no_stats, no_log, no_upload, first_chunks=first_chunks, log_note=log_note)
 
