@@ -44,6 +44,8 @@ https://chatgpt.com/share/e/67e1b7f6-c0d4-800a-a945-3133de9bf3a0
 """
 
 import argparse
+import sys
+
 import dask
 import numpy as np
 import rasterio
@@ -94,7 +96,6 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
     base_cache_dir = os.path.expanduser("~/zarr_cache")
     os.makedirs(base_cache_dir, exist_ok=True)
 
-    # Unique cache dir for this chunk
     tile_uuid = uuid.uuid4().hex[:6]
     cache_dir = os.path.join(base_cache_dir, f"{tile_id}_{tile_uuid}")
 
@@ -133,6 +134,9 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
             latitude=slice(lat_max + buffer, lat_min - buffer),
             longitude=slice(lon_min - buffer, lon_max + buffer)
         ).load()
+
+        # Deletes cache as soon as the data are loaded into memory
+        shutil.rmtree(cache_dir, ignore_errors=True)
 
         uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
@@ -206,8 +210,6 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         # Removes task tracking file from S3 once task is successful
         uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
 
-        shutil.rmtree(cache_dir, ignore_errors=True)
-
     except Exception as e:
 
         return_message = f"Error creating 2010/2015 age maps for chunk {bounds}: {e}: {uu.timestr()}"
@@ -272,24 +274,60 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
-    uu.create_s3_task_files(stage, chunk_list)
+    # uu.create_s3_task_files(stage, chunk_list)
 
-    futures = []
+    # futures = []
+    #
+    # for chunk in chunk_list:
+    #     future = client.submit(calculate_forest_age, chunk, is_final, no_upload, output_dir_list, stage)
+    #     futures.append(future)
+    #
+    # forest_age_results = client.gather(futures)
+    #
+    # success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, forest_age_results)
+    #
+    # # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
+    # if not no_upload:
+    #     for output_folder in output_dir_list:
+    #         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+    #         main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+    #         # print(geotiff_files)
+    #
+    # uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
-    for chunk in chunk_list:
-        future = client.submit(calculate_forest_age, chunk, is_final, no_upload, output_dir_list, stage)
-        futures.append(future)
 
-    forest_age_results = client.gather(futures)
 
-    success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, forest_age_results)
+    batch_size = 500
+    # batch_size = 5  # For testing
+    chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
+    all_forest_age_results = []
+    all_1x1_stats = []
 
-    # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-    if not no_upload:
-        for output_folder in output_dir_list:
-            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-            # print(geotiff_files)
+    for i, chunk_batch in enumerate(chunk_batches):
+        main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks)")
+        main_logger.info("Creating task txts in s3...")
+        uu.create_s3_task_files(stage, chunk_batch)
+
+        futures = [client.submit(calculate_forest_age, chunk, is_final, no_upload, output_dir_list, stage)
+                   for chunk in chunk_batch]
+
+        try:
+            forest_age_results = client.gather(futures)
+        except Exception as e:
+            main_logger.error(f"Batch {i + 1} failed: {e}")
+            sys.exit()
+
+        all_forest_age_results.extend(forest_age_results)
+
+        success_count_1x1, batch_stats = uu.count_successful_chunks(chunk_batch, is_final, main_logger, forest_age_results)
+        all_1x1_stats.extend(batch_stats)
+
+        if not no_upload:
+            for output_folder in output_dir_list:
+                geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+                main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+
+        main_logger.info(f"Batch {i + 1}/{len(chunk_batches)} complete: {success_count_1x1} succeeded")
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
