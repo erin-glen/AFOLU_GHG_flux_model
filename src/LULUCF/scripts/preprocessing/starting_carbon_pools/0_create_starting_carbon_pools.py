@@ -2,19 +2,19 @@
 Run from src/LULUCF/
 
 Local:
-python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
 
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
-python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp -f 1 --year YYYY
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp -f 1 --year YYYY
 
 python -m scripts.utilities.create_cluster -n 60 -t 10 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
+python -m scripts.preprocessing..starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
 Max memory usage: ~18 GB/worker
 Time: 23:17 through calculation; 40:25 through tile stats; Credits: 170; Cost: $6.00
 
 python -m scripts.utilities.create_cluster -n 50 -t 12 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
 Max memory usage: ~20 GB/worker
 Time: 29:26 through calculation; 31:11 through tile stats; Credits: 116; Cost: $3.94
 -t 14 seemed high, so may be better to go back down to -t 12.

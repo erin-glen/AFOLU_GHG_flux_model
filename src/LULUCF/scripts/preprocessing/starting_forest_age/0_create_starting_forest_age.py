@@ -1,19 +1,36 @@
 """
 Run from src/LULUCF
 
+This preprocessing step doesn't scale quite like others, as far as I can tell.
+It starts by reading in the relevant ZARR pieces for the chunks being processed, but I don't know how that scales.
+Reading the ZARR chunks involves dozens of tasks and takes much longer than all the subsequent processing.
+That's why I am trying the full/global run with -n 6 -t 8; I don't know how helpful it is to have lots of workers for this.
+When I was developing this script, I was able to quickly get something that worked on a single 1x1 chunk but then
+slowed down in proportion to the number of chunks, even when there was an ample number of workers.
+Obviously, that's not how it should go with Dask.
+It took a lot longer to work out how to have the script not slow down as I scaled.
+I tried several things (in conjunction with ChatGPT) but ultimately settled on having the script read the
+ZARR pieces into an array at original resolution, then process the arrays real-time (not lazily).
+The original approach was to have everything occur lazily and only compute at the very end, at the time of upload--
+but that simply did not scale.
+Note that I also tried processing 10x10 degree chunks but the problem there was that the processing of the chunks
+once downloaded took too much memory and would've required really large workers.
+
+
 Local:
-python -m scripts.preprocessing.forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
+python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
 
 Coiled tiny test:
 python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
-python -m scripts.preprocessing.forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
+python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
 
 Coiled larger test (because this doesn't always scale beyond 1 chunk well):
 python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 4 -t 4
-python -m scripts.preprocessing.forest_age -cn AFOLU_flux_model_scripts -bb 10 47 13 50 -cs 1
+python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 47 13 50 -cs 1
 
 Full run:
-python -m scripts.utilities.create_cluster -n 6 -t 8 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 7 -t 9 -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -cshp -ln "This is intended to be the definitive forest age 2010/2015 run."
 
 
 https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=8f5974e7-3ece-11ef-967a-4ffbfe06208e
@@ -32,17 +49,33 @@ import numpy as np
 import rasterio
 import os
 import boto3
+import uuid
+import shutil
 import xarray as xr
 from affine import Affine
 import fsspec
 from fsspec.implementations.cached import CachingFileSystem
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import log_utilities as lu
-from ..utilities import universal_utilities as uu
-from ..utilities import resize_cluster
+from ...utilities import constants_and_names as cn
+from ...utilities import log_utilities as lu
+from ...utilities import universal_utilities as uu
+from ...utilities import resize_cluster
 
+
+def try_open_zarr(url, cache_path, consolidated=True):
+    if os.path.exists(cache_path):
+        shutil.rmtree(cache_path)
+    os.makedirs(cache_path, exist_ok=True)
+
+    fs = CachingFileSystem(
+        fs=fsspec.filesystem("s3", anon=True, endpoint_url="https://s3.gfz-potsdam.de"),
+        cache_storage=cache_path,
+        block_size=0,
+        check_files=False
+    )
+    store = fs.get_mapper(url)
+    return xr.open_zarr(store, consolidated=consolidated)
 
 def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
 
@@ -52,35 +85,31 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
     logger_worker = lu.setup_logging_worker()
     s3 = boto3.client("s3")
 
+    bounds_str = uu.boundstr(bounds)
+    tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])
+    chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
+
+    zarr_url = "s3://dog.atlaseo-glm.eo-gridded-data/collections/GAMI/GAMI_v2.1.zarr"
+
+    base_cache_dir = os.path.expanduser("~/zarr_cache")
+    os.makedirs(base_cache_dir, exist_ok=True)
+
+    # Unique cache dir for this chunk
+    tile_uuid = uuid.uuid4().hex[:6]
+    cache_dir = os.path.join(base_cache_dir, f"{tile_id}_{tile_uuid}")
+
     try:
-
-        bounds_str = uu.boundstr(bounds)
-        tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])
-        chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
-
         uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
-
         lu.print_and_log(f"Processing chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
-        ### ZARR setup
-        zarr_url = "s3://dog.atlaseo-glm.eo-gridded-data/collections/GAMI/GAMI_v2.1.zarr"
-        cache_dir = f"/tmp/zarr_cache_{tile_id}"  # Unique cache per worker chunk
-        os.makedirs(cache_dir, exist_ok=True)
-
-        # Cache of ZARR pieces
-        cached_fs = CachingFileSystem(
-            fs=fsspec.filesystem("s3", anon=True, endpoint_url="https://s3.gfz-potsdam.de"),
-            cache_storage=cache_dir,
-            block_size=0,  # cache whole chunks
-            check_files=False
-        )
-
-        # Store for cached ZARR pieces, from which xarray will read
-        store = cached_fs.get_mapper(zarr_url)
-
-        # Opens the dataset using xarray
-        ds = xr.open_zarr(store, consolidated=True)
-
+        try:
+            ds = try_open_zarr(zarr_url, cache_dir, consolidated=True)
+        except ValueError as e:
+            if "mmap length is greater than file size" in str(e):
+                lu.print_and_log(f"Zarr mmap error in {tile_id}, retrying with consolidated=False...", False, logger_worker)
+                ds = try_open_zarr(zarr_url, cache_dir, consolidated=False)
+            else:
+                raise
         # Gets the forest age dimension of the ZARR
         forest_age = ds["forest_age"]
 
@@ -170,8 +199,14 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
 
         return_message = f"Success creating 2010/2015 age maps for {bounds_str}: {uu.timestr()}"
 
+        # Cleans up the worker
+        os.remove(file_2010)
+        os.remove(file_2015)
+
         # Removes task tracking file from S3 once task is successful
         uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
+
+        shutil.rmtree(cache_dir, ignore_errors=True)
 
     except Exception as e:
 
@@ -179,6 +214,8 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
 
         lu.print_and_log(return_message, False, logger_worker)
         uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
+
+        shutil.rmtree(cache_dir, ignore_errors=True)
 
     return return_message, chunk_stats  # Returns both the success message and the chunk statistics
 
