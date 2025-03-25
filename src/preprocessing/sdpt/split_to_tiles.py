@@ -46,6 +46,8 @@ def split_sdpt_by_tiles(tile_grid_path,
     Reads a tile grid (shapefile or other supported format), loops over each tile,
     then clips relevant country layers (i.e., those that pass a bounding-box check)
     in a file geodatabase. Writes out tile-based shapefiles.
+
+    If an output tile file already exists, we skip processing that tile.
     """
 
     # 1) Load tile grid
@@ -78,6 +80,16 @@ def split_sdpt_by_tiles(tile_grid_path,
         tile_geom = tile_row.geometry
         tile_id = tile_row[tile_id_field]
         tile_bounds = tile_geom.bounds  # (minx, miny, maxx, maxy)
+
+        # Build the output path for this tile
+        os.makedirs(out_dir, exist_ok=True)
+        out_name = f"tile_{tile_id}.shp"
+        tile_out_path = os.path.join(out_dir, out_name)
+
+        # Skip processing if the tile shapefile already exists
+        if os.path.exists(tile_out_path):
+            print(f"Tile {tile_id}: Output file already exists at '{tile_out_path}'. Skipping.")
+            continue
 
         # Collect all clipped polygons across layers
         all_clips = []
@@ -114,13 +126,6 @@ def split_sdpt_by_tiles(tile_grid_path,
                 pd.concat(all_clips, ignore_index=True),
                 crs=all_clips[0].crs
             )
-            os.makedirs(out_dir, exist_ok=True)
-            out_name = f"tile_{tile_id}.shp"
-            tile_out_path = os.path.join(out_dir, out_name)
-
-            if os.path.exists(tile_out_path):
-                os.remove(tile_out_path)
-
             print(f"Writing {len(merged_clips)} features to {tile_out_path}")
             merged_clips.to_file(tile_out_path)
         else:
