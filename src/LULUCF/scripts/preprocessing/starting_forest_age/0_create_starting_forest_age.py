@@ -29,9 +29,11 @@ python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 4 -t 
 python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 47 13 50 -cs 1
 
 Full run:
-python -m scripts.utilities.create_cluster -n 7 -t 9 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 12 -t 9 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -cshp -ln "This is intended to be the definitive forest age 2010/2015 run."
-
+When I ran with -n 7 -t 9, it would process only about 3 batches of 300 chunks (900 chunks) before failing,
+sometimes because it ran out of memory. Increasing the cluster size to -n 12 -t 9 made it run through 1800 chunks before failing!
+I think that the cluster with 7 workers simply couldn't handle all the data it was downloading at a certain point.
 
 https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=8f5974e7-3ece-11ef-967a-4ffbfe06208e
 https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/
@@ -46,13 +48,14 @@ https://chatgpt.com/share/e/67e1b7f6-c0d4-800a-a945-3133de9bf3a0
 import argparse
 import sys
 
-import dask
+import gc
 import numpy as np
 import rasterio
 import os
 import boto3
 import uuid
 import shutil
+import traceback
 import xarray as xr
 from affine import Affine
 import fsspec
@@ -62,7 +65,6 @@ from fsspec.implementations.cached import CachingFileSystem
 from ...utilities import constants_and_names as cn
 from ...utilities import log_utilities as lu
 from ...utilities import universal_utilities as uu
-from ...utilities import resize_cluster
 
 
 def try_open_zarr(url, cache_path, consolidated=True):
@@ -78,6 +80,20 @@ def try_open_zarr(url, cache_path, consolidated=True):
     )
     store = fs.get_mapper(url)
     return xr.open_zarr(store, consolidated=consolidated)
+
+
+def log_disk_usage(start_or_end, path="/", logger=None):
+    if not os.path.exists(path):
+        msg = f"[Disk] Path does not exist: {path}"
+    else:
+        total, used, free = shutil.disk_usage(path)
+        msg = f"[Disk {start_or_end}] {used // (1024 ** 3)} GB used, {free // (1024 ** 3)} GB free at {path}"
+
+    if logger:
+        logger.info(msg)
+    else:
+        print(msg)
+
 
 def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
 
@@ -212,11 +228,16 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
 
     except Exception as e:
 
-        return_message = f"Error creating 2010/2015 age maps for chunk {bounds}: {e}: {uu.timestr()}"
+        error_trace = traceback.format_exc()
+        return_message = f"Error creating 2010/2015 age maps for chunk {bounds}: {e}---{error_trace}: {uu.timestr()}"
 
         lu.print_and_log(return_message, False, logger_worker)
         uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
 
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+    finally:
+        # Always try to remove cache dir
         shutil.rmtree(cache_dir, ignore_errors=True)
 
     return return_message, chunk_stats  # Returns both the success message and the chunk statistics
@@ -252,6 +273,16 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
     chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
+    # chunk_list = chunk_list[0:1501]  ## DONE
+    # chunk_list = chunk_list[1501:]
+    # chunk_list = chunk_list[2101:]
+    # chunk_list = chunk_list[2701:]
+    # chunk_list = chunk_list[3601:]
+    # chunk_list = chunk_list[4501:]
+    # chunk_list = chunk_list[5101:]
+    chunk_list = chunk_list[6301:]
+
+
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
@@ -273,39 +304,27 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
-    # uu.create_s3_task_files(stage, chunk_list)
-
-    # futures = []
-    #
-    # for chunk in chunk_list:
-    #     future = client.submit(calculate_forest_age, chunk, is_final, no_upload, output_dir_list, stage)
-    #     futures.append(future)
-    #
-    # forest_age_results = client.gather(futures)
-    #
-    # success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, forest_age_results)
-    #
-    # # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-    # if not no_upload:
-    #     for output_folder in output_dir_list:
-    #         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-    #         main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-    #         # print(geotiff_files)
-    #
-    # uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
-
-    batch_size = 500
+    # Runs in batches of specified size. This may help with managing zarr access/caches.
+    batch_size = 300
     # batch_size = 5  # For testing
     chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
+    main_logger.info(f"There are {len(chunk_batches)} batches to process: {uu.timestr()}")
     all_forest_age_results = []
     all_1x1_stats = []
 
+    # Iterates through the batches
     for i, chunk_batch in enumerate(chunk_batches):
-        main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks)")
+        main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks): {uu.timestr()}")
         main_logger.info("Creating task txts in s3...")
         uu.create_s3_task_files(stage, chunk_batch)
+
+        log_disk_usage("start", "/home/mambauser", main_logger)
+
+        # Clear cache at the start of each batch, just in case something is left over from the
+        # previous batch
+        shutil.rmtree(os.path.expanduser("~/zarr_cache"), ignore_errors=True)
 
         futures = [client.submit(calculate_forest_age, chunk, is_final, no_upload, output_dir_list, stage)
                    for chunk in chunk_batch]
@@ -313,7 +332,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         try:
             forest_age_results = client.gather(futures)
         except Exception as e:
-            main_logger.error(f"Batch {i + 1} failed: {e}")
+            main_logger.error(f"Batch {i + 1} failed: {e}: {uu.timestr()}")
             sys.exit()
 
         all_forest_age_results.extend(forest_age_results)
@@ -321,48 +340,40 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         success_count_1x1, batch_stats = uu.count_successful_chunks(chunk_batch, is_final, main_logger, forest_age_results)
         all_1x1_stats.extend(batch_stats)
 
+        del futures
+        del forest_age_results
+        client.run(gc.collect)
+
         if not no_upload:
             for output_folder in output_dir_list:
                 geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
                 main_logger.info(f"Output rasters in {output_folder}: {file_count}")
 
-        main_logger.info(f"Batch {i + 1}/{len(chunk_batches)} complete: {success_count_1x1} succeeded")
+        main_logger.info(f"Batch {i + 1}/{len(chunk_batches)} complete: {success_count_1x1} succeeded: {uu.timestr()}")
+        main_logger.info("Clearing base Zarr cache after batch...")
+        shutil.rmtree(os.path.expanduser("~/zarr_cache"), ignore_errors=True)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage}_batch_{i}", main_logger)
+
+        log_disk_usage("end", "/home/mambauser", main_logger)
+
+        # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
+        # and min and max values across all chunks for all inputs and outputs
+        # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
+        if not no_stats:
+            uu.aggregate_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger)
+
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+
+        if not run_local:
+            # Creates combined log from all workers if not deactivated
+            worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+            uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats and worker log compilation", main_logger)
+
+            # Adds the workers' logs to the main log and uploads to s3
+            lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
-
-    ### Step 3: Chunk stats for 1x1 degree outputs, aggregates logs
-
-    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
-    # cluster, not all the workers.
-    if not run_local:
-        workers = client.scheduler_info()["workers"]
-        n_workers = len(workers)
-
-        # Reduces number of workers in the cluster down to 1 if there is more than 10
-        # TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
-        if n_workers > 10:
-            main_logger.info("Resizing cluster to 1 worker")
-
-            resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
-
-    # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
-    # and min and max values across all chunks for all inputs and outputs
-    # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
-    if (not no_stats) and (success_count_1x1 > 0):
-        uu.aggregate_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger)
-
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
-
-    # Sets it so that no worker logs are created if doing a local run
-    if not run_local:
-
-        # Creates combined log from all workers if not deactivated
-        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
-        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats and worker log compilation", main_logger)
-
-        # Adds the workers' logs to the main log and uploads to s3
-        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
 
     # Closes the Dask client if not running locally
     if not run_local:
