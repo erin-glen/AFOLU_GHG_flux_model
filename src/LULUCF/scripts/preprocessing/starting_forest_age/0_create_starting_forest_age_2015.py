@@ -179,8 +179,8 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         crs = "EPSG:4326"
 
         # Output paths
-        file_2010 = f"/tmp/{tile_id}__{bounds_str}__forest_age_2010.tif"
-        file_2015 = f"/tmp/{tile_id}__{bounds_str}__forest_age_2015.tif"
+        file_2010 = f"/tmp/{tile_id}__{bounds_str}__{cn.forest_age_2010_pattern}.tif"
+        file_2015 = f"/tmp/{tile_id}__{bounds_str}__{cn.forest_age_2015_pattern}.tif"
 
         # Writes 2010 age to raster
         lu.print_and_log(f"Saving 2010 raster {file_2010}: {uu.timestr()}", is_final, logger_worker)
@@ -200,8 +200,8 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         ) as dst:
             dst.write(arr_2015, 1)
 
-        chunk_stats.append(uu.calculate_stats(arr_2010, f"forest_age_2010", bounds_str, tile_id, 'output_layer'))
-        chunk_stats.append(uu.calculate_stats(arr_2015, f"forest_age_2015", bounds_str, tile_id, 'output_layer'))
+        chunk_stats.append(uu.calculate_stats(arr_2010, cn.forest_age_2010_pattern, bounds_str, tile_id, 'output_layer'))
+        chunk_stats.append(uu.calculate_stats(arr_2015, cn.forest_age_2015_pattern, bounds_str, tile_id, 'output_layer'))
 
         uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
 
@@ -273,14 +273,16 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
     chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
-    # chunk_list = chunk_list[0:1501]  ## DONE
+    # chunk_list = chunk_list[0:1501]
     # chunk_list = chunk_list[1501:]
     # chunk_list = chunk_list[2101:]
     # chunk_list = chunk_list[2701:]
     # chunk_list = chunk_list[3601:]
     # chunk_list = chunk_list[4501:]
     # chunk_list = chunk_list[5101:]
-    chunk_list = chunk_list[6301:]
+    # chunk_list = chunk_list[6301:]
+    # chunk_list = chunk_list[8101:]
+    chunk_list = chunk_list[11401:]
 
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
