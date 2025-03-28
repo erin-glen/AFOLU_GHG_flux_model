@@ -1484,7 +1484,8 @@ def replace_tile_id_in_dict(data_dict, new_tile_id):
     return data_dict
 
 
-
+# Identifies all chunks (1x1 deg tiles) that are adjacent to a focal chunk, plus the focal chunk.
+# Does not limit to chunks that actually exist.
 def get_adjacent_1x1_chunks(bbox):
     """
     Given a bounding box (W, S, E, N), return a list of 1x1 degree tile bounding boxes
