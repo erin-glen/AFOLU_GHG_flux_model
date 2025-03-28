@@ -1485,6 +1485,34 @@ def replace_tile_id_in_dict(data_dict, new_tile_id):
 
 
 
+def get_adjacent_1x1_chunks(bbox):
+    """
+    Given a bounding box (W, S, E, N), return a list of 1x1 degree tile bounding boxes
+    that intersect it. Each tile is assumed to be aligned on integer degrees.
+
+    Parameters:
+    - bbox: tuple (W, S, E, N)
+
+    Returns:
+    - List of (xmin, ymin, xmax, ymax) tuples for intersecting tiles
+    """
+    west, south, east, north = bbox
+
+    # Floor west/south, ceil east/north to get inclusive range of tiles
+    xmin_tiles = int(np.floor(west))
+    xmax_tiles = int(np.ceil(east))
+    ymin_tiles = int(np.floor(south))
+    ymax_tiles = int(np.ceil(north))
+
+    tile_bounds = []
+    for x in range(xmin_tiles, xmax_tiles):
+        for y in range(ymin_tiles, ymax_tiles):
+            tile_bounds.append((x, y, x + 1, y + 1))  # 1x1 degree tile
+
+    return tile_bounds
+
+
+
 # Fills any missing chunks (layers) with NoData (0s) of the correct datatype.
 # The 0s must be the correct datatype so that the numba function receives consistent datatypes for each input dataset.
 # Needs to be expanded if additional datatypes are being used.

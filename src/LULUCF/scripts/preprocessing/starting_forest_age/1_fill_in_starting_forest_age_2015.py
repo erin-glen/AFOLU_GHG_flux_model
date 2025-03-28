@@ -27,6 +27,9 @@ import os
 
 from scipy.ndimage import distance_transform_edt
 
+import rasterio.merge
+from rasterio.windows import from_bounds, transform
+
 # Project imports
 from ...utilities import constants_and_names as cn
 from ...utilities import log_utilities as lu
@@ -35,77 +38,125 @@ from ...utilities import resize_cluster
 
 
 def fill_in_starting_forest_age(bounds, fishnet_iso_df, is_final, no_upload, output_dir_list, stage):
+
+
     chunk_stats = []
     logger_worker = lu.setup_logging_worker()
 
-    # try:
-    # uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
     bounds_str = uu.boundstr(bounds)
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
 
+    input_dir = cn.forest_age_2015_dir
+    output_dir = output_dir_list[0]
 
-    # Input path: S3 GeoTIFF
-    input_path = f"{cn.forest_age_2015_dir}{tile_id}__{bounds_str}__{cn.forest_age_2015_pattern}.tif"
-    output_path = f"{output_dir_list[0]}{tile_id}__{bounds_str}__{cn.forest_age_2015_filled_in_pattern}.tif"
+    buffer_deg = 1 / 120 * 10  # 10 pixels at 120 px/deg
+    buffered_bounds = (
+        bounds[0] - buffer_deg,
+        bounds[1] - buffer_deg,
+        bounds[2] + buffer_deg,
+        bounds[3] + buffer_deg,
+    )
 
-    input_path = input_path.replace("CHUNK_SIZE", str(chunk_length_pixels))
+    # Determine which tiles intersect buffered bounds
+    all_tile_bounds = uu.get_adjacent_1x1_chunks(buffered_bounds)
+    tile_ids_and_bounds = [(uu.xy_to_tile_id(xmin, ymax), (xmin, ymin, xmax, ymax)) for (xmin, ymin, xmax, ymax) in all_tile_bounds]
+    lu.print_and_log(f" {len(tile_ids_and_bounds)} chunks to analyze for {bounds_str} (including the focal chunk): {tile_ids_and_bounds}: {uu.timestr()}", is_final, logger_worker)
 
-    # Read raster from S3
     fs = fsspec.filesystem("s3")
-    with fs.open(input_path, "rb") as f:
-        with rasterio.open(f) as src:
-            profile = src.profile
-            age_data = src.read(1)
-            nodata_val = 0  # Treat 0 as NoData
-            profile.update(nodata=nodata_val, compress='lzw')
+    src_datasets = []
 
-    # Create mask where 0 is invalid/missing
-    mask = age_data != nodata_val
+    # Try to load each tile that intersects
+    for neighbor_tile_id, tile_bounds in tile_ids_and_bounds:
+        neighbor_bounds_str = uu.boundstr(tile_bounds)
+        tile_path = f"{input_dir}{neighbor_tile_id}__{neighbor_bounds_str}__{cn.forest_age_2015_pattern}.tif"
+        tile_path = tile_path.replace("CHUNK_SIZE", str(chunk_length_pixels))
+
+        try:
+            if fs.exists(tile_path):
+                f = fs.open(tile_path, "rb")
+                src = rasterio.open(f)
+                src_datasets.append(src)
+        except Exception as e:
+            # Log but don’t fail — this tile might be ocean etc.
+            print(f"Tile not found or error opening {tile_path}: {e}")
+
+    if not src_datasets:
+        raise ValueError(f"No valid tiles found around chunk {bounds_str}")
+
+    lu.print_and_log(f"{len(src_datasets)} files found for {bounds_str} (including the focal chunk): {uu.timestr()}", is_final, logger_worker)
+
+    # Merge the rasters into one mosaic
+    mosaic_data, mosaic_transform = rasterio.merge.merge(src_datasets, bounds=buffered_bounds)
+    mosaic_data = mosaic_data[0]  # Only one band
+
+    # Interpolate (0 = NoData)
+    mask = mosaic_data != 0
     if not np.any(mask):
         raise ValueError(f"No valid (non-zero) data found in chunk {bounds_str}")
 
-    # Fill 0s using nearest non-zero values
     distance, indices = distance_transform_edt(~mask, return_indices=True)
-    filled_data = age_data[tuple(indices)]
+    filled_data = mosaic_data[tuple(indices)]
 
-    print(filled_data)
+    # Crop filled_data back to the original bounds
+    # Compute pixel offset for crop
 
-    # Write to output GeoTIFF
-    # output_temp_path = f"/tmp/filled_{tile_id}.tif"
+    # Create window for original bounds in the mosaic space
+    crop_window = from_bounds(*bounds, transform=mosaic_transform).round_offsets().round_lengths()
+
+    # Read the correct crop from filled_data
+    filled_crop = filled_data[
+                  int(crop_window.row_off):int(crop_window.row_off + crop_window.height),
+                  int(crop_window.col_off):int(crop_window.col_off + crop_window.width)
+                  ]
+
+    mask_crop = mask[
+                int(crop_window.row_off):int(crop_window.row_off + crop_window.height),
+                int(crop_window.col_off):int(crop_window.col_off + crop_window.width)
+                ]
+
+
+    transform = rasterio.transform.from_origin(
+        west=bounds[0],
+        north=bounds[3],
+        xsize=mosaic_transform.a,
+        ysize=abs(mosaic_transform.e)
+    )
+
+    # Update profile
+    profile = src_datasets[0].profile
+    profile.update(
+        height=int(crop_window.height),
+        width=int(crop_window.width),
+        transform=transform,
+        nodata=0,
+        compress='lzw'
+    )
+
+    # Save result
+    output_path = f"{output_dir}{tile_id}__{bounds_str}__{cn.forest_age_2015_filled_in_pattern}.tif"
     output_temp_path = f"/mnt/c/GIS/AFOLU_flux_model/forest_age/filled_in/{tile_id}__{bounds_str}__{cn.forest_age_2015_filled_in_pattern}.tif"
-    with rasterio.open(output_temp_path, "w", **profile) as dst:
-        dst.write(filled_data, 1)
 
-    # # Upload to S3 if applicable
+    with rasterio.open(output_temp_path, "w", **profile) as dst:
+        dst.write(filled_crop, 1)
+
+    # # Optional: Upload to S3
     # if not no_upload:
     #     with fs.open(output_path, "wb") as f_out:
     #         with open(output_temp_path, "rb") as f_in:
     #             f_out.write(f_in.read())
-    #
-    # # Clean up temp file
-    # if os.path.exists(output_temp_path):
-    #     os.remove(output_temp_path)
 
     return_message = f"Success creating filled forest age for {bounds_str}: {uu.timestr()}"
-    # uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
 
-    # Optionally track stats
     chunk_stats.append({
         "chunk_id": tile_id,
-        "min": int(filled_data.min()),
-        "mean": float(filled_data[mask].mean()),
-        "max": int(filled_data.max())
+        "min": int(filled_crop.min()),
+        "mean": float(filled_crop[mask_crop].mean()),
+        "max": int(filled_crop.max())
     })
 
-    print(chunk_stats)
-
-    # except Exception as e:
-    #     return_message = f"Error processing chunk {bounds}: {e}: {uu.timestr()}"
-    #     lu.print_and_log(return_message, False, logger_worker)
-    #     # uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
-
     return return_message, chunk_stats
+
 
 
 
