@@ -28,8 +28,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     ### Step 1: Preparation
 
     # Model stage being run
-    age_years = [2010, 2015]
-    stage = f'starting_forest_age_{age_years[0]}_{age_years[1]}_10x10_deg_aggreg'
+    age_years = [2015]  # Could be expanded to use age in 2000 as well
+    stage = f'starting_forest_age_interpolated__{age_years[0]}_10x10_deg_aggreg'
     model_type = 'standard'
 
     # Connects to Coiled cluster if not running locally
@@ -43,7 +43,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     main_logger.info(f"Year for initial carbon pools: {age_years}")
 
     # Creates list of output directories specific to the run
-    output_dir_list = [cn.forest_age_2010_dir, cn.forest_age_2015_dir]
+    output_dir_list = [cn.forest_age_2015_interpolated_dir]
     output_dir_list = [path.replace("CHUNK_SIZE", str(4000)) for path in output_dir_list]
     main_logger.info(f"Directories to aggregate: {output_dir_list}")
 

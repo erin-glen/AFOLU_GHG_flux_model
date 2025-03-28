@@ -255,7 +255,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
         # Calculates stats for the input layers
         for key, array in layers.items():
-            chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer', fishnet_iso_df))
+            chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer'))
         # print(chunk_stats)
 
 

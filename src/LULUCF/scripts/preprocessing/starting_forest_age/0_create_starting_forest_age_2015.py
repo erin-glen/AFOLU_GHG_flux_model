@@ -82,19 +82,6 @@ def try_open_zarr(url, cache_path, consolidated=True):
     return xr.open_zarr(store, consolidated=consolidated)
 
 
-def log_disk_usage(start_or_end, path="/", logger=None):
-    if not os.path.exists(path):
-        msg = f"[Disk] Path does not exist: {path}"
-    else:
-        total, used, free = shutil.disk_usage(path)
-        msg = f"[Disk {start_or_end}] {used // (1024 ** 3)} GB used, {free // (1024 ** 3)} GB free at {path}"
-
-    if logger:
-        logger.info(msg)
-    else:
-        print(msg)
-
-
 def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
@@ -282,7 +269,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # chunk_list = chunk_list[5101:]
     # chunk_list = chunk_list[6301:]
     # chunk_list = chunk_list[8101:]
-    chunk_list = chunk_list[11401:]
+    # chunk_list = chunk_list[11401:]
+    chunk_list = chunk_list[13201:]
 
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
@@ -322,8 +310,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         main_logger.info("Creating task txts in s3...")
         uu.create_s3_task_files(stage, chunk_batch)
 
-        log_disk_usage("start", "/home/mambauser", main_logger)
-
         # Clear cache at the start of each batch, just in case something is left over from the
         # previous batch
         shutil.rmtree(os.path.expanduser("~/zarr_cache"), ignore_errors=True)
@@ -355,8 +341,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         main_logger.info("Clearing base Zarr cache after batch...")
         shutil.rmtree(os.path.expanduser("~/zarr_cache"), ignore_errors=True)
         uu.stage_duration(start_time, uu.timestr(), f"{stage}_batch_{i}", main_logger)
-
-        log_disk_usage("end", "/home/mambauser", main_logger)
 
         # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
         # and min and max values across all chunks for all inputs and outputs
