@@ -1135,3 +1135,20 @@ def list_raster_full_paths_in_s3_folder_and_count(s3_path):
         print(f"Error accessing {s3_path}: {e}")
 
     return geotiff_files, len(geotiff_files)
+
+# Splits a full s3 path "s3://bucket-name/rest_of_path" into "bucket-name" and "rest_of_path"
+def split_s3_path(s3_path):
+    s3_path = s3_path.replace("s3://", "")   # Remove the "s3://" prefix
+    bucket, key = s3_path.split("/", 1)    # Split the remaining string by the first "/"
+    return bucket, key
+
+def download_s3_file(s3_path, local_path):
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    s3.download_file(bucket, key, local_path)
+
+def upload_s3_file(s3_path, local_path):
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    s3.upload_file(local_path, Bucket=bucket, Key=key)
+
