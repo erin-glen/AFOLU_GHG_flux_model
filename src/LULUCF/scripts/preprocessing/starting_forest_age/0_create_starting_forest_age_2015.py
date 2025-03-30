@@ -1,5 +1,5 @@
 """
-Run from src/LULUCF
+Maps forest age in 2010 and 2015 in 1x1 deg geotifs using GAMI v2.1.
 
 This preprocessing step doesn't scale quite like others, as far as I can tell.
 It starts by reading in the relevant ZARR pieces for the chunks being processed, but I don't know how that scales.
@@ -16,6 +16,7 @@ but that simply did not scale.
 Note that I also tried processing 10x10 degree chunks but the problem there was that the processing of the chunks
 once downloaded took too much memory and would've required really large workers.
 
+Run from src/LULUCF
 
 Local:
 python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
@@ -34,6 +35,13 @@ python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age
 When I ran with -n 7 -t 9, it would process only about 3 batches of 300 chunks (900 chunks) before failing,
 sometimes because it ran out of memory. Increasing the cluster size to -n 12 -t 9 made it run through 1800 chunks before failing!
 I think that the cluster with 7 workers simply couldn't handle all the data it was downloading at a certain point.
+I also noticed that the batches took wildly different amounts of time depending on where they were.
+Some batches in the 60N band took 1 hour to run, while those around 50S took 20 minutes to run, and batches in 70N
+and 80N took just a few minutes to run. I suppose this makes sense, but is worth noting all the same.
+
+If I ever re-run this, be prepared for it to be a slog. Maybe try upping it to 20 workers or so and see if that leads
+to getting through more batches before failure. I would definitely continue to use batches, though.
+chunk_list = chunk_list[1501:] is how I resumed the processing at the batch that failed.
 
 https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=8f5974e7-3ece-11ef-967a-4ffbfe06208e
 https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/
@@ -270,7 +278,9 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # chunk_list = chunk_list[6301:]
     # chunk_list = chunk_list[8101:]
     # chunk_list = chunk_list[11401:]
-    chunk_list = chunk_list[13201:]
+    # chunk_list = chunk_list[13201:]
+    # chunk_list = chunk_list[14401:]
+    # chunk_list = chunk_list[16501:]
 
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")

@@ -1,4 +1,11 @@
 """
+Interpolates forest age in 2015 to assign an age to all pixels for which there is no age in GAMI v2.1.
+This way, every pixel has a starting age in 2015.
+Chunks that do not have any age pixels are returned as rasters with all 0s.
+Interpolation uses the age in the focal chunk and all adjacent chunks that exist so that there are not
+artifacts for age interpolation around the edges of chunks (or at least they are reduced because ages in surrounding
+chunks are considered).
+
 Run from src/LULUCF
 
 Local:
@@ -13,12 +20,15 @@ python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_fores
 python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp -f 5
 
 Full run:
-python -m scripts.utilities.create_cluster -n 60 -t 5 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 20 -t 5 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp -ln "This is intended to be the definitive interpolated forest age for 2015."
+This goes very quickly, so -no is totally adequate.
+
 """
 
 import argparse
 import numpy as np
+import os
 import rasterio
 import rasterio.merge
 import dask
@@ -189,6 +199,9 @@ def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list
         return_message = f"Success creating filled forest age for {bounds_str}: {uu.timestr()}"
 
         chunk_stats.append(uu.calculate_stats(filled_crop, cn.forest_age_2015_interpolated_pattern, bounds_str, tile_id, 'output_layer'))
+
+        if not run_local:
+            os.remove(output_tmp_path)
 
         # Removes task tracking file from S3 once task is successful
         uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
