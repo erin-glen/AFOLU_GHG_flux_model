@@ -14,16 +14,16 @@ python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_fores
 Does not have age data (should output a raster full of 0s):
 python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb -28 -60 -27 -59 -cs 1 --run_local
 
-Coiled tiny test:
+Coiled test:
 python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
 python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
 python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp -f 5
 
 Full run:
-python -m scripts.utilities.create_cluster -n 20 -t 5 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 20 -t 14 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp -ln "This is intended to be the definitive interpolated forest age for 2015."
-This goes very quickly, so -no is totally adequate.
-
+This goes very quickly, so -n 20 -t 10 is totally adequate. Could try -t 14 next time.
+Max memory: 8 GB. 16:06 to finish chunks; 16:29 with chunk stat aggregation; 30 Coiled credits; $1.00 AWS
 """
 
 import argparse
