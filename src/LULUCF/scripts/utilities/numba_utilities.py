@@ -57,7 +57,7 @@ def create_typed_dicts(layers):
         if array is None:
             continue
 
-        print(key, print(array.dtype))
+        # print(key, print(array.dtype))
 
         # Suggested by https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/672bad5a-cda0-800a-8889-09657ed7e888
         # to optimize memory allocation for numba. Not sure it helps but it doesn't seemt to hurt, so leaving it in.

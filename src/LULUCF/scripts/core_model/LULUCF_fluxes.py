@@ -94,7 +94,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     continent_ecozone_fallback = nu.backup_continent_ecozone(continent_ecozone_block)
 
     forest_age_block = in_dict_uint8[cn.forest_age_start_year_pattern]
-    print(forest_age_block)
 
 
     ## Test/intermediate outputs blocks
