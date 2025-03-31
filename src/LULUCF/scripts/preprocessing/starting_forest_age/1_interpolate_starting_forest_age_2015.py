@@ -20,10 +20,10 @@ python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_fores
 python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp -f 5
 
 Full run:
-python -m scripts.utilities.create_cluster -n 20 -t 15 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 20 -t 19 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp -ln "This is intended to be the definitive interpolated forest age for 2015."
-This goes very quickly, so -n 20 -t 15 is totally adequate. Could try -t 18 next time.
-Max memory: 8 GB. 12:46 to finish chunks; 13:07 with chunk stat aggregation; 23 Coiled credits; $0.85 AWS
+This goes very quickly, so -n 20 -t 19 is totally adequate. Could try -t 21 next time.
+Max memory: 8 GB. 12:30 to finish chunks; 12:51 with chunk stat aggregation; 23 Coiled credits; $0.83 AWS
 
 https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67e69c53-bcd4-800a-8874-8cf4d1fb9c56
 https://chatgpt.com/share/e/67eaa8ea-b108-800a-b469-b813b970d61f
@@ -164,7 +164,7 @@ def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list
         # Updates raster metadata
         profile = src_datasets[0].profile
         profile.update(
-            dtype="int8",
+            dtype="uint8",
             height=int(crop_window.height),
             width=int(crop_window.width),
             transform=transform,

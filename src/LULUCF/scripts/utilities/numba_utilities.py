@@ -42,6 +42,7 @@ def backup_continent_ecozone(continent_ecozone_block):
 # Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type (e.g., uint8, float32)
 # Note: need to add new code if inputs with other data types are added
 def create_typed_dicts(layers):
+
     # Initializes empty dictionaries for each type
     uint8_dict_layers = {}
     uint16_dict_layers = {}
@@ -55,6 +56,8 @@ def create_typed_dicts(layers):
         # Skips the dictionary entry if it has no data (generally because the chunk doesn't exist for that input)
         if array is None:
             continue
+
+        print(key, print(array.dtype))
 
         # Suggested by https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/672bad5a-cda0-800a-8889-09657ed7e888
         # to optimize memory allocation for numba. Not sure it helps but it doesn't seemt to hurt, so leaving it in.
@@ -72,8 +75,8 @@ def create_typed_dicts(layers):
         elif array.dtype == np.float32:
             float32_dict_layers[key] = contig_array
         else:
-            pass
-            # raise TypeError(f"{key} dtype not in list")
+            raise TypeError(f"{key} dtype not in list")
+
 
     # print(f"uint8 datasets: {uint8_dict_layers.keys()}")
     # print(f"uint16 datasets: {uint16_dict_layers.keys()}")

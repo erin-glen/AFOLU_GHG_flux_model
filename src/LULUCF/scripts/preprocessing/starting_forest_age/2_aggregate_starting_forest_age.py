@@ -6,9 +6,11 @@ python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_
 python -m scripts.utilities.create_cluster -n 33 -t 7 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts
 
-Time: 2:02 through aggregation; 2:19 through tile stats; Credits: 8.5; Cost: $0.53
--n 35 -t 7 worked fine. Could try using -t 8 next time.
-Although, I noted that each worker started by processing 11 tasks instead of the t+1 tasks I expected. Don't know why.
+Time: 2:02 through aggregation; 2:19 through tile stats; Credits: 9.3; Cost: $0.34
+-n 33 -t 7 worked fine.
+I noted that each worker started by processing 11 tasks instead of the t+1 tasks I expected. Don't know why.
+So, maybe the number of threads doesn't matter. Given that each worker starts on 11 tasks at the beginning and there are
+only 356 tasks, 33 workers ought to be sufficient to cover all the tasks in one pass (though that's not necessary).
 """
 
 import argparse

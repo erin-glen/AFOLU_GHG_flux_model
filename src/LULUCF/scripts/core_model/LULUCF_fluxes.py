@@ -93,6 +93,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     # TODO make sure this is working right and applied in the right places
     continent_ecozone_fallback = nu.backup_continent_ecozone(continent_ecozone_block)
 
+    forest_age_block = in_dict_uint8[cn.forest_age_start_year_pattern]
+    print(forest_age_block)
+
 
     ## Test/intermediate outputs blocks
 
@@ -1076,9 +1079,11 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # Test prints
     # print(layers)
     # print(layers['burned_area_2002'].max())
+    # print(layers[cn.forest_age_start_year_pattern].max())
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern])
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern].max())
-    # print(layers[soil_c_2000_pattern].dtype)
+    # print(layers[cn.forest_age_start_year_pattern].dtype)
+    # print(layers['burned_area_final_2023'].dtype)
 
 
     ### Part 2: Calculates min, mean, and max for each input chunk.
@@ -1101,7 +1106,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # Creates the typed dictionaries for all input layers (including those that originally had no data)
     typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
 
-    print("uint8_typed_list:", typed_dict_uint8)
+    # print("uint8_typed_list:", typed_dict_uint8)
     # print("uint16_typed_list:", typed_dict_uint16)
     # print("int16_typed_list:", typed_dict_int16)
     # print("int32_typed_list:", typed_dict_int32)
@@ -1426,7 +1431,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Starting forest age
     # TODO: Need to make starting forest age for 2000
     if interval_type == cn.intervals_annual:
-        download_dict[f"{cn.forest_age_2015_interpolated_pattern}"] = f"{cn.forest_age_2015_interpolated_dir}{sample_tile_id}_{cn.forest_age_2015_interpolated_pattern}.tif"
+        download_dict[f"{cn.forest_age_start_year_pattern}"] = f"{cn.forest_age_2015_interpolated_dir}{sample_tile_id}__{cn.forest_age_2015_interpolated_pattern}.tif"
 
     # Replaces the CHUNK_SIZE_pixels part of the input paths with 40000_pixels for any that have it
     download_dict = {
@@ -1449,6 +1454,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
     # print(download_dict_with_data_types)
+
 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
     output_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year, chunk_size_pixels, model_type, interval_end_years, interval_year_diff)
