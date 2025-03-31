@@ -1,12 +1,12 @@
 """
 Run from src/LULUCF/
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_forest_age.1_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts --first_chunks 2 --run_local
+python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts --first_chunks 2 --run_local
 
 python -m scripts.utilities.create_cluster -n 40 -t 5 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_forest_age.1_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts
 
-Time: 16:32 through calculation; 16:48 through tile stats; Credits: 59; Cost: $1.90
+Time: 3:00 through aggregation; 3:16 through tile stats; Credits: 16; Cost: $0.50
 Using more than -t 5 seemed to cause some tile_ids to randomly fail, even though memory usage was not high.
 So, best to stay with -t 5 even though the Dask dashboard indicates low memory usage compared to what's available (e.g., 5 out of 32 GB being used).
 """
@@ -16,10 +16,10 @@ import dask
 import re
 
 # Project imports
-from src.LULUCF.scripts.utilities import constants_and_names as cn
-from src.LULUCF.scripts.utilities import universal_utilities as uu
-from src.LULUCF.scripts.utilities import log_utilities as lu
-from src.LULUCF.scripts.utilities import resize_cluster
+from ...utilities import constants_and_names as cn
+from ...utilities import universal_utilities as uu
+from ...utilities import log_utilities as lu
+from ...utilities import resize_cluster
 
 
 def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload= False,
@@ -29,7 +29,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Model stage being run
     age_years = [2015]  # Could be expanded to use age in 2000 as well
-    stage = f'starting_forest_age_interpolated__{age_years[0]}_10x10_deg_aggreg'
+    stage = f'starting_forest_age_interpolated__{age_years[0]}__10x10_deg_aggreg'
     model_type = 'standard'
 
     # Connects to Coiled cluster if not running locally
@@ -40,7 +40,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
-    main_logger.info(f"Year for initial carbon pools: {age_years}")
+    main_logger.info(f"Year for forest age map: {age_years}")
 
     # Creates list of output directories specific to the run
     output_dir_list = [cn.forest_age_2015_interpolated_dir]
@@ -129,7 +129,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Create carbon pools in 2000.")
+    parser = argparse.ArgumentParser(description="Aggregate starting forest age to 10x10 deg geotifs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')

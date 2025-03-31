@@ -926,6 +926,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     ds = gdal.Open(first_raster_path)
     raster_datatype = ds.GetRasterBand(1).DataType
     raster_nodata_value = ds.GetRasterBand(1).GetNoDataValue()
+    if raster_nodata_value == None:  # In case no NoData value is assigned
+        raster_nodata_value = 0
     ds = None
 
     # Defaults to Float32 if not found
@@ -956,8 +958,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         subprocess.check_call(merge_command)
         lu.print_and_log(f"Successfully merged rasters into {merged_file}", is_final, logger_worker)
     except subprocess.CalledProcessError as e:
-        lu.print_and_log(f"Error merging rasters: {e}", is_final, logger_worker)
-        print(f"Error merging rasters: {e}")
+        lu.print_and_log(f"Error merging rasters: {e}: {timestr()}", False, logger_worker)
         return f"failure merging {s3_name_dict}"
 
     ### Part 2: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters)
