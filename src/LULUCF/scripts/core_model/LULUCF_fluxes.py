@@ -53,10 +53,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     deadwood_c_dens_block = in_dict_float32[cn.deadwood_c_dens_pattern].astype('float32')
     litter_c_dens_block = in_dict_float32[cn.litter_c_dens_pattern].astype('float32')
 
-    print(agc_dens_block.max())
-    print(bgc_dens_block.max())
-    print(deadwood_c_dens_block.max())
-    print(litter_c_dens_block.max())
+    # print(agc_dens_block.max())
+    # print(bgc_dens_block.max())
+    # print(deadwood_c_dens_block.max())
+    # print(litter_c_dens_block.max())
 
     # Root:shoot (unitless)
     r_s_ratio_block = in_dict_float32[cn.r_s_ratio_pattern].astype('float32')
@@ -154,7 +154,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         ]
         # print(vegetation_heights_so_far_block)
 
-        # Writes the dictionary entries to a chunk for use in the decision tree
+        # Land cover and vegetation height at the start and end of the interval,
+        # e.g., 2005/2010 or 2016/2017
         LC_prev_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year - interval_length}"]
         LC_curr_block = in_dict_uint8[f"{cn.land_cover_pattern}_{interval_end_year}"]
         veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}"]
@@ -169,7 +170,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         # It works by getting the burned area chunks for the current interval and appending them to a list of chunks
         # from previous intervals.
         # For example, for a 5-year interval 2001-2005, it will get burned area for 2001, 2002, 2003, 2004, and 2005.
-        # For annual interval 2003-2004, it will get burned area for 2003.
+        # For annual interval 2015-2016, it will get burned area for 2015 and 2016.
+        # For 2016-2017, it will get burned area for 2015, 2016, 2017.
         for year_offset in range(interval_end_year-interval_year_diff, interval_end_year+1):
             burned_area_for_year_in_interval = f"{cn.burned_area_final_pattern}_{year_offset}"
             burned_area_blocks_all_intervals_so_far.append(in_dict_uint8[burned_area_for_year_in_interval])
@@ -189,15 +191,15 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 # The name of the disturbance layer in the input dictionary
                 annual_disturbance_for_year_in_interval = f"{cn.forest_disturbance_layer_name}_{year_offset}"
 
-                # Replaces the binary annual disturbance array with the year of disturbance (1, 2, 3...20)
+                # Replaces the binary annual disturbance array with the year of disturbance (1, 2, 3...23)
                 year_disturb_array = in_dict_uint8[annual_disturbance_for_year_in_interval] * (year_offset - start_year)
 
                 # Makes a list of disturbance arrays with the disturbance year.
-                # uint8 is okay because the highest value should be 20 (not 2020).
+                # uint8 is okay because the highest value should be 23 (not 2020).
                 forest_dist_blocks_all_intervals_so_far.append(year_disturb_array.astype('uint8'))
 
-            print("forest_dist_blocks_all_intervals_so_far")
-            print(forest_dist_blocks_all_intervals_so_far)
+            # print("forest_dist_blocks_all_intervals_so_far")
+            # print(forest_dist_blocks_all_intervals_so_far)
 
 
         # Numpy arrays for outputs that don't depend on previous interval's values
@@ -524,28 +526,28 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                             state_out = nu.accrete_node(node, 1)
                             agc_rf = cn.oil_palm_agc_rf
                             bgc_rf = cn.oil_palm_bgc_rf
-                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in,
-                                                                                                               deadwood_c_ratio=0, litter_c_ratio=0)
+                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T_5_yrs(agc_rf, bgc_rf, c_dens_in,
+                                                                                                                     deadwood_c_ratio=0, litter_c_ratio=0)
                         else: # New non-oil palm planted trees (112)
                             state_out = nu.accrete_node(node, 2)
                             agc_rf = planted_forest_AGC_RF_cell
                             bgc_rf = planted_forest_BGC_RF_cell
-                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in,
-                                                                                                               deadwood_c_ratio=0, litter_c_ratio=0)
+                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T_5_yrs(agc_rf, bgc_rf, c_dens_in,
+                                                                                                                     deadwood_c_ratio=0, litter_c_ratio=0)
                     else:  # New non-planted trees (12)
                         node = nu.accrete_node(node, 2)
                         if tall_veg_curr:  # New terrestrial natural forest (121)
                             state_out = nu.accrete_node(node, 1)
                             agc_rf = natrl_forest_curve_0_5_AGC_RF_cell
                             bgc_rf = agc_rf * r_s_ratio_cell
-                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in,
-                                                                            deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
+                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T_5_yrs(agc_rf, bgc_rf, c_dens_in,
+                                                                                                                     deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
                         else:  # New trees outside forests (122)
                             state_out = nu.accrete_node(node, 2)
                             agc_rf = cn.trees_outside_forests_agc_rf_max
                             bgc_rf = agc_rf * r_s_ratio_cell
-                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T(agc_rf, bgc_rf, c_dens_in,
-                                                                                                               deadwood_c_ratio=0, litter_c_ratio=0)
+                            c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count = nu.calc_NT_T_5_yrs(agc_rf, bgc_rf, c_dens_in,
+                                                                                                                     deadwood_c_ratio=0, litter_c_ratio=0)
 
                 ### Tree loss
                 elif tall_veg_loss:  # Tree converted to non-tree (2)    #TODO: Include mangrove exception.
@@ -560,7 +562,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                             c_pools_fire_CO2 = cn.agc_emissions_only
                             c_pools_fire_non_CO2 = cn.agc_emissions_only
                             c_pools_no_fire = cn.biomass_emissions_only
-                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                 node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                 c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                 rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -575,7 +577,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
                                 c_pools_no_fire = cn.biomass_emissions_only
-                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -588,7 +590,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
                                 c_pools_no_fire = cn.biomass_emissions_only
-                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -601,7 +603,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
                                 c_pools_no_fire = cn.biomass_emissions_only
-                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -614,7 +616,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
                                 c_pools_no_fire = cn.biomass_emissions_only
-                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -627,7 +629,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
                                 c_pools_no_fire = cn.biomass_emissions_only
-                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -644,7 +646,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 c_pools_fire_CO2 = cn.all_non_soil_pools
                                 c_pools_fire_non_CO2 = cn.all_non_soil_pools
                                 c_pools_no_fire = cn.all_non_soil_pools
-                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -659,7 +661,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     c_pools_fire_CO2 = cn.all_non_soil_pools
                                     c_pools_fire_non_CO2 = cn.all_non_soil_pools
                                     c_pools_no_fire = cn.all_non_soil_pools
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                         node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                         c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -672,7 +674,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     c_pools_fire_CO2 = cn.agc_emissions_only
                                     c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
                                     c_pools_no_fire = cn.biomass_emissions_only
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                         node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                         c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -687,7 +689,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     c_pools_fire_CO2 = cn.all_non_soil_pools
                                     c_pools_fire_non_CO2 = cn.all_non_soil_pools
                                     c_pools_no_fire = cn.all_non_soil_pools
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                         node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                         c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -700,7 +702,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     c_pools_fire_CO2 = cn.agc_emissions_only
                                     c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
                                     c_pools_no_fire = cn.biomass_emissions_only
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                         node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                         c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -713,7 +715,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 c_pools_fire_CO2 = cn.all_non_soil_pools
                                 c_pools_fire_non_CO2 = cn.all_non_soil_pools
                                 c_pools_no_fire = cn.all_non_soil_pools
-                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -727,7 +729,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 c_pools_fire_non_CO2 = np.array([0, 0, 0, 0]).astype('float32') # This particular combination doesn't ever have fire emissions
                                 c_pools_no_fire = cn.biomass_emissions_only
                                 burned_in_last_interval = 0  # This particular combination doesn't ever have fire emissions, so this is forced to 0
-                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -740,7 +742,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                             c_pools_fire_CO2 = cn.agc_emissions_only
                             c_pools_fire_non_CO2 = cn.agc_emissions_only
                             c_pools_no_fire = cn.biomass_emissions_only
-                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT(
+                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_NT_5_yrs(
                                 node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                 c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                 rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
@@ -765,7 +767,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.agc_emissions_only
                                 c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_non_stand_disturbs(
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_non_stand_disturbs_5_yrs(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg,
@@ -782,7 +784,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.agc_emissions_only
                                 c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_non_stand_disturbs(
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_non_stand_disturbs_5_yrs(
                                     node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg,
@@ -801,7 +803,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     c_pools_fire_CO2 = cn.agc_emissions_only
                                     c_pools_fire_non_CO2 = cn.agc_emissions_only
                                     c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_non_stand_disturbs(
+                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_non_stand_disturbs_5_yrs(
                                         node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                         c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg,
@@ -815,7 +817,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     c_pools_fire_CO2 = cn.agc_emissions_only
                                     c_pools_fire_non_CO2 = cn.agc_emissions_only
                                     c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_non_stand_disturbs(
+                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_non_stand_disturbs_5_yrs(
                                         node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                         c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg,
@@ -833,7 +835,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     c_pools_fire_CO2 = cn.agc_emissions_only
                                     c_pools_fire_non_CO2 = cn.agc_emissions_only
                                     c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_non_stand_disturbs(
+                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_non_stand_disturbs_5_yrs(
                                         node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                         c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg,
@@ -847,7 +849,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     c_pools_fire_CO2 = cn.agc_emissions_only
                                     c_pools_fire_non_CO2 = cn.agc_emissions_only
                                     c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_non_stand_disturbs(
+                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_non_stand_disturbs_5_yrs(
                                         node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                         c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg,
@@ -865,7 +867,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 bgc_rf = planted_forest_BGC_RF_cell
                             c_pools_fire_CO2 = cn.agc_emissions_only
                             c_pools_fire_non_CO2 = cn.agc_emissions_only
-                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs(
+                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs_5_yrs(
                                 node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                 interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
@@ -889,7 +891,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     bgc_rf = agc_rf * r_s_ratio_cell
                                     c_pools_fire_CO2 = cn.agc_emissions_only
                                     c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs(
+                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs_5_yrs(
                                         node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                         interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                         Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
@@ -902,7 +904,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                         bgc_rf = agc_rf * r_s_ratio_cell
                                         c_pools_fire_CO2 = cn.agc_emissions_only
                                         c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs(
+                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs_5_yrs(
                                             node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
@@ -913,7 +915,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                         bgc_rf = agc_rf * r_s_ratio_cell
                                         c_pools_fire_CO2 = cn.agc_emissions_only
                                         c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs(
+                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs_5_yrs(
                                             node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
@@ -924,7 +926,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 bgc_rf = agc_rf * r_s_ratio_cell
                                 c_pools_fire_CO2 = cn.agc_emissions_only
                                 c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs(
+                                state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count = nu.calc_T_T_no_disturbs_5_yrs(
                                     node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                     interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                     Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
@@ -1099,7 +1101,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # Creates the typed dictionaries for all input layers (including those that originally had no data)
     typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
 
-    # print("uint8_typed_list:", typed_dict_uint8)
+    print("uint8_typed_list:", typed_dict_uint8)
     # print("uint16_typed_list:", typed_dict_uint16)
     # print("int16_typed_list:", typed_dict_int16)
     # print("int32_typed_list:", typed_dict_int32)
@@ -1393,16 +1395,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         download_dict[cn.litter_c_dens_pattern] = f"{cn.litter_c_2015_dir}{sample_tile_id}__{cn.litter_c_2015_pattern}.tif"
         # download_dict[cn.soil_c_2000_pattern] = f"{sample_tile_id}_{cn.soil_c_2000_pattern}.tif"
 
-    # Replaces the CHUNK_SIZE_pixels and DATE parts of the initial carbon rasters
-    download_dict = {
-        key: value.replace("CHUNK_SIZE", '40000')
-        for key, value in download_dict.items()
-    }
-    download_dict = {
-        key: value.replace("DATE", '20250320')   # Date of initial carbon pool creation
-        for key, value in download_dict.items()
-    }
-
     if interval_type == cn.intervals_five_years:
         # Land cover and vegetation height rasters (5-year intervals)
         for year in range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1, cn.interval_duration):
@@ -1431,11 +1423,18 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     for growth_interval in cn.natural_forest_growth_curve_intervals:
         download_dict[f"{cn.natural_forest_growth_curve_pattern}__{growth_interval}_years"] = f"{cn.natural_forest_growth_curve_dir}rate_{growth_interval}/{sample_tile_id}_{cn.natural_forest_growth_curve_pattern}__{growth_interval}_years.tif"
 
-    # print(download_dict)
+    # Starting forest age
+    # TODO: Need to make starting forest age for 2000
+    if interval_type == cn.intervals_annual:
+        download_dict[f"{cn.forest_age_2015_interpolated_pattern}"] = f"{cn.forest_age_2015_interpolated_dir}{sample_tile_id}_{cn.forest_age_2015_interpolated_pattern}.tif"
 
-    # Creates a list of output directories for all outputs and intervals based on specifics of the model run
-    output_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year, chunk_size_pixels, model_type, interval_end_years, interval_year_diff)
-    # print(output_dir_list)
+    # Replaces the CHUNK_SIZE_pixels part of the input paths with 40000_pixels for any that have it
+    download_dict = {
+        key: value.replace("CHUNK_SIZE", '40000')
+        for key, value in download_dict.items()
+    }
+
+    # print(download_dict)
 
     # Returns the first tile in each input so that the datatype can be determined.
     # This is done up front, once per tile set, rather than on each chunk, since
@@ -1450,6 +1449,10 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
     # print(download_dict_with_data_types)
+
+    # Creates a list of output directories for all outputs and intervals based on specifics of the model run
+    output_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year, chunk_size_pixels, model_type, interval_end_years, interval_year_diff)
+    # print(output_dir_list)
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.

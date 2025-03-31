@@ -297,10 +297,10 @@ def first_file_name_in_s3_folder(download_dict):
                 first_tiles[key] = cn.full_bucket_prefix + "/" + tif_files[0]
             else:
                 first_tiles[key] = None  # No .tif files found
-                sys.exit(f"No tif files found in {first_tiles[key]}")
+                sys.exit(f"No tif files found in {key}, {folder_path}")
         else:
             first_tiles[key] = None  # No files found in the folder
-            sys.exit(f"No files found in {first_tiles[key]}")
+            sys.exit(f"No files found in {key}, {folder_path}")
 
     return first_tiles
 
@@ -503,7 +503,7 @@ def get_interval_info(end_year, main_logger, start_year):
         sys.exit(1)
 
     main_logger.info(f"Interval type: {interval_type}")
-    main_logger.info(f"Interval duration: {interval_year_diff+1} years")
+    main_logger.info(f"Interval duration: {interval_length} years")
     main_logger.info(f"Interval end years/Output years: {output_years}")
 
     return interval_type, interval_year_diff, interval_length, output_years
@@ -911,7 +911,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     # Lists the tile paths for the relevant rasters
     tile_paths = [vsis3_in_folder + filename for filename in filenames_in_focus_area]
 
-    lu.print_and_log(f"Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger_worker)
+    lu.print_and_log(f"flm: Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger_worker)
     if is_final:   # Prints to console if it is a final run
         print(f"Merging small rasters in {tile_id} in {vsis3_in_folder}")
 

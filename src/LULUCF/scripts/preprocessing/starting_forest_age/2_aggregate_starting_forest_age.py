@@ -3,12 +3,11 @@ Run from src/LULUCF/
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts --first_chunks 2 --run_local
 
-python -m scripts.utilities.create_cluster -n 40 -t 5 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 35 -t 6 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts
 
-Time: 3:00 through aggregation; 3:16 through tile stats; Credits: 16; Cost: $0.50
-Using more than -t 5 seemed to cause some tile_ids to randomly fail, even though memory usage was not high.
-So, best to stay with -t 5 even though the Dask dashboard indicates low memory usage compared to what's available (e.g., 5 out of 32 GB being used).
+Time: 3:05 through aggregation; 3:20 through tile stats; Credits: 12; Cost: $0.40
+-n 35 -t 6 worked fine. Could try using -t 7 next time.
 """
 
 import argparse

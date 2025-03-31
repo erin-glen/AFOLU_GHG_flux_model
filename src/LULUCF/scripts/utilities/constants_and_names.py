@@ -227,31 +227,31 @@ soil_c_dens_pattern = "soil_c_MgC_ha"
 
 ### Starting carbon pools (2000/2015)
 
-agc_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{agc_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
+agc_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{agc_dens_pattern}/CHUNK_SIZE_pixels/20250307/"
 agc_2000_pattern = f"{agc_dens_pattern}_2000"
 
-bgc_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{bgc_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
+bgc_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{bgc_dens_pattern}/CHUNK_SIZE_pixels/20250307/"
 bgc_2000_pattern = f"{bgc_dens_pattern}_2000"
 
-deadwood_c_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{deadwood_c_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
+deadwood_c_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{deadwood_c_dens_pattern}/CHUNK_SIZE_pixels/20250307/"
 deadwood_c_2000_pattern = f"{deadwood_c_dens_pattern}_2000"
 
-litter_c_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{litter_c_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
+litter_c_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{litter_c_dens_pattern}/CHUNK_SIZE_pixels/20250307/"
 litter_c_2000_pattern = f"{litter_c_dens_pattern}_2000"
 
-soil_c_2000_dir = f"{full_bucket_prefix}/climate/carbon_model/carbon_pools/soil_carbon/intermediate_full_extent/standard/20231108/CHUNK_SIZE_pixels/DATE/"
+soil_c_2000_dir = f"{full_bucket_prefix}/climate/carbon_model/carbon_pools/soil_carbon/intermediate_full_extent/standard/20231108/CHUNK_SIZE_pixels/20250307/"
 soil_c_2000_pattern = "soil_C_full_extent_2000_Mg_C_ha"
 
-agc_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{agc_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
+agc_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{agc_dens_pattern}/CHUNK_SIZE_pixels/20250318/"
 agc_2015_pattern = f"{agc_dens_pattern}_2015"
 
-bgc_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{bgc_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
+bgc_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{bgc_dens_pattern}/CHUNK_SIZE_pixels/20250318/"
 bgc_2015_pattern = f"{bgc_dens_pattern}_2015"
 
-deadwood_c_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{deadwood_c_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
+deadwood_c_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{deadwood_c_dens_pattern}/CHUNK_SIZE_pixels/20250318/"
 deadwood_c_2015_pattern = f"{deadwood_c_dens_pattern}_2015"
 
-litter_c_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{litter_c_dens_pattern}/CHUNK_SIZE_pixels/DATE/"
+litter_c_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{litter_c_dens_pattern}/CHUNK_SIZE_pixels/20250318/"
 litter_c_2015_pattern = f"{litter_c_dens_pattern}_2015"
 
 
@@ -275,14 +275,14 @@ r_s_ratio_pattern = "BGB_AGB_ratio"
 continent_ecozone_dir = f"{full_bucket_prefix}/climate/carbon_model/fao_ecozones/ecozone_continent/20190116/processed/"
 continent_ecozone_pattern = "fao_ecozones_continents_processed"
 
-forest_age_run_date = '20250325'
-forest_age_2010_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2010/standard/not_interpolated/CHUNK_SIZE_pixels/{forest_age_run_date}/"
+forest_age_2010_2015_run_date = '20250325'
+forest_age_2010_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2010/standard/not_interpolated/CHUNK_SIZE_pixels/{forest_age_2010_2015_run_date}/"
 forest_age_2010_pattern = "forest_age_2010"
 
-forest_age_2015_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2015/standard/not_interpolated/CHUNK_SIZE_pixels/{forest_age_run_date}/"
+forest_age_2015_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2015/standard/not_interpolated/CHUNK_SIZE_pixels/{forest_age_2010_2015_run_date}/"
 forest_age_2015_pattern = "forest_age_2015"
 
-forest_age_2015_interpolated_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2015/standard/interpolated/CHUNK_SIZE_pixels/20250329/"
+forest_age_2015_interpolated_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2015/standard/interpolated/CHUNK_SIZE_pixels/20250331/"
 forest_age_2015_interpolated_pattern = "forest_age_interpolated_2015"
 
 #TODO: @Mel - Change in hansenize + pre-processing to use path, pattern, and intervals. Delete after.

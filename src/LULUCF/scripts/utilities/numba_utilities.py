@@ -452,7 +452,7 @@ def non_CO2_fire_equations(carbon_in, Cf, Gef_ch4, Gef_n2o):
 # Gross and net fluxes and ending carbon stocks for non-tree converted to tree.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 @jit(nopython=True)
-def calc_NT_T(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
+def calc_NT_T_5_yrs(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
@@ -494,7 +494,7 @@ def calc_NT_T(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
 # CO2 emissions are calculated differently depending on if fire was detected during the interval and if a Gef_CO2 is supplied.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 @jit(nopython=True)
-def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
+def calc_T_NT_5_yrs(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
                     forest_dist_last, interval_end_year, c_dens_in,
                     post_dist_regrowth, most_recent_year_not_tall_veg, Cf, Gef_ch4, Gef_n2o,
                     deadwood_c_ratio, litter_c_ratio):
@@ -645,10 +645,10 @@ def calc_T_NT(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c
 # Gross and net fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 @jit(nopython=True)
-def calc_T_T_non_stand_disturbs(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
-                              forest_dist_last, interval_end_year, c_dens_in,
-                              post_dist_RF, most_recent_year_not_tall_veg, Cf, Gef_co2, Gef_ch4, Gef_n2o,
-                              deadwood_c_ratio, litter_c_ratio):
+def calc_T_T_non_stand_disturbs_5_yrs(node, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
+                                      forest_dist_last, interval_end_year, c_dens_in,
+                                      post_dist_RF, most_recent_year_not_tall_veg, Cf, Gef_co2, Gef_ch4, Gef_n2o,
+                                      deadwood_c_ratio, litter_c_ratio):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
@@ -809,7 +809,7 @@ def calc_T_T_non_stand_disturbs(node, burned_in_last_interval, agc_rf, bgc_rf, c
 # Gross and net fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 @jit(nopython=True)
-def calc_T_T_no_disturbs(node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
+def calc_T_T_no_disturbs_5_yrs(node, most_recent_year_burned, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                interval_end_year, c_dens_in,
                                most_recent_year_not_tall_veg, Cf, Gef_co2, Gef_ch4, Gef_n2o,
                                deadwood_c_ratio, litter_c_ratio):
