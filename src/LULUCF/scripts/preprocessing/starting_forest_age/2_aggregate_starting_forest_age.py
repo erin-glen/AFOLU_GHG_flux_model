@@ -3,11 +3,12 @@ Run from src/LULUCF/
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts --first_chunks 2 --run_local
 
-python -m scripts.utilities.create_cluster -n 35 -t 6 -cn AFOLU_flux_model_scripts
+python -m scripts.utilities.create_cluster -n 33 -t 7 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts
 
-Time: 3:05 through aggregation; 3:20 through tile stats; Credits: 12; Cost: $0.40
--n 35 -t 6 worked fine. Could try using -t 7 next time.
+Time: 2:02 through aggregation; 2:19 through tile stats; Credits: 8.5; Cost: $0.53
+-n 35 -t 7 worked fine. Could try using -t 8 next time.
+Although, I noted that each worker started by processing 11 tasks instead of the t+1 tasks I expected. Don't know why.
 """
 
 import argparse

@@ -391,7 +391,9 @@ gdal_to_string_dtype_mapping = {
     gdal.GDT_UInt32: 'UInt32',
     gdal.GDT_Int32: 'Int32',
     gdal.GDT_Float32: 'Float32',
-    gdal.GDT_Float64: 'Float64'
+    gdal.GDT_Float64: 'Float64',
+    'Int8': 'Int8',  # GDAL doesn't have int8, apparently. Outside Coiled, this converts it correctly.
+    14: 'Int8'   # GDAL doesn't have int8, apparently. In Coiled, this converts it correctly.
 }
 
 # Maps GDAL data type to the appropriate string value
