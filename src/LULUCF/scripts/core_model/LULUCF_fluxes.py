@@ -34,7 +34,7 @@ from ..utilities import resize_cluster
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-# @jit(nopython=True)
+@jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                   primary_forest_RFs, start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years, is_final):
 
@@ -133,7 +133,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     # Iterates through model intervals
     for interval_end_year in interval_end_years:
 
-        print(f"Now at {interval_end_year}:")
+        # print(f"Now at {interval_end_year}:")
+
+        # print(interval_type)
 
         # Model years so far, including the model start year.
         # Eventually used to determine whether current height has decreased significantly from maximum height
@@ -141,7 +143,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         if interval_type in [cn.intervals_five_years, cn.intervals_annual]:
             years_so_far = list(range(start_year, interval_end_year + 1, interval_length))
         else:
-            sys.exit("interval_type not valid: 'hybrid' not supported yet")
+            raise ValueError("interval_type not valid: 'hybrid' not supported yet")
 
         # print(years_so_far)
 
@@ -182,7 +184,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         # print(burned_area_blocks_all_intervals_so_far)
 
 
-        # Creates a list of all the forest disturbance arrays from 2001 to the end of the interval.
+        # Creates a list of all the annual Potapov forest disturbance rasters from 2001 to the end of the interval.
         # The values in the list are the disturbance year starting from 1, e.g., 2001=1, 2008=8, 2017=17.
         # It works by getting the annual disturbance chunks for the current interval and appending them to a list of
         # chunks from previous intervals.
@@ -264,6 +266,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 continent_ecozone_cell = continent_ecozone_block[row, col]
                 climate_zone_cell = climate_zone_block[row, col]
 
+                forest_age_cell = forest_age_block[row, col]
+
                 # Applies the continent_ecozne fallback value when there isn't a value for the pixel
                 if continent_ecozone_cell == 0:
                     continent_ecozone_cell = continent_ecozone_fallback
@@ -311,15 +315,16 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     # Most recent year with forest disturbance during the interval
                     forest_dist_last = max([forest_dist_t_4, forest_dist_t_3, forest_dist_t_2, forest_dist_t_1, forest_dist_t])
 
-                # Annual intervals: Burned area for last year. Annual disturbance not relevant.
+                # Annual intervals: Burned area for last year. Annual Potapov disturbance rasters not relevant.
                 elif interval_type == cn.intervals_annual:
                     burned_area_t = burned_area_blocks_all_intervals_so_far[-1][row, col]
                     # Most recent year with burned area during the interval
                     most_recent_year_burned = max([burned_area_t])
                     burned_in_last_interval = (most_recent_year_burned > 0)
+                    forest_dist_last = 0   # Annual Potapov forest disturbance raster not used for annual model
 
                 else:
-                    sys.exit("interval_type not valid: 'hybrid' not supported yet")
+                    raise ValueError("interval_type not valid: 'hybrid' not supported yet")
 
                 # if forest_dist_last > 0:
                 #     print(forest_dist_last)
@@ -343,8 +348,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 # if first_burn_in_record > 0:
                 #     print("fire", row, col, first_burn_in_record)
 
-                # Loops over forest disturbance pixels since 2001 to see if there was a disturbance.
+                # Loops over annual forest disturbance rasters since 2001 to see if there was a disturbance.
                 # Stops once a disturbance is detected because all that matters here is that there was a disturbance at some point (not the specific year).
+                #TODO generalize to include disturbances of >= 5 m height reduction (would apply to annual model as well)?
                 for forest_dist_year in forest_dist_blocks_all_intervals_so_far:
                     # Update the maximum value for this pixel
                     if forest_dist_year[row, col] > 0:
@@ -972,6 +978,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 litter_c_dens_block[row, col] = c_dens_out[3]
 
                 # Test/intermediate outputs
+                forest_age_block[row, col] = forest_age_cell
                 gain_year_count_out_block[row, col] = gain_year_count
                 most_recent_year_not_tall_veg_block[row, col] = most_recent_year_not_tall_veg
                 years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
@@ -1016,8 +1023,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
         # Test/intermediate outputs only saved if not a large run
         if not is_final:
+            out_dict_uint8[f"{cn.forest_age_output_pattern}_{year_range}"] = forest_age_block.copy()
             out_dict_uint8[f"{cn.gain_year_count_pattern}_{year_range}"] = gain_year_count_out_block.copy()
-            out_dict_uint16[f"{cn.most_recent_year_not_tall_veg}_{cn.first_model_year_5_years}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
+            out_dict_uint16[f"{cn.most_recent_year_not_tall_veg}_{start_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
             out_dict_uint8[f"{cn.years_of_forest_regrowth}_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
             out_dict_uint16[f"{cn.year_of_forest_loss}_{year_range}"] = year_of_forest_loss_block.copy()
             out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
@@ -1156,9 +1164,9 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
     [in_dict.clear() for in_dict in in_dicts]
 
-    for interval_end_year in cn.interval_end_years_5_years:
+    for interval_end_year in interval_end_years:
 
-        year_range = f"{interval_end_year-cn.interval_duration+1}_{interval_end_year}"
+        year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
 
         # Gross emissions across all carbon pools
         out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"] = (
@@ -1239,14 +1247,17 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
             out_pattern, year_range = uu.strip_and_extract_years(key)
+            print(out_pattern)
+            print(year_range)
 
             # Retrieves the relevant output s3 path for this specific output (list of one element).
             # First, finds the output folders for all intervals with the relevant patterns
             matched_output_s3_folders = [item for item in output_folders if out_pattern in item]
-            # print(matched_output_s3_folders)
+            print(matched_output_s3_folders)
+
             # Second, finds the output folder with the right interval for that pattern
             matched_output_s3_folder_list = [item for item in matched_output_s3_folders if year_range in item]
-            # print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
+            print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
 
             # Output paths without bucket (s3://gfw2-data).
             # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
@@ -1494,13 +1505,13 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, flux_1x1_results)
 
-    # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-    if not no_upload:
-        for output_folder in output_dir_list:
-
-            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-            # print(geotiff_files)
+    # # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
+    # if not no_upload:
+    #     for output_folder in output_dir_list:
+    #
+    #         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+    #         main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+    #         # print(geotiff_files)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 

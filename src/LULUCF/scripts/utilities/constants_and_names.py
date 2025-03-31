@@ -286,9 +286,10 @@ forest_age_2015_interpolated_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_mod
 forest_age_2015_interpolated_pattern = "forest_age_interpolated_2015"
 
 forest_age_start_year_pattern = "forest_age_interpolated_start_year"
+forest_age_output_pattern = "forest_age_during_model"
 
 # TODO: @Mel - Change in hansenize + pre-processing to use path, pattern, and intervals. Delete after.
-#GEE script that the global rasters are from is https://code.earthengine.google.com/8727b80dd1e6273361c75f6ada3db826
+#GEE script that the global rasters are from is https://code.earthengine.google.com/3d8ac6f1dcc5cf36c766d0ddffaa3068 (each file takes about 15 minutes to export to Google Drive)
 secondary_natural_forest_raw_dir =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/20241004/"
 secondary_natural_forest_0_5_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__0_5_years.tif"   # both the raw raster name and processed pattern for hansenized tiles
 secondary_natural_forest_6_10_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__6_10_years.tif"
@@ -520,6 +521,7 @@ LULUCF_core_output_dirs = [
     f"{outputs_path}{agc_rf_pre_dist_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
 
     # Intermediate outputs
+    f"{outputs_path}{forest_age_output_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{gain_year_count_pattern}/START_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{most_recent_year_not_tall_veg}/RUNSTART_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/", # Years represent from model start to current interval end
     f"{outputs_path}{years_of_forest_regrowth}/YEAR/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/",
