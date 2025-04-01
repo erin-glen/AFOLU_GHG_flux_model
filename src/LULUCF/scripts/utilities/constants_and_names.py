@@ -113,7 +113,7 @@ tree_wet_max_height_code = 148
 
 # IPCC Tier 1 removal factor spreadsheet by continent-ecozone-age category combination
 # (IPCC 2019, Table 4.9, with corrigenda 4 temperate forest revision) (Mg AGB/ha/yr)
-IPCC_removal_factor_table_url = "http://gfw2-data.s3.amazonaws.com/climate/carbon_model/removal_rate_tables/"
+IPCC_removal_factor_table_url = "https://gfw2-data.s3.amazonaws.com/climate/carbon_model/removal_rate_tables/"
 IPCC_removal_factor_table_name = "gain_rate_continent_ecozone_age_20230821.xlsx"
 IPCC_removal_factor_table_full_path = f"{IPCC_removal_factor_table_url}{IPCC_removal_factor_table_name}"
 IPCC_removal_factor_table_tab = "natrl fores gain, for std model"
@@ -288,8 +288,8 @@ forest_age_2015_interpolated_pattern = "forest_age_interpolated_2015"
 forest_age_start_year_pattern = "forest_age_interpolated_start_year"
 forest_age_output_pattern = "forest_age_during_model"
 
-# TODO: @Mel - Change in hansenize + pre-processing to use path, pattern, and intervals. Delete after.
-#GEE script that the global rasters are from is https://code.earthengine.google.com/3d8ac6f1dcc5cf36c766d0ddffaa3068 (each file takes about 15 minutes to export to Google Drive)
+# GEE script that the global rasters are from is https://code.earthengine.google.com/3d8ac6f1dcc5cf36c766d0ddffaa3068 (each file takes about 15 minutes to export to Google Drive).
+# NOTE: GEE export function splits the exported global raster into two pieces. I merged the two pieces into a single file in ArcPro, then uploaded to s3.
 secondary_natural_forest_raw_dir =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/20241004/"
 secondary_natural_forest_0_5_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__0_5_years.tif"   # both the raw raster name and processed pattern for hansenized tiles
 secondary_natural_forest_6_10_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__6_10_years.tif"
@@ -312,7 +312,7 @@ secondary_natural_forest_21_100_processed_dir = f"{full_bucket_prefix}/climate/s
 
 natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/"
 natural_forest_growth_curve_pattern = "natural_forest_mean_growth_rate__Mg_AGC_ha_yr"
-natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_40', '41_60', '61_80', '81_100']
+natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_40', '41_60', '61_80', '81_100', '21_100']
 
 #TODO: Update to path pattern instead of processed_dir/ pattern in hansenize. Delete processed after.
 drivers_run_date = '20241224'

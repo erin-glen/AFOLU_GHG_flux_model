@@ -6,6 +6,7 @@ from numba.core import types
 
 # Project imports
 from . import constants_and_names as cn
+from .constants_and_names import gain_year_count_pattern
 
 
 # Adds latest decision tree branch to the state node
@@ -128,19 +129,6 @@ def create_typed_dicts(layers):
 
     return typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32
 
-# Classifies pixels into age bins for application of Robinson carbon growth curves
-@jit(nopython=True)
-def classify_forest_age(age):
-
-    # Iterates through age bins for rates
-    for age_bin in cn.natural_forest_growth_curve_intervals:
-        start_str, end_str = age_bin.split('_')
-        start, end = int(start_str), int(end_str)
-
-        if start <= age <= end:
-            return age_bin
-
-    return 111
 
 # Classifies vegetation height classes for start and end of current interval
 @jit(nopython=True)
@@ -465,16 +453,24 @@ def non_CO2_fire_equations(carbon_in, Cf, Gef_ch4, Gef_n2o):
     return ch4_flux_out, n2o_flux_out
 
 
-# Gross and net fluxes and ending carbon stocks for non-tree converted to tree.
+# Gross and net fluxes and ending carbon stocks for non-tree converted to tree for 5-year interval.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 @jit(nopython=True)
-def calc_NT_T_5_yrs(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
+def calc_NT_T(interval_type, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
 
     # Step 1: Calculates the number of years of carbon gain (years)
-    gain_year_count = cn.NT_T_gain_year_count_default
+    if interval_type == cn.intervals_five_years:
+        gain_year_count = cn.NT_T_gain_year_count_default
+    elif interval_type == cn.intervals_annual:
+        gain_year_count = 1
+    else:
+        raise ValueError("interval_type not valid: 'hybrid' not supported yet")
+
+    # Tracks the forest age
+    forest_age = gain_year_count
 
     # Step 2: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
     agc_gross_removals_out = float((agc_rf * gain_year_count) * -1)  #float() necessary for Numba typing
@@ -502,7 +498,7 @@ def calc_NT_T_5_yrs(agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio)
     c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')  # Mg C/ha/interval
     c_dens_out = np.array([agc_dens_out, bgc_dens_out, deadwood_c_dens_out, litter_c_dens_out]).astype('float32')  # Mg C/ha
 
-    return c_gross_emissions_out, c_gross_removals_out, c_dens_out, gain_year_count
+    return c_gross_emissions_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age
 
 
 # Gross fluxes and ending carbon stocks for trees converted to non-trees with and without fire.
