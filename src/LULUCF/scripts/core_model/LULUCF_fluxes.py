@@ -1059,19 +1059,19 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
         # Converts carbon pool fluxes from Mg C/ha/interval to Mg CO2/ha/yr.
         # Gross emissions are positive. Gross removals are negative.
-        out_dict_float32[f"{cn.agc_gross_emis_pattern}_{year_range}"] = (agc_gross_emis_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
-        out_dict_float32[f"{cn.bgc_gross_emis_pattern}_{year_range}"] = (bgc_gross_emis_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
-        out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = (deadwood_c_gross_emis_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
-        out_dict_float32[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] = (litter_c_gross_emis_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.agc_gross_emis_pattern}_{year_range}"] = (agc_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.bgc_gross_emis_pattern}_{year_range}"] = (bgc_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = (deadwood_c_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] = (litter_c_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
 
-        out_dict_float32[f"{cn.agc_gross_removals_pattern}_{year_range}"] = (agc_gross_removals_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
-        out_dict_float32[f"{cn.bgc_gross_removals_pattern}_{year_range}"] = (bgc_gross_removals_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
-        out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"] = (deadwood_c_gross_removals_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
-        out_dict_float32[f"{cn.litter_c_gross_removals_pattern}_{year_range}"] = (litter_c_gross_removals_out_block * cn.C_to_CO2_numba / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.agc_gross_removals_pattern}_{year_range}"] = (agc_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.bgc_gross_removals_pattern}_{year_range}"] = (bgc_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"] = (deadwood_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.litter_c_gross_removals_pattern}_{year_range}"] = (litter_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
 
         # Converts non-CO2 emissions from Mg CO2e/ha/interval to Mg CO2e/ha/yr
-        out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = (ch4_gross_emis_out_block / cn.interval_duration).copy()
-        out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = (n2o_gross_emis_out_block / cn.interval_duration).copy()
+        out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = (ch4_gross_emis_out_block / interval_length).copy()
+        out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = (n2o_gross_emis_out_block / interval_length).copy()
 
         # Still Mg C/ha
         out_dict_float32[f"{cn.agc_dens_pattern}_{interval_end_year}"] = agc_dens_block.copy()
