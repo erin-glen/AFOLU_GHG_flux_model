@@ -128,6 +128,19 @@ def create_typed_dicts(layers):
 
     return typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32
 
+# Classifies pixels into age bins for application of Robinson carbon growth curves
+@jit(nopython=True)
+def classify_forest_age(age):
+
+    # Iterates through age bins for rates
+    for age_bin in cn.natural_forest_growth_curve_intervals:
+        start_str, end_str = age_bin.split('_')
+        start, end = int(start_str), int(end_str)
+
+        if start <= age <= end:
+            return age_bin
+
+    return 111
 
 # Classifies vegetation height classes for start and end of current interval
 @jit(nopython=True)

@@ -288,7 +288,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     if ifl_primary_cell:   # And if in IFL/primary forest...
                         agc_rf_pre_dist_prev = primary_forest_AGC_RF   # Use the primary forest/IFL RF
                     else:  # If not in IFL/primary forest...
-                        agc_rf_pre_dist_prev = natrl_forest_curve_21_100_AGC_RF_cell   # Use old secondary forest RF
+                        age_bin = nu.classify_forest_age(forest_age_cell)
+                        # agc_rf_pre_dist_prev =
+
                 else:  # If not first interval...
                     agc_rf_pre_dist_prev = agc_rf_pre_dist_out_block[row, col]  # Use removal factor from the previous interval
 

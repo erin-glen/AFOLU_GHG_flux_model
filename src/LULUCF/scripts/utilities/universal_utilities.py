@@ -791,11 +791,13 @@ def check_chunk_for_data(required_layers, bounds_str, tile_id, any_or_all, is_fi
 # Makes a shapefile of the footprints of rasters in a folder, for checking geographical completeness of rasters
 def make_tile_footprint_shp(input_dict, no_upload):
 
+    logger_worker = lu.setup_logging_worker()
+
     in_folder = list(input_dict.keys())[0]
     pattern = list(input_dict.values())[0]
 
     # Task properties
-    print(f"flm: Making tile index shapefile for: {in_folder}: {timestr()}")
+    lu.print_and_log(f"flm: Making tile index shapefile for: {in_folder}: {timestr()}", True, logger_worker)
 
     # Folder including s3 key
     s3_in_folder = in_folder
@@ -826,7 +828,7 @@ def make_tile_footprint_shp(input_dict, no_upload):
 
     os.remove(f"/tmp/{file_paths_txt}")
 
-    return(f"Completed: {timestr()}")
+    return(f"Index shapefile for {pattern} completed: {timestr()}")
 
 
 # Creates a list of 10x10 deg tiles to create, where the list is a list of dictionaries of the form
@@ -1855,9 +1857,11 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
                           dt, no_data, tiled=True, x_pixel_window=400, y_pixel_window=400):
     #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
 
+    logger_worker = lu.setup_logging_worker()
+
     source_vrt_path = source_vrt_path.replace("s3://", "/vsis3/")  #VRT has to be accessed using /vsis3/
 
-    print(f"Creating {filename}: {timestr()}...")
+    lu.print_and_log(f"Creating {filename}: {timestr()}...", True, logger_worker)
 
     # Check that pixel window arguments are given if tiled = True
     if tiled and not (x_pixel_window and y_pixel_window):
@@ -1898,23 +1902,23 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
             )
 
         gdal.Warp(str(Path(filename)), str(Path(source_vrt_path)), options=options)
-        print(f"{filename} created: {timestr()}")
+        lu.print_and_log(f"{filename} created: {timestr()}", True, logger_worker)
 
-        print(f"Checking if {filename} contains data: {timestr()}")
+        lu.print_and_log(f"Checking if {filename} contains data: {timestr()}", True, logger_worker)
         if check_geotiff_has_data(filename):
-            print(f"{filename} contains data. Uploading to s3: {timestr()}")
+            lu.print_and_log(f"{filename} contains data. Uploading to s3: {timestr()}", True, logger_worker)
         else:
-            print(f"{filename} is empty or contains only NoData values. Not uploading to s3: {timestr()}")
+            lu.print_and_log(f"{filename} is empty or contains only NoData values. Not uploading to s3: {timestr()}", False, logger_worker)
             return f"{filename} is empty or contains only NoData values. Not uploading to s3: {timestr()}"
 
         # Uploads tile to s3
         upload_s3_file(output_raster_s3_path_and_name, filename)
-        print(f"{filename} uploaded to s3: {timestr()}")
+        lu.print_and_log(f"{filename} uploaded to s3: {timestr()}", True, logger_worker)
 
         # Deletes rasters from cluster after uploading to s3
         os.remove(str(Path(filename)))
 
-        success_message = f"Success for {filename}: {timestr()}"
+        success_message = f"Success Hansenizing {filename}: {timestr()}"
         return success_message  # Return both the success message and the statistics
 
     else:

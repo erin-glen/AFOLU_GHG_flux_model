@@ -295,16 +295,24 @@ secondary_natural_forest_0_5_pattern =  "natural_forest_mean_growth_rate__Mg_AGC
 secondary_natural_forest_6_10_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__6_10_years.tif"
 secondary_natural_forest_11_15_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__11_15_years.tif"
 secondary_natural_forest_16_20_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__16_20_years.tif"
+secondary_natural_forest_21_40_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years.tif"
+secondary_natural_forest_41_60_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__41_60_years.tif"
+secondary_natural_forest_61_80_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__61_80_years.tif"
+secondary_natural_forest_81_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__81_100_years.tif"
 secondary_natural_forest_21_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_100_years.tif"
 secondary_natural_forest_0_5_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_0_5/"
 secondary_natural_forest_6_10_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_6_10/"
 secondary_natural_forest_11_15_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_11_15/"
 secondary_natural_forest_16_20_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_16_20/"
+secondary_natural_forest_21_40_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_21_40/"
+secondary_natural_forest_41_60_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_41_60/"
+secondary_natural_forest_61_80_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_61_80/"
+secondary_natural_forest_81_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_81_100/"
 secondary_natural_forest_21_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_21_100/"
 
 natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/"
 natural_forest_growth_curve_pattern = "natural_forest_mean_growth_rate__Mg_AGC_ha_yr"
-natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_100']
+natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_40', '41_60', '61_80', '81_100']
 
 #TODO: Update to path pattern instead of processed_dir/ pattern in hansenize. Delete processed after.
 drivers_run_date = '20241224'
