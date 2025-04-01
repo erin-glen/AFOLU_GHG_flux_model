@@ -983,7 +983,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                             node = nu.accrete_node(node, 2)
                             if tall_veg_curr:  # New terrestrial natural forest (121)
                                 state_out = nu.accrete_node(node, 1)
-                                agc_rf = natrl_forest_age_dependent_agc_rf
+                                agc_rf = natrl_forest_curve_0_5_AGC_RF_cell   # Forces new forest to use the first interval of the age curve
                                 bgc_rf = agc_rf * r_s_ratio_cell
                                 c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_annual_cell = (
                                     nu.calc_NT_T(interval_type, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio))
