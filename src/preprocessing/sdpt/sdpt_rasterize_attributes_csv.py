@@ -43,7 +43,7 @@ def load_species_reclassification(local_csv_path=None, s3_csv_key=None):
     """
     try:
         if s3_csv_key:
-            # Download CSV into the local_temp_dir
+            # Download CSV into cn.local_temp_dir
             local_csv_path = os.path.join(cn.local_temp_dir, os.path.basename(s3_csv_key))
             uu.download_file_from_s3(s3_csv_key, local_csv_path, cn.s3_bucket_name)
             logging.info(f"Downloaded CSV from s3://{cn.s3_bucket_name}/{s3_csv_key} to {local_csv_path}")
@@ -73,7 +73,7 @@ def classify_plantation(row, species_to_rotation):
           else => "unknown_tc"
       - If simpleType == "planted forest":
           use species_to_rotation
-      - Otherwise, None
+      - Otherwise => None
     """
     simple_name = str(row.get("simpleName", "")).strip().lower()
     vernac_name = str(row.get("vernacName", "")).strip()
@@ -90,83 +90,41 @@ def classify_plantation(row, species_to_rotation):
         return None
 
 # ---------------------------------------------------------------------------
-def custom_download_shapefile_remove_prefix(
-    s3_prefix: str,
-    local_dir: str,
-    local_shp_basename: str,
-    s3_bucket_name: str
-):
-    """
-    Download a shapefile from S3 to a local directory, removing the 'tile_' prefix
-    when creating the local file name.
-
-    Example:
-      s3_prefix = "myfolder/tile_00N_110E"
-      local_shp_basename = "00N_110E"
-      => We'll download tile_00N_110E.shp -> 00N_110E.shp, etc.
-    """
-    uu.create_directory_if_not_exists(local_dir)
-    extensions = ['.shp', '.shx', '.dbf', '.prj', '.cpg']
-
-    for ext in extensions:
-        s3_path = s3_prefix + ext  # e.g. "myfolder/tile_00N_110E.shp"
-        local_path = os.path.join(local_dir, local_shp_basename + ext)  # "C:/tmp/sdpt/00N_110E.shp"
-        logging.info(f"Attempting to download: s3://{s3_bucket_name}/{s3_path} to {local_path}")
-        try:
-            uu.download_file_from_s3(s3_path, local_path, s3_bucket_name)
-            if not os.path.exists(local_path):
-                logging.error(f"Failed to download {s3_path} to {local_path}")
-        except Exception as e:
-            logging.error(f"Error downloading file from S3: {e}")
-
-# ---------------------------------------------------------------------------
 def rasterize_tile(tile_id, species_to_rotation, run_mode='default'):
     """
     Rasterize a single tile by:
-      1. Downloading the shapefile from S3, removing "tile_" prefix locally
-      2. Classifying rows
-      3. Using gdal_rasterize to create a GeoTIFF
-      4. Uploading to S3 if run_mode='default'
+      1. If run_mode == 'default', check if final TIF in S3 => skip if found
+      2. Build /vsis3/ path for tile_{tile_id}.shp
+      3. Read shapefile in memory
+      4. Classify each record
+      5. Use gdal_rasterize to create GeoTIFF locally
+      6. Upload to S3 if run_mode='default'
     """
     try:
         logging.info(f"Rasterizing tile {tile_id}")
 
-        # 1) Build local shapefile folder: C:/tmp/sdpt
-        local_shp_folder = os.path.join(cn.local_temp_dir, "sdpt")
-        uu.create_directory_if_not_exists(local_shp_folder)
+        # If run_mode=default => check if final TIF is already in S3
+        if run_mode == 'default':
+            s3_raster_key = posixpath.join(
+                cn.datasets['sdpt']['s3_processed'],
+                f"{tile_id}_plantations.tif"
+            )
+            if uu.s3_file_exists(cn.s3_bucket_name, s3_raster_key):
+                logging.info(f"Tile {tile_id}: final TIF already in s3://{cn.s3_bucket_name}/{s3_raster_key}, skipping.")
+                return
 
-        # We'll store shapefile locally as "00N_110E.shp" (no tile_ prefix).
-        local_shp_basename = tile_id
+        # 1) Build the /vsis3/ path for the tile shapefile
+        # e.g. "/vsis3/gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/tile_00N_110E.shp"
+        s3_shp_uri = f"/vsis3/{cn.s3_bucket_name}/{cn.datasets['sdpt']['s3_raw']}/tile_{tile_id}.shp"
+        logging.info(f"Reading shapefile for tile {tile_id} from: {s3_shp_uri}")
 
-        # 2) Build the S3 prefix for the tile shapefile
-        #    e.g. "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/tile_00N_110E"
-        s3_shapefile_prefix = posixpath.join(
-            cn.datasets['sdpt']['s3_raw'],  # .../sdpt
-            f"tile_{tile_id}"               # tile_00N_110E
-        )
-        # => "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/tile_00N_110E"
-
-        # 3) Download shapefile from S3
-        custom_download_shapefile_remove_prefix(
-            s3_prefix=s3_shapefile_prefix,
-            local_dir=local_shp_folder,
-            local_shp_basename=local_shp_basename,
-            s3_bucket_name=cn.s3_bucket_name
-        )
-
-        # 4) Build local path to the .shp => "C:/tmp/sdpt/00N_110E.shp"
-        local_shp_path = os.path.join(local_shp_folder, f"{tile_id}.shp")
-        if not os.path.exists(local_shp_path):
-            logging.warning(f"Shapefile {local_shp_path} not found. Skipping tile {tile_id}.")
-            return
-
-        # 5) Read into GeoDataFrame
-        gdf = gpd.read_file(local_shp_path)
+        # 2) Read shapefile directly from S3
+        gdf = gpd.read_file(s3_shp_uri)
         if gdf.empty:
-            logging.info(f"No features found in {local_shp_path}. Skipping.")
+            logging.info(f"No features found in tile_{tile_id}.shp. Skipping.")
             return
 
-        # 6) Classify each row
+        # 3) Classify each row
         gdf["plantation_type"] = gdf.apply(lambda row: classify_plantation(row, species_to_rotation), axis=1)
         gdf.dropna(subset=["plantation_type"], inplace=True)
         if gdf.empty:
@@ -178,14 +136,15 @@ def rasterize_tile(tile_id, species_to_rotation, run_mode='default'):
             logging.info(f"All plantation rows mapped to null for tile {tile_id}.")
             return
 
-        # 7) Save shapefile for gdal_rasterize
+        # 4) Write a temporary shapefile locally for gdal_rasterize
+        out_folder = os.path.join(cn.local_temp_dir, "sdpt_no_chunks")
+        uu.create_directory_if_not_exists(out_folder)
         temp_shp_base = f"{tile_id}_temp"
-        temp_shp_path = os.path.join(local_shp_folder, f"{temp_shp_base}.shp")
+        temp_shp_path = os.path.join(out_folder, f"{temp_shp_base}.shp")
         gdf.to_file(temp_shp_path)
 
-        # 8) Construct and run gdal_rasterize
         minx, miny, maxx, maxy = gdf.total_bounds
-        out_raster_path = os.path.join(local_shp_folder, f"{tile_id}_plantations.tif")
+        final_raster_path = os.path.join(out_folder, f"{tile_id}_plantations.tif")
 
         gdal_cmd = [
             'gdal_rasterize',
@@ -198,35 +157,33 @@ def rasterize_tile(tile_id, species_to_rotation, run_mode='default'):
             '-co', 'COMPRESS=DEFLATE',
             '-co', 'TILED=YES',
             temp_shp_path,
-            out_raster_path
+            final_raster_path
         ]
         logging.info(f"Running GDAL command: {' '.join(gdal_cmd)}")
         subprocess.run(gdal_cmd, check=True)
 
-        # 9) Remove temp shapefile
-        for ext in ['shp', 'shx', 'dbf', 'prj', 'cpg']:
-            p = os.path.join(local_shp_folder, f"{temp_shp_base}.{ext}")
+        # Remove the temp shapefile pieces
+        for ext in ['.shp', '.shx', '.dbf', '.prj', '.cpg']:
+            p = os.path.join(out_folder, f"{temp_shp_base}{ext}")
             if os.path.exists(p):
                 os.remove(p)
 
-        if not os.path.exists(out_raster_path):
-            logging.error(f"Rasterize failed to produce {out_raster_path}.")
+        if not os.path.exists(final_raster_path):
+            logging.error(f"gdal_rasterize failed to produce {final_raster_path}.")
             return
 
-        # 10) If run_mode=='default', upload to S3
+        # 5) If run_mode=='default', upload to S3 and remove local
         if run_mode == 'default':
             s3_raster_key = posixpath.join(
                 cn.datasets['sdpt']['s3_processed'],
                 f"{tile_id}_plantations.tif"
             )
-            logging.info(f"Uploading {out_raster_path} to s3://{cn.s3_bucket_name}/{s3_raster_key}")
-            uu.upload_file_to_s3(out_raster_path, cn.s3_bucket_name, s3_raster_key)
-
-            # Remove local after uploading
-            os.remove(out_raster_path)
-            logging.info(f"Removed local raster {out_raster_path}")
+            logging.info(f"Uploading {final_raster_path} to s3://{cn.s3_bucket_name}/{s3_raster_key}")
+            uu.upload_file_to_s3(final_raster_path, cn.s3_bucket_name, s3_raster_key)
+            os.remove(final_raster_path)
+            logging.info(f"Removed local raster {final_raster_path}")
         else:
-            logging.info(f"Test mode: local output retained at {out_raster_path}")
+            logging.info(f"Test mode => local raster retained => {final_raster_path}")
 
     except subprocess.CalledProcessError as e:
         logging.error(f"GDAL error for tile {tile_id}: {e}")
@@ -237,8 +194,8 @@ def rasterize_tile(tile_id, species_to_rotation, run_mode='default'):
 def main(tile_id=None, run_mode='default', client_type='local'):
     """
     1. Optionally connect to Coiled
-    2. Gather tile IDs from S3 (assuming tile_ prefix)
-    3. Rasterize in parallel
+    2. Gather tile IDs from S3 (assuming tile_{tile_id}.shp)
+    3. Rasterize in parallel, skipping if final TIF in S3 (run_mode=default)
     """
     # 1) Setup Dask
     if client_type == 'coiled':
@@ -249,30 +206,27 @@ def main(tile_id=None, run_mode='default', client_type='local'):
         logging.info("Local Dask client started.")
 
     try:
-        # 2) Load CSV from S3
+        # 2) Load the classification CSV from S3 (downloaded locally)
         species_to_rotation = load_species_reclassification(
             s3_csv_key=SDPT_RECLASS_S3_CSV
         )
 
-        # 3) Decide which tiles to process
+        # 3) Determine tile IDs
         if tile_id:
             tile_ids = [tile_id]
         else:
-            # e.g. "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt"
-            s3_folder = cn.datasets['sdpt']['s3_raw']  # no 'sdpt_by_tiles'
+            s3_folder = cn.datasets['sdpt']['s3_raw']
             existing_files = uu.list_s3_files(cn.s3_bucket_name, s3_folder)
             tile_ids = []
             for key in existing_files:
-                # e.g. "tile_00N_110E.shp"
                 base = os.path.basename(key)
                 if base.startswith("tile_") and base.endswith(".shp"):
-                    # tile_00N_110E.shp => 00N_110E
                     tid = base.replace("tile_", "").replace(".shp", "")
                     tile_ids.append(tid)
 
         logging.info(f"Tiles to process: {tile_ids}")
 
-        # 4) Submit tasks
+        # 4) Submit tasks to Dask
         futures = [client.submit(rasterize_tile, tid, species_to_rotation, run_mode) for tid in tile_ids]
         client.gather(futures)
 
@@ -288,17 +242,20 @@ def main(tile_id=None, run_mode='default', client_type='local'):
 
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Rasterize plantation shapefiles with reclassification.')
-    parser.add_argument('--tile_id', type=str, help='Tile ID (e.g., 00N_110E, no "tile_" prefix)')
+    parser = argparse.ArgumentParser(
+        description='Non-chunked SDPT script reading shapefiles from /vsis3/, skipping tiles if final TIF in S3.'
+    )
+    parser.add_argument('--tile_id', type=str, help='Tile ID (e.g., 00N_110E, no "tile_" prefix).')
     parser.add_argument('--run_mode', type=str, choices=['default', 'test'], default='default',
-                        help='Run mode (default uploads to S3, test leaves local file)')
-    parser.add_argument('--client', type=str, choices=['local', 'coiled'], default='local',
-                        help='Dask client type (local or coiled)')
+                        help='Run mode => default => upload final TIF to S3, test => keep TIF locally.')
+    parser.add_argument('--client', type=str, choices=['local','coiled'], default='local',
+                        help='Dask client type => local or coiled.')
     args = parser.parse_args()
 
     # If no command-line args, run a sample
     if not any(sys.argv[1:]):
-        logging.info("Running in test mode with sample tile_id 00N_110E...")
-        main(tile_id='00N_110E', run_mode='default', client_type='local')
+        logging.info("No CLI args => sample run tile_id=00N_110E, run_mode=default, local client.")
+        # main(tile_id='00N_110E', run_mode='default', client_type='local')
+        main(run_mode='default', client_type='local')
     else:
         main(tile_id=args.tile_id, run_mode=args.run_mode, client_type=args.client)
