@@ -14,7 +14,6 @@ python -m scripts.core_model.LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data
 """
 
 import argparse
-import dask
 import concurrent.futures
 import sys
 import numpy as np
@@ -115,7 +114,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     most_recent_year_not_tall_veg_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint16')
 
     # Forest age for each output year of the model
-    forest_age_annual_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
+    forest_age_annual_block = forest_age_start_year_block
 
     # Number of years of regrowth for new forest
     years_of_forest_regrowth_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
@@ -277,7 +276,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 continent_ecozone_cell = continent_ecozone_block[row, col]
                 climate_zone_cell = climate_zone_block[row, col]
 
-                forest_age_start_year_cell = forest_age_start_year_block[row, col]
                 forest_age_annual_cell = forest_age_annual_block[row, col]
 
                 # Applies the continent_ecozne fallback value when there isn't a value for the pixel
@@ -482,8 +480,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 # Reassigns age to 0 if there was a partial disturbance in the last interval
                 if partially_disturbed_in_last_interval:
                     forest_age_annual_cell = 0
-                else:
-                    forest_age_annual_cell = forest_age_start_year_cell
 
                 # Calculates the number of years of forest regrowth since the last year of not-tall vegetation
                 # or partial disturbance.
@@ -1199,7 +1195,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     # When decision trees above do not apply
                     else:
 
-                        state_out = 4000000000
+                        state_out = 9000
 
                         # If no C fluxes calculated in decision tree, densities out should be densities in (Mg C/ha).
                         # Otherwise, they get reset to 0.

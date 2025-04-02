@@ -666,9 +666,10 @@ def create_output_dir_name_list(core_output_dirs, interval_type, start_year, chu
     output_full_dirs = []
 
     # Replaces the DATE, CHUNK_SIZE, and MODEL_TYPE parts of the directories with values specific to the run
-    core_output_dirs = [path.replace("DATE", timestr()[:8]) for path in core_output_dirs]
-    core_output_dirs = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in core_output_dirs]
     core_output_dirs = [path.replace("MODEL_TYPE", model_type) for path in core_output_dirs]
+    core_output_dirs = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in core_output_dirs]
+    core_output_dirs = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in core_output_dirs]
+    core_output_dirs = [path.replace("DATE", timestr()[:8]) for path in core_output_dirs]
 
     # Iterates through the list of core output directories and adds the correct output years (stocks) or year ranges (fluxes) to each
     for basic_output in core_output_dirs:
