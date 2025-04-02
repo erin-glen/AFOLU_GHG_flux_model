@@ -148,8 +148,10 @@ datasets = {
     'climate_domain': "climate/carbon_model/inputs_for_carbon_pools/processed/fao_ecozones_bor_tem_tro/20190418/",
     'sdpt': {
         's3_raw': posixpath.join(project_dir, raw_dir, 'plantations', 'sdpt'),
-        's3_processed': posixpath.join(project_dir, processed_dir, 'sdpt'),
-        'local_processed': posixpath.join(local_temp_dir, 'sdpt', today_date)
+        's3_processed': posixpath.join(project_dir, processed_dir, 'sdpt', today_date),
+        's3_processed_small': posixpath.join(project_dir, processed_dir, 'sdpt', '4000_pixels', today_date),
+        'local_processed': posixpath.join(local_temp_dir, 'sdpt', today_date),
+        'local_processed_small': posixpath.join(local_temp_dir, 'sdpt_chunks_4000', today_date)
     },
 }
 
