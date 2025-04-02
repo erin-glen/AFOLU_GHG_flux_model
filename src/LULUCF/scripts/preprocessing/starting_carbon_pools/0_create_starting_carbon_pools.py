@@ -534,7 +534,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count_1x1 > 0):
-        uu.aggregate_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger)
+        uu.compile_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 

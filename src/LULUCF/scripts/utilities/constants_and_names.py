@@ -188,7 +188,7 @@ vegetation_height_5_year_path = f"{LULUCF_path}landcover/vegetation_height/five_
 vegetation_height_5_year_pattern = "vegetation_height"
 vegetation_height_annual_path = f"{LULUCF_path}landcover/vegetation_height/annual/20250114/raw/"
 vegetation_height_annual_pattern = ""
-vegetation_height_pattern = "vegetation_height"  # This is just for use in the numba data dictionary
+vegetation_height_pattern = "vegetation_height"  # Raw tifs don't have a pattern; this is just for use in the numba data dictionary
 
 
 forest_disturbance_annual_dir = f"{LULUCF_path}landcover/annual_forest_disturbance/raw/"

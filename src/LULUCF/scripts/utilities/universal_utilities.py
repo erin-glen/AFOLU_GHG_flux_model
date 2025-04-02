@@ -1189,7 +1189,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'pattern': out_pattern,
             'years': year_range,
             'chunk_name': f'{tile_id}__{bounds_str}__{out_pattern}_{year_range}.tif',
-            'tile_name': f'{tile_id}__{out_pattern}.tif',
+            'tile_name': f'{tile_id}__{out_pattern}_{year_range}.tif',
             'in_out': in_out,
             'min_value': 'no data',
             'mean_value': 'no data',
@@ -1206,7 +1206,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'pattern': out_pattern,
             'years': year_range,
             'chunk_name': f'{tile_id}__{bounds_str}__{out_pattern}_{year_range}.tif',
-            'tile_name': f'{tile_id}__{out_pattern}.tif',
+            'tile_name': f'{tile_id}__{out_pattern}_{year_range}.tif',
             'in_out': in_out,
             'min_value': np.min(array_per_ha),
             'mean_value': np.mean(array_per_ha),
@@ -1222,7 +1222,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
 # Calculates difference between pixel counts in all 1x1s in a 10x10 vs. the corresponding 10x10
 # to make sure that aggregation of 1x1s didn't lose any data (difference should be 0).
 # From https://chatgpt.com/share/e/67d5d68d-7168-800a-ada1-e42f8c3e9253
-def aggregate_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger):
+def compile_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger):
 
     ### Part 1: Organizes chunk stats for 1x1 degree chunks (inputs and outputs)
 
@@ -1272,11 +1272,14 @@ def aggregate_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger):
     input_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'] == 'input_layer']
     output_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'] == 'output_layer']
 
-    # Splits input rows based on 'layer_name' containing 'ba_' or 'forest_disturbance'
-    annual_1x1_inputs = input_1x1_rows[input_1x1_rows['layer_name'].str.contains(f'{cn.burned_area_final_pattern}|forest_disturbance', case=False, na=False)]
+    # Groups inputs that are a timeseries so they can go in their own tab so that no tab is too many rows
+    timeseries_input_layers = f'{cn.burned_area_final_pattern}|{cn.forest_disturbance_layer_name}|{cn.vegetation_height_pattern}|{cn.land_cover_pattern}'
 
-    # Puts output rows that don't contain 'ba_' or 'forest_disturbance' in a separate tab
-    other_1x1_inputs = input_1x1_rows[~input_1x1_rows['layer_name'].str.contains('ba_|forest_disturbance', case=False, na=False)]
+    # Splits input rows based on whether they are a timeseries input
+    annual_1x1_inputs = input_1x1_rows[input_1x1_rows['layer_name'].str.contains(timeseries_input_layers, case=False, na=False)]
+
+    # Puts output rows that aren't a timeseries input in their own tab
+    other_1x1_inputs = input_1x1_rows[~input_1x1_rows['layer_name'].str.contains(timeseries_input_layers, case=False, na=False)]
 
     # Splits output rows based on 'layer_name' containing 'flux', 'gross', or 'net'
     gross_flux_1x1_outputs = output_1x1_rows[output_1x1_rows['layer_name'].str.contains('gross', case=False, na=False)]
