@@ -1038,7 +1038,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                         c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio=0, litter_c_ratio=0)
-                                elif med_veg_curr:  # Plantation harvested as medium vegetation (2123->21231/21232)
+                                elif med_veg_curr:  # Plantation harvested as medium vegetation (2123->21231/21232)-- shouldn't occur in annual model because no med. veg modeled
                                     node = nu.accrete_node(node, 3)
                                     agc_rf = planted_forest_AGC_RF_cell
                                     bgc_rf = planted_forest_BGC_RF_cell
@@ -1094,7 +1094,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                         c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio, litter_c_ratio)
-                                elif short_veg_curr:  # Natural forest converted to short vegetation (2212)
+                                elif short_veg_curr or med_veg_curr:  # Natural forest converted to short vegetation (2212)
                                     node = nu.accrete_node(node, 2)
                                     if drivers_cell in cn.drivers_non_soil_C: # Natural forest converted to short vegetation with disturbance that emits all non-soil C pools (22121->221211/221212)
                                         node = nu.accrete_node(node, 1)
@@ -1122,7 +1122,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                             rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                             deadwood_c_ratio, litter_c_ratio)
-                                elif med_veg_curr:  # Natural forest converted to medium vegetation (2213)
+                                elif med_veg_curr:  # Natural forest converted to medium vegetation (2213)-- shouldn't occur in annual model because no med. veg modeled
                                     node = nu.accrete_node(node, 3)
                                     if drivers_cell in cn.drivers_non_soil_C: # Natural forest converted to medium vegetation with disturbance that emits all non-soil C pools (22131->221311/221312)
                                         node = nu.accrete_node(node, 1)
