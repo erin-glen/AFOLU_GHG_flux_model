@@ -1,5 +1,3 @@
-# constants_and_names.py
-
 import posixpath
 from datetime import datetime
 import boto3
@@ -33,7 +31,7 @@ small_chunk_pattern = r"__-?\d+_-?\d+_-?\d+_-?\d+__"
 
 # Local Directories
 local_root = 'C:/GIS/Data/Global'  # Adjust as needed for your local environment
-local_temp_dir = 'C:/tmp'  # Adjust based on your environment
+local_temp_dir = '/tmp'          # Adjust based on your environment
 
 # Date Configuration
 today_date = datetime.today().strftime('%Y%m%d')
@@ -147,17 +145,17 @@ datasets = {
         'local_processed': posixpath.join(local_temp_dir, 'extraction', today_date),
         'working_version': posixpath.join(project_dir, processed_dir, 'extraction', '20241021')
     },
-    'climate_domain': "climate/carbon_model/inputs_for_carbon_pools/processed/fao_ecozones_bor_tem_tro/20190418/"
-
-    # Add other datasets as needed
+    'climate_domain': "climate/carbon_model/inputs_for_carbon_pools/processed/fao_ecozones_bor_tem_tro/20190418/",
+    'sdpt': {
+        's3_raw': posixpath.join(project_dir, raw_dir, 'plantations', 'sdpt'),
+        's3_processed': posixpath.join(project_dir, processed_dir, 'sdpt'),
+        'local_processed': posixpath.join(local_temp_dir, 'sdpt', today_date)
+    },
 }
-
-
 
 # ---------------------------------------------------
 # 3. General Paths and Constants
 # ---------------------------------------------------
-
 
 # IPCC Codes
 ipcc_codes = {
@@ -175,7 +173,6 @@ ecozone_codes = {
     'tropical': 1,
     'boreal': 2,
     'temperate': 3,
-
 }
 
 # Nutrient Status Codes
@@ -185,14 +182,13 @@ nutrient_status_codes = {
     'rich': 2
 }
 
-
 """
 Some info on SDPT data from David:
 They're for SDPTv2, from 20240911, I think. For planted forest type, 
-1-oil palm, 2-woodfiber, 3-other. For planted_forest_tree_crop, I believe 1-planted forest, 2-tree crop.
+1-oil palm, 2-woodfiber, 3-other. For planted_forest_tree_crop, 
+I believe 1-planted forest, 2-tree crop.
 """
 
-#TODO this needs to be updated!!!
 # Plantation Types Codes
 plantation_type_codes = {
     'unknown': 0,
@@ -223,38 +219,45 @@ file_patterns = {
 # ---------------------------------------------------
 # 4. Download Dictionary
 # ---------------------------------------------------
-# Prepare download dictionary using 'working_version' paths
 
 lc_uri = 'climate/AFOLU_flux_model/LULUCF/outputs/IPCC_basic_classes/2020/40000_pixels/20240205'
 
 download_dict = {
-    file_patterns[
-        'land_cover']: f's3://{s3_bucket_name}/{posixpath.join(lc_uri, f"{sample_tile_id}__IPCC_classes_2020.tif")}',
-    file_patterns['peat']: f's3://{s3_bucket_name}/{posixpath.join(peat_tiles_prefix, f"{sample_tile_id}.tif")}',
-    file_patterns[
-        'dadap']: f's3://{s3_bucket_name}/{posixpath.join(datasets["dadap"]["working_version"], f"dadap_{sample_tile_id}.tif")}',
-    file_patterns[
-        'engert']: f's3://{s3_bucket_name}/{posixpath.join(datasets["engert"]["working_version"], f"engert_{sample_tile_id}.tif")}',
-    file_patterns[
-        'grip']: f's3://{s3_bucket_name}/{posixpath.join(datasets["grip"]["roads"]["working_version"], f"{sample_tile_id}_grip_density.tif")}',
-    file_patterns[
-        'osm_roads']: f's3://{s3_bucket_name}/{posixpath.join(datasets["osm"]["roads"]["working_version"], f"{sample_tile_id}_osm_roads_density.tif")}',
-    file_patterns[
-        'osm_canals']: f's3://{s3_bucket_name}/{posixpath.join(datasets["osm"]["canals"]["working_version"], f"{sample_tile_id}_osm_canals_density.tif")}',
-    file_patterns[
-        'planted_forest_type_layer']: f's3://{s3_bucket_name}/{posixpath.join(datasets["planted_forest_type"]["working_version"], f"{sample_tile_id}_plantation_type_oilpalm_woodfiber_other.tif")}',
-    file_patterns[
-        'extraction']: f's3://{s3_bucket_name}/{posixpath.join(datasets["extraction"]["working_version"], f"{sample_tile_id}_extraction.tif")}',
-    file_patterns[
-        'climate_domain']: f's3://{s3_bucket_name}/{posixpath.join(datasets["climate_domain"], f"{sample_tile_id}_fao_ecozones_bor_tem_tro_processed.tif")}',
-    file_patterns[
-        'descals_type']: f's3://{s3_bucket_name}/{posixpath.join(datasets["descals_oil_palm"]["plant_type"]["working_version"], f"descals_extent_{sample_tile_id}.tif")}',
+    file_patterns['land_cover']:
+        f's3://{s3_bucket_name}/{posixpath.join(lc_uri, f"{sample_tile_id}__IPCC_classes_2020.tif")}',
 
+    file_patterns['peat']:
+        f's3://{s3_bucket_name}/{posixpath.join(peat_tiles_prefix, f"{sample_tile_id}.tif")}',
+
+    file_patterns['dadap']:
+        f's3://{s3_bucket_name}/{posixpath.join(datasets["dadap"]["working_version"], f"dadap_{sample_tile_id}.tif")}',
+
+    file_patterns['engert']:
+        f's3://{s3_bucket_name}/{posixpath.join(datasets["engert"]["working_version"], f"engert_{sample_tile_id}.tif")}',
+
+    file_patterns['grip']:
+        f's3://{s3_bucket_name}/{posixpath.join(datasets["grip"]["roads"]["working_version"], f"{sample_tile_id}_grip_density.tif")}',
+
+    file_patterns['osm_roads']:
+        f's3://{s3_bucket_name}/{posixpath.join(datasets["osm"]["roads"]["working_version"], f"{sample_tile_id}_osm_roads_density.tif")}',
+
+    file_patterns['osm_canals']:
+        f's3://{s3_bucket_name}/{posixpath.join(datasets["osm"]["canals"]["working_version"], f"{sample_tile_id}_osm_canals_density.tif")}',
+
+    file_patterns['planted_forest_type_layer']:
+        f's3://{s3_bucket_name}/{posixpath.join(datasets["planted_forest_type"]["working_version"], f"{sample_tile_id}_plantation_type_oilpalm_woodfiber_other.tif")}',
+
+    file_patterns['extraction']:
+        f's3://{s3_bucket_name}/{posixpath.join(datasets["extraction"]["working_version"], f"{sample_tile_id}_extraction.tif")}',
+
+    file_patterns['climate_domain']:
+        f's3://{s3_bucket_name}/{posixpath.join(datasets["climate_domain"], f"{sample_tile_id}_fao_ecozones_bor_tem_tro_processed.tif")}',
+
+    file_patterns['descals_type']:
+        f's3://{s3_bucket_name}/{posixpath.join(datasets["descals_oil_palm"]["plant_type"]["working_version"], f"descals_extent_{sample_tile_id}.tif")}',
 }
 
-
-### Miscellaneous
-
+# Additional numeric conversions or constants
 full_raster_dims = 40000  # Size of a 10x10 deg raster in pixels
 
 # Threshold for height loss to be counted as tree loss (meters)
@@ -270,8 +273,8 @@ combined_log = "combined_log"
 
 # Constants for GWPs
 gwp_ch4 = np.float32(28.0)  # For example
-gwp_n2o = np.float32(265.0)  # For example
+gwp_n2o = np.float32(265.0) # For example
 
-# constants_and_names.py
-c_to_co2 = np.float32(3.67)      # Conversion factor from C to CO₂
-n2o_n_to_n2o = np.float32(1.571) # Conversion factor from N₂O-N to N₂O
+# Conversion factors
+c_to_co2 = np.float32(3.67)       # C to CO2
+n2o_n_to_n2o = np.float32(1.571)  # N2O-N to N2O
