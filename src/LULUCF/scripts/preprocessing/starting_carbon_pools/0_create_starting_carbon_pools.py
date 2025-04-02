@@ -359,7 +359,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
                                                                out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
 
             # Only prints if not a final run
-            lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Ready to upload: {uu.timestr()}", is_final, logger_worker)
+            lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", is_final, logger_worker)
 
             # Executes uploads in parallel
             with ThreadPoolExecutor(max_workers=5) as executor:
