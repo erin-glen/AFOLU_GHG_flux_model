@@ -211,6 +211,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
             # print("forest_dist_blocks_all_intervals_so_far")
             # print(forest_dist_blocks_all_intervals_so_far)
 
+        # Tracks whether a partial disturbance occurred in the last interval due to any cause (not including just fire,
+        # which does not count as a partial disturbance in this model if height does not decrease significantly with it).
+        # Rewritten for every interval. Hence, it is defined inside the interval loop.
+        partially_disturbed_in_last_interval_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
 
         # Numpy arrays for outputs that don't depend on previous interval's values
         state_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint32')  # Land cover state at end of interval
@@ -1082,6 +1086,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
                 max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
                 first_time_sig_loss_from_max_height_block[row, col] = first_time_sig_loss_from_max_height
+                partially_disturbed_in_last_interval_block[row, col] = partially_disturbed_in_last_interval
 
         # os.quit()   # For testing the first interval
 
@@ -1127,7 +1132,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
             out_dict_uint8[f"{cn.years_of_forest_regrowth}_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
             out_dict_uint16[f"{cn.year_of_forest_loss}_{year_range}"] = year_of_forest_loss_block.copy()
             out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
-            out_dict_uint8[f"{cn.first_time_sig_loss_from_max_height_block}_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()
+            out_dict_uint8[f"{cn.first_time_sig_loss_from_max_height}_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()
+            out_dict_uint8[f"{cn.partially_disturbed_in_last_interval}_{year_range}"] = partially_disturbed_in_last_interval_block.copy()
 
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
