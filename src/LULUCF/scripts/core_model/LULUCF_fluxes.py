@@ -33,7 +33,7 @@ from ..utilities import resize_cluster
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-@jit(nopython=True)
+# @jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                   primary_forest_RFs, start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years, is_final):
 
@@ -537,8 +537,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 node = 0
                 gain_year_count = 0
 
-                state_out = 9000  #TODO Delete this when tree is complete
-
                 if interval_type == cn.intervals_annual or interval_type == cn.intervals_five_years:
 
                     ### Tree gain
@@ -952,6 +950,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     node = nu.accrete_node(node, 1)
                                     if first_forest_dist_in_record or (first_time_sig_loss_from_max_height > 0) or (most_recent_year_not_tall_veg > 0): # Young secondary natural forest (32211->322111/322112)
                                         node = nu.accrete_node(node, 1)
+                                        print(f"In {node}")
                                         # Because the pixel had a stand-replacing or non-stand-replacing disturbance at some point
                                         # it shouldn't use primary forest or old secondary forest RF anymore.
                                         # This replaces those RFs with a young secondary forest RF.
@@ -976,6 +975,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                         node = nu.accrete_node(node, 2)
                                         if oldest_secondary_forest:  # >100 year old secondary forest (proxy for primary forest/IFL) (322121->3221211/3221212)
                                             node = nu.accrete_node(node, 1)
+                                            print(f"In {node}")
                                             agc_rf = primary_forest_AGC_RF
                                             bgc_rf = agc_rf * r_s_ratio_cell
                                             c_pools_fire_CO2 = cn.agc_emissions_only
@@ -1059,9 +1059,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
                 first_time_sig_loss_from_max_height_block[row, col] = first_time_sig_loss_from_max_height
 
-        # os.quit()   # For testing the first interval
+        os.quit()   # For testing the first interval
 
-        ### End of iteration calculations and outputs
+        ### End of one iteration calculations and outputs
 
         # Adds the output arrays to the dictionary with the appropriate data type
         # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
