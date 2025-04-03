@@ -33,7 +33,7 @@ from ..utilities import resize_cluster
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-# @jit(nopython=True)
+@jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                   primary_forest_RFs, start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years, is_final):
 
@@ -493,8 +493,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 # Checked this before the second global run and it's still the case (output folder v38).
                 years_of_forest_regrowth = nu.calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_tall_veg, tall_veg_curr, partially_disturbed_in_last_interval, years_of_forest_regrowth)
 
-                # Assigns pixel to "old secondary forest" if age is > 100 years
-                if(forest_age_annual_cell > 100):
+                # Assigns pixel to "old secondary forest" if age is >= 100 years. All age pixels >100 years were reassigned to 100.
+                if forest_age_annual_cell >= 100:
                     oldest_secondary_forest = 1
                 else:
                     oldest_secondary_forest = 0
@@ -514,7 +514,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_41_60_AGC_RF_cell
                 elif 61 <= forest_age_annual_cell <= 80:
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_61_80_AGC_RF_cell
-                elif 81 <= forest_age_annual_cell <= 100:
+                elif 81 <= forest_age_annual_cell < 100:  # < 100 because 100 is the value assigned to all forests 100 and above
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_81_100_AGC_RF_cell
                 else:  # Use the primary forest/IFL RF for forest >100 years old
                     natrl_forest_age_dependent_agc_rf = primary_forest_AGC_RF
@@ -948,19 +948,20 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 node = nu.accrete_node(node, 2)
                                 if tall_veg_curr:  # Forest not disturbed in last interval (3221)
                                     node = nu.accrete_node(node, 1)
-                                    if first_forest_dist_in_record or (first_time_sig_loss_from_max_height > 0) or (most_recent_year_not_tall_veg > 0): # Young secondary natural forest (32211->322111/322112)
+                                    if oldest_secondary_forest:  # >100 year old natural forest not disturbed in last interval (32211->322111/322112)
                                         node = nu.accrete_node(node, 1)
-                                        print(f"In {node}")
-                                        # Because the pixel had a stand-replacing or non-stand-replacing disturbance at some point
-                                        # it shouldn't use primary forest or old secondary forest RF anymore.
-                                        # This replaces those RFs with a young secondary forest RF.
-                                        # +/- 0.01 the primary forest and old secondary RF are to provide some tolerance around
-                                        # those RFs in case numba is rounding them and they aren't exact matches.
-                                        # if (natrl_forest_age_dependent_agc_rf > primary_forest_AGC_RF - 0.01) and (natrl_forest_age_dependent_agc_rf < primary_forest_AGC_RF + 0.01):
-                                        #     agc_rf = natrl_forest_curve_0_5_AGC_RF_cell
-                                        # elif (natrl_forest_age_dependent_agc_rf > natrl_forest_curve_21_100_AGC_RF_cell - 0.01) and (natrl_forest_age_dependent_agc_rf < natrl_forest_curve_21_100_AGC_RF_cell + 0.01):
-                                        #     agc_rf = natrl_forest_curve_0_5_AGC_RF_cell
-                                        # else:  # If not using primary or old secondary RF, it can use whatever the relevant young secondary RF is
+                                        agc_rf = primary_forest_AGC_RF
+                                        bgc_rf = agc_rf * r_s_ratio_cell
+                                        c_pools_fire_CO2 = cn.agc_emissions_only
+                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
+                                            node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
+                                            agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                            interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
+                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                            deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
+                                    else: # <100 year old natural forest not disturbed in last interval (32212->322121/322122)
+                                        node = nu.accrete_node(node, 2)
                                         agc_rf = natrl_forest_age_dependent_agc_rf
                                         bgc_rf = agc_rf * r_s_ratio_cell
                                         c_pools_fire_CO2 = cn.agc_emissions_only
@@ -971,33 +972,56 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                             deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
-                                    else:  # Natural forest undisturbed since start of model (32212)
-                                        node = nu.accrete_node(node, 2)
-                                        if oldest_secondary_forest:  # >100 year old secondary forest (proxy for primary forest/IFL) (322121->3221211/3221212)
-                                            node = nu.accrete_node(node, 1)
-                                            print(f"In {node}")
-                                            agc_rf = primary_forest_AGC_RF
-                                            bgc_rf = agc_rf * r_s_ratio_cell
-                                            c_pools_fire_CO2 = cn.agc_emissions_only
-                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
-                                                node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
-                                                agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                                interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
-                                                Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
-                                                deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
-                                        else:  # Older secondary forest (322122->3221221/3221222)
-                                            node = nu.accrete_node(node, 2)
-                                            agc_rf = natrl_forest_curve_21_100_AGC_RF_cell
-                                            bgc_rf = agc_rf * r_s_ratio_cell
-                                            c_pools_fire_CO2 = cn.agc_emissions_only
-                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
-                                                node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
-                                                agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                                interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
-                                                Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
-                                                deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
+                                    # if first_forest_dist_in_record or (first_time_sig_loss_from_max_height > 0) or (most_recent_year_not_tall_veg > 0): # Young secondary natural forest (32211->322111/322112)
+                                    #     node = nu.accrete_node(node, 1)
+                                    #     print(f"In {node}")
+                                    #     # Because the pixel had a stand-replacing or non-stand-replacing disturbance at some point
+                                    #     # it shouldn't use primary forest or old secondary forest RF anymore.
+                                    #     # This replaces those RFs with a young secondary forest RF.
+                                    #     # +/- 0.01 the primary forest and old secondary RF are to provide some tolerance around
+                                    #     # those RFs in case numba is rounding them and they aren't exact matches.
+                                    #     # if (natrl_forest_age_dependent_agc_rf > primary_forest_AGC_RF - 0.01) and (natrl_forest_age_dependent_agc_rf < primary_forest_AGC_RF + 0.01):
+                                    #     #     agc_rf = natrl_forest_curve_0_5_AGC_RF_cell
+                                    #     # elif (natrl_forest_age_dependent_agc_rf > natrl_forest_curve_21_100_AGC_RF_cell - 0.01) and (natrl_forest_age_dependent_agc_rf < natrl_forest_curve_21_100_AGC_RF_cell + 0.01):
+                                    #     #     agc_rf = natrl_forest_curve_0_5_AGC_RF_cell
+                                    #     # else:  # If not using primary or old secondary RF, it can use whatever the relevant young secondary RF is
+                                    #     agc_rf = natrl_forest_age_dependent_agc_rf
+                                    #     bgc_rf = agc_rf * r_s_ratio_cell
+                                    #     c_pools_fire_CO2 = cn.agc_emissions_only
+                                    #     c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                    #     state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
+                                    #         node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
+                                    #         agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                    #         interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
+                                    #         Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                    #         deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
+                                    # else:  # Natural forest undisturbed since start of model (32212)
+                                    #     node = nu.accrete_node(node, 2)
+                                    #     if oldest_secondary_forest:  # >100 year old secondary forest (proxy for primary forest/IFL) (322121->3221211/3221212)
+                                    #         node = nu.accrete_node(node, 1)
+                                    #         print(f"In {node}")
+                                    #         agc_rf = primary_forest_AGC_RF
+                                    #         bgc_rf = agc_rf * r_s_ratio_cell
+                                    #         c_pools_fire_CO2 = cn.agc_emissions_only
+                                    #         c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                    #         state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
+                                    #             node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
+                                    #             agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                    #             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
+                                    #             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                    #             deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
+                                    #     else:  # Older secondary forest (322122->3221221/3221222)
+                                    #         node = nu.accrete_node(node, 2)
+                                    #         agc_rf = natrl_forest_curve_21_100_AGC_RF_cell
+                                    #         bgc_rf = agc_rf * r_s_ratio_cell
+                                    #         c_pools_fire_CO2 = cn.agc_emissions_only
+                                    #         c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                    #         state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
+                                    #             node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
+                                    #             agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                    #             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
+                                    #             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                    #             deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
                                 else:  # Trees outside forests not disturbed in the last interval (3222->32221/32222)
                                     node = nu.accrete_node(node, 2)
                                     agc_rf = cn.trees_outside_forests_agc_rf_max
@@ -1059,7 +1083,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
                 first_time_sig_loss_from_max_height_block[row, col] = first_time_sig_loss_from_max_height
 
-        os.quit()   # For testing the first interval
+        # os.quit()   # For testing the first interval
 
         ### End of one iteration calculations and outputs
 

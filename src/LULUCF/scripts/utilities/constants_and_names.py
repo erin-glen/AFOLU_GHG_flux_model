@@ -528,7 +528,7 @@ LULUCF_core_output_dirs = [
     f"{outputs_path}{agc_rf_pre_dist_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
 
     # Intermediate outputs
-    f"{outputs_path}{forest_age_output_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{forest_age_output_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{gain_year_count_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{most_recent_year_not_tall_veg}/RUNSTART_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/", # Years represent from model start to current interval end
     f"{outputs_path}{years_of_forest_regrowth}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/",
