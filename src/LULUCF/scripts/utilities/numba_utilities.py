@@ -720,7 +720,8 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_last_interval, RF
 
 
     # Step 1: Calculates the number of years of carbon gain before the non-stand-replacing disturbance occurred (years).
-    # Annual model has no gain before loss, so gain_year_count_pre_dist = 0.
+    # Annual model has no gain before disturbance (no gain in disturbance year),
+    # so in this function gain_year_count_pre_dist = 0 always.
     if interval_type == cn.intervals_five_years:
         if forest_dist_last > 0:
             # If a forest disturbance was detected, the gain_year_count_pre_dist are the number of years until detection of the last disturbance.
@@ -771,7 +772,9 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_last_interval, RF
         # Must specify float32 because numba is quite particular about datatypes.
         c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')
 
-    # Assigns pre-disturbance gross removals 0 for consistency between 5-year and annual intervals
+    # Assigns pre-disturbance gross removals 0 for consistency between 5-year and annual intervals.
+    # There are no removals in the year of disturbance, so we know removals in a partially disturbed forest with annual intervals
+    # is always 0 and can skip the calculations in the 5-year interval branch to save some time.
     elif interval_type == cn.intervals_annual:
         agc_gross_removals_out = 0
         bgc_gross_removals_out = 0
@@ -897,11 +900,11 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_last_interval, RF
 
     non_co2_fluxes_out = np.array([ch4_flux_out, n2o_flux_out]).astype('float32')
 
-    # Step 9: Resets the forest age to 0 because there was a partial disturbance
+    # Step 9: Resets the forest age to 0 because this function always has a partial disturbance
+    # either with or without fire-- it doesn't matter. Age is reset either way.
     forest_age_interval_end = 0
 
     return state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out, gain_year_count_pre_dist, forest_age_interval_end
-
 
 
 # Gross and net fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances.
@@ -922,7 +925,8 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
     # Step 1: Calculates the number of years of carbon gain before a fire occurred (years).
     # Note that removals continue after the year of fire, too, for 5-year intervals. This gain_year_count_pre_dist is used to determine removals
     # until the fire (i.e. carbon densities at the year of fire).
-    # Annual model has no gain before loss, so gain_year_count_pre_dist = 0.
+    # Annual model has no gain in the year of disturbance (including fire),
+    # so gain_year_count_pre_dist = 0 when there is fire and = 1 when there is no fire.
     if interval_type == cn.intervals_five_years:
         if most_recent_year_burned_during_interval > 0:
             # If a forest disturbance was detected, the gain_year_count_pre_dist are the number of years until detection of the last disturbance.
@@ -942,7 +946,10 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
             gain_year_count_pre_dist = cn.interval_duration
 
     elif interval_type == cn.intervals_annual:
-        gain_year_count_pre_dist = 0
+        if most_recent_year_burned_during_interval > 0:
+            gain_year_count_pre_dist = 0  # No removals in a disturbance/fire year, so no removals during annual interval with fire
+        else:
+            gain_year_count_pre_dist = 1  # One year of gain when there is no fire
 
     else:
         raise ValueError("interval_type not valid: 'hybrid' not supported yet")
@@ -961,33 +968,21 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
         litter_c_ratio = 0.0
 
 
-    # Step 3: Calculates pre-disturbance gross removals by carbon pools (Mg C/ha/interval) for 5-year intervals. Gross removals are negative.
-    # This should only have a non-0 value for 5-year intervals; it should be 0 for annual intervals.
-    if interval_type == cn.intervals_five_years:
-        agc_gross_removals_out = float((RF_AGC * gain_year_count_pre_dist) * -1) #float() necessary for Numba typing
-        bgc_gross_removals_out = float((RF_BGC * gain_year_count_pre_dist) * -1) #float() necessary for Numba typing
-        deadwood_c_gross_removals_out= agc_gross_removals_out * deadwood_c_ratio
-        litter_c_gross_removals_out= agc_gross_removals_out * litter_c_ratio
+    # Step 3: Calculates pre-disturbance gross removals by carbon pools (Mg C/ha/interval) for 5-year and annual intervals. Gross removals are negative.
+    # Works for 5-year and annual intervals alike.
+    agc_gross_removals_out = float((RF_AGC * gain_year_count_pre_dist) * -1) #float() necessary for Numba typing
+    bgc_gross_removals_out = float((RF_BGC * gain_year_count_pre_dist) * -1) #float() necessary for Numba typing
+    deadwood_c_gross_removals_out= agc_gross_removals_out * deadwood_c_ratio
+    litter_c_gross_removals_out= agc_gross_removals_out * litter_c_ratio
 
-        # Consolidates outputs into array to reduce the number of arguments returned to the decision tree.
-        # Must specify float32 because numba is quite particular about datatypes.
-        c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')
-
-    # Assigns pre-fire gross removals 0 for consistency between 5-year and annual intervals
-    elif interval_type == cn.intervals_annual:
-        agc_gross_removals_out = 0
-        bgc_gross_removals_out = 0
-        deadwood_c_gross_removals_out = 0
-        litter_c_gross_removals_out = 0
-        c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')
-
-    else:
-        raise ValueError("interval_type not valid: 'hybrid' not supported yet")
+    # Consolidates outputs into array to reduce the number of arguments returned to the decision tree.
+    # Must specify float32 because numba is quite particular about datatypes.
+    c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')
 
 
     # Step 4: Calculates carbon densities at the year of fire by carbon pool (Mg C/ha). This is not output from the model.
     # For 5-year intervals, C pools pre-disturbance differ from input carbon pools.
-    # For annual intervals, C pools pre-disturbance are the same as input carbon pools because there is no gain before loss.
+    # For annual intervals, C pools pre-disturbance are the same as input carbon pools because there is no gain before disturbance/fire.
     if interval_type == cn.intervals_five_years:
         agc_pre_disturb = agc_dens_in - agc_gross_removals_out
         bgc_pre_disturb = bgc_dens_in - bgc_gross_removals_out
@@ -995,8 +990,10 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
         litter_c_pre_disturb = litter_c_dens_in - litter_c_gross_removals_out
 
         # Pre-disturbance carbon densities as an array, used as input for non-CO2 fire emissions and post-disturbance removals (if applicable)
-        c_pre_disturb = np.array([agc_pre_disturb, bgc_pre_disturb, deadwood_c_pre_disturb, litter_c_pre_disturb])
+        c_pre_disturb = np.array([agc_pre_disturb, bgc_pre_disturb, deadwood_c_pre_disturb, litter_c_pre_disturb]).astype('float32')
 
+    # Assigning interval start C pools to pre-disturbance C pools rather than calculating them like in the 5-year interval
+    # branch reduces the number of calculations and is more explicit
     elif interval_type == cn.intervals_annual:
         agc_pre_disturb = agc_dens_in
         bgc_pre_disturb = bgc_dens_in
@@ -1109,7 +1106,8 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
     non_co2_fluxes_out = np.array([ch4_flux_out, n2o_flux_out]).astype('float32')
 
 
-    # Step 9: Updates the forest age. Increments by the years in the interval.
+    # Step 9: Updates the forest age. Increments by the number of years in the interval.
+    # Age is not affected by fire, so age always increases in this function.
     if interval_type == cn.intervals_five_years:
         forest_age_interval_end = forest_age_interval_start + cn.interval_duration
     elif interval_type == cn.intervals_annual:
