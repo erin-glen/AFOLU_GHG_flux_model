@@ -180,11 +180,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         # Stores the burned area blocks for the current interval (recreated/overwritten for each interval)
         burned_area_curr_interval_block_list = []
 
-        # Creates a list of all the burned area arrays from the model start to the end of the interval.
-        # It works by getting the burned area chunks up through the end of the current interval.
+        # Creates a list of all the burned area arrays for the current interval.
+        # It lists all burned area chunks in the interval
         # For example, for a 5-year interval 2001-2005, it will get burned area for 2001, 2002, 2003, 2004, and 2005.
         # For annual interval 2015-2016, it will get burned area for 2015 and 2016.
-        # For 2016-2017, it will get burned area for 2015, 2016, 2017.
+        # For 2016-2017, it will get burned area for 2016-2017.
         for year in range(interval_end_year - interval_length, interval_end_year+1):
             burned_area_for_year_in_interval = f"{cn.burned_area_final_pattern}_{year}"
             burned_area_curr_interval_block_list.append(in_dict_uint8[burned_area_for_year_in_interval])
@@ -321,13 +321,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     # Most recent year with forest disturbance during the interval
                     forest_dist_last = max([forest_dist_t_4, forest_dist_t_3, forest_dist_t_2, forest_dist_t_1, forest_dist_t])
 
-                # Annual intervals: Burned area for start and end years of interval. 
+                # Annual intervals: Burned area for start year of interval only.
                 # Annual Potapov disturbance rasters not relevant.
                 elif interval_type == cn.intervals_annual:
-                    burned_area_t_1 = burned_area_curr_interval_block_list[-2][row, col]
-                    burned_area_t = burned_area_curr_interval_block_list[-1][row, col]
-                    # Most recent year with burned area during the interval
-                    most_recent_year_burned_during_interval = max([burned_area_t_1, burned_area_t])
+                    burned_area_t_1 = burned_area_curr_interval_block_list[0][row, col]
+                    # burned_area_t = burned_area_curr_interval_block_list[-1][row, col]
+                    # # Most recent year with burned area during the interval
+                    most_recent_year_burned_during_interval = max([burned_area_t_1])
                     burned_in_curr_interval = (most_recent_year_burned_during_interval > 0)
                     forest_dist_last = 0   # Annual Potapov forest disturbance raster not used for annual model
 
