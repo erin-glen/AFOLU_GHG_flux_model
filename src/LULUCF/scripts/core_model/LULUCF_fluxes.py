@@ -1112,7 +1112,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
             out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
             out_dict_uint8[f"{cn.first_time_sig_loss_from_max_height}_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()
             out_dict_uint8[f"{cn.part_or_full_dist_in_prev_interval}_{year_range}"] = part_or_full_dist_in_prev_interval_block.copy()
-            out_dict_uint8[f"{cn.burned_in_prev_interval}_{year_range}"] = burned_in_curr_interval_block.copy()
+            out_dict_uint8[f"{cn.burned_in_curr_interval}_{year_range}"] = burned_in_curr_interval_block.copy()
 
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
