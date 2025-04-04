@@ -99,8 +99,9 @@ def check_s3_file_created(s3_path):
 
 # Uploads local rasters to s3 and deletes the local versions after
 def upload_raster_to_s3(file_path, bucket, s3_key):
+
     s3_client = boto3.client("s3")
-    """Handles uploading raster files to S3 and deletes local copy after upload."""
+
     try:
         s3_client.upload_file(file_path, bucket, s3_key)
         os.remove(file_path)  # Remove local temp file after upload
