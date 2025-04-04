@@ -105,9 +105,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
     ## Test/intermediate outputs blocks
 
-    # Stores the burned area blocks for the entire model duration (added to progressively during each interval)
-    burned_area_all_intervals_so_far_blocks = []
-
     # Stores the forest disturbance blocks for the entire model duration (added to progressively during each interval)
     forest_dist_blocks_all_intervals_so_far = []
 
@@ -143,7 +140,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     # Iterates through model intervals
     for interval_end_year in interval_end_years:
 
-        # print(f"Now at {interval_end_year}:")
+        # print(f"Now at interval ending in {interval_end_year}:")
 
         # print(interval_type)
 
@@ -180,18 +177,23 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         # print(f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}:", veg_h_prev_block)
         # print(f"{cn.vegetation_height_pattern}_{interval_end_year}:", veg_h_curr_block)
 
+        # Stores the burned area blocks for the current interval (recreated/overwritten for each interval)
+        burned_area_curr_interval_block_list = []
+
         # Creates a list of all the burned area arrays from the model start to the end of the interval.
-        # It works by getting the burned area chunks for the current interval and appending them to a list of chunks
-        # from previous intervals.
+        # It works by getting the burned area chunks up through the end of the current interval.
         # For example, for a 5-year interval 2001-2005, it will get burned area for 2001, 2002, 2003, 2004, and 2005.
         # For annual interval 2015-2016, it will get burned area for 2015 and 2016.
         # For 2016-2017, it will get burned area for 2015, 2016, 2017.
-        for year_offset in range(interval_end_year-interval_year_diff, interval_end_year+1):
-            burned_area_for_year_in_interval = f"{cn.burned_area_final_pattern}_{year_offset}"
-            burned_area_all_intervals_so_far_blocks.append(in_dict_uint8[burned_area_for_year_in_interval])
+        for year in range(interval_end_year - interval_length, interval_end_year+1):
+            burned_area_for_year_in_interval = f"{cn.burned_area_final_pattern}_{year}"
+            burned_area_curr_interval_block_list.append(in_dict_uint8[burned_area_for_year_in_interval])
+            # print(year)
+            # print(burned_area_for_year_in_interval)
+            # print(burned_area_curr_interval_block_list)
 
-        # print("burned_area_all_intervals_so_far_blocks")
-        # print(burned_area_all_intervals_so_far_blocks)
+        # print("burned_area_curr_interval_block_list")
+        # print(burned_area_curr_interval_block_list)
 
 
         # Creates a list of all the annual Potapov forest disturbance rasters from 2001 to the end of the interval.
@@ -200,13 +202,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         # chunks from previous intervals.
         # Only does it for model run using 5-year intervals, as annual disturbance isn't needed for annual interval models
         if interval_type != cn.intervals_annual:
-            for year_offset in range(interval_end_year-interval_year_diff, interval_end_year+1):
+            for year in range(interval_end_year-interval_year_diff, interval_end_year+1):
 
                 # The name of the disturbance layer in the input dictionary
-                annual_disturbance_for_year_in_interval = f"{cn.forest_disturbance_layer_name}_{year_offset}"
+                annual_disturbance_for_year_in_interval = f"{cn.forest_disturbance_layer_name}_{year}"
 
                 # Replaces the binary annual disturbance array with the year of disturbance (1, 2, 3...23)
-                year_disturb_array = in_dict_uint8[annual_disturbance_for_year_in_interval] * (year_offset - start_year)
+                year_disturb_array = in_dict_uint8[annual_disturbance_for_year_in_interval] * (year - start_year)
 
                 # Makes a list of disturbance arrays with the disturbance year.
                 # uint8 is okay because the highest value should be 23 (not 2020).
@@ -300,11 +302,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 if interval_type == cn.intervals_five_years:
                     # Note: Stacking the burned area rasters using ndstack, stack, or flatten outside the pixel iteration did not work with numba.
                     # So just reading each raster from the list of rasters separately.
-                    burned_area_t_4 = burned_area_all_intervals_so_far_blocks[-5][row, col]
-                    burned_area_t_3 = burned_area_all_intervals_so_far_blocks[-4][row, col]
-                    burned_area_t_2 = burned_area_all_intervals_so_far_blocks[-3][row, col]
-                    burned_area_t_1 = burned_area_all_intervals_so_far_blocks[-2][row, col]
-                    burned_area_t = burned_area_all_intervals_so_far_blocks[-1][row, col]
+                    burned_area_t_4 = burned_area_curr_interval_block_list[-5][row, col]
+                    burned_area_t_3 = burned_area_curr_interval_block_list[-4][row, col]
+                    burned_area_t_2 = burned_area_curr_interval_block_list[-3][row, col]
+                    burned_area_t_1 = burned_area_curr_interval_block_list[-2][row, col]
+                    burned_area_t = burned_area_curr_interval_block_list[-1][row, col]
                     # Most recent year with burned area during the interval
                     most_recent_year_burned_during_interval = max([burned_area_t_4, burned_area_t_3, burned_area_t_2, burned_area_t_1, burned_area_t])
                     burned_in_prev_interval = (most_recent_year_burned_during_interval > 0)
@@ -319,11 +321,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     # Most recent year with forest disturbance during the interval
                     forest_dist_last = max([forest_dist_t_4, forest_dist_t_3, forest_dist_t_2, forest_dist_t_1, forest_dist_t])
 
-                # Annual intervals: Burned area for last year. Annual Potapov disturbance rasters not relevant.
+                # Annual intervals: Burned area for start and end years of interval. 
+                # Annual Potapov disturbance rasters not relevant.
                 elif interval_type == cn.intervals_annual:
-                    burned_area_t = burned_area_all_intervals_so_far_blocks[-1][row, col]
+                    burned_area_t_1 = burned_area_curr_interval_block_list[-2][row, col]
+                    burned_area_t = burned_area_curr_interval_block_list[-1][row, col]
                     # Most recent year with burned area during the interval
-                    most_recent_year_burned_during_interval = max([burned_area_t])
+                    most_recent_year_burned_during_interval = max([burned_area_t_1, burned_area_t])
                     burned_in_prev_interval = (most_recent_year_burned_during_interval > 0)
                     forest_dist_last = 0   # Annual Potapov forest disturbance raster not used for annual model
 
@@ -343,7 +347,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
                 # Loops over burned area pixels since 2001 to see if there was a fire.
                 # Stops once a fire is detected because all that matters here is that there was a fire at some point.
-                for burned_area_year in burned_area_all_intervals_so_far_blocks:
+                for burned_area_year in burned_area_curr_interval_block_list:
                     # Update the maximum value for this pixel
                     if burned_area_year[row, col] > 0:
                         first_burn_in_record = burned_area_year[row, col]
