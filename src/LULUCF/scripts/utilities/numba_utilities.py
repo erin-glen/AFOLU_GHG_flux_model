@@ -16,6 +16,16 @@ def accrete_node(combo, new):
     combo = combo*10 + new
     return combo
 
+# Makes all output states the same number of digits (currently 6)
+@jit(nopython=True)
+def pad_to_6_digits(state_out, max_digits_state_out):
+
+    if state_out < 10 ** (max_digits_state_out-1):
+        digits = int(np.log10(state_out)) + 1 if state_out > 0 else 1
+        pad_zeros = max_digits_state_out - digits
+        state_out = state_out * (10 ** pad_zeros)
+
+    return np.uint32(state_out)
 
 # Calculates a backup continent-ecozone value in case pixels don't have one.
 # There are many ways that are more efficient or at least succinct to calculate the mode of an array in Python,
@@ -190,7 +200,7 @@ def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_f
 # Calculates the number of years of forest regrowth since the last year of not-tall vegetation
 @jit(nopython=True)
 def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_forest, tall_veg_curr,
-                                       partially_disturbed_in_last_interval, years_of_forest_regrowth):
+                                       part_or_full_dist_in_prev_interval, years_of_forest_regrowth):
 
     # Determines if the number of years of regrowth should be calculated, based on last stand-replacing disturbance
     # or partial disturbance.
@@ -202,7 +212,7 @@ def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_f
     # disturbance occurs, if known.
     # For example, if a partial disturbance occurs in 2001 (as identified by the annual disturbance raster),
     # regrowth is assumed not to begin until the start of the next interval (2005).
-    if partially_disturbed_in_last_interval:
+    if part_or_full_dist_in_prev_interval:
 
         years_of_forest_regrowth = 0
         return years_of_forest_regrowth
@@ -511,7 +521,7 @@ def calc_NT_T(interval_type, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter
 # Applies to 5-year intervals and annual intervals. Main difference is that the calculation of gain before loss
 # only applies to the former.
 @jit(nopython=True)
-def calc_T_NT(node, interval_type, burned_in_last_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
+def calc_T_NT(node, interval_type, burned_in_prev_interval, agc_rf, bgc_rf, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
                     forest_dist_last, interval_end_year, c_dens_in,
                     post_dist_regrowth, most_recent_year_not_tall_veg, Cf, Gef_ch4, Gef_n2o,
                     deadwood_c_ratio, litter_c_ratio):
@@ -522,7 +532,7 @@ def calc_T_NT(node, interval_type, burned_in_last_interval, agc_rf, bgc_rf, c_po
     # Establishes which carbon pools are emitted depending on whether fire was detected during the interval.
     # For T->NT, emission factors are binary (1 means full emissions, 0 means no emissions).
     # Carbon pools that are emitted as CO2 if fire was detected.
-    if burned_in_last_interval:
+    if burned_in_prev_interval:
         agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = unpack_emission_factors(c_pools_fire_CO2)
     else:
         # Carbon pools that are emitted as CO2 if fire was not detected.
@@ -648,7 +658,7 @@ def calc_T_NT(node, interval_type, burned_in_last_interval, agc_rf, bgc_rf, c_po
     n2o_flux_out = 0
 
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
-    if burned_in_last_interval:
+    if burned_in_prev_interval:
 
         state_out = accrete_node(node, 1)
 
@@ -680,7 +690,7 @@ def calc_T_NT(node, interval_type, burned_in_last_interval, agc_rf, bgc_rf, c_po
     non_co2_fluxes_out = np.array([ch4_flux_out, n2o_flux_out]).astype('float32')
 
     # # For testing
-    # if burned_in_last_interval:
+    # if burned_in_prev_interval:
     #
     #     print("agc_dens_in:", agc_dens_in)
     #     print("agc_gross_removals_out:", agc_gross_removals_out)
@@ -702,7 +712,7 @@ def calc_T_NT(node, interval_type, burned_in_last_interval, agc_rf, bgc_rf, c_po
 # Gross and net fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 @jit(nopython=True)
-def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_last_interval, RF_AGC_pre_dist, RF_BGC_pre_dist,
+def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF_AGC_pre_dist, RF_BGC_pre_dist,
                                 c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
                                 forest_dist_last, interval_end_year, c_dens_in,
                                 RF_post_dist, most_recent_year_not_tall_veg, Cf, Gef_co2, Gef_ch4, Gef_n2o,
@@ -713,7 +723,7 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_last_interval, RF
 
     # Establishes which carbon pools are emitted depending on whether fire was detected during the interval.
     # For T->T, emission factors can range between 0 and 1, with 0 meaning no emissions and 1 meaning full emissions.
-    if burned_in_last_interval:      # Carbon pools that are emitted as CO2 if fire was detected.
+    if burned_in_prev_interval:      # Carbon pools that are emitted as CO2 if fire was detected.
         agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = unpack_emission_factors(c_pools_fire_CO2)
     else:          # Carbon pools that are emitted as CO2 if fire was not detected.
         agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = unpack_emission_factors(c_pools_no_fire)
@@ -815,7 +825,7 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_last_interval, RF
     # if a Gef for CO2 is supplied AND if there was fire during the interval.
     # This is used for non-stand replacing forest disturbances (as opposed to entire C pools being combusted).
     # From IPCC 2019 Eqn. 2.27
-    if burned_in_last_interval:
+    if burned_in_prev_interval:
 
         # Equations divide by C_to_CO2 to put the emissions back in Mg C/ha. They are later converted back to Mg CO2/ha,
         # but we need CO2 fire emissions in Mg C/ha here for consistency with all other outputs.
@@ -869,7 +879,7 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_last_interval, RF
     n2o_flux_out = 0
 
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
-    if burned_in_last_interval:
+    if burned_in_prev_interval:
 
         state_out = accrete_node(node, 1)
 

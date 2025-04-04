@@ -493,11 +493,8 @@ years_of_forest_regrowth = "years_of_forest_regrowth"
 year_of_forest_loss = "year_of_forest_loss"
 max_height_since_last_time_not_tall_veg = "max_height_since_last_time_not_tall_veg"
 first_time_sig_loss_from_max_height = "first_time_sig_loss_from_max_height"
-partially_disturbed_in_last_interval = "partially_disturbed_in_last_interval"
-
-intermediate_outputs = [gain_year_count_pattern, most_recent_year_not_tall_veg, years_of_forest_regrowth,
-                        year_of_forest_loss, max_height_since_last_time_not_tall_veg,
-                        first_time_sig_loss_from_max_height, partially_disturbed_in_last_interval]
+part_or_full_dist_in_prev_interval = "part_or_full_dist_in_prev_interval"
+burned_in_prev_interval = "burned_in_prev_interval"
 
 # List of output directories with placeholders for parts of the directory
 LULUCF_core_output_dirs = [
@@ -537,7 +534,8 @@ LULUCF_core_output_dirs = [
     f"{outputs_path}{year_of_forest_loss}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{max_height_since_last_time_not_tall_veg}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{first_time_sig_loss_from_max_height}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{partially_disturbed_in_last_interval}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/"
+    f"{outputs_path}{part_or_full_dist_in_prev_interval}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{burned_in_prev_interval}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/"
 ]
 
 # TODO @Mel We shouldn't need this eventually.
