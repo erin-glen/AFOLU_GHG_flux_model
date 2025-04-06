@@ -321,7 +321,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     # Most recent year with forest disturbance during the interval
                     forest_dist_last = max([forest_dist_t_4, forest_dist_t_3, forest_dist_t_2, forest_dist_t_1, forest_dist_t])
 
-                # Annual intervals: Burned area for start year of interval only.
+                # Annual intervals: Burned area for start year of interval only (year t-1).
                 # Annual Potapov disturbance rasters not relevant.
                 elif interval_type == cn.intervals_annual:
                     burned_area_t_1 = burned_area_curr_interval_block_list[0][row, col]
@@ -514,7 +514,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 else:
                     primary_forest_proxy = 0
 
-                # Aboveground removal factors based on stand age (Mg C/ha/yr)
+                # Aboveground removal factors based on stand age at the start of the interval (as opposed to the end) (Mg C/ha/yr)
                 if 0 <= forest_age_annual_cell <= 5:
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_0_5_AGC_RF_cell
                 elif 6 <= forest_age_annual_cell <= 10:

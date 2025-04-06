@@ -285,7 +285,7 @@ forest_age_2015_interpolated_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_mod
 forest_age_2015_interpolated_pattern = "forest_age_interpolated_2015"
 
 forest_age_start_year_pattern = "forest_age_interpolated_start_year"
-forest_age_output_pattern = "forest_age_during_model"
+forest_age_output_pattern = "forest_age_at_end_of_interval"
 
 # GEE script that the global rasters are from is https://code.earthengine.google.com/3d8ac6f1dcc5cf36c766d0ddffaa3068 (each file takes about 15 minutes to export to Google Drive).
 # NOTE: GEE export function splits the exported global raster into two pieces. I merged the two pieces into a single file in ArcPro, then uploaded to s3.
