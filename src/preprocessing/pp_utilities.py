@@ -573,7 +573,7 @@ def setup_coiled_cluster():
         tuple: Dask client and cluster objects.
     """
     coiled_cluster = coiled.Cluster(
-        n_workers=40,
+        n_workers=20,
         use_best_zone=True,
         compute_purchase_option="spot_with_fallback",
         idle_timeout="15 minutes",
