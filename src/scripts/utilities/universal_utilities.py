@@ -14,6 +14,7 @@ import subprocess
 import re
 import requests
 import concurrent.futures
+import tempfile
 from botocore.config import Config
 from dask.distributed import print
 from dask.distributed import Client
@@ -21,49 +22,127 @@ from datetime import datetime
 from io import BytesIO
 from osgeo import gdal
 
-# Project imports
+# Local project imports
 from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import log_utilities as lu
 
-# Time in Eastern US timezone as a string
+################################################################################
+# Time / Logging / Cluster
+################################################################################
+
 def timestr():
-    # Define the Eastern Time timezone
+    """
+    Returns the current US/Eastern time as a string in YYYYMMDD_H_M_S format.
+    """
     eastern = pytz.timezone('US/Eastern')
-    # Get the current time in UTC and convert to Eastern Time
-    eastern_time = datetime.now(eastern)
-    # Format the time as a string
-    return eastern_time.strftime("%Y%m%d_%H_%M_%S")
+    now_eastern = datetime.now(eastern)
+    return now_eastern.strftime("%Y%m%d_%H_%M_%S")
 
 
-# Connects to a Coiled cluster of a specified name if the local flag isn't on
 def connect_to_Coiled_cluster(cluster_name, run_local):
+    """
+    Connects to a Coiled cluster of a specified name, or uses a local Dask Client if run_local=True.
+    """
     if run_local:
         print("Running locally with a local Dask client.")
         cluster = None
         client = Client()
         return cluster, client
     else:
+        # Minimal Coiled cluster creation for organic_soils approach
         cluster = coiled.Cluster(
             name=cluster_name,
-            account='wri-forest-research',  # Specify the workspace here
-            # Include other cluster configurations as needed
+            account='wri-forest-research',
+            # Include other cluster configurations if needed
         )
         client = cluster.get_client()
         return cluster, client
 
-# Chunk bounds as a string
+################################################################################
+# Chunk / Tiling Logic
+################################################################################
+
 def boundstr(bounds):
-    bounds_str = "_".join([str(round(x)) for x in bounds])
-    return bounds_str
+    """
+    Converts bounding box [W, S, E, N] into a string with integer rounding: 'W_S_E_N'
+    """
+    return "_".join([str(round(x)) for x in bounds])
 
 
-# Chunk length in pixels
 def calc_chunk_length_pixels(bounds):
-    chunk_length_pixels = int((bounds[3] - bounds[1]) * (40000 / 10))
-    return chunk_length_pixels
+    """
+    Returns the pixel dimension along one side of the bounding box, assuming 0.00025 deg (40000 px in 10 deg).
+    """
+    return int((bounds[3] - bounds[1]) * (40000 / 10))
 
 
-# Maps GDAL data type to the appropriate string value
+def get_10x10_tile_bounds(tile_id):
+    """
+    For a tile_id like '02N_010E' or '10S_050W', returns (W, S, E, N).
+    """
+    if "S" in tile_id:
+        max_y = -1 * (int(tile_id[:2]))
+        min_y = -1 * (int(tile_id[:2]) + 10)
+    else:
+        max_y = int(tile_id[:2])
+        min_y = int(tile_id[:2]) - 10
+
+    if "W" in tile_id:
+        max_x = -1 * (int(tile_id[4:7]) - 10)
+        min_x = -1 * (int(tile_id[4:7]))
+    else:
+        max_x = int(tile_id[4:7]) + 10
+        min_x = int(tile_id[4:7])
+
+    return min_x, min_y, max_x, max_y  # W, S, E, N
+
+
+def get_chunk_bounds(bounding_box, chunk_size):
+    """
+    Returns list of [W, S, E, N] sub-chunks subdividing 'bounding_box',
+    each chunk_size degrees wide/tall.
+    """
+    min_x, min_y, max_x, max_y = bounding_box
+    x = min_x
+    y = min_y
+
+    chunks = []
+    while y < max_y:
+        while x < max_x:
+            bounds = [x, y, x + chunk_size, y + chunk_size]
+            chunks.append(bounds)
+            x += chunk_size
+        x = min_x
+        y += chunk_size
+    return chunks
+
+
+def xy_to_tile_id(top_left_x, top_left_y):
+    """
+    From top-left XY, produce the standard tile_id string: 'YYN_XXXE' or 'YYS_XXXW'.
+    """
+    lat_ceil = math.ceil(top_left_y / 10.0) * 10
+    lng_floor = math.floor(top_left_x / 10.0) * 10
+
+    lng = f"{str(abs(lng_floor)).zfill(3)}{'E' if lng_floor >= 0 else 'W'}"
+    lat = f"{str(abs(lat_ceil)).zfill(2)}{'N' if lat_ceil >= 0 else 'S'}"
+    return f"{lat}_{lng}"
+
+
+def stage_duration(start_time_str, end_time_str, stage):
+    """
+    Logs elapsed time for a named stage, from start_time_str to end_time_str.
+    Both are in timestr() format: YYYYMMDD_H_M_S.
+    """
+    start_time = datetime.strptime(start_time_str, "%Y%m%d_%H_%M_%S")
+    end_time = datetime.strptime(end_time_str, "%Y%m%d_%H_%M_%S")
+    print(f"Elapsed time for {stage}: {end_time - start_time}")
+
+################################################################################
+# GDAL / Data Type Mappings
+################################################################################
+
+# Old "gdal_dtype_mapping" was partial. We'll keep a more complete dictionary:
 gdal_dtype_mapping = {
     gdal.GDT_Byte: 'Byte',
     gdal.GDT_UInt16: 'UInt16',
@@ -74,8 +153,10 @@ gdal_dtype_mapping = {
     gdal.GDT_Float64: 'Float64'
 }
 
-# Maps GDAL datatypes to numpy datatypes
 def map_to_numpy_dtype(data_type):
+    """
+    Converts a string like 'Float32'/'Byte' into a Numpy dtype
+    """
     dtype_map = {
         'Float32': 'float32',
         'Float64': 'float64',
@@ -83,81 +164,53 @@ def map_to_numpy_dtype(data_type):
         'UInt16': 'uint16',
         'Int16': 'int16',
         'UInt32': 'uint32',
-        'Int32': 'int32',
-        # Add more mappings as needed
+        'Int32': 'int32'
+        # Add more as needed
     }
-    return dtype_map.get(data_type, 'float32')  # Defaults to 'float32' if argument not found
+    return dtype_map.get(data_type, 'float32')
+
+################################################################################
+# S3 Path Splitting / File Transfer
+################################################################################
+
+def split_s3_path(s3_path):
+    """
+    Splits 's3://bucket/...key...' into (bucket, key).
+    """
+    s3_path_clean = s3_path.replace("s3://", "")
+    bucket, key = s3_path_clean.split("/", 1)
+    return bucket, key
 
 
-# Gets the W, S, E, N bounds of a 10x10 degree tile
-def get_10x10_tile_bounds(tile_id):
-    if "S" in tile_id:
-        max_y = -1 * (int(tile_id[:2]))
-        min_y = -1 * (int(tile_id[:2]) + 10)
-    else:
-        max_y = (int(tile_id[:2]))
-        min_y = (int(tile_id[:2]) - 10)
-
-    if "W" in tile_id:
-        max_x = -1 * (int(tile_id[4:7]) - 10)
-        min_x = -1 * (int(tile_id[4:7]))
-    else:
-        max_x = (int(tile_id[4:7]) + 10)
-        min_x = (int(tile_id[4:7]))
-
-    return min_x, min_y, max_x, max_y  # W, S, E, N
+def download_s3_file(s3_path, local_path):
+    """
+    Downloads a file from s3_path to local_path.
+    """
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    s3.download_file(bucket, key, local_path)
 
 
-# Returns list of all chunk boundaries within a bounding box for chunks of a given size
-def get_chunk_bounds(bounding_box, chunk_size):
-    min_x = bounding_box[0]
-    min_y = bounding_box[1]
-    max_x = bounding_box[2]
-    max_y = bounding_box[3]
+def upload_s3_file(s3_path, local_path):
+    """
+    Uploads a local file to s3_path.
+    """
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    s3.upload_file(local_path, bucket, key)
 
-    x, y = (min_x, min_y)
-    chunks = []
+################################################################################
+# Tile Reading and Checking
+################################################################################
 
-    # Polygon Size
-    while y < max_y:
-        while x < max_x:
-            bounds = [
-                x,
-                y,
-                x + chunk_size,
-                y + chunk_size,
-            ]
-            chunks.append(bounds)
-            x += chunk_size
-        x = min_x
-        y += chunk_size
-
-    return chunks
-
-
-# Returns the encompassing tile_id string in the form YYN/S_XXXE/W based on a coordinate
-def xy_to_tile_id(top_left_x, top_left_y):
-    lat_ceil = math.ceil(top_left_y / 10.0) * 10
-    lng_floor = math.floor(top_left_x / 10.0) * 10
-
-    lng = f"{str(abs(lng_floor)).zfill(3)}{'E' if lng_floor >= 0 else 'W'}"
-    lat = f"{str(abs(lat_ceil)).zfill(2)}{'N' if lat_ceil >= 0 else 'S'}"
-
-    return f"{lat}_{lng}"
-
-
-# Calculates the elapsed time for a stage
-def stage_duration(start_time_str, end_time_str, stage):
-
-    start_time = datetime.strptime(start_time_str, "%Y%m%d_%H_%M_%S")
-    end_time = datetime.strptime(end_time_str, "%Y%m%d_%H_%M_%S")
-
-    print(f"Elapsed time for {stage}: {end_time - start_time}")
-
-
-# Lazily opens tile within provided bounds (i.e., one chunk) and returns as a numpy array.
 def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, logger):
+    """
+    Lazily opens tile within provided bounds ([W, S, E, N]) using rasterio
+    and returns it as a numpy array. If the tile or window is unavailable,
+    returns an array of zeros with the same shape & correct data type.
 
+    Note: This old-branch-friendly version returns JUST 'data' (no status).
+    """
     try:
         with rasterio.open(uri) as ds:
             window = rasterio.windows.from_bounds(*bounds, ds.transform)
@@ -165,72 +218,85 @@ def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, 
     except Exception as e:
         numpy_dtype = map_to_numpy_dtype(data_type)
         data = np.full((chunk_length_pixels, chunk_length_pixels), 0).astype(numpy_dtype)
-        lu.print_and_log(f"flm: Error accessing the dataset. Returning array of all 0s: {e}", is_final, logger)
+        lu.print_and_log(f"flm: Error accessing dataset at {uri}. Returning all 0s: {e}",
+                         is_final, logger)
 
     return data
 
 
-# Prepares list of chunks to download.
 def prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger):
-
+    """
+    Submits concurrent tasks to read each input layer chunk with get_tile_dataset_rio.
+    Returns a dict of {Future: layer_key}.
+    """
     futures = {}
-
     bounds_str = boundstr(bounds)
     tile_id = xy_to_tile_id(bounds[0], bounds[3])
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        lu.print_and_log(f"Requesting data in chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
-
+        lu.print_and_log(f"Requesting data in chunk {bounds_str} in {tile_id}: {timestr()}",
+                         is_final, logger)
         for key, value in updated_download_dict.items():
-            futures[executor.submit(get_tile_dataset_rio, value[0], value[1], bounds, chunk_length_pixels, is_final, logger)] = key
-
+            future = executor.submit(get_tile_dataset_rio,
+                                     value[0],  # s3_path
+                                     value[1],  # data_type
+                                     bounds,
+                                     chunk_length_pixels,
+                                     is_final,
+                                     logger)
+            futures[future] = key
     return futures
 
 
-# Checks if tiles exist at all
 def check_for_tile(download_dict, is_final, logger):
-
-    # Configures S3 client with increased retries; retries can max out for global analyses
-    s3_config = Config(
-        retries={
-            'max_attempts': 10,  # Increases the number of retry attempts
-            'mode': 'standard'
-        }
-    )
+    """
+    Checks if at least one tile in download_dict actually exists in S3
+    by using head_object. If none exist, returns False.
+    """
+    s3_config = Config(retries={'max_attempts': 10, 'mode': 'standard'})
     s3_client = boto3.client("s3", config=s3_config)
 
+    tile_id = None
     for value in download_dict.values():
-        # Extract the S3 key
-        s3_key = value[0][len("s3://gfw2-data/"):]  # Adjust if the bucket name differs
+        s3_path = value[0]
+        # strip the initial "s3://gfw2-data/"
+        s3_key = s3_path.replace("s3://gfw2-data/", "", 1)
 
-        # Extract the tile_id using the tile_id_pattern
-        tile_id_matches = re.findall(cn.tile_id_pattern, value[0])
-        if not tile_id_matches:
-            logger.warning(f"No tile_id found in the file path: {value[0]}")
-            continue  # Skip if no tile_id is found
+        # Extract the tile_id for logging
+        matches = re.findall(cn.tile_id_pattern, s3_path)
+        if matches:
+            tile_id = matches[0]
+        else:
+            logger.warning(f"No tile_id found in file path: {s3_path}")
 
-        tile_id = tile_id_matches[0]
-
-        # Check if the object exists in S3
         try:
+            # If head_object succeeds on any tile, we return True
             s3_client.head_object(Bucket='gfw2-data', Key=s3_key)
-            lu.print_and_log(f"Tile id {tile_id} exists for some inputs. Proceeding: {timestr()}", is_final, logger)
-            return True  # If at least one tile exists, return True
-        except Exception as e:
-            pass  # Continue checking other tiles
+            lu.print_and_log(f"Tile id {tile_id} exists. Proceeding: {timestr()}", is_final, logger)
+            return True
+        except Exception:
+            pass
 
-    lu.print_and_log(f"Tile id {tile_id} does not exist. Skipped chunk: {timestr()}", is_final, logger)
+    if tile_id:
+        lu.print_and_log(f"Tile id {tile_id} does not exist. Skipped chunk: {timestr()}",
+                         is_final, logger)
+    else:
+        lu.print_and_log(f"No tile_id found at all. Skipped chunk: {timestr()}",
+                         is_final, logger)
+
     return False
 
 
-# Checks whether a chunk has data in it.
 def check_chunk_for_data(required_layers, bounds_str, tile_id, any_or_all, is_final, logger):
+    """
+    Checks if the chunk has actual data. If any_or_all == 'any', returns True
+    as soon as it finds a layer that isn't all zeros. If 'all', it checks min vs. max.
+    """
     if any_or_all == "any":
-
         for array in required_layers.values():
             min_val = np.min(array)
-
-            if min_val != None:
+            # If min_val is not None (which it always is) but we do this check anyway:
+            if min_val != 0:
                 logger.info(f"flm: Data in chunk {bounds_str}. Proceeding: {timestr()}")
                 print(f"flm: Data in chunk {bounds_str}. Proceeding: {timestr()}")
                 return True
@@ -240,13 +306,12 @@ def check_chunk_for_data(required_layers, bounds_str, tile_id, any_or_all, is_fi
         return False
 
     elif any_or_all == "all":
-
         for key, array in required_layers.items():
             min_val = np.min(array)
             max_val = np.max(array)
-
             if min_val == max_val:
-                logger.info(f"flm: Chunk {bounds_str} does not exist for {key}. Skipped chunk: {timestr()}")
+                logger.info(f"flm: Chunk {bounds_str} does not exist for {key}. "
+                            f"Skipped chunk: {timestr()}")
                 print(f"flm: Chunk {bounds_str} does not exist for {key}. Skipped chunk: {timestr()}")
                 return False
 
@@ -255,134 +320,62 @@ def check_chunk_for_data(required_layers, bounds_str, tile_id, any_or_all, is_fi
         return True
 
     else:
-        raise Exception("any_or_all argument not valid")
+        raise ValueError("any_or_all argument must be 'any' or 'all'.")
 
-# Saves array as a raster locally, then uploads it to s3. NoData value for outputs is optional
-
-import tempfile
-
-# universal_utilities.py
-
-import os
-import time
-import tempfile
-import boto3
-from botocore.config import Config
-import rasterio
-from rasterio.transform import from_bounds
-
-# Assuming cn and lu are imported from your project modules
-# from . import constants_and_names as cn
-# from . import log_utilities as lu
-
-def timestr():
-    """
-    Returns the current time as a string formatted as YYYYMMDD_HH_MM_SS.
-    """
-    return time.strftime('%Y%m%d_%H_%M_%S')
+################################################################################
+# Save & Upload Rasters
+################################################################################
 
 def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
-                                     bounds_str, output_dict, is_final, logger, no_data_val=None):
+                                     bounds_str, output_dict, is_final, logger,
+                                     no_data_val=None):
     """
-    Saves raster data to local temporary files and uploads them to S3.
-
-    This function processes raster data arrays by saving them locally in a temporary directory
-    and then uploading them to a specified S3 bucket and path. It ensures cross-platform
-    compatibility by using the system's temporary directory, handles exceptions during file
-    operations, and logs detailed information for debugging purposes.
-
-    **Differences from the Original Function:**
-
-    - **Cross-Platform Temporary Directory:**
-      - Replaced hardcoded '/tmp' paths with `tempfile.gettempdir()` to ensure compatibility
-        across different operating systems (e.g., Windows, Linux, macOS).
-      - This change prevents `FileNotFoundError` on systems where the '/tmp' directory does
-        not exist, such as Windows.
-
-    - **Correct S3 Key Construction:**
-      - Updated the S3 key construction to avoid duplicating the 's3://' prefix and the bucket name.
-      - Ensures that files are uploaded to the correct location within the S3 bucket without
-        redundant or incorrect path segments.
-
-    - **Enhanced Logging and Exception Handling:**
-      - Added detailed logging statements to record the full local file paths and S3 destinations.
-      - Implemented exception handling for file saving, uploading, and deletion to catch and
-        log any errors that occur during these operations.
+    Saves output arrays locally as GeoTIFFs, then uploads them to S3, then removes local files.
+    Uses cross-platform 'tempfile.gettempdir()' for the local directory.
 
     Args:
-        bounds (list): Bounding box coordinates [W, S, E, N].
-        chunk_length_pixels (int): Number of pixels per chunk side.
-        tile_id (str): Identifier for the tile (e.g., '00N_110E').
-        bounds_str (str): String representation of bounds (e.g., '112_-4_114_-2').
-        output_dict (dict): Dictionary containing output arrays and metadata.
-            Each key is a descriptive name, and each value is a list containing:
-            - data_array (numpy.ndarray): The raster data array.
-            - data_type (str): Data type of the array (e.g., 'uint8', 'float32').
-            - data_meaning (str): Descriptor for the type of data (e.g., 'soil', 'state').
-            - year_out (str): Year associated with the data (e.g., '2020').
-        is_final (bool): Flag indicating if this is the final run. Affects file naming and logging verbosity.
-        logger (logging.Logger): Logger instance for logging messages.
-        no_data_val (int, optional): NoData value for the raster. Defaults to None.
+        bounds: [W, S, E, N]
+        chunk_length_pixels: e.g. 8000
+        tile_id: e.g. "00N_110E"
+        bounds_str: e.g. "112_-4_114_-2"
+        output_dict: {
+            'soil': [data_array, 'float32', 'soil', '2020'],
+            'state': [data_array, 'uint8', 'state', '2020']
+        }
+        is_final: bool controlling verbosity
+        logger: logging.Logger instance
+        no_data_val: optional nodata for the raster
 
     Returns:
         None
-
-    Raises:
-        Exception: Propagates exceptions after logging if critical errors occur during processing.
-
-    Example:
-        save_and_upload_small_raster_set(
-            bounds=[112, -4, 114, -2],
-            chunk_length_pixels=8000,
-            tile_id='00N_110E',
-            bounds_str='112_-4_114_-2',
-            output_dict={
-                'soil': [soil_array, 'float32', 'soil', '2020'],
-                'state': [state_array, 'uint8', 'state', '2020']
-            },
-            is_final=True,
-            logger=logger_instance,
-            no_data_val=0
-        )
     """
-
-    # Configure S3 client with increased retries
-    s3_config = Config(
-        retries={
-            'max_attempts': 10,  # Increase retry attempts
-            'mode': 'standard'
-        }
-    )
+    s3_config = Config(retries={'max_attempts': 10, 'mode': 'standard'})
     s3_client = boto3.client("s3", config=s3_config)
 
+    from rasterio.transform import from_bounds
     try:
-        # Create transform based on bounds and chunk size
         transform = from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
     except Exception as e:
         logger.error(f"Failed to create transform from bounds {bounds}: {e}")
-        raise  # Re-raise the exception after logging
+        raise
 
-    # Generate base filename info
-    file_info = f'{tile_id}__{bounds_str}'
+    file_info = f"{tile_id}__{bounds_str}"
 
     if is_final:
-        lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
+        lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}",
+                         is_final, logger)
 
-    # Get the system's temporary directory
+    # Cross-platform temporary directory
     temp_dir = tempfile.gettempdir()
-
-    # Ensure the temporary directory exists
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir, exist_ok=True)
 
-    # Iterate over each output layer
     for key, value in output_dict.items():
         data_array = value[0]
         data_type = value[1]
         data_meaning = value[2]
         year_out = value[3]
 
-        # Construct file name
         if is_final:
             file_name = f"{file_info}__{key}.tif"
         else:
@@ -390,14 +383,11 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
 
         local_file_path = os.path.join(temp_dir, file_name)
 
-        # Logging the local file path
-        lu.print_and_log(f"Saving local file {local_file_path}", is_final, logger)
-
-        # Logging saving process
+        # Optionally log this step
         if not is_final:
-            lu.print_and_log(f"Saving {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger)
+            lu.print_and_log(f"Saving chunk {bounds_str} in {tile_id} for {year_out}: {timestr()}",
+                             is_final, logger)
 
-        # Prepare metadata for raster
         rasterio_kwargs = {
             'driver': 'GTiff',
             'width': chunk_length_pixels,
@@ -410,234 +400,92 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
             'blockxsize': 400,
             'blockysize': 400
         }
-
         if no_data_val is not None:
             rasterio_kwargs['nodata'] = no_data_val
 
-        # Save raster to local temporary file
+        # Save locally
         try:
             with rasterio.open(local_file_path, 'w', **rasterio_kwargs) as dst:
                 dst.write(data_array, 1)
         except Exception as e:
-            lu.print_and_log(f"Failed to save raster {file_name} locally: {e}", is_final, logger)
-            continue  # Skip uploading if saving fails
+            lu.print_and_log(f"Failed to save raster {file_name} locally: {e}",
+                             is_final, logger)
+            continue
 
-        # Construct S3 path
-        s3_path = f"{cn.s3_out_dir}/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels/{time.strftime('%Y%m%d')}"
+        # Construct an S3 path for this example. If your code uses a certain layout, do so here:
+        # This is just one example that might match older references:
+        # "s3://gfw2-data/climate/organic_soils/{data_meaning}/{year_out}/.../CHUNK"
+        # If needed, adjust to your pipeline’s structure. We’ll keep it direct:
+        s3_folder = f"s3://gfw2-data/climate/organic_soils/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels"
+        # Clean up path
+        s3_folder_no_prefix = s3_folder.replace("s3://gfw2-data/", "")
+        s3_key = f"{s3_folder_no_prefix}/{file_name}"
 
-        # Remove 's3://' prefix and bucket name if present
-        if s3_path.startswith('s3://'):
-            s3_path = s3_path[len('s3://'):]
-        if s3_path.startswith(f"{cn.s3_bucket_name}/"):
-            s3_path = s3_path[len(f"{cn.s3_bucket_name}/"):]
-
-        # Ensure S3 path uses forward slashes
-        s3_path = s3_path.replace("\\", "/")
-
-        s3_key = f"{s3_path}/{file_name}"
-
-        # Logging the S3 key
-        lu.print_and_log(f"Uploading {local_file_path} to s3://{cn.s3_bucket_name}/{s3_key}", is_final, logger)
-
-        # Upload file to S3
+        # Upload
         try:
-            s3_client.upload_file(local_file_path, cn.s3_bucket_name, Key=s3_key)
-            lu.print_and_log(f"Successfully uploaded {local_file_path} to s3://{cn.s3_bucket_name}/{s3_key}", is_final, logger)
+            s3_client.upload_file(local_file_path, "gfw2-data", s3_key)
+            lu.print_and_log(f"Uploaded {local_file_path} to s3://gfw2-data/{s3_key}",
+                             is_final, logger)
         except Exception as e:
-            lu.print_and_log(f"Failed to upload {local_file_path} to s3://{cn.s3_bucket_name}/{s3_key}: {e}", is_final, logger)
-            continue  # Proceed to next file
+            lu.print_and_log(f"Failed to upload {local_file_path} to s3://gfw2-data/{s3_key}: {e}",
+                             is_final, logger)
+            continue
 
-        # Verify the upload by checking if the object exists
+        # Verify
         try:
-            s3_client.head_object(Bucket=cn.s3_bucket_name, Key=s3_key)
-            lu.print_and_log(f"Confirmed upload of {file_name} to s3://{cn.s3_bucket_name}/{s3_key}", is_final, logger)
+            s3_client.head_object(Bucket="gfw2-data", Key=s3_key)
+            lu.print_and_log(f"Confirmed upload of {file_name} to s3://gfw2-data/{s3_key}",
+                             is_final, logger)
         except Exception as e:
-            lu.print_and_log(f"Upload verification failed for s3://{cn.s3_bucket_name}/{s3_key}: {e}", is_final, logger)
-            continue  # Proceed to next file
+            lu.print_and_log(f"Upload verification failed for s3://gfw2-data/{s3_key}: {e}",
+                             is_final, logger)
+            continue
 
-        # Delete local temporary file after successful upload
+        # Remove local file
         try:
             os.remove(local_file_path)
         except OSError as e:
-            lu.print_and_log(f"Failed to delete local raster {file_name}: {e}", is_final, logger)
+            lu.print_and_log(f"Failed to delete local raster {file_name}: {e}",
+                             is_final, logger)
 
     if is_final:
-        lu.print_and_log(f"All rasters for {bounds_str} in {tile_id} have been processed and uploaded.", is_final, logger)
+        lu.print_and_log(f"All rasters for {bounds_str} in {tile_id} have been processed and uploaded.",
+                         is_final, logger)
 
 
-from rasterio.transform import from_bounds  # Correct import
+################################################################################
+# Listing / Uploading Shapefiles and Rasters
+################################################################################
 
-# def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
-#                                      bounds_str, output_dict, is_final, logger, no_data_val=None):
-#     """
-#     Saves raster data to local temporary files and uploads them to S3.
-#
-#     Args:
-#         bounds (list): Bounding box coordinates [W, S, E, N].
-#         chunk_length_pixels (int): Number of pixels per chunk side.
-#         tile_id (str): Identifier for the tile.
-#         bounds_str (str): String representation of bounds.
-#         output_dict (dict): Dictionary containing output arrays and metadata.
-#         is_final (bool): Flag indicating if this is the final run.
-#         logger (logging.Logger): Logger instance for logging messages.
-#         no_data_val (int, optional): NoData value for the raster. Defaults to None.
-#
-#     Returns:
-#         None
-#     """
-#
-#     # Configure S3 client with increased retries
-#     s3_config = Config(
-#         retries={
-#             'max_attempts': 10,  # Increase retry attempts
-#             'mode': 'standard'
-#         }
-#     )
-#     s3_client = boto3.client("s3", config=s3_config)
-#
-#     try:
-#         # Create transform based on bounds and chunk size
-#         transform = from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
-#         logger.debug(f"Transform created successfully for bounds {bounds}")
-#     except Exception as e:
-#         logger.error(f"Failed to create transform from bounds {bounds}: {e}")
-#         raise  # Re-raise the exception after logging
-#
-#     # Generate base filename info
-#     timestamp = time.strftime('%Y%m%d_%H_%M_%S')
-#     file_info = f"{tile_id}__{bounds_str}"
-#
-#     if is_final:
-#         logger.info(f"Saving and uploading outputs for {bounds_str} in {tile_id} at {timestamp}")
-#
-#     # Directory to store temporary files
-#     temp_dir = "/tmp"
-#     if not os.path.exists(temp_dir):
-#         os.makedirs(temp_dir, exist_ok=True)
-#         logger.debug(f"Temporary directory created at {temp_dir}")
-#
-#     # Iterate over each output layer
-#     for key, value in output_dict.items():
-#         data_array = value[0]
-#         data_type = value[1]
-#         data_meaning = value[2]
-#         year_out = value[3]
-#
-#         # Construct file name
-#         if is_final:
-#             file_name = f"{file_info}__{key}.tif"
-#         else:
-#             file_name = f"{file_info}__{key}__{timestamp}.tif"
-#
-#         # Logging saving process
-#         if not is_final:
-#             logger.info(f"Saving {bounds_str} in {tile_id} for {year_out} at {timestamp}")
-#
-#         # Define local file path
-#         local_file_path = os.path.join(temp_dir, file_name)
-#
-#         # Prepare metadata for raster
-#         metadata = {
-#             'driver': 'GTiff',
-#             'height': chunk_length_pixels,
-#             'width': chunk_length_pixels,
-#             'count': 1,
-#             'dtype': data_type,
-#             'crs': CRS.from_epsg(4326),
-#             'transform': transform,
-#             'compress': 'lzw',
-#             'blockxsize': 400,
-#             'blockysize': 400
-#         }
-#
-#         if no_data_val is not None:
-#             metadata['nodata'] = no_data_val
-#
-#         # Save raster to local temporary file
-#         try:
-#             with rasterio.open(local_file_path, 'w', **metadata) as dst:
-#                 dst.write(data_array, 1)
-#             logger.debug(f"Raster saved locally at {local_file_path}")
-#         except RasterioIOError as e:
-#             logger.error(f"Failed to save raster {file_name} locally: {e}")
-#             continue  # Skip uploading if saving fails
-#
-#         # Construct S3 path
-#         current_date = time.strftime('%Y%m%d')
-#         s3_path = os.path.join(
-#             cn.s3_out_dir,
-#             data_meaning,
-#             str(year_out),
-#             f"{chunk_length_pixels}_pixels",
-#             current_date
-#         ).replace("\\", "/")  # Ensure S3 path uses forward slashes
-#
-#         # Logging upload process
-#         if not is_final:
-#             logger.info(f"Uploading {bounds_str} in {tile_id} for {year_out} to {s3_path} at {timestamp}")
-#
-#         # Upload file to S3
-#         try:
-#             s3_client.upload_file(local_file_path, "gfw2-data", f"{s3_path}/{file_name}")
-#             logger.debug(f"Raster {file_name} uploaded to s3://gfw2-data/{s3_path}/{file_name}")
-#         except ClientError as e:
-#             logger.error(f"Failed to upload raster {file_name} to S3: {e}")
-#             continue  # Proceed to next file
-#         except Exception as e:
-#             logger.error(f"Unexpected error during upload of {file_name}: {e}")
-#             continue  # Proceed to next file
-#
-#         # Verify the upload by checking if the object exists
-#         try:
-#             s3_client.head_object(Bucket="gfw2-data", Key=f"{s3_path}/{file_name}")
-#             logger.debug(f"Confirmed upload of {file_name} to S3.")
-#         except ClientError as e:
-#             if e.response['Error']['Code'] == "404":
-#                 logger.error(f"Upload verification failed: s3://gfw2-data/{s3_path}/{file_name} does not exist.")
-#             else:
-#                 logger.error(f"ClientError during upload verification of {file_name}: {e}")
-#             continue  # Proceed to next file
-#         except Exception as e:
-#             logger.error(f"Unexpected error during upload verification of {file_name}: {e}")
-#             continue  # Proceed to next file
-#
-#         # Delete local temporary file after successful upload
-#         try:
-#             os.remove(local_file_path)
-#             logger.debug(f"Local raster {file_name} deleted from {local_file_path}")
-#         except OSError as e:
-#             logger.warning(f"Failed to delete local raster {file_name}: {e}")
-#
-#     logger.info(f"All rasters for {bounds_str} in {tile_id} have been processed and uploaded.")
-
-
-# Lists rasters in an s3 folder and returns their names as a list
 def list_rasters_in_folder(full_in_folder):
-
+    """
+    Shells out 'aws s3 ls' to get all .tif files in an S3 folder. Returns list of filenames only.
+    """
     cmd = ['aws', 's3', 'ls', full_in_folder]
     s3_contents_bytes = subprocess.check_output(cmd)
-
-    # Converts subprocess results to useful string
     s3_contents_str = s3_contents_bytes.decode('utf-8')
     s3_contents_list = s3_contents_str.splitlines()
-    rasters = [line.split()[-1] for line in s3_contents_list]
-    rasters = [i for i in rasters if "tif" in i]
-
+    rasters = [line.split()[-1] for line in s3_contents_list if "tif" in line]
     return rasters
 
 
-# Uploads a shapefile to s3
 def upload_shp(in_folder, shp):
-
+    """
+    Uploads a shapefile (and sidecar files) from /tmp to s3 in the given folder.
+    in_folder should be an s3 path like 's3://gfw2-data/xyz/'
+    """
     print(f"flm: Uploading to {in_folder}{shp}: {timestr()}")
-
     shp_pattern = shp[:-4]
+    s3_client = boto3.client("s3")
 
-    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
-    s3_client.upload_file(f"/tmp/{shp}", "gfw2-data", Key=f"{in_folder[15:]}{shp}")
-    s3_client.upload_file(f"/tmp/{shp_pattern}.dbf", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.dbf")
-    s3_client.upload_file(f"/tmp/{shp_pattern}.prj", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.prj")
-    s3_client.upload_file(f"/tmp/{shp_pattern}.shx", "gfw2-data", Key=f"{in_folder[15:]}{shp_pattern}.shx")
+    # For old references: in_folder[15:] was used to remove 's3://gfw2-data/' from the front.
+    # If your prefix differs, adjust accordingly:
+    s3_prefix = in_folder.replace("s3://gfw2-data/", "")
+
+    s3_client.upload_file(f"/tmp/{shp}",        "gfw2-data", f"{s3_prefix}{shp}")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.dbf", "gfw2-data", f"{s3_prefix}{shp_pattern}.dbf")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.prj", "gfw2-data", f"{s3_prefix}{shp_pattern}.prj")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.shx", "gfw2-data", f"{s3_prefix}{shp_pattern}.shx")
 
     os.remove(f"/tmp/{shp}")
     os.remove(f"/tmp/{shp_pattern}.dbf")
@@ -647,75 +495,75 @@ def upload_shp(in_folder, shp):
     print(f"flm: Uploaded to {in_folder}{shp}: {timestr()}")
 
 
-# Makes a shapefile of the footprints of rasters in a folder, for checking geographical completeness of rasters
 def make_tile_footprint_shp(input_dict):
-
+    """
+    Creates shapefile footprints of rasters in the given S3 folder, using 'gdaltindex'.
+    input_dict is { folder_s3_path: pattern_string }.
+    """
     in_folder = list(input_dict.keys())[0]
     pattern = list(input_dict.values())[0]
 
-    # Task properties
     print(f"flm: Making tile index shapefile for: {in_folder}: {timestr()}")
 
-    # Folder including s3 key
     s3_in_folder = in_folder
-    vsis3_in_folder = f'/vsis3/{in_folder[5:]}'  # [5] drops the s3:// at the front
+    vsis3_in_folder = f"/vsis3/{in_folder[5:]}"  # remove "s3://"
 
-    # List of all the filenames in the folder
     filenames = list_rasters_in_folder(s3_in_folder)
+    tile_paths = [vsis3_in_folder + fn for fn in filenames]
 
-    # List of the tile paths in the folder
-    tile_paths = [vsis3_in_folder + filename for filename in filenames]
-
-    file_paths_txt = f's3_paths_{pattern}.txt'
-
-    with open(f"/tmp/{file_paths_txt}", 'w') as file:
+    file_paths_txt = f"s3_paths_{pattern}.txt"
+    with open(f"/tmp/{file_paths_txt}", 'w') as f:
         for item in tile_paths:
-            file.write(item + '\n')
+            f.write(item + '\n')
 
-    # Output shapefile name
     shp = f"raster_footprints_{pattern}.shp"
 
-    cmd = ["gdaltindex", "-t_srs", "EPSG:4326", f"/tmp/{shp}", "--optfile", f"/tmp/{file_paths_txt}"]
+    cmd = [
+        "gdaltindex",
+        "-t_srs", "EPSG:4326",
+        f"/tmp/{shp}",
+        "--optfile", f"/tmp/{file_paths_txt}"
+    ]
     subprocess.check_call(cmd)
 
-    # Uploads shapefile to s3
+    # Upload shapefile
     upload_shp(s3_in_folder, shp)
-
     os.remove(f"/tmp/{file_paths_txt}")
 
     return f"Completed: {timestr()}"
 
 
-# Saves an xarray data array locally as a raster and then uploads it to s3
 def save_and_upload_raster_10x10(**kwargs):
+    """
+    Saves a single xarray data array as a raster locally (/tmp), then uploads to S3.
+    Typically used by older code.
+    Required kwargs keys: 'data', 'out_file_name', 'out_folder'.
+    """
+    data_array = kwargs['data']
+    out_file_name = kwargs['out_file_name']
+    out_folder = kwargs['out_folder']
 
-    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
-
-    data_array = kwargs['data']  # The data being saved
-    out_file_name = kwargs['out_file_name']  # The output file name
-    out_folder = kwargs['out_folder']  # The output folder
-
+    s3_client = boto3.client("s3")
     print(f"flm: Saving {out_file_name} locally")
 
-    profile_kwargs = {'compress': 'lzw'}  # Adds attribute to compress the output raster
+    profile_kwargs = {'compress': 'lzw'}
     data_array.rio.to_raster(f"/tmp/{out_file_name}", **profile_kwargs)
 
+    # out_folder might be like "s3://gfw2-data/...subfolder..."
     print(f"flm: Saving {out_file_name} to {out_folder[10:]}{out_file_name}")
-
     s3_client.upload_file(f"/tmp/{out_file_name}", "gfw2-data", Key=f"{out_folder[10:]}{out_file_name}")
 
-    # Deletes the local raster
     os.remove(f"/tmp/{out_file_name}")
 
+################################################################################
+# Stats
+################################################################################
 
-# Flattens a nested list
-def flatten_list(nested_list):
-    return [x for xs in nested_list for x in xs]
-
-
-# Calculates stats for a chunk (numpy array)
 def calculate_stats(array, name, bounds_str, tile_id, in_out):
-    if array is None or not np.any(array):  # Check if the array is None or empty
+    """
+    Computes min, mean, max for a given chunk array. If array is empty or None, returns 'no data' stats.
+    """
+    if array is None or not np.any(array):
         return {
             'chunk_id': bounds_str,
             'tile_id': tile_id,
@@ -726,7 +574,7 @@ def calculate_stats(array, name, bounds_str, tile_id, in_out):
             'max_value': 'no data',
             'data_type': 'no data'
         }
-    else:    # Only calculates stats if there is data in the array
+    else:
         return {
             'chunk_id': bounds_str,
             'tile_id': tile_id,
@@ -739,36 +587,33 @@ def calculate_stats(array, name, bounds_str, tile_id, in_out):
         }
 
 
-# Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet
 def calculate_chunk_stats(all_stats, stage):
-
+    """
+    Takes a list of per-chunk stats dictionaries and writes them to an Excel file
+    in cn.chunk_stats_path. Minimally updated from older code.
+    """
     if not all_stats:
         print("No statistics to calculate; all_stats is empty.")
         return
 
     print("Calculating tile stats...")
 
-    # Convert accumulated statistics to a DataFrame
     df_all_stats = pd.DataFrame(all_stats)
-
-    # Convert problematic non-numeric values to NaN
     df_all_stats['min_value'] = pd.to_numeric(df_all_stats['min_value'], errors='coerce')
     df_all_stats['max_value'] = pd.to_numeric(df_all_stats['max_value'], errors='coerce')
 
-    # Sort the DataFrame by 'in_out' and 'layer_name'
     sorted_stats = df_all_stats.sort_values(by=['in_out', 'layer_name']).reset_index(drop=True)
 
-    # Calculate the min and max values for each layer_name
     min_max_stats = df_all_stats.groupby('layer_name').agg(
         min_value=('min_value', 'min'),
         max_value=('max_value', 'max')
     ).reset_index()
 
-    # Creates a dictionary to store separate DataFrames for each 'in_out' value
-    in_out_tables = {in_out_value: sorted_stats[sorted_stats['in_out'] == in_out_value]
-                     for in_out_value in sorted_stats['in_out'].unique()}
+    in_out_tables = {
+        val: sorted_stats[sorted_stats['in_out'] == val]
+        for val in sorted_stats['in_out'].unique()
+    }
 
-    # Ensure the directory exists
     stats_dir = cn.chunk_stats_path
     if not os.path.exists(stats_dir):
         try:
@@ -778,48 +623,47 @@ def calculate_chunk_stats(all_stats, stage):
             print(f"Error creating directory {stats_dir}: {e}")
             return
 
-    # Construct the filename using os.path.join for portability
     filename = f"{stage}_chunk_statistics_{timestr()}.xlsx"
     filepath = os.path.join(stats_dir, filename)
 
-    # Write the combined statistics to a single Excel file
     try:
         with pd.ExcelWriter(filepath) as writer:
-
-            # Writes each 'in_out' DataFrame to its own sheet
             for in_out_value, table in in_out_tables.items():
                 sheet_name = f"chunk_stats_{str(in_out_value)}"
                 table.to_excel(writer, sheet_name=sheet_name, index=False)
-
-            # Write the min and max statistics to the second sheet
             min_max_stats.to_excel(writer, sheet_name='min_max_for_layers', index=False)
-
         print(f"Chunk statistics successfully saved to {filepath}")
-        print(sorted_stats.head())  # Show first few rows of the stats DataFrame for inspection
-
+        print(sorted_stats.head())
     except Exception as e:
         print(f"Can't print chunk stats: {e}")
 
+################################################################################
+# Data Type Checking
+################################################################################
 
-# Gets the name of the first file in a dictionary of dataset names and folders in s3.
 def first_file_name_in_s3_folder(download_dict):
+    """
+    Retrieves first file found under each path in download_dict, substituting '{tile_id}' with '00N_110E' (example).
+    Returns {key: 's3://...firstfile...'} or None if none found.
+    """
     s3_client = boto3.client("s3")
     first_tiles = {}
-    sample_tile_id = '00N_110E'  # Use a valid sample tile ID
+    sample_tile_id = '00N_110E'  # Hard-coded example
 
     for key, folder_path in download_dict.items():
-        # Replace {tile_id} with sample_tile_id
-        folder_path = folder_path.replace('{tile_id}', sample_tile_id)
-        # Splits the path to get the directory part
-        dir_path = os.path.dirname(folder_path)
-        # Drops the s3:// prefix
-        dir_path = dir_path[len('s3://'):]
-        # Extract bucket and prefix
-        bucket, prefix = dir_path.split('/', 1)
-        prefix += '/'  # Ensure prefix ends with '/'
-        # List objects in the specified bucket and prefix
+        replaced_path = folder_path.replace('{tile_id}', sample_tile_id)
+        dir_path = os.path.dirname(replaced_path)
+        # remove 's3://'
+        dir_path_no_prefix = dir_path[len('s3://'):]
+        if '/' in dir_path_no_prefix:
+            bucket, prefix = dir_path_no_prefix.split('/', 1)
+        else:
+            bucket = dir_path_no_prefix
+            prefix = ''
+        prefix += '/'
+
         response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
-        if 'Contents' in response and len(response['Contents']) > 0:
+        if 'Contents' in response and response['Contents']:
             first_file_key = response['Contents'][0]['Key']
             first_tiles[key] = f"s3://{bucket}/{first_file_key}"
         else:
@@ -829,10 +673,13 @@ def first_file_name_in_s3_folder(download_dict):
 
 
 def get_dtype_from_s3(file_path):
+    """
+    Opens a raster in S3 via /vsis3/ to retrieve its GDAL data type name.
+    """
     if file_path is None:
         print("File path is None. Cannot determine data type.")
         return None
-    vsis3_path = f'/vsis3/{file_path[len("s3://"):]}'
+    vsis3_path = f"/vsis3/{file_path[len('s3://'):]}"
     dataset = gdal.Open(vsis3_path)
     if dataset:
         band = dataset.GetRasterBand(1)
@@ -843,6 +690,10 @@ def get_dtype_from_s3(file_path):
 
 
 def add_file_type_to_dict(first_tiles):
+    """
+    For each dataset key in 'first_tiles', gets the data type from the first tile found,
+    then returns a dict {key: [file_path, data_type]}.
+    """
     download_dict_with_data_types = {}
     for key, file_path in first_tiles.items():
         if file_path is None:
@@ -859,133 +710,126 @@ def add_file_type_to_dict(first_tiles):
     return download_dict_with_data_types
 
 
-# Replaces a tile_id in s3 paths in a dictionary with another tile_id
 def replace_tile_id_in_dict(data_dict, new_tile_id):
+    """
+    Replaces a tile_id pattern in the S3 paths of data_dict with 'new_tile_id'.
+    """
     tile_id_pattern = cn.tile_id_pattern if hasattr(cn, 'tile_id_pattern') else r'\d{2}[NS]_\d{3}[EW]'
-
     for key, value in data_dict.items():
         file_path = value[0]
         updated_file_path = re.sub(tile_id_pattern, new_tile_id, file_path)
         data_dict[key][0] = updated_file_path
-
     return data_dict
 
 
-def fill_missing_input_layers_with_no_data(layers, uint8_list, int16_list, int32_list, float32_list,
-                                           bounds_str, tile_id, is_final, logger):
-    # Determine the shape of arrays based on an existing layer
+################################################################################
+# Handling Missing Layers
+################################################################################
+
+def fill_missing_input_layers_with_no_data(layers,
+                                           uint8_list,
+                                           int16_list,
+                                           int32_list,
+                                           float32_list,
+                                           bounds_str,
+                                           tile_id,
+                                           is_final,
+                                           logger):
+    """
+    Fills any missing layers with 0 arrays of the appropriate dtype, guided by the lists provided.
+    """
     existing_array = next(iter(layers.values()), None)
     if existing_array is not None:
         array_shape = existing_array.shape
     else:
-        # Handle the case where no data exists at all
-        raise ValueError(f"No data available to determine the size for missing layers in chunk {bounds_str} in {tile_id}: {timestr()}")
+        raise ValueError(f"No data in any layer to determine shape for missing layers, chunk {bounds_str} in {tile_id}: {timestr()}")
 
-    # Create a mapping of data types to their corresponding layer names
     data_type_lists = {
         np.uint8: uint8_list,
         np.int16: int16_list,
         np.int32: int32_list,
-        np.float32: float32_list,
+        np.float32: float32_list
     }
-
-    # Iterate over each data type and its corresponding list of layer names
     for dtype, keys_list in data_type_lists.items():
-        for key in keys_list:
-            if key not in layers:
-                # Create an array of zeros with the determined dtype and shape
-                layers[key] = np.zeros(array_shape, dtype=dtype)
-                # Log the creation of the missing layer
-                lu.print_and_log(f"Filled missing layer '{key}' with NoData values for chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
-
+        for k in keys_list:
+            if k not in layers:
+                layers[k] = np.zeros(array_shape, dtype=dtype)
+                lu.print_and_log(f"Filled missing layer '{k}' with NoData for chunk {bounds_str} in {tile_id}: {timestr()}",
+                                 is_final, logger)
     return layers
 
 
-# Creates numpy array of rates or ratios from a tab in an Excel spreadsheet, e.g., removal factors or carbon pool ratios
 def convert_lookup_table_to_array(spreadsheet, sheet_name, fields_to_keep):
-    # Fetches the file content.
+    """
+    Downloads an Excel file from 'spreadsheet', reads 'sheet_name', extracts columns in fields_to_keep,
+    returns them as a float32 numpy array. Typically used for emission factor tables or so.
+    """
     response = requests.get(spreadsheet)
-    response.raise_for_status()  # Ensure we notice bad responses
-
-    # Converts to Excel.
+    response.raise_for_status()
     excel_df = pd.read_excel(BytesIO(response.content), sheet_name=sheet_name)
-
-    # Retains only the relevant columns
     filtered_data = excel_df[fields_to_keep]
-
-    # Converts from dataframe to Numpy array
-    filtered_array = filtered_data.to_numpy().astype(
-        float)  # Need to convert Pandas dataframe to numpy array because Numba jit-decorated function can't use dataframes.
-
+    filtered_array = filtered_data.to_numpy().astype(float)
     return filtered_array
 
 
-# Creates arrays of 0s for any missing inputs and puts them in the corresponding typed dictionary
-def complete_inputs(existing_input_list, typed_dict, datatype, chunk_length_pixels, bounds_str, tile_id, is_final, logger):
+def complete_inputs(existing_input_list, typed_dict, datatype, chunk_length_pixels,
+                    bounds_str, tile_id, is_final, logger):
+    """
+    For each dataset_name in existing_input_list, if it's not in typed_dict,
+    create a zero array of shape (chunk_length_pixels, chunk_length_pixels) in the given 'datatype'.
+    """
     for dataset_name in existing_input_list:
         if dataset_name not in typed_dict.keys():
-            typed_dict[dataset_name] = np.full((chunk_length_pixels, chunk_length_pixels), 0, dtype=datatype)
-            lu.print_and_log(f"Created {dataset_name} for chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
+            typed_dict[dataset_name] = np.full((chunk_length_pixels, chunk_length_pixels), 0,
+                                               dtype=datatype)
+            lu.print_and_log(f"Created {dataset_name} for chunk {bounds_str} in {tile_id}: {timestr()}",
+                             is_final, logger)
     return typed_dict
 
-# The keys are s3 destination foldes and the values are the output 10x10 deg file names
+################################################################################
+# Aggregation / Merging
+################################################################################
+
+def flatten_list(nested_list):
+    """
+    Flattens a nested list [[a,b],[c,d]] -> [a,b,c,d].
+    """
+    return [x for xs in nested_list for x in xs]
+
+
 def create_list_for_aggregation(s3_in_folders):
-
-    list_of_s3_names_total = []  # Final list of dictionaries of input s3 paths and output aggregated 10x10 raster names
-
-    # Iterates through all the input s3 folders
+    """
+    For each folder in s3_in_folders, lists all .tif, transforms the chunked
+    filenames into final 10x10 names, and returns a combined list of dictionary items:
+       [{folder_path: [output_filename]}, ...]
+    """
+    list_of_s3_names_total = []
     for s3_in_folder in s3_in_folders:
-
         print(f"Listing files in {s3_in_folder}")
+        simple_output_file_names = []
 
-        simple_output_file_names = []  # List of output aggregated output 10x10 rasters
-
-        # Raw filenames in an input folder, e.g., ['00N_000E__6_-2_8_0__IPCC_classes_2020.tif', '00N_000E__6_-4_8_-2__IPCC_classes_2020.tif',...]
         filenames = list_raster_names_in_s3_folder(s3_in_folder)
-
-        # Iterates through all the files in a folder and converts them to the output names.
-        # Essentially [tile_id]__[pattern].tif. Drops the chunk bounds from the middle.
         for filename in filenames:
-            result = re.sub(cn.small_chunk_pattern, '__', filename)   #TODO Haven't run this since switching to cn.small_chunk_pattern
-            simple_output_file_names.append(result)  # New list of simplified file names used for 10x10 degree outputs
+            result = re.sub(cn.small_chunk_pattern, '__', filename)
+            simple_output_file_names.append(result)
 
-        # Removes duplicate simplified file names.
-        # There are duplicates because each 10x10 output raster has many constituent chunks, each of which have the same aggregated, final name
-        # e.g., ['00N_000E__IPCC_classes_2020.tif', '00N_010E__IPCC_classes_2020.tif', ...]
         simple_output_file_names = np.unique(simple_output_file_names).tolist()
-
-        # Makes nested lists of the file names. Nested for next step.
-        # e.g., [['00N_110E__AGC_density_MgC_ha_2000.tif']]
         simple_output_file_names = [[item] for item in simple_output_file_names]
 
-        # Makes a list of dictionaries, where the key is the input s3 path and the value is the output aggregated name
-        # e.g., [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif']}]
         list_of_s3_name_dicts = [{key: value} for value in simple_output_file_names for key in [s3_in_folder]]
-
-        # Adds the dictionary of s3 paths and output names for this folder to the list for all folders
         list_of_s3_names_total.append(list_of_s3_name_dicts)
 
-    # Combines all the lists from individual output folders into a single list
-    # Now it's:
-    # [{'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_000E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']},
-    # {'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_010E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']}, ... ]
     list_of_s3_names_total = flatten_list(list_of_s3_names_total)
-
     print(f"There are {len(list_of_s3_names_total)} 10x10 deg rasters to create across {len(s3_in_folders)} input folders.")
-
     return list_of_s3_names_total
 
 
-# Flattens a nested list
-def flatten_list(nested_list):
-    return [x for xs in nested_list for x in xs]
-
-import boto3
-
 def list_raster_names_in_s3_folder(s3_in_folder):
+    """
+    Lists all objects ending in .tif from the given s3_in_folder (like 's3://bucket/prefix').
+    Returns list of filenames (no path).
+    """
     print(f"Listing files in {s3_in_folder}")
-
-    # Remove 's3://' prefix and split bucket and prefix
     s3_in_folder = s3_in_folder.replace('s3://', '')
     bucket_name, *prefix_parts = s3_in_folder.split('/')
     prefix = '/'.join(prefix_parts)
@@ -999,123 +843,94 @@ def list_raster_names_in_s3_folder(s3_in_folder):
         if 'Contents' in page:
             for obj in page['Contents']:
                 key = obj['Key']
-                # Exclude the prefix itself and any folders
-                if key.endswith('/'):
-                    continue
-                # Extract the filename from the key
-                filename = key.split('/')[-1]
-                filenames.append(filename)
-
+                if key.endswith('.tif') or key.endswith('.tiff'):
+                    filename = key.split('/')[-1]
+                    filenames.append(filename)
     return filenames
 
 
 def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
-
+    """
+    Merges multiple 1x1 deg rasters into a single 10x10 deg raster using gdal_merge.py,
+    then optionally uploads to S3.
+    """
     logger = lu.setup_logging()
+    in_folder = list(s3_name_dict.keys())[0]
+    out_file_name = list(s3_name_dict.values())[0][0]
 
-    in_folder = list(s3_name_dict.keys())[0]  # The input s3 folder for the small rasters
-    out_file_name = list(s3_name_dict.values())[0][0]  # The output file name for the combined rasters
+    s3_in_folder = in_folder
+    vsis3_in_folder = f"/vsis3/{in_folder[5:]}"  # remove 's3://'
 
-    s3_in_folder = in_folder  # The input s3 folder with s3:// prepended
-    vsis3_in_folder = f'/vsis3/{in_folder[5:]}'  # The input s3 folder with /vsis3/ prepended
-
-    # Lists all the rasters in the specified s3 folder
+    # gather all rasters in the folder
     filenames = list_raster_names_in_s3_folder(s3_in_folder)
-
-    # Gets the tile_id from the output file name in the standard format
     tile_id = out_file_name[:8]
-
-    # Limits the input rasters to the specified tile_id (the relevant 10x10 area)
     filenames_in_focus_area = [i for i in filenames if tile_id in i]
+    tile_paths = [vsis3_in_folder + fn for fn in filenames_in_focus_area]
 
-    # Lists the tile paths for the relevant rasters
-    tile_paths = [vsis3_in_folder + filename for filename in filenames_in_focus_area]
+    lu.print_and_log(f"Merging small rasters in {tile_id} in {vsis3_in_folder}",
+                     is_final, logger)
 
-    lu.print_and_log(f"Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger)
-
-    # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
+    # updates the output folder from e.g. 8000_pixels to 40000_pixels
     out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
 
     min_x, min_y, max_x, max_y = get_10x10_tile_bounds(tile_id)
 
-    # Dynamically sets the datatype for the merged raster based on the input rasters (courtesy of https://chatgpt.com/share/e/a91c4c98-b2b1-4680-a4a7-453f1a878052)
-    # Determines the data type of the first raster
     first_raster_path = tile_paths[0]
     ds = gdal.Open(first_raster_path)
     raster_datatype = ds.GetRasterBand(1).DataType
     raster_nodata_value = ds.GetRasterBand(1).GetNoDataValue()
+    if raster_nodata_value is None:
+        raster_nodata_value = 0
     ds = None
 
-    # Defaults to Float32 if not found
     dtype_str = gdal_dtype_mapping.get(raster_datatype, 'Float32')
 
-    # Merges the rasters (courtesy of ChatGPT: https://chatgpt.com/share/e/13158ebb-dd0a-41d8-8dfb-9ee12e4c804e)
-    # This is the only system I found that maintains the extent of all the constituent rasters and doesn't change their resolution or pixel size or shift them.
-    # I also tried various gdal_translate, build_vrt, and numpy padding approaches, none of which worked in all cases.
     merged_file = f"/tmp/merged_{out_file_name}"
-
     merge_command = [
         'gdal_merge.py',
         '-o', merged_file,
         '-of', 'GTiff',
         '-co', 'COMPRESS=DEFLATE',
-        '-co', 'TILED=YES', # If not included, the size of the merged small rasters can be many times their sum. Answer at https://gis.stackexchange.com/a/258215
-        '-co', 'BLOCKXSIZE=400',  # Internal tiling
-        '-co', 'BLOCKYSIZE=400',  # Internal tiling
+        '-co', 'TILED=YES',
+        '-co', 'BLOCKXSIZE=400',
+        '-co', 'BLOCKYSIZE=400',
         '-ul_lr', str(min_x), str(max_y), str(max_x), str(min_y),
         '-ot', dtype_str,
         '-a_nodata', str(raster_nodata_value)
     ]
-
-    # Add the input tile paths
     merge_command.extend(tile_paths)
 
     try:
         subprocess.check_call(merge_command)
-        lu.print_and_log(f"Successfully merged rasters into {merged_file}", is_final, logger)
+        lu.print_and_log(f"Successfully merged rasters into {merged_file}",
+                         is_final, logger)
     except subprocess.CalledProcessError as e:
         lu.print_and_log(f"Error merging rasters: {e}", is_final, logger)
         return f"failure for {s3_name_dict}"
 
-    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
-
-    lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}", is_final, logger)
-
     if not no_upload:
-
+        s3_client = boto3.client("s3")
+        out_key = f"{out_folder[15:]}{out_file_name}"  # removing 's3://gfw2-data/'
+        lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}",
+                         is_final, logger)
         try:
-            s3_client.upload_file(merged_file, "gfw2-data", Key=f"{out_folder[15:]}{out_file_name}")  #[15:] drops s3://gfw2-data/ from front
+            s3_client.upload_file(merged_file, "gfw2-data", out_key)
             lu.print_and_log(f"Successfully uploaded {out_file_name} to s3", is_final, logger)
         except boto3.exceptions.S3UploadFailedError as e:
             lu.print_and_log(f"Error uploading file to s3: {e}", is_final, logger)
             return f"failure for {s3_name_dict}"
 
-    # Deletes the local merged raster
     os.remove(merged_file)
-
     return f"success for {s3_name_dict}"
 
-# Returns list of rasters (full paths and names) in an s3 folder, and also returns the count of them
-#Per https://chatgpt.com/share/e/67413a39-1b3c-800a-b582-72d1a8a17de1
+
 def list_raster_full_paths_in_s3_folder_and_count(s3_path):
     """
-    List all GeoTIFF files from a list of full S3 paths using boto3 and return the count.
-
-    Args:
-        s3_paths (list): List of S3 paths (e.g., "s3://bucket-name/prefix/").
-
-    Returns:
-        tuple: A tuple containing:
-            - A flat list of GeoTIFF file paths.
-            - The total count of GeoTIFF files.
+    Lists all .tif/.tiff files (full S3 URIs) within a prefix, returning (list, count).
     """
-
-    # Initialize the S3 client
     s3_client = boto3.client('s3')
     geotiff_files = []
-
     try:
-        # Parses bucket and prefix from the S3 path
         if s3_path.startswith("s3://"):
             path_parts = s3_path[5:].split("/", 1)
             bucket_name = path_parts[0]
@@ -1123,32 +938,15 @@ def list_raster_full_paths_in_s3_folder_and_count(s3_path):
         else:
             raise ValueError(f"Invalid S3 path: {s3_path}")
 
-        # Uses pagination to handle more than 1,000 objects (otherwise, limited to list of 1000 elements)
         paginator = s3_client.get_paginator('list_objects_v2')
         for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
             if 'Contents' in page:
                 files = [obj['Key'] for obj in page['Contents']]
-                geotiffs = [f"s3://{bucket_name}/{file}" for file in files if file.endswith(('.tif', '.tiff'))]
+                geotiffs = [f"s3://{bucket_name}/{f}" for f in files if f.endswith(('.tif', '.tiff'))]
                 geotiff_files.extend(geotiffs)
-
     except Exception as e:
         print(f"Error accessing {s3_path}: {e}")
 
     return geotiff_files, len(geotiff_files)
 
-# Splits a full s3 path "s3://bucket-name/rest_of_path" into "bucket-name" and "rest_of_path"
-def split_s3_path(s3_path):
-    s3_path = s3_path.replace("s3://", "")   # Remove the "s3://" prefix
-    bucket, key = s3_path.split("/", 1)    # Split the remaining string by the first "/"
-    return bucket, key
-
-def download_s3_file(s3_path, local_path):
-    s3 = boto3.client('s3')
-    bucket, key = split_s3_path(s3_path)
-    s3.download_file(bucket, key, local_path)
-
-def upload_s3_file(s3_path, local_path):
-    s3 = boto3.client('s3')
-    bucket, key = split_s3_path(s3_path)
-    s3.upload_file(local_path, Bucket=bucket, Key=key)
 
