@@ -1033,9 +1033,16 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
                         state_out = 200000
 
+                        # Sets forest age to 0 if no vegetation in cell
+                        forest_age_annual_cell = 0
+
                         # If no C fluxes calculated in decision tree, densities out should be the same as densities in (Mg C/ha).
                         # Otherwise, they get reset to 0.
-                        c_dens_out = np.array(c_dens_in).astype('float32')
+                        # c_dens_out = np.array([agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in]).astype('float32')
+
+                        #TODO Confirm we want to reset C pools to 0 if decision trees don't apply.
+                        # Otherwise, we have pixels that have carbon but no vegetation (weird mismatch).
+                        c_dens_out = np.array([0, 0, 0, 0]).astype('float32')
 
                 else:
 

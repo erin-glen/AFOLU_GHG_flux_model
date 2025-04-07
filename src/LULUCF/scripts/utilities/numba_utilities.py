@@ -474,6 +474,12 @@ def calc_NT_T(interval_type, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
 
+    #TODO Revisit this: setting starting C pools to 0 when there's tree cover gain
+    agc_dens_in = 0
+    bgc_dens_in = 0
+    deadwood_c_dens_in = 0
+    litter_c_dens_in = 0
+
     # Step 1: Calculates the number of years of carbon gain (years)
     if interval_type == cn.intervals_five_years:
         gain_year_count = cn.NT_T_gain_year_count_default
@@ -997,8 +1003,6 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
     # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest only).
     # Thus, we need to check whether the pixel was non-tall vegetation at some point during the model before the end of this interval.
     # If conditions aren't met, the deadwood and litter ratios are set to 0 (no removals).
-    # This isn't used for annual intervals (just used to calculate gain before loss) but not limiting it to just 5-year intervals
-    # because it's not much computation.
     #TODO Refactor this rule into its own function and use that in T->T disturbed, and T->T undisturbed.
     # T->NT has a slightly different formulation of the rule for when to set these to 0.
     if most_recent_year_not_tall_veg == 0 or most_recent_year_not_tall_veg == interval_end_year:
