@@ -3,6 +3,7 @@ from datetime import datetime
 import boto3
 from botocore.exceptions import ClientError
 import numpy as np
+import os
 
 # ---------------------------------------------------
 # 1. General Configuration
@@ -23,7 +24,8 @@ processed_dir = 'inputs/processed'
 # Define s3_out_dir for outputs
 s3_out_dir = 's3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/drainage_model'
 
-local_log_path = '/tmp'
+local_log_path = "./logs/"
+os.makedirs("./logs/", exist_ok=True)
 s3_log_path = "climate/AFOLU_flux_model/organic_soils/model_logs/"
 
 tile_id_pattern = r"[0-9]{2}[A-Z][_][0-9]{3}[A-Z]"

@@ -1,191 +1,188 @@
 import boto3
 import logging
-import time
 import os
+import sys
+import time
 
 from dask.distributed import print
 from datetime import datetime
 
-
+# Project imports
 from . import constants_and_names as cn
 from . import universal_utilities as uu
 
 
-# Log compilation and uploading
-# From https://chatgpt.com/share/e/4fe1e9c8-05a0-4e9d-8eee-64168891b5e2
-# Gets the logs for all workers
-#TODO Wait to run this until all entries have been added to the Coiled log--
-# running this right after the model finishes means that final log entries haven't made it into Coiled yet.
-# Log compilation and uploading
-# Log compilation and uploading
-def compile_and_upload_log(no_log, client, cluster, stage, chunk_count, chunk_size_deg,
-                           start_time_str, end_time_str, success_count, skipping_chunk_count, log_note):
+##############################################################################
+# LULUCF-Style Main Logging
+##############################################################################
 
-    # Only consolidate and upload logs if logging is enabled
-    if no_log:
-        return
+def setup_logging_main(log_filename=None):
+    """
+    Set up a main-function logger that logs both to console (stdout) and a file.
+    """
+    logger = logging.getLogger("flm_logger")
+    logger.setLevel(logging.INFO)
 
-    log_name = f"{cn.combined_log}_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.txt"
-    local_log = os.path.join(cn.local_log_path, log_name)
+    # Avoid adding duplicate handlers
+    if not logger.hasHandlers():
+        formatter = logging.Formatter('flm: %(message)s')
 
-    print(f"Preparing consolidated log {log_name}")
+        # Console handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
 
-    # Retrieve logs from cluster or client
-    if cluster is not None:
-        try:
-            logs = cluster.get_logs()
-            print("Retrieved logs from cluster.")
-        except Exception as e:
-            print(f"Error retrieving logs from cluster: {e}")
-            logs = {}
-    elif client is not None:
-        try:
-            logs = client.get_worker_logs()
-            print("Retrieved logs from client.")
-        except Exception as e:
-            print(f"Error retrieving logs from client: {e}")
-            logs = {}
+        # Optional file handler
+        if log_filename:
+            file_handler = logging.FileHandler(log_filename)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
+    return logger
+
+
+def populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note,
+                             run_local, model_type, stage):
+    """
+    Creates a main log for the top-level script. Records memory, workers, bounding box, etc.
+    """
+    main_log_name = f"{cn.combined_log}_main_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
+    main_log_local_path = f"{cn.local_log_path}{main_log_name}"
+    os.makedirs("logs", exist_ok=True)  # Ensure logs/ directory is there
+    main_logger = setup_logging_main(main_log_local_path)
+
+    if run_local:
+        worker_memory = "N/A - local run"
+        n_workers = "N/A - local run"
+        nthreads = "N/A - local run"
     else:
-        print("No cluster or client provided. Skipping log retrieval.")
-        logs = {}
+        worker_memory, n_workers, nthreads = uu.get_cluster_info(client, cluster)
 
-    # Convert the start and end times of the stage run from string to datetime.
-    try:
-        start_time = datetime.strptime(start_time_str, "%Y%m%d_%H_%M_%S")
-        end_time = datetime.strptime(end_time_str, "%Y%m%d_%H_%M_%S")
-    except ValueError as ve:
-        print(f"Error parsing start or end time: {ve}")
-        return
+    main_logger.info(f"Model type: {model_type}")
+    main_logger.info(f"Stage: {stage}")
+    main_logger.info(f"Model version: {cn.model_version}")
+    main_logger.info(f"Number of workers: {n_workers}")
+    main_logger.info(f"Memory per worker: {worker_memory}")
+    main_logger.info(f"Threads per worker: {nthreads}")
+    main_logger.info(f"Log note: {log_note}")
 
-    # Retrieve the number of workers
-    try:
-        if cluster is not None:
-            scheduler_info = cluster.scheduler_info
-        elif client is not None:
-            scheduler_info = client.scheduler_info()
-        else:
-            scheduler_info = {}
-        n_workers = len(scheduler_info.get('workers', {}))
-    except Exception as e:
-        print(f"Error retrieving scheduler info: {e}")
-        n_workers = "Unknown"
+    if bounding_box:
+        main_logger.info(f"Bounding box: {bounding_box}")
 
-    # Get memory per worker.
-    try:
-        if scheduler_info and 'workers' in scheduler_info:
-            worker_memory_bytes = next(iter(scheduler_info['workers'].values())).get('memory_limit', None)
-            if worker_memory_bytes:
-                worker_memory_gb = worker_memory_bytes / (1024 ** 3)  # Convert bytes to GB
-                worker_memory = f"{worker_memory_gb:.2f} GB"
-            else:
-                worker_memory = "Unknown"
-        else:
-            worker_memory = "Unknown"
-    except Exception:
-        worker_memory = "Unknown"
+    if use_shapefile:
+        main_logger.info(f"Using shapefile: {use_shapefile}")
 
-    # Create header lines
-    header_lines = [
-        f"Stage: {stage}",
-        f"Model version: {cn.model_version}",
-        f"Number of workers: {n_workers}",
-        f"Memory per worker: {worker_memory}",
-        f"Number of chunks: {chunk_count}",
-        f"Chunk size (degrees): {chunk_size_deg}",
-        f"Log note: {log_note}",
-        f"Starting time: {start_time_str}",
-        f"Ending time: {end_time_str}",
-        "",
-        "Filtered logs:",
-        ""
-    ]
-
-    # Filter logs containing both 'distributed.worker' and 'flm',
-    # and where the datetime is greater than start_time
-    filtered_logs = []
-    for worker_id, log_entries in logs.items():
-        for log_entry in log_entries:
-            # Determine if log_entry is a tuple or a string
-            if isinstance(log_entry, tuple):
-                # Assuming the tuple structure is (timestamp, message)
-                # Adjust the index if your tuple structure is different
-                if len(log_entry) >= 2:
-                    message = log_entry[1]
-                else:
-                    # If tuple does not have enough elements, skip
-                    continue
-            elif isinstance(log_entry, str):
-                message = log_entry
-            else:
-                # If log_entry is neither tuple nor string, skip
-                continue
-
-            # Split the message into lines
-            for line in message.split('\n'):
-                if 'distributed.worker' in line and 'flm' in line:
-                    # Extract the datetime from the end of the log line
-                    try:
-                        # Assuming the datetime is the last element in the line
-                        log_time_str = line.strip().split()[-1]
-                        log_time = datetime.strptime(log_time_str, "%Y%m%d_%H_%M_%S")
-                        # Include the line only if log_time is greater than start_time
-                        if log_time > start_time:
-                            filtered_logs.append(line)
-                    except (ValueError, IndexError) as ve:
-                        # If the datetime format is incorrect or not found, skip this line
-                        continue
-
-    # Create summary messages
-    end_time_message = f"Stage ended at: {end_time_str}"
-    stage_duration = f"Elapsed time for {stage}: {end_time - start_time}"
-    success_chunk_message = f"Number of 'Success' chunks: {success_count}"
-    skip_chunk_message = f"Number of 'Skipped' chunks: {skipping_chunk_count}"
-    difference_message = f"Difference between submitted chunks and processed chunks: {chunk_count - (success_count + skipping_chunk_count)}"
-
-    # Combine all parts into the final log content
-    combined_filtered_logs = (
-        "\n".join(header_lines) +
-        "\n".join(filtered_logs) +
-        "\n" + end_time_message +
-        "\n" + stage_duration +
-        "\n" + success_chunk_message +
-        "\n" + skip_chunk_message +
-        "\n" + difference_message
-    )
-
-    # Save the consolidated log to a local file
-    try:
-        with open(local_log, "w") as file:
-            file.write(combined_filtered_logs)
-        print(f"Consolidated log saved to {local_log}")
-    except Exception as e:
-        print(f"Error saving consolidated log: {e}")
-        return
-
-    # Upload the log file to S3
-    try:
-        s3_client = boto3.client("s3")
-        s3_client.upload_file(local_log, "gfw2-data", f"{cn.s3_log_path}{log_name}")
-        print(f"Log uploaded to {cn.s3_log_path}{log_name}")
-    except Exception as e:
-        print(f"Error uploading log to S3: {e}")
-
-# Determines whether statement should be printed to the console as well as logged
-def print_and_log(text, is_final, logger):
-
-    logger.info(f"flm: {text}")
-    if not is_final:
-        print(f"flm: {text}")
+    return main_logger, main_log_local_path
 
 
-# Configure logging for the distributed workers
-# https://chatgpt.com/share/e/6f80ccde-6a85-4837-94a0-4fcf09b96e43
-def setup_logging():
+def setup_logging_worker():
+    """
+    Configure logging for distributed workers, from LULUCF.
+    """
     logger = logging.getLogger('distributed.worker')
     logger.setLevel(logging.INFO)
+
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    # Apply formatter to existing handlers (Dask may have added some)
+    for handler in logger.handlers:
+        handler.setFormatter(formatter)
+
     if not logger.hasHandlers():
         handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
+
     return logger
+
+
+def compile_worker_logs(no_log, cluster, stage, start_time_str, logger):
+    """
+    Retrieves logs from Coiled, filters lines with 'flm', writes to local file.
+    This is used by LULUCF-style logging at the end of the run.
+    """
+    if no_log:
+        return None
+
+    worker_log_name = f"{cn.combined_log}_workers_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
+    worker_log_local_path = f"{cn.local_log_path}{worker_log_name}"
+
+    logger.info(f"Preparing consolidated worker log: {worker_log_name}")
+
+    # Retrieve logs from cluster
+    try:
+        logs = cluster.get_logs()
+    except Exception as e:
+        logger.error(f"Error retrieving logs from cluster: {e}")
+        logs = {}
+
+    filtered_logs = []
+    for worker_id, log_str in logs.items():
+        for line in log_str.split('\n'):
+            if 'flm' in line:  # capturing lines containing 'flm'
+                filtered_logs.append(line)
+
+    combined_filtered_logs = "\n".join(filtered_logs) + "\n"
+
+    # Save filtered logs
+    try:
+        with open(worker_log_local_path, "w") as f:
+            f.write(combined_filtered_logs)
+    except Exception as e:
+        logger.error(f"Error saving worker logs: {e}")
+        return None
+
+    return worker_log_local_path
+
+
+def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
+    """
+    Merges the main log and the worker logs, uploads to S3,
+    optionally deleting logs if no_log is used. Used by LULUCF.
+    """
+    if not main_log or no_log:
+        # If there's no main log or logs are disabled, do nothing
+        return
+
+    combined_log_name = f"{cn.combined_log}_combined_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
+    combined_local_log = f"{cn.local_log_path}{combined_log_name}"
+
+    try:
+        with open(combined_local_log, "w") as outfile:
+            # Write main log
+            with open(main_log, "r") as infile_main:
+                outfile.write(infile_main.read())
+                outfile.write("\n")
+
+            # If worker logs exist and no_log is False, add them
+            if worker_log:
+                with open(worker_log, "r") as infile_worker:
+                    outfile.write(infile_worker.read())
+
+        print(f"Combined log saved as {combined_local_log}")
+
+        # Upload to S3
+        s3_client = boto3.client("s3")
+        s3_client.upload_file(combined_local_log, "gfw2-data", Key=f"{cn.s3_log_path}{combined_log_name}")
+
+        # Clean up old logs
+        os.remove(main_log)
+        if worker_log:
+            os.remove(worker_log)
+
+    except Exception as e:
+        print(f"Error merging/uploading logs: {e}")
+
+
+##############################################################################
+# Shared Print Helper
+##############################################################################
+
+def print_and_log(text, is_final, logger):
+    """
+    Print to console if not is_final, and always log with 'flm:' prefix.
+    """
+    logger.info(f"flm: {text}")
+    if not is_final:
+        print(f"flm: {text}", flush=True)
+

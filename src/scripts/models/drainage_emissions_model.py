@@ -1,4 +1,4 @@
-# drainage_model.py
+#drainage_emissions_model
 
 import argparse
 import concurrent.futures
@@ -6,15 +6,10 @@ import numpy as np
 import gc
 import os
 
-from dask.distributed import Client
+from dask.distributed import print
 from numba import jit, types
 from numba.typed import Dict
 from datetime import datetime
-
-# Function to calculate drainage and emissions using Numba
-from numba import jit, types
-from numba.typed import Dict
-import numpy as np
 
 # Project-specific imports (ensure these modules are available)
 from src.scripts.utilities import constants_and_names as cn
@@ -22,7 +17,7 @@ from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
 from src.scripts.utilities import numba_utilities as nu
 
-# Import constants
+# Import constants for gas conversions
 c_to_co2 = np.float32(cn.c_to_co2)
 n2o_n_to_n2o = np.float32(cn.n2o_n_to_n2o)
 gwp_ch4 = np.float32(cn.gwp_ch4)
@@ -55,7 +50,6 @@ sago_palm_code = cn.plantation_type_codes['sago_palm']
 unknown_plantation_code = cn.plantation_type_codes['unknown']
 
 
-# Main function
 @jit(nopython=True)
 def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float32):
     """
@@ -88,7 +82,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     nutrient_block = in_dict_uint8['nutrient_status']
     descals_type_block = in_dict_int16['descals_type']
 
-    # Initialize output arrays
+    # Output arrays
     rows, cols = peat_block.shape
     soil_block = np.zeros((rows, cols), dtype=np.uint32)
     state_out_block = np.zeros((rows, cols), dtype=np.uint32)
@@ -98,7 +92,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     ch4_ditch_emissions_out = np.zeros((rows, cols), dtype=np.float32)
     co2_offsite_emissions_out = np.zeros((rows, cols), dtype=np.float32)
 
-    # Iterate over each pixel
+    # Loop over pixels
     for row in range(rows):
         for col in range(cols):
             peat = peat_block[row, col]
@@ -110,8 +104,8 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
             engert = engert_block[row, col]
             grip = grip_block[row, col]
             extraction = extraction_block[row, col]
-            ecozone = ecozone_block[row, col]  # Numeric code for ecozone
-            nutrient = nutrient_block[row, col]  # Numeric code for nutrient status
+            ecozone = ecozone_block[row, col]
+            nutrient = nutrient_block[row, col]
             descals_type = descals_type_block[row, col]
 
             ef_co2 = np.float32(0.0)
@@ -123,37 +117,39 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
 
             node = 0
 
+            # Decide if peat is drained
             if peat == 1:
                 node = nu.accrete_node(node, 1)
                 if dadap > 0 or osm_canals > 0:
                     node = nu.accrete_node(node, 1)
-                    soil_block[row, col] = 1  # 'drained'
+                    soil_block[row, col] = 1  # drained
                 elif engert > 0 or grip > 0 or osm_roads > 0:
                     node = nu.accrete_node(node, 2)
-                    soil_block[row, col] = 1  # 'drained'
+                    soil_block[row, col] = 1
                 elif land_cover == cropland_code or land_cover == settlement_code:
                     node = nu.accrete_node(node, 3)
-                    soil_block[row, col] = 1  # 'drained'
+                    soil_block[row, col] = 1
                 elif planted_forest_type or descals_type > 0:
                     node = nu.accrete_node(node, 4)
-                    soil_block[row, col] = 1  # 'drained'
+                    soil_block[row, col] = 1
                 elif extraction > 0:
                     node = nu.accrete_node(node, 5)
-                    soil_block[row, col] = 1  # 'drained'
+                    soil_block[row, col] = 1
                 else:
                     node = nu.accrete_node(node, 6)
-                    soil_block[row, col] = 0  # 'undrained peat'
+                    soil_block[row, col] = 0  # undrained peat
             else:
                 node = nu.accrete_node(node, 2)
-                soil_block[row, col] = 0  # 'not peat'
+                soil_block[row, col] = 0  # not peat
 
-            # Update state_out with the node value
+            # Save node to state
             state_out_block[row, col] = node
 
-            # New decision tree for emission factors where soil_block == 1
+            # If drained peat, go deeper
             if soil_block[row, col] == 1:
                 node = nu.accrete_node(node, 1)
-                # Start of emission factor decision tree
+
+                # Offsite defaults for each ecozone
                 if ecozone == boreal_code:
                     node = nu.accrete_node(node, 1)
                     ef_co2_offsite = 0.12
@@ -175,7 +171,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                             frac_ditch = 0.025
                         else:
                             node = nu.accrete_node(node, 3)
-                            ef_co2 = 0.0  # Handle unknown nutrient status
+                            ef_co2 = 0.0
                             ef_n2o = 0.0
                             ef_ch4_land = 0.0
                             ef_ch4_ditch = 0.0
@@ -185,7 +181,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_co2 = 5.7
                         ef_n2o = 9.5
                         ef_ch4_land = 1.4
-                        ef_ch4_ditch = 1165.0  # using deep default
+                        ef_ch4_ditch = 1165.0
                         frac_ditch = 0.05
                     elif land_cover == cropland_code:
                         node = nu.accrete_node(node, 3)
@@ -203,11 +199,12 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         frac_ditch = 0.05
                     else:
                         node = nu.accrete_node(node, 5)
-                        ef_co2 = 0.0  # No emissions or default value
+                        ef_co2 = 0.0
                         ef_n2o = 0.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 0.0
                         frac_ditch = 0
+
                 elif ecozone == temperate_code:
                     node = nu.accrete_node(node, 2)
                     ef_co2_offsite = 0.31
@@ -220,7 +217,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         frac_ditch = 0.05
                     elif land_cover == grassland_code:
                         node = nu.accrete_node(node, 2)
-                        ef_ch4_ditch = 1165.0  # using deep default
+                        ef_ch4_ditch = 1165.0
                         if nutrient == poor_nutrient_code:
                             node = nu.accrete_node(node, 1)
                             ef_co2 = 5.3
@@ -231,14 +228,13 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                             node = nu.accrete_node(node, 2)
                             ef_co2 = 6.1
                             ef_n2o = 8.2
-                            ef_ch4_land = 16.0  # using deep default
+                            ef_ch4_land = 16.0
                             frac_ditch = 0.05
                         else:
                             node = nu.accrete_node(node, 3)
-                            ef_co2 = 0.0  # Handle unknown nutrient status
+                            ef_co2 = 0.0
                             ef_n2o = 0.0
                             ef_ch4_land = 0.0
-                            ef_ch4_ditch = 0.0
                             frac_ditch = 0.05
                     elif land_cover == cropland_code:
                         node = nu.accrete_node(node, 3)
@@ -256,15 +252,16 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         frac_ditch = 0.05
                     else:
                         node = nu.accrete_node(node, 5)
-                        ef_co2 = 0.0  # No emissions or default value
+                        ef_co2 = 0.0
                         ef_n2o = 0.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 0.0
                         frac_ditch = 0
+
                 elif ecozone == tropical_code:
                     node = nu.accrete_node(node, 3)
                     ef_co2_offsite = 0.82
-                    ef_ch4_ditch = 2259.0  # Assigned before conditions
+                    ef_ch4_ditch = 2259.0
                     frac_ditch = 0.02
                     if planted_forest_type > 0:
                         node = nu.accrete_node(node, 1)
@@ -290,7 +287,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                             ef_ch4_land = 26.2
                         else:
                             node = nu.accrete_node(node, 5)
-                            ef_co2 = 0.0  # Handle unknown plantation type
+                            ef_co2 = 0.0
                             ef_n2o = 0.0
                             ef_ch4_land = 0.0
                             ef_ch4_ditch = 0.0
@@ -316,33 +313,40 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_ch4_land = 0.0
                     else:
                         node = nu.accrete_node(node, 6)
-                        ef_co2 = 0.0  # No emissions or default value
+                        ef_co2 = 0.0
                         ef_n2o = 0.0
                         ef_ch4_land = 0.0
                         ef_ch4_ditch = 0.0
+
                 else:
                     node = nu.accrete_node(node, 4)
-                    # Handle unknown ecozone by setting emission factors to zero
                     ef_co2 = 0.0
                     ef_n2o = 0.0
                     ef_ch4_land = 0.0
                     ef_ch4_ditch = 0.0
                     ef_co2_offsite = 0.0
 
-                # Update state_out with the node value after emission factor decisions
                 state_out_block[row, col] = node
 
-                # Use the helper function to calculate emissions in CO₂e
+                # Summation to CO2e
                 (co2_emissions,
                  n2o_emissions_co2e,
                  ch4_land_emissions_co2e,
                  ch4_ditch_emissions_co2e,
                  co2_offsite_emissions
-                 ) = nu.calculate_emissions_co2e(
-                    ef_co2, ef_n2o, ef_ch4_land, ef_ch4_ditch, ef_co2_offsite, frac_ditch,
-                    c_to_co2, n2o_n_to_n2o, gwp_n2o, gwp_ch4
+                ) = nu.calculate_emissions_co2e(
+                    ef_co2,
+                    ef_n2o,
+                    ef_ch4_land,
+                    ef_ch4_ditch,
+                    ef_co2_offsite,
+                    frac_ditch,
+                    c_to_co2,
+                    n2o_n_to_n2o,
+                    gwp_n2o,
+                    gwp_ch4
                 )
-                # Assign emissions to output arrays
+
                 co2_emissions_out[row, col] = co2_emissions
                 n2o_emissions_out[row, col] = n2o_emissions_co2e
                 ch4_land_emissions_out[row, col] = ch4_land_emissions_co2e
@@ -350,17 +354,16 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                 co2_offsite_emissions_out[row, col] = co2_offsite_emissions
 
             else:
+                # not peat or not drained => no drainage emissions
                 node = nu.accrete_node(node, 2)
-                # Update state_out with the node value
                 state_out_block[row, col] = node
-                # No emissions for undrained peat or non-peat areas
                 co2_emissions_out[row, col] = 0.0
                 n2o_emissions_out[row, col] = 0.0
                 ch4_land_emissions_out[row, col] = 0.0
                 ch4_ditch_emissions_out[row, col] = 0.0
                 co2_offsite_emissions_out[row, col] = 0.0
 
-    # Add outputs to dictionaries
+    # Add them to typed dict
     out_dict_uint32["soil"] = soil_block
     out_dict_uint32["state"] = state_out_block
     out_dict_float32["co2_emissions"] = co2_emissions_out
@@ -369,7 +372,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     out_dict_float32["ch4_ditch_emissions_co2e"] = ch4_ditch_emissions_out
     out_dict_float32["co2_offsite_emissions"] = co2_offsite_emissions_out
 
-    # Optionally, calculate total emissions
+    # total
     total_emissions_out = (co2_emissions_out + co2_offsite_emissions_out +
                            n2o_emissions_out + ch4_land_emissions_out +
                            ch4_ditch_emissions_out)
@@ -379,308 +382,233 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
 
 
 def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_final, no_upload):
-    logger = lu.setup_logging()
-
+    """
+    Processes one chunk of drainage emissions: downloads input layers, runs Numba,
+    logs stats, and optionally saves outputs to S3.
+    """
+    logger = lu.setup_logging_worker()
     bounds_str = uu.boundstr(bounds)
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
 
     chunk_stats = []
 
-    # Replace placeholder {tile_id} in download_dict with the actual tile ID
+    # Replace placeholder {tile_id} in S3 references
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
 
-    # Check if the necessary tiles exist
+    # Quick check if tile exists
     tile_exists = uu.check_for_tile(updated_download_dict, is_final, logger)
     if not tile_exists:
         return f"Skipped chunk {bounds_str} because {tile_id} does not exist for any inputs: {uu.timestr()}", chunk_stats
 
-    # Prepare to download the chunk
+    # Prepare to download layers
     futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger)
 
-    # Wait for downloads to complete and collect layers
+    # Wait & gather
     layers = {}
-    for future in concurrent.futures.as_completed(futures):
-        layer = futures[future]
+    for fut in concurrent.futures.as_completed(futures):
+        key = futures[fut]
         try:
-            layers[layer] = future.result()
+            arr = fut.result()  # array only
         except Exception as e:
-            logger.error(f"Error downloading layer {layer} for chunk {bounds_str}: {e}")
-            return f"Failed to download layer {layer} for chunk {bounds_str}: {e}", chunk_stats
+            logger.error(f"Error downloading layer {key} for chunk {bounds_str}: {e}")
+            return f"Failed to download layer {key} for chunk {bounds_str}: {e}", chunk_stats
+        layers[key] = arr
 
-    # Define expected data type lists for layers
-    # Define expected data type lists for layers
+    # Fill missing inputs
     uint8_list = ['IPCC_basic_classes_2020', 'peat', 'planted_forest_type', 'extraction', 'nutrient_status']
     int16_list = ['climate_domain', 'descals_type']
     int32_list = []
     float32_list = ['dadap', 'osm_roads', 'osm_canals', 'engert', 'grip']
 
-    # Fill missing layers with NoData if necessary
     layers = uu.fill_missing_input_layers_with_no_data(
-        layers, uint8_list, int16_list, int32_list, float32_list, bounds_str, tile_id, is_final, logger
+        layers, uint8_list, int16_list, int32_list, float32_list,
+        bounds_str, tile_id, is_final, logger
     )
 
-    # Troubleshooting Step 1: Log available layers after filling
-    logger.info(f"Available layers after filling: {list(layers.keys())}")
+    # Stats for input arrays
+    for k, arr in layers.items():
+        stats = uu.calculate_stats(arr, k, bounds_str, tile_id, 'input_layer')
+        chunk_stats.append(stats)
 
-    # Troubleshooting Step 2: Verify that all required layers are present
-    expected_layers = uint8_list + int16_list + int32_list + float32_list
-    missing_layers = [layer for layer in expected_layers if layer not in layers]
-    if missing_layers:
-        logger.error(f"Missing layers after filling: {missing_layers}")
-        return f"Failed due to missing layers: {missing_layers}", chunk_stats
-
-    # Troubleshooting Step 3: Log data types of each layer
-    for key in layers:
-        logger.info(f"Layer '{key}' data type: {layers[key].dtype}")
-
-    # Create typed dictionaries for Numba functions
+    # Create typed dictionaries for Numba
     typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
 
-    # Troubleshooting Step 4: Log keys in typed dictionaries
-    logger.info(f"Keys in typed_dict_uint8: {list(typed_dict_uint8.keys())}")
-    logger.info(f"Keys in typed_dict_int16: {list(typed_dict_int16.keys())}")
-    logger.info(f"Keys in typed_dict_int32: {list(typed_dict_int32.keys())}")
-    logger.info(f"Keys in typed_dict_float32: {list(typed_dict_float32.keys())}")
-
-    # Verify typed dictionaries have all required keys
-    missing_uint8_keys = [key for key in uint8_list if key not in typed_dict_uint8]
-    missing_int16_keys = [key for key in int16_list if key not in typed_dict_int16]
-    missing_int32_keys = [key for key in int32_list if key not in typed_dict_int32]
-    missing_float32_keys = [key for key in float32_list if key not in typed_dict_float32]
-    if missing_uint8_keys or missing_int16_keys or missing_int32_keys or missing_float32_keys:
-        logger.error(
-            f"Typed dictionaries missing keys. uint8: {missing_uint8_keys}, int16: {missing_int16_keys}, int32: {missing_int32_keys}, float32: {missing_float32_keys}")
-        return f"Failed due to missing keys in typed dictionaries", chunk_stats
-
-    # Calculate statistics for input layers
-    for key, array in layers.items():
-        stats = uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer')
-        chunk_stats.append(stats)
-
-    # Run the drainage and emissions calculation
-    lu.print_and_log(f"Calculating drainage and emissions in {bounds_str} in {tile_id}: {uu.timestr()}", is_final,
-                     logger)
+    lu.print_and_log(f"Calculating drainage in chunk {bounds_str} for {tile_id}: {uu.timestr()}", is_final, logger)
     try:
         out_dict_uint32, out_dict_float32 = calculate_drainage_and_emissions(
-            typed_dict_uint8, typed_dict_int16, typed_dict_float32
+            typed_dict_uint8,
+            typed_dict_int16,
+            typed_dict_float32
         )
-    except KeyError as e:
-        logger.error(f"KeyError during Numba function execution: {e}")
-        logger.error("Possible missing key in typed dictionaries passed to Numba function.")
-        return f"Failed due to KeyError in Numba function: {e}", chunk_stats
     except Exception as e:
-        logger.error(f"Exception during Numba function execution: {e}")
-        return f"Failed due to exception in Numba function: {e}", chunk_stats
+        logger.error(f"Error in drainage/emissions function: {e}")
+        return f"Failed in Numba function for {bounds_str}: {e}", chunk_stats
 
-    # Combine outputs into a single dictionary
+    # Combine
     out_dict_all_dtypes = {**out_dict_uint32, **out_dict_float32}
 
-    # Calculate statistics for output layers
-    for key, array in out_dict_all_dtypes.items():
-        stats = uu.calculate_stats(array, key, bounds_str, tile_id, 'output_layer')
+    # Stats for output arrays
+    for k, arr in out_dict_all_dtypes.items():
+        stats = uu.calculate_stats(arr, k, bounds_str, tile_id, 'output_layer')
         chunk_stats.append(stats)
 
-    # Save and upload outputs if required
+    # Optionally upload
     if not no_upload:
-        out_no_data_val = 0  # Define NoData value if needed
-
-        # Prepare output dictionary for saving
-        for key, value in out_dict_all_dtypes.items():
-            data_type = value.dtype.name
+        out_no_data_val = 0
+        # set year=2020 or any single year
+        for key, arr in out_dict_all_dtypes.items():
+            data_type = arr.dtype.name
             out_pattern = key
-            year = 2020  # Adjust if necessary
-            out_dict_all_dtypes[key] = [value, data_type, out_pattern, f'{year}']
+            year = "2020"  # Hard-coded
+            out_dict_all_dtypes[key] = [arr, data_type, out_pattern, year]
 
-        # Save and upload raster outputs
         uu.save_and_upload_small_raster_set(
             bounds, chunk_length_pixels, tile_id, bounds_str,
             out_dict_all_dtypes, is_final, logger, out_no_data_val
         )
 
-    # Clear memory
-    del out_dict_all_dtypes
-    del layers
-    gc.collect()
-
-    success_message = f"Success for {bounds_str}: {uu.timestr()}"
-    return success_message, chunk_stats
+    return f"Success for {bounds_str}: {uu.timestr()}", chunk_stats
 
 
 def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
                        run_local=False, no_stats=False, no_log=False, no_upload=False):
     """
-    Main function to run the drainage model.
-
-    Args:
-        cluster_name (str, optional): Name of the Coiled cluster.
-        bounding_box (list, optional): List of coordinates [W, S, E, N] in degrees.
-        chunk_size (float, optional): Size of each chunk in degrees.
-        run_local (bool, optional): Run locally without Dask/Coiled.
-        no_stats (bool, optional): Do not create the chunk stats spreadsheet.
-        no_log (bool, optional): Do not create the combined log.
-        no_upload (bool, optional): Do not save and upload outputs to S3.
-
-    Returns:
-        None
+    Main function with LULUCF-style logs:
+     1. Create "main" log
+     2. Launch chunk tasks
+     3. Compile worker logs
+     4. Merge logs
     """
-    # Set default values if None
-    if cluster_name is None:
-        cluster_name = 'default_cluster'
-    if bounding_box is None:
-        bounding_box = [110, -10, 120, 0]  # Default bounding box
-    if chunk_size is None:
-        chunk_size = 2  # Default chunk size
+    stage = "drainage_model"
+    start_time = uu.timestr()
 
-    # Connect to cluster
+    # Connect or local
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
-    # Stage information
-    stage = 'drainage_model'
-    start_time = uu.timestr()
-    print(f"Stage {stage} started at: {start_time}")
+    # Create a top-level main log
+    main_logger, main_log_local_path = lu.populate_main_log_header(
+        bounding_box=bounding_box,
+        use_shapefile=False,
+        client=client,
+        cluster=cluster,
+        log_note="Drainage model run",
+        run_local=run_local,
+        model_type="organic_soils",
+        stage=stage
+    )
+    main_logger.info(f"Stage {stage} started at: {start_time}")
 
-    # Prepare chunks
-    chunks = uu.get_chunk_bounds(bounding_box, chunk_size)
-    print(f"Processing {len(chunks)} chunks")
+    if bounding_box is None:
+        bounding_box = [110, -10, 120, 0]  # default if none
+    if chunk_size is None:
+        chunk_size = 2
 
-    # Determine if the run is final
+    # Prepare chunk bounding boxes
+    chunk_list = uu.get_chunk_bounds(bounding_box, chunk_size)
+    main_logger.info(f"Processing {len(chunk_list)} chunk(s) at bounding box {bounding_box} with chunk size {chunk_size}°")
+
     is_final = False
-    if len(chunks) > 20:
+    if len(chunk_list) > 20:
         is_final = True
-        print("Running as final model.")
+        main_logger.info("Running as final model due to >20 chunks")
 
-    # Accumulate stats and messages
-    all_stats = []
-    return_messages = []
-
-    # Prepare the download dictionary
-    # This dictionary should include paths to all required input datasets
+    # Build a dictionary of S3 paths for input data
     download_dict = cn.download_dict
 
-    # Get first tile names and data types
-    print(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
+    # Check data types with a sample tile
+    main_logger.info(f"Determining data types from sample tile: {uu.timestr()}")
     first_tiles = uu.first_file_name_in_s3_folder(download_dict)
-
-    print(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
 
-    # Create tasks and start processing
-    print(f"Creating tasks and starting processing: {uu.timestr()}")
+    # Launch tasks for each chunk
     futures = []
-    for chunk in chunks:
-        future = client.submit(
+    for bds in chunk_list:
+        fut = client.submit(
             calculate_and_upload_drainage,
-            chunk, download_dict_with_data_types, is_final, no_upload
+            bds,
+            download_dict_with_data_types,
+            is_final,
+            no_upload
         )
-        futures.append(future)
+        futures.append(fut)
 
-    # Collect the results once they are finished
+    # Gather
     results = client.gather(futures)
 
-    # Process results
     success_count = 0
-    skipping_chunk_count = 0
+    skipping_count = 0
+    all_stats = []
 
-    for result in results:
-        return_message, chunk_stats = result
-
-        print(return_message)
-
-        if "Success" in return_message:
+    for msg, stats in results:
+        main_logger.info(msg)
+        if "Success" in msg:
             success_count += 1
+        elif "Skipped" in msg or "skipped" in msg.lower():
+            skipping_count += 1
+        all_stats.extend(stats)
 
-        if "skipped chunk" in return_message.lower():
-            skipping_chunk_count += 1
+    main_logger.info(f"Number of 'Success' chunks: {success_count}")
+    main_logger.info(f"Number of 'Skipped' chunks: {skipping_count}")
 
-        if return_message:
-            return_messages.append(return_message)
-
-        if chunk_stats is not None:
-            all_stats.extend(chunk_stats)
-
-    # Print counts
-    print(f"Number of 'Success' chunks: {success_count}")
-    print(f"Number of 'skipped chunk' chunks: {skipping_chunk_count}")
-
-    # Calculate stats if not suppressed
+    # If user wants chunk-level stats
     if not no_stats:
         try:
             uu.calculate_chunk_stats(all_stats, stage)
-        except AttributeError:
-            print(
-                "Can't print chunk stats: module 'src.scripts.utilities.constants_and_names' has no attribute 'chunk_stats_path'")
+        except AttributeError as e:
+            main_logger.info(f"Cannot print chunk stats: {e}")
 
     # End time
     end_time = uu.timestr()
-    print(f"Stage {stage} ended at: {end_time}")
-    uu.stage_duration(start_time, end_time, stage)
+    main_logger.info(f"Stage {stage} ended at: {end_time}")
+    uu.stage_duration(start_time, end_time, stage, main_logger)
 
-    # Compile and upload logs
-    log_note = "Drainage model run"
-    try:
-        lu.compile_and_upload_log(
-            no_log,
-            client,
-            cluster,
-            stage,
-            len(chunks),  # Total number of chunks
-            chunk_size,
-            start_time,
-            end_time,
-            success_count,  # New argument: Count of successfully processed chunks
-            skipping_chunk_count,  # New argument: Count of skipped chunks
-            log_note  # Log note
-        )
-
-    except AttributeError as e:
-        print(f"Error during log compilation and upload: {e}")
-
-    # Close the client and cluster if not running locally
+    # If not local, gather worker logs
     if not run_local:
+        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
         client.close()
         cluster.close()
+    else:
+        main_logger.info("Local run completed. Worker logs not compiled.")
 
 
 def main(argv=None):
     """
-    Main function to run the drainage model from the command line.
+    Command-line entry point for drainage model with LULUCF-style logging.
 
-    This script calculates the drainage model using specified parameters.
-    It can be run with default settings or customized via command-line arguments.
+    If run with no arguments, uses the commented bounding boxes for test runs.
     """
     import sys
     if argv is None:
         argv = sys.argv[1:]
-    parser = argparse.ArgumentParser(description="Calculate drainage model with emissions.")
-    parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
+    parser = argparse.ArgumentParser(description="Calculate drainage model with LULUCF-style logging.")
+    parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name', default=None)
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
-    parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
-    parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
-    parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
+    parser.add_argument('--no_stats', action='store_true', help='Skip chunk stats spreadsheet')
+    parser.add_argument('--no_log', action='store_true', help='Skip worker log merging & uploading')
+    parser.add_argument('--no_upload', action='store_true', help='Skip uploading outputs to S3')
+
     args = parser.parse_args(argv)
 
-    # If no arguments are provided, use default values
+    # If no arguments, we do a local test run with your commented bounding boxes
     if not argv:
-        print("No command-line arguments provided. Using default values for testing.")
+        print("No CLI args provided. Using defaults for test run.")
         run_drainage_model(
-            cluster_name='drainage',
-
-            # Define your test bounding box here
-            # bounding_box=[110, -10, 120, 0],  # Example bounding box
-            # bounding_box=[112, -4, 114, -2],  # one 2-degree chunk with data in Borneo 00N_110E
-            # bounding_box=[110, -10, 120, 0], # 10x10 degree tile Borneo
-            # bounding_box=[-74, -4, -72, -2],  # one 2-degree chunk with data Peru 00N_080W
-            # bounding_box=[-80.0, -10.0, -70.0, 0.0],  # 10x10 degree tile peru 00N_080W
-            # bounding_box=[16.0, 6.0, 18.0, 8.0],  # 2-degree chunk Congo 10N_010E
-            # bounding_box=[-10.0, 0.0, 0.0, 10],  # 10x10 degree tile Congo 10N_010E
-            # bounding_box=[-8, 52, -6, 54, 2],  # 2-degree chunk Ireland 60N_010W
-            # bounding_box=[-110.0, 50.0, -100.0, 60.0],  # 10x10 degree tile Ireland 60N_010W
-            bounding_box=[-180, -60, 180, 80],  # entire world
-
+            cluster_name=None,
+            # bounding_box=[110, -10, 120, 0],    # Example bounding box
+            # bounding_box=[112, -4, 114, -2],    # one 2-degree chunk with data in Borneo 00N_110E
+            # bounding_box=[110, -10, 120, 0],    # 10x10 degree tile Borneo
+            # bounding_box=[-74, -4, -72, -2],    # one 2-degree chunk with data Peru 00N_080W
+            # bounding_box=[-80.0, -10.0, -70.0, 0.0],  # 10x10 degree tile Peru 00N_080W
+            # bounding_box=[16.0, 6.0, 18.0, 8.0], # 2-degree chunk Congo 10N_010E
+            # bounding_box=[-10.0, 0.0, 0.0, 10.0],# 10x10 degree tile Congo 10N_010E
+            # bounding_box=[-8, 52, -6, 54],       # 2-degree chunk Ireland 60N_010W
+            # bounding_box=[-110.0, 50.0, -100.0, 60.0], # 10x10 degree tile Ireland 60N_010W
+            # bounding_box=[-180, -60, 180, 80],   # entire world
+            bounding_box=[112, -4, 114, -2],  # Currently chosen bounding box
             chunk_size=2,
             run_local=True,
             no_stats=False,
