@@ -141,9 +141,10 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
         else:
             file_name = f"{file_info}__{key}__{timestr()}.tif"
 
-        # Only prints if not a final run
-        if not is_final:
-            lu.print_and_log(f"Saving {key} for {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger_worker)
+        # # Only prints if not a final run
+        # # Disabled this because it prints sooooo many lines that it's annoying to scroll through
+        # if not is_final:
+        #     lu.print_and_log(f"Saving {key} for {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger_worker)
 
         # Includes NoData value in output raster
         if no_data_val is not None:

@@ -63,6 +63,7 @@ if __name__ == "__main__":
         worker_cpu = 4
         idle_timeout = 15
         scheduler_memory = '64'
+        threads_per_worker = 2
 
     else:
         scheduler_memory = worker_memory

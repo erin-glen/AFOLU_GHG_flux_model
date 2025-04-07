@@ -1265,6 +1265,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         # Clear memory of unneeded arrays
         del out_dict
 
+
     ### Part 5: Calculates combined gross fluxes and net fluxes.
     ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
     ### Doing this outside numba function to minimize pixel-level calculations and chunks being returned by numba function.
@@ -1274,57 +1275,63 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
     [in_dict.clear() for in_dict in in_dicts]
 
-    for interval_end_year in interval_end_years:
-
-        year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
-
-        # Gross emissions across all carbon pools
-        out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"] = (
-                out_dict_all_dtypes[f"{cn.agc_gross_emis_pattern}_{year_range}"]
-                + out_dict_all_dtypes[f"{cn.bgc_gross_emis_pattern}_{year_range}"]
-                + out_dict_all_dtypes[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"]
-                + out_dict_all_dtypes[f"{cn.litter_c_gross_emis_pattern}_{year_range}"])
-
-        # Gross emissions for non-CO2 emissions
-        out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"] = (
-                out_dict_all_dtypes[f"{cn.ch4_flux_pattern}_{year_range}"]
-                + out_dict_all_dtypes[f"{cn.n2o_flux_pattern}_{year_range}"])
-
-        # Gross emissions for all carbon pools and all gases
-        out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_all_gases_pattern}_{year_range}"] = (
-            out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"]
-            + out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"]
-        )
-
-        # Gross removals across all carbon pools
-        out_dict_all_dtypes[f"{cn.gross_removals_all_C_pools_pattern}_{year_range}"] = (
-                out_dict_all_dtypes[f"{cn.agc_gross_removals_pattern}_{year_range}"]
-                + out_dict_all_dtypes[f"{cn.bgc_gross_removals_pattern}_{year_range}"]
-                + out_dict_all_dtypes[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"]
-                + out_dict_all_dtypes[f"{cn.litter_c_gross_removals_pattern}_{year_range}"])
-
-        # Net flux for each carbon pool
-        out_dict_all_dtypes[f"{cn.agc_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.agc_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.agc_gross_removals_pattern}_{year_range}"]
-        out_dict_all_dtypes[f"{cn.bgc_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.bgc_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.bgc_gross_removals_pattern}_{year_range}"]
-        out_dict_all_dtypes[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"]
-        out_dict_all_dtypes[f"{cn.litter_c_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.litter_c_gross_removals_pattern}_{year_range}"]
-
-        # Net flux across all carbon pools but for CO2 only
-        out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_{year_range}"] = (
-                out_dict_all_dtypes[f"{cn.agc_net_flux_pattern}_{year_range}"]
-                + out_dict_all_dtypes[f"{cn.bgc_net_flux_pattern}_{year_range}"]
-                + out_dict_all_dtypes[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"]
-                + out_dict_all_dtypes[f"{cn.litter_c_net_flux_pattern}_{year_range}"])
-
-        # Net flux across all carbon pools, plus non-pool non-CO2 emissions
-        out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_all_gases_pattern}_{year_range}"] = (
-                out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_{year_range}"]
-                + out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"])
+    # lu.print_and_log(f"Summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    #
+    # for interval_end_year in interval_end_years:
+    #
+    #     year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
+    #
+    #     # Gross emissions across all carbon pools
+    #     out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"] = (
+    #             out_dict_all_dtypes[f"{cn.agc_gross_emis_pattern}_{year_range}"]
+    #             + out_dict_all_dtypes[f"{cn.bgc_gross_emis_pattern}_{year_range}"]
+    #             + out_dict_all_dtypes[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"]
+    #             + out_dict_all_dtypes[f"{cn.litter_c_gross_emis_pattern}_{year_range}"])
+    #
+    #     # Gross emissions for non-CO2 emissions
+    #     out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"] = (
+    #             out_dict_all_dtypes[f"{cn.ch4_flux_pattern}_{year_range}"]
+    #             + out_dict_all_dtypes[f"{cn.n2o_flux_pattern}_{year_range}"])
+    #
+    #     # Gross emissions for all carbon pools and all gases
+    #     out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_all_gases_pattern}_{year_range}"] = (
+    #         out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"]
+    #         + out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"]
+    #     )
+    #
+    #     # Gross removals across all carbon pools
+    #     out_dict_all_dtypes[f"{cn.gross_removals_all_C_pools_pattern}_{year_range}"] = (
+    #             out_dict_all_dtypes[f"{cn.agc_gross_removals_pattern}_{year_range}"]
+    #             + out_dict_all_dtypes[f"{cn.bgc_gross_removals_pattern}_{year_range}"]
+    #             + out_dict_all_dtypes[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"]
+    #             + out_dict_all_dtypes[f"{cn.litter_c_gross_removals_pattern}_{year_range}"])
+    #
+    #     # Net flux for each carbon pool
+    #     out_dict_all_dtypes[f"{cn.agc_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.agc_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.agc_gross_removals_pattern}_{year_range}"]
+    #     out_dict_all_dtypes[f"{cn.bgc_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.bgc_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.bgc_gross_removals_pattern}_{year_range}"]
+    #     out_dict_all_dtypes[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"]
+    #     out_dict_all_dtypes[f"{cn.litter_c_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.litter_c_gross_removals_pattern}_{year_range}"]
+    #
+    #     # Net flux across all carbon pools but for CO2 only
+    #     out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_{year_range}"] = (
+    #             out_dict_all_dtypes[f"{cn.agc_net_flux_pattern}_{year_range}"]
+    #             + out_dict_all_dtypes[f"{cn.bgc_net_flux_pattern}_{year_range}"]
+    #             + out_dict_all_dtypes[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"]
+    #             + out_dict_all_dtypes[f"{cn.litter_c_net_flux_pattern}_{year_range}"])
+    #
+    #     # Net flux across all carbon pools, plus non-pool non-CO2 emissions
+    #     out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_all_gases_pattern}_{year_range}"] = (
+    #             out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_{year_range}"]
+    #             + out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"])
+    #
+    # lu.print_and_log(f"Done summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
 
 
     ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
     ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
     ### Also useful for a quick sum of outputs without doing zonal stats
+
+    lu.print_and_log(f"Populating chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
 
     # The relevant pixel area (m^2) file in s3
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
@@ -1340,6 +1347,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
 
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
+
+    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
 
 
     ### Part 7: Saves numpy arrays as rasters and uploads to s3
