@@ -21,6 +21,7 @@ from dask.distributed import Client
 from datetime import datetime
 from io import BytesIO
 from osgeo import gdal
+import sys
 
 # Local project imports
 from src.scripts.utilities import constants_and_names as cn
@@ -949,4 +950,64 @@ def list_raster_full_paths_in_s3_folder_and_count(s3_path):
 
     return geotiff_files, len(geotiff_files)
 
+def get_interval_info(start_year, end_year, main_logger):
+    """
+    Determines whether we're doing annual, 5-year, or hybrid intervals
+    based on the given start_year and end_year. Returns:
+      - interval_type   (cn.intervals_annual, cn.intervals_five_years, or cn.intervals_hybrid)
+      - interval_year_diff  (the effective 'interval_duration - 1' for five_year or 1 for annual, or a list if hybrid)
+      - interval_length     (5 or 1, or a list if hybrid)
+      - output_years        (the list of 'interval_end_years')
 
+    Currently supports:
+      - (2000, 2020) => 5-year intervals
+      - (2015, 2023) => annual intervals
+      - (2015, 2020) => annual intervals
+      - (2000, 2023) => hybrid
+    """
+    # We can do partial logic for 2015..2020 as annual intervals:
+    if start_year == 2000 and end_year == 2020:
+        interval_type = cn.intervals_five_years
+        interval_year_diff = cn.interval_duration - 1  # 4
+        interval_length = cn.interval_duration         # 5
+        output_years = cn.interval_end_years_5_years   # [2005, 2010, 2015, 2020]
+
+    elif start_year == 2015 and end_year == 2023:
+        interval_type = cn.intervals_annual
+        interval_year_diff = 1
+        interval_length = 1
+        output_years = cn.interval_end_years_annual    # [2016, 2017, ..., 2023]
+
+    elif start_year == 2015 and end_year == 2020:
+        # We'll treat 2015..2020 as an annual run. We just define the end years as [2016, 2017, ..., 2020].
+        interval_type = cn.intervals_annual
+        interval_year_diff = 1
+        interval_length = 1
+        # So we need interval_end_years for 2015..2020:
+        output_years = list(range(start_year + 1, end_year + 1))  # [2016, 2017, 2018, 2019, 2020]
+
+    elif start_year == 2000 and end_year == 2023:
+        interval_type = cn.intervals_hybrid
+        # first part: the 2000–2020 5-year intervals
+        # second part: the 2020–2023 annual intervals
+        # Typically you'd do something like:
+        interval_year_diff = (
+            [cn.interval_duration - 1] * len(cn.interval_end_years_5_years[:-1]) +
+            [1] * len(cn.interval_end_years_annual)
+        )
+        interval_length = (
+            [cn.interval_duration] * len(cn.interval_end_years_5_years[:-1]) +
+            [1] * len(cn.interval_end_years_annual)
+        )
+        output_years = cn.interval_end_years_5_years[:-1] + cn.interval_end_years_annual
+
+    else:
+        # Anything else => "interval_type not valid"
+        main_logger.error("interval_type not valid")
+        sys.exit(1)
+
+    main_logger.info(f"Interval type: {interval_type}")
+    main_logger.info(f"Interval duration: {interval_length} years")
+    main_logger.info(f"Interval end years/Output years: {output_years}")
+
+    return interval_type, interval_year_diff, interval_length, output_years

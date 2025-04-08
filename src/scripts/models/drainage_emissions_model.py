@@ -1,15 +1,16 @@
-#drainage_emissions_model
+# drainage_emissions_model.py
 
 import argparse
 import concurrent.futures
 import numpy as np
 import gc
 import os
+import sys
+from datetime import datetime
 
 from dask.distributed import print
 from numba import jit, types
 from numba.typed import Dict
-from datetime import datetime
 
 # Project-specific imports (ensure these modules are available)
 from src.scripts.utilities import constants_and_names as cn
@@ -91,6 +92,11 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     ch4_land_emissions_out = np.zeros((rows, cols), dtype=np.float32)
     ch4_ditch_emissions_out = np.zeros((rows, cols), dtype=np.float32)
     co2_offsite_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+
+    # (Optional) If you wanted to incorporate burned-area logic for a single year,
+    # you would do it here. E.g.:
+    # burned_block = in_dict_uint8.get("burned_area_final_YYYY", None)
+    # Then use that in your drainage logic if not None.
 
     # Loop over pixels
     for row in range(rows):
@@ -381,10 +387,18 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     return out_dict_uint32, out_dict_float32
 
 
-def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_final, no_upload):
+def calculate_and_upload_drainage(bounds,
+                                  download_dict_with_data_types,
+                                  is_final,
+                                  no_upload,
+                                  interval_start_year=None,
+                                  interval_end_year=None):
     """
-    Processes one chunk of drainage emissions: downloads input layers, runs Numba,
-    logs stats, and optionally saves outputs to S3.
+    Processes one chunk of drainage emissions:
+      1) If interval_start_year / interval_end_year are not provided, do single-year approach (like original).
+      2) If they are provided, we gather any burned-area layers for [interval_start_year..interval_end_year]
+         but still pass everything into 'calculate_drainage_and_emissions' the same way,
+         because we haven't changed that logic to handle multi-year. We could do a sum or average if needed.
     """
     logger = lu.setup_logging_worker()
     bounds_str = uu.boundstr(bounds)
@@ -399,7 +413,17 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
     # Quick check if tile exists
     tile_exists = uu.check_for_tile(updated_download_dict, is_final, logger)
     if not tile_exists:
-        return f"Skipped chunk {bounds_str} because {tile_id} does not exist for any inputs: {uu.timestr()}", chunk_stats
+        return (f"Skipped chunk {bounds_str} because {tile_id} does not exist for any inputs: {uu.timestr()}",
+                chunk_stats)
+
+    if interval_start_year and interval_end_year:
+        # Example approach: for each year in [interval_start_year..interval_end_year],
+        # ensure there's a burned key. That way fill_missing_input_layers won't crash.
+        for yr in range(interval_start_year, interval_end_year + 1):
+            burned_key = f"{cn.burned_area_final_pattern}_{yr}"
+            if burned_key not in updated_download_dict:
+                updated_download_dict[burned_key] = None
+        # Possibly also do land-cover if you have multi-year land cover.
 
     # Prepare to download layers
     futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger)
@@ -421,6 +445,11 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
     int32_list = []
     float32_list = ['dadap', 'osm_roads', 'osm_canals', 'engert', 'grip']
 
+    # If we do have interval years, add burned-area keys to the fill list
+    if interval_start_year and interval_end_year:
+        for yr in range(interval_start_year, interval_end_year + 1):
+            uint8_list.append(f"{cn.burned_area_final_pattern}_{yr}")
+
     layers = uu.fill_missing_input_layers_with_no_data(
         layers, uint8_list, int16_list, int32_list, float32_list,
         bounds_str, tile_id, is_final, logger
@@ -434,7 +463,8 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
     # Create typed dictionaries for Numba
     typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
 
-    lu.print_and_log(f"Calculating drainage in chunk {bounds_str} for {tile_id}: {uu.timestr()}", is_final, logger)
+    lu.print_and_log(f"Calculating drainage in chunk {bounds_str} for {tile_id}: {uu.timestr()}",
+                     is_final, logger)
     try:
         out_dict_uint32, out_dict_float32 = calculate_drainage_and_emissions(
             typed_dict_uint8,
@@ -456,11 +486,16 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
     # Optionally upload
     if not no_upload:
         out_no_data_val = 0
-        # set year=2020 or any single year
+        # If you are doing multi-year, you might label them "start_end".
+        # If not, fallback to single year e.g. "2020".
+        if interval_start_year and interval_end_year and interval_start_year != interval_end_year:
+            year = f"{interval_start_year}_{interval_end_year}"
+        else:
+            year = "2020"  # default single-year label
+
         for key, arr in out_dict_all_dtypes.items():
             data_type = arr.dtype.name
             out_pattern = key
-            year = "2020"  # Hard-coded
             out_dict_all_dtypes[key] = [arr, data_type, out_pattern, year]
 
         uu.save_and_upload_small_raster_set(
@@ -471,14 +506,22 @@ def calculate_and_upload_drainage(bounds, download_dict_with_data_types, is_fina
     return f"Success for {bounds_str}: {uu.timestr()}", chunk_stats
 
 
-def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
-                       run_local=False, no_stats=False, no_log=False, no_upload=False):
+def run_drainage_model(cluster_name=None,
+                       bounding_box=None,
+                       chunk_size=None,
+                       run_local=False,
+                       no_stats=False,
+                       no_log=False,
+                       no_upload=False,
+                       start_year=None,
+                       end_year=None):
     """
     Main function with LULUCF-style logs:
      1. Create "main" log
-     2. Launch chunk tasks
-     3. Compile worker logs
-     4. Merge logs
+     2. If start_year/end_year are provided, we do multiple intervals (like 2015..2020).
+        Otherwise, we do the original single run.
+     3. Launch chunk tasks
+     4. Compile logs
     """
     stage = "drainage_model"
     start_time = uu.timestr()
@@ -492,7 +535,7 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
         use_shapefile=False,
         client=client,
         cluster=cluster,
-        log_note="Drainage model run",
+        log_note="Drainage model run (optional burned-area multi-year)",
         run_local=run_local,
         model_type="organic_soils",
         stage=stage
@@ -506,14 +549,15 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
 
     # Prepare chunk bounding boxes
     chunk_list = uu.get_chunk_bounds(bounding_box, chunk_size)
-    main_logger.info(f"Processing {len(chunk_list)} chunk(s) at bounding box {bounding_box} with chunk size {chunk_size}°")
+    main_logger.info(f"Processing {len(chunk_list)} chunk(s) at bounding box {bounding_box} "
+                     f"with chunk size {chunk_size}°")
 
     is_final = False
     if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model due to >20 chunks")
 
-    # Build a dictionary of S3 paths for input data
+    # Build a dictionary of S3 paths for input data (original approach)
     download_dict = cn.download_dict
 
     # Check data types with a sample tile
@@ -521,17 +565,33 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
     first_tiles = uu.first_file_name_in_s3_folder(download_dict)
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
 
-    # Launch tasks for each chunk
     futures = []
-    for bds in chunk_list:
-        fut = client.submit(
-            calculate_and_upload_drainage,
-            bds,
-            download_dict_with_data_types,
-            is_final,
-            no_upload
-        )
-        futures.append(fut)
+    if start_year and end_year and (start_year < end_year):
+        # MULTI-INTERVAL approach: e.g. 2015..2020 in yearly steps or 5-year steps, your choice
+        # For simplicity, let's do each year:
+        for yr in range(start_year, end_year + 1):
+            for bds in chunk_list:
+                fut = client.submit(
+                    calculate_and_upload_drainage,
+                    bds,
+                    download_dict_with_data_types,
+                    is_final,
+                    no_upload,
+                    interval_start_year=yr,
+                    interval_end_year=yr
+                )
+                futures.append(fut)
+    else:
+        # SINGLE-INTERVAL approach: do exactly the original approach
+        for bds in chunk_list:
+            fut = client.submit(
+                calculate_and_upload_drainage,
+                bds,
+                download_dict_with_data_types,
+                is_final,
+                no_upload
+            )
+            futures.append(fut)
 
     # Gather
     results = client.gather(futures)
@@ -561,7 +621,7 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
     # End time
     end_time = uu.timestr()
     main_logger.info(f"Stage {stage} ended at: {end_time}")
-    uu.stage_duration(start_time, end_time, stage, main_logger)
+    uu.stage_duration(start_time, end_time, stage)
 
     # If not local, gather worker logs
     if not run_local:
@@ -575,14 +635,12 @@ def run_drainage_model(cluster_name=None, bounding_box=None, chunk_size=None,
 
 def main(argv=None):
     """
-    Command-line entry point for drainage model with LULUCF-style logging.
-
-    If run with no arguments, uses the commented bounding boxes for test runs.
+    Command-line entry point for drainage model with optional multi-year burned areas.
+    If no CLI args, we run a small local test.
     """
-    import sys
     if argv is None:
         argv = sys.argv[1:]
-    parser = argparse.ArgumentParser(description="Calculate drainage model with LULUCF-style logging.")
+    parser = argparse.ArgumentParser(description="Drainage model (optional intervals).")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name', default=None)
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
@@ -591,29 +649,25 @@ def main(argv=None):
     parser.add_argument('--no_log', action='store_true', help='Skip worker log merging & uploading')
     parser.add_argument('--no_upload', action='store_true', help='Skip uploading outputs to S3')
 
+    # Optional multi-interval approach
+    parser.add_argument('--start_year', type=int, help='Start year for multi-year approach')
+    parser.add_argument('--end_year', type=int, help='End year for multi-year approach')
+
     args = parser.parse_args(argv)
 
-    # If no arguments, we do a local test run with your commented bounding boxes
+    # If no arguments, do local test run
     if not argv:
         print("No CLI args provided. Using defaults for test run.")
         run_drainage_model(
             cluster_name=None,
-            # bounding_box=[110, -10, 120, 0],    # Example bounding box
-            # bounding_box=[112, -4, 114, -2],    # one 2-degree chunk with data in Borneo 00N_110E
-            # bounding_box=[110, -10, 120, 0],    # 10x10 degree tile Borneo
-            # bounding_box=[-74, -4, -72, -2],    # one 2-degree chunk with data Peru 00N_080W
-            # bounding_box=[-80.0, -10.0, -70.0, 0.0],  # 10x10 degree tile Peru 00N_080W
-            # bounding_box=[16.0, 6.0, 18.0, 8.0], # 2-degree chunk Congo 10N_010E
-            # bounding_box=[-10.0, 0.0, 0.0, 10.0],# 10x10 degree tile Congo 10N_010E
-            # bounding_box=[-8, 52, -6, 54],       # 2-degree chunk Ireland 60N_010W
-            # bounding_box=[-110.0, 50.0, -100.0, 60.0], # 10x10 degree tile Ireland 60N_010W
-            # bounding_box=[-180, -60, 180, 80],   # entire world
-            bounding_box=[112, -4, 114, -2],  # Currently chosen bounding box
+            bounding_box=[112, -4, 114, -2],
             chunk_size=2,
             run_local=True,
             no_stats=False,
             no_log=False,
-            no_upload=False
+            no_upload=False,
+            start_year=2015,   # Will process 2015..2015 in single-year approach
+            end_year=2015
         )
     else:
         run_drainage_model(
@@ -623,9 +677,10 @@ def main(argv=None):
             run_local=args.run_local,
             no_stats=args.no_stats,
             no_log=args.no_log,
-            no_upload=args.no_upload
+            no_upload=args.no_upload,
+            start_year=args.start_year,
+            end_year=args.end_year
         )
-
 
 if __name__ == "__main__":
     main()
