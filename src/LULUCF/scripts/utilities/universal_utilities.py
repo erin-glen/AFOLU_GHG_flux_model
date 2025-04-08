@@ -122,9 +122,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
 
     file_info = f'{tile_id}__{bounds_str}'
 
-    # Only prints if not a final run
-    if is_final:
-        lu.print_and_log(f"Saving outputs locally for {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"Saving outputs locally for {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
 
     # For every output file, saves from array to local raster, then to s3.
     # Can't save directly to s3, unfortunately, so need to save locally first.

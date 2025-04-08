@@ -1336,72 +1336,72 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # The relevant pixel area (m^2) file in s3
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
 
-    # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
-    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger_worker)
-    pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
+    # # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
+    # pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger_worker)
+    # pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
+    #
+    # # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
+    # for key, array_per_ha in out_dict_all_dtypes.items():
+    #
+    #     # # Converts per hectare values to per pixel values for the output numpy array
+    #     # output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
+    #     #
+    #     # chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
+    #
+    #     # # Converts per hectare values to per pixel values for the output numpy array
+    #     # output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
+    #
+    #     chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer'))
+    #
+    # lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
 
-    # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
-    for key, array_per_ha in out_dict_all_dtypes.items():
 
-        # # Converts per hectare values to per pixel values for the output numpy array
-        # output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
-        #
-        # chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
-
-        # # Converts per hectare values to per pixel values for the output numpy array
-        # output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
-
-        chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer'))
-
-    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-
-
-    ### Part 7: Saves numpy arrays as rasters and uploads to s3
-
-    uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
-
-    # Only saves arrays to geotifs and uploads them to s3 if enabled
-    if not no_upload:
-
-        out_no_data_val = 0  # NoData value for output raster (optional)
-
-        # Adds metadata used for uploading outputs to s3 to the dictionary
-        for key, value in out_dict_all_dtypes.items():
-            data_type = value.dtype.name
-
-            # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
-            out_pattern, year_range = uu.strip_and_extract_years(key)
-            # print(out_pattern)
-            # print(year_range)
-
-            # Retrieves the relevant output s3 path for this specific output (list of one element).
-            # First, finds the output folders for all intervals with the relevant patterns
-            matched_output_s3_folders = [item for item in output_folders if out_pattern in item]
-            # print(matched_output_s3_folders)
-
-            # Second, finds the output folder with the right interval for that pattern
-            matched_output_s3_folder_list = [item for item in matched_output_s3_folders if year_range in item]
-            # print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
-
-            # Output paths without bucket (s3://gfw2-data).
-            # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
-            s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
-
-            # Dictionary with metadata for each array
-            out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
-
-        # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
-        upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
-                                                        out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
-
-        lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}",
-                             is_final, logger_worker)
-
-        # Execute uploads in parallel
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
-
-        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}", is_final, logger_worker)
+    # ### Part 7: Saves numpy arrays as rasters and uploads to s3
+    #
+    # uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
+    #
+    # # Only saves arrays to geotifs and uploads them to s3 if enabled
+    # if not no_upload:
+    #
+    #     out_no_data_val = 0  # NoData value for output raster (optional)
+    #
+    #     # Adds metadata used for uploading outputs to s3 to the dictionary
+    #     for key, value in out_dict_all_dtypes.items():
+    #         data_type = value.dtype.name
+    #
+    #         # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
+    #         out_pattern, year_range = uu.strip_and_extract_years(key)
+    #         # print(out_pattern)
+    #         # print(year_range)
+    #
+    #         # Retrieves the relevant output s3 path for this specific output (list of one element).
+    #         # First, finds the output folders for all intervals with the relevant patterns
+    #         matched_output_s3_folders = [item for item in output_folders if out_pattern in item]
+    #         # print(matched_output_s3_folders)
+    #
+    #         # Second, finds the output folder with the right interval for that pattern
+    #         matched_output_s3_folder_list = [item for item in matched_output_s3_folders if year_range in item]
+    #         # print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
+    #
+    #         # Output paths without bucket (s3://gfw2-data).
+    #         # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
+    #         s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
+    #
+    #         # Dictionary with metadata for each array
+    #         out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
+    #
+    #     # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
+    #     upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
+    #                                                     out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
+    #
+    #     lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}",
+    #                          is_final, logger_worker)
+    #
+    #     # Execute uploads in parallel
+    #     with ThreadPoolExecutor(max_workers=5) as executor:
+    #         executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
+    #
+    #     lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}", is_final, logger_worker)
 
     # Clears memory of unneeded arrays
     del out_dict_all_dtypes
