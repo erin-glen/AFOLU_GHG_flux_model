@@ -1343,10 +1343,15 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
     for key, array_per_ha in out_dict_all_dtypes.items():
 
-        # Converts per hectare values to per pixel values for the output numpy array
-        output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
+        # # Converts per hectare values to per pixel values for the output numpy array
+        # output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
+        #
+        # chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
-        chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
+        # # Converts per hectare values to per pixel values for the output numpy array
+        # output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
+
+        chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer'))
 
     lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
 
