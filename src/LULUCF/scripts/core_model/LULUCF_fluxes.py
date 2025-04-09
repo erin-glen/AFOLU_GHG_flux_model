@@ -1130,7 +1130,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = (ch4_gross_emis_out_block / interval_length).copy()
         out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = (n2o_gross_emis_out_block / interval_length).copy()
 
-        # Still Mg C/ha
+        # Still Mg C/ha at the interval end year
         out_dict_float32[f"{cn.agc_dens_pattern}_{interval_end_year}"] = agc_dens_block.copy()
         out_dict_float32[f"{cn.bgc_dens_pattern}_{interval_end_year}"] = bgc_dens_block.copy()
         out_dict_float32[f"{cn.deadwood_c_dens_pattern}_{interval_end_year}"] = deadwood_c_dens_block.copy()
@@ -1186,7 +1186,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
     # print(futures)
 
-    lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
 
     # Dictionary that stores the dataset name (key) and downloaded data and their statuses (values)
     layers = {}
@@ -1242,8 +1242,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     ### Part 4: Calculates LULUCF fluxes and densities
 
-
-    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
     numba_start = time.time()
 
@@ -1254,7 +1253,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     numba_end = time.time()
     lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     lu.print_and_log(f"Memory usage after numba calculations completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", is_final, logger_worker)
-    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id} took {numba_end-numba_start}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id} took {round(numba_end-numba_start)}: {uu.timestr()}", False, logger_worker)
 
     # print(out_dict_uint32)
     # print(out_dict_float32)
@@ -1284,64 +1283,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     [in_dict.clear() for in_dict in in_dicts]
 
 
-    # ## Part 5: Calculates combined gross fluxes and net fluxes.
-    # ## Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
-    # ## Doing this outside numba function to minimize pixel-level calculations and chunks being returned by numba function.
-    #
-    # lu.print_and_log(f"Summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-    #
-    # for interval_end_year in interval_end_years:
-    #
-    #     year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
-    #
-    #     # Gross emissions across all carbon pools
-    #     out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"] = (
-    #             out_dict_all_dtypes[f"{cn.agc_gross_emis_pattern}_{year_range}"]
-    #             + out_dict_all_dtypes[f"{cn.bgc_gross_emis_pattern}_{year_range}"]
-    #             + out_dict_all_dtypes[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"]
-    #             + out_dict_all_dtypes[f"{cn.litter_c_gross_emis_pattern}_{year_range}"])
-    #
-    #     # Gross emissions for non-CO2 emissions
-    #     out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"] = (
-    #             out_dict_all_dtypes[f"{cn.ch4_flux_pattern}_{year_range}"]
-    #             + out_dict_all_dtypes[f"{cn.n2o_flux_pattern}_{year_range}"])
-    #
-    #     # Gross emissions for all carbon pools and all gases
-    #     out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_all_gases_pattern}_{year_range}"] = (
-    #         out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"]
-    #         + out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"]
-    #     )
-    #
-    #     # Gross removals across all carbon pools
-    #     out_dict_all_dtypes[f"{cn.gross_removals_all_C_pools_pattern}_{year_range}"] = (
-    #             out_dict_all_dtypes[f"{cn.agc_gross_removals_pattern}_{year_range}"]
-    #             + out_dict_all_dtypes[f"{cn.bgc_gross_removals_pattern}_{year_range}"]
-    #             + out_dict_all_dtypes[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"]
-    #             + out_dict_all_dtypes[f"{cn.litter_c_gross_removals_pattern}_{year_range}"])
-    #
-    #     # Net flux for each carbon pool
-    #     out_dict_all_dtypes[f"{cn.agc_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.agc_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.agc_gross_removals_pattern}_{year_range}"]
-    #     out_dict_all_dtypes[f"{cn.bgc_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.bgc_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.bgc_gross_removals_pattern}_{year_range}"]
-    #     out_dict_all_dtypes[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"]
-    #     out_dict_all_dtypes[f"{cn.litter_c_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.litter_c_gross_removals_pattern}_{year_range}"]
-    #
-    #     # Net flux across all carbon pools but for CO2 only
-    #     out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_{year_range}"] = (
-    #             out_dict_all_dtypes[f"{cn.agc_net_flux_pattern}_{year_range}"]
-    #             + out_dict_all_dtypes[f"{cn.bgc_net_flux_pattern}_{year_range}"]
-    #             + out_dict_all_dtypes[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"]
-    #             + out_dict_all_dtypes[f"{cn.litter_c_net_flux_pattern}_{year_range}"])
-    #
-    #     # Net flux across all carbon pools, plus non-pool non-CO2 emissions
-    #     out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_all_gases_pattern}_{year_range}"] = (
-    #             out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_{year_range}"]
-    #             + out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"])
-    #
-    # lu.print_and_log(f"Done summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-    # print(f"After creating summative outputs for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
-
-
-    ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
+    ### Part 5: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
     ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
     ### Also useful for a quick sum of outputs without doing zonal stats
 
@@ -1364,10 +1306,10 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
         # chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer'))
 
-    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
 
-    ### Part 7: Saves numpy arrays as rasters and uploads to s3
+    ### Part 6: Saves numpy arrays as rasters and uploads to s3
 
     uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
 
@@ -1405,7 +1347,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
                                                         out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
 
-        lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", False, logger_worker)
 
         # Execute uploads in parallel
         with ThreadPoolExecutor(max_workers=5) as executor:
