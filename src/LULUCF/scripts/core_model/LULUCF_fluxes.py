@@ -30,6 +30,10 @@ from ..utilities import log_utilities as lu
 from ..utilities import numba_utilities as nu
 from ..utilities import resize_cluster
 
+import gc
+import os
+import psutil
+
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
@@ -807,6 +811,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     deadwood_c_ratio=0, litter_c_ratio=0)
 
                     ### Trees remaining trees
+                    #TODO Include emissions if it's natural forest converted to oil palm according to Descals planting year. Not currently including emissions.
                     elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: Include mangrove exception.
                         node = nu.accrete_node(node, 3)
                         if part_or_full_dist_in_prev_interval:  # Trees partially disturbed in the last interval (31)
@@ -1155,6 +1160,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
 
+    process = psutil.Process(os.getpid())
+
     logger_worker = lu.setup_logging_worker()
 
     # try:
@@ -1169,6 +1176,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     ### No checks about whether the chunk has data because the way the chunk_list is constructed,
     ### every chunk is relevant and should be processed, so they don't need to be checked.
 
+    print(f"At start of task {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
     # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
 
@@ -1179,10 +1188,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
     # print(futures)
 
-    # Only prints if not a final run
-    if not is_final:
-        lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}",
-                         is_final, logger_worker)
+    lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
     # Dictionary that stores the dataset name (key) and downloaded data and their statuses (values)
     layers = {}
@@ -1204,6 +1210,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern].max())
     # print(layers[cn.forest_age_start_year_pattern].dtype)
     # print(layers['burned_area_final_2023'].dtype)
+
+    print(f"After downloading inputs for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
 
 
     ### Part 2: Calculates min, mean, and max for each input chunk.
@@ -1230,19 +1238,27 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     # print("int32_typed_list:", typed_dict_int32)
     # print("float32_typed_list:", typed_dict_float32)
 
+    print(f"After creating typed dicts for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
+    updated_download_dict.clear()
+    del updated_download_dict
+    del futures
+    gc.collect()
+    print(f"After deleting updated_download_dict and futures for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
 
     ### Part 4: Calculates LULUCF fluxes and densities
 
     lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
-    if is_final:
-        print(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}")
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
+    print(f"Before numba calculations typed dicts for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
 
     out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(
         typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs,
         start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years, is_final)
 
     lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    print(f"After numba calculations typed dicts for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
 
     # print(out_dict_uint32)
     # print(out_dict_float32)
@@ -1265,16 +1281,28 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
         # Clear memory of unneeded arrays
         del out_dict
 
+    print(f"After creating combined output dict for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
 
-    ### Part 5: Calculates combined gross fluxes and net fluxes.
-    ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
-    ### Doing this outside numba function to minimize pixel-level calculations and chunks being returned by numba function.
+    gc.collect()
+
+    print(f"After gc.collect() for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
 
     # Deletes all unnecessary input dictionaries before the memory-intensive derived output calculations
     # Suggested by ChatGPT: https://chatgpt.com/share/e/672bbf2e-ebbc-800a-aae3-3d92f5a1d663
     in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
     [in_dict.clear() for in_dict in in_dicts]
 
+    print(f"After deleting input data for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
+    gc.collect()
+
+    print(f"After gc.collect() for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
+
+    # ## Part 5: Calculates combined gross fluxes and net fluxes.
+    # ## Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
+    # ## Doing this outside numba function to minimize pixel-level calculations and chunks being returned by numba function.
+    #
     # lu.print_and_log(f"Summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     #
     # for interval_end_year in interval_end_years:
@@ -1325,6 +1353,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     #             + out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"])
     #
     # lu.print_and_log(f"Done summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    # print(f"After creating summative outputs for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
 
 
     ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
@@ -1333,78 +1362,96 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     lu.print_and_log(f"Populating chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
 
+    print(f"Before creating pixel area chunk for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
     # The relevant pixel area (m^2) file in s3
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
 
-    # # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
-    # pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger_worker)
-    # pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
-    #
-    # # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
-    # for key, array_per_ha in out_dict_all_dtypes.items():
-    #
-    #     # # Converts per hectare values to per pixel values for the output numpy array
-    #     # output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
-    #     #
-    #     # chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
-    #
-    #     # # Converts per hectare values to per pixel values for the output numpy array
-    #     # output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
-    #
-    #     chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer'))
-    #
-    # lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
+    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger_worker)
+    pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
+    print(f"After creating pixel area chunk for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
 
-    # ### Part 7: Saves numpy arrays as rasters and uploads to s3
-    #
-    # uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
-    #
-    # # Only saves arrays to geotifs and uploads them to s3 if enabled
-    # if not no_upload:
-    #
-    #     out_no_data_val = 0  # NoData value for output raster (optional)
-    #
-    #     # Adds metadata used for uploading outputs to s3 to the dictionary
-    #     for key, value in out_dict_all_dtypes.items():
-    #         data_type = value.dtype.name
-    #
-    #         # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
-    #         out_pattern, year_range = uu.strip_and_extract_years(key)
-    #         # print(out_pattern)
-    #         # print(year_range)
-    #
-    #         # Retrieves the relevant output s3 path for this specific output (list of one element).
-    #         # First, finds the output folders for all intervals with the relevant patterns
-    #         matched_output_s3_folders = [item for item in output_folders if out_pattern in item]
-    #         # print(matched_output_s3_folders)
-    #
-    #         # Second, finds the output folder with the right interval for that pattern
-    #         matched_output_s3_folder_list = [item for item in matched_output_s3_folders if year_range in item]
-    #         # print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
-    #
-    #         # Output paths without bucket (s3://gfw2-data).
-    #         # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
-    #         s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
-    #
-    #         # Dictionary with metadata for each array
-    #         out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
-    #
-    #     # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
-    #     upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
-    #                                                     out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
-    #
-    #     lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}",
-    #                          is_final, logger_worker)
-    #
-    #     # Execute uploads in parallel
-    #     with ThreadPoolExecutor(max_workers=5) as executor:
-    #         executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
-    #
-    #     lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}", is_final, logger_worker)
+    # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
+    for key, array_per_ha in out_dict_all_dtypes.items():
+
+        # Converts per hectare values to per pixel values for the output numpy array
+        output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
+
+        chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
+
+        # chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer'))
+
+    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    print(f"After populating output chunk stats for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
+    gc.collect()
+
+    print(f"After gc.collect() for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
+    for k, v in locals().items():
+        if isinstance(v, dict):
+            print(f"{k}: {len(v)} keys")
+            for key, val in v.items():
+                if isinstance(val, np.ndarray):
+                    print(f"  {key}: {val.nbytes / 1024 ** 2:.2f} MB")
+
+    ### Part 7: Saves numpy arrays as rasters and uploads to s3
+
+    uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
+    print(f"Before saving and uploading for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
+    # Only saves arrays to geotifs and uploads them to s3 if enabled
+    if not no_upload:
+
+        out_no_data_val = 0  # NoData value for output raster (optional)
+
+        # Adds metadata used for uploading outputs to s3 to the dictionary
+        for key, value in out_dict_all_dtypes.items():
+            data_type = value.dtype.name
+
+            # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
+            out_pattern, year_range = uu.strip_and_extract_years(key)
+            # print(out_pattern)
+            # print(year_range)
+
+            # Retrieves the relevant output s3 path for this specific output (list of one element).
+            # First, finds the output folders for all intervals with the relevant patterns
+            matched_output_s3_folders = [item for item in output_folders if out_pattern in item]
+            # print(matched_output_s3_folders)
+
+            # Second, finds the output folder with the right interval for that pattern
+            matched_output_s3_folder_list = [item for item in matched_output_s3_folders if year_range in item]
+            # print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
+
+            # Output paths without bucket (s3://gfw2-data).
+            # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
+            s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
+
+            # Dictionary with metadata for each array
+            out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
+
+        # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
+        upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
+                                                        out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
+
+        lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", is_final, logger_worker)
+        print(f"Before uploading for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
+        # Execute uploads in parallel
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
+
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}", is_final, logger_worker)
+        print(f"After uploading for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
 
     # Clears memory of unneeded arrays
+    # Explicitly free output arrays after upload
+    out_dict_all_dtypes.clear()
     del out_dict_all_dtypes
+    gc.collect()
+    print(f"After deleting out_dict_all_dtypes for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
 
     return_message = f"Success for {bounds_str}: {uu.timestr()}"
 
