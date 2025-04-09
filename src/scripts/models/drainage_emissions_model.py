@@ -355,7 +355,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                  ch4_land_emissions_co2e,
                  ch4_ditch_emissions_co2e,
                  co2_offsite_emissions
-                ) = nu.calculate_emissions_co2e(
+                 ) = nu.calculate_emissions_co2e(
                     ef_co2,
                     ef_n2o,
                     ef_ch4_land,
@@ -404,11 +404,11 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                     if ecozone in (boreal_code, temperate_code):
                         if drained:
                             gef_co2 = np.float32(1650.0)
-                            gef_co  = np.float32(110.0)
+                            gef_co = np.float32(110.0)
                             gef_ch4 = np.float32(12.0)
                         else:
                             gef_co2 = np.float32(1450.0)
-                            gef_co  = np.float32(90.0)
+                            gef_co = np.float32(90.0)
                             gef_ch4 = np.float32(10.0)
 
                     elif ecozone == tropical_code:
@@ -416,38 +416,38 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                             # E.g. if cropland or planted forest => "prescribed"
                             if (land_cover == cropland_code or planted_forest_type > 0):
                                 gef_co2 = np.float32(1700.0)
-                                gef_co  = np.float32(200.0)
+                                gef_co = np.float32(200.0)
                                 gef_ch4 = np.float32(15.0)
                             else:
                                 gef_co2 = np.float32(1600.0)
-                                gef_co  = np.float32(180.0)
+                                gef_co = np.float32(180.0)
                                 gef_ch4 = np.float32(14.0)
                         else:
                             gef_co2 = np.float32(1500.0)
-                            gef_co  = np.float32(150.0)
+                            gef_co = np.float32(150.0)
                             gef_ch4 = np.float32(10.0)
                     else:
                         # unknown => set 0
                         gef_co2 = np.float32(0.0)
-                        gef_co  = np.float32(0.0)
+                        gef_co = np.float32(0.0)
                         gef_ch4 = np.float32(0.0)
 
                     # L_fire = pixel_area_ha * M_B * C_f * G_ef * 10^-3
                     burn_co2 = pixel_area_ha * mass_burnt * combustion_factor * gef_co2 * 1e-3
-                    burn_co  = pixel_area_ha * mass_burnt * combustion_factor * gef_co  * 1e-3
+                    burn_co = pixel_area_ha * mass_burnt * combustion_factor * gef_co * 1e-3
                     burn_ch4 = pixel_area_ha * mass_burnt * combustion_factor * gef_ch4 * 1e-3
 
                     burned_co2_out[row, col] = burn_co2
-                    burned_co_out[row, col]  = burn_co
+                    burned_co_out[row, col] = burn_co
                     burned_ch4_out[row, col] = burn_ch4
                 else:
                     burned_co2_out[row, col] = 0.0
-                    burned_co_out[row, col]  = 0.0
+                    burned_co_out[row, col] = 0.0
                     burned_ch4_out[row, col] = 0.0
             else:
                 # No burned_block => no fire data
                 burned_co2_out[row, col] = 0.0
-                burned_co_out[row, col]  = 0.0
+                burned_co_out[row, col] = 0.0
                 burned_ch4_out[row, col] = 0.0
 
     # Add drainage outputs to typed dict
@@ -461,17 +461,17 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
 
     # total drainage-based
     total_emissions_out = (
-        co2_emissions_out
-        + co2_offsite_emissions_out
-        + n2o_emissions_out
-        + ch4_land_emissions_out
-        + ch4_ditch_emissions_out
+            co2_emissions_out
+            + co2_offsite_emissions_out
+            + n2o_emissions_out
+            + ch4_land_emissions_out
+            + ch4_ditch_emissions_out
     )
     out_dict_float32["total_emissions"] = total_emissions_out
 
     # Add burned emissions to typed dict
     out_dict_float32["burned_co2"] = burned_co2_out
-    out_dict_float32["burned_co"]  = burned_co_out
+    out_dict_float32["burned_co"] = burned_co_out
     out_dict_float32["burned_ch4"] = burned_ch4_out
 
     return out_dict_uint32, out_dict_float32
@@ -774,6 +774,7 @@ def main(argv=None):
             start_year=args.start_year,
             end_year=args.end_year
         )
+
 
 if __name__ == "__main__":
     main()
