@@ -15,6 +15,10 @@ python -m scripts.core_model.LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data
 
 import argparse
 import concurrent.futures
+import gc
+import os
+import psutil
+import time
 import sys
 import numpy as np
 
@@ -29,10 +33,6 @@ from ..utilities import universal_utilities as uu
 from ..utilities import log_utilities as lu
 from ..utilities import numba_utilities as nu
 from ..utilities import resize_cluster
-
-import gc
-import os
-import psutil
 
 
 # Function to calculate LULUCF fluxes and carbon densities
@@ -1242,15 +1242,19 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
     ### Part 4: Calculates LULUCF fluxes and densities
 
+
     lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
+    numba_start = time.time()
 
     out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(
         typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs,
         start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years, is_final)
 
+    numba_end = time.time()
     lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     lu.print_and_log(f"Memory usage after numba calculations completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", is_final, logger_worker)
+    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id} took {numba_end-numba_start}: {uu.timestr()}", False, logger_worker)
 
     # print(out_dict_uint32)
     # print(out_dict_float32)
@@ -1589,8 +1593,9 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
     # print(download_dict_with_data_types)
 
-    # Creates a list of output directories for all outputs and intervals based on specifics of the model run
-    output_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year, chunk_size_pixels, model_type, interval_end_years, interval_year_diff)
+    # Creates a list of output directories (core and intermediates) for all outputs and intervals based on specifics of the model run
+    output_dir_list_core_intermediate = cn.LULUCF_core_output_dirs + cn.LULUCF_intermediate_output_dirs
+    output_dir_list = uu.create_output_dir_name_list(output_dir_list_core_intermediate, interval_type, start_year, chunk_size_pixels, model_type, interval_end_years, interval_year_diff)
     # print(output_dir_list)
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
@@ -1639,33 +1644,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
-    # ### Step 3: Aggregates 1x1 degree outputs to 10x10 degree outputs (if not disabled)
-    #
-    # all_10x10_stats = None
-    #
-    # if not no_aggregate:
-    #     # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
-    #     # These are the basis for the aggregation tasks.
-    #     list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
-    #     # print(list_of_s3_name_dicts_total)
-    #
-    #     main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
-    #
-    #     # Each task is a single 10x10 deg aggregated geotif
-    #     C_pool_10x10_deg_delayed_results = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
-    #                                         for s3_name_dict in list_of_s3_name_dicts_total]
-    #
-    #     C_pool_10x10_deg_results = dask.compute(*C_pool_10x10_deg_delayed_results)
-    #
-    #     success_count_10x10, all_10x10_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, C_pool_10x10_deg_results)
-    #
-    #     uu.stage_duration(start_time, uu.timestr(), f"{stage} with 10x10 deg aggregation", main_logger)
-    #
-    # else:
-    #     main_logger.info(f"Skipping aggregation of 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
-
-
-    ### Step 4: Chunk stats for 1x1 degree and 10x10 degree outputs, aggregates logs
+    ### Step 3: Chunk stats for 1x1 degree and 10x10 degree outputs, aggregates logs
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
