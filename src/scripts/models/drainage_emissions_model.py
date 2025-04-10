@@ -74,7 +74,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
 
     # Extract required input arrays
     peat_block = in_dict_uint8['peat']
-    land_cover_block = in_dict_uint8['IPCC_basic_classes_2020']
+    land_cover_block = in_dict_uint8['land_cover']
     planted_forest_type_block = in_dict_uint8['planted_forest_type']
     dadap_block = in_dict_float32['dadap']
     osm_roads_block = in_dict_float32['osm_roads']
@@ -142,37 +142,41 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
             frac_ditch = np.float32(0.0)
 
             node = 0  # Node for logic tracing
+            drained = False
 
             # Decide if peat is drained
             if peat == 1:
                 node = nu.accrete_node(node, 1)
                 if dadap > 0 or osm_canals > 0:
                     node = nu.accrete_node(node, 1)
-                    soil_block[row, col] = 1  # drained
+                    drained = True
                 elif engert > 0 or grip > 0 or osm_roads > 0:
                     node = nu.accrete_node(node, 2)
-                    soil_block[row, col] = 1
-                elif land_cover == cropland_code or land_cover == settlement_code:
+                    drained = True
+                elif land_cover in (cropland_code, settlement_code):
                     node = nu.accrete_node(node, 3)
-                    soil_block[row, col] = 1
-                elif planted_forest_type or descals_type > 0:
+                    drained = True
+                elif planted_forest_type > 0 or descals_type_block[row, col] > 0:
                     node = nu.accrete_node(node, 4)
-                    soil_block[row, col] = 1
+                    drained = True
                 elif extraction > 0:
                     node = nu.accrete_node(node, 5)
-                    soil_block[row, col] = 1
+                    drained = True
                 else:
                     node = nu.accrete_node(node, 6)
-                    soil_block[row, col] = 0  # undrained peat
+
+                if drained:
+                    soil_block[row, col] = 2  # drained peat
+                else:
+                    soil_block[row, col] = 1  # undrained peat
             else:
                 node = nu.accrete_node(node, 2)
                 soil_block[row, col] = 0  # not peat
 
-            # Save node to state
             state_out_block[row, col] = node
 
             # If drained peat, fill drainage EFs
-            if soil_block[row, col] == 1:
+            if soil_block[row, col] == 2:
                 node = nu.accrete_node(node, 1)
 
                 # Offsite defaults for each ecozone
@@ -393,60 +397,75 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
             # If you want to handle drains as well, put this logic
             # outside the else so it applies to all.
             # -----------------------------------------------------
-            if burned_block is not None:
-                burned_val = burned_block[row, col]  # 1 => burned, 0 => not burned
-                if burned_val > 0:
-                    # Determine if pixel is drained
-                    drained = (soil_block[row, col] == 1)
+                # Fully disaggregated burned-area logic
+                if burned_block is not None:
+                    burned_val = burned_block[row, col]
+                    if burned_val > 0 and soil_block[row, col] in (1, 2):
+                        combustion_factor = np.float32(0.75)
+                        mass_burnt = np.float32(50.0)
 
-                    # Set default combustion factor and mass burnt
-                    combustion_factor = np.float32(0.75)
-                    mass_burnt = np.float32(50.0)  # t DM
+                        ecozone = ecozone_block[row, col]
 
-                    # Set emission factors based on ecozone and drainage
-                    gef_co2, gef_co, gef_ch4 = np.float32(0.0), np.float32(0.0), np.float32(0.0)
+                        if ecozone == boreal_code:
+                            burned_node = nu.accrete_node(burned_node, 1)
+                            if soil_block[row, col] == 2:  # Drained peat
+                                burned_node = nu.accrete_node(burned_node, 1)
+                                gef_co2, gef_co, gef_ch4 = 1650.0, 110.0, 12.0
+                            elif soil_block[row, col] == 1:  # Undrained peat
+                                burned_node = nu.accrete_node(burned_node, 2)
+                                gef_co2, gef_co, gef_ch4 = 1450.0, 90.0, 10.0
 
-                    if ecozone in (boreal_code, temperate_code):
-                        if drained:
-                            gef_co2, gef_co, gef_ch4 = 1650.0, 110.0, 12.0
+                        elif ecozone == temperate_code:
+                            burned_node = nu.accrete_node(burned_node, 2)
+                            if soil_block[row, col] == 2:  # Drained peat
+                                burned_node = nu.accrete_node(burned_node, 1)
+                                gef_co2, gef_co, gef_ch4 = 1650.0, 110.0, 12.0
+                            elif soil_block[row, col] == 1:  # Undrained peat
+                                burned_node = nu.accrete_node(burned_node, 2)
+                                gef_co2, gef_co, gef_ch4 = 1450.0, 90.0, 10.0
+
+                        elif ecozone == tropical_code:
+                            burned_node = nu.accrete_node(burned_node, 3)
+                            if soil_block[row, col] == 2:  # Drained peat
+                                burned_node = nu.accrete_node(burned_node, 1)
+                                if land_cover == cropland_code:
+                                    burned_node = nu.accrete_node(burned_node, 3)
+                                    gef_co2, gef_co, gef_ch4 = 1700.0, 200.0, 15.0
+                                elif planted_forest_type > 0:
+                                    burned_node = nu.accrete_node(burned_node, 4)
+                                    gef_co2, gef_co, gef_ch4 = 1700.0, 200.0, 15.0
+                                else:
+                                    burned_node = nu.accrete_node(burned_node, 5)
+                                    gef_co2, gef_co, gef_ch4 = 1600.0, 180.0, 14.0
+                            elif soil_block[row, col] == 1:  # Undrained tropical peat
+                                # No burned-area emissions are calculated for undrained tropical peat, following specific guidelines.
+                                gef_co2, gef_co, gef_ch4 = 0.0, 0.0, 0.0
+
                         else:
-                            gef_co2, gef_co, gef_ch4 = 1450.0, 90.0, 10.0
+                            burned_node = nu.accrete_node(burned_node, 4)
+                            gef_co2, gef_co, gef_ch4 = 0.0, 0.0, 0.0
 
-                    elif ecozone == tropical_code:
-                        if drained:
-                            if land_cover == cropland_code or planted_forest_type > 0:
-                                gef_co2, gef_co, gef_ch4 = 1700.0, 200.0, 15.0
-                            else:
-                                gef_co2, gef_co, gef_ch4 = 1600.0, 180.0, 14.0
-                        else:
-                            gef_co2, gef_co, gef_ch4 = 1500.0, 150.0, 10.0
+                        burn_co2, burn_co, burn_ch4, burn_total_co2e = nu.calculate_burned_area_emissions(
+                            pixel_area_ha,
+                            mass_burnt,
+                            combustion_factor,
+                            gef_co2,
+                            gef_co,
+                            gef_ch4,
+                            gwp_co,
+                            gwp_ch4
+                        )
 
-                    # Use standardized burned-area emissions calculation
-                    burn_co2, burn_co, burn_ch4, burn_total_co2e = nu.calculate_burned_area_emissions(
-                        pixel_area_ha,
-                        mass_burnt,
-                        combustion_factor,
-                        gef_co2,
-                        gef_co,
-                        gef_ch4,
-                        gwp_co,
-                        gwp_ch4
-                    )
-
-                    burned_co2_out[row, col] = burn_co2
-                    burned_co_out[row, col] = burn_co
-                    burned_ch4_out[row, col] = burn_ch4
-                    burned_total_emissions_co2e_out[row, col] = burn_total_co2e
-                else:
-                    burned_co2_out[row, col] = 0.0
-                    burned_co_out[row, col] = 0.0
-                    burned_ch4_out[row, col] = 0.0
-                    burned_total_emissions_co2e_out[row, col] = 0.0
-            else:
-                burned_co2_out[row, col] = 0.0
-                burned_co_out[row, col] = 0.0
-                burned_ch4_out[row, col] = 0.0
-                burned_total_emissions_co2e_out[row, col] = 0.0
+                        burned_co2_out[row, col] = burn_co2
+                        burned_co_out[row, col] = burn_co
+                        burned_ch4_out[row, col] = burn_ch4
+                        burned_total_emissions_co2e_out[row, col] = burn_total_co2e
+                        state_out_block[row, col] = nu.accrete_node(state_out_block[row, col], burned_node)
+                    else:
+                        burned_co2_out[row, col] = 0.0
+                        burned_co_out[row, col] = 0.0
+                        burned_ch4_out[row, col] = 0.0
+                        burned_total_emissions_co2e_out[row, col] = 0.0
 
     # Add drainage outputs to typed dict
     out_dict_uint32["soil"] = soil_block
@@ -474,7 +493,6 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     out_dict_float32["burned_total_emissions_co2e"] = burned_total_emissions_co2e_out
 
     return out_dict_uint32, out_dict_float32
-
 
 def calculate_and_upload_drainage(bounds,
                                   download_dict_with_data_types,
@@ -522,7 +540,7 @@ def calculate_and_upload_drainage(bounds,
 
     # Fill missing inputs
     uint8_list = [
-        'IPCC_basic_classes_2020',
+        'land_cover',
         'peat',
         'planted_forest_type',
         'extraction',
@@ -609,60 +627,49 @@ def run_drainage_model(cluster_name=None,
                        start_year=None,
                        end_year=None):
     """
-    Main function with LULUCF-style logs:
-     1. Create "main" log
-     2. If start_year/end_year are provided, we do multiple intervals
-        (like 2015..2020). Otherwise, single run.
-     3. Launch chunk tasks
-     4. Compile logs
+    Main function adapted to explicitly align burned areas and land cover intervals with LULUCF.
     """
     stage = "drainage_model"
     start_time = uu.timestr()
 
-    # Connect or local
+    # Connect to Coiled or local Dask cluster
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
-    # Create a top-level main log
+    # Setup logging
     main_logger, main_log_local_path = lu.populate_main_log_header(
         bounding_box=bounding_box,
         use_shapefile=False,
         client=client,
         cluster=cluster,
-        log_note="Drainage model run (with burned-area logic)",
+        log_note="Drainage model run aligned with LULUCF annual/5-year intervals",
         run_local=run_local,
         model_type="organic_soils",
         stage=stage
     )
     main_logger.info(f"Stage {stage} started at: {start_time}")
 
-    if bounding_box is None:
-        bounding_box = [110, -10, 120, 0]  # default if none
-    if chunk_size is None:
-        chunk_size = 2
+    # Default bounding box/chunk size if not set
+    bounding_box = bounding_box or [110, -10, 120, 0]
+    chunk_size = chunk_size or 2
 
-    # Prepare chunk bounding boxes
     chunk_list = uu.get_chunk_bounds(bounding_box, chunk_size)
-    main_logger.info(f"Processing {len(chunk_list)} chunk(s) at bounding box {bounding_box} "
-                     f"with chunk size {chunk_size}°")
+    is_final = len(chunk_list) > 20
 
-    is_final = False
-    if len(chunk_list) > 20:
-        is_final = True
+    if is_final:
         main_logger.info("Running as final model due to >20 chunks")
 
-    # Build a dictionary of S3 paths for input data
-    download_dict = cn.download_dict
-
-    # Check data types with a sample tile
-    main_logger.info(f"Determining data types from sample tile: {uu.timestr()}")
-    first_tiles = uu.first_file_name_in_s3_folder(download_dict)
-    download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
-
     futures = []
-    if start_year and end_year and (start_year < end_year):
-        # MULTI-INTERVAL approach
+    if start_year and end_year and (start_year <= end_year):
+        # Interval-based (annual or multi-year)
+        main_logger.info(f"Running intervals: {start_year}-{end_year}")
         for yr in range(start_year, end_year + 1):
             for bds in chunk_list:
+                tile_id = uu.xy_to_tile_id(bds[0], bds[3])
+                download_dict = cn.get_dynamic_download_dict(tile_id, yr)
+
+                # Determine data types from download dict for the first tile
+                download_dict_with_data_types = uu.add_file_type_to_dict(download_dict)
+
                 fut = client.submit(
                     calculate_and_upload_drainage,
                     bds,
@@ -674,48 +681,46 @@ def run_drainage_model(cluster_name=None,
                 )
                 futures.append(fut)
     else:
-        # SINGLE-INTERVAL approach
+        # Single-interval fallback (default to 2020 if no year provided)
+        year = start_year or 2020
+        main_logger.info(f"Running single interval year: {year}")
         for bds in chunk_list:
+            tile_id = uu.xy_to_tile_id(bds[0], bds[3])
+            download_dict = cn.get_dynamic_download_dict(tile_id, year)
+
+            download_dict_with_data_types = uu.add_file_type_to_dict(download_dict)
+
             fut = client.submit(
                 calculate_and_upload_drainage,
                 bds,
                 download_dict_with_data_types,
                 is_final,
-                no_upload
+                no_upload,
+                interval_start_year=year,
+                interval_end_year=year
             )
             futures.append(fut)
 
-    # Gather
+    # Gather results
     results = client.gather(futures)
-
-    success_count = 0
-    skipping_count = 0
-    all_stats = []
-
-    for msg, stats in results:
-        main_logger.info(msg)
-        if "Success" in msg:
-            success_count += 1
-        elif "Skipped" in msg or "skipped" in msg.lower():
-            skipping_count += 1
-        all_stats.extend(stats)
+    success_count = sum("Success" in msg for msg, _ in results)
+    skipping_count = sum("Skipped" in msg for msg, _ in results)
+    all_stats = [stat for _, stats in results for stat in stats]
 
     main_logger.info(f"Number of 'Success' chunks: {success_count}")
     main_logger.info(f"Number of 'Skipped' chunks: {skipping_count}")
 
-    # If user wants chunk-level stats
+    # Optional chunk-level stats
     if not no_stats:
         try:
             uu.calculate_chunk_stats(all_stats, stage)
         except AttributeError as e:
             main_logger.info(f"Cannot print chunk stats: {e}")
 
-    # End time
     end_time = uu.timestr()
     main_logger.info(f"Stage {stage} ended at: {end_time}")
     uu.stage_duration(start_time, end_time, stage)
 
-    # If not local, gather worker logs
     if not run_local:
         worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
         lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
@@ -752,14 +757,14 @@ def main(argv=None):
         print("No CLI args provided. Using defaults for test run.")
         run_drainage_model(
             cluster_name=None,
-            bounding_box=[112, -4, 114, -2],
-            chunk_size=2,
+            bounding_box=[112, -2, 113, -1],
+            chunk_size=1,
             run_local=True,
             no_stats=False,
             no_log=False,
             no_upload=False,
             start_year=2015,
-            end_year=2015
+            end_year=2020
         )
     else:
         run_drainage_model(
