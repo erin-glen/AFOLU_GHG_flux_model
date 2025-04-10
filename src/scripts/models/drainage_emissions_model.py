@@ -92,6 +92,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     ch4_land_emissions_out = np.zeros((rows, cols), dtype=np.float32)
     ch4_ditch_emissions_out = np.zeros((rows, cols), dtype=np.float32)
     co2_offsite_emissions_out = np.zeros((rows, cols), dtype=np.float32)
+    drainage_total_co2e_out = np.zeros((rows, cols), dtype=np.float32)
 
     burned_co2_out = np.zeros((rows, cols), dtype=np.float32)
     burned_co_out = np.zeros((rows, cols), dtype=np.float32)
@@ -286,7 +287,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                  n2o_emissions_co2e,
                  ch4_land_emissions_co2e,
                  ch4_ditch_emissions_co2e,
-                 co2_offsite_emissions) = nu.calculate_emissions_co2e(
+                 co2_offsite_emissions, drainage_total_co2e) = nu.calculate_drainage_emissions_co2e(
                     ef_co2,
                     ef_n2o,
                     ef_ch4_land,
@@ -304,6 +305,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                 ch4_land_emissions_out[row, col] = ch4_land_emissions_co2e
                 ch4_ditch_emissions_out[row, col] = ch4_ditch_emissions_co2e
                 co2_offsite_emissions_out[row, col] = co2_offsite_emissions
+                drainage_total_co2e_out[row, col] = drainage_total_co2e
 
             else:
                 # Not drained or not peat => no drainage EFs
@@ -312,6 +314,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                 ch4_land_emissions_out[row, col] = 0.0
                 ch4_ditch_emissions_out[row, col] = 0.0
                 co2_offsite_emissions_out[row, col] = 0.0
+                drainage_total_co2e_out[row, col] = 0.0
 
             # (C) Burned-Area Emissions
             if burned_block is not None:
@@ -372,20 +375,12 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     out_dict_uint32["soil"] = soil_block
     out_dict_uint32["state"] = state_out_block
 
-    out_dict_float32["co2_emissions"] = co2_emissions_out
-    out_dict_float32["n2o_emissions_co2e"] = n2o_emissions_out
-    out_dict_float32["ch4_land_emissions_co2e"] = ch4_land_emissions_out
-    out_dict_float32["ch4_ditch_emissions_co2e"] = ch4_ditch_emissions_out
-    out_dict_float32["co2_offsite_emissions"] = co2_offsite_emissions_out
-
-    total_emissions_out = (
-        co2_emissions_out
-        + n2o_emissions_out
-        + ch4_land_emissions_out
-        + ch4_ditch_emissions_out
-        + co2_offsite_emissions_out
-    )
-    out_dict_float32["total_emissions"] = total_emissions_out
+    out_dict_float32["drainage_co2"] = co2_emissions_out
+    out_dict_float32["drainage_n2o_co2e"] = n2o_emissions_out
+    out_dict_float32["drainage_ch4_land_co2e"] = ch4_land_emissions_out
+    out_dict_float32["drainage_ch4_ditch_co2e"] = ch4_ditch_emissions_out
+    out_dict_float32["drainage_co2_offsite"] = co2_offsite_emissions_out
+    out_dict_float32["drainage_total_co2e"] = drainage_total_co2e_out
 
     out_dict_float32["burned_co2"] = burned_co2_out
     out_dict_float32["burned_co_co2e"] = burned_co_out

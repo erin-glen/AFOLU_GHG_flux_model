@@ -72,27 +72,58 @@ def create_typed_dicts(layers):
 
 
 @jit(nopython=True)
-def calculate_emissions_co2e(
+def calculate_drainage_emissions_co2e(
     ef_co2, ef_n2o, ef_ch4_land, ef_ch4_ditch, ef_co2_offsite, frac_ditch,
     c_to_co2, n2o_n_to_n2o, gwp_n2o, gwp_ch4
 ):
     """
-    Existing drainage-based logic, unchanged.
-    Returns drainage emissions in CO2e.
+    Calculates drainage EF partials (CO2, N2O, CH4, offsite CO2) and
+    returns a final drainage_total_co2e in tonnes CO2-equivalent.
+
+    Args:
+        ef_co2 (float32): Baseline CO2 (tonnes C/ha/yr) ...
+        ef_n2o (float32): N2O (kg N/ha/yr) ...
+        ef_ch4_land (float32): CH4 from land (kg CH4/ha/yr) ...
+        ef_ch4_ditch (float32): CH4 from ditch (kg CH4/ha/yr) ...
+        ef_co2_offsite (float32): Offsite CO2 (tonnes C/ha/yr)
+        frac_ditch (float32): Fraction of area that is ditch ...
+        c_to_co2, n2o_n_to_n2o, gwp_n2o, gwp_ch4: conversion constants
+
+    Returns:
+        co2_emissions (float32): drainage CO2 in tonnes CO2/ha/yr
+        n2o_emissions_co2e (float32): drainage N2O in tonnes CO2e/ha/yr
+        ch4_land_emissions_co2e (float32): drainage CH4 (land) in tonnes CO2e/ha/yr
+        ch4_ditch_emissions_co2e (float32): drainage CH4 (ditch) in tonnes CO2e/ha/yr
+        co2_offsite_emissions (float32): drainage offsite CO2 in tonnes CO2/ha/yr
+        drainage_total_co2e (float32): sum of all the above, in tonnes CO2e/ha/yr
     """
-    co2_emissions = ef_co2 * c_to_co2
+    # Convert baseline CO2 from tonne C -> tonne CO2
+    co2_emissions = ef_co2 * c_to_co2  # e.g. 1 tonne C => 3.67 tonne CO2
     co2_offsite_emissions = ef_co2_offsite * c_to_co2
 
-    n2o_emissions_co2e = (ef_n2o * n2o_n_to_n2o * gwp_n2o) / 1000.0
+    # N2O in kg N/ha => convert to kg N2O => convert to tonne => multiply GWP
+    n2o_emissions_co2e = (ef_n2o * n2o_n_to_n2o * gwp_n2o) / 1000.0  # e.g. 265 GWP
+
+    # CH4 from land or ditch in kg CH4 => convert to tonne => multiply GWP (28)
     ch4_land_emissions_co2e = (ef_ch4_land / 1000.0) * gwp_ch4
     ch4_ditch_emissions_co2e = (ef_ch4_ditch / 1000.0) * gwp_ch4 * frac_ditch
+
+    # Combine partials into a final drainage total
+    drainage_total_co2e = (
+        co2_emissions
+        + n2o_emissions_co2e
+        + ch4_land_emissions_co2e
+        + ch4_ditch_emissions_co2e
+        + co2_offsite_emissions
+    )
 
     return (
         co2_emissions,
         n2o_emissions_co2e,
         ch4_land_emissions_co2e,
         ch4_ditch_emissions_co2e,
-        co2_offsite_emissions
+        co2_offsite_emissions,
+        drainage_total_co2e
     )
 
 @jit(nopython=True)
