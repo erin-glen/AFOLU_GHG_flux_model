@@ -116,6 +116,8 @@ tree_threshold = 5
 t_to_Mt = 1e-3
 combined_log = "combined_log"
 
+combustion_factor = np.float32(0.75)
+
 # Global warming potentials (GWP) and emission conversions
 gwp_ch4 = np.float32(28.0)
 gwp_n2o = np.float32(265.0)

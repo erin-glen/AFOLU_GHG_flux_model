@@ -24,6 +24,7 @@ n2o_n_to_n2o = np.float32(cn.n2o_n_to_n2o)
 gwp_ch4 = np.float32(cn.gwp_ch4)
 gwp_n2o = np.float32(cn.gwp_n2o)
 gwp_co = np.float32(cn.gwp_co)
+combustion_factor = np.float32(cn.combustion_factor)
 
 forest_code = cn.ipcc_codes['forest']
 cropland_code = cn.ipcc_codes['cropland']
@@ -316,34 +317,31 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
             if burned_block is not None:
                 burned_val = burned_block[row, col]
                 if burned_val > 0 and soil_block[row, col] in (1, 2):
-                    combustion_factor = np.float32(0.75)
-                    mass_burnt = np.float32(50.0)
-
                     burned_node = 0
                     if ecozone == boreal_code:
                         burned_node = nu.accrete_node(burned_node, 1)
                         if soil_block[row, col] == 2:
-                            gef_co2, gef_co, gef_ch4 = 1650.0, 110.0, 12.0
+                            gef_co2, gef_co, gef_ch4, mass_burnt = 1650.0, 110.0, 12.0, 0
                         else:
-                            gef_co2, gef_co, gef_ch4 = 1450.0, 90.0, 10.0
+                            gef_co2, gef_co, gef_ch4, mass_burnt = 1450.0, 90.0, 10.0, 0
                     elif ecozone == temperate_code:
                         burned_node = nu.accrete_node(burned_node, 2)
                         if soil_block[row, col] == 2:
-                            gef_co2, gef_co, gef_ch4 = 1650.0, 110.0, 12.0
+                            gef_co2, gef_co, gef_ch4, mass_burnt = 1650.0, 110.0, 12.0, 0
                         else:
-                            gef_co2, gef_co, gef_ch4 = 1450.0, 90.0, 10.0
+                            gef_co2, gef_co, gef_ch4, mass_burnt = 1450.0, 90.0, 10.0, 0
                     elif ecozone == tropical_code:
                         burned_node = nu.accrete_node(burned_node, 3)
                         if soil_block[row, col] == 2:
                             if land_cover == cropland_code or planted_forest_type > 0:
-                                gef_co2, gef_co, gef_ch4 = 1700.0, 200.0, 15.0
+                                gef_co2, gef_co, gef_ch4, mass_burnt = 1700.0, 200.0, 15.0, 0
                             else:
-                                gef_co2, gef_co, gef_ch4 = 1600.0, 180.0, 14.0
+                                gef_co2, gef_co, gef_ch4, mass_burnt = 1600.0, 180.0, 14.0, 0
                         else:
-                            gef_co2, gef_co, gef_ch4 = 0.0, 0.0, 0.0
+                            gef_co2, gef_co, gef_ch4, mass_burnt = 0.0, 0.0, 0.0, 0
                     else:
                         burned_node = nu.accrete_node(burned_node, 4)
-                        gef_co2, gef_co, gef_ch4 = 0.0, 0.0, 0.0
+                        gef_co2, gef_co, gef_ch4, mass_burnt = 0.0, 0.0, 0.0, 0
 
                     (burn_co2,
                      burn_co,
@@ -390,8 +388,8 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     out_dict_float32["total_emissions"] = total_emissions_out
 
     out_dict_float32["burned_co2"] = burned_co2_out
-    out_dict_float32["burned_co"] = burned_co_out
-    out_dict_float32["burned_ch4"] = burned_ch4_out
+    out_dict_float32["burned_co_co2e"] = burned_co_out
+    out_dict_float32["burned_ch4_co2e"] = burned_ch4_out
     out_dict_float32["burned_total_emissions_co2e"] = burned_total_emissions_co2e_out
 
     return out_dict_uint32, out_dict_float32
