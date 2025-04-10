@@ -321,22 +321,22 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                     if ecozone == boreal_code:
                         burned_node = nu.accrete_node(burned_node, 1)
                         if soil_block[row, col] == 2:
-                            gef_co2, gef_co, gef_ch4, mass_burnt = 1650.0, 110.0, 12.0, 0
+                            gef_co2, gef_co, gef_ch4, mass_burnt = 362.0, 207.0, 9.0, 336
                         else:
-                            gef_co2, gef_co, gef_ch4, mass_burnt = 1450.0, 90.0, 10.0, 0
+                            gef_co2, gef_co, gef_ch4, mass_burnt = 362.0, 207.0, 9.0, 66
                     elif ecozone == temperate_code:
                         burned_node = nu.accrete_node(burned_node, 2)
                         if soil_block[row, col] == 2:
-                            gef_co2, gef_co, gef_ch4, mass_burnt = 1650.0, 110.0, 12.0, 0
+                            gef_co2, gef_co, gef_ch4, mass_burnt = 362.0, 207.0, 9.0, 336
                         else:
-                            gef_co2, gef_co, gef_ch4, mass_burnt = 1450.0, 90.0, 10.0, 0
+                            gef_co2, gef_co, gef_ch4, mass_burnt = 362.0, 207.0, 9.0, 66
                     elif ecozone == tropical_code:
                         burned_node = nu.accrete_node(burned_node, 3)
                         if soil_block[row, col] == 2:
-                            if land_cover == cropland_code or planted_forest_type > 0:
-                                gef_co2, gef_co, gef_ch4, mass_burnt = 1700.0, 200.0, 15.0, 0
-                            else:
-                                gef_co2, gef_co, gef_ch4, mass_burnt = 1600.0, 180.0, 14.0, 0
+                            if land_cover == cropland_code or planted_forest_type > 0: # prescribed burn - update actual values
+                                gef_co2, gef_co, gef_ch4, mass_burnt = 464.0, 210.0, 21.0, 155
+                            else: #wildfire
+                                gef_co2, gef_co, gef_ch4, mass_burnt = 464.0, 210.0, 21.0, 353
                         else:
                             gef_co2, gef_co, gef_ch4, mass_burnt = 0.0, 0.0, 0.0, 0
                     else:
