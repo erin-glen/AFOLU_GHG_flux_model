@@ -96,22 +96,41 @@ def calculate_emissions_co2e(
     )
 
 @jit(nopython=True)
-def calculate_fire_emissions(mass_burnt, combustion_factor, gef_co2, gef_co, gef_ch4):
+def calculate_burned_area_emissions(pixel_area_ha,
+                                    mass_burnt,
+                                    combustion_factor,
+                                    gef_co2,
+                                    gef_co,
+                                    gef_ch4,
+                                    gwp_co,
+                                    gwp_ch4):
     """
-    Calculates burned-area emissions in tonnes/pixel,
-    assuming each pixel is effectively 1 "unit area."
+    Calculates burned-area emissions (CO₂, CO, CH₄) in tonnes per pixel and total CO₂e.
 
-    L_fire = M_B * C_f * G_ef * 10^-3
-      where M_B is in t DM,
-            G_ef is in g gas / kg DM,
-            10^-3 converts g->kg or g->tonnes
-               depending on how you set M_B.
+    Formula:
+        L_fire = pixel_area_ha * mass_burnt * combustion_factor * G_ef * 1e-3
 
-    For now, we treat each pixel as 1 ha
-    and skip an explicit area factor.
+    Args:
+        pixel_area_ha (float32): Area of the pixel (ha), typically 1 ha.
+        mass_burnt (float32): Mass of fuel burnt per hectare (t DM/ha).
+        combustion_factor (float32): Fraction of biomass combusted (unitless).
+        gef_co2 (float32): Emission factor for CO₂ (g/kg DM).
+        gef_co (float32): Emission factor for CO (g/kg DM).
+        gef_ch4 (float32): Emission factor for CH₄ (g/kg DM).
+        gwp_co (float32): Global Warming Potential for CO.
+        gwp_ch4 (float32): Global Warming Potential for CH₄.
+
+    Returns:
+        burn_co2 (float32): CO₂ emissions (tonnes).
+        burn_co (float32): CO emissions (tonnes).
+        burn_ch4 (float32): CH₄ emissions (tonnes).
+        total_burned_emissions_co2e (float32): Total burned-area emissions in CO₂e.
     """
-    burn_co2 = mass_burnt * combustion_factor * gef_co2 * 1e-3
-    burn_co  = mass_burnt * combustion_factor * gef_co  * 1e-3
-    burn_ch4 = mass_burnt * combustion_factor * gef_ch4 * 1e-3
-    return burn_co2, burn_co, burn_ch4
+    burn_co2 = pixel_area_ha * mass_burnt * combustion_factor * gef_co2 * 1e-3
+    burn_co  = pixel_area_ha * mass_burnt * combustion_factor * gef_co  * 1e-3
+    burn_ch4 = pixel_area_ha * mass_burnt * combustion_factor * gef_ch4 * 1e-3
+
+    total_burned_emissions_co2e = burn_co2 + (burn_co * gwp_co) + (burn_ch4 * gwp_ch4)
+
+    return burn_co2, burn_co, burn_ch4, total_burned_emissions_co2e
 

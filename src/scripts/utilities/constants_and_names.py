@@ -244,9 +244,9 @@ combined_log = "combined_log"
 
 gwp_ch4 = np.float32(28.0)
 gwp_n2o = np.float32(265.0)
+gwp_co = np.float32(1.9) #need to check this!
 c_to_co2 = np.float32(3.67)
 n2o_n_to_n2o = np.float32(1.571)
-
 # ---------------------------------------------------
 # 4. Additional Constants for Interval Handling
 # ---------------------------------------------------
