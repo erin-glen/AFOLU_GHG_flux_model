@@ -58,9 +58,11 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
       3) Additional burned-area emissions (CO₂, CO, CH₄, and total CO₂e)
          if a burned-area layer is provided.
     """
+    # Prepare typed output dictionaries
     out_dict_uint32 = Dict.empty(key_type=types.unicode_type, value_type=types.uint32[:, :])
     out_dict_float32 = Dict.empty(key_type=types.unicode_type, value_type=types.float32[:, :])
 
+    # Required input arrays
     peat_block = in_dict_uint8['peat']
     land_cover_block = in_dict_uint8['land_cover']
     planted_forest_type_block = in_dict_uint8['planted_forest_type']
@@ -74,20 +76,27 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     nutrient_block = in_dict_uint8['nutrient_status']
     descals_type_block = in_dict_int16['descals_type']
 
-    # Check for any combined burned-area key
+    # Optional combined burned-area key
     burned_block = None
     for k in in_dict_uint8.keys():
         if k.startswith("burned_area_combined_"):
             burned_block = in_dict_uint8[k]
             break
 
-    pixel_area_ha = np.float32(1.0)
+    # Optional pixel_area_ha block (fallback to ones if missing)
+    rows_, cols_ = peat_block.shape
+    if 'pixel_area_ha' in in_dict_float32:
+        pixel_area_block = in_dict_float32['pixel_area_ha']
+    else:
+        pixel_area_block = np.ones((rows_, cols_), dtype=np.float32)
+
     rows, cols = peat_block.shape
 
+    # Prepare output arrays
     soil_block = np.zeros((rows, cols), dtype=np.uint32)
     state_out_block = np.zeros((rows, cols), dtype=np.uint32)
 
-    # Drainage partial EFs (CO2, N2O, CH4, offsite) + total
+    # Drainage partial + total
     drained_co2_out = np.zeros((rows, cols), dtype=np.float32)
     drained_n2o_out = np.zeros((rows, cols), dtype=np.float32)
     drained_ch4_land_out = np.zeros((rows, cols), dtype=np.float32)
@@ -95,15 +104,17 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     drained_co2_offsite_out = np.zeros((rows, cols), dtype=np.float32)
     drained_total_co2e_out = np.zeros((rows, cols), dtype=np.float32)
 
-    # Burned output: partial + total
+    # Burned partial + total
     burned_state_out = np.zeros((rows, cols), dtype=np.uint32)
     burned_co2_out = np.zeros((rows, cols), dtype=np.float32)
     burned_co_out = np.zeros((rows, cols), dtype=np.float32)
     burned_ch4_out = np.zeros((rows, cols), dtype=np.float32)
     burned_total_co2e_out = np.zeros((rows, cols), dtype=np.float32)
 
+    # Main loop
     for row in range(rows):
         for col in range(cols):
+            pixel_area_ha = pixel_area_block[row, col]
             peat = peat_block[row, col]
             land_cover = land_cover_block[row, col]
             planted_forest_type = planted_forest_type_block[row, col]
@@ -127,7 +138,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
             node = 0
             drained = False
 
-            # (A) Drainage Classification
+            # A) Drainage Classification
             if peat == 1:
                 node = nu.accrete_node(node, 1)
                 if dadap > 0 or osm_canals > 0:
@@ -149,16 +160,16 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                     node = nu.accrete_node(node, 6)
 
                 if drained:
-                    soil_block[row, col] = 2
+                    soil_block[row, col] = 2  # drained
                 else:
-                    soil_block[row, col] = 1
+                    soil_block[row, col] = 1  # undrained
             else:
                 node = nu.accrete_node(node, 2)
-                soil_block[row, col] = 0
+                soil_block[row, col] = 0  # not peat
 
             state_out_block[row, col] = node
 
-            # (B) Drainage EF / Emissions
+            # B) Drainage EF / Emissions
             if soil_block[row, col] == 2:
                 node = nu.accrete_node(node, 1)
 
@@ -286,21 +297,24 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         ef_co2 = 2.0
                         ef_n2o = 0.0
 
+                # Calculate drainage EFs (per ha)
                 (co2_emissions,
                  n2o_emissions_co2e,
                  ch4_land_emissions_co2e,
                  ch4_ditch_emissions_co2e,
-                 co2_offsite_emissions, drainage_total_co2e) = nu.calculate_drainage_emissions_co2e(
-                    ef_co2,
-                    ef_n2o,
-                    ef_ch4_land,
-                    ef_ch4_ditch,
-                    ef_co2_offsite,
-                    frac_ditch,
-                    c_to_co2,
-                    n2o_n_to_n2o,
-                    gwp_n2o,
-                    gwp_ch4
+                 co2_offsite_emissions,
+                 drainage_total_co2e) = nu.calculate_drainage_emissions_co2e(
+                     ef_co2,
+                     ef_n2o,
+                     ef_ch4_land,
+                     ef_ch4_ditch,
+                     ef_co2_offsite,
+                     frac_ditch,
+                     c_to_co2,
+                     n2o_n_to_n2o,
+                     gwp_n2o,
+                     gwp_ch4,
+                     pixel_area_ha
                 )
 
                 # Store partial + total
@@ -312,7 +326,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                 drained_total_co2e_out[row, col] = drainage_total_co2e
 
             else:
-                # Not drained or not peat => zero out partial & total
+                # not drained or not peat => zero out partial & total
                 drained_co2_out[row, col] = 0.0
                 drained_n2o_out[row, col] = 0.0
                 drained_ch4_land_out[row, col] = 0.0
@@ -321,117 +335,92 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                 drained_total_co2e_out[row, col] = 0.0
 
             # (C) Burned-Area Emissions
-            # We'll track a separate integer code for the burned logic (burned_state_out).
-            # We'll also store partial and total burned EFs in 'burned_co2_out', etc.
-
-            burned_node = 0  # integer code for the pixel's burned classification
-            combustion_factor = np.float32(0.75)
-
+            burned_node = 0
             if burned_block is not None:
                 burned_val = burned_block[row, col]
-
-                # We only apply burned logic if burned_val>0 and it's peat soil (drained=2 or undrained=1).
                 if burned_val > 0 and soil_block[row, col] in (1, 2):
-                    # Accrete the “starting” burned_node
-                    # e.g. 1 => boreal, 2 => temperate, 3 => tropical, 4 => other
                     if ecozone == boreal_code:
                         burned_node = nu.accrete_node(burned_node, 1)
-                        # Distinguish drained vs. undrained peat for your EF values:
-                        if soil_block[row, col] == 2:  # drained
-                            # Example numeric values
-                            gef_co2, gef_co, gef_ch4 = np.float32(1650.0), np.float32(110.0), np.float32(12.0)
-                            mass_burnt = np.float32(250.0)  # t DM/ha
-                        else:  # undrained peat
-                            gef_co2, gef_co, gef_ch4 = np.float32(1450.0), np.float32(90.0), np.float32(10.0)
-                            mass_burnt = np.float32(75.0)
-
+                        if soil_block[row, col] == 2:
+                            gef_co2, gef_co, gef_ch4 = 1650.0, 110.0, 12.0
+                            mass_burnt = 250.0
+                        else:
+                            gef_co2, gef_co, gef_ch4 = 1450.0, 90.0, 10.0
+                            mass_burnt = 75.0
                     elif ecozone == temperate_code:
                         burned_node = nu.accrete_node(burned_node, 2)
                         if soil_block[row, col] == 2:
-                            gef_co2, gef_co, gef_ch4 = np.float32(1650.0), np.float32(110.0), np.float32(12.0)
-                            mass_burnt = np.float32(200.0)
+                            gef_co2, gef_co, gef_ch4 = 1650.0, 110.0, 12.0
+                            mass_burnt = 200.0
                         else:
-                            gef_co2, gef_co, gef_ch4 = np.float32(1450.0), np.float32(90.0), np.float32(10.0)
-                            mass_burnt = np.float32(50.0)
-
+                            gef_co2, gef_co, gef_ch4 = 1450.0, 90.0, 10.0
+                            mass_burnt = 50.0
                     elif ecozone == tropical_code:
                         burned_node = nu.accrete_node(burned_node, 3)
-                        # Distinguish farmland vs. other just as an example
                         if soil_block[row, col] == 2:
                             if land_cover in (cropland_code,) or planted_forest_type > 0:
-                                # e.g. “prescribed burn” scenario
-                                gef_co2, gef_co, gef_ch4 = np.float32(1700.0), np.float32(200.0), np.float32(15.0)
-                                mass_burnt = np.float32(150.0)
+                                gef_co2, gef_co, gef_ch4 = 1700.0, 200.0, 15.0
+                                mass_burnt = 150.0
                             else:
-                                # e.g. “wildfire” scenario
-                                gef_co2, gef_co, gef_ch4 = np.float32(1600.0), np.float32(180.0), np.float32(14.0)
-                                mass_burnt = np.float32(300.0)
+                                gef_co2, gef_co, gef_ch4 = 1600.0, 180.0, 14.0
+                                mass_burnt = 300.0
                         else:
-                            # undrained tropical peat => zero out or trivial
-                            gef_co2, gef_co, gef_ch4 = np.float32(0.0), np.float32(0.0), np.float32(0.0)
-                            mass_burnt = np.float32(0.0)
-
+                            gef_co2, gef_co, gef_ch4 = 0.0, 0.0, 0.0
+                            mass_burnt = 0.0
                     else:
-                        # “other” ecozone
                         burned_node = nu.accrete_node(burned_node, 4)
-                        gef_co2, gef_co, gef_ch4 = np.float32(0.0), np.float32(0.0), np.float32(0.0)
-                        mass_burnt = np.float32(0.0)
+                        gef_co2, gef_co, gef_ch4 = 0.0, 0.0, 0.0
+                        mass_burnt = 0.0
 
-                    # Now call your burned-area EF function
                     (burn_co2,
                      burn_co,
                      burn_ch4,
                      burn_total_co2e) = nu.calculate_burned_area_emissions(
-                        pixel_area_ha,
-                        mass_burnt,
-                        combustion_factor,
-                        gef_co2,
-                        gef_co,
-                        gef_ch4,
-                        gwp_co,
-                        gwp_ch4
+                         np.float32(pixel_area_ha),  # pass pixel area as float32
+                         np.float32(mass_burnt),
+                         combustion_factor,
+                         np.float32(gef_co2),
+                         np.float32(gef_co),
+                         np.float32(gef_ch4),
+                         gwp_co,
+                         gwp_ch4
                     )
 
                     burned_co2_out[row, col] = burn_co2
                     burned_co_out[row, col] = burn_co
                     burned_ch4_out[row, col] = burn_ch4
                     burned_total_co2e_out[row, col] = burn_total_co2e
-
                 else:
-                    # Not burned or not peat => zero out burned
                     burned_co2_out[row, col] = 0.0
                     burned_co_out[row, col] = 0.0
                     burned_ch4_out[row, col] = 0.0
                     burned_total_co2e_out[row, col] = 0.0
-
             else:
-                # No burned_block => skip
                 burned_co2_out[row, col] = 0.0
                 burned_co_out[row, col] = 0.0
                 burned_ch4_out[row, col] = 0.0
                 burned_total_co2e_out[row, col] = 0.0
 
-            # After the logic:
             burned_state_out[row, col] = burned_node
 
-        # a) integer dictionaries
-        out_dict_uint32["soil"] = soil_block
-        out_dict_uint32["state"] = state_out_block
-        out_dict_uint32["burned_state"] = burned_state_out
+    # Populate out_dict for integer outputs
+    out_dict_uint32["soil"] = soil_block
+    out_dict_uint32["state"] = state_out_block
+    out_dict_uint32["burned_state"] = burned_state_out
 
-        # b) float dictionaries: partial + total drainage
-        out_dict_float32["drained_co2"] = drained_co2_out
-        out_dict_float32["drained_n2o_co2e"] = drained_n2o_out
-        out_dict_float32["drained_ch4_land_co2e"] = drained_ch4_land_out
-        out_dict_float32["drained_ch4_ditch_co2e"] = drained_ch4_ditch_out
-        out_dict_float32["drained_co2_offsite"] = drained_co2_offsite_out
-        out_dict_float32["drained_total_co2e"] = drained_total_co2e_out
+    # Drainage partial + total
+    out_dict_float32["drained_co2"] = drained_co2_out
+    out_dict_float32["drained_n2o_co2e"] = drained_n2o_out
+    out_dict_float32["drained_ch4_land_co2e"] = drained_ch4_land_out
+    out_dict_float32["drained_ch4_ditch_co2e"] = drained_ch4_ditch_out
+    out_dict_float32["drained_co2_offsite"] = drained_co2_offsite_out
+    out_dict_float32["drained_total_co2e"] = drained_total_co2e_out
 
-        # c) float dictionaries: partial + total burned
-        out_dict_float32["burned_co2"] = burned_co2_out
-        out_dict_float32["burned_co_co2e"] = burned_co_out
-        out_dict_float32["burned_ch4_co2e"] = burned_ch4_out
-        out_dict_float32["burned_total_co2e"] = burned_total_co2e_out
+    # Burned partial + total
+    out_dict_float32["burned_co2"] = burned_co2_out
+    out_dict_float32["burned_co_co2e"] = burned_co_out
+    out_dict_float32["burned_ch4_co2e"] = burned_ch4_out
+    out_dict_float32["burned_total_co2e"] = burned_total_co2e_out
 
     return out_dict_uint32, out_dict_float32
 
@@ -484,7 +473,12 @@ def calculate_and_upload_drainage(bounds,
                                   is_final,
                                   no_upload,
                                   interval_start,
-                                  interval_end):
+                                  interval_end,
+                                  use_actual_pixel_area=False):
+    """
+    Chunk-level function that merges any burned layers, optionally loads 'pixel_area_ha',
+    calculates drainage + fire EFs, and optionally uploads results.
+    """
     logger = lu.setup_logging_worker()
     bounds_str = uu.boundstr(bounds)
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])
@@ -504,6 +498,7 @@ def calculate_and_upload_drainage(bounds,
         if burned_key not in updated_download_dict:
             updated_download_dict[burned_key] = None
 
+    # Download
     futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger)
     layers = {}
     for fut in concurrent.futures.as_completed(futures):
@@ -515,29 +510,23 @@ def calculate_and_upload_drainage(bounds,
             return f"Failed to download layer {key} for chunk {bounds_str}: {e}", chunk_stats
         layers[key] = arr
 
-    # Fill missing
+    # fill_missing
     uint8_list = ['peat', 'planted_forest_type', 'extraction', 'nutrient_status']
     int16_list = ['climate_domain', 'descals_type']
     int32_list = []
-    float32_list = ['dadap', 'osm_roads', 'osm_canals', 'engert', 'grip']
+    # Always add 'pixel_area_ha' to float32 to have it recognized (can fallback to ones)
+    float32_list = ['dadap', 'osm_roads', 'osm_canals', 'engert', 'grip', 'pixel_area_ha']
 
-    # If single land cover, just add 'land_cover'
+    # Single land cover
     uint8_list.append('land_cover')
 
-    # Add burned layers
+    # Add burned
     for yr in range(interval_start, interval_end + 1):
         uint8_list.append(f"{cn.burned_area_final_pattern}_{yr}")
 
     layers = uu.fill_missing_input_layers_with_no_data(
-        layers,
-        uint8_list,
-        int16_list,
-        int32_list,
-        float32_list,
-        bounds_str,
-        tile_id,
-        is_final,
-        logger
+        layers, uint8_list, int16_list, int32_list, float32_list,
+        bounds_str, tile_id, is_final, logger
     )
 
     # Stats
@@ -545,14 +534,12 @@ def calculate_and_upload_drainage(bounds,
         stats = uu.calculate_stats(arr, k, bounds_str, tile_id, 'input_layer')
         chunk_stats.append(stats)
 
-    # Combine burned layers
+    # Combine burned
     combine_burned_area(layers, interval_start, interval_end)
 
-    # If you have a time-coded land cover for interval_end: rename to 'land_cover'
-    # if f"land_cover_{interval_end}" in layers:
-    #     layers['land_cover'] = layers[f"land_cover_{interval_end}"]
+    # If you had time-coded land cover, rename it here if desired
 
-    # Create typed dict
+    # Create typed dicts
     typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
 
     lu.print_and_log(
@@ -570,12 +557,12 @@ def calculate_and_upload_drainage(bounds,
 
     out_dict_all_dtypes = {**out_dict_uint32, **out_dict_float32}
 
-    # Output stats
+    # Stats for outputs
     for k, arr in out_dict_all_dtypes.items():
         stats = uu.calculate_stats(arr, k, bounds_str, tile_id, 'output_layer')
         chunk_stats.append(stats)
 
-    # Upload
+    # Upload if desired
     if not no_upload:
         out_no_data_val = 0
         if interval_start != interval_end:
@@ -605,18 +592,20 @@ def run_drainage_model(cluster_name=None,
                        no_upload=False,
                        start_year=None,
                        end_year=None,
-                       interval_type="annual"):
+                       interval_type="annual",
+                       use_actual_pixel_area=False):
     """
     Main function that can handle either 'annual' or 'five_year'
     blocks. Land cover + burned-area are time-based. Everything else is static.
+
+    If use_actual_pixel_area==True, we try to load a 'pixel_area_ha'
+    dataset for each tile (or fill it with 1.0 if missing).
     """
     stage = "drainage_model"
     start_time = uu.timestr()
 
-    # 1) Connect to cluster
     cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
-    # 2) Setup logging
     main_logger, main_log_local_path = lu.populate_main_log_header(
         bounding_box=bounding_box,
         use_shapefile=False,
@@ -628,71 +617,71 @@ def run_drainage_model(cluster_name=None,
         stage=stage
     )
     main_logger.info(f"Stage {stage} started at: {start_time}")
+    main_logger.info(f"use_actual_pixel_area={use_actual_pixel_area}")
 
-    # 3) Default bounding box & chunk size if not provided
     bounding_box = bounding_box or [110, -10, 120, 0]
-    chunk_size = chunk_size or 2
-    chunk_list = uu.get_chunk_bounds(bounding_box, chunk_size)
-    is_final = len(chunk_list) > 20
+    chunk_size   = chunk_size or 2
+    chunk_list   = uu.get_chunk_bounds(bounding_box, chunk_size)
+    is_final     = (len(chunk_list) > 20)
     if is_final:
         main_logger.info("Running as final model due to >20 chunks")
 
-    # 4) Determine intervals
     if not (start_year and end_year):
-        # fallback single-year or single-block
         start_year = start_year or 2020
-        end_year = end_year or start_year
+        end_year   = end_year or start_year
         interval_type = "annual"
 
     intervals = get_intervals(start_year, end_year, interval_type)
 
-    # 5) Figure out data types using the first chunk in chunk_list
     if not chunk_list:
         main_logger.info("No chunks to process. Exiting.")
         return
 
-    # (A) Get the first chunk's bounding box
-    first_chunk = chunk_list[0]
-    # (B) Convert that bounding box to a tile id
+    # figure out data types from first chunk
+    first_chunk    = chunk_list[0]
     sample_tile_id = uu.xy_to_tile_id(first_chunk[0], first_chunk[3])
-    # (C) Build the sample dictionary for the entire model range
-    sample_dict = cn.get_dynamic_download_dict(sample_tile_id, start_year, end_year)
-    # (D) Derive data types
-    download_dict_with_data_types = uu.add_file_type_to_dict(sample_dict)
+    sample_dict    = cn.get_dynamic_download_dict(sample_tile_id, start_year, end_year)
 
-    # 6) Submit tasks for each interval and chunk
+    # If user wants actual area => we add 'pixel_area_ha' for the sample tile
+    if use_actual_pixel_area:
+        # Must define cn.pixel_area_ha_dir in your constants if not existing
+        sample_dict['pixel_area_ha'] = os.path.join(
+            cn.pixel_area_ha_dir,  # e.g. "s3://bucket/pixel_area_ha/"
+            f"{sample_tile_id}_pixel_area_ha.tif"
+        )
+
+    dwn_dict_types = uu.add_file_type_to_dict(sample_dict)
+
     futures = []
     for (iv_start, iv_end) in intervals:
-        main_logger.info(f"Queueing tasks for interval {iv_start}-{iv_end}")
+        main_logger.info(f"Queueing tasks for {iv_start}-{iv_end}")
         for bds in chunk_list:
             fut = client.submit(
                 calculate_and_upload_drainage,
                 bds,
-                download_dict_with_data_types,  # typed dictionary for sample tile
+                dwn_dict_types,
                 is_final,
                 no_upload,
                 iv_start,
-                iv_end
+                iv_end,
+                use_actual_pixel_area
             )
             futures.append(fut)
 
-    # 7) Gather results
     results = client.gather(futures)
     success_count = sum("Success" in msg for msg, _ in results)
-    skipping_count = sum("Skipped" in msg for msg, _ in results)
+    skip_count    = sum("Skipped" in msg for msg, _ in results)
     all_stats = [stat for _, stats in results for stat in stats]
 
     main_logger.info(f"Number of 'Success' chunks: {success_count}")
-    main_logger.info(f"Number of 'Skipped' chunks: {skipping_count}")
+    main_logger.info(f"Number of 'Skipped' chunks: {skip_count}")
 
-    # 8) Optional stats
     if not no_stats:
         try:
             uu.calculate_chunk_stats(all_stats, stage)
         except AttributeError as e:
             main_logger.info(f"Cannot print chunk stats: {e}")
 
-    # 9) Cleanup
     end_time = uu.timestr()
     main_logger.info(f"Stage {stage} ended at: {end_time}")
     uu.stage_duration(start_time, end_time, stage)
@@ -706,12 +695,15 @@ def run_drainage_model(cluster_name=None,
         main_logger.info("Local run completed. Worker logs not compiled.")
 
 
-
 def main(argv=None):
     """
     Command-line entry point.
-    Usage:
-      python drainage_emissions_model.py --start_year 2015 --end_year 2020 --interval_type five_year
+
+    Usage Example:
+      python drainage_emissions_model.py \
+        --start_year 2015 --end_year 2020 \
+        --interval_type five_year \
+        --use_actual_pixel_area
     """
     if argv is None:
         argv = sys.argv[1:]
@@ -719,20 +711,23 @@ def main(argv=None):
     parser.add_argument('-cn', '--cluster_name', default=None)
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('--run_local', action='store_true', help='Run locally')
+    parser.add_argument('--run_local', action='store_true', help='Run locally without Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Skip stats spreadsheet')
     parser.add_argument('--no_log', action='store_true', help='Skip worker log merging')
-    parser.add_argument('--no_upload', action='store_true', help='Skip outputs to S3')
+    parser.add_argument('--no_upload', action='store_true', help='Skip uploading outputs to S3')
 
     parser.add_argument('--start_year', type=int, help='Starting year')
     parser.add_argument('--end_year', type=int, help='Ending year')
     parser.add_argument('--interval_type', choices=['annual', 'five_year'], default='annual',
                         help='annual vs five_year intervals')
 
+    parser.add_argument('--use_actual_pixel_area', action='store_true',
+                        help='If set, the model attempts to load a pixel_area_ha dataset and multiplies partial+total EFs by it')
+
     args = parser.parse_args(argv)
 
     if not argv:
-        print("No CLI args provided. Running local test")
+        print("No CLI args provided. Running local test with default 1ha/pixel approach.")
         run_drainage_model(
             cluster_name=None,
             bounding_box=[112, -2, 113, -1],
@@ -743,7 +738,8 @@ def main(argv=None):
             no_upload=False,
             start_year=2015,
             end_year=2019,
-            interval_type="five_year"
+            interval_type="five_year",
+            use_actual_pixel_area=False
         )
     else:
         run_drainage_model(
@@ -756,7 +752,8 @@ def main(argv=None):
             no_upload=args.no_upload,
             start_year=args.start_year,
             end_year=args.end_year,
-            interval_type=args.interval_type
+            interval_type=args.interval_type,
+            use_actual_pixel_area=args.use_actual_pixel_area
         )
 
 
