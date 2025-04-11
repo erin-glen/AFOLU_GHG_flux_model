@@ -94,6 +94,7 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
     co2_offsite_emissions_out = np.zeros((rows, cols), dtype=np.float32)
     drainage_total_co2e_out = np.zeros((rows, cols), dtype=np.float32)
 
+    burned_state_out = np.zeros((rows, cols), dtype=np.uint32)
     burned_co2_out = np.zeros((rows, cols), dtype=np.float32)
     burned_co_out = np.zeros((rows, cols), dtype=np.float32)
     burned_ch4_out = np.zeros((rows, cols), dtype=np.float32)
@@ -317,35 +318,63 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                 drainage_total_co2e_out[row, col] = 0.0
 
             # (C) Burned-Area Emissions
+            # We'll track a separate integer code for the burned logic (burned_state_out).
+            # We'll also store partial and total burned EFs in 'burned_co2_out', etc.
+
+            burned_node = 0  # integer code for the pixel's burned classification
+            combustion_factor = np.float32(0.75)
+
             if burned_block is not None:
                 burned_val = burned_block[row, col]
+
+                # We only apply burned logic if burned_val>0 and it's peat soil (drained=2 or undrained=1).
                 if burned_val > 0 and soil_block[row, col] in (1, 2):
-                    burned_node = 0
+                    # Accrete the “starting” burned_node
+                    # e.g. 1 => boreal, 2 => temperate, 3 => tropical, 4 => other
                     if ecozone == boreal_code:
                         burned_node = nu.accrete_node(burned_node, 1)
-                        if soil_block[row, col] == 2:
-                            gef_co2, gef_co, gef_ch4, mass_burnt = 362.0, 207.0, 9.0, 336
-                        else:
-                            gef_co2, gef_co, gef_ch4, mass_burnt = 362.0, 207.0, 9.0, 66
+                        # Distinguish drained vs. undrained peat for your EF values:
+                        if soil_block[row, col] == 2:  # drained
+                            # Example numeric values
+                            gef_co2, gef_co, gef_ch4 = np.float32(1650.0), np.float32(110.0), np.float32(12.0)
+                            mass_burnt = np.float32(250.0)  # t DM/ha
+                        else:  # undrained peat
+                            gef_co2, gef_co, gef_ch4 = np.float32(1450.0), np.float32(90.0), np.float32(10.0)
+                            mass_burnt = np.float32(75.0)
+
                     elif ecozone == temperate_code:
                         burned_node = nu.accrete_node(burned_node, 2)
                         if soil_block[row, col] == 2:
-                            gef_co2, gef_co, gef_ch4, mass_burnt = 362.0, 207.0, 9.0, 336
+                            gef_co2, gef_co, gef_ch4 = np.float32(1650.0), np.float32(110.0), np.float32(12.0)
+                            mass_burnt = np.float32(200.0)
                         else:
-                            gef_co2, gef_co, gef_ch4, mass_burnt = 362.0, 207.0, 9.0, 66
+                            gef_co2, gef_co, gef_ch4 = np.float32(1450.0), np.float32(90.0), np.float32(10.0)
+                            mass_burnt = np.float32(50.0)
+
                     elif ecozone == tropical_code:
                         burned_node = nu.accrete_node(burned_node, 3)
+                        # Distinguish farmland vs. other just as an example
                         if soil_block[row, col] == 2:
-                            if land_cover == cropland_code or planted_forest_type > 0: # prescribed burn - update actual values
-                                gef_co2, gef_co, gef_ch4, mass_burnt = 464.0, 210.0, 21.0, 155
-                            else: #wildfire
-                                gef_co2, gef_co, gef_ch4, mass_burnt = 464.0, 210.0, 21.0, 353
+                            if land_cover in (cropland_code,) or planted_forest_type > 0:
+                                # e.g. “prescribed burn” scenario
+                                gef_co2, gef_co, gef_ch4 = np.float32(1700.0), np.float32(200.0), np.float32(15.0)
+                                mass_burnt = np.float32(150.0)
+                            else:
+                                # e.g. “wildfire” scenario
+                                gef_co2, gef_co, gef_ch4 = np.float32(1600.0), np.float32(180.0), np.float32(14.0)
+                                mass_burnt = np.float32(300.0)
                         else:
-                            gef_co2, gef_co, gef_ch4, mass_burnt = 0.0, 0.0, 0.0, 0
-                    else:
-                        burned_node = nu.accrete_node(burned_node, 4)
-                        gef_co2, gef_co, gef_ch4, mass_burnt = 0.0, 0.0, 0.0, 0
+                            # undrained tropical peat => zero out or trivial
+                            gef_co2, gef_co, gef_ch4 = np.float32(0.0), np.float32(0.0), np.float32(0.0)
+                            mass_burnt = np.float32(0.0)
 
+                    else:
+                        # “other” ecozone
+                        burned_node = nu.accrete_node(burned_node, 4)
+                        gef_co2, gef_co, gef_ch4 = np.float32(0.0), np.float32(0.0), np.float32(0.0)
+                        mass_burnt = np.float32(0.0)
+
+                    # Now call your burned-area EF function
                     (burn_co2,
                      burn_co,
                      burn_ch4,
@@ -359,21 +388,33 @@ def calculate_drainage_and_emissions(in_dict_uint8, in_dict_int16, in_dict_float
                         gwp_co,
                         gwp_ch4
                     )
+
+                    # Store partial & total burned EFs
                     burned_co2_out[row, col] = burn_co2
                     burned_co_out[row, col] = burn_co
                     burned_ch4_out[row, col] = burn_ch4
                     burned_total_emissions_co2e_out[row, col] = burn_total_co2e
 
-                    state_val = state_out_block[row, col]
-                    state_out_block[row, col] = nu.accrete_node(state_val, burned_node)
                 else:
+                    # Not burned or not peat => zero out burned
                     burned_co2_out[row, col] = 0.0
                     burned_co_out[row, col] = 0.0
                     burned_ch4_out[row, col] = 0.0
                     burned_total_emissions_co2e_out[row, col] = 0.0
 
+            else:
+                # No burned_block => skip
+                burned_co2_out[row, col] = 0.0
+                burned_co_out[row, col] = 0.0
+                burned_ch4_out[row, col] = 0.0
+                burned_total_emissions_co2e_out[row, col] = 0.0
+
+            # After the logic:
+            burned_state_out[row, col] = burned_node
+
     out_dict_uint32["soil"] = soil_block
     out_dict_uint32["state"] = state_out_block
+    out_dict_uint32["burned_state"] = burned_state_out
 
     out_dict_float32["drainage_co2"] = co2_emissions_out
     out_dict_float32["drainage_n2o_co2e"] = n2o_emissions_out
