@@ -562,23 +562,31 @@ def calculate_and_upload_drainage(bounds,
         stats = uu.calculate_stats(arr, k, bounds_str, tile_id, 'output_layer')
         chunk_stats.append(stats)
 
-    # Upload if desired
+        # ------------------------------------------------------------------
+        #  Upload rasters
+        # ------------------------------------------------------------------
     if not no_upload:
         out_no_data_val = 0
-        if interval_start != interval_end:
-            year_str = f"{interval_start}_{interval_end}"
-        else:
-            year_str = f"{interval_start}"
+
+        year_str = f"{interval_start}_{interval_end}" \
+            if interval_start != interval_end else f"{interval_start}"
 
         for key, arr in out_dict_all_dtypes.items():
             data_type = arr.dtype.name
-            out_pattern = key
-            out_dict_all_dtypes[key] = [arr, data_type, out_pattern, year_str]
+            data_meaning = key  # use key as sub‑folder
+            out_dict_all_dtypes[key] = [arr, data_type, data_meaning, year_str]
 
-        model_version_tag = cn.model_version_tag
         uu.save_and_upload_small_raster_set(
-            bounds, chunk_length_pixels, tile_id, bounds_str,
-            out_dict_all_dtypes, is_final, logger, model_version_tag, out_no_data_val
+            bounds=bounds,
+            chunk_length_pixels=chunk_length_pixels,
+            tile_id=tile_id,
+            bounds_str=bounds_str,
+            output_dict=out_dict_all_dtypes,
+            is_final=is_final,
+            logger=logger,
+            interval_type=("annual" if (interval_start == interval_end) else "five_years"),
+            model_type="standard_model",  # or another tag if you wish
+            no_data_val=out_no_data_val
         )
 
     return f"Success for {bounds_str}, block {interval_start}-{interval_end}: {uu.timestr()}", chunk_stats

@@ -22,6 +22,7 @@ from datetime import datetime
 from io import BytesIO
 from osgeo import gdal
 import sys
+import posixpath
 
 # Local project imports
 from src.scripts.utilities import constants_and_names as cn
@@ -323,135 +324,136 @@ def check_chunk_for_data(required_layers, bounds_str, tile_id, any_or_all, is_fi
     else:
         raise ValueError("any_or_all argument must be 'any' or 'all'.")
 
-################################################################################
-# Save & Upload Rasters
-################################################################################
+# ---------------------------------------------------
+#  NEW helper: build_output_s3_folder
+# ---------------------------------------------------
+def build_output_s3_folder(data_meaning: str,
+                           year_out: str,
+                           chunk_size_pixels: int,
+                           interval_type: str,
+                           model_type: str = "standard_model",
+                           date_str: str | None = None) -> str:
+    """
+    Returns the S3 folder (NO trailing slash) for a single output layer, e.g.:
 
-def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
-                                     bounds_str, output_dict, is_final, logger, model_version_tag,
+      s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_3_0/
+          gross_emissions_CO2/standard_model/annual_intervals/2016/8000_pixels/20250414
+
+    Args
+    ----
+    data_meaning       – sub‑folder that identifies the variable
+    year_out           – "2016" or "2015_2020" etc.
+    chunk_size_pixels  – 8000, 40000, …
+    interval_type      – "annual", "five_years", or "hybrid"
+    model_type         – "standard_model" (default) or another tag you pass in
+    date_str           – override the YYYYMMDD stamp; defaults to today's date
+    """
+    date_str = date_str or cn.today_date
+
+    return posixpath.join(
+        cn.outputs_path,
+        data_meaning,                          # e.g. "gross_emissions_CO2"
+        model_type,                            # "standard_model"
+        f"{interval_type}_intervals",          # "annual_intervals"
+        str(year_out),                         # "2016"  or "2015_2020"
+        f"{chunk_size_pixels}_pixels",         # "8000_pixels"
+        date_str                               # "20250414"
+    )
+
+# ---------------------------------------------------
+#  UPDATED: save_and_upload_small_raster_set
+# ---------------------------------------------------
+def save_and_upload_small_raster_set(bounds,
+                                     chunk_length_pixels,
+                                     tile_id,
+                                     bounds_str,
+                                     output_dict,
+                                     is_final,
+                                     logger,
+                                     interval_type,
+                                     model_type="standard_model",
                                      no_data_val=None):
     """
-    Saves output arrays locally as GeoTIFFs, then uploads them to S3, then removes local files.
-    Uses cross-platform 'tempfile.gettempdir()' for the local directory.
+    Saves each array in `output_dict` as a GeoTIFF in /tmp, uploads it to S3, then
+    deletes the local file.  The S3 folder is created on‑the‑fly with
+    `build_output_s3_folder`, so no hard‑coded list of output directories is
+    required.
 
-    Args:
-        bounds: [W, S, E, N]
-        chunk_length_pixels: e.g. 8000
-        tile_id: e.g. "00N_110E"
-        bounds_str: e.g. "112_-4_114_-2"
-        output_dict: {
-            'soil': [data_array, 'float32', 'soil', '2020'],
-            'state': [data_array, 'uint8', 'state', '2020']
-        }
-        is_final: bool controlling verbosity
-        logger: logging.Logger instance
-        no_data_val: optional nodata for the raster
-
-    Returns:
-        None
+    output_dict  = {
+        "gross_emissions_CO2": [array, "float32", "gross_emissions_CO2", "2016"],
+        "soil"              : [array, "uint32",  "soil",                "2015_2020"],
+        ...
+    }
     """
+
     s3_config = Config(retries={'max_attempts': 10, 'mode': 'standard'})
     s3_client = boto3.client("s3", config=s3_config)
 
-    from rasterio.transform import from_bounds
-    try:
-        transform = from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
-    except Exception as e:
-        logger.error(f"Failed to create transform from bounds {bounds}: {e}")
-        raise
+    transform = rasterio.transform.from_bounds(
+        *bounds,
+        width=chunk_length_pixels,
+        height=chunk_length_pixels
+    )
 
-    file_info = f"{tile_id}__{bounds_str}"
+    file_stub = f"{tile_id}__{bounds_str}"
+    temp_dir  = tempfile.gettempdir()
+    os.makedirs(temp_dir, exist_ok=True)
 
     if is_final:
-        lu.print_and_log(f"Saving and uploading outputs for {bounds_str} in {tile_id}: {timestr()}",
+        lu.print_and_log(f"Saving + uploading outputs for {bounds_str} in {tile_id}: {timestr()}",
                          is_final, logger)
 
-    # Cross-platform temporary directory
-    temp_dir = tempfile.gettempdir()
-    if not os.path.exists(temp_dir):
-        os.makedirs(temp_dir, exist_ok=True)
+    for key, (data_array, data_type, data_meaning, year_out) in output_dict.items():
 
-    for key, value in output_dict.items():
-        data_array = value[0]
-        data_type = value[1]
-        data_meaning = value[2]
-        year_out = value[3]
+        # ---------- local file name ------------------------------------------
+        fname = f"{file_stub}__{key}.tif" if is_final \
+                else f"{file_stub}__{key}__{timestr()}.tif"
+        local_path = os.path.join(temp_dir, fname)
 
-        if is_final:
-            file_name = f"{file_info}__{key}.tif"
-        else:
-            file_name = f"{file_info}__{key}__{timestr()}.tif"
-
-        local_file_path = os.path.join(temp_dir, file_name)
-
-        # Optionally log this step
-        if not is_final:
-            lu.print_and_log(f"Saving chunk {bounds_str} in {tile_id} for {year_out}: {timestr()}",
-                             is_final, logger)
-
-        rasterio_kwargs = {
-            'driver': 'GTiff',
-            'width': chunk_length_pixels,
-            'height': chunk_length_pixels,
-            'count': 1,
-            'dtype': data_type,
-            'crs': 'EPSG:4326',
-            'transform': transform,
-            'compress': 'lzw',
-            'blockxsize': 400,
-            'blockysize': 400
-        }
+        # ---------- write GeoTIFF locally ------------------------------------
+        profile = dict(
+            driver="GTiff",
+            width=chunk_length_pixels,
+            height=chunk_length_pixels,
+            count=1,
+            dtype=data_type,
+            crs="EPSG:4326",
+            transform=transform,
+            compress="lzw",
+            blockxsize=400,
+            blockysize=400
+        )
         if no_data_val is not None:
-            rasterio_kwargs['nodata'] = no_data_val
+            profile["nodata"] = no_data_val
 
-        # Save locally
-        try:
-            with rasterio.open(local_file_path, 'w', **rasterio_kwargs) as dst:
-                dst.write(data_array, 1)
-        except Exception as e:
-            lu.print_and_log(f"Failed to save raster {file_name} locally: {e}",
-                             is_final, logger)
-            continue
+        with rasterio.open(local_path, "w", **profile) as dst:
+            dst.write(data_array, 1)
 
-        # Construct an S3 path for this example. If your code uses a certain layout, do so here:
-        # This is just one example that might match older references:
-        # "s3://gfw2-data/climate/organic_soils/{data_meaning}/{year_out}/.../CHUNK"
-        # If needed, adjust to your pipeline’s structure. We’ll keep it direct:
-        s3_folder = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/{model_version_tag}/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels"
-        # Clean up path
-        s3_folder_no_prefix = s3_folder.replace("s3://gfw2-data/", "")
-        s3_key = f"{s3_folder_no_prefix}/{file_name}"
+        # ---------- build S3 folder + key ------------------------------------
+        s3_folder = build_output_s3_folder(
+            data_meaning=data_meaning,
+            year_out=year_out,
+            chunk_size_pixels=chunk_length_pixels,
+            interval_type=interval_type,
+            model_type=model_type
+        )
+        s3_key = posixpath.join(
+            s3_folder.replace("s3://gfw2-data/", ""),  # bucket stripped
+            fname
+        )
 
-        # Upload
-        try:
-            s3_client.upload_file(local_file_path, "gfw2-data", s3_key)
-            lu.print_and_log(f"Uploaded {local_file_path} to s3://gfw2-data/{s3_key}",
-                             is_final, logger)
-        except Exception as e:
-            lu.print_and_log(f"Failed to upload {local_file_path} to s3://gfw2-data/{s3_key}: {e}",
-                             is_final, logger)
-            continue
+        # ---------- upload & verify ------------------------------------------
+        s3_client.upload_file(local_path, "gfw2-data", s3_key)
+        s3_client.head_object(Bucket="gfw2-data", Key=s3_key)
 
-        # Verify
-        try:
-            s3_client.head_object(Bucket="gfw2-data", Key=s3_key)
-            lu.print_and_log(f"Confirmed upload of {file_name} to s3://gfw2-data/{s3_key}",
-                             is_final, logger)
-        except Exception as e:
-            lu.print_and_log(f"Upload verification failed for s3://gfw2-data/{s3_key}: {e}",
-                             is_final, logger)
-            continue
-
-        # Remove local file
-        try:
-            os.remove(local_file_path)
-        except OSError as e:
-            lu.print_and_log(f"Failed to delete local raster {file_name}: {e}",
-                             is_final, logger)
+        # ---------- clean up --------------------------------------------------
+        os.remove(local_path)
+        lu.print_and_log(f"Uploaded {fname} → {s3_folder}/", is_final, logger)
 
     if is_final:
-        lu.print_and_log(f"All rasters for {bounds_str} in {tile_id} have been processed and uploaded.",
+        lu.print_and_log(f"All rasters for {bounds_str} in {tile_id} processed + uploaded.",
                          is_final, logger)
+
 
 
 ################################################################################

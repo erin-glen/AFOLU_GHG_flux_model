@@ -6,8 +6,11 @@ import os
 # ---------------------------------------------------
 # 1. General Configuration
 # ---------------------------------------------------
-model_version = 0.3
-model_version_tag = "version_0_3_0"
+
+# ── version helpers ──────────────────────────────────────────────
+model_version            = "0.3.0"              # dotted string
+model_version_underscore = model_version.replace(".", "_")   # "0_3_0"
+
 s3_bucket_name = 'gfw2-data'
 full_bucket_prefix = f"s3://{s3_bucket_name}"
 s3_region_name = 'us-east-1'
@@ -16,7 +19,14 @@ project_dir = 'climate/AFOLU_flux_model/organic_soils'
 raw_dir = posixpath.join(project_dir, 'inputs/raw')
 processed_dir = posixpath.join(project_dir, 'inputs/processed')
 
-s3_out_dir = posixpath.join(full_bucket_prefix, project_dir, 'outputs/drainage_model')
+# organic‑soils constants file
+outputs_path = posixpath.join(
+    full_bucket_prefix,                      # "s3://gfw2-data"
+    project_dir,                             # "climate/AFOLU_flux_model/organic_soils"
+    "outputs",
+    f"version_{model_version_underscore}"    # "version_0_3_0"
+)   # → s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_3_0
+
 s3_log_path = posixpath.join(project_dir, 'model_logs')
 
 local_log_path = "./logs/"
@@ -192,3 +202,4 @@ if __name__ == "__main__":
     test_dict = get_dynamic_download_dict('00N_110E', 2015)
     for k, v in test_dict.items():
         print(f"{k}: {v}")
+
