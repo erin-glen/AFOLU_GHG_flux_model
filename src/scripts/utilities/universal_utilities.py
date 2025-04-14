@@ -328,7 +328,7 @@ def check_chunk_for_data(required_layers, bounds_str, tile_id, any_or_all, is_fi
 ################################################################################
 
 def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
-                                     bounds_str, output_dict, is_final, logger,
+                                     bounds_str, output_dict, is_final, logger, model_version_tag,
                                      no_data_val=None):
     """
     Saves output arrays locally as GeoTIFFs, then uploads them to S3, then removes local files.
@@ -417,7 +417,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
         # This is just one example that might match older references:
         # "s3://gfw2-data/climate/organic_soils/{data_meaning}/{year_out}/.../CHUNK"
         # If needed, adjust to your pipeline’s structure. We’ll keep it direct:
-        s3_folder = f"s3://gfw2-data/climate/organic_soils/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels"
+        s3_folder = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/{model_version_tag}/{data_meaning}/{year_out}/{chunk_length_pixels}_pixels"
         # Clean up path
         s3_folder_no_prefix = s3_folder.replace("s3://gfw2-data/", "")
         s3_key = f"{s3_folder_no_prefix}/{file_name}"

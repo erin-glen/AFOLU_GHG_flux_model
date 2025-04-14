@@ -6,7 +6,8 @@ import os
 # ---------------------------------------------------
 # 1. General Configuration
 # ---------------------------------------------------
-model_version = 0.2
+model_version = 0.3
+model_version_tag = "version_0_3_0"
 s3_bucket_name = 'gfw2-data'
 full_bucket_prefix = f"s3://{s3_bucket_name}"
 s3_region_name = 'us-east-1'

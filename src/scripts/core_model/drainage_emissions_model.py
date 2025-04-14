@@ -575,9 +575,10 @@ def calculate_and_upload_drainage(bounds,
             out_pattern = key
             out_dict_all_dtypes[key] = [arr, data_type, out_pattern, year_str]
 
+        model_version_tag = cn.model_version_tag
         uu.save_and_upload_small_raster_set(
             bounds, chunk_length_pixels, tile_id, bounds_str,
-            out_dict_all_dtypes, is_final, logger, out_no_data_val
+            out_dict_all_dtypes, is_final, logger, model_version_tag, out_no_data_val
         )
 
     return f"Success for {bounds_str}, block {interval_start}-{interval_end}: {uu.timestr()}", chunk_stats
