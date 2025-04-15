@@ -380,7 +380,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 bgc_dens_in = bgc_dens_block[row, col]
                 deadwood_c_dens_in = deadwood_c_dens_block[row, col]
                 litter_c_dens_in = litter_c_dens_block[row, col]
-                # soil_c_dens = soil_c_dens_block[row, col]
 
                 # Makes a list of carbon densities to save space in the decision tree below.
                 # This list is input to flux calculation functions as one argument, rather than a separate argument
@@ -827,213 +826,210 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     deadwood_c_ratio=0, litter_c_ratio=0)
 
                     ### Trees remaining trees
-                    #TODO Include emissions if it's natural forest converted to oil palm according to Descals planting year. Not currently including emissions.
                     elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: Include mangrove exception.
                         node = nu.accrete_node(node, 3)
-                        if part_or_full_dist_in_prev_interval:  # Trees partially disturbed in the last interval (31)
+                        if (not all_planted_trees) and year_before_converted_to_oil_palm: # Non-planted trees converted to oil palm in the next interval (31->311/312)
                             node = nu.accrete_node(node, 1)
-                            if all_planted_trees:   # Planted trees partially disturbed in the last interval (311)
-                                node = nu.accrete_node(node, 1)
-                                if sig_height_gain_prev_curr_abs:  # Oil palm/planted trees partially disturbed in the last interval with signif. height increase after (3111)
-                                    # NOTE: This should only occur with 5-year interval data, not annual data.  #TODO Test with 5-year data
-                                    node = nu.accrete_node(node, 1)
-                                    # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
-                                    if all_oil_palm:  # Oil palm partially disturbed in the last interval with signif. height increase after (31111->311111/311112)
-                                        node = nu.accrete_node(node, 1)
-                                        agc_rf_in = cn.oil_palm_agc_rf
-                                        bgc_rf_in = cn.oil_palm_bgc_rf
-                                        rf_post_dist = np.array([agc_rf_in, bgc_rf_in, 0, 0]).astype('float32')
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                        (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                         RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
-                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
-                                            c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                            rf_post_dist, most_recent_year_not_tall_veg,
-                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                                    else: # Planted trees partially disturbed in the last interval with signif. height increase after (31112->311121/311122)
-                                        node = nu.accrete_node(node, 2)
-                                        agc_rf_in = planted_forest_AGC_RF_cell
-                                        bgc_rf_in = planted_forest_BGC_RF_cell
-                                        rf_post_dist = np.array([agc_rf_in, bgc_rf_in, 0, 0]).astype('float32')
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                        (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                         RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
-                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
-                                            c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                            rf_post_dist, most_recent_year_not_tall_veg,
-                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                                else:  # Oil palm/planted trees partially disturbed in the last interval without signif. height increase after (3112)
-                                    # NOTE: All annual interval data is expected to use this branch.
-                                    node = nu.accrete_node(node, 2)
-                                    # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
-                                    if all_oil_palm: # Oil palm partially disturbed in the last interval without signif. height increase after (31121->311211/311212)
-                                        node = nu.accrete_node(node, 1)
-                                        agc_rf_in = cn.oil_palm_agc_rf
-                                        bgc_rf_in = cn.oil_palm_bgc_rf
-                                        rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                        (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                         RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
-                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
-                                            c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                            rf_post_dist, most_recent_year_not_tall_veg,
-                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                                    else: # Planted trees partially disturbed in the last interval without signif. height increase after (31122->311221/311222)
-                                        node = nu.accrete_node(node, 2)
-                                        agc_rf_in = planted_forest_AGC_RF_cell
-                                        bgc_rf_in = planted_forest_BGC_RF_cell
-                                        rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                        (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                         RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
-                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
-                                            c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                            rf_post_dist, most_recent_year_not_tall_veg,
-                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                            else:  # Non-planted trees partially disturbed in the last interval (312)
-                                node = nu.accrete_node(node, 2)
-                                if tall_veg_curr:  # Forest partially disturbed in the last interval (3121)
-                                    node = nu.accrete_node(node, 1)
-                                    if sig_height_gain_prev_curr_abs:  # Forest partially disturbed in the last interval with signif. height increase after (31211->312111/312112)
-                                        # NOTE: This should only occur with 5-year interval data, not annual data.
-                                        node = nu.accrete_node(node, 1)
-                                        # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
-                                        agc_rf_in = natrl_forest_age_dependent_agc_rf
-                                        bgc_rf_in = agc_rf_in * r_s_ratio_cell
-                                        agc_rf_post = natrl_forest_curve_0_5_AGC_RF_cell # Post-dist RF is 0-5 year secondary forest
-                                        bgc_rf_post = agc_rf_post * r_s_ratio_cell
-                                        rf_post_dist = np.array([agc_rf_post, bgc_rf_post, 0, 0]).astype('float32')
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                        (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                         RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
-                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                            rf_post_dist, most_recent_year_not_tall_veg,
-                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
-                                            deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
-                                    else:  # Forest partially disturbed in the last interval without signif. height increase after (31212->312121/312122)
-                                        # NOTE: All annual interval data is expected to use this branch.
-                                        node = nu.accrete_node(node, 2)
-                                        # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
-                                        agc_rf_in = natrl_forest_age_dependent_agc_rf
-                                        bgc_rf_in = agc_rf_in * r_s_ratio_cell
-                                        rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')  # No post-disturbance RFs or removals
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                        (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                         RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
-                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                            rf_post_dist, most_recent_year_not_tall_veg,
-                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
-                                            deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
-                                else:  # Trees outside forests partially disturbed in the last interval (3122)
-                                    node = nu.accrete_node(node, 2)
-                                    if sig_height_gain_prev_curr_abs:  # Trees outside forests partially disturbed in the last interval with signif. height increase after (31221->312211/312212)
-                                        # NOTE: This should only occur with 5-year interval data, not annual data.
-                                        node = nu.accrete_node(node, 1)
-                                        # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
-                                        agc_rf_in = cn.trees_outside_forests_agc_rf_max
-                                        bgc_rf_in = agc_rf_in * r_s_ratio_cell
-                                        agc_rf_post = cn.trees_outside_forests_agc_rf_max
-                                        bgc_rf_post = agc_rf_post * r_s_ratio_cell
-                                        rf_post_dist = np.array([agc_rf_post, bgc_rf_post, 0, 0]).astype('float32')
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                        (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                         RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
-                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                            rf_post_dist, most_recent_year_not_tall_veg,
-                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
-                                            deadwood_c_ratio=0, litter_c_ratio=0)
-                                    else:  # Trees outside forests partially disturbed in the last interval with signif. height increase after (31222->312221/312222)
-                                        # NOTE: All annual interval data is expected to use this branch.
-                                        node = nu.accrete_node(node, 2)
-                                        # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
-                                        agc_rf_in = cn.trees_outside_forests_agc_rf_max
-                                        bgc_rf_in = agc_rf_in * r_s_ratio_cell
-                                        rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')  # No post-disturbance RFs or removals
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
-                                        (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                         RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
-                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                            rf_post_dist, most_recent_year_not_tall_veg,
-                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
-                                            deadwood_c_ratio=0, litter_c_ratio=0)
-                        else:  # Trees not disturbed in the last interval (32)
+                            agc_rf_in = natrl_forest_age_dependent_agc_rf
+                            bgc_rf_in = agc_rf_in * r_s_ratio_cell
+                            rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
+                            c_pools_fire_CO2 = cn.all_non_soil_pools
+                            c_pools_fire_non_CO2 = cn.all_non_soil_pools
+                            c_pools_no_fire = cn.all_non_soil_pools
+                            (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
+                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
+                                c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest,
+                                Gef_n2o_forest, deadwood_c_ratio, litter_c_ratio)
+                        else:  # Trees remaining trees (32)
                             node = nu.accrete_node(node, 2)
-                            if all_planted_trees:  # Oil palm/planted trees not disturbed in the last interval (321)
+                            if part_or_full_dist_in_prev_interval:  # Trees partially disturbed in the last interval (321)
                                 node = nu.accrete_node(node, 1)
-                                # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
-                                if all_oil_palm:  # Oil palm not disturbed in the last interval (3211->32111/32112)
+                                if all_planted_trees:   # Planted trees partially disturbed in the last interval (311)
                                     node = nu.accrete_node(node, 1)
-                                    RF_AGC_final = cn.oil_palm_agc_rf
-                                    RF_BGC_final = cn.oil_palm_bgc_rf
-                                    c_pools_fire_CO2 = cn.agc_emissions_only
-                                    c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
-                                        node, interval_type, forest_age_annual_cell,
-                                        most_recent_year_burned_during_interval,
-                                        RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                        interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
-                                        Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                                else: # Planted trees not disturbed in the last interval (3212->32121/32122)
-                                    node = nu.accrete_node(node, 2)
-                                    RF_AGC_final = planted_forest_AGC_RF_cell
-                                    RF_BGC_final = planted_forest_BGC_RF_cell
-                                    c_pools_fire_CO2 = cn.agc_emissions_only
-                                    c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
-                                        node, interval_type, forest_age_annual_cell,
-                                        most_recent_year_burned_during_interval,
-                                        RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                        interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
-                                        Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                            else:  # Non-planted trees not disturbed in last interval (322)
-                                node = nu.accrete_node(node, 2)
-                                if tall_veg_curr:  # Forest not disturbed in last interval (3221)
-                                    node = nu.accrete_node(node, 1)
-                                    if primary_forest_proxy:  # >100 year old natural forest not disturbed in last interval (32211)
+                                    if sig_height_gain_prev_curr_abs:  # Oil palm/planted trees partially disturbed in the last interval with signif. height increase after (3111)
+                                        # NOTE: This should only occur with 5-year interval data, not annual data.  #TODO Test with 5-year data
                                         node = nu.accrete_node(node, 1)
-
-                                        # TODO Include natural forest->oil palm calculations. Update Powerpoint tree.
-                                        if year_before_converted_to_oil_palm:  # >100 year old natural forest not disturbed in last interval converted to oil palm in the next interval (322111->3221111/3221112)
+                                        # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
+                                        if all_oil_palm:  # Oil palm partially disturbed in the last interval with signif. height increase after (31111->311111/311112)
                                             node = nu.accrete_node(node, 1)
-                                            agc_rf_in = natrl_forest_age_dependent_agc_rf
-                                            bgc_rf_in = agc_rf_in * r_s_ratio_cell
-                                            rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                            c_pools_fire_CO2 = cn.all_non_soil_pools
-                                            c_pools_fire_non_CO2 = cn.all_non_soil_pools
-                                            c_pools_no_fire = cn.all_non_soil_pools
+                                            agc_rf_in = cn.oil_palm_agc_rf
+                                            bgc_rf_in = cn.oil_palm_bgc_rf
+                                            rf_post_dist = np.array([agc_rf_in, bgc_rf_in, 0, 0]).astype('float32')
+                                            c_pools_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
+                                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
                                                 c_pools_fire_CO2, c_pools_fire_non_CO2,
                                                 c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                                rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest,
-                                                Gef_n2o_forest, deadwood_c_ratio, litter_c_ratio)
-                                        else:  # >100 year old natural forest not disturbed in last interval and staying as natural forest (322112->3221121/3221122)
+                                                rf_post_dist, most_recent_year_not_tall_veg,
+                                                Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
+                                        else: # Planted trees partially disturbed in the last interval with signif. height increase after (31112->311121/311122)
                                             node = nu.accrete_node(node, 2)
+                                            agc_rf_in = planted_forest_AGC_RF_cell
+                                            bgc_rf_in = planted_forest_BGC_RF_cell
+                                            rf_post_dist = np.array([agc_rf_in, bgc_rf_in, 0, 0]).astype('float32')
+                                            c_pools_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
+                                                c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                rf_post_dist, most_recent_year_not_tall_veg,
+                                                Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
+                                    else:  # Oil palm/planted trees partially disturbed in the last interval without signif. height increase after (3112)
+                                        # NOTE: All annual interval data is expected to use this branch.
+                                        node = nu.accrete_node(node, 2)
+                                        # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
+                                        if all_oil_palm: # Oil palm partially disturbed in the last interval without signif. height increase after (31121->311211/311212)
+                                            node = nu.accrete_node(node, 1)
+                                            agc_rf_in = cn.oil_palm_agc_rf
+                                            bgc_rf_in = cn.oil_palm_bgc_rf
+                                            rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
+                                            c_pools_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
+                                                c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                rf_post_dist, most_recent_year_not_tall_veg,
+                                                Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
+                                        else: # Planted trees partially disturbed in the last interval without signif. height increase after (31122->311221/311222)
+                                            node = nu.accrete_node(node, 2)
+                                            agc_rf_in = planted_forest_AGC_RF_cell
+                                            bgc_rf_in = planted_forest_BGC_RF_cell
+                                            rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
+                                            c_pools_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
+                                                c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                rf_post_dist, most_recent_year_not_tall_veg,
+                                                Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
+                                else:  # Non-planted trees partially disturbed in the last interval (3212)
+                                    node = nu.accrete_node(node, 2)
+                                    if tall_veg_curr:  # Forest partially disturbed in the last interval (32121)
+                                        node = nu.accrete_node(node, 1)
+                                        if sig_height_gain_prev_curr_abs:  # Forest partially disturbed in the last interval with signif. height increase after (321211->3212111/3212112)
+                                            # NOTE: This should only occur with 5-year interval data, not annual data.
+                                            node = nu.accrete_node(node, 1)
+                                            # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
+                                            agc_rf_in = natrl_forest_age_dependent_agc_rf
+                                            bgc_rf_in = agc_rf_in * r_s_ratio_cell
+                                            agc_rf_post = natrl_forest_curve_0_5_AGC_RF_cell # Post-dist RF is 0-5 year secondary forest
+                                            bgc_rf_post = agc_rf_post * r_s_ratio_cell
+                                            rf_post_dist = np.array([agc_rf_post, bgc_rf_post, 0, 0]).astype('float32')
+                                            c_pools_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                rf_post_dist, most_recent_year_not_tall_veg,
+                                                Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                                deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
+                                        else:  # Forest partially disturbed in the last interval without signif. height increase after (321212->3212121/3212122)
+                                            # NOTE: All annual interval data is expected to use this branch.
+                                            node = nu.accrete_node(node, 2)
+                                            # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
+                                            agc_rf_in = natrl_forest_age_dependent_agc_rf
+                                            bgc_rf_in = agc_rf_in * r_s_ratio_cell
+                                            rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')  # No post-disturbance RFs or removals
+                                            c_pools_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                rf_post_dist, most_recent_year_not_tall_veg,
+                                                Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                                deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
+                                    else:  # Trees outside forests partially disturbed in the last interval (32122)
+                                        node = nu.accrete_node(node, 2)
+                                        if sig_height_gain_prev_curr_abs:  # Trees outside forests partially disturbed in the last interval with signif. height increase after (321221->3212211/3212212)
+                                            # NOTE: This should only occur with 5-year interval data, not annual data.
+                                            node = nu.accrete_node(node, 1)
+                                            # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
+                                            agc_rf_in = cn.trees_outside_forests_agc_rf_max
+                                            bgc_rf_in = agc_rf_in * r_s_ratio_cell
+                                            agc_rf_post = cn.trees_outside_forests_agc_rf_max
+                                            bgc_rf_post = agc_rf_post * r_s_ratio_cell
+                                            rf_post_dist = np.array([agc_rf_post, bgc_rf_post, 0, 0]).astype('float32')
+                                            c_pools_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                rf_post_dist, most_recent_year_not_tall_veg,
+                                                Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                                deadwood_c_ratio=0, litter_c_ratio=0)
+                                        else:  # Trees outside forests partially disturbed in the last interval with signif. height increase after (321222->3212221/3212222)
+                                            # NOTE: All annual interval data is expected to use this branch.
+                                            node = nu.accrete_node(node, 2)
+                                            # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
+                                            agc_rf_in = cn.trees_outside_forests_agc_rf_max
+                                            bgc_rf_in = agc_rf_in * r_s_ratio_cell
+                                            rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')  # No post-disturbance RFs or removals
+                                            c_pools_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                rf_post_dist, most_recent_year_not_tall_veg,
+                                                Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                                deadwood_c_ratio=0, litter_c_ratio=0)
+                            else:  # Trees not disturbed in the last interval (322)
+                                node = nu.accrete_node(node, 2)
+                                if all_planted_trees:  # Oil palm/planted trees not disturbed in the last interval (3221)
+                                    node = nu.accrete_node(node, 1)
+                                    # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
+                                    if all_oil_palm:  # Oil palm not disturbed in the last interval (32211->322111/322112)
+                                        node = nu.accrete_node(node, 1)
+                                        RF_AGC_final = cn.oil_palm_agc_rf
+                                        RF_BGC_final = cn.oil_palm_bgc_rf
+                                        c_pools_fire_CO2 = cn.agc_emissions_only
+                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
+                                            node, interval_type, forest_age_annual_cell,
+                                            most_recent_year_burned_during_interval,
+                                            RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                            interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
+                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
+                                    else: # Planted trees not disturbed in the last interval (32212->322121/322122)
+                                        node = nu.accrete_node(node, 2)
+                                        RF_AGC_final = planted_forest_AGC_RF_cell
+                                        RF_BGC_final = planted_forest_BGC_RF_cell
+                                        c_pools_fire_CO2 = cn.agc_emissions_only
+                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
+                                            node, interval_type, forest_age_annual_cell,
+                                            most_recent_year_burned_during_interval,
+                                            RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                            interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
+                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
+                                else:  # Non-planted trees not disturbed in last interval (3222)
+                                    node = nu.accrete_node(node, 2)
+                                    if tall_veg_curr:  # Forest not disturbed in last interval (32221)
+                                        node = nu.accrete_node(node, 1)
+                                        if primary_forest_proxy:  # >100 year old natural forest not disturbed in last interval (322211->3222111/3222112)
+                                            node = nu.accrete_node(node, 1)
                                             RF_AGC_final = primary_forest_AGC_RF
                                             RF_BGC_final = RF_AGC_final * r_s_ratio_cell
                                             c_pools_fire_CO2 = cn.agc_emissions_only
@@ -1044,28 +1040,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                                 interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                                 deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
-
-
-                                    else: # <100 year old natural forest not disturbed in last interval (32212)
-                                        node = nu.accrete_node(node, 2)
-
-                                        #TODO Include natural forest->oil palm calculations. Update Powerpoint tree.
-                                        if year_before_converted_to_oil_palm:  # <100 year old natural forest converted to oil palm in next interval (322121->3221211/3221212)
-                                            node = nu.accrete_node(node, 1)
-                                            agc_rf_in = natrl_forest_age_dependent_agc_rf
-                                            bgc_rf_in = agc_rf_in * r_s_ratio_cell
-                                            rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                            c_pools_fire_CO2 = cn.all_non_soil_pools
-                                            c_pools_fire_non_CO2 = cn.all_non_soil_pools
-                                            c_pools_no_fire = cn.all_non_soil_pools
-                                            (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
-                                                c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
-                                                rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest,
-                                                Gef_n2o_forest, deadwood_c_ratio, litter_c_ratio)
-                                        else: # <100 year old natural forest not disturbed in last interval and staying as natural forest (322122->3221221/3221222
+                                        else: # <100 year old natural forest not disturbed in last interval (322212->3222121/3222122)
                                             node = nu.accrete_node(node, 2)
                                             RF_AGC_final = natrl_forest_age_dependent_agc_rf
                                             RF_BGC_final = RF_AGC_final * r_s_ratio_cell
@@ -1077,17 +1052,17 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                                 interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                                 deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
-                                else:  # Trees outside forests not disturbed in the last interval (3222->32221/32222)
-                                    node = nu.accrete_node(node, 2)
-                                    RF_AGC_final = cn.trees_outside_forests_agc_rf_max
-                                    RF_BGC_final = RF_AGC_final * r_s_ratio_cell
-                                    c_pools_fire_CO2 = cn.agc_emissions_only
-                                    c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                    state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
-                                        node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
-                                        RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                        interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
-                                        Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
+                                    else:  # Trees outside forests not disturbed in the last interval (32222->322221/322222)
+                                        node = nu.accrete_node(node, 2)
+                                        RF_AGC_final = cn.trees_outside_forests_agc_rf_max
+                                        RF_BGC_final = RF_AGC_final * r_s_ratio_cell
+                                        c_pools_fire_CO2 = cn.agc_emissions_only
+                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
+                                            node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
+                                            RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                            interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
+                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
 
                     # When decision trees above do not apply
                     else:
@@ -1509,7 +1484,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         cn.planted_forest_tree_crop_pattern: f"{cn.planted_forest_tree_crop_dir}{sample_tile_id}.tif",
 
         # Originally from gfw-data-lake, so it's in 400x400 windows
-        cn.organic_soil_extent_pattern: f"{cn.organic_soil_extent_dir}{sample_tile_id}_{cn.organic_soil_extent_pattern}.tif",
         cn.elevation_pattern: f"{cn.elevation_dir}{sample_tile_id}_{cn.elevation_pattern}.tif",
         cn.climate_domain_pattern: f"{cn.climate_domain_dir}{sample_tile_id}_{cn.climate_domain_pattern}.tif",
         cn.climate_zone_pattern: f"{cn.climate_zone_dir}{sample_tile_id}_{cn.climate_zone_pattern}.tif",
@@ -1526,7 +1500,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         download_dict[cn.bgc_dens_pattern] = f"{cn.bgc_2000_dir}{sample_tile_id}__{cn.bgc_2000_pattern}.tif"
         download_dict[cn.deadwood_c_dens_pattern] = f"{cn.deadwood_c_2000_dir}{sample_tile_id}__{cn.deadwood_c_2000_pattern}.tif"
         download_dict[cn.litter_c_dens_pattern] = f"{cn.litter_c_2000_dir}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif"
-        # download_dict[cn.soil_c_2000_pattern] = f"{sample_tile_id}_{cn.soil_c_2000_pattern}.tif"
 
     ##TODO: 2015 carbon maps are still using the 2000 mangrove carbon map!!
     if interval_type == cn.intervals_annual:
@@ -1534,7 +1507,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         download_dict[cn.bgc_dens_pattern] = f"{cn.bgc_2015_dir}{sample_tile_id}__{cn.bgc_2015_pattern}.tif"
         download_dict[cn.deadwood_c_dens_pattern] = f"{cn.deadwood_c_2015_dir}{sample_tile_id}__{cn.deadwood_c_2015_pattern}.tif"
         download_dict[cn.litter_c_dens_pattern] = f"{cn.litter_c_2015_dir}{sample_tile_id}__{cn.litter_c_2015_pattern}.tif"
-        # download_dict[cn.soil_c_2000_pattern] = f"{sample_tile_id}_{cn.soil_c_2000_pattern}.tif"
 
     if interval_type == cn.intervals_five_years:
         # Land cover and vegetation height rasters (5-year intervals)

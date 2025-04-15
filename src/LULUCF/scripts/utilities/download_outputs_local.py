@@ -3,7 +3,7 @@ Downloads everything in the specified LULUCF output folder in s3 locally.
 From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67f3f252-8624-800a-a4d8-b0e29d05104e
 
 Usage when run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/src/LULUCF$:
-python scripts/utilities/download_outputs_local.py v11
+python scripts/utilities/download_outputs_local.py v12_oil_palm_conversion
 
 The argument is the name of the local subfolder to which everything is downloaded.
 """
