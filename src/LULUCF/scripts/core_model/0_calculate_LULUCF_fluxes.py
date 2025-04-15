@@ -123,9 +123,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     # Forest age for each output year of the model
     forest_age_annual_block = forest_age_start_year_block
 
-    # # Number of years of regrowth for new forest
-    # years_of_forest_regrowth_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
-
     # Year in which forest loss occurs/is assigned during an interval (0 if no loss)
     ### TODO Never actually used. What did I intend to do with this?
     year_of_forest_loss_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint16')
@@ -459,9 +456,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 # Suggested by https://chatgpt.com/share/e/6724d803-aca4-800a-928c-11d76d38c0ec to work well with numba.
                 vegetation_height_so_far_cell = np.empty(len(years_so_far), dtype=np.uint8)
 
-                # ## Number of years of regrowth for new forest since last time not forest
-                # years_of_forest_regrowth = years_of_forest_regrowth_block[row, col]
-
                 # Populates the fixed-length array by accessing vegetation_heights_all_years
                 # Used to determine whether current height has decreased significantly from this maximum height over multiple intervals (gradual height loss).
                 # Suggested by https://chatgpt.com/share/e/6724d803-aca4-800a-928c-11d76d38c0ec to work well with numba
@@ -521,16 +515,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 # Resets age to 0 if there was a partial disturbance in the last interval
                 if part_or_full_dist_in_prev_interval:
                     forest_age_annual_cell = 0
-
-                # # Calculates the number of years of forest regrowth since the last year of not-tall vegetation
-                # # or partial disturbance.
-                # # Can override the pre-existing value.
-                # #TODO: This does not seem to work correctly after partial disturbances, at least in primary forest. It doesn't increment the years since disturbance.
-                # # It seems that the disturbance is being recorded correctly and the pixel is being reclassified as
-                # # young secondary forest, but calculate_years_of_forest_regrowth isn't being triggered by this multi-interval disturbance.
-                # # Look at ArcMap bookmark "Primary forest->partial disturbance->stable forest->stable forest".
-                # # Checked this before the second global run and it's still the case (output folder v38).
-                # years_of_forest_regrowth = nu.calculate_years_of_forest_regrowth(interval_length, interval_end_year, most_recent_year_not_tall_veg, tall_veg_curr, part_or_full_dist_in_prev_interval, years_of_forest_regrowth)
 
                 # Assigns pixel to "primary forest proxy" if age is >= 100 years. All age pixels >100 years were reassigned to 100.
                 if forest_age_annual_cell >= 100:
@@ -1130,7 +1114,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 forest_age_annual_block[row, col] = forest_age_annual_cell
                 gain_year_count_out_block[row, col] = gain_year_count
                 most_recent_year_not_tall_veg_block[row, col] = most_recent_year_not_tall_veg
-                # years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
                 max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
                 first_time_sig_loss_from_max_height_block[row, col] = first_time_sig_loss_from_max_height
                 part_or_full_dist_in_prev_interval_block[row, col] = part_or_full_dist_in_prev_interval
@@ -1177,7 +1160,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
             out_dict_uint8[f"{cn.forest_age_output_pattern}_{interval_end_year}"] = forest_age_annual_block.copy()
             out_dict_uint8[f"{cn.gain_year_count_pattern}_{year_range}"] = gain_year_count_out_block.copy()
             out_dict_uint16[f"{cn.most_recent_year_not_tall_veg}_{start_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
-            # out_dict_uint8[f"{cn.years_of_forest_regrowth}_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
             out_dict_uint16[f"{cn.year_of_forest_loss}_{year_range}"] = year_of_forest_loss_block.copy()
             out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
             out_dict_uint8[f"{cn.first_time_sig_loss_from_max_height}_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()

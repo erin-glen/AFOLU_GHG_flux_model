@@ -197,48 +197,6 @@ def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_f
     return most_recent_year_not_forest
 
 
-# # Calculates the number of years of forest regrowth since the last year of not-tall vegetation
-# @jit(nopython=True)
-# def calculate_years_of_forest_regrowth(interval_length, interval_end_year, most_recent_year_not_forest, tall_veg_curr,
-#                                        part_or_full_dist_in_prev_interval, years_of_forest_regrowth):
-#
-#     # Determines if the number of years of regrowth should be calculated, based on last stand-replacing disturbance
-#     # or partial disturbance.
-#     # Resets the number of years since disturbance to 0 if partial or complete disturbances occur.
-#
-#     # Partial disturbance: if a partial disturbance occurred in the last interval, years of regrowth is set to
-#     # part of the interval.
-#     # Years of forest growth doesn't start until the end of the interval, regardless of the year in which the
-#     # disturbance occurs, if known.
-#     # For example, if a partial disturbance occurs in 2001 (as identified by the annual disturbance raster),
-#     # regrowth is assumed not to begin until the start of the next interval (2005).
-#     if part_or_full_dist_in_prev_interval:
-#
-#         years_of_forest_regrowth = 0
-#         return years_of_forest_regrowth
-#
-#     # Resets the growth year counter in cases where there was tall vegetation and then there wasn't in the next interval.
-#     # Otherwise, the years counter would continue accruing even if tall veg was lost.
-#     if not tall_veg_curr:
-#         years_of_forest_regrowth = 0
-#         return years_of_forest_regrowth
-#
-#     # Increases the years of forest regrowth if certain conditions are met:
-#     # Condition 1: The end of the interval must be after the last year that was not tall vegetation,
-#     # i.e. there was not tall vegetation previously but there is at the end of this interval (indicating regrowth).
-#     # Condition 2: There must have been some year that was not forest,
-#     # i.e. the years of regrowth is only relevant when there was not forest some year.
-#     else:
-#         if (interval_end_year > most_recent_year_not_forest) & (most_recent_year_not_forest > 0):
-#
-#             years_of_forest_regrowth = years_of_forest_regrowth + interval_length
-#
-#         else:  # No change
-#             years_of_forest_regrowth = years_of_forest_regrowth
-#
-#     return years_of_forest_regrowth
-
-
 # Calculates the maximum canopy height since the last time a pixel was classified as not tall vegetation land cover.
 # This is used to determine whether current height has decreased significantly from this maximum height.
 @jit(nopython=True)
