@@ -705,3 +705,13 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
+
+"""
+python -m src.scripts.core_model.drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --bounding_box 110 -10 120 0 \
+  --chunk_size 2 \
+  --start_year 2015 \
+  --end_year 2019 \
+  --interval_type five_year
+"""

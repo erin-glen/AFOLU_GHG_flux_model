@@ -97,17 +97,26 @@ def xy_to_tile_id(x: float, y: float) -> str:
 # ----------------------------------------------------------------------
 # Connects to a Coiled cluster of a specified name if the local flag isn't on
 def connect_to_cluster(cluster_name, run_local):
-
-    # Runs locally without Dask or in a Coiled cluster using Dask
+    """
+    Connect to an existing Coiled cluster with the specified name.
+    If no existing cluster is found, create a new one.
+    If run_local is True, skip Coiled and run locally.
+    """
     if run_local:
         print("Running locally without Dask/Coiled.")
         return None, None
-    else:   #TODO Make it so that this doesn't create a cluster if it doesn't exist. This will create a cluster.
-        # Connects to the existing Coiled cluster
-        cluster = coiled.Cluster(name=cluster_name)
+    else:
+        try:
+            # Attempt to connect to an existing cluster by name.
+            cluster = coiled.Cluster.from_name(cluster_name)
+            print(f"Connected to existing cluster: {cluster_name}")
+        except Exception as e:
+            # If no such cluster exists, create a new one.
+            print(f"No existing cluster with name '{cluster_name}' found. Creating a new cluster.")
+            cluster = coiled.Cluster(name=cluster_name, shutdown_on_close=False)
         client = Client(cluster)
-
         return cluster, client
+
 
 
 # ----------------------------------------------------------------------
