@@ -387,6 +387,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 # for each pool (Mg C/ha)
                 c_dens_in = [agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in]
 
+                # Forces starting AGC and BGC pools to 0 when there is tree cover gain.
+                # This assumes no residual AGC and BGC when tree cover gain occurs.
+                # It also assumes that there can be some deadwood and litter C left over.
+                c_dens_in_NT_T = [0, 0, deadwood_c_dens_in, litter_c_dens_in]
+
                 elevation_cell = elevation_block[row, col]
                 climate_domain_cell = climate_domain_block[row, col]
                 precipitation_cell = precipitation_block[row, col]

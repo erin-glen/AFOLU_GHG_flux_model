@@ -474,14 +474,6 @@ def calc_NT_T(interval_type, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
 
-    # Forces starting AGC and BGC pools to 0 when there is tree cover gain.
-    # This assumes no residual AGC and BGC when tree cover gain occurs.
-    # It also assumes that there can be some deadwood and litter C left over.
-    #TODO Only force to 0 if it's the first time it's tall vegetation in the model. Want to use residual AGC/BGC
-    # if the model showed tall vegetation previously.
-    agc_dens_in = 0
-    bgc_dens_in = 0
-
     # Step 1: Calculates the number of years of carbon gain (years)
     if interval_type == cn.intervals_five_years:
         gain_year_count = cn.NT_T_gain_year_count_default
