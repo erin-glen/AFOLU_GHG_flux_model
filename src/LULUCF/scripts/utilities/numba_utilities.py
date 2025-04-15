@@ -197,47 +197,46 @@ def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_f
     return most_recent_year_not_forest
 
 
-# Calculates the number of years of forest regrowth since the last year of not-tall vegetation
-@jit(nopython=True)
-def calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_forest, tall_veg_curr,
-                                       part_or_full_dist_in_prev_interval, years_of_forest_regrowth):
-
-    # Determines if the number of years of regrowth should be calculated, based on last stand-replacing disturbance
-    # or partial disturbance.
-    # Resets the number of years since disturbance to 0 if partial or complete disturbances occur.
-
-    # Partial disturbance: if a partial disturbance occurred in the last interval, years of regrowth is set to
-    # part of the interval.
-    # Years of forest growth doesn't start until the end of the interval, regardless of the year in which the
-    # disturbance occurs, if known.
-    # For example, if a partial disturbance occurs in 2001 (as identified by the annual disturbance raster),
-    # regrowth is assumed not to begin until the start of the next interval (2005).
-    if part_or_full_dist_in_prev_interval:
-
-        years_of_forest_regrowth = 0
-        return years_of_forest_regrowth
-
-    # Resets the growth year counter in cases where there was tall vegetation and then there wasn't in the next interval.
-    # Otherwise, the years counter would continue accruing even if tall veg was lost.
-    if not tall_veg_curr:
-        years_of_forest_regrowth = 0
-        return years_of_forest_regrowth
-
-    # Increases the years of forest regrowth if certain conditions are met:
-    # Condition 1: The end of the interval must be after the last year that was not tall vegetation,
-    # i.e. there was not tall vegetation previously but there is at the end of this interval (indicating regrowth).
-    # Condition 2: There must have been some year that was not forest,
-    # i.e. the years of regrowth is only relevant when there was not forest some year.
-    else:
-        if (interval_end_year > most_recent_year_not_forest) & (most_recent_year_not_forest > 0):
-
-            #TODO definitely need to change this from cn.interval duration to generalize the interval duration
-            years_of_forest_regrowth = years_of_forest_regrowth + cn.interval_duration
-
-        else:  # No change
-            years_of_forest_regrowth = years_of_forest_regrowth
-
-    return years_of_forest_regrowth
+# # Calculates the number of years of forest regrowth since the last year of not-tall vegetation
+# @jit(nopython=True)
+# def calculate_years_of_forest_regrowth(interval_length, interval_end_year, most_recent_year_not_forest, tall_veg_curr,
+#                                        part_or_full_dist_in_prev_interval, years_of_forest_regrowth):
+#
+#     # Determines if the number of years of regrowth should be calculated, based on last stand-replacing disturbance
+#     # or partial disturbance.
+#     # Resets the number of years since disturbance to 0 if partial or complete disturbances occur.
+#
+#     # Partial disturbance: if a partial disturbance occurred in the last interval, years of regrowth is set to
+#     # part of the interval.
+#     # Years of forest growth doesn't start until the end of the interval, regardless of the year in which the
+#     # disturbance occurs, if known.
+#     # For example, if a partial disturbance occurs in 2001 (as identified by the annual disturbance raster),
+#     # regrowth is assumed not to begin until the start of the next interval (2005).
+#     if part_or_full_dist_in_prev_interval:
+#
+#         years_of_forest_regrowth = 0
+#         return years_of_forest_regrowth
+#
+#     # Resets the growth year counter in cases where there was tall vegetation and then there wasn't in the next interval.
+#     # Otherwise, the years counter would continue accruing even if tall veg was lost.
+#     if not tall_veg_curr:
+#         years_of_forest_regrowth = 0
+#         return years_of_forest_regrowth
+#
+#     # Increases the years of forest regrowth if certain conditions are met:
+#     # Condition 1: The end of the interval must be after the last year that was not tall vegetation,
+#     # i.e. there was not tall vegetation previously but there is at the end of this interval (indicating regrowth).
+#     # Condition 2: There must have been some year that was not forest,
+#     # i.e. the years of regrowth is only relevant when there was not forest some year.
+#     else:
+#         if (interval_end_year > most_recent_year_not_forest) & (most_recent_year_not_forest > 0):
+#
+#             years_of_forest_regrowth = years_of_forest_regrowth + interval_length
+#
+#         else:  # No change
+#             years_of_forest_regrowth = years_of_forest_regrowth
+#
+#     return years_of_forest_regrowth
 
 
 # Calculates the maximum canopy height since the last time a pixel was classified as not tall vegetation land cover.
@@ -367,17 +366,48 @@ def unpack_emission_factors(ef):
 # Returns the removal factor for primary forest/IFL based on the continent-ecozone combination (Mg AGC/ha/yr)
 # From https://chatgpt.com/share/e/67340a6f-b8cc-800a-84e3-f98e600001e5
 @jit(nopython=True)
-def calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs):
+def calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RF_array):
 
-    primary_forest_RF_indices = np.where(primary_forest_RFs[:, 0] == continent_ecozone_cell)
+    primary_forest_RF_indices = np.where(primary_forest_RF_array[:, 0] == continent_ecozone_cell)
 
     # Checks if there are matching indices and extracts corresponding primary forest RF
     if primary_forest_RF_indices[0].size > 0:  # If matching continent-ecozone combination...
-        primary_forest_RF = primary_forest_RFs[primary_forest_RF_indices[0][0], 1]  # Uses matching RF
+        primary_forest_RF = primary_forest_RF_array[primary_forest_RF_indices[0][0], 1]  # Uses matching RF
     else:  # If no matching continent-ecozone combination...
-        primary_forest_RF = np.mean(primary_forest_RFs[:, 1]) # Uses average of all primary forest RFs
+        primary_forest_RF = np.mean(primary_forest_RF_array[:, 1]) # Uses average of all primary forest RFs
+
     return primary_forest_RF
 
+
+# Returns the emission factors for partially disturbed forest by driver based on the continent-ecozone combination (unit: fraction AGC lost)
+# From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67feb6f2-c124-800a-9279-61f0e3a67faf
+@jit(nopython=True)
+def calc_partial_disturbance_EFs(drivers_cell, continent_ecozone_cell, partial_disturbance_EF_array):
+
+    # # For testing-- force driver or continent_ecozone values
+    # drivers_cell = 3
+    # continent_ecozone_cell = 9999
+
+    # Selects correct driver column. Sets fallback to driver 4 (logging) if driver value isn't legitimate.
+    if 1 <= drivers_cell <= 7:
+        col_index = drivers_cell  # EF columns are at indexes 1–7 (drivers 1-7)
+    else:
+        col_index = 4  # Defaults to 5th column (index 4: logging driver)
+
+    partial_disturbance_EF_indices = np.where(partial_disturbance_EF_array[:, 0] == continent_ecozone_cell)
+
+    if partial_disturbance_EF_indices[0].size > 0:
+        row_index = partial_disturbance_EF_indices[0][0]
+        partial_disturbance_EF = partial_disturbance_EF_array[row_index, col_index]
+    else:
+        # Manual mean of the specified column (col_index) because numba has all kinds of restrictions!
+        total = 0.0
+        n_rows = partial_disturbance_EF_array.shape[0]
+        for i in range(n_rows):
+            total += partial_disturbance_EF_array[i, col_index]
+        partial_disturbance_EF = total / n_rows
+
+    return partial_disturbance_EF
 
 # Calculates Cf for fire emissions from forests (as opposed to savanna/grassland or biofuel burning).
 # From IPCC 2019 Table 2.6 (unitless)

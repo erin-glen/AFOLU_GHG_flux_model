@@ -35,6 +35,7 @@ from ..utilities import numba_utilities as nu
 from ..utilities import resize_cluster
 
 
+
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
 @jit(nopython=True)
@@ -122,8 +123,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     # Forest age for each output year of the model
     forest_age_annual_block = forest_age_start_year_block
 
-    # Number of years of regrowth for new forest
-    years_of_forest_regrowth_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
+    # # Number of years of regrowth for new forest
+    # years_of_forest_regrowth_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
 
     # Year in which forest loss occurs/is assigned during an interval (0 if no loss)
     ### TODO Never actually used. What did I intend to do with this?
@@ -300,8 +301,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 if continent_ecozone_cell == 0:
                     continent_ecozone_cell = continent_ecozone_fallback
 
-                # Determines the removal factor for primary forests/IFL based on the ecozone (Mg AGC/ha/yr)
+                # Determines the removal factor for primary forests/IFL based on the continent-ecozone combination (Mg AGC/ha/yr)
                 primary_forest_AGC_RF = nu.calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RF_array)
+
+                # Determines the emission factor for the cell's driver for partially disturbed forest based on the continent-ecozone combination (unit: fraction AGC lost)
+                partial_disturbance_EF_for_driver = nu.calc_partial_disturbance_EFs(drivers_cell, continent_ecozone_cell, partial_disturbance_EF_array)
 
                 # 5-year intervals: Burned area and Potapov annual disturbance raster stacks during the interval
                 if interval_type == cn.intervals_five_years:
@@ -389,7 +393,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 # Forces starting AGC and BGC pools to 0 when there is tree cover gain.
                 # This assumes no residual AGC and BGC when tree cover gain occurs.
                 # It also assumes that there can be some deadwood and litter C left over.
-                c_dens_in_NT_T = [0, 0, deadwood_c_dens_in, litter_c_dens_in]
+                # Gotta force the AGC and BGC to float32.
+                c_dens_in_NT_T = [np.float32(0), np.float32(0), deadwood_c_dens_in, litter_c_dens_in]
 
                 elevation_cell = elevation_block[row, col]
                 climate_domain_cell = climate_domain_block[row, col]
@@ -454,8 +459,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 # Suggested by https://chatgpt.com/share/e/6724d803-aca4-800a-928c-11d76d38c0ec to work well with numba.
                 vegetation_height_so_far_cell = np.empty(len(years_so_far), dtype=np.uint8)
 
-                ## Number of years of regrowth for new forest since last time not forest
-                years_of_forest_regrowth = years_of_forest_regrowth_block[row, col]
+                # ## Number of years of regrowth for new forest since last time not forest
+                # years_of_forest_regrowth = years_of_forest_regrowth_block[row, col]
 
                 # Populates the fixed-length array by accessing vegetation_heights_all_years
                 # Used to determine whether current height has decreased significantly from this maximum height over multiple intervals (gradual height loss).
@@ -517,15 +522,15 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 if part_or_full_dist_in_prev_interval:
                     forest_age_annual_cell = 0
 
-                # Calculates the number of years of forest regrowth since the last year of not-tall vegetation
-                # or partial disturbance.
-                # Can override the pre-existing value.
-                #TODO: This does not seem to work correctly after partial disturbances, at least in primary forest. It doesn't increment the years since disturbance.
-                # It seems that the disturbance is being recorded correctly and the pixel is being reclassified as
-                # young secondary forest, but calculate_years_of_forest_regrowth isn't being triggered by this multi-interval disturbance.
-                # Look at ArcMap bookmark "Primary forest->partial disturbance->stable forest->stable forest".
-                # Checked this before the second global run and it's still the case (output folder v38).
-                years_of_forest_regrowth = nu.calculate_years_of_forest_regrowth(interval_end_year, most_recent_year_not_tall_veg, tall_veg_curr, part_or_full_dist_in_prev_interval, years_of_forest_regrowth)
+                # # Calculates the number of years of forest regrowth since the last year of not-tall vegetation
+                # # or partial disturbance.
+                # # Can override the pre-existing value.
+                # #TODO: This does not seem to work correctly after partial disturbances, at least in primary forest. It doesn't increment the years since disturbance.
+                # # It seems that the disturbance is being recorded correctly and the pixel is being reclassified as
+                # # young secondary forest, but calculate_years_of_forest_regrowth isn't being triggered by this multi-interval disturbance.
+                # # Look at ArcMap bookmark "Primary forest->partial disturbance->stable forest->stable forest".
+                # # Checked this before the second global run and it's still the case (output folder v38).
+                # years_of_forest_regrowth = nu.calculate_years_of_forest_regrowth(interval_length, interval_end_year, most_recent_year_not_tall_veg, tall_veg_curr, part_or_full_dist_in_prev_interval, years_of_forest_regrowth)
 
                 # Assigns pixel to "primary forest proxy" if age is >= 100 years. All age pixels >100 years were reassigned to 100.
                 if forest_age_annual_cell >= 100:
@@ -843,7 +848,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                 rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest,
                                 Gef_n2o_forest, deadwood_c_ratio, litter_c_ratio)
-                        else:  # Trees remaining trees (32)
+                        else:  # Trees remaining trees- no conversion to oil palm (32)
                             node = nu.accrete_node(node, 2)
                             if part_or_full_dist_in_prev_interval:  # Trees partially disturbed in the last interval (321)
                                 node = nu.accrete_node(node, 1)
@@ -860,7 +865,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             rf_post_dist = np.array([agc_rf_in, bgc_rf_in, 0, 0]).astype('float32')
                                             c_pools_fire_CO2 = cn.agc_emissions_only
                                             c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
@@ -875,7 +880,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             rf_post_dist = np.array([agc_rf_in, bgc_rf_in, 0, 0]).astype('float32')
                                             c_pools_fire_CO2 = cn.agc_emissions_only
                                             c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
@@ -894,7 +899,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
                                             c_pools_fire_CO2 = cn.agc_emissions_only
                                             c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
@@ -909,7 +914,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
                                             c_pools_fire_CO2 = cn.agc_emissions_only
                                             c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
@@ -932,7 +937,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             rf_post_dist = np.array([agc_rf_post, bgc_rf_post, 0, 0]).astype('float32')
                                             c_pools_fire_CO2 = cn.agc_emissions_only
                                             c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
@@ -949,7 +954,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')  # No post-disturbance RFs or removals
                                             c_pools_fire_CO2 = cn.agc_emissions_only
                                             c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
@@ -970,7 +975,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             rf_post_dist = np.array([agc_rf_post, bgc_rf_post, 0, 0]).astype('float32')
                                             c_pools_fire_CO2 = cn.agc_emissions_only
                                             c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
@@ -987,7 +992,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')  # No post-disturbance RFs or removals
                                             c_pools_fire_CO2 = cn.agc_emissions_only
                                             c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([0.5, 0.5, 0, 0]).astype('float32')  ## TODO: Use actual values!
+                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
@@ -1125,7 +1130,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 forest_age_annual_block[row, col] = forest_age_annual_cell
                 gain_year_count_out_block[row, col] = gain_year_count
                 most_recent_year_not_tall_veg_block[row, col] = most_recent_year_not_tall_veg
-                years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
+                # years_of_forest_regrowth_block[row, col] = years_of_forest_regrowth
                 max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
                 first_time_sig_loss_from_max_height_block[row, col] = first_time_sig_loss_from_max_height
                 part_or_full_dist_in_prev_interval_block[row, col] = part_or_full_dist_in_prev_interval
@@ -1172,7 +1177,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
             out_dict_uint8[f"{cn.forest_age_output_pattern}_{interval_end_year}"] = forest_age_annual_block.copy()
             out_dict_uint8[f"{cn.gain_year_count_pattern}_{year_range}"] = gain_year_count_out_block.copy()
             out_dict_uint16[f"{cn.most_recent_year_not_tall_veg}_{start_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
-            out_dict_uint8[f"{cn.years_of_forest_regrowth}_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
+            # out_dict_uint8[f"{cn.years_of_forest_regrowth}_{interval_end_year}"] = years_of_forest_regrowth_block.copy()
             out_dict_uint16[f"{cn.year_of_forest_loss}_{year_range}"] = year_of_forest_loss_block.copy()
             out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
             out_dict_uint8[f"{cn.first_time_sig_loss_from_max_height}_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()

@@ -92,8 +92,6 @@ def print_and_log(text, is_final, logger):
 # Log compilation and uploading
 # From https://chatgpt.com/share/e/4fe1e9c8-05a0-4e9d-8eee-64168891b5e2
 # Gets the logs for all workers
-#TODO Wait to run this until all entries have been added to the Coiled log--
-# running this right after the model finishes means that final log entries haven't made it into Coiled yet.
 def compile_worker_logs(no_log, cluster, stage, start_time_str, logger):
 
     # Only consolidates the worker logs and uploads to s3 if not deactivated

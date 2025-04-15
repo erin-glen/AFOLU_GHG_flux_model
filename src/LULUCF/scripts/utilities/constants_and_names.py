@@ -500,7 +500,7 @@ net_flux_all_C_pools_all_gases_pattern = "net_flux__all_C_pools__all_gases__MgCO
 # Intermediate outputs
 gain_year_count_pattern = "gain_year_count_during_interval"
 most_recent_year_not_tall_veg = "most_recent_year_not_tall_veg"
-years_of_forest_regrowth = "years_of_forest_regrowth"
+# years_of_forest_regrowth = "years_of_forest_regrowth"
 year_of_forest_loss = "year_of_forest_loss"
 max_height_since_last_time_not_tall_veg = "max_height_since_last_time_not_tall_veg"
 first_time_sig_loss_from_max_height = "first_time_sig_loss_from_max_height"
@@ -546,7 +546,7 @@ LULUCF_intermediate_output_dirs = [
     f"{outputs_path}{forest_age_output_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{gain_year_count_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{most_recent_year_not_tall_veg}/RUNSTART_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/", # Years represent from model start to current interval end
-    f"{outputs_path}{years_of_forest_regrowth}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/",
+    # f"{outputs_path}{years_of_forest_regrowth}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{year_of_forest_loss}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{max_height_since_last_time_not_tall_veg}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{first_time_sig_loss_from_max_height}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
