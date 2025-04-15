@@ -943,6 +943,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     # I also tried various gdal_translate, build_vrt, and numpy padding approaches, none of which worked in all cases.
     merged_file = f"/tmp/merged_{out_file_name}"
 
+    #TODO Add -of COG to make it a COG, per https://gdal.org/en/stable/drivers/raster/cog.html?
     merge_command = [
         'gdal_merge.py',
         '-o', merged_file,

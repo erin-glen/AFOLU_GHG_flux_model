@@ -16,10 +16,10 @@ import re
 import sys
 
 # Project imports
-from src.LULUCF.scripts.utilities import constants_and_names as cn
-from src.LULUCF.scripts.utilities import universal_utilities as uu
-from src.LULUCF.scripts.utilities import log_utilities as lu
-from src.LULUCF.scripts.utilities import resize_cluster
+from ...utilities import constants_and_names as cn
+from ...utilities import universal_utilities as uu
+from ...utilities import log_utilities as lu
+from ...utilities import resize_cluster
 
 
 

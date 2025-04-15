@@ -38,11 +38,11 @@ from dask.distributed import print
 from numba import jit
 
 # Project imports
-from src.LULUCF.scripts.utilities import constants_and_names as cn
-from src.LULUCF.scripts.utilities import universal_utilities as uu
-from src.LULUCF.scripts.utilities import log_utilities as lu
-from src.LULUCF.scripts.utilities import numba_utilities as nu
-from src.LULUCF.scripts.utilities import resize_cluster
+from ...utilities import constants_and_names as cn
+from ...utilities import universal_utilities as uu
+from ...utilities import log_utilities as lu
+from ...utilities import numba_utilities as nu
+from ...utilities import resize_cluster
 
 
 # Function to create initial (year 2000) non-soil carbon pool densities
@@ -481,8 +481,8 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # print(download_dict_with_data_types)
 
     # Creates numpy array of ratios of BGC, deadwood C, and litter C relative to AGC. Relevant columns must be specified.
-    mangrove_C_ratio_array = uu.convert_lookup_table_to_array(cn.rate_ratio_spreadsheet, cn.mangrove_rate_ratio_tab,
-                                                           ['gainEcoCon', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
+    mangrove_C_ratio_array = uu.convert_lookup_table_to_array(cn.RF_C_ratio_spreadsheet_full_path, cn.mangrove_rate_ratio_tab,
+                                                              ['gainEcoCon', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")

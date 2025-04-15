@@ -3,14 +3,14 @@ Run from src/LULUCF
 
 Test:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
-python -m scripts.core_model.LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2015 2023
-python -m scripts.core_model.LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload -yr 2015 2023
-python -m scripts.core_model.LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023
-python -m scripts.core_model.LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1 -yr 2015 2023
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2015 2023
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload -yr 2015 2023
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1 -yr 2015 2023
 
 Full run:
 python -m scripts.utilities.create_cluster -n 200
-python -m scripts.core_model.LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/
 """
 
 import argparse
@@ -39,7 +39,8 @@ from ..utilities import resize_cluster
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
 @jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
-                  primary_forest_RFs, start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years, is_final):
+                  primary_forest_RF_array, partial_disturbance_EF_array, start_year, end_year,
+                  interval_type, interval_year_diff, interval_length, interval_end_years, is_final):
 
     # Separate dictionaries for output numpy arrays of each datatype, named by output data type).
     # This is because a dictionary in a Numba function cannot have arrays with multiple data types, so each dictionary has to store only one data type,
@@ -51,7 +52,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
     # The maximum possible number of digits of the state_out in the current decision tree.
     # This needs to be changed if the decision tree is deepened.
-    max_digits_state_out = 6
+    max_digits_state_out = 7
 
     # Carbon density arrays determined by the starting year of the model (Mg C/ha),
     # but the starting C densities have the same key in the dictionary regardless of the starting year
@@ -300,7 +301,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     continent_ecozone_cell = continent_ecozone_fallback
 
                 # Determines the removal factor for primary forests/IFL based on the ecozone (Mg AGC/ha/yr)
-                primary_forest_AGC_RF = nu.calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RFs)
+                primary_forest_AGC_RF = nu.calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RF_array)
 
                 # 5-year intervals: Burned area and Potapov annual disturbance raster stacks during the interval
                 if interval_type == cn.intervals_five_years:
@@ -325,13 +326,15 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     # Most recent year with forest disturbance during the interval
                     forest_dist_last = max([forest_dist_t_4, forest_dist_t_3, forest_dist_t_2, forest_dist_t_1, forest_dist_t])
 
-                # Annual intervals: Burned area for start year of interval only (year t-1).
+                # Annual intervals: Burned area for end year of interval only (year t).
+                # Use of burned area for end year of interval as opposed to start year is by analogy with
+                # Tree Cover Loss due to Fires (TCLF).
                 # Annual Potapov disturbance rasters not relevant.
                 elif interval_type == cn.intervals_annual:
-                    burned_area_t_1 = burned_area_curr_interval_block_list[0][row, col]
-                    # burned_area_t = burned_area_curr_interval_block_list[-1][row, col]
-                    # # Most recent year with burned area during the interval
-                    most_recent_year_burned_during_interval = max([burned_area_t_1])
+                    # burned_area_t_1 = burned_area_curr_interval_block_list[0][row, col]
+                    burned_area_t = burned_area_curr_interval_block_list[-1][row, col]
+                    # Most recent year with burned area during the interval (but for annual interval, the only year)
+                    most_recent_year_burned_during_interval = max([burned_area_t])
                     burned_in_curr_interval = (most_recent_year_burned_during_interval > 0)
                     forest_dist_last = 0   # Annual Potapov forest disturbance raster not used for annual model
 
@@ -418,11 +421,19 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
                 SDPT_planted_trees = (planted_forest_type_cell > 0)  # All SDPT planted trees
                 SDPT_oil_palm = (planted_forest_type_cell == cn.SDPT_oil_palm_code)  # Oil palm in SDPT planted trees
-                oil_palm_after_Descals = (interval_end_year > oil_palm_first_year_cell) and (oil_palm_first_year_cell != 0) # Second condition to exclude NoData (0s) from first year of oil palm
-                oil_palm_pre_2000 = (oil_palm_2000_extent_cell == 1)
+                oil_palm_year_of_Descals_or_later = (interval_end_year >= oil_palm_first_year_cell) and (oil_palm_first_year_cell != 0) # Second condition to exclude NoData (0s) from first year of oil palm
+                oil_palm_pre_2000 = (oil_palm_2000_extent_cell == 1) # Oil palm that existed in the year 2000, according to that specific map/input
 
-                all_planted_trees = (SDPT_planted_trees or oil_palm_pre_2000 or oil_palm_after_Descals)
-                all_oil_palm = (SDPT_oil_palm or oil_palm_pre_2000 or oil_palm_after_Descals)
+                # All planted trees in the given interval
+                all_planted_trees = (SDPT_planted_trees or oil_palm_pre_2000 or oil_palm_year_of_Descals_or_later)
+
+                # All oil palm in the given interval
+                all_oil_palm = (SDPT_oil_palm or oil_palm_pre_2000 or oil_palm_year_of_Descals_or_later)
+
+                # Flag for whether this is one year before Descals year of planting
+                # (to determine if forest loss should occur in the year before oil palm is detected)
+                #TODO generalize to 5-year intervals (not just using interval end year but using whole interval)
+                year_before_converted_to_oil_palm = (interval_end_year == oil_palm_first_year_cell - interval_length)
 
                 ## Various pixel metrics that are used in the decision tree
 
@@ -568,13 +579,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 RF_AGC_final = cn.oil_palm_agc_rf
                                 RF_BGC_final = cn.oil_palm_bgc_rf
                                 (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_annual_cell) = (
-                                    nu.calc_NT_T(interval_type, RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio=0, litter_c_ratio=0))
+                                    nu.calc_NT_T(interval_type, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio=0, litter_c_ratio=0))
                             else: # New non-oil palm planted trees (112)
                                 state_out = nu.accrete_node(node, 2)
                                 RF_AGC_final = planted_forest_AGC_RF_cell
                                 RF_BGC_final = planted_forest_BGC_RF_cell
                                 (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_annual_cell) = (
-                                    nu.calc_NT_T(interval_type, RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio=0, litter_c_ratio=0))
+                                    nu.calc_NT_T(interval_type, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio=0, litter_c_ratio=0))
                         else:  # New non-planted trees (12)
                             node = nu.accrete_node(node, 2)
                             if tall_veg_curr:  # New terrestrial natural forest (121)
@@ -582,13 +593,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 RF_AGC_final = natrl_forest_curve_0_5_AGC_RF_cell   # Forces new forest to use the first interval of the age curve
                                 RF_BGC_final = RF_AGC_final * r_s_ratio_cell
                                 (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_annual_cell) = (
-                                    nu.calc_NT_T(interval_type, RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio))
+                                    nu.calc_NT_T(interval_type, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio))
                             else:  # New trees outside forests (122)
                                 state_out = nu.accrete_node(node, 2)
                                 RF_AGC_final = cn.trees_outside_forests_agc_rf_max
                                 RF_BGC_final = RF_AGC_final * r_s_ratio_cell
                                 (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_annual_cell) = (
-                                    nu.calc_NT_T(interval_type, RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio=0, litter_c_ratio=0))
+                                    nu.calc_NT_T(interval_type, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio=0, litter_c_ratio=0))
 
                     ### Tree loss
                     elif tall_veg_loss:  # Tree converted to non-tree (2)    #TODO: Include mangrove exception.
@@ -997,30 +1008,70 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 node = nu.accrete_node(node, 2)
                                 if tall_veg_curr:  # Forest not disturbed in last interval (3221)
                                     node = nu.accrete_node(node, 1)
-                                    if primary_forest_proxy:  # >100 year old natural forest not disturbed in last interval (32211->322111/322112)
+                                    if primary_forest_proxy:  # >100 year old natural forest not disturbed in last interval (32211)
                                         node = nu.accrete_node(node, 1)
-                                        RF_AGC_final = primary_forest_AGC_RF
-                                        RF_BGC_final = RF_AGC_final * r_s_ratio_cell
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
-                                            node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
-                                            RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
-                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
-                                            deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
-                                    else: # <100 year old natural forest not disturbed in last interval (32212->322121/322122)
+
+                                        # TODO Include natural forest->oil palm calculations. Update Powerpoint tree.
+                                        if year_before_converted_to_oil_palm:  # >100 year old natural forest not disturbed in last interval converted to oil palm in the next interval (322111->3221111/3221112)
+                                            node = nu.accrete_node(node, 1)
+                                            agc_rf_in = natrl_forest_age_dependent_agc_rf
+                                            bgc_rf_in = agc_rf_in * r_s_ratio_cell
+                                            rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
+                                            c_pools_fire_CO2 = cn.all_non_soil_pools
+                                            c_pools_fire_non_CO2 = cn.all_non_soil_pools
+                                            c_pools_no_fire = cn.all_non_soil_pools
+                                            (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
+                                                c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest,
+                                                Gef_n2o_forest, deadwood_c_ratio, litter_c_ratio)
+                                        else:  # >100 year old natural forest not disturbed in last interval and staying as natural forest (322112->3221121/3221122)
+                                            node = nu.accrete_node(node, 2)
+                                            RF_AGC_final = primary_forest_AGC_RF
+                                            RF_BGC_final = RF_AGC_final * r_s_ratio_cell
+                                            c_pools_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
+                                                node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
+                                                RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
+                                                Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                                deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
+
+
+                                    else: # <100 year old natural forest not disturbed in last interval (32212)
                                         node = nu.accrete_node(node, 2)
-                                        RF_AGC_final = natrl_forest_age_dependent_agc_rf
-                                        RF_BGC_final = RF_AGC_final * r_s_ratio_cell
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                        state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
-                                            node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
-                                            RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
-                                            Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
-                                            deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
+
+                                        #TODO Include natural forest->oil palm calculations. Update Powerpoint tree.
+                                        if year_before_converted_to_oil_palm:  # <100 year old natural forest converted to oil palm in next interval (322121->3221211/3221212)
+                                            node = nu.accrete_node(node, 1)
+                                            agc_rf_in = natrl_forest_age_dependent_agc_rf
+                                            bgc_rf_in = agc_rf_in * r_s_ratio_cell
+                                            rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
+                                            c_pools_fire_CO2 = cn.all_non_soil_pools
+                                            c_pools_fire_non_CO2 = cn.all_non_soil_pools
+                                            c_pools_no_fire = cn.all_non_soil_pools
+                                            (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                             RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
+                                                c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest,
+                                                Gef_n2o_forest, deadwood_c_ratio, litter_c_ratio)
+                                        else: # <100 year old natural forest not disturbed in last interval and staying as natural forest (322122->3221221/3221222
+                                            node = nu.accrete_node(node, 2)
+                                            RF_AGC_final = natrl_forest_age_dependent_agc_rf
+                                            RF_BGC_final = RF_AGC_final * r_s_ratio_cell
+                                            c_pools_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                            state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
+                                                node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
+                                                RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
+                                                Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                                deadwood_c_ratio=deadwood_c_ratio, litter_c_ratio=litter_c_ratio)
                                 else:  # Trees outside forests not disturbed in the last interval (3222->32221/32222)
                                     node = nu.accrete_node(node, 2)
                                     RF_AGC_final = cn.trees_outside_forests_agc_rf_max
@@ -1153,7 +1204,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
 
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
-def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict_with_data_types,
+def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, download_dict_with_data_types,
                                        start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
                                        fishnet_iso_df, is_final, no_upload, output_folders, stage):
 
@@ -1247,13 +1298,13 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
     numba_start = time.time()
 
     out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(
-        typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RFs,
+        typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32, primary_forest_RF_array, partial_disturbance_EF_array,
         start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years, is_final)
 
     numba_end = time.time()
     lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     lu.print_and_log(f"Memory usage after numba calculations completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", is_final, logger_worker)
-    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id} took {round(numba_end-numba_start)}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id} took {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
 
     # print(out_dict_uint32)
     # print(out_dict_float32)
@@ -1373,7 +1424,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RFs, download_dict
 
 
 
-def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_aggregate=False, no_upload=False,
+def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
          use_shapefile=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     ### Step 1: Preparation
@@ -1543,12 +1594,20 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.
     # Inputs are Mg AGB/ha/yr. Outputs are Mg AGB/ha/yr. Conversion to Mg AGC/ha/yr is done below.
-    primary_forest_RF_array = uu.convert_lookup_table_to_array(cn.IPCC_removal_factor_table_full_path,
-                                                          cn.IPCC_removal_factor_table_tab,
-                                                          ['gainEcoCon', 'growth_primary'])
+    primary_forest_RF_array = uu.convert_lookup_table_to_array(cn.RF_C_ratio_spreadsheet_full_path,
+                                                               cn.IPCC_removal_factor_table_tab,
+                                                               ['gainEcoCon', 'growth_primary'])
 
     # Converts primary forest AGB RFs to AGC RFs (Mg AGB/ha/yr -> Mg AGC/ha/yr)
     primary_forest_RF_array[:, 1] = primary_forest_RF_array[:, 1] * cn.biomass_to_carbon_non_mangrove
+
+
+    partial_disturbance_EF_array = uu.convert_lookup_table_to_array(cn.partial_disturbance_emission_factor_table_full_path,
+                                                                    cn.partial_disturbance_emission_factor_table_tab,
+                                                                    ['gainEcoCon', '1_perm_ag_EF', '2_hard_comm_EF',
+                                                                     '3_shift_cult_EF',	'4_logging_EF',	'5_wildfire_EF',
+                                                                     '6_sett_infrastr_EF', '7_natrl_dist_EF'])
+
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
@@ -1565,7 +1624,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     futures = []
     for chunk in chunk_list:
         future = client.submit(calculate_and_upload_LULUCF_fluxes,
-                               chunk, primary_forest_RF_array, download_dict_with_data_types,
+                               chunk, primary_forest_RF_array, partial_disturbance_EF_array, download_dict_with_data_types,
                                start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
                                fishnet_iso_df, is_final, no_upload, output_dir_list, stage)
         futures.append(future)
@@ -1575,13 +1634,13 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, flux_1x1_results)
 
-    # # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-    # if not no_upload:
-    #     for output_folder in output_dir_list:
-    #
-    #         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-    #         main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-    #         # print(geotiff_files)
+    # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
+    if not no_upload:
+        for output_folder in output_dir_list:
+
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+            # print(geotiff_files)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
@@ -1599,7 +1658,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 
-            resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
+            resize_cluster.resize_coiled_cluster("LULUCF_model", 1)
 
     # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
@@ -1607,14 +1666,14 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     if (not no_stats) and (success_count_1x1 > 0):
         uu.compile_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger)
 
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with aggregation and tile stats", main_logger)
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
     # Sets it so that no worker logs are created if doing a local run
     if not run_local:
 
         # Creates combined log from all workers if not deactivated
         worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
-        uu.stage_duration(start_time, uu.timestr(), f"{stage} with aggregation, tile stats, and worker log compilation", main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats and worker log compilation", main_logger)
 
         # Adds the workers' logs to the main log and uploads to s3
         lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
@@ -1637,7 +1696,6 @@ if __name__ == "__main__":
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
     parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
-    parser.add_argument('--no_aggregate', action='store_true', help='Do not aggregate 1x1 degrees outputs to 10x10 degree outputs')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 
     args = parser.parse_args()
@@ -1653,10 +1711,9 @@ if __name__ == "__main__":
     run_local = args.run_local
     no_stats = args.no_stats
     no_log = args.no_log
-    no_aggregate = args.no_aggregate
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, year_range, run_local, no_stats, no_log, no_aggregate, no_upload, use_shapefile,
+    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, use_shapefile,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)

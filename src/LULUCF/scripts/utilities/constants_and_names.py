@@ -67,9 +67,6 @@ biomass_to_carbon_mangrove = 0.45   # Conversion of biomass to carbon for mangro
 # and is only used where Huang et al. 2021 can't reach (remote Pacific islands).
 default_r_s_non_mang = 0.26
 
-rate_ratio_spreadsheet = 'http://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_model/LULUCF/rate_ratio_lookup_tables/rate_and_ratio_lookup_tables_20240718.xlsx'
-mangrove_rate_ratio_tab = 'mang gain C ratio, for model'
-
 # Non-mangrove deadwood C:AGC and litter C:AGC constants (unitless)
 # Deadwood and litter carbon as fractions of AGC are from
 # https://cdm.unfccc.int/methodologies/ARmethodologies/tools/ar-am-tool-12-v3.0.pdf
@@ -87,6 +84,27 @@ tropical_high_elev_deadwood_c_ratio = 0.07
 tropical_high_elev_litter_c_ratio = 0.01
 non_tropical_deadwood_c_ratio = 0.08
 non_tropical_litter_c_ratio = 0.04
+
+# s3 folder with Excel workbooks that contain lookup tables for emission factors, removal factors, and carbon pool constants
+EF_RF_C_ratio_spreadsheet_URL = "http://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_model/LULUCF/rate_ratio_lookup_tables/"
+
+# Removal factor and carbon pool constant workbook
+RF_C_ratio_spreadsheet_name = "RF_rate_and_C_ratio_lookup_tables_20250414.xlsx"
+RF_C_ratio_spreadsheet_full_path = f"{EF_RF_C_ratio_spreadsheet_URL}{RF_C_ratio_spreadsheet_name}"
+
+# IPCC Tier 1 removal factor spreadsheet by continent-ecozone-age category combination
+# (IPCC 2019, Table 4.9, with corrigenda 4 temperate forest revision) (Mg AGB/ha/yr)
+# Currently only used for primary forests.
+IPCC_removal_factor_table_tab = "natrl fores gain, for std model"
+
+# IPCC Tier 1 mangrove removal factors and AGC:BGC, AGC:deadwood C, and AGC:litter C, from IPCC 2013 Wetlands Supplement
+mangrove_rate_ratio_tab = 'mang gain and Cratios,for model'
+
+# Emission factors for partial disturbances (by 1km driver)
+partial_disturbance_emission_factor_table_name = "partial_disturbance_emission_factors_LULUCF_model__20250415.xlsx"
+partial_disturbance_emission_factor_table_full_path = f"{EF_RF_C_ratio_spreadsheet_URL}{partial_disturbance_emission_factor_table_name}"
+partial_disturbance_emission_factor_table_tab = "EF_combined"
+
 
 # Aboveground carbon removal factor for oil palm (Mg C/ha/yr) (IPCC 2019 Cropland Table 5.3)
 oil_palm_agc_rf = 2.4
@@ -111,13 +129,6 @@ tree_dry_min_height_code = 27
 tree_dry_max_height_code = 48
 tree_wet_min_height_code = 127
 tree_wet_max_height_code = 148
-
-# IPCC Tier 1 removal factor spreadsheet by continent-ecozone-age category combination
-# (IPCC 2019, Table 4.9, with corrigenda 4 temperate forest revision) (Mg AGB/ha/yr)
-IPCC_removal_factor_table_url = "https://gfw2-data.s3.amazonaws.com/climate/carbon_model/removal_rate_tables/"
-IPCC_removal_factor_table_name = "gain_rate_continent_ecozone_age_20230821.xlsx"
-IPCC_removal_factor_table_full_path = f"{IPCC_removal_factor_table_url}{IPCC_removal_factor_table_name}"
-IPCC_removal_factor_table_tab = "natrl fores gain, for std model"
 
 
 ### Miscellaneous
