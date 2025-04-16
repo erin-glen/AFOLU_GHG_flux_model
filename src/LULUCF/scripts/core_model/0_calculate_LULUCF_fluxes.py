@@ -1399,6 +1399,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Model stage being run
     stage = 'LULUCF_fluxes'
     model_type = 'standard_model'
+    run_date = '20250415'
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
@@ -1442,11 +1443,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model.")
-
-    # Accumulates all statistics and output messages from chunk analysis
-    # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-    all_stats = []
-    return_messages = []
 
     # This is just a placeholder tile_id that is used to obtain the datatype of each tile set.
     # It is overwritten when chunks are assigned and analyzed.
@@ -1502,7 +1498,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
             download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_5_year_path}{year}/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_{year}.tif"
 
     if interval_type == cn.intervals_annual:
-        # Land cover and vegetation height rasters (5-year intervals)
+        # Land cover and vegetation height rasters (annual intervals)
         for year in range(cn.first_model_year_annual, cn.last_model_year_annual + 1):
             download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_annual_path}{year}/{sample_tile_id}.tif"
             download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_annual_path}{year}/{sample_tile_id}.tif"
@@ -1552,7 +1548,8 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # Creates a list of output directories (core and intermediates) for all outputs and intervals based on specifics of the model run
     output_dir_list_core_intermediate = cn.LULUCF_core_output_dirs + cn.LULUCF_intermediate_output_dirs
-    output_dir_list = uu.create_output_dir_name_list(output_dir_list_core_intermediate, interval_type, start_year, chunk_size_pixels, model_type, interval_end_years, interval_year_diff)
+    output_dir_list = uu.create_output_dir_name_list(output_dir_list_core_intermediate, interval_type, start_year,
+                                                     chunk_size_pixels, model_type, interval_end_years, interval_year_diff, run_date)
     # print(output_dir_list)
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
@@ -1584,14 +1581,17 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
     main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
-    # Runs in batches of specified size. This may help with managing zarr access/caches.
+    # Runs in batches of specified size
     # batch_size = 1000
-    batch_size = 1  # For testing
+    batch_size = 20  # For testing
     chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
     main_logger.info(f"There are {len(chunk_batches)} batches to process: {uu.timestr()}")
+
+    # Accumulates all output messages and statistics across batches
+    # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
     all_flux_results = []
     all_1x1_stats = []
-    success_count = 0
+    success_count = 0  # Count of successful chunks
 
     # Iterates through the batches
     for i, chunk_batch in enumerate(chunk_batches):
@@ -1634,7 +1634,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
 
-    ### Step 3: Chunk stats for 1x1 degree and 10x10 degree outputs, aggregates logs
+    ### Step 3: Chunk stats for 1x1 degree outputs, aggregates logs
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
@@ -1650,13 +1650,13 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
-    # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
+    # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
     if (not no_stats) and (success_count > 0):
         uu.compile_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
-    # Sets it so that no worker logs are created if doing a local run
+    # Worker logs are not aggregated if doing a local run (since there are no workers)
     if not run_local:
 
         # Creates combined log from all workers if not deactivated
