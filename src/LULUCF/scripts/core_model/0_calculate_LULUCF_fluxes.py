@@ -1173,7 +1173,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, download_dict_with_data_types,
                                        start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
-                                       fishnet_iso_df, is_final, no_upload, output_folders, stage):
+                                       is_final, no_upload, output_folders, stage):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -1190,7 +1190,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
         tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
         chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
 
-        ### Part 1: Downloads chunk.
+        ### Part 1: Downloads all inputs for chunk.
         ### No checks about whether the chunk has data because the way the chunk_list is constructed,
         ### every chunk is relevant and should be processed, so they don't need to be checked.
 
@@ -1233,7 +1233,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
         # Calculates stats for the input layers
         for key, array in layers.items():
-            chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer', fishnet_iso_df))
+            chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer'))
         # print(chunk_stats)
 
 
@@ -1281,6 +1281,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
         # The dictionaries by datatype that are returned from the numba function have limitations on them,
         # e.g., they can't be combined with other datatypes. This prevents the addition of attributes needed for uploading to s3.
         # So the trick here is to copy the numba-exported arrays into normal Python arrays to which we can do anything in Python.
+        # Everything in out_dict also needs to be in cn.LULUCF_core_output_dirs
+        # because that has the list of basic output directories which are customized for this run
         out_dict_all_dtypes = {}
 
         # Transfers the dictionaries of numpy arrays for each data type to a new, Pythonic array
@@ -1605,7 +1607,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
             future = client.submit(calculate_and_upload_LULUCF_fluxes,
                                    chunk, primary_forest_RF_array, partial_disturbance_EF_array, download_dict_with_data_types,
                                    start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
-                                   fishnet_iso_df, is_final, no_upload, output_dir_list, stage)
+                                   is_final, no_upload, output_dir_list, stage)
             futures.append(future)
 
         try:

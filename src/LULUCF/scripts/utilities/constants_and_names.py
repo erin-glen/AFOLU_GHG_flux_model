@@ -538,7 +538,9 @@ LULUCF_summative_output_dirs = [
     f"{outputs_path}{deadwood_c_net_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{litter_c_net_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/"
+    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
+    f"{outputs_path}{non_soil_c_dens_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/"
+
 ]
 
 # Intermediate outputs
