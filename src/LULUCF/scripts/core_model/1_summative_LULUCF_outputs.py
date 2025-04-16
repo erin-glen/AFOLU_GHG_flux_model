@@ -14,6 +14,7 @@ python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -cshp s
 """
 
 import argparse
+import dask
 import concurrent.futures
 import gc
 import os
@@ -34,64 +35,10 @@ from ..utilities import numba_utilities as nu
 from ..utilities import resize_cluster
 
 
-# ## Part 5: Calculates combined gross fluxes and net fluxes.
-# ## Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
-# ## Doing this outside numba function to minimize pixel-level calculations and chunks being returned by numba function.
-#
-# lu.print_and_log(f"Summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-#
-# for interval_end_year in interval_end_years:
-#
-#     year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
-#
-#     # Gross emissions across all carbon pools
-#     out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"] = (
-#             out_dict_all_dtypes[f"{cn.agc_gross_emis_pattern}_{year_range}"]
-#             + out_dict_all_dtypes[f"{cn.bgc_gross_emis_pattern}_{year_range}"]
-#             + out_dict_all_dtypes[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"]
-#             + out_dict_all_dtypes[f"{cn.litter_c_gross_emis_pattern}_{year_range}"])
-#
-#     # Gross emissions for non-CO2 emissions
-#     out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"] = (
-#             out_dict_all_dtypes[f"{cn.ch4_flux_pattern}_{year_range}"]
-#             + out_dict_all_dtypes[f"{cn.n2o_flux_pattern}_{year_range}"])
-#
-#     # Gross emissions for all carbon pools and all gases
-#     out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_all_gases_pattern}_{year_range}"] = (
-#         out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"]
-#         + out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"]
-#     )
-#
-#     # Gross removals across all carbon pools
-#     out_dict_all_dtypes[f"{cn.gross_removals_all_C_pools_pattern}_{year_range}"] = (
-#             out_dict_all_dtypes[f"{cn.agc_gross_removals_pattern}_{year_range}"]
-#             + out_dict_all_dtypes[f"{cn.bgc_gross_removals_pattern}_{year_range}"]
-#             + out_dict_all_dtypes[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"]
-#             + out_dict_all_dtypes[f"{cn.litter_c_gross_removals_pattern}_{year_range}"])
-#
-#     # Net flux for each carbon pool
-#     out_dict_all_dtypes[f"{cn.agc_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.agc_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.agc_gross_removals_pattern}_{year_range}"]
-#     out_dict_all_dtypes[f"{cn.bgc_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.bgc_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.bgc_gross_removals_pattern}_{year_range}"]
-#     out_dict_all_dtypes[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"]
-#     out_dict_all_dtypes[f"{cn.litter_c_net_flux_pattern}_{year_range}"] = out_dict_all_dtypes[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] + out_dict_all_dtypes[f"{cn.litter_c_gross_removals_pattern}_{year_range}"]
-#
-#     # Net flux across all carbon pools but for CO2 only
-#     out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_{year_range}"] = (
-#             out_dict_all_dtypes[f"{cn.agc_net_flux_pattern}_{year_range}"]
-#             + out_dict_all_dtypes[f"{cn.bgc_net_flux_pattern}_{year_range}"]
-#             + out_dict_all_dtypes[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"]
-#             + out_dict_all_dtypes[f"{cn.litter_c_net_flux_pattern}_{year_range}"])
-#
-#     # Net flux across all carbon pools, plus non-pool non-CO2 emissions
-#     out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_all_gases_pattern}_{year_range}"] = (
-#             out_dict_all_dtypes[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_{year_range}"]
-#             + out_dict_all_dtypes[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"])
-#
-# lu.print_and_log(f"Done summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-# print(f"After creating summative outputs for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
-
 def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type, interval_year_diff, interval_length,
-                                    interval_end_years, fishnet_iso_df, is_final, no_upload, output_dir_list, stage):
+                                    interval_end_years, fishnet_iso_df, is_final, no_upload,
+                                    summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list,
+                                    stage, model_type):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -105,6 +52,201 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
+
+    # Dictionary of data to download (inputs to model)
+    download_dict = {}
+
+    # Iterates through inputs and creates the dictionary of patterns and download paths
+    for summative_input_by_interval in summative_inputs_by_interval_dir_list:
+
+        # All the components of the input path
+        parts = summative_input_by_interval.strip('/').split('/')
+
+        # Gets the segment for the input pattern
+        pattern_idx = parts.index(f"version_{cn.model_version_underscore}")
+        pattern_segment = parts[pattern_idx + 1]
+
+        # Gets the segment for the input interval
+        interval_idx = parts.index(f"{interval_type}_intervals")
+        interval_segment = parts[interval_idx + 1]
+
+        # Constructs the dictionary entry.
+        # Value has to be a list because prepare_to_download_chunk expects the download dictionary keys to be lists.
+        download_dict[f"{pattern_segment}_{interval_segment}"] = [f"{summative_input_by_interval}{tile_id}__{bounds_str}__{pattern_segment}_{interval_segment}.tif"]
+
+    # print(download_dict)
+
+    # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
+    # Thus, this returns a complete set of inputs (missing chunks filled).
+    # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
+    # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
+    futures = uu.prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger_worker)
+    # print(futures)
+
+    lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+
+    # Dictionary that stores the dataset name (key) and downloaded data and their statuses (values)
+    layers = {}
+
+    # Ensures futures stores Future objects
+    # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages for chunks
+    for future in concurrent.futures.as_completed(futures):
+        layer = futures[future]  # Gets the corresponding key
+        data, status = future.result()  # Unpacks the tuple result
+        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+            lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
+        layers[layer] = data
+
+    # print(layers)
+    # sys.quit()
+
+    lu.print_and_log(f"Summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+
+    out_dict = {}
+
+    for interval_end_year in interval_end_years:
+
+        year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
+
+        # Gross emissions across all carbon pools
+        out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"] = (
+                layers[f"{cn.agc_gross_emis_pattern}_{year_range}"] + layers[f"{cn.bgc_gross_emis_pattern}_{year_range}"]
+                + layers[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] + layers[f"{cn.litter_c_gross_emis_pattern}_{year_range}"])
+
+    #     # Gross emissions for non-CO2 emissions
+    #     out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"] = (
+    #             layers[f"{cn.ch4_flux_pattern}_{year_range}"]
+    #             + layers[f"{cn.n2o_flux_pattern}_{year_range}"])
+    #
+    #     # Gross emissions for all carbon pools and all gases
+    #     out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}_{year_range}"] = (
+    #         out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_{year_range}"]
+    #         + out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"]
+    #     )
+    #
+    #     # Gross removals across all carbon pools
+    #     out_dict[f"{cn.gross_removals_all_C_pools_pattern}_{year_range}"] = (
+    #             layers[f"{cn.agc_gross_removals_pattern}_{year_range}"]
+    #             + layers[f"{cn.bgc_gross_removals_pattern}_{year_range}"]
+    #             + layers[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"]
+    #             + layers[f"{cn.litter_c_gross_removals_pattern}_{year_range}"])
+    #
+    #     # Net flux for each carbon pool
+    #     out_dict[f"{cn.agc_net_flux_pattern}_{year_range}"] = layers[f"{cn.agc_gross_emis_pattern}_{year_range}"] + layers[f"{cn.agc_gross_removals_pattern}_{year_range}"]
+    #     out_dict[f"{cn.bgc_net_flux_pattern}_{year_range}"] = layers[f"{cn.bgc_gross_emis_pattern}_{year_range}"] + layers[f"{cn.bgc_gross_removals_pattern}_{year_range}"]
+    #     out_dict[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"] = layers[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] + layers[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"]
+    #     out_dict[f"{cn.litter_c_net_flux_pattern}_{year_range}"] = layers[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] + layers[f"{cn.litter_c_gross_removals_pattern}_{year_range}"]
+    #
+    #     # Net flux across all carbon pools but for CO2 only
+    #     out_dict[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_{year_range}"] = (
+    #             out_dict[f"{cn.agc_net_flux_pattern}_{year_range}"]
+    #             + out_dict[f"{cn.bgc_net_flux_pattern}_{year_range}"]
+    #             + out_dict[f"{cn.deadwood_c_net_flux_pattern}_{year_range}"]
+    #             + out_dict[f"{cn.litter_c_net_flux_pattern}_{year_range}"])
+    #
+    #     # Net flux across all carbon pools, plus non-pool non-CO2 emissions
+    #     out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}_{year_range}"] = (
+    #             out_dict[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_{year_range}"]
+    #             + out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_{year_range}"])
+    #
+    #
+    # for interval_end_year in interval_end_years:
+    #
+    #     out_dict[f"{cn.non_soil_c_dens_pattern}_{interval_end_year}"] = (
+    #             layers[f"{cn.agc_dens_pattern}_{interval_end_year}"]
+    #             + layers[f"{cn.bgc_dens_pattern}_{interval_end_year}"]
+    #             + layers[f"{cn.deadwood_c_dens_pattern}_{interval_end_year}"]
+    #             + layers[f"{cn.litter_c_dens_pattern}_{interval_end_year}"])
+
+    lu.print_and_log(f"Done summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    print(f"After creating summative outputs for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
+    ### Part 5: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
+    ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
+    ### Also useful for a quick sum of outputs without doing zonal stats
+
+    lu.print_and_log(f"Populating chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+
+    # The relevant pixel area (m^2) file in s3
+    pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
+
+    # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
+    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger_worker)
+    pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
+
+    # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
+    for key, array_per_ha in out_dict.items():
+        # Converts per hectare values to per pixel values for the output numpy array
+        output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
+
+        chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
+
+    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+
+    # ### Part 6: Saves numpy arrays as rasters and uploads to s3
+    #
+    # uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
+    #
+    # # Only saves arrays to geotifs and uploads them to s3 if enabled
+    # if not no_upload:
+    #
+    #     out_no_data_val = 0  # NoData value for output raster (optional)
+    #
+    #     # Adds metadata used for uploading outputs to s3 to the dictionary
+    #     for key, value in out_dict.items():
+    #         data_type = value.dtype.name
+    #
+    #         # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
+    #         out_pattern, year_range = uu.strip_and_extract_years(key)
+    #         # print(out_pattern)
+    #         # print(year_range)
+    #
+    #         # Retrieves the relevant output s3 path for this specific output (list of one element).
+    #         # First, finds the output folders for all intervals with the relevant patterns
+    #         matched_output_s3_folders = [item for item in summative_outputs_by_interval_dir_list if out_pattern in item]
+    #         # print(matched_output_s3_folders)
+    #
+    #         # Second, finds the output folder with the right interval for that pattern
+    #         matched_output_s3_folder_list = [item for item in matched_output_s3_folders if year_range in item]
+    #         # print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
+    #
+    #         # Output paths without bucket (s3://gfw2-data).
+    #         # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
+    #         s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
+    #
+    #         # Dictionary with metadata for each array
+    #         out_dict[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
+    #
+    #     # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
+    #     upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
+    #                                                        out_dict, is_final, logger_worker,
+    #                                                        out_no_data_val)
+    #
+    #     lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", False, logger_worker)
+    #
+    #     # Execute uploads in parallel
+    #     with ThreadPoolExecutor(max_workers=5) as executor:
+    #         executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
+    #
+    #     lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}",
+    #                      is_final, logger_worker)
+    #
+    # return_message = f"Success for {bounds_str}: {uu.timestr()}"
+    #
+    # # Removes task tracking file from S3 once task is successful
+    # uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
+    #
+    # # except Exception as e:
+    # #
+    # #     return_message = f"Error processing chunk {bounds}: {e}: {uu.timestr()}"
+    # #
+    # #     lu.print_and_log(return_message, is_final, logger_worker)
+    # #     print(return_message)
+    # #     uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
+    #
+    # return return_message, chunk_stats  # Return both the success message and the statistics
+
+
 
 
 
@@ -165,57 +307,31 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         main_logger.info("Running as final model.")
 
 
-    # This is just a placeholder tile_id that is used to obtain the datatype of each tile set.
-    # It is overwritten when chunks are assigned and analyzed.
-    # Using this placeholder allows the full path and tile name to be specified up front, which simplifies things.
-    # Otherwise, we'd have just the path but not the file name now and would have to add in the file name later
-    # (probably at the chunk level).
-    sample_tile_id = "00N_000E"
-
-    download_dict = {}
-
-    output_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year,
+    # Creates a list of input directories used in summative output creation based on specifics of the model run
+    summative_inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year,
                                                      chunk_size_pixels, model_type, interval_end_years, interval_year_diff, run_date)
-    print(output_dir_list)
+
+    # Creates a list of output directories for all outputs and intervals based on specifics of the model run
+    summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
+                                                     chunk_size_pixels, model_type, interval_end_years, interval_year_diff, run_date)
+
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
 
-    # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
-    futures = []
-    for chunk in chunk_list:
-        future = client.submit(create_summative_LULUCF_outputs,
-                               chunk, start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
-                               fishnet_iso_df, is_final, no_upload, output_dir_list, stage)
-        futures.append(future)
 
-    # Collect the results once they are finished
-    flux_1x1_results = client.gather(futures)
+    summative_output_delayed_results = [dask.delayed(create_summative_LULUCF_outputs)
+                       (chunk, start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
+                        fishnet_iso_df, is_final, no_upload,
+                        summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list, stage, model_type)
+                       for chunk in chunk_list]
 
-    success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, flux_1x1_results)
+    # Runs analysis and gathers results
+    summative_output_results = dask.compute(*summative_output_delayed_results)
 
+    # success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, summative_output_results)
 
-    # for LULUCF_core_output_dir in cn.LULUCF_core_output_dirs:
-    #     print(LULUCF_core_output_dir)
-    #
-    #     # Remove the prefix
-    #     relative_path = LULUCF_core_output_dir[len(cn.outputs_path):]
-    #
-    #     # Split by '/' and get the first folder
-    #     pattern = relative_path.split('/')[0]
-    #
-    #     LULUCF_core_output_dir = LULUCF_core_output_dir.replace("MODEL_TYPE", model_type)
-    #     LULUCF_core_output_dir = LULUCF_core_output_dir.replace("MODEL_INTERVAL_TYPE", interval_type)
-    #     LULUCF_core_output_dir = LULUCF_core_output_dir.replace("CHUNK_SIZE", str(chunk_size_pixels))
-    #     LULUCF_core_output_dir = LULUCF_core_output_dir.replace("DATE", '20250415'[:8])
-    #
-    #     for year in range(start_year + 1, end_year + 1, interval_length):
-    #         download_dict[f"{pattern}_{year}"] = f"{LULUCF_core_output_dir}{sample_tile_id}_{pattern}_{year}.tif"
-    #
-    #     print(download_dict)
-    #
-    #     sys.quit()
 
 
 

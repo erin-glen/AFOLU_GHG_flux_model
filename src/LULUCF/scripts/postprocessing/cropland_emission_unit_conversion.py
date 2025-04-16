@@ -30,7 +30,7 @@ def cropland_emissions_unit_conversion(chunk, cropland_emissions_kg_input_dir, c
 
     # Read in the raster
     print("Getting cropland raster")
-    kg_tile_chunk = uu.get_tile_dataset_rio(input_tile_path, 'Float32', bounds, chunk_length_pixels, is_final, logger)
+    kg_tile_chunk = uu.get_tile_dataset_rio(input_tile_path, bounds, chunk_length_pixels, 'Float32')
     kg_tile_chunk = kg_tile_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
     # Conversion value from kg to Mg

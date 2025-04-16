@@ -32,9 +32,9 @@ def agg_4x4(tile_id, bounds, chunk_length_pixels, pixel_area_tile, mg_ha_yr_tile
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
     print(f"Getting rasters for {tile_id}: \n {pixel_area_tile} \n {mg_ha_yr_tile}")
-    pixel_area_tile_chunk = uu.get_tile_dataset_rio(pixel_area_tile, 'Float32', bounds, chunk_length_pixels, is_final, logger)
+    pixel_area_tile_chunk = uu.get_tile_dataset_rio(pixel_area_tile, bounds, chunk_length_pixels, 'Float32')
     pixel_area_tile_chunk = pixel_area_tile_chunk[0]  # Converts downloaded tuple (array, status) to just the array
-    mg_ha_yr_tile_chunk = uu.get_tile_dataset_rio(mg_ha_yr_tile, 'Float32', bounds, chunk_length_pixels, is_final, logger)
+    mg_ha_yr_tile_chunk = uu.get_tile_dataset_rio(mg_ha_yr_tile, bounds, chunk_length_pixels, 'Float32')
     mg_ha_yr_tile_chunk = mg_ha_yr_tile_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
     # Converts per hectare values to per pixel values in the numpy array

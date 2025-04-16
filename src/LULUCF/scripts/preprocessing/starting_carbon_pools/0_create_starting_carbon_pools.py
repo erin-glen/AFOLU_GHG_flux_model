@@ -317,7 +317,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
 
         # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
-        pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds, chunk_length_pixels, is_final, logger_worker)
+        pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, bounds, chunk_length_pixels, 'Float32')
         pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
         # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes

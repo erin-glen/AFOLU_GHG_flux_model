@@ -575,7 +575,7 @@ def stage_duration(start_time_str, end_time_str, stage, logger):
 # the Numba functions won't be able to handle that (since they're so particular about datatypes).
 # So, that is addressed here through setting the array of 0s to the datatype of the dataset.
 # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
-def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, logger_worker):
+def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
 
     bounds_str = boundstr(bounds)
 
@@ -600,7 +600,7 @@ def get_tile_dataset_rio(uri, data_type, bounds, chunk_length_pixels, is_final, 
 # Prepares list of chunks to download.
 # Chunks are defined by a bounding box.
 # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
-def prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger):
+def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger):
 
     futures = {}
 
@@ -613,9 +613,20 @@ def prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels
     with concurrent.futures.ThreadPoolExecutor() as executor:
         lu.print_and_log(f"Requesting data in chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
 
-        for key, value in updated_download_dict.items():
-            future = executor.submit(get_tile_dataset_rio, value[0], value[1], bounds, chunk_length_pixels, is_final, logger)
-            futures[future] = key  # Stores Future objects (data ans status) as keys, layer names as values
+        for key, value in download_dict.items():
+
+            # When the values are a list with just the file to download, without the datatype
+            if len(value)==1:
+                future = executor.submit(get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, 'float32')
+                futures[future] = key  # Stores Future objects (data and status) as keys, layer names as values
+
+            # When the values are a list with the file to download and the datatype
+            elif len(value)==2:
+                future = executor.submit(get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, value[1])
+                futures[future] = key  # Stores Future objects (data and status) as keys, layer names as values
+
+            else:
+                sys.exit("Unexpected number of parameters in download dictionary")
 
     return futures
 
