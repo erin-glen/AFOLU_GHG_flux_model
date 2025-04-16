@@ -233,7 +233,7 @@ agc_dens_pattern = "AGC_density_MgC_ha"
 bgc_dens_pattern = "BGC_density_MgC_ha"
 deadwood_c_dens_pattern = "deadwood_C_density_MgC_ha"
 litter_c_dens_pattern = "litter_C_density_MgC_ha"
-c_dens_non_soil_pattern = "carbon_density_non_soil_Mg C_ha"
+c_dens_non_soil_pattern = "carbon_density_non_soil_Mg_C_ha"
 soil_c_dens_pattern = "soil_c_MgC_ha"
 
 ### Starting carbon pools (2000/2015)
@@ -509,50 +509,50 @@ burned_in_curr_interval = "burned_in_current_interval"
 
 # List of output directories with placeholders for parts of the directory
 LULUCF_core_output_dirs = [
-    f"{outputs_path}{agc_dens_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{bgc_dens_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{deadwood_c_dens_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{litter_c_dens_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{agc_gross_emis_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{bgc_gross_emis_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{deadwood_c_gross_emis_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{litter_c_gross_emis_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{agc_gross_removals_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{bgc_gross_removals_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{deadwood_c_gross_removals_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{litter_c_gross_removals_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{ch4_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{n2o_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{land_state_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{agc_rf_pre_dist_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/"
+    f"{outputs_path}{agc_dens_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{bgc_dens_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{deadwood_c_dens_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{litter_c_dens_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{agc_gross_emis_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{bgc_gross_emis_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{deadwood_c_gross_emis_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{litter_c_gross_emis_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{agc_gross_removals_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{bgc_gross_removals_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{deadwood_c_gross_removals_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{litter_c_gross_removals_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{ch4_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{n2o_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{land_state_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{agc_rf_pre_dist_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
 # Summative outputs
 LULUCF_summative_output_dirs = [
-    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{gross_emis_all_C_pools_non_CO2_only_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{gross_removals_all_C_pools_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{agc_net_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{bgc_net_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{deadwood_c_net_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{litter_c_net_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{c_dens_non_soil_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/"
+    f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_non_CO2_only_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{gross_removals_all_C_pools_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{agc_net_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{bgc_net_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{deadwood_c_net_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{litter_c_net_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{c_dens_non_soil_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/"
 
 ]
 
 # Intermediate outputs
 LULUCF_intermediate_output_dirs = [
-    f"{outputs_path}{forest_age_output_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{gain_year_count_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{most_recent_year_not_tall_veg}/RUNSTART_END/MODEL_TYPE/CHUNK_SIZE_pixels/DATE/", # Years represent from model start to current interval end
-    f"{outputs_path}{year_of_forest_loss}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{max_height_since_last_time_not_tall_veg}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{first_time_sig_loss_from_max_height}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{part_or_full_dist_in_prev_interval}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{burned_in_curr_interval}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/"
+    f"{outputs_path}{forest_age_output_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{gain_year_count_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{most_recent_year_not_tall_veg}/RUNSTART_END/MODEL_TYPE/CHUNK_SIZE_pixels/RUN_DATE/", # Years represent from model start to current interval end
+    f"{outputs_path}{year_of_forest_loss}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{max_height_since_last_time_not_tall_veg}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{first_time_sig_loss_from_max_height}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{part_or_full_dist_in_prev_interval}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{burned_in_curr_interval}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
 # TODO @Mel We shouldn't need this eventually.

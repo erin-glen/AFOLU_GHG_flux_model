@@ -1,19 +1,26 @@
 """
-Run from src/LULUCF/
+Run from src/LULUCF
+
+Can only run on 1x1 degree chunks that do not have the run timestamp in the file name.
+The way this builds the input file names, it can't handle filenames with the run timestamp.
+It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools --year 2015 --first_chunks 2 --run_date YYYYMMDD
+python -m scripts.core_model.2_aggregate_LULUCF_outputs --no_upload -yr 2015 2023 --first_chunks 2 --run_date YYYYMMDD
 
 Coiled test:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015 --first_chunks 2 --run_date YYYYMMDD
+python -m scripts.core_model.2_aggregate_LULUCF_outputs -cn LULUCF_model -yr 2015 2023 --first_chunks 2 --run_date YYYYMMDD
 
 Full Coiled run:
-python -m scripts.utilities.create_cluster -n 40 -t 5 -cn LULUCF_model
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015 --run_date YYYYMMDD
-Time: 16:32 through calculation; 16:48 through tile stats; Credits: 59; Cost: $1.90
-Using more than -t 5 seemed to cause some tile_ids to randomly fail, even though memory usage was not high.
-So, best to stay with -t 5 even though the Dask dashboard indicates low memory usage compared to what's available (e.g., 5 out of 32 GB being used).
+python -m scripts.utilities.create_cluster -n 50
+python -m scripts.core_model.2_aggregate_LULUCF_outputs -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ --run_date YYYYMMDD
+
+From before:
+Took about 30 minutes to do the aggregated gross and net flux outputs. A few 10x10 tiles from many of the folders
+weren't output, and I got various GDAL errors throughout. Not investigating further now.
+Log to explore is https://cloud.coiled.io/clusters/676603/account/wri-forest-research/information?workspace=WRI-forest-research&tab=Logs&filterPattern=&showLifecycle=0
+It has some potentially useful errors.
 """
 
 import argparse
@@ -22,30 +29,33 @@ import re
 import sys
 
 # Project imports
-from ...utilities import constants_and_names as cn
-from ...utilities import universal_utilities as uu
-from ...utilities import log_utilities as lu
-from ...utilities import resize_cluster
+from ..utilities import constants_and_names as cn
+from ..utilities import log_utilities as lu
+from ..utilities import universal_utilities as uu
+from ..utilities import resize_cluster
 
 
-def main(cluster_name, year, run_date, run_local=False, no_stats=False, no_log=False, no_upload= False,
+def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
          first_chunks=None, log_note=None):
+
 
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = f'starting_carbon_pools_{year}_10x10_deg_aggreg'
-    model_type = 'standard'
+    stage = 'LULUCF_aggregation_to_10x10_deg'
+    model_type = 'standard_model'
 
-    # Directories to process
-    if year == 2000:
-        output_dir_list = [cn.agc_2000_dir, cn.bgc_2000_dir, cn.deadwood_c_2000_dir, cn.litter_c_2000_dir]
-    elif year == 2015:
-        output_dir_list = [cn.agc_2015_dir, cn.bgc_2015_dir, cn.deadwood_c_2015_dir, cn.litter_c_2015_dir]
-        # output_dir_list = [cn.deadwood_c_2015_dir]  # To test a specific carbon pool
-    else:
-        print(f"Year input {year} not valid. Terminating.")
+    # Determines if arguments for start and end year are valid
+    if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
+                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2023
+                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2023
+        print("Year range selection not valid")
         sys.exit()
+    else:
+        start_year = year_range[0]
+        end_year = year_range[1]
+        # print(f"Start year: {start_year}")
+        # print(f"End year: {end_year}")
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -53,15 +63,35 @@ def main(cluster_name, year, run_date, run_local=False, no_stats=False, no_log=F
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header('N/A', 'N/A', client, cluster, log_note, run_local, model_type, stage)
 
+    # Starting time for stage
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
-    main_logger.info(f"Year for initial carbon pools: {year}")
-    main_logger.info(f"Date for 1x1 deg rasters being aggregated: {run_date}")
+    main_logger.info(f"Start year: {start_year}; end year: {end_year}")
+    main_logger.info(f"Run date: {run_date}")
 
-    # Creates list of output directories specific to the run
-    output_dir_list = [path.replace("RUN_DATE", run_date) for path in output_dir_list]
-    output_dir_list = [path.replace("CHUNK_SIZE", str(4000)) for path in output_dir_list]
-    main_logger.info(f"Directories to aggregate: {output_dir_list}")
+    # Calculates the interval type, difference between start and end years of intervals,
+    # and the model output years for the model run
+    interval_type, interval_year_diff, interval_length, interval_end_years = uu.get_interval_info(end_year, main_logger, start_year)
+
+
+    # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
+    # Instead, it creates a list of input folders, from which a download dictionary is created for each chunk (in the chunk-level function).
+    # It's a little simpler this way. Since the datatypes of the inputs don't need to be specified in advance for this script
+    # (since it's not using numba), there's no need to centrally create a download dictionary with each input's datatype
+    # just once on the scheduler, as is more efficient for scripts that use numba.
+    # Creates a list of input directories used in summative output creation based on specifics of the model run
+
+    # Want to aggregate the core LULUCF outputs and the summative ones
+    LULUCF_aggreg_dirs = cn.LULUCF_core_output_dirs + cn.LULUCF_summative_output_dirs
+
+    output_dir_list = uu.create_output_dir_name_list(LULUCF_aggreg_dirs, interval_type, start_year,'4000',
+                                                     model_type, interval_end_years, interval_year_diff, run_date)
+
+    # For testing- first folder only, so contents of all folders don't need to be listed
+    output_dir_list = output_dir_list[0:1]
+    print(output_dir_list)
+
+    main_logger.info(f"There are {len(output_dir_list)} folders to aggregate to 10x10s")
 
 
     ### Step 2: Aggregates 1x1 degree outputs to 10x10 degree outputs
@@ -75,6 +105,7 @@ def main(cluster_name, year, run_date, run_local=False, no_stats=False, no_log=F
         list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:first_chunks]
 
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[338:339]  # To limit it to a specific tile
+    print(list_of_s3_name_dicts_total)
 
     # Extracts and lists unique tile_ids, the target for aggregation
     tile_ids = set()
@@ -98,6 +129,7 @@ def main(cluster_name, year, run_date, run_local=False, no_stats=False, no_log=F
 
     main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
 
+    # TODO seems to create the 10x10 but nothing uploaded to s3, at least in local run
     # Each task is a single 10x10 deg aggregated geotif
     delayed_results_10x10_deg = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
                                         for s3_name_dict in list_of_s3_name_dicts_total]
@@ -145,11 +177,11 @@ def main(cluster_name, year, run_date, run_local=False, no_stats=False, no_log=F
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Create carbon pools in 2000.")
+    parser = argparse.ArgumentParser(description="Aggregate 1x1 degree outputs from LULUCF model to 10x10 degree geotifs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
+    parser.add_argument('-rd', '--run_date', help='Date of run, in YYYYMMDD')
+    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
-    parser.add_argument('--year', type=int, required=True, help='Year for carbon pools')
-    parser.add_argument('--run_date', required=True, help='Date YYYYMMDD of carbon pool 1x1s to process')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
@@ -160,9 +192,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
-    first_chunks = args.first_chunks
-    year = args.year
     run_date = args.run_date
+    year_range = args.year_range
+    first_chunks = args.first_chunks
     log_note = args.log_note
 
     run_local = args.run_local
@@ -170,5 +202,4 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, year, run_date, run_local, no_stats, no_log, no_upload, first_chunks=first_chunks, log_note=log_note)
-
+    main(cluster_name, year_range, run_date, run_local, no_stats, no_log, no_upload, first_chunks=first_chunks, log_note=log_note)

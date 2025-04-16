@@ -14,9 +14,9 @@ import dask
 from dask.distributed import print
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import log_utilities as lu
-from ..utilities import universal_utilities as uu
+from src.LULUCF.scripts.utilities import constants_and_names as cn
+from src.LULUCF.scripts.utilities import log_utilities as lu
+from src.LULUCF.scripts.utilities import universal_utilities as uu
 
 def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 
@@ -130,7 +130,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         # Replaces '/' with '__'
         value = path_suffix.rstrip('/').replace("/", "__")
 
-        # Creatres the dictionary,
+        # Creates the dictionary,
         # e.g., {'s3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/processed/20250217/': 'AGB_2015_ESA_CCI_Mg_AGB_ha'}
         s3_in_folders_list_of_dicts.append({path: value})
 

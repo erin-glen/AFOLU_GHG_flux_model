@@ -1,16 +1,19 @@
 """
 Run from src/LULUCF
 
-Test:
+Local test (may not work):
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --no_upload -yr 2015 2023 --run_date YYYYMMDD
+
+Coiled test:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2015 2023
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload -yr 2015 2023
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1 -yr 2015 2023
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1 -yr 2015 2023 --run_date YYYYMMDD
 
 Full run:
 python -m scripts.utilities.create_cluster -n 200
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ --run_date YYYYMMDD
 """
 
 import argparse
@@ -1396,7 +1399,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
 
 
-def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
          use_shapefile=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     ### Step 1: Preparation
@@ -1404,7 +1407,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Model stage being run
     stage = 'LULUCF_fluxes'
     model_type = 'standard_model'
-    run_date = '20250415'
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
@@ -1415,8 +1417,8 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     else:
         start_year = year_range[0]
         end_year = year_range[1]
-        print(f"Start year: {start_year}")
-        print(f"End year: {end_year}")
+        # print(f"Start year: {start_year}")
+        # print(f"End year: {end_year}")
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -1428,6 +1430,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
+    main_logger.info(f"Run date: {run_date}")
 
     # Calculates the interval type, difference between start and end years of intervals, and the model output years
     # for the model run
@@ -1579,7 +1582,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
                                                                      '3_shift_cult_EF',	'4_logging_EF',	'5_wildfire_EF',
                                                                      '6_sett_infrastr_EF', '7_natrl_dist_EF'])
 
-
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
@@ -1684,6 +1686,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate LULUCF fluxes.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
+    parser.add_argument('-rd', '--run_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--use_shapefile', help='Shapefile of chunks')
@@ -1699,6 +1702,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
+    run_date = args.run_date
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
     use_shapefile = args.use_shapefile
@@ -1712,6 +1716,6 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, use_shapefile,
+    main(cluster_name, run_date, year_range, run_local, no_stats, no_log, no_upload, use_shapefile,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)

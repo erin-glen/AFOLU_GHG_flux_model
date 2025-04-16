@@ -5,10 +5,13 @@ Can only run on 1x1 degree chunks that do not have the run timestamp in the file
 The way this builds the input file names, it can't handle filenames with the run timestamp.
 It also can't handle chunks smaller than 1x1 degree.
 
-Test:
+Local test:
+python -m scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
+
+Coiled test:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1 -yr 2015 2023
+python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1 -yr 2015 2023 --run_date YYYYMMDD
 
 Full run:
 python -m scripts.utilities.create_cluster -n 50
@@ -251,7 +254,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     return return_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
          use_shapefile=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
 
@@ -260,7 +263,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Model stage being run
     stage = 'LULUCF_summative_output_calculation'
     model_type = 'standard_model'
-    run_date = '20250415'
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
@@ -271,8 +273,8 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     else:
         start_year = year_range[0]
         end_year = year_range[1]
-        print(f"Start year: {start_year}")
-        print(f"End year: {end_year}")
+        # print(f"Start year: {start_year}")
+        # print(f"End year: {end_year}")
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -284,6 +286,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
+    main_logger.info(f"Run date: {run_date}")
 
     # Calculates the interval type, difference between start and end years of intervals,
     # and the model output years for the model run
@@ -310,7 +313,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         main_logger.info("Running as final model.")
 
 
-    # Unlike other scripts, this one doesn't construct the download dictionary in the main function.
+    # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
     # Instead, it creates a list of input folders, from which a download dictionary is created for each chunk (in the chunk-level function).
     # It's a little simpler this way. Since the datatypes of the inputs don't need to be specified in advance for this script
     # (since it's not using numba), there's no need to centrally create a download dictionary with each input's datatype
@@ -397,6 +400,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate summative outputs of core LULUCF model.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
+    parser.add_argument('-rd', '--run_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--use_shapefile', help='Shapefile of chunks')
@@ -412,6 +416,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
+    run_date = args.run_date
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
     use_shapefile = args.use_shapefile
@@ -425,6 +430,6 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, use_shapefile,
+    main(cluster_name, run_date, year_range, run_local, no_stats, no_log, no_upload, use_shapefile,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)

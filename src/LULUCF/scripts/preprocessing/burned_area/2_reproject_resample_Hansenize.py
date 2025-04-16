@@ -311,7 +311,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Iterates through output folders and counts the number of output rasters.
     for output_folder in output_folders:
         output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
-        output_folder = re.sub('DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
+        output_folder = re.sub('RUN_DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
         output_folder = f"{cn.full_bucket_prefix}/{output_folder}"   # Need to prepend s3 and bucket name for counting
 
         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
