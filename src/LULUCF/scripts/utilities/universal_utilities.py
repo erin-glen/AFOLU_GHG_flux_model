@@ -1352,7 +1352,7 @@ def compile_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger):
             # Writes output rows based on layer_name conditions to separate sheets
             main_logger.info(f"Writing outputs to spreadsheet: {timestr()}")
             gross_flux_1x1_outputs.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
-            net_flux_1x1_outputs.to_excel(writer, sheet_name='flux_outputs_1x1', index=False)
+            net_flux_1x1_outputs.to_excel(writer, sheet_name='net_outputs_1x1', index=False)
             other_1x1_outputs.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
 
             # Writes the min and max statistics to the second sheet

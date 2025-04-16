@@ -1584,29 +1584,54 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
     main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
-    # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
-    futures = []
-    for chunk in chunk_list:
-        future = client.submit(calculate_and_upload_LULUCF_fluxes,
-                               chunk, primary_forest_RF_array, partial_disturbance_EF_array, download_dict_with_data_types,
-                               start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
-                               fishnet_iso_df, is_final, no_upload, output_dir_list, stage)
-        futures.append(future)
+    # Runs in batches of specified size. This may help with managing zarr access/caches.
+    # batch_size = 1000
+    batch_size = 1  # For testing
+    chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
+    main_logger.info(f"There are {len(chunk_batches)} batches to process: {uu.timestr()}")
+    all_flux_results = []
+    all_1x1_stats = []
+    success_count = 0
 
-    # Collect the results once they are finished
-    flux_1x1_results = client.gather(futures)
+    # Iterates through the batches
+    for i, chunk_batch in enumerate(chunk_batches):
+        main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks): {uu.timestr()}")
+        main_logger.info("Creating task txts in s3...")
+        uu.create_s3_task_files(stage, chunk_batch)
 
-    success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, flux_1x1_results)
+        # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
+        futures = []
+        for chunk in chunk_batch:
+            future = client.submit(calculate_and_upload_LULUCF_fluxes,
+                                   chunk, primary_forest_RF_array, partial_disturbance_EF_array, download_dict_with_data_types,
+                                   start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
+                                   fishnet_iso_df, is_final, no_upload, output_dir_list, stage)
+            futures.append(future)
 
-    # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-    if not no_upload:
-        for output_folder in output_dir_list:
+        try:
+            batch_flux_results = client.gather(futures)
+        except Exception as e:
+            main_logger.error(f"Batch {i + 1} failed: {e}: {uu.timestr()}")
+            sys.exit()
 
-            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-            # print(geotiff_files)
+        all_flux_results.extend(batch_flux_results)
 
-    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+        success_count_1x1, batch_stats = uu.count_successful_chunks(chunk_batch, is_final, main_logger, batch_flux_results)
+        all_1x1_stats.extend(batch_stats)
+
+        del futures
+        del batch_flux_results
+        client.run(gc.collect)
+
+        # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
+        if not no_upload:
+            for output_folder in output_dir_list:
+
+                geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+                main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+                # print(geotiff_files)
+
+        uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
 
     ### Step 3: Chunk stats for 1x1 degree and 10x10 degree outputs, aggregates logs
@@ -1618,7 +1643,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         n_workers = len(workers)
 
         # Reduces number of workers in the cluster down to 1 if there is more than 10
-        # TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 
@@ -1627,7 +1651,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
-    if (not no_stats) and (success_count_1x1 > 0):
+    if (not no_stats) and (success_count > 0):
         uu.compile_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
