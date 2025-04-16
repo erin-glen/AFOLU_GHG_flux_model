@@ -192,8 +192,8 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
     if cluster_type == 'coiled':
 
         if not run_local:
-            # Connects to Coiled cluster if not running locally
-            cluster, client = uu.connect_to_Coiled_cluster(cluster_name, False)
+            # Connects to Coiled cluster if not running locally and the named cluster exists
+            cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, False)
             client
 
         # Creates the log for the main function and populates it with basic run information

@@ -259,8 +259,8 @@ def estimate_time(total_bytes, concurrency, rate_per_worker=50e6):
 
 def main(cluster_name, run_local, source_root, dest_root, task_file, resume):
 
-    # Connects to Coiled cluster if not running locally
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    # Connects to Coiled cluster if not running locally and the named cluster exists
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Clean up user-provided paths
     src_root = source_root.replace("gs://", "")

@@ -321,19 +321,43 @@ def timestr():
     return eastern_time.strftime("%Y%m%d_%H_%M_%S")
 
 
-# Connects to a Coiled cluster of a specified name if the local flag isn't on
+# Connects to a Coiled cluster of a specified name if the local flag isn't on.
+# Does not create a Coiled cluster if the specified cluster name doesn't exist (contrary to default Coiled behavior).
 def connect_to_Coiled_cluster(cluster_name, run_local):
 
-    # Runs locally without Dask or in a Coiled cluster using Dask
+    # If local run flag is on, doesn't return a cluster or client
     if run_local:
         print("Running locally without Dask/Coiled.")
-        return None, None
-    else:   #TODO Make it so that this doesn't create a cluster if it doesn't exist. This will create a cluster.
-        # Connects to the existing Coiled cluster
-        cluster = coiled.Cluster(name=cluster_name)
-        client = Client(cluster)
+        return None, None, run_local
 
-        return cluster, client
+    # If no local run flag, it tries to attach to the named cluster
+    else:
+        try:
+            # Gets info on all Coiled clusters (including closed ones)
+            all_clusters = coiled.list_clusters()
+
+            # Filters to clusters that are running and match the name
+            running_clusters = {
+                cluster["name"]: cluster
+                for cluster in all_clusters
+                if cluster.get("status") == "RUNNING"
+            }
+
+            if cluster_name not in running_clusters:
+                print(f"Cluster '{cluster_name}' is not running. Not connecting.")
+                run_local = True
+                return None, None, run_local
+
+            print(f"Connecting to running cluster '{cluster_name}'.")
+            cluster = coiled.Cluster(name=cluster_name)
+            client = Client(cluster)
+            return cluster, client, run_local
+
+        except Exception as e:
+            print(f"Error while trying to connect to Coiled cluster: {e}")
+            run_local = True
+            return None, None, run_local
+
 
 #TODO: @Mel - find usages, change to using create_cluster.py instead. delete here after.
 # Creates a local client using dask or Coiled cluster with a specified name, # of worker, # of CPUs and # GiB
@@ -865,7 +889,7 @@ def create_list_for_aggregation(s3_in_folders, main_logger):
         # Iterates through all the files in a folder and converts them to the output names.
         # Essentially [tile_id]__[pattern].tif. Drops the chunk bounds from the middle.
         for filename in filenames:
-            result = re.sub(cn.small_chunk_pattern, '__', filename)   #TODO Haven't run this since switching to cn.small_chunk_pattern
+            result = re.sub(cn.small_chunk_pattern, '__', filename)
             simple_output_file_names.append(result)  # New list of simplified file names used for 10x10 degree outputs
 
         # Removes duplicate simplified file names.

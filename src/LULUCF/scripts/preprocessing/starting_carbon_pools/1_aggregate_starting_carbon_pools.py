@@ -42,8 +42,8 @@ def main(cluster_name, year, input_date, run_local=False, no_stats=False, no_log
         print(f"Year input {year} not valid. Terminating.")
         sys.exit()
 
-    # Connects to Coiled cluster if not running locally
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    # Connects to Coiled cluster if not running locally and the named cluster exists
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header('N/A', 'N/A', client, cluster, log_note, run_local, model_type, stage)

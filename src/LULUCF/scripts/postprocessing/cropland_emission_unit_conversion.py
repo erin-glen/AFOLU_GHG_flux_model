@@ -48,9 +48,9 @@ def cropland_emissions_unit_conversion(chunk, cropland_emissions_kg_input_dir, c
 
 def main(cluster_name):
     # -------------------------------------------------------------------------------------------------------------------
-    # Step 1: Connects to Coiled cluster if not running locally
+    # Step 1: Connects to Coiled cluster if not running locally and the named cluster exists
     run_local = False
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # -------------------------------------------------------------------------------------------------------------------
     # Step 2: Convert cropland emissions from kg per hectare per year to mg per hectare per year

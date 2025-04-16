@@ -82,8 +82,8 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     run_local = args.run_local
 
-    # Connects to Coiled cluster if not running locally
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    # Connects to Coiled cluster if not running locally and the named cluster exists
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
 
     # Create tasks for all years

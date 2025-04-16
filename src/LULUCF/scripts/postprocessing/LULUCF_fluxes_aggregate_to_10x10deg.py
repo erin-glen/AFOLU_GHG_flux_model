@@ -24,12 +24,12 @@ from ..utilities import universal_utilities as uu
 
 def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 
-    logger = lu.setup_logging()
+    main_logger = lu.setup_logging()
 
     is_final = False
 
-    # Connects to Coiled cluster if not running locally
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    # Connects to Coiled cluster if not running locally and the named cluster exists
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Model stage being run
     stage = 'LULUCF_flux_postprocessing__outputs_aggregated_to_10x10deg'

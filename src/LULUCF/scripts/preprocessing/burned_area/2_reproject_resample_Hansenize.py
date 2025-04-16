@@ -235,7 +235,8 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     stage = f'Hansenize_burned_area_{start_year}_{end_year}'
     model_type = 'standard'
 
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    # Connects to Coiled cluster if not running locally and the named cluster exists
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header("N/A", False, client, cluster, log_note, run_local, model_type, stage)

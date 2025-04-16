@@ -249,8 +249,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     stage = f'create_forest_age_{age_years[0]}_{age_years[1]}__1x1_deg'
     model_type = 'standard'
 
-    # Connects to Coiled cluster if not running locally
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    # Connects to Coiled cluster if not running locally and the named cluster exists
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, "N/A", client, cluster, log_note, run_local, model_type, stage)

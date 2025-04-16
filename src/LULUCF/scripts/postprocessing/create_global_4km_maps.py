@@ -104,9 +104,9 @@ def combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, globa
 
 def main(cluster_name):
     # -------------------------------------------------------------------------------------------------------------------
-    # Step 1: Connects to Coiled cluster if not running locally
+    # Step 1: Connects to Coiled cluster if not running locally and the named cluster exists
     run_local = False
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # -------------------------------------------------------------------------------------------------------------------
     # Step 2: Create download/ upload dictionary from list of processes to run
