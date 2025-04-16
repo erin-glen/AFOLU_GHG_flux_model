@@ -149,9 +149,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
     s3_client.upload_file(combined_local_log, "gfw2-data", Key=f"{cn.s3_log_path}{combined_log_name}")
 
-    # Deletes the main log if no_log is activated
-    if no_log:
-        os.remove(main_log)
+    os.remove(main_log)
 
     if not no_log:
         os.remove(worker_log)

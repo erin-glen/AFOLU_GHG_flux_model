@@ -1596,7 +1596,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Iterates through the batches
     for i, chunk_batch in enumerate(chunk_batches):
         main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks): {uu.timestr()}")
-        main_logger.info("Creating task txts in s3...")
+        main_logger.info("Creating batch task txts in s3...")
         uu.create_s3_task_files(stage, chunk_batch)
 
         # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
@@ -1616,7 +1616,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
         all_flux_results.extend(batch_flux_results)
 
-        success_count_1x1, batch_stats = uu.count_successful_chunks(chunk_batch, is_final, main_logger, batch_flux_results)
+        success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_final, main_logger, batch_flux_results)
         all_1x1_stats.extend(batch_stats)
 
         del futures
