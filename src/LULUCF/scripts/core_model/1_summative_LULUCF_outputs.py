@@ -155,7 +155,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         # Summative outputs for outputs with specific years in their name (i.e. carbon densities)
         for interval_end_year in interval_end_years:
 
-            out_dict[f"{cn.non_soil_c_dens_pattern}_{interval_end_year}"] = (
+            out_dict[f"{cn.c_dens_non_soil_pattern}_{interval_end_year}"] = (
                     layers[f"{cn.agc_dens_pattern}_{interval_end_year}"]
                     + layers[f"{cn.bgc_dens_pattern}_{interval_end_year}"]
                     + layers[f"{cn.deadwood_c_dens_pattern}_{interval_end_year}"]

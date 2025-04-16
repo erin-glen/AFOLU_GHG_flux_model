@@ -233,7 +233,7 @@ agc_dens_pattern = "AGC_density_MgC_ha"
 bgc_dens_pattern = "BGC_density_MgC_ha"
 deadwood_c_dens_pattern = "deadwood_C_density_MgC_ha"
 litter_c_dens_pattern = "litter_C_density_MgC_ha"
-non_soil_c_dens_pattern = "non_soil_C_density_MgC_ha"
+c_dens_non_soil_pattern = "carbon_density_non_soil_Mg C_ha"
 soil_c_dens_pattern = "soil_c_MgC_ha"
 
 ### Starting carbon pools (2000/2015)
@@ -539,7 +539,7 @@ LULUCF_summative_output_dirs = [
     f"{outputs_path}{litter_c_net_flux_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
     f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/DATE/",
-    f"{outputs_path}{non_soil_c_dens_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/"
+    f"{outputs_path}{c_dens_non_soil_pattern}/MODEL_TYPE/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/DATE/"
 
 ]
 
