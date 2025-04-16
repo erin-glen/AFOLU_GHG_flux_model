@@ -31,12 +31,12 @@ resolution = 0.00025
 first_model_year_5_years = 2000  # First year of 5-year interval data
 last_model_year_5_years = 2020   # Last year of 5-year interval data
 
-# Number of years in interval
-interval_duration = 5    #TODO: calculate programmatically in numba function rather than coded here-- for greater flexibility.
-interval_end_years_5_years = list(range(first_model_year_5_years, last_model_year_5_years + 1, interval_duration))[1:]  # 2005, 2010, 2015, 2020
+# Number of years in five-year interval
+five_year_interval_duration = 5
+interval_end_years_5_years = list(range(first_model_year_5_years, last_model_year_5_years + 1, five_year_interval_duration))[1:]  # 2005, 2010, 2015, 2020
 
 # Number of years of removals in a tree cover gain pixel
-NT_T_gain_year_count_default = math.ceil(interval_duration / 2)
+NT_T_gain_year_count_default = math.ceil(five_year_interval_duration / 2)
 
 ### Model years in annual series
 first_model_year_annual = 2015  # First year of annual data
@@ -280,8 +280,8 @@ climate_zone_pattern = "climate_zone_processed"
 precipitation_dir = f"{full_bucket_prefix}/climate/carbon_model/inputs_for_carbon_pools/processed/precip/20190418/"
 precipitation_pattern = "precip_mm_annual"
 
-r_s_ratio_dir = f"{full_bucket_prefix}/climate/carbon_model/BGB_AGB_ratio/processed/20230216/"
-r_s_ratio_pattern = "BGB_AGB_ratio"
+r_s_ratio_non_mang_dir = f"{full_bucket_prefix}/climate/carbon_model/BGB_AGB_ratio/processed/20230216/"
+r_s_ratio_non_mang_pattern = "BGB_AGB_ratio_non_mang"
 
 continent_ecozone_dir = f"{full_bucket_prefix}/climate/carbon_model/fao_ecozones/ecozone_continent/20190116/processed/"
 continent_ecozone_pattern = "fao_ecozones_continents_processed"

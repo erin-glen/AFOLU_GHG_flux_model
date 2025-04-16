@@ -98,7 +98,6 @@ def compile_worker_logs(no_log, cluster, stage, start_time_str, logger):
     if no_log:
         return
 
-    #TODO Create log folder if it doesn't exist already
     worker_log_name = f"{cn.combined_log}_workers_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
     worker_log_local_path = f"{cn.local_log_path}{worker_log_name}"
 

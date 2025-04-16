@@ -323,6 +323,7 @@ def timestr():
 
 # Connects to a Coiled cluster of a specified name if the local flag isn't on.
 # Does not create a Coiled cluster if the specified cluster name doesn't exist (contrary to default Coiled behavior).
+# Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67fff45a-ec78-800a-83e1-8b3618a7e09a
 def connect_to_Coiled_cluster(cluster_name, run_local):
 
     # If local run flag is on, doesn't return a cluster or client
@@ -332,31 +333,19 @@ def connect_to_Coiled_cluster(cluster_name, run_local):
 
     # If no local run flag, it tries to attach to the named cluster
     else:
-        try:
-            # Gets info on all Coiled clusters (including closed ones)
-            all_clusters = coiled.list_clusters()
+        # Gets info on all Coiled clusters (including terminated ones)
+        all_clusters = coiled.list_clusters()
 
-            # Filters to clusters that are running and match the name
-            running_clusters = {
-                cluster["name"]: cluster
-                for cluster in all_clusters
-                if cluster.get("status") == "RUNNING"
-            }
+        # Iterates through clusters and identifies the running one of the correct name to connect to
+        for cluster in all_clusters:
+            if cluster.get("name") == cluster_name and cluster.get("current_state", {}).get("state") == 'ready':
+                print(f"Connecting to running cluster '{cluster_name}'.")
+                cluster = coiled.Cluster(name=cluster_name)
+                client = Client(cluster)
+                return cluster, client, run_local
 
-            if cluster_name not in running_clusters:
-                print(f"Cluster '{cluster_name}' is not running. Not connecting.")
-                run_local = True
-                return None, None, run_local
-
-            print(f"Connecting to running cluster '{cluster_name}'.")
-            cluster = coiled.Cluster(name=cluster_name)
-            client = Client(cluster)
-            return cluster, client, run_local
-
-        except Exception as e:
-            print(f"Error while trying to connect to Coiled cluster: {e}")
-            run_local = True
-            return None, None, run_local
+        print(f"Cluster named {cluster_name} not found. Running locally.")
+        return None, None, run_local
 
 
 #TODO: @Mel - find usages, change to using create_cluster.py instead. delete here after.
@@ -510,8 +499,8 @@ def get_interval_info(end_year, main_logger, start_year):
 
     if start_year == 2000 and end_year == 2020:
         interval_type = cn.intervals_five_years
-        interval_year_diff = cn.interval_duration - 1  # -1 because the interval really starts one year after the end of the previous interval
-        interval_length = cn.interval_duration
+        interval_year_diff = cn.five_year_interval_duration - 1  # -1 because the interval really starts one year after the end of the previous interval
+        interval_length = cn.five_year_interval_duration
         output_years = cn.interval_end_years_5_years
     elif start_year == 2015 and end_year == 2023:
         interval_type = cn.intervals_annual
@@ -520,8 +509,8 @@ def get_interval_info(end_year, main_logger, start_year):
         output_years = cn.interval_end_years_annual
     elif start_year == 2000 and end_year == 2023:  # Hybrid model (2000-2023)
         interval_type = cn.intervals_hybrid
-        interval_year_diff = [cn.interval_duration - 1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
-        interval_length = [cn.interval_duration] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
+        interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
+        interval_length = [cn.five_year_interval_duration] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
         # intervals = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]
         output_years = cn.interval_end_years_5_years[:-1] + cn.interval_end_years_annual
     else:

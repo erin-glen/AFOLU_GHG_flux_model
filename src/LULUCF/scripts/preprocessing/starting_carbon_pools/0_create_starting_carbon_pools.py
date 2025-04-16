@@ -63,7 +63,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     # print(in_dict_float32)
 
     # Input blocks
-    r_s_ratio_block = in_dict_float32[cn.r_s_ratio_pattern]
+    r_s_ratio_block = in_dict_float32[cn.r_s_ratio_non_mang_pattern]
     elevation_block = in_dict_int16[cn.elevation_pattern]
     climate_domain_block = in_dict_int16[cn.climate_domain_pattern]
     precipitation_block = in_dict_int32[cn.precipitation_pattern]
@@ -82,7 +82,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
         agb_non_mang_block = in_dict_uint16[cn.agb_2015_pattern].astype(np.int16)
         mangrove_agb_block = in_dict_float32[cn.mangrove_agb_2000_pattern]
     else:
-        out_dict_float32[f"{cn.agc_dens_pattern}_{year}"] = np.full(in_dict_float32[cn.r_s_ratio_pattern].shape, 9999).astype('float32')
+        out_dict_float32[f"{cn.agc_dens_pattern}_{year}"] = np.full(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape, 9999).astype('float32')
         return out_dict_float32
 
     mangrove_in_chunk = True  # Flag for whether chunk has mangrove in it
@@ -97,10 +97,10 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
     # Output blocks
     # Need to specify the output datatype or it will default to float32
-    agc_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_pattern].shape).astype('float32')
-    bgc_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_pattern].shape).astype('float32')
-    deadwood_c_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_pattern].shape).astype('float32')
-    litter_c_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_pattern].shape).astype('float32')
+    agc_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+    bgc_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+    deadwood_c_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+    litter_c_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
 
     # Iterates through all pixels in the chunk
     for row in range(continent_ecozone_block.shape[0]):
@@ -201,7 +201,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
 # All steps for creating starting non-soil carbon pools in a chunk: download chunks, calculate carbon densities, upload to s3
 def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, download_dict_with_data_types, year,
-                                           fishnet_iso_df, is_final, no_upload, output_folders, stage):
+                                           is_final, no_upload, output_folders, stage):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -441,7 +441,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         cn.elevation_pattern: f"{cn.elevation_dir}{sample_tile_id}_{cn.elevation_pattern}.tif",
         cn.climate_domain_pattern: f"{cn.climate_domain_dir}{sample_tile_id}_{cn.climate_domain_pattern}.tif",
         cn.precipitation_pattern: f"{cn.precipitation_dir}{sample_tile_id}_{cn.precipitation_pattern}.tif",
-        cn.r_s_ratio_pattern: f"{cn.r_s_ratio_dir}{sample_tile_id}_{cn.r_s_ratio_pattern}.tif",
+        cn.r_s_ratio_non_mang_pattern: f"{cn.r_s_ratio_non_mang_dir}{sample_tile_id}_{cn.r_s_ratio_non_mang_pattern}.tif",
         cn.continent_ecozone_pattern: f"{cn.continent_ecozone_dir}{sample_tile_id}_{cn.continent_ecozone_pattern}.tif"
     }
 
@@ -497,7 +497,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     C_pool_1x1_deg_delayed_results = [dask.delayed(create_and_upload_starting_C_densities)
                        (chunk, mangrove_C_ratio_array, download_dict_with_data_types, year,
-                        fishnet_iso_df, is_final, no_upload, output_dir_list, stage)
+                        is_final, no_upload, output_dir_list, stage)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results
@@ -524,7 +524,6 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         n_workers = len(workers)
 
         # Reduces number of workers in the cluster down to 1 if there is more than 10
-        # TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 

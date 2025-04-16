@@ -362,7 +362,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         n_workers = len(workers)
 
         # Reduces number of workers in the cluster down to 1 if there is more than 10
-        # TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 
