@@ -1142,3 +1142,34 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
 
     return state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out, gain_year_count_pre_dist, forest_age_interval_end
 
+
+# Gross and net fluxes and ending carbon stocks for non-tree to cropland gain
+# Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
+# Applies to 5-year intervals and annual intervals.
+# Cropland removal factor is one-time removals, so it isn't any different in 5-year vs. annual intervals.
+@jit(nopython=True)
+def calc_NT_cropland_gain(agc_rf, c_dens_in):
+
+    # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
+    agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
+
+    # Step 1: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
+    agc_gross_removals_out = float(agc_rf * -1)  #float() necessary for Numba typing
+    bgc_gross_removals_out = 0  #float() necessary for Numba typing
+    deadwood_c_gross_removals_out = 0
+    litter_c_gross_removals_out = 0
+
+    # Step 2: Calculates ending carbon densities by carbon pool (Mg C/ha)
+    agc_dens_out = agc_dens_in - agc_gross_removals_out
+    bgc_dens_out = bgc_dens_in
+    deadwood_c_dens_out = deadwood_c_dens_in
+    litter_c_dens_out = litter_c_dens_in
+
+    # Step 3: Prepares outputs
+    # Consolidates all gross fluxes from all carbon pools into arrays to reduce the number of arguments returned to the decision tree
+    # Must specify float32 because numba is quite particular about datatypes
+    c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')  # Mg C/ha/interval
+    c_dens_out = np.array([agc_dens_out, bgc_dens_out, deadwood_c_dens_out, litter_c_dens_out]).astype('float32')  # Mg C/ha
+    c_gross_emissions_out = np.array([0, 0, 0, 0]).astype('float32')  # Specified for completeness
+
+    return c_gross_emissions_out, c_gross_removals_out, c_dens_out

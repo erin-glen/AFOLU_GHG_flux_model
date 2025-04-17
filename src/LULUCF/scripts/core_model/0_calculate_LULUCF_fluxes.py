@@ -573,7 +573,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 if interval_type == cn.intervals_annual or interval_type == cn.intervals_five_years:
 
                     ### Tree gain
-                    if tall_veg_gain:  # Non-tree converted to tree (1)    #TODO: Include mangrove exception.
+                    if tall_veg_gain:  # Non-tree converted to tree (1)    #TODO: @Mel Include mangrove exception.
                         node = nu.accrete_node(node, 1)
                         if all_planted_trees:  # New planted trees (11)
                             node = nu.accrete_node(node, 1)
@@ -605,7 +605,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     nu.calc_NT_T(interval_type, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio=0, litter_c_ratio=0))
 
                     ### Tree loss
-                    elif tall_veg_loss:  # Tree converted to non-tree (2)    #TODO: Include mangrove exception.
+                    elif tall_veg_loss:  # Tree converted to non-tree (2)    #TODO: @Mel Include mangrove exception.
                         node = nu.accrete_node(node, 2)
                         if all_planted_trees:  # Full loss of planted trees (21)
                             node = nu.accrete_node(node, 1)
@@ -825,7 +825,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     deadwood_c_ratio=0, litter_c_ratio=0)
 
                     ### Trees remaining trees
-                    elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: Include mangrove exception.
+                    elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: @Mel Include mangrove exception.
                         node = nu.accrete_node(node, 3)
                         if (not all_planted_trees) and year_before_converted_to_oil_palm: # Non-planted trees converted to oil palm in the next interval (31->311/312)
                             node = nu.accrete_node(node, 1)
@@ -1062,6 +1062,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
+
+                    ### Cropland gain   ##TODO: @Mel Include mangrove exception.
+                    elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland):
+                        state_out = nu.accrete_node(node, 4)
+                        RF_AGC_final = cn.cropland_rf
+                        c_gross_emissions_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(RF_AGC_final, c_dens_in_NT_T)
+
 
                     # When decision trees above do not apply
                     else:
