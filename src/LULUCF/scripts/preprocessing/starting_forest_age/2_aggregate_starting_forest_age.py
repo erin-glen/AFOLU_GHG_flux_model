@@ -1,7 +1,7 @@
 """
 Run from src/LULUCF/
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts --first_chunks 2 --run_local
+python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts --first_10x10s_to_process 2 --run_local
 
 python -m scripts.utilities.create_cluster -n 33 -t 7 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts
@@ -25,7 +25,7 @@ from ...utilities import resize_cluster
 
 
 def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload= False,
-         first_chunks=None, log_note=None):
+         first_10x10s_to_process=None, log_note=None):
 
     ### Step 1: Preparation
 
@@ -57,8 +57,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
 
     # For testing. Limits the number of output rasters to that given in the command line
-    if first_chunks:
-        list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:first_chunks]
+    if first_10x10s_to_process:
+        list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:first_10x10s_to_process]
 
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[338:339]  # To limit it to a specific 10x10 deg tile
 
@@ -133,7 +133,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Aggregate starting forest age to 10x10 deg geotifs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
+    parser.add_argument('-f', '--first_10x10s_to_process', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
@@ -144,7 +144,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
-    first_chunks = args.first_chunks
+    first_10x10s_to_process = args.first_10x10s_to_process
     log_note = args.log_note
 
     run_local = args.run_local
@@ -152,5 +152,5 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, run_local, no_stats, no_log, no_upload, first_chunks=first_chunks, log_note=log_note)
+    main(cluster_name, run_local, no_stats, no_log, no_upload, first_10x10s_to_process=first_10x10s_to_process, log_note=log_note)
 

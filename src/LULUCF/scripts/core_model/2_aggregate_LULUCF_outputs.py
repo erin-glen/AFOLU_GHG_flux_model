@@ -6,11 +6,11 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m scripts.core_model.2_aggregate_LULUCF_outputs --no_upload -yr 2015 2023 --first_chunks 2 --run_date YYYYMMDD
+python -m scripts.core_model.2_aggregate_LULUCF_outputs -yr 2015 2023 --first_10x10s_to_process 2 --run_date YYYYMMDD
 
 Coiled test:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
-python -m scripts.core_model.2_aggregate_LULUCF_outputs -cn LULUCF_model -yr 2015 2023 --first_chunks 2 --run_date YYYYMMDD
+python -m scripts.core_model.2_aggregate_LULUCF_outputs -cn LULUCF_model -yr 2015 2023 --first_10x10s_to_process 2 --run_date YYYYMMDD
 
 Full Coiled run:
 python -m scripts.utilities.create_cluster -n 50
@@ -36,7 +36,7 @@ from ..utilities import resize_cluster
 
 
 def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         first_chunks=None, log_note=None):
+         first_10x10s_to_process=None, log_note=None):
 
 
     ### Step 1: Preparation
@@ -73,7 +73,6 @@ def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no
     # and the model output years for the model run
     interval_type, interval_year_diff, interval_length, interval_end_years = uu.get_interval_info(end_year, main_logger, start_year)
 
-
     # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
     # Instead, it creates a list of input folders, from which a download dictionary is created for each chunk (in the chunk-level function).
     # It's a little simpler this way. Since the datatypes of the inputs don't need to be specified in advance for this script
@@ -81,15 +80,15 @@ def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no
     # just once on the scheduler, as is more efficient for scripts that use numba.
     # Creates a list of input directories used in summative output creation based on specifics of the model run
 
-    # Want to aggregate the core LULUCF outputs and the summative ones
+    # Combine the core LULUCF outputs and the summative ones into a single list that will be used for 1x1 deg aggregation
     LULUCF_aggreg_dirs = cn.LULUCF_core_output_dirs + cn.LULUCF_summative_output_dirs
 
     output_dir_list = uu.create_output_dir_name_list(LULUCF_aggreg_dirs, interval_type, start_year,'4000',
                                                      model_type, interval_end_years, interval_year_diff, run_date)
 
-    # For testing- first folder only, so contents of all folders don't need to be listed
-    output_dir_list = output_dir_list[0:1]
-    print(output_dir_list)
+    # # For testing- first folder only, so contents of all folders don't need to be listed
+    # output_dir_list = output_dir_list[0:1]
+    # print(output_dir_list)
 
     main_logger.info(f"There are {len(output_dir_list)} folders to aggregate to 10x10s")
 
@@ -100,12 +99,12 @@ def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no
     # These are the basis for the aggregation tasks.
     list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
 
-    # For testing. Limits the number of output rasters to that given in the command line
-    if first_chunks:
-        list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:first_chunks]
+    # For testing. Limits the number of output 10x10 deg rasters to that given in the command line
+    if first_10x10s_to_process:
+        list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:first_10x10s_to_process]
 
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[338:339]  # To limit it to a specific tile
-    print(list_of_s3_name_dicts_total)
+    # print(list_of_s3_name_dicts_total)
 
     # Extracts and lists unique tile_ids, the target for aggregation
     tile_ids = set()
@@ -129,7 +128,6 @@ def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no
 
     main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
 
-    # TODO seems to create the 10x10 but nothing uploaded to s3, at least in local run
     # Each task is a single 10x10 deg aggregated geotif
     delayed_results_10x10_deg = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
                                         for s3_name_dict in list_of_s3_name_dicts_total]
@@ -181,7 +179,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-rd', '--run_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
-    parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
+    parser.add_argument('-f', '--first_10x10s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
@@ -194,7 +192,7 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     run_date = args.run_date
     year_range = args.year_range
-    first_chunks = args.first_chunks
+    first_10x10s_to_process = args.first_10x10s_to_process
     log_note = args.log_note
 
     run_local = args.run_local
@@ -202,4 +200,4 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, year_range, run_date, run_local, no_stats, no_log, no_upload, first_chunks=first_chunks, log_note=log_note)
+    main(cluster_name, year_range, run_date, run_local, no_stats, no_log, no_upload, first_10x10s_to_process=first_10x10s_to_process, log_note=log_note)

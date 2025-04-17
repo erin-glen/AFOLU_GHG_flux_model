@@ -2,11 +2,11 @@
 Run from src/LULUCF/
 
 Local test:
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools --year 2015 --first_chunks 2 --run_date YYYYMMDD
+python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools --year 2015 --first_10x10s_to_process 2 --run_date YYYYMMDD
 
 Coiled test:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015 --first_chunks 2 --run_date YYYYMMDD
+python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015 --first_10x10s_to_process 2 --run_date YYYYMMDD
 
 Full Coiled run:
 python -m scripts.utilities.create_cluster -n 40 -t 5 -cn LULUCF_model
@@ -29,7 +29,7 @@ from ...utilities import resize_cluster
 
 
 def main(cluster_name, year, run_date, run_local=False, no_stats=False, no_log=False, no_upload= False,
-         first_chunks=None, log_note=None):
+         first_10x10s_to_process=None, log_note=None):
 
     ### Step 1: Preparation
 
@@ -71,8 +71,8 @@ def main(cluster_name, year, run_date, run_local=False, no_stats=False, no_log=F
     list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
 
     # For testing. Limits the number of output rasters to that given in the command line
-    if first_chunks:
-        list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:first_chunks]
+    if first_10x10s_to_process:
+        list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:first_10x10s_to_process]
 
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[338:339]  # To limit it to a specific tile
 
@@ -147,7 +147,7 @@ def main(cluster_name, year, run_date, run_local=False, no_stats=False, no_log=F
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create carbon pools in 2000.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
+    parser.add_argument('-f', '--first_10x10s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('--year', type=int, required=True, help='Year for carbon pools')
     parser.add_argument('--run_date', required=True, help='Date YYYYMMDD of carbon pool 1x1s to process')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
@@ -160,7 +160,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
-    first_chunks = args.first_chunks
+    first_10x10s_to_process = args.first_10x10s_to_process
     year = args.year
     run_date = args.run_date
     log_note = args.log_note
@@ -170,5 +170,5 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, year, run_date, run_local, no_stats, no_log, no_upload, first_chunks=first_chunks, log_note=log_note)
+    main(cluster_name, year, run_date, run_local, no_stats, no_log, no_upload, first_10x10s_to_process=first_10x10s_to_process, log_note=log_note)
 
