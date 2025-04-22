@@ -1892,7 +1892,7 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
 
     source_vrt_path = source_vrt_path.replace("s3://", "/vsis3/")  #VRT has to be accessed using /vsis3/
 
-    lu.print_and_log(f"Creating {filename}: {timestr()}...", True, logger_worker)
+    lu.print_and_log(f"Creating {filename}: {timestr()}...", False, logger_worker)
 
     # Check that pixel window arguments are given if tiled = True
     if tiled and not (x_pixel_window and y_pixel_window):

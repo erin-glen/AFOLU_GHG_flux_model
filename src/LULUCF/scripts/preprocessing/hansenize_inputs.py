@@ -1,7 +1,7 @@
 """
 Run from src/LULUCF
 
-Coiled test area with no data:
+Coiled test area without land (i.e. no data):
 python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 1
 python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p secondary_natural_forest -bb -120 30 -110 40 -cs 10
 
@@ -54,38 +54,34 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
 
     # Add Robinson et al. secondary natural forest growth rates
     if 'secondary_natural_forest' in process:
-        # download_upload_dictionary["secondary_natural_forest_0_5"] = {
-        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
-        #     'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
-        #     'vrt': f"/tmp/secondary_natural_forest_0_5.vrt",
-        #     'processed_dir': cn.secondary_natural_forest_0_5_processed_dir,
-        #     'processed_pattern': cn.secondary_natural_forest_0_5_pattern
-        # }
-        #
-        # download_upload_dictionary["secondary_natural_forest_6_10"] = {
-        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
-        #     'raw_pattern': cn.secondary_natural_forest_6_10_pattern,
-        #     'vrt': f"/tmp/secondary_natural_forest_6_10.vrt",
-        #     'processed_dir': cn.secondary_natural_forest_6_10_processed_dir,
-        #     'processed_pattern': cn.secondary_natural_forest_6_10_pattern
-        # }
-        #
-        # download_upload_dictionary["secondary_natural_forest_11_15"] = {
-        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
-        #     'raw_pattern': cn.secondary_natural_forest_11_15_pattern,
-        #     'vrt': f"/tmp/secondary_natural_forest_11_15.vrt",
-        #     'processed_dir': cn.secondary_natural_forest_11_15_processed_dir,
-        #     'processed_pattern': cn.secondary_natural_forest_11_15_pattern
-        # }
-        #
-        # download_upload_dictionary["secondary_natural_forest_16_20"] = {
-        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
-        #     'raw_pattern': cn.secondary_natural_forest_16_20_pattern,
-        #     'vrt': f"/tmp/secondary_natural_forest_16_20.vrt",
-        #     'processed_dir': cn.secondary_natural_forest_16_20_processed_dir,
-        #     'processed_pattern': cn.secondary_natural_forest_16_20_pattern
-        # }
-
+        download_upload_dictionary["secondary_natural_forest_0_5"] = {
+            'raw_dir': cn.secondary_natural_forest_raw_dir,
+            'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
+            'vrt': f"/tmp/secondary_natural_forest_0_5.vrt",
+            'processed_dir': cn.secondary_natural_forest_0_5_processed_dir,
+            'processed_pattern': cn.secondary_natural_forest_0_5_pattern
+        }
+        download_upload_dictionary["secondary_natural_forest_6_10"] = {
+            'raw_dir': cn.secondary_natural_forest_raw_dir,
+            'raw_pattern': cn.secondary_natural_forest_6_10_pattern,
+            'vrt': f"/tmp/secondary_natural_forest_6_10.vrt",
+            'processed_dir': cn.secondary_natural_forest_6_10_processed_dir,
+            'processed_pattern': cn.secondary_natural_forest_6_10_pattern
+        }
+        download_upload_dictionary["secondary_natural_forest_11_15"] = {
+            'raw_dir': cn.secondary_natural_forest_raw_dir,
+            'raw_pattern': cn.secondary_natural_forest_11_15_pattern,
+            'vrt': f"/tmp/secondary_natural_forest_11_15.vrt",
+            'processed_dir': cn.secondary_natural_forest_11_15_processed_dir,
+            'processed_pattern': cn.secondary_natural_forest_11_15_pattern
+        }
+        download_upload_dictionary["secondary_natural_forest_16_20"] = {
+            'raw_dir': cn.secondary_natural_forest_raw_dir,
+            'raw_pattern': cn.secondary_natural_forest_16_20_pattern,
+            'vrt': f"/tmp/secondary_natural_forest_16_20.vrt",
+            'processed_dir': cn.secondary_natural_forest_16_20_processed_dir,
+            'processed_pattern': cn.secondary_natural_forest_16_20_pattern
+        }
         download_upload_dictionary["secondary_natural_forest_21_40"] = {
             'raw_dir': cn.secondary_natural_forest_raw_dir,
             'raw_pattern': cn.secondary_natural_forest_21_40_pattern,
@@ -114,14 +110,13 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
             'processed_dir': cn.secondary_natural_forest_81_100_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_81_100_pattern
         }
-
-        # download_upload_dictionary["secondary_natural_forest_21_100"] = {
-        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
-        #     'raw_pattern': cn.secondary_natural_forest_21_100_pattern,
-        #     'vrt': f"/tmp/secondary_natural_forest_21_100.vrt",
-        #     'processed_dir': cn.secondary_natural_forest_21_100_processed_dir,
-        #     'processed_pattern': cn.secondary_natural_forest_21_100_pattern
-        # }
+        download_upload_dictionary["secondary_natural_forest_21_100"] = {
+            'raw_dir': cn.secondary_natural_forest_raw_dir,
+            'raw_pattern': cn.secondary_natural_forest_21_100_pattern,
+            'vrt': f"/tmp/secondary_natural_forest_21_100.vrt",
+            'processed_dir': cn.secondary_natural_forest_21_100_processed_dir,
+            'processed_pattern': cn.secondary_natural_forest_21_100_pattern
+        }
 
     if 'AGB2015' in process:
         download_upload_dictionary["AGB2015"] = {
@@ -132,6 +127,14 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
             'processed_pattern': cn.agb_2015_pattern
         }
 
+    if 'climate_zone' in process:
+        download_upload_dictionary["climate_zone"] = {
+            'raw_dir': cn.climate_zone_raw_dir,
+            'raw_pattern': cn.climate_zone_raw_pattern,
+            'vrt': f"/tmp/climate_zone.vrt",
+            'processed_dir': cn.climate_zone_processed_dir,
+            'processed_pattern': cn.climate_zone_pattern
+        }
 
     # if 'cropland_fertilizer' in process:
     #     download_upload_dictionary[""] = {
@@ -321,7 +324,7 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
 
             tile_id = uu.xy_to_tile_id(chunk[0], chunk[3])  # tile_id in YYN/S_XXXE/W
 
-            output_filename = f"{tile_id}_{items['processed_pattern']}"
+            output_filename = f"{tile_id}_{items['processed_pattern']}.tif"
             # print(output_filename)
             output_tile_s3 = f"{items['processed_dir']}{output_filename}"
             # print(output_tile_s3)
@@ -393,7 +396,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Hansenize AFOLU model raster inputs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-ct', '--cluster_type', action='store', help='Run locally with Dask (local), test with 1 worker in coiled (test), or run with full coiled cluster (full)')
-    parser.add_argument('-p', '--processes', action='store', nargs='+', help='What datasets do you want to hansenize? Options: drivers, secondary_natural_forest, AGB2015')
+    parser.add_argument('-p', '--processes', action='store', nargs='+', help='What datasets do you want to hansenize?')
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 
