@@ -13,7 +13,7 @@ python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3
 
 Full run:
 python -m scripts.utilities.create_cluster -n 200
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ --run_date YYYYMMDD
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ --run_date YYYYMMDD  --log_note "This is a full run."
 """
 
 import argparse
@@ -573,7 +573,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 if interval_type == cn.intervals_annual or interval_type == cn.intervals_five_years:
 
                     ### Tree gain
-                    if tall_veg_gain:  # Non-tree converted to tree (1)    #TODO: @Mel Include mangrove exception.
+                    #TODO @Mel maybe include mangroves as the first if and change if tall_veg_gain: to elif tall_veg_gain:
+                    # That way, the mangrove decision tree gets priority.
+
+                    if tall_veg_gain:  # Non-tree converted to tree (1)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
                         node = nu.accrete_node(node, 1)
                         if all_planted_trees:  # New planted trees (11)
                             node = nu.accrete_node(node, 1)
@@ -605,7 +608,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     nu.calc_NT_T(interval_type, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio=0, litter_c_ratio=0))
 
                     ### Tree loss
-                    elif tall_veg_loss:  # Tree converted to non-tree (2)    #TODO: @Mel Include mangrove exception.
+                    elif tall_veg_loss:  # Tree converted to non-tree (2)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
                         node = nu.accrete_node(node, 2)
                         if all_planted_trees:  # Full loss of planted trees (21)
                             node = nu.accrete_node(node, 1)
@@ -825,7 +828,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     deadwood_c_ratio=0, litter_c_ratio=0)
 
                     ### Trees remaining trees
-                    elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: @Mel Include mangrove exception.
+                    elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
                         node = nu.accrete_node(node, 3)
                         if (not all_planted_trees) and year_before_converted_to_oil_palm: # Non-planted trees converted to oil palm in the next interval (31->311/312)
                             node = nu.accrete_node(node, 1)
@@ -1063,11 +1066,23 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
 
-                    ### Cropland gain   ##TODO: @Mel Include mangrove exception.
-                    elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland):
+                    ### Non-tree to cropland gain (without tall vegetation)
+                    elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
                         state_out = nu.accrete_node(node, 4)
                         RF_AGC_final = cn.cropland_rf
-                        c_gross_emissions_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(RF_AGC_final, c_dens_in_NT_T)
+                        RF_BGC_final = 0
+                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(RF_AGC_final, RF_BGC_final, c_dens_in_NT_T)
+
+                    ### Cropland converted to non-cropland (without tall vegetation)
+                    elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                        state_out = nu.accrete_node(node, 5)
+                        c_pools_no_fire = cn.biomass_emissions_only
+                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_cropland_non_cropland(c_dens_in, c_pools_no_fire)
+
+                    ### Cropland remaining cropland (without tall vegetation)
+                    elif (LC_prev == cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                        state_out = nu.accrete_node(node, 6)
+                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_cropland_cropland(c_dens_in)
 
 
                     # When decision trees above do not apply
@@ -1179,7 +1194,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
             out_dict_uint8[f"{cn.burned_in_curr_interval}_{year_range}"] = burned_in_curr_interval_block.copy()
 
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
-
 
 
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3

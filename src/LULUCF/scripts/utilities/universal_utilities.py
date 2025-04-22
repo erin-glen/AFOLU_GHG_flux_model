@@ -548,7 +548,7 @@ def create_chunk_list(bounding_box, use_shapefile, chunk_size_deg, first_chunks,
         chunk_size_pixels = int(cn.full_raster_dims * 1/10)
 
         main_logger.info("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
-        main_logger.info(f"Chunk source: 1x1 degree tile index shapefile {cn.fishnet_1x1deg_all_land_s3_uri}{cn.fishnet_1x1deg_all_land_name}")
+        main_logger.info(f"Chunk source: 1x1 degree tile index shapefile {cn.fishnet_1x1deg_uri}")
         main_logger.info(f"Chunk size: 1 degree, {chunk_size_pixels} pixels")
 
         # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
@@ -1279,7 +1279,7 @@ def compile_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger):
 
     # Reads the shapefile from S3 to extract "chunk_id" and "iso" fields
     # Based on https://chatgpt.com/share/e/6744de08-6b64-800a-b8c4-6a20833f7e3a
-    gdf = gpd.read_file(cn.fishnet_1x1deg_all_land_s3_uri)
+    gdf = gpd.read_file(cn.fishnet_1x1deg_uri)
 
     # Creates a DataFrame with "chunk_id" and "iso" fields
     fishnet_shapefile_df = gdf[['chunk_id', 'iso']]
@@ -1606,7 +1606,7 @@ def strip_and_extract_years(key):
 def fishnet_with_GADM_iso():
 
     # Reads the 1x1 deg fishnet with GADM3.6 iso joined from S3 to extract "chunk_id" and "iso" fields
-    gdf = gpd.read_file(cn.fishnet_1x1deg_all_land_s3_uri)
+    gdf = gpd.read_file(cn.fishnet_1x1deg_uri)
 
     # Creates a DataFrame of the 1x1def fishnet with "chunk_id" and "iso" fields
     fishnet_df = gdf[['chunk_id', 'iso']]

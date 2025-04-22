@@ -182,8 +182,13 @@ local_chunk_stats_path = "chunk_stats/"
 s3_chunk_stats_path = "climate/AFOLU_flux_model/LULUCF/chunk_stats/"
 
 # 1x1 deg fishnet between 80N and 60N, 180W and 180E that intersects GADM3.6 and has GADM iso joined to it
-fishnet_1x1deg_all_land_s3_uri = f"{AFOLU_path}fishnet_1x1deg/20241125/"
+fishnet_1x1deg_s3_dir = f"{AFOLU_path}fishnet_1x1deg/20241125/"
+
 fishnet_1x1deg_all_land_name = "fishnet_GADM36_1x1deg__spatial_join_intersect__20241125.shp"
+fishnet_1x1deg_Americas_name = "fishnet_GADM36_1x1deg__spatial_join_intersect__Americas__20250421.shp"
+fishnet_1x1deg_SEAsia_name = "fishnet_GADM36_1x1deg__spatial_join_intersect__SEAsia__20250421.shp"
+
+fishnet_1x1deg_uri = f"{fishnet_1x1deg_s3_dir}{fishnet_1x1deg_all_land_name}"
 
 progress_tracking_path = "climate/AFOLU_flux_model/task_progress_txts/"
 
