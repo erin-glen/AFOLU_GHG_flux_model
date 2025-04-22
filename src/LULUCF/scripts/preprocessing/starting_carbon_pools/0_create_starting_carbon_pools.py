@@ -70,7 +70,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     continent_ecozone_block = in_dict_int16[cn.continent_ecozone_pattern]
 
     # Gets a fallback value for continent_ecozone for the chunk in case some pixels don't have one
-    continent_ecozone_fallback = nu.backup_continent_ecozone(continent_ecozone_block)
+    continent_ecozone_fallback = nu.fallback_conteco_climzone_value(continent_ecozone_block)
 
     # AGB block sources (mangrove and non-mangrove) depend on the starting year
     # Numba can't handle two different possible datatypes for agb_non_mang_block,

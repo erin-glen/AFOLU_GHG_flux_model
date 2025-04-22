@@ -27,27 +27,27 @@ def pad_to_6_digits(state_out, max_digits_state_out):
 
     return np.uint32(state_out)
 
-# Calculates a backup continent-ecozone value in case pixels don't have one.
+# Calculates a backup continent-ecozone value or climate zone value in case pixels don't have one.
 # There are many ways that are more efficient or at least succinct to calculate the mode of an array in Python,
 # but they don't work with Numba. So, I'm going with this.
 # https://chatgpt.com/share/e/67bf7958-351c-800a-bd00-259213586471
 @jit(nopython=True)
-def backup_continent_ecozone(continent_ecozone_block):
+def fallback_conteco_climzone_value(conteco_or_climzone_block, fallback_value):
 
     # Flattens 2D array to 1D for counting
-    continent_ecozone_block_flat = continent_ecozone_block.ravel()
+    conteco_or_climzone_block_flat = conteco_or_climzone_block.ravel()
 
     # Removes 0s so that the mode of the remaining pixels can be determined
-    non_zero_values = continent_ecozone_block_flat[continent_ecozone_block_flat > 0]
+    non_zero_values = conteco_or_climzone_block_flat[conteco_or_climzone_block_flat > 0]
     counts = np.bincount(non_zero_values)  # Counts the number of pixels with that value
     # print("Counts:", counts)
     if len(counts) == 0:   # If the only values in the chunk are 0 -> there are no counts of non-zero pixels
-        continent_ecozone_fallback = 2020  # Sets an arbitrary continent-ecozone value. This is a real edge case.
+        conteco_or_climzone_fallback = fallback_value  # Sets an arbitrary continent-ecozone value. This is a real edge case.
     else:   # Otherwise, there are non-zero values in the chunk -> uses the most common non-zero value
-        continent_ecozone_fallback = np.argmax(counts)
+        conteco_or_climzone_fallback = np.argmax(counts)
 
-    # print("Fallback 1 continent_ecozone for chunk:", continent_ecozone_fallback)
-    return continent_ecozone_fallback
+    # print("Fallback 1 value for chunk:", conteco_or_climzone_fallback)
+    return conteco_or_climzone_fallback
 
 
 # Creates a separate dictionary for each chunk datatype so that they can be passed to Numba as separate arguments.
@@ -1142,37 +1142,76 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
 
     return state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out, gain_year_count_pre_dist, forest_age_interval_end
 
-
-# Gross and net fluxes and ending carbon stocks for non-tree to cropland gain
-# Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
-# Applies to 5-year intervals and annual intervals.
-# Cropland removal factor is one-time removals, so it isn't any different in 5-year vs. annual intervals.
-@jit(nopython=True)
-def calc_NT_cropland_gain(agc_rf, bgc_rf, c_dens_in):
-
-    # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
-    agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
-
-    # Step 1: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
-    agc_gross_removals_out = float(agc_rf * -1)  #float() necessary for Numba typing
-    bgc_gross_removals_out = float(bgc_rf * -1)  #float() necessary for Numba typing. Should be 0, but equation here just for flexibility.
-    deadwood_c_gross_removals_out = 0  # No removals to deadwood
-    litter_c_gross_removals_out = 0  # No removals to litter
-
-    # Step 2: Calculates ending carbon densities by carbon pool (Mg C/ha)
-    agc_dens_out = agc_dens_in - agc_gross_removals_out
-    bgc_dens_out = bgc_dens_in - bgc_gross_removals_out
-    deadwood_c_dens_out = deadwood_c_dens_in  # No change to deadwood C
-    litter_c_dens_out = litter_c_dens_in  # No change to litter C
-
-    # Step 3: Prepares outputs
-    # Consolidates all gross fluxes from all carbon pools into arrays to reduce the number of arguments returned to the decision tree
-    # Must specify float32 because numba is quite particular about datatypes
-    c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')  # Mg C/ha/interval
-    c_dens_out = np.array([agc_dens_out, bgc_dens_out, deadwood_c_dens_out, litter_c_dens_out]).astype('float32')  # Mg C/ha
-    c_gross_emissions_out = np.array([0, 0, 0, 0]).astype('float32')  # Specified for completeness
-
-    return c_gross_emissions_out, c_gross_removals_out, c_dens_out
+#
+# # Gross and net fluxes and ending carbon stocks for non-tree to cropland gain
+# # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
+# # Applies to 5-year intervals and annual intervals.
+# # Cropland removal factor is one-time removals, so it isn't any different in 5-year vs. annual intervals.
+# @jit(nopython=True)
+# def calc_NT_cropland_gain(agc_rf, bgc_rf, c_dens_in):
+#
+#     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
+#     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
+#
+#     # Step 1: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
+#     agc_gross_removals_out = float(agc_rf * -1)  #float() necessary for Numba typing
+#     bgc_gross_removals_out = float(bgc_rf * -1)  #float() necessary for Numba typing. Should be 0, but equation here just for flexibility.
+#     deadwood_c_gross_removals_out = 0  # No removals to deadwood
+#     litter_c_gross_removals_out = 0  # No removals to litter
+#
+#     # Step 2: Calculates ending carbon densities by carbon pool (Mg C/ha)
+#     agc_dens_out = agc_dens_in - agc_gross_removals_out
+#     bgc_dens_out = bgc_dens_in - bgc_gross_removals_out
+#     deadwood_c_dens_out = deadwood_c_dens_in  # No change to deadwood C
+#     litter_c_dens_out = litter_c_dens_in  # No change to litter C
+#
+#     # Step 3: Prepares outputs
+#     # Consolidates all gross fluxes from all carbon pools into arrays to reduce the number of arguments returned to the decision tree
+#     # Must specify float32 because numba is quite particular about datatypes
+#     c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')  # Mg C/ha/interval
+#     c_dens_out = np.array([agc_dens_out, bgc_dens_out, deadwood_c_dens_out, litter_c_dens_out]).astype('float32')  # Mg C/ha
+#     c_gross_emissions_out = np.array([0, 0, 0, 0]).astype('float32')  # Specified for completeness
+#
+#     return c_gross_emissions_out, c_gross_removals_out, c_dens_out
+#
+#
+#
+# @jit(nopython=True)
+# def calc_NT_cropland_gain(c_pools_no_fire,c_dens_in, post_dist_regrowth):
+#
+#     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
+#     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
+#
+#     # Carbon pools that are emitted as CO2 if fire was not detected.
+#     agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = unpack_emission_factors(c_pools_no_fire)
+#
+#
+#     # Step 5: Calculates CO2 gross emissions by carbon pools (Mg C/ha/interval). Gross emissions are positive.
+#     # Which pools are emitted is controlled by the ef_CO2 flags.
+#     agc_gross_emis_out = agc_dens_in * agc_ef_CO2
+#     bgc_gross_emis_out = bgc_dens_in * bgc_ef_CO2
+#     deadwood_c_gross_emis_out = deadwood_c_dens_in * deadwood_c_ef_CO2
+#     litter_c_gross_emis_out = litter_c_dens_in * litter_c_ef_CO2
+#
+#     # Consolidates outputs into array to reduce the number of arguments returned to the decision tree.
+#     c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')
+#
+#
+#     # Step 6: Updates gross removals to include one-time post-disturbance regrowth,
+#     # if applicable (medium height veg and cropland) (Mg C/ha/interval).
+#     # Regrowth of medium height veg and cropland is a one-time value, not annual, so no multiplication by gain year count.
+#     # Post-disturbance regrowth can occur for 5-year and annual intervals because either can have an ending land cover
+#     # with aboveground carbon.
+#     c_gross_removals_out = post_dist_regrowth
+#
+#
+#     # Step 7: Calculates ending carbon densities by carbon pool (Mg C/ha).
+#     # Starts with carbon density in (list converted to np array), adds gross removals (subtracts negative value), subtracts emissions (positive value).
+#     # Ending carbon pools are not affected by non-CO2 emissions in the next step.
+#
+#     c_dens_out = c_dens_in - c_gross_emissions_out + c_gross_removals_out
+#
+#     return c_gross_emissions_out, c_gross_removals_out, c_dens_out
 
 
 # Gross and net fluxes and ending carbon stocks for cropland converted to non-cropland (without tall vegetation).

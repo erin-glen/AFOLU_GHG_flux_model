@@ -37,11 +37,40 @@ from ..utilities import log_utilities as lu
 from ..utilities import numba_utilities as nu
 from ..utilities import resize_cluster
 
+@jit(nopython=True)
+def calc_NT_cropland_gain(c_pools_no_fire, c_dens_in, post_dist_regrowth):
+
+    # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
+    agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = nu.unpack_starting_carbon_densities(c_dens_in)
+
+    # Carbon pools that are emitted as CO2 if fire was not detected.
+    agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = nu.unpack_emission_factors(c_pools_no_fire)
+
+    # Step 1: Calculates CO2 gross emissions by carbon pools (Mg C/ha/interval). Gross emissions are positive.
+    # Which pools are emitted is controlled by the ef_CO2 flags.
+    agc_gross_emis_out = agc_dens_in * agc_ef_CO2
+    bgc_gross_emis_out = bgc_dens_in * bgc_ef_CO2
+    deadwood_c_gross_emis_out = deadwood_c_dens_in * deadwood_c_ef_CO2
+    litter_c_gross_emis_out = litter_c_dens_in * litter_c_ef_CO2
+
+    # Consolidates outputs into array to reduce the number of arguments returned to the decision tree.
+    c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')
+
+    # Step 2: Gross removals is the annual crop AGC removals after residual carbon is lost
+    c_gross_removals_out = -1 * post_dist_regrowth
+
+    # Step 7: Calculates ending carbon densities by carbon pool (Mg C/ha).
+    # Starts with carbon density in (list converted to np array), subtracts emissions (positive value).
+    # Ending carbon pools are not affected by non-CO2 emissions in the next step.
+
+    c_dens_out = c_dens_in - c_gross_emissions_out + c_gross_removals_out
+
+    return c_gross_emissions_out, c_gross_removals_out, c_dens_out
 
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-# @jit(nopython=True)
+@jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                   primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                   start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years, is_final):
@@ -105,10 +134,15 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     climate_domain_block = in_dict_int16[cn.climate_domain_pattern]
     precipitation_block = in_dict_int32[cn.precipitation_pattern]
 
-    # Sets a fallback value for continent_ecozone for the chunk in case any pixels fall outside the continent-ecozone boundary
-    continent_ecozone_fallback = nu.backup_continent_ecozone(continent_ecozone_block)
-
     forest_age_start_year_block = in_dict_uint8[cn.forest_age_start_year_pattern]
+
+    # Sets a fallback value for continent_ecozone for the chunk in case any pixels fall outside the continent-ecozone boundary.
+    # fallback_value is only used if the chunk doesn't have any continent_ecozone pixels in it at all.
+    continent_ecozone_fallback = nu.fallback_conteco_climzone_value(continent_ecozone_block, 2020)
+
+    # Sets a fallback value for climate zone for the chunk in case any pixels fall outside the climate zone boundary.
+    # fallback_value is only used if the chunk doesn't have any climate_zone pixels in it at all.
+    climate_zone_fallback = nu.fallback_conteco_climzone_value(climate_zone_block, 5)
 
 
     ## Test/intermediate outputs blocks
@@ -290,9 +324,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
                 forest_age_annual_cell = forest_age_annual_block[row, col]
 
-                # Applies the continent_ecozne fallback value when there isn't a value for the pixel
+                # Applies the continent_ecozone fallback value when there isn't a value for the pixel
                 if continent_ecozone_cell == 0:
                     continent_ecozone_cell = continent_ecozone_fallback
+
+                # Applies the climate_zone fallback value when there isn't a value for the pixel
+                if climate_zone_cell == 0:
+                    climate_zone_cell = climate_zone_fallback
 
                 # Determines the removal factor for primary forests/IFL based on the continent-ecozone combination (Mg AGC/ha/yr)
                 primary_forest_AGC_RF = nu.calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RF_array)
@@ -408,7 +446,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 # Forces starting AGC and BGC pools to 0 when there is tree cover gain.
                 # This assumes no residual AGC and BGC when tree cover gain occurs.
                 # It also assumes that there can be some deadwood and litter C left over.
-                # Gotta force the AGC and BGC to float32.
+                # Need to force the AGC and BGC to float32.
                 c_dens_in_NT_T = [np.float32(0), np.float32(0), deadwood_c_dens_in, litter_c_dens_in]
 
                 # One-time removal factor for gain of medium-height vegetation (Mg C/ha)
@@ -1069,9 +1107,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     ### Non-tree to cropland gain (without tall vegetation)
                     elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
                         state_out = nu.accrete_node(node, 4)
-                        RF_AGC_final = cn.cropland_rf
-                        RF_BGC_final = 0
-                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(RF_AGC_final, RF_BGC_final, c_dens_in_NT_T)
+                        c_pools_no_fire = cn.all_non_soil_pools
+                        rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
+                        c_gross_emis_out, c_gross_removals_out, c_dens_out = calc_NT_cropland_gain(c_pools_no_fire, c_dens_in, rf_post_dist)
 
                     ### Cropland converted to non-cropland (without tall vegetation)
                     elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
@@ -1196,6 +1234,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
 
+
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                        download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff,
@@ -1247,11 +1286,11 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     # Test prints
     # print(layers)
     # print(layers['burned_area_2002'].max())
-    # print(layers[cn.forest_age_start_year_pattern].max())
+    # print(layers[cn.climate_zone_pattern].max())
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern])
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern].max())
     # print(layers[cn.forest_age_start_year_pattern].dtype)
-    # print(layers['burned_area_final_2023'].dtype)
+    # print(layers[cn.climate_zone_pattern].dtype)
 
 
     ### Part 2: Calculates min, mean, and max for each input chunk.
@@ -1498,7 +1537,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         # Originally from gfw-data-lake, so it's in 400x400 windows
         cn.elevation_pattern: f"{cn.elevation_dir}{sample_tile_id}_{cn.elevation_pattern}.tif",
         cn.climate_domain_pattern: f"{cn.climate_domain_dir}{sample_tile_id}_{cn.climate_domain_pattern}.tif",
-        cn.climate_zone_pattern: f"{cn.climate_zone_dir}{sample_tile_id}_{cn.climate_zone_pattern}.tif",
+        cn.climate_zone_pattern: f"{cn.climate_zone_processed_dir}{sample_tile_id}_{cn.climate_zone_pattern}.tif",
         cn.precipitation_pattern: f"{cn.precipitation_dir}{sample_tile_id}_{cn.precipitation_pattern}.tif",
         # "ecozone": f"s3://gfw2-data/fao_ecozones/v2000/raster/epsg-4326/10/40000/class/gdal-geotiff/{sample_tile_id}.tif",   # Originally from gfw-data-lake, so it's in 400x400 windows
         # "iso": f"s3://gfw2-data/gadm_administrative_boundaries/v3.6/raster/epsg-4326/10/40000/adm0/gdal-geotiff/{sample_tile_id}.tif",  # Originally from gfw-data-lake, so it's in 400x400 windows
@@ -1566,7 +1605,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # all tiles have the same datatype for each input-- it only needs to be done once at the very beginning of the stage.
     main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
     first_tiles = uu.first_file_name_in_s3_folder(download_dict)
-    # print(first_tiles)
 
     # Creates a download dictionary with the datatype of each input in the values.
     # This is supplied to each chunk that is being analyzed.
