@@ -641,8 +641,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     agc_rf_in = planted_forest_AGC_RF_cell
                                     bgc_rf_in = planted_forest_BGC_RF_cell
                                     rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
-                                    c_pools_EF_fire_CO2 = cn.agc_emissions_only
-                                    c_pools_EF_fire_non_CO2 = cn.all_but_bgc_emissions
+                                    c_pools_EF_fire_CO2 = cn.biomass_emissions_only
+                                    c_pools_EF_fire_non_CO2 = cn.all_non_soil_pools
                                     c_pools_EF_no_fire = cn.all_non_soil_pools
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
@@ -683,8 +683,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     agc_rf_in = planted_forest_AGC_RF_cell
                                     bgc_rf_in = planted_forest_BGC_RF_cell
                                     rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                    c_pools_EF_fire_CO2 = cn.agc_emissions_only
-                                    c_pools_EF_fire_non_CO2 = cn.all_but_bgc_emissions
+                                    c_pools_EF_fire_CO2 = cn.biomass_emissions_only
+                                    c_pools_EF_fire_non_CO2 = cn.all_non_soil_pools
                                     c_pools_EF_no_fire = cn.all_non_soil_pools
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
@@ -846,7 +846,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     ### Trees remaining trees
                     elif (tree_prev) and (tree_curr):  # Trees remaining trees (3)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
                         node = nu.accrete_node(node, 3)
-                        if (not all_planted_trees) and year_before_converted_to_oil_palm: # Non-planted trees converted to oil palm in the next interval (31->311/312)
+                        if (not all_planted_trees) and year_before_converted_to_oil_palm: # Non-planted trees with oil palm planted in the next interval (31->311/312)
                             node = nu.accrete_node(node, 1)
                             agc_rf_in = natrl_forest_age_dependent_agc_rf
                             bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
