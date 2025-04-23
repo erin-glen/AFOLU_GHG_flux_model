@@ -625,13 +625,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 agc_rf_in = cn.oil_palm_agc_rf
                                 bgc_rf_in = cn.oil_palm_bgc_rf
                                 rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                c_pools_fire_CO2 = cn.agc_emissions_only
-                                c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                c_pools_no_fire = cn.all_non_soil_pools
+                                c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
+                                c_pools_EF_no_fire = cn.all_non_soil_pools
                                 (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                  RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                    node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                    c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                    node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                    c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                     deadwood_c_ratio=0, litter_c_ratio=0)
                             else:  # Full loss of non-oil palm planted trees (212)
@@ -641,13 +641,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     agc_rf_in = planted_forest_AGC_RF_cell
                                     bgc_rf_in = planted_forest_BGC_RF_cell
                                     rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
-                                    c_pools_fire_CO2 = cn.agc_emissions_only
-                                    c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
-                                    c_pools_no_fire = cn.all_non_soil_pools
+                                    c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                    c_pools_EF_fire_non_CO2 = cn.all_but_bgc_emissions
+                                    c_pools_EF_no_fire = cn.all_non_soil_pools
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                        c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio=0, litter_c_ratio=0)
                                 elif short_veg_curr:  # Plantation harvested as short vegetation (2122->21221/21222)
@@ -655,13 +655,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     agc_rf_in = planted_forest_AGC_RF_cell
                                     bgc_rf_in = planted_forest_BGC_RF_cell
                                     rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                    c_pools_fire_CO2 = cn.agc_emissions_only
-                                    c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
-                                    c_pools_no_fire = cn.biomass_emissions_only
+                                    c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                    c_pools_EF_fire_non_CO2 = cn.all_but_bgc_emissions
+                                    c_pools_EF_no_fire = cn.biomass_emissions_only
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                        c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio=0, litter_c_ratio=0)
                                 elif med_veg_curr:  # Plantation harvested as medium vegetation (2123->21231/21232)-- shouldn't occur in annual model because no med. veg modeled
@@ -669,13 +669,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     agc_rf_in = planted_forest_AGC_RF_cell
                                     bgc_rf_in = planted_forest_BGC_RF_cell
                                     rf_post_dist = np.array([medium_height_veg_AGC_RF, medium_height_veg_BGC_RF, 0, 0]).astype('float32')
-                                    c_pools_fire_CO2 = cn.agc_emissions_only
-                                    c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
-                                    c_pools_no_fire = cn.biomass_emissions_only
+                                    c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                    c_pools_EF_fire_non_CO2 = cn.all_but_bgc_emissions
+                                    c_pools_EF_no_fire = cn.biomass_emissions_only
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                        c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio=0, litter_c_ratio=0)
                                 elif LC_curr == cn.builtup:  # Plantation converted to settlement (2124->21241/21242)
@@ -683,13 +683,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     agc_rf_in = planted_forest_AGC_RF_cell
                                     bgc_rf_in = planted_forest_BGC_RF_cell
                                     rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                    c_pools_fire_CO2 = cn.agc_emissions_only
-                                    c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
-                                    c_pools_no_fire = cn.all_non_soil_pools
+                                    c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                    c_pools_EF_fire_non_CO2 = cn.all_but_bgc_emissions
+                                    c_pools_EF_no_fire = cn.all_non_soil_pools
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                        c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio=0, litter_c_ratio=0)
                                 else:  # Plantation converted to anything else (2125->21251/21252)
@@ -697,13 +697,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     agc_rf_in = planted_forest_AGC_RF_cell
                                     bgc_rf_in = planted_forest_BGC_RF_cell
                                     rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                    c_pools_fire_CO2 = cn.agc_emissions_only
-                                    c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
-                                    c_pools_no_fire = cn.biomass_emissions_only
+                                    c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                    c_pools_EF_fire_non_CO2 = cn.all_but_bgc_emissions
+                                    c_pools_EF_no_fire = cn.biomass_emissions_only
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                        c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio=0, litter_c_ratio=0)
                         else:  # Full loss of non-planted trees (22)
@@ -715,13 +715,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     agc_rf_in = natrl_forest_age_dependent_agc_rf
                                     bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
                                     rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
-                                    c_pools_fire_CO2 = cn.all_non_soil_pools
-                                    c_pools_fire_non_CO2 = cn.all_non_soil_pools
-                                    c_pools_no_fire = cn.all_non_soil_pools
+                                    c_pools_EF_fire_CO2 = cn.all_non_soil_pools
+                                    c_pools_EF_fire_non_CO2 = cn.all_non_soil_pools
+                                    c_pools_EF_no_fire = cn.all_non_soil_pools
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                        c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
                                 elif short_veg_curr or med_veg_curr:  # Natural forest converted to short vegetation (2212)
@@ -738,13 +738,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             raise ValueError("interval_type not valid: 'hybrid' not supported yet")
                                         bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
                                         rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                        c_pools_fire_CO2 = cn.all_non_soil_pools
-                                        c_pools_fire_non_CO2 = cn.all_non_soil_pools
-                                        c_pools_no_fire = cn.all_non_soil_pools
+                                        c_pools_EF_fire_CO2 = cn.all_non_soil_pools
+                                        c_pools_EF_fire_non_CO2 = cn.all_non_soil_pools
+                                        c_pools_EF_no_fire = cn.all_non_soil_pools
                                         (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                          RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                            c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                             rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                             deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
                                     else:  # Natural forest converted to short vegetation with disturbance that emits biomass C pools only (22122->221221/221222)
@@ -752,13 +752,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                         agc_rf_in = natrl_forest_age_dependent_agc_rf
                                         bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
                                         rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
-                                        c_pools_no_fire = cn.biomass_emissions_only
+                                        c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                        c_pools_EF_fire_non_CO2 = cn.all_but_bgc_emissions
+                                        c_pools_EF_no_fire = cn.biomass_emissions_only
                                         (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                          RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                            c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                             rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                             deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
                                 elif med_veg_curr:  # Natural forest converted to medium vegetation (2213)-- shouldn't occur in annual model because no med. veg modeled
@@ -768,13 +768,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                         agc_rf_in = natrl_forest_age_dependent_agc_rf
                                         bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
                                         rf_post_dist = np.array([medium_height_veg_AGC_RF, medium_height_veg_BGC_RF, 0, 0]).astype('float32')
-                                        c_pools_fire_CO2 = cn.all_non_soil_pools
-                                        c_pools_fire_non_CO2 = cn.all_non_soil_pools
-                                        c_pools_no_fire = cn.all_non_soil_pools
+                                        c_pools_EF_fire_CO2 = cn.all_non_soil_pools
+                                        c_pools_EF_fire_non_CO2 = cn.all_non_soil_pools
+                                        c_pools_EF_no_fire = cn.all_non_soil_pools
                                         (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                          RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                            c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                             rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                             deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
                                     else:  # Natural forest converted to medium vegetation with disturbance that emits biomass C pools only (22132->221321/221322)
@@ -782,13 +782,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                         agc_rf_in = natrl_forest_age_dependent_agc_rf
                                         bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
                                         rf_post_dist = np.array([medium_height_veg_AGC_RF, medium_height_veg_BGC_RF, 0, 0]).astype('float32')
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.all_but_bgc_emissions
-                                        c_pools_no_fire = cn.biomass_emissions_only
+                                        c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                        c_pools_EF_fire_non_CO2 = cn.all_but_bgc_emissions
+                                        c_pools_EF_no_fire = cn.biomass_emissions_only
                                         (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                          RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                            c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                            node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                            c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                             rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                             deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
                                 elif LC_curr == cn.builtup:  # Natural forest converted to settlement (2214->22141/22142)
@@ -796,13 +796,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     agc_rf_in = natrl_forest_age_dependent_agc_rf
                                     bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
                                     rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                    c_pools_fire_CO2 = cn.all_non_soil_pools
-                                    c_pools_fire_non_CO2 = cn.all_non_soil_pools
-                                    c_pools_no_fire = cn.all_non_soil_pools
+                                    c_pools_EF_fire_CO2 = cn.all_non_soil_pools
+                                    c_pools_EF_fire_non_CO2 = cn.all_non_soil_pools
+                                    c_pools_EF_no_fire = cn.all_non_soil_pools
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                        c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
                                 else:  # Natural forest converted to anything else (wetland/open water/ice, etc.) (2215->22151/22152)
@@ -810,14 +810,14 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                     agc_rf_in = natrl_forest_age_dependent_agc_rf
                                     bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
                                     rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                    c_pools_fire_CO2 = np.array([0, 0, 0, 0]).astype('float32')   # This particular combination doesn't ever have fire emissions
-                                    c_pools_fire_non_CO2 = np.array([0, 0, 0, 0]).astype('float32') # This particular combination doesn't ever have fire emissions
-                                    c_pools_no_fire = cn.biomass_emissions_only
+                                    c_pools_EF_fire_CO2 = np.array([0, 0, 0, 0]).astype('float32')   # This particular combination doesn't ever have fire emissions
+                                    c_pools_EF_fire_non_CO2 = np.array([0, 0, 0, 0]).astype('float32') # This particular combination doesn't ever have fire emissions
+                                    c_pools_EF_no_fire = cn.biomass_emissions_only
                                     burned_in_curr_interval = 0  # This particular combination doesn't ever have fire emissions, so this is forced to 0
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                        c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                        node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
                             else:  # Full loss of trees outside forests (222->2221/2222)
@@ -825,13 +825,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                 agc_rf_in = cn.trees_outside_forests_agc_rf_max
                                 bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
                                 rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                c_pools_fire_CO2 = cn.agc_emissions_only
-                                c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                c_pools_no_fire = cn.biomass_emissions_only
+                                c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
+                                c_pools_EF_no_fire = cn.biomass_emissions_only
                                 (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                  RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
-                                    node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                    c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                    node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                    c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                     deadwood_c_ratio=0, litter_c_ratio=0)
 
@@ -843,14 +843,14 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                             agc_rf_in = natrl_forest_age_dependent_agc_rf
                             bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
                             rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                            c_pools_fire_CO2 = cn.all_non_soil_pools
-                            c_pools_fire_non_CO2 = cn.all_non_soil_pools
-                            c_pools_no_fire = cn.all_non_soil_pools
+                            c_pools_EF_fire_CO2 = cn.all_non_soil_pools
+                            c_pools_EF_fire_non_CO2 = cn.all_non_soil_pools
+                            c_pools_EF_no_fire = cn.all_non_soil_pools
                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_NT(
                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
-                                c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                 rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest,
                                 Gef_n2o_forest, deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
                         else:  # Trees remaining trees- no conversion to oil palm (32)
@@ -868,14 +868,14 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             agc_rf_in = cn.oil_palm_agc_rf
                                             bgc_rf_in = cn.oil_palm_bgc_rf
                                             rf_post_dist = np.array([agc_rf_in, bgc_rf_in, 0, 0]).astype('float32')
-                                            c_pools_fire_CO2 = cn.agc_emissions_only
-                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
+                                            c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
-                                                c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                                c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                                 rf_post_dist, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
                                         else: # Planted trees partially disturbed in the last interval with signif. height increase after (31112->311121/311122)
@@ -883,14 +883,14 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             agc_rf_in = planted_forest_AGC_RF_cell
                                             bgc_rf_in = planted_forest_BGC_RF_cell
                                             rf_post_dist = np.array([agc_rf_in, bgc_rf_in, 0, 0]).astype('float32')
-                                            c_pools_fire_CO2 = cn.agc_emissions_only
-                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
+                                            c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
-                                                c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                                c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                                 rf_post_dist, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
                                     else:  # Oil palm/planted trees partially disturbed in the last interval without signif. height increase after (3112)
@@ -902,14 +902,14 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             agc_rf_in = cn.oil_palm_agc_rf
                                             bgc_rf_in = cn.oil_palm_bgc_rf
                                             rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                            c_pools_fire_CO2 = cn.agc_emissions_only
-                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
+                                            c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
-                                                c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                                c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                                 rf_post_dist, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
                                         else: # Planted trees partially disturbed in the last interval without signif. height increase after (31122->311221/311222)
@@ -917,14 +917,14 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             agc_rf_in = planted_forest_AGC_RF_cell
                                             bgc_rf_in = planted_forest_BGC_RF_cell
                                             rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                            c_pools_fire_CO2 = cn.agc_emissions_only
-                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
+                                            c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
                                                 node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in,
-                                                c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                                c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                                 rf_post_dist, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
                                 else:  # Non-planted trees partially disturbed in the last interval (3212)
@@ -940,13 +940,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             agc_rf_post = natrl_forest_curve_0_5_AGC_RF_cell # Post-dist RF is 0-5 year secondary forest
                                             bgc_rf_post = agc_rf_post * r_s_ratio_non_mang
                                             rf_post_dist = np.array([agc_rf_post, bgc_rf_post, 0, 0]).astype('float32')
-                                            c_pools_fire_CO2 = cn.agc_emissions_only
-                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
+                                            c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
-                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                                c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                                 rf_post_dist, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                                 deadwood_c_ratio=deadwood_c_ratio_non_mang, litter_c_ratio=litter_c_ratio_non_mang)
@@ -957,13 +957,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             agc_rf_in = natrl_forest_age_dependent_agc_rf
                                             bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
                                             rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')  # No post-disturbance RFs or removals
-                                            c_pools_fire_CO2 = cn.agc_emissions_only
-                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
+                                            c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
-                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                                c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                                 rf_post_dist, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                                 deadwood_c_ratio=deadwood_c_ratio_non_mang, litter_c_ratio=litter_c_ratio_non_mang)
@@ -978,13 +978,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             agc_rf_post = cn.trees_outside_forests_agc_rf_max
                                             bgc_rf_post = agc_rf_post * r_s_ratio_non_mang
                                             rf_post_dist = np.array([agc_rf_post, bgc_rf_post, 0, 0]).astype('float32')
-                                            c_pools_fire_CO2 = cn.agc_emissions_only
-                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
+                                            c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
-                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                                c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                                 rf_post_dist, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                                 deadwood_c_ratio=0, litter_c_ratio=0)
@@ -995,13 +995,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             agc_rf_in = cn.trees_outside_forests_agc_rf_max
                                             bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
                                             rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')  # No post-disturbance RFs or removals
-                                            c_pools_fire_CO2 = cn.agc_emissions_only
-                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
-                                            c_pools_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
+                                            c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_no_fire = np.array([partial_disturbance_EF_for_driver, partial_disturbance_EF_for_driver, 0, 0]).astype('float32')
                                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                              RF_AGC_final, RF_BGC_final, gain_year_count, forest_age_annual_cell) = nu.calc_T_T_non_stand_disturbs(
-                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_fire_CO2, c_pools_fire_non_CO2,
-                                                c_pools_no_fire, forest_dist_last, interval_end_year, c_dens_in,
+                                                node, interval_type, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                                c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                                 rf_post_dist, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                                 deadwood_c_ratio=0, litter_c_ratio=0)
@@ -1014,24 +1014,24 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                         node = nu.accrete_node(node, 1)
                                         RF_AGC_final = cn.oil_palm_agc_rf
                                         RF_BGC_final = cn.oil_palm_bgc_rf
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                        c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                        c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                         state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
                                             node, interval_type, forest_age_annual_cell,
                                             most_recent_year_burned_during_interval,
-                                            RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                            RF_AGC_final, RF_BGC_final, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
                                     else: # Planted trees not disturbed in the last interval (32212->322121/322122)
                                         node = nu.accrete_node(node, 2)
                                         RF_AGC_final = planted_forest_AGC_RF_cell
                                         RF_BGC_final = planted_forest_BGC_RF_cell
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                        c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                        c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                         state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
                                             node, interval_type, forest_age_annual_cell,
                                             most_recent_year_burned_during_interval,
-                                            RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                            RF_AGC_final, RF_BGC_final, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
                                 else:  # Non-planted trees not disturbed in last interval (3222)
@@ -1042,11 +1042,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             node = nu.accrete_node(node, 1)
                                             RF_AGC_final = primary_forest_AGC_RF
                                             RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang
-                                            c_pools_fire_CO2 = cn.agc_emissions_only
-                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                             state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
                                                 node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
-                                                RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                RF_AGC_final, RF_BGC_final, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
                                                 interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                                 deadwood_c_ratio=deadwood_c_ratio_non_mang, litter_c_ratio=litter_c_ratio_non_mang)
@@ -1054,11 +1054,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             node = nu.accrete_node(node, 2)
                                             RF_AGC_final = natrl_forest_age_dependent_agc_rf
                                             RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang
-                                            c_pools_fire_CO2 = cn.agc_emissions_only
-                                            c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                            c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                             state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
                                                 node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
-                                                RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                                RF_AGC_final, RF_BGC_final, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
                                                 interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                                 deadwood_c_ratio=deadwood_c_ratio_non_mang, litter_c_ratio=litter_c_ratio_non_mang)
@@ -1066,34 +1066,38 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                         node = nu.accrete_node(node, 2)
                                         RF_AGC_final = cn.trees_outside_forests_agc_rf_max
                                         RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang
-                                        c_pools_fire_CO2 = cn.agc_emissions_only
-                                        c_pools_fire_non_CO2 = cn.agc_emissions_only
+                                        c_pools_EF_fire_CO2 = cn.agc_emissions_only
+                                        c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                         state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out, gain_year_count, forest_age_annual_cell = nu.calc_T_T_no_disturbs(
                                             node, interval_type, forest_age_annual_cell, most_recent_year_burned_during_interval,
-                                            RF_AGC_final, RF_BGC_final, c_pools_fire_CO2, c_pools_fire_non_CO2,
+                                            RF_AGC_final, RF_BGC_final, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
 
                     ### Non-tree to cropland gain (without tall vegetation)
                     elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                        node = nu.accrete_node(node, 4)
-                        state_out = nu.accrete_node(node, 1)
-                        c_pools_no_fire = cn.all_non_soil_pools
+                        node = nu.accrete_node(node, 4)  # General cropland node code
+                        state_out = nu.accrete_node(node, 1)  # Cropland gain node code
+                        c_pools_EF_no_fire = cn.all_non_soil_pools
                         rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
-                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(c_pools_no_fire, c_dens_in, rf_post_dist)
+                        forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
+                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(c_pools_EF_no_fire, c_dens_in, rf_post_dist)
 
                     ### Cropland converted to non-cropland (without tall vegetation)
                     elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                        node = nu.accrete_node(node, 4)
-                        state_out = nu.accrete_node(node, 2)
-                        c_pools_no_fire = cn.biomass_emissions_only
-                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_cropland_non_cropland(c_dens_in, c_pools_no_fire)
+                        node = nu.accrete_node(node, 4)  # General cropland node code
+                        state_out = nu.accrete_node(node, 2)  # Cropland loss node code
+                        c_pools_EF_no_fire = cn.agc_emissions_only  # There should only be AGC in cropland anyway
+                        c_dens_in = [cn.cropland_agc_dens, 0, 0 ,0]  # Forces input AGC to cropland default; other pools forced to 0, regardless of existing value.
+                        forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
+                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_cropland_non_cropland(c_dens_in, c_pools_EF_no_fire)
 
                     ### Cropland remaining cropland (without tall vegetation)
                     elif (LC_prev == cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                        node = nu.accrete_node(node, 4)
-                        state_out = nu.accrete_node(node, 3)
-                        c_dens_in = [cn.cropland_rf, 0, 0 ,0]  # Forces AGC to cropland default; other pools forced to 0, regardless of value.
+                        node = nu.accrete_node(node, 4)  # General cropland node code
+                        state_out = nu.accrete_node(node, 3)  # Cropland->cropland node code
+                        c_dens_in = [cn.cropland_agc_dens, 0, 0 ,0]  # Forces input AGC to cropland default; other pools forced to 0, regardless of existing value. Same values output.
+                        forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
                         c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_cropland_cropland(c_dens_in)
 
 

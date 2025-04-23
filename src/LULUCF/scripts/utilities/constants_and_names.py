@@ -113,6 +113,9 @@ oil_palm_bgc_rf = oil_palm_agc_rf * default_r_s_non_mang
 # One-time annual cropland removal factor (Mg C/ha) (IPCC 2019 Cropland Section 5.3.1.2)
 cropland_rf = 4.7
 
+# Cropland aboveground carbon density (global constant, static value) (Mg C/ha) (IPCC 2019 Cropland Section 5.3.1.2)
+cropland_agc_dens = cropland_rf
+
 # Aboveground carbon removal factor for trees outside forests (Mg C/ha/yr), assuming that the entire hectare is ToF
 # (IPCC 2019 Settlements Section 8.2.1.2 (p. 8.5))
 trees_outside_forests_agc_rf_max = 2.8
