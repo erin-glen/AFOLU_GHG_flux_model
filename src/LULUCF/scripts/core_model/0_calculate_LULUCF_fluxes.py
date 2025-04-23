@@ -820,11 +820,19 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                         c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
-                            else:  # Full loss of trees outside forests (222->2221/2222)
+                            else:  # Full loss of trees outside forests (222)
                                 node = nu.accrete_node(node, 2)
                                 agc_rf_in = cn.trees_outside_forests_agc_rf_max
                                 bgc_rf_in = agc_rf_in * r_s_ratio_non_mang
-                                rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
+                                if LC_curr == cn.cropland:  # Full loss of trees outside forests converted to cropland (2221->22211/22212)
+                                    rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
+                                    node = nu.accrete_node(node, 1)
+                                elif LC_curr == med_veg_curr:  # Full loss of trees outside forests converted to medium-height vegetation (2222->22221/22222)
+                                    rf_post_dist = np.array([medium_height_veg_AGC_RF, medium_height_veg_BGC_RF, 0, 0]).astype('float32')
+                                    node = nu.accrete_node(node, 2)
+                                else:  # Full loss of trees outside forests converted to anything else (2223->22231/22232)
+                                    rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
+                                    node = nu.accrete_node(node, 3)
                                 c_pools_EF_fire_CO2 = cn.agc_emissions_only
                                 c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                 c_pools_EF_no_fire = cn.biomass_emissions_only
@@ -857,13 +865,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                             node = nu.accrete_node(node, 2)
                             if part_or_full_dist_in_prev_interval:  # Trees partially disturbed in the last interval (321)
                                 node = nu.accrete_node(node, 1)
-                                if all_planted_trees:   # Planted trees partially disturbed in the last interval (311)
+                                if all_planted_trees:   # Planted trees partially disturbed in the last interval (3211)
                                     node = nu.accrete_node(node, 1)
-                                    if sig_height_gain_prev_curr_abs:  # Oil palm/planted trees partially disturbed in the last interval with signif. height increase after (3111)
+                                    if sig_height_gain_prev_curr_abs:  # Oil palm/planted trees partially disturbed in the last interval with signif. height increase after (32111)
                                         # NOTE: This should only occur with 5-year interval data, not annual data.  #TODO Confirm with 5-year data
                                         node = nu.accrete_node(node, 1)
                                         # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
-                                        if all_oil_palm:  # Oil palm partially disturbed in the last interval with signif. height increase after (31111->311111/311112)
+                                        if all_oil_palm:  # Oil palm partially disturbed in the last interval with signif. height increase after (321111->3211111/3211112)
                                             node = nu.accrete_node(node, 1)
                                             agc_rf_in = cn.oil_palm_agc_rf
                                             bgc_rf_in = cn.oil_palm_bgc_rf
@@ -878,7 +886,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                                 c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                                 rf_post_dist, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                                        else: # Planted trees partially disturbed in the last interval with signif. height increase after (31112->311121/311122)
+                                        else: # Planted trees partially disturbed in the last interval with signif. height increase after (321112->3211121/3211122)
                                             node = nu.accrete_node(node, 2)
                                             agc_rf_in = planted_forest_AGC_RF_cell
                                             bgc_rf_in = planted_forest_BGC_RF_cell
@@ -893,11 +901,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                                 c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                                 rf_post_dist, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                                    else:  # Oil palm/planted trees partially disturbed in the last interval without signif. height increase after (3112)
+                                    else:  # Oil palm/planted trees partially disturbed in the last interval without signif. height increase after (32112)
                                         # NOTE: All annual interval data is expected to use this branch.
                                         node = nu.accrete_node(node, 2)
                                         # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
-                                        if all_oil_palm: # Oil palm partially disturbed in the last interval without signif. height increase after (31121->311211/311212)
+                                        if all_oil_palm: # Oil palm partially disturbed in the last interval without signif. height increase after (321121->3211211/3211212)
                                             node = nu.accrete_node(node, 1)
                                             agc_rf_in = cn.oil_palm_agc_rf
                                             bgc_rf_in = cn.oil_palm_bgc_rf
@@ -912,7 +920,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                                 c_pools_EF_no_fire, forest_dist_last, interval_end_year, c_dens_in,
                                                 rf_post_dist, most_recent_year_not_tall_veg,
                                                 Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                                        else: # Planted trees partially disturbed in the last interval without signif. height increase after (31122->311221/311222)
+                                        else: # Planted trees partially disturbed in the last interval without signif. height increase after (321122->3211221/3211222)
                                             node = nu.accrete_node(node, 2)
                                             agc_rf_in = planted_forest_AGC_RF_cell
                                             bgc_rf_in = planted_forest_BGC_RF_cell
