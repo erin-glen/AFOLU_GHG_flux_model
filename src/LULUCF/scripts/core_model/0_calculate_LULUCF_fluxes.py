@@ -37,36 +37,6 @@ from ..utilities import log_utilities as lu
 from ..utilities import numba_utilities as nu
 from ..utilities import resize_cluster
 
-@jit(nopython=True)
-def calc_NT_cropland_gain(c_pools_no_fire, c_dens_in, post_dist_regrowth):
-
-    # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
-    agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = nu.unpack_starting_carbon_densities(c_dens_in)
-
-    # Carbon pools that are emitted as CO2 if fire was not detected.
-    agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = nu.unpack_emission_factors(c_pools_no_fire)
-
-    # Step 1: Calculates CO2 gross emissions by carbon pools (Mg C/ha/interval). Gross emissions are positive.
-    # Which pools are emitted is controlled by the ef_CO2 flags.
-    agc_gross_emis_out = agc_dens_in * agc_ef_CO2
-    bgc_gross_emis_out = bgc_dens_in * bgc_ef_CO2
-    deadwood_c_gross_emis_out = deadwood_c_dens_in * deadwood_c_ef_CO2
-    litter_c_gross_emis_out = litter_c_dens_in * litter_c_ef_CO2
-
-    # Consolidates outputs into array to reduce the number of arguments returned to the decision tree.
-    c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')
-
-    # Step 2: Gross removals is the annual crop AGC removals after residual carbon is lost
-    c_gross_removals_out = -1 * post_dist_regrowth
-
-    # Step 7: Calculates ending carbon densities by carbon pool (Mg C/ha).
-    # Starts with carbon density in (list converted to np array), subtracts emissions (positive value).
-    # Ending carbon pools are not affected by non-CO2 emissions in the next step.
-
-    c_dens_out = c_dens_in - c_gross_emissions_out + c_gross_removals_out
-
-    return c_gross_emissions_out, c_gross_removals_out, c_dens_out
-
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
@@ -1106,20 +1076,24 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
                     ### Non-tree to cropland gain (without tall vegetation)
                     elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                        state_out = nu.accrete_node(node, 4)
+                        node = nu.accrete_node(node, 4)
+                        state_out = nu.accrete_node(node, 1)
                         c_pools_no_fire = cn.all_non_soil_pools
                         rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
-                        c_gross_emis_out, c_gross_removals_out, c_dens_out = calc_NT_cropland_gain(c_pools_no_fire, c_dens_in, rf_post_dist)
+                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(c_pools_no_fire, c_dens_in, rf_post_dist)
 
                     ### Cropland converted to non-cropland (without tall vegetation)
                     elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                        state_out = nu.accrete_node(node, 5)
+                        node = nu.accrete_node(node, 4)
+                        state_out = nu.accrete_node(node, 2)
                         c_pools_no_fire = cn.biomass_emissions_only
                         c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_cropland_non_cropland(c_dens_in, c_pools_no_fire)
 
                     ### Cropland remaining cropland (without tall vegetation)
                     elif (LC_prev == cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                        state_out = nu.accrete_node(node, 6)
+                        node = nu.accrete_node(node, 4)
+                        state_out = nu.accrete_node(node, 3)
+                        c_dens_in = [cn.cropland_rf, 0, 0 ,0]  # Forces AGC to cropland default; other pools forced to 0, regardless of value.
                         c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_cropland_cropland(c_dens_in)
 
 

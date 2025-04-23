@@ -453,7 +453,7 @@ def non_CO2_fire_equations(carbon_in, Cf, Gef_ch4, Gef_n2o):
     return ch4_flux_out, n2o_flux_out
 
 
-# Gross and net fluxes and ending carbon stocks for non-tree converted to tree.
+# Gross fluxes and ending carbon stocks for non-tree converted to tree.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 # Applies to 5-year intervals and annual intervals. Only difference is the gain_year_count.
 @jit(nopython=True)
@@ -711,8 +711,9 @@ def calc_T_NT(node, interval_type, burned_in_prev_interval, RF_AGC_in, RF_BGC_in
             RF_AGC_out, RF_BGC_out, gain_year_count, forest_age_interval_end)
 
 
-# Gross and net fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances.
+# Gross fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
+# Applies to 5-year intervals and annual intervals.
 @jit(nopython=True)
 def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF_AGC_pre_dist_in, RF_BGC_pre_dist_in,
                                 c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
@@ -933,8 +934,9 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF
             RF_AGC_pre_dist_out, RF_BGC_pre_dist_out, gain_year_count_pre_dist, forest_age_interval_end)
 
 
-# Gross and net fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances.
+# Gross fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
+# Applies to 5-year intervals and annual intervals.
 @jit(nopython=True)
 def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_recent_year_burned_during_interval, RF_AGC, RF_BGC,
                          c_pools_fire_CO2, c_pools_fire_non_CO2, interval_end_year, c_dens_in,
@@ -1142,79 +1144,42 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
 
     return state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out, gain_year_count_pre_dist, forest_age_interval_end
 
-#
-# # Gross and net fluxes and ending carbon stocks for non-tree to cropland gain
-# # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
-# # Applies to 5-year intervals and annual intervals.
-# # Cropland removal factor is one-time removals, so it isn't any different in 5-year vs. annual intervals.
-# @jit(nopython=True)
-# def calc_NT_cropland_gain(agc_rf, bgc_rf, c_dens_in):
-#
-#     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
-#     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
-#
-#     # Step 1: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
-#     agc_gross_removals_out = float(agc_rf * -1)  #float() necessary for Numba typing
-#     bgc_gross_removals_out = float(bgc_rf * -1)  #float() necessary for Numba typing. Should be 0, but equation here just for flexibility.
-#     deadwood_c_gross_removals_out = 0  # No removals to deadwood
-#     litter_c_gross_removals_out = 0  # No removals to litter
-#
-#     # Step 2: Calculates ending carbon densities by carbon pool (Mg C/ha)
-#     agc_dens_out = agc_dens_in - agc_gross_removals_out
-#     bgc_dens_out = bgc_dens_in - bgc_gross_removals_out
-#     deadwood_c_dens_out = deadwood_c_dens_in  # No change to deadwood C
-#     litter_c_dens_out = litter_c_dens_in  # No change to litter C
-#
-#     # Step 3: Prepares outputs
-#     # Consolidates all gross fluxes from all carbon pools into arrays to reduce the number of arguments returned to the decision tree
-#     # Must specify float32 because numba is quite particular about datatypes
-#     c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')  # Mg C/ha/interval
-#     c_dens_out = np.array([agc_dens_out, bgc_dens_out, deadwood_c_dens_out, litter_c_dens_out]).astype('float32')  # Mg C/ha
-#     c_gross_emissions_out = np.array([0, 0, 0, 0]).astype('float32')  # Specified for completeness
-#
-#     return c_gross_emissions_out, c_gross_removals_out, c_dens_out
-#
-#
-#
-# @jit(nopython=True)
-# def calc_NT_cropland_gain(c_pools_no_fire,c_dens_in, post_dist_regrowth):
-#
-#     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
-#     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
-#
-#     # Carbon pools that are emitted as CO2 if fire was not detected.
-#     agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = unpack_emission_factors(c_pools_no_fire)
-#
-#
-#     # Step 5: Calculates CO2 gross emissions by carbon pools (Mg C/ha/interval). Gross emissions are positive.
-#     # Which pools are emitted is controlled by the ef_CO2 flags.
-#     agc_gross_emis_out = agc_dens_in * agc_ef_CO2
-#     bgc_gross_emis_out = bgc_dens_in * bgc_ef_CO2
-#     deadwood_c_gross_emis_out = deadwood_c_dens_in * deadwood_c_ef_CO2
-#     litter_c_gross_emis_out = litter_c_dens_in * litter_c_ef_CO2
-#
-#     # Consolidates outputs into array to reduce the number of arguments returned to the decision tree.
-#     c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')
-#
-#
-#     # Step 6: Updates gross removals to include one-time post-disturbance regrowth,
-#     # if applicable (medium height veg and cropland) (Mg C/ha/interval).
-#     # Regrowth of medium height veg and cropland is a one-time value, not annual, so no multiplication by gain year count.
-#     # Post-disturbance regrowth can occur for 5-year and annual intervals because either can have an ending land cover
-#     # with aboveground carbon.
-#     c_gross_removals_out = post_dist_regrowth
-#
-#
-#     # Step 7: Calculates ending carbon densities by carbon pool (Mg C/ha).
-#     # Starts with carbon density in (list converted to np array), adds gross removals (subtracts negative value), subtracts emissions (positive value).
-#     # Ending carbon pools are not affected by non-CO2 emissions in the next step.
-#
-#     c_dens_out = c_dens_in - c_gross_emissions_out + c_gross_removals_out
-#
-#     return c_gross_emissions_out, c_gross_removals_out, c_dens_out
+
+# Gross fluxes and ending carbon stocks for non-cropland (without tall vegetation) converted to cropland (without tall vegetation).
+# Applies to 5-year intervals and annual intervals.
+@jit(nopython=True)
+def calc_NT_cropland_gain(c_pools_no_fire, c_dens_in, post_dist_regrowth):
+
+    # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
+    agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
+
+    # Carbon pools that are emitted as CO2 if fire was not detected.
+    agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = unpack_emission_factors(c_pools_no_fire)
+
+    # Step 1: Calculates CO2 gross emissions by carbon pools (Mg C/ha/interval). Gross emissions are positive.
+    # Which pools are emitted is controlled by the ef_CO2 flags.
+    agc_gross_emis_out = agc_dens_in * agc_ef_CO2
+    bgc_gross_emis_out = bgc_dens_in * bgc_ef_CO2
+    deadwood_c_gross_emis_out = deadwood_c_dens_in * deadwood_c_ef_CO2
+    litter_c_gross_emis_out = litter_c_dens_in * litter_c_ef_CO2
+
+    # Consolidates outputs into array to reduce the number of arguments returned to the decision tree.
+    c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')
+
+    # Step 2: Calculates gross removals.
+    # Gross removals is the annual crop AGC removals after residual carbon is lost (Mg C/ha/interval).
+    # Gross removals is negative.
+    c_gross_removals_out = -1 * post_dist_regrowth
+
+    # Step 3: Calculates ending carbon densities by carbon pool (Mg C/ha).
+    # Starts with carbon density in (list converted to np array), subtracts emissions (positive value), subtracts cropland removals (negative value).
+    # Ending carbon pools are not affected by non-CO2 emissions in the next step.
+    c_dens_out = np.array(c_dens_in).astype('float32') - c_gross_emissions_out - c_gross_removals_out
+
+    return c_gross_emissions_out, c_gross_removals_out, c_dens_out
 
 
-# Gross and net fluxes and ending carbon stocks for cropland converted to non-cropland (without tall vegetation).
+# Gross fluxes and ending carbon stocks for cropland converted to non-cropland (without tall vegetation).
 @jit(nopython=True)
 def calc_cropland_non_cropland(c_dens_in, c_pools_no_fire):
 
@@ -1241,6 +1206,7 @@ def calc_cropland_non_cropland(c_dens_in, c_pools_no_fire):
 
 
 # Gross and net fluxes and ending carbon stocks for cropland remaining cropland (without tall vegetation).
+# Currently: Ending AGC is forced to the cropland default (4.7 Mg C/ha); ending BGC, deadwood and litter are 0 Mg C/ha
 # No emissions or removals.
 @jit(nopython=True)
 def calc_cropland_cropland(c_dens_in):
