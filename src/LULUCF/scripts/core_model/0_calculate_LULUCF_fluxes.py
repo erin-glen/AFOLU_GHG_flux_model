@@ -580,10 +580,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
                 if interval_type == cn.intervals_annual or interval_type == cn.intervals_five_years:
 
-                    ### Tree gain
                     #TODO @Mel maybe include mangroves as the first if and change if tall_veg_gain: to elif tall_veg_gain:
                     # That way, the mangrove decision tree gets priority.
+                    # However, maybe do node = nu.accrete_node(node, 9), so the first node digit doesn't conflict with other top-level nodes.
 
+                    ### Tree gain
                     if tall_veg_gain:  # Non-tree converted to tree (1)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
                         node = nu.accrete_node(node, 1)
                         if all_planted_trees:  # New planted trees (11)
@@ -1082,19 +1083,19 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
 
-                    ### Non-tree to cropland gain (without tall vegetation)
+                    ### Non-cropland AND non-tree to cropland gain (without tall vegetation)
                     elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                        node = nu.accrete_node(node, 4)  # General cropland node code
-                        state_out = nu.accrete_node(node, 1)  # Cropland gain node code
-                        c_pools_EF_no_fire = cn.all_non_soil_pools
+                        node = nu.accrete_node(node, 4)  # General cropland node code (4)
+                        state_out = nu.accrete_node(node, 1)  # Cropland gain node code (41)
+                        c_pools_EF_no_fire = cn.all_non_soil_pools  # Fire not considered in years of cropland gain
                         rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
                         forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
                         c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(c_pools_EF_no_fire, c_dens_in, rf_post_dist)
 
                     ### Cropland converted to non-cropland (without tall vegetation)
                     elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                        node = nu.accrete_node(node, 4)  # General cropland node code
-                        state_out = nu.accrete_node(node, 2)  # Cropland loss node code
+                        node = nu.accrete_node(node, 4)  # General cropland node code (4)
+                        state_out = nu.accrete_node(node, 2)  # Cropland loss node code (42)
                         c_pools_EF_no_fire = cn.agc_emissions_only  # There should only be AGC in cropland anyway
                         c_dens_in = [cn.cropland_agc_dens, 0, 0 ,0]  # Forces input AGC to cropland default; other pools forced to 0, regardless of existing value.
                         forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
@@ -1102,11 +1103,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
                     ### Cropland remaining cropland (without tall vegetation)
                     elif (LC_prev == cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                        node = nu.accrete_node(node, 4)  # General cropland node code
-                        state_out = nu.accrete_node(node, 3)  # Cropland->cropland node code
+                        node = nu.accrete_node(node, 4)  # General cropland node code (4)
+                        node = nu.accrete_node(node, 3)  # Cropland->cropland node code (43->431/432)
                         c_dens_in = [cn.cropland_agc_dens, 0, 0 ,0]  # Forces input AGC to cropland default; other pools forced to 0, regardless of existing value. Same values output.
                         forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
-                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_cropland_cropland(c_dens_in)
+                        (state_out, c_gross_emis_out, c_gross_removals_out,
+                         c_dens_out, non_co2_flux_out) = calc_cropland_cropland(node, c_dens_in, most_recent_year_burned_during_interval)
 
 
                     # When decision trees above do not apply
@@ -1196,7 +1198,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"] = (deadwood_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
         out_dict_float32[f"{cn.litter_c_gross_removals_pattern}_{year_range}"] = (litter_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
 
-        # Converts non-CO2 emissions from Mg CO2e/ha/interval to Mg CO2e/ha/yr
+        # Converts non-CO2 emissions from Mg CO2e/ha/interval to Mg CO2e/ha/yr. No conversion of Mg C/ha to Mg CO2 because these are already in Mg CO2e/ha.
         out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = (ch4_gross_emis_out_block / interval_length).copy()
         out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = (n2o_gross_emis_out_block / interval_length).copy()
 
@@ -1219,6 +1221,58 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
+
+# Gross and net fluxes and ending carbon stocks for cropland remaining cropland (without tall vegetation).
+# Currently: Ending AGC is forced to the cropland default (4.7 Mg C/ha); ending BGC, deadwood and litter are 0 Mg C/ha
+# No CO2 emissions or removals but there are non-CO2 emissions if there is fire (crop residue burning).
+@jit(nopython=True)
+def calc_cropland_cropland(node, c_dens_in, most_recent_year_burned_during_interval):
+
+
+    # Step 1: Calculates carbon densities, carbon gross emissions and carbon gross removals (no changes to any)
+    c_dens_out = np.array(c_dens_in).astype('float32')
+    c_gross_emissions_out = np.array([0, 0, 0, 0]).astype('float32')  # Specified for completeness
+    c_gross_removals_out = np.array([0, 0, 0, 0]).astype('float32')  # Specified for completeness
+
+
+    # Step 2: Calculates non-CO2 emissions (if relevant) (Mg CO2e/ha/interval)
+    # Default non-CO2 emissions values
+    ch4_flux_out = 0
+    n2o_flux_out = 0
+
+    # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
+    if most_recent_year_burned_during_interval > 0:
+
+        state_out = nu.accrete_node(node, 1)
+
+        # # Selects just the carbon pools that have non-CO2 emissions from fire
+        # c_pools_for_fire_non_CO2 = np.where(c_pools_fire_non_CO2 == 1, c_pre_disturb, 0)
+        #
+        # # Sums the C pools that have non-CO2 fire emissions. We don't track which C pools the CH4 and N2O emissions come from,
+        # # so the pools are combined.
+        # c_pools_for_fire_total = np.sum(c_pools_for_fire_non_CO2)
+        #
+        # # Calculates non-CO2 fire emissions using the selected C pools in the year before disturbance
+        # ch4_flux_out, n2o_flux_out = non_CO2_fire_equations_cropland(c_pools_for_fire_total, Cf, Gef_ch4, Gef_n2o)
+
+        # # For testing non-CO2 emissions
+        # print("c_dens_in:", c_dens_in)
+        # print("c_pre_disturb:", c_pre_disturb)
+        # print(f"Cf: {Cf}; Gef_ch4: {Gef_ch4}; GWP CH4: {cn.gwp_ch4}")
+        # print(f"Cf: {Cf}; Gef_n2o: {Gef_n2o}; GWP N2O: {cn.gwp_n2o}")
+        # print("c_pools_for_fire_non_CO2:", c_pools_for_fire_non_CO2)
+        # print("c_pools_for_fire_total:", c_pools_for_fire_total)
+        # print(f"ch4_flux_out: {ch4_flux_out}; n2o_flux_out: {n2o_flux_out};")
+        # os.quit()
+
+    # Node code if no fire in the last interval. No CH4 and N2O emissions calculated.
+    else:
+
+        state_out = nu.accrete_node(node, 2)
+
+    non_co2_fluxes_out = np.array([ch4_flux_out, n2o_flux_out]).astype('float32')
+
+    return state_out, c_gross_emissions_out, c_gross_removals_out, c_dens_out, non_co2_fluxes_out
 
 
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3

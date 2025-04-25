@@ -12,11 +12,11 @@ from .constants_and_names import gain_year_count_pattern
 
 # Adds latest decision tree branch to the state node
 @jit(nopython=True)
-def accrete_node(combo, new):
-    combo = combo*10 + new
-    return combo
+def accrete_node(combined, new_digit):
+    combined = combined * 10 + new_digit
+    return combined
 
-# Makes all output states the same number of digits (currently 6)
+# Makes all output states the same number of digits (currently 7) by padding 0s to the right
 @jit(nopython=True)
 def pad_to_6_digits(state_out, max_digits_state_out):
 
@@ -440,7 +440,7 @@ def calc_Gef_forest(climate_domain_cell):
 # biomass_to_carbon can be hard-coded as non-mangrove because we assume that mangroves don't have fires.
 # From IPCC 2019 Eqn. 2.27
 @jit(nopython=True)
-def non_CO2_fire_equations(carbon_in, Cf, Gef_ch4, Gef_n2o):
+def non_CO2_fire_equations_forest(carbon_in, Cf, Gef_ch4, Gef_n2o):
 
     # print(f"Carbon in: {carbon_in}; Cf: {Cf}; Gef_ch4: {Gef_ch4}; GWP CH4: {cn.gwp_ch4}")
 
@@ -671,7 +671,7 @@ def calc_T_NT(node, interval_type, burned_in_prev_interval, RF_AGC_in, RF_BGC_in
         c_pools_for_fire_total = np.sum(c_pools_for_fire_non_CO2)
 
         # Calculates non-CO2 fire emissions using the selected C pools in the year before disturbance
-        ch4_flux_out, n2o_flux_out = non_CO2_fire_equations(c_pools_for_fire_total, Cf, Gef_ch4, Gef_n2o)
+        ch4_flux_out, n2o_flux_out = non_CO2_fire_equations_forest(c_pools_for_fire_total, Cf, Gef_ch4, Gef_n2o)
 
         # # For testing non-CO2 emissions
         # print("c_dens_in:", c_dens_in)
@@ -907,7 +907,7 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF
         c_pools_for_fire_total = np.sum(c_pools_for_fire_non_CO2)
 
         # Calculates non-CO2 fire emissions using the selected C pools in the year before disturbance
-        ch4_flux_out, n2o_flux_out = non_CO2_fire_equations(c_pools_for_fire_total, Cf, Gef_ch4, Gef_n2o)
+        ch4_flux_out, n2o_flux_out = non_CO2_fire_equations_forest(c_pools_for_fire_total, Cf, Gef_ch4, Gef_n2o)
 
         # # For testing non-CO2 emissions
         # print("c_dens_in:", c_dens_in)
@@ -1113,7 +1113,7 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
         c_pools_for_fire_total = np.sum(c_pools_for_fire_non_CO2)
 
         # Calculates non-CO2 fire emissions using the selected C pools in the year before disturbance
-        ch4_flux_out, n2o_flux_out = non_CO2_fire_equations(c_pools_for_fire_total, Cf, Gef_ch4, Gef_n2o)
+        ch4_flux_out, n2o_flux_out = non_CO2_fire_equations_forest(c_pools_for_fire_total, Cf, Gef_ch4, Gef_n2o)
 
         # # For testing non-CO2 emissions
         # print("c_dens_in:", c_dens_in)

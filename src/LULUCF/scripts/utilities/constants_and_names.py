@@ -387,7 +387,7 @@ planted_forest_AGC_BGC_removal_factor_pattern = "annual_gain_rate_AGC_BGC_Mg_ha_
 oil_palm_2000_extent_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/IDN_MYS_plantation_pre_2000/processed/20200724/"
 oil_palm_2000_extent_pattern = "plantation_2000_or_earlier_processed"
 
-# Descals et al. 2024: essd-16-5111-2024-discussion.html
+# Descals et al. 2024: https://essd.copernicus.org/articles/16/5111/2024/essd-16-5111-2024-discussion.html
 oil_palm_first_year_dir = f"{AFOLU_path}organic_soils/inputs/processed/descals_plantation/year/20241105/"
 oil_palm_first_year_pattern = "descals_year"
 
