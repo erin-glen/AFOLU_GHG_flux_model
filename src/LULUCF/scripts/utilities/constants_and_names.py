@@ -105,7 +105,6 @@ partial_disturbance_emission_factor_table_name = "partial_disturbance_emission_f
 partial_disturbance_emission_factor_table_full_path = f"{EF_RF_C_ratio_spreadsheet_URL}{partial_disturbance_emission_factor_table_name}"
 partial_disturbance_emission_factor_table_tab = "EF_combined"
 
-
 # Aboveground carbon removal factor for oil palm (Mg C/ha/yr) (IPCC 2019 Cropland Table 5.3)
 oil_palm_agc_rf = 2.4
 oil_palm_bgc_rf = oil_palm_agc_rf * default_r_s_non_mang
@@ -164,6 +163,21 @@ all_non_soil_pools = np.array([1, 1, 1, 1]).astype('uint8')
 SDPT_oil_palm_code = 1
 SDPT_wood_fiber_code = 2
 SDPT_other_code = 3
+
+# Value for cropland nodes in land state node decision tree (for cropland gain, loss, or remaining cropland)
+cropland_node = 4
+
+# Ratio of aboveground residue dry matter to harvested yield (Rag(T) (IPCC 2019, V4, Ch. 11, Table 11.1A- generic value)
+cropland_residue_harvest_ratio = 1.0
+
+# Emission factors for crop residue burning (IPCC 2019, V4, Ch. 2, Table 2.5-- agricultural residues)
+Gef_CH4_crop_residue = 2.7
+Gef_N2O_crop_residue = 0.07
+
+# Combustion factor for crop residue burning (IPCC 2019, V4, Ch. 2, Table 2.6-- agricultural residues, other crops)
+Cf_crop_residue = 0.85
+
+
 
 ########
 ### File name paths and patterns
