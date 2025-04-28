@@ -301,6 +301,21 @@ climate_zone_raw_pattern = "ipcc_climate_1985-2015.tif"
 
 climate_zone_processed_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/climate_zone/processed/20250422/"
 climate_zone_pattern = "climate_zone_2019_corrigenda_processed"
+"""
+1: tropical montane
+2: tropical wet
+3: tropical moist
+4: tropical dry
+5: warm temperate moist
+6: warm temperate dry
+7: cool temperate moist
+8: cool temperate dry
+9: boreal moist
+10: boreal dry
+11: polar moist
+12: polar dry
+"""
+
 
 precipitation_dir = f"{full_bucket_prefix}/climate/carbon_model/inputs_for_carbon_pools/processed/precip/20190418/"
 precipitation_pattern = "precip_mm_annual"

@@ -419,9 +419,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 # Need to force the AGC and BGC to float32.
                 c_dens_in_NT_T = [np.float32(0), np.float32(0), deadwood_c_dens_in, litter_c_dens_in]
 
-                # One-time removal factor for gain of medium-height vegetation (Mg C/ha)
-                #TODO Correct and complete this function. Currently using just climate domain as a stand in for IPCC climate zone.
-                medium_height_veg_AGC_RF, medium_height_veg_BGC_RF = nu.calc_medium_height_veg_removals(climate_domain_cell)
+                # One-time removal factor for gain of medium-height vegetation (Mg C/ha) based on climate zone
+                medium_height_veg_AGC_RF, medium_height_veg_BGC_RF = nu.calc_medium_height_veg_removals(climate_zone_cell)
 
                 # Gef for fire emissions for different gases for forests specifically (g respective gas/kg dry matter)
                 Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest = nu.calc_Gef_forest(climate_domain_cell)

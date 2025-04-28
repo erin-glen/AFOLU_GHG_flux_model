@@ -274,20 +274,37 @@ def calc_deadwood_litter_ratios(elevation, climate_domain, precipitation):
 
 
 # Returns AGC and BGC one-time removal factors for the gain of medium-height vegetation (Mg C/ha)
-#TODO Correct and complete this function. Currently using just climate domain as a stand in for IPCC climate zone.
+# Values are from IPCC 2006, V4, Ch. 6, Table 6.4- DEFAULT BIOMASS STOCKS PRESENT ON GRASSLAND, AFTER CONVERSION FROM OTHER LAND USE (no 2019 update).
+# medium_height_veg_AGB_RF is from the "peak above-ground biomass" columns.
+# medium_height_veg_BGB_RF is the difference between medium_height_veg_AGB_RF and the "total (above-ground and below-ground) non-woody biomass" column.
 @jit(nopython=True)
-def calc_medium_height_veg_removals(climate_domain):
+def calc_medium_height_veg_removals(climate_zone):
 
-    if climate_domain == 1:  # Tropical/subtropical
-        medium_height_veg_AGB_RF = 4.3   # Average of the two tropical classes for now
-        medium_height_veg_BGB_RF = (12.4-medium_height_veg_AGB_RF)  # Average of the two tropical classes for now
-    elif climate_domain == 2: # Temperate
-        medium_height_veg_AGB_RF = 2.1
-        medium_height_veg_BGB_RF = 1.0
-    elif climate_domain == 3: # Boreal
-        medium_height_veg_AGB_RF = 1.7  # Average of the four temperate classes for now
-        medium_height_veg_BGB_RF = (9.9-medium_height_veg_AGB_RF)  # Average of the four temperate classes for now
-    else: # Outside ecozone bounds
+    if climate_zone >= 9:  # Boreal- dry and wet (and polar)
+        medium_height_veg_AGB_RF = 1.7
+        medium_height_veg_BGB_RF = (8.5 - medium_height_veg_AGB_RF)
+    elif climate_zone == 8:  # Cold temperate- dry
+        medium_height_veg_AGB_RF = 1.7
+        medium_height_veg_BGB_RF = (6.5 - medium_height_veg_AGB_RF)
+    elif climate_zone == 7:  # Cold temperate- wet
+        medium_height_veg_AGB_RF = 2.4
+        medium_height_veg_BGB_RF = (13.6 - medium_height_veg_AGB_RF)
+    elif climate_zone == 6:  # Warm temperate- dry
+        medium_height_veg_AGB_RF = 1.6
+        medium_height_veg_BGB_RF = (6.1 - medium_height_veg_AGB_RF)
+    elif climate_zone == 5:  # Warm temperate- wet
+        medium_height_veg_AGB_RF = 2.7
+        medium_height_veg_BGB_RF = (13.5 - medium_height_veg_AGB_RF)
+    elif climate_zone == 4:  # Tropical- dry
+        medium_height_veg_AGB_RF = 2.3
+        medium_height_veg_BGB_RF = (8.7 - medium_height_veg_AGB_RF)
+    elif climate_zone == 2 or climate_zone == 3:  # Tropical- wet/moist
+        medium_height_veg_AGB_RF = 6.2
+        medium_height_veg_BGB_RF = (16.1 - medium_height_veg_AGB_RF)
+    elif climate_zone == 1:  # Tropical- montane (average of tropical dry and tropical wet/moist values)
+        medium_height_veg_AGB_RF = (2.3 + 6.2)/2
+        medium_height_veg_BGB_RF = (((8.7 + 16.1)/2) - medium_height_veg_AGB_RF)
+    else: # Outside ecozone bounds-- apply boreal values
         medium_height_veg_AGB_RF = 1.7
         medium_height_veg_BGB_RF = (8.5-medium_height_veg_AGB_RF)
 
