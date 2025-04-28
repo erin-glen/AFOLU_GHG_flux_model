@@ -200,8 +200,7 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
             client
 
         # Creates the log for the main function and populates it with basic run information
-        main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, False, client, cluster,
-                                                                       f"Preprocessing: {process}", run_local,
+        main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, f"Preprocessing: {process}", run_local,
                                                                        'standard', f'Hansenize_{process}')
 
         # Step 2: Create chunk list

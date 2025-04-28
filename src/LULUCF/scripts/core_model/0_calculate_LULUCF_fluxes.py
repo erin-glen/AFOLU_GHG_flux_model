@@ -1110,6 +1110,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                         (state_out, c_gross_emis_out, c_gross_removals_out,
                          c_dens_out, non_co2_flux_out) = nu.calc_cropland_cropland(node, c_dens_in, most_recent_year_burned_during_interval)
 
+                    ### Short or medium vegetation remaining short or medium vegetation
+                    elif (short_veg_prev or med_veg_prev) and (short_veg_prev or short_veg_curr): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                        node = nu.accrete_node(node, cn.grassland_node)  # General grassland node code (5)
+                        node = nu.accrete_node(node, 3)  # Short/medium vegetation->Short/medium vegetation node code (53->531/532)
+                        forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
+                        (state_out, c_gross_emis_out, c_gross_removals_out,
+                         c_dens_out, non_co2_flux_out) = nu.calc_shortmedveg_shortmedveg(node, c_dens_in, most_recent_year_burned_during_interval)
 
                     # When decision trees above do not apply
                     else:
@@ -1470,8 +1477,12 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
+    # Shapefile of chunk footprints to use if none is supplied on the command line
+    if not chunk_shapefile_uri:
+        chunk_shapefile_uri = cn.fishnet_1x1deg_uri
+
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, chunk_shapefile_uri, client, cluster, log_note, run_local, model_type, stage)
+    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
     # Starting time for stage
     start_time = uu.timestr()
@@ -1710,7 +1721,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
     if (not no_stats) and (success_count > 0):
-        uu.compile_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger)
+        uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 

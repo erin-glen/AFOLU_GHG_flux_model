@@ -1250,7 +1250,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
 # Calculates difference between pixel counts in all 1x1s in a 10x10 vs. the corresponding 10x10
 # to make sure that aggregation of 1x1s didn't lose any data (difference should be 0).
 # From https://chatgpt.com/share/e/67d5d68d-7168-800a-ada1-e42f8c3e9253
-def compile_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger):
+def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger):
 
     ### Part 1: Organizes chunk stats for 1x1 degree chunks (inputs and outputs)
 
@@ -1279,7 +1279,7 @@ def compile_1x1_chunk_stats(all_1x1_stats, stage, no_upload, main_logger):
 
     # Reads the shapefile from S3 to extract "chunk_id" and "iso" fields
     # Based on https://chatgpt.com/share/e/6744de08-6b64-800a-b8c4-6a20833f7e3a
-    gdf = gpd.read_file(cn.fishnet_1x1deg_uri)
+    gdf = gpd.read_file(chunk_shapefile_uri)
 
     # Creates a DataFrame with "chunk_id" and "iso" fields
     fishnet_shapefile_df = gdf[['chunk_id', 'iso']]
@@ -1604,6 +1604,8 @@ def strip_and_extract_years(key):
 
 # Creates a dataframe from the attribute table of the 1x1 deg fishnet with GADM iso joined to it
 def fishnet_with_GADM_iso(shapefile_uri):
+
+    print(shapefile_uri)
 
     # Reads the 1x1 deg fishnet with GADM iso joined from S3 to extract "chunk_id" and "iso" fields
     gdf = gpd.read_file(shapefile_uri)
