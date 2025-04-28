@@ -11,11 +11,11 @@ python -m scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --
 Coiled test:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
 python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ -f 1 -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp -f 1 -yr 2015 2023 --run_date YYYYMMDD
 
 Full run:
 python -m scripts.utilities.create_cluster -n 50
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/
+python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp
 """
 
 import argparse
@@ -255,7 +255,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
 
 
 def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         use_shapefile=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
+         chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
 
     ### Step 1: Preparation
@@ -280,7 +280,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note, run_local, model_type, stage)
+    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, chunk_shapefile_uri, client, cluster, log_note, run_local, model_type, stage)
 
     # Starting time for stage
     start_time = uu.timestr()
@@ -295,10 +295,10 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
-    fishnet_iso_df = uu.fishnet_with_GADM_iso()
+    fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
     # Can only run on 1x1 degree chunks
     if chunk_size_pixels != 4000:
@@ -403,7 +403,7 @@ if __name__ == "__main__":
     parser.add_argument('-rd', '--run_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('-cshp', '--use_shapefile', help='Shapefile of chunks')
+    parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
@@ -419,7 +419,7 @@ if __name__ == "__main__":
     run_date = args.run_date
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
-    use_shapefile = args.use_shapefile
+    chunk_shapefile_uri = args.chunk_shapefile_uri
     first_chunks = args.first_chunks
     year_range = args.year_range
     log_note = args.log_note
@@ -430,6 +430,6 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, run_date, year_range, run_local, no_stats, no_log, no_upload, use_shapefile,
+    main(cluster_name, run_date, year_range, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)

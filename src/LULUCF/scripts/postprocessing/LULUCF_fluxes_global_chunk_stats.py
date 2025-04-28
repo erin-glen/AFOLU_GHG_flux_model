@@ -205,7 +205,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     # print(tiles_to_process)
 
     # Returns a dataframe of chunk_id and ISO, to be joined with chunk stats
-    fishnet_iso_df = uu.fishnet_with_GADM_iso()
+    fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
 
     # For local runs
     if run_local:

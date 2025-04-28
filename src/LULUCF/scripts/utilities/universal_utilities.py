@@ -1603,10 +1603,10 @@ def strip_and_extract_years(key):
 
 
 # Creates a dataframe from the attribute table of the 1x1 deg fishnet with GADM iso joined to it
-def fishnet_with_GADM_iso():
+def fishnet_with_GADM_iso(shapefile_uri):
 
-    # Reads the 1x1 deg fishnet with GADM3.6 iso joined from S3 to extract "chunk_id" and "iso" fields
-    gdf = gpd.read_file(cn.fishnet_1x1deg_uri)
+    # Reads the 1x1 deg fishnet with GADM iso joined from S3 to extract "chunk_id" and "iso" fields
+    gdf = gpd.read_file(shapefile_uri)
 
     # Creates a DataFrame of the 1x1def fishnet with "chunk_id" and "iso" fields
     fishnet_df = gdf[['chunk_id', 'iso']]

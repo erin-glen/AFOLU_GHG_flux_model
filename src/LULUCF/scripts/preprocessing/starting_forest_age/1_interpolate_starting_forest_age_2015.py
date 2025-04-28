@@ -17,11 +17,11 @@ python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_fores
 Coiled test:
 python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
 python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
-python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp -f 5
+python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp -f 5
 
 Full run:
 python -m scripts.utilities.create_cluster -n 20 -t 19 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp -ln "This is intended to be the definitive interpolated forest age for 2015."
+python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
 This goes very quickly, so -n 20 -t 19 is totally adequate. Could try -t 21 next time.
 Max memory: 8 GB. 12:30 to finish chunks; 12:51 with chunk stat aggregation; 23 Coiled credits; $0.83 AWS
 
@@ -221,7 +221,7 @@ def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list
 
 
 def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         use_shapefile=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
+         chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     ### Step 1: Preparation
 
@@ -244,10 +244,10 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
-    fishnet_iso_df = uu.fishnet_with_GADM_iso()
+    fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
@@ -332,7 +332,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('-cshp', '--use_shapefile', action='store_true', help='Use shapefile to determine chunks')
+    parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
@@ -346,7 +346,7 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
-    use_shapefile = args.use_shapefile
+    chunk_shapefile_uri = args.chunk_shapefile_uri
     first_chunks = args.first_chunks
     log_note = args.log_note
 
@@ -355,6 +355,6 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, run_local, no_stats, no_log, no_upload, use_shapefile,
+    main(cluster_name, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)

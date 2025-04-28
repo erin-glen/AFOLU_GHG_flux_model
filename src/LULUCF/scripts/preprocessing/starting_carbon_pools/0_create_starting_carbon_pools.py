@@ -6,15 +6,15 @@ python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_p
 
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp -f 1 --year YYYY
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp -f 1 --year YYYY
 
 python -m scripts.utilities.create_cluster -n 60 -t 10 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing..starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
+python -m scripts.preprocessing..starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
 Max memory usage: ~18 GB/worker
 Time: 23:17 through calculation; 40:25 through tile stats; Credits: 170; Cost: $6.00
 
 python -m scripts.utilities.create_cluster -n 50 -t 12 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
 Max memory usage: ~20 GB/worker
 Time: 29:26 through calculation; 31:11 through tile stats; Credits: 116; Cost: $3.94
 -t 14 seemed high, so may be better to go back down to -t 12.
@@ -387,7 +387,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
 
 def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_upload= False,
-         use_shapefile=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
+         chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     ### Step 1: Preparation
 
@@ -406,7 +406,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, use_shapefile, client, cluster, log_note, run_local, model_type, stage)
+    main_logger, main_log_local_path = lu.populate_main_log_header(bounding_box, chunk_shapefile_uri, client, cluster, log_note, run_local, model_type, stage)
 
     # Starting time for stage
     start_time = uu.timestr()
@@ -416,10 +416,10 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
-    fishnet_iso_df = uu.fishnet_with_GADM_iso()
+    fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
@@ -557,7 +557,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('-cshp', '--use_shapefile', action='store_true', help='Use shapefile to determine chunks')
+    parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('--year', type=int, required=True, help='Year for carbon pools')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
@@ -572,7 +572,7 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
-    use_shapefile = args.use_shapefile
+    chunk_shapefile_uri = args.chunk_shapefile_uri
     first_chunks = args.first_chunks
     year = args.year
     log_note = args.log_note
@@ -582,7 +582,7 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, year, run_local, no_stats, no_log, no_upload, use_shapefile,
+    main(cluster_name, year, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)
 

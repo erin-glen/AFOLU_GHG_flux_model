@@ -31,7 +31,7 @@ python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age
 
 Full run:
 python -m scripts.utilities.create_cluster -n 12 -t 9 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -cshp -ln "This is intended to be the definitive forest age 2010/2015 run."
+python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
 When I ran with -n 7 -t 9, it would process only about 3 batches of 300 chunks (900 chunks) before failing,
 sometimes because it ran out of memory. Increasing the cluster size to -n 12 -t 9 made it run through 1800 chunks before failing!
 I think that the cluster with 7 workers simply couldn't handle all the data it was downloading at a certain point.
@@ -240,7 +240,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
 
 
 def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         use_shapefile=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
+         chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     ### Step 1: Preparation
 
@@ -263,10 +263,10 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
-    fishnet_iso_df = uu.fishnet_with_GADM_iso()
+    fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
     # chunk_list = chunk_list[0:1501]
     # chunk_list = chunk_list[1501:]
@@ -378,7 +378,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('-cshp', '--use_shapefile', action='store_true', help='Use shapefile to determine chunks')
+    parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
@@ -392,7 +392,7 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
-    use_shapefile = args.use_shapefile
+    chunk_shapefile_uri = args.chunk_shapefile_uri
     first_chunks = args.first_chunks
     log_note = args.log_note
 
@@ -401,6 +401,6 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, run_local, no_stats, no_log, no_upload, use_shapefile,
+    main(cluster_name, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)

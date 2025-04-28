@@ -224,8 +224,8 @@ def process_10x10_tile(year, bounds, is_final, fishnet_iso_df):
 
 
 ### Main Function
-def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False, use_shapefile=False,
-         bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
+def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
+         chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     start_year = year_range[0]
     end_year = year_range[1]
@@ -249,10 +249,10 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
-    fishnet_iso_df = uu.fishnet_with_GADM_iso()
+    fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
     # chunk_list = get_10x10_grid()
     # chunk_list = [[40, 50, 50, 60]]  # Test area in central Russia that originally wasn't getting all the MODIS tiles within this 10x10 deg area
@@ -347,7 +347,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('-cshp', '--use_shapefile', action='store_true', help='Use shapefile to determine chunks')
+    parser.add_argument('-cshp', '--chunk_shapefile_uri', action='store_true', help='Use shapefile to determine chunks')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for burned area processing')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
@@ -362,7 +362,7 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
-    use_shapefile = args.use_shapefile
+    chunk_shapefile_uri = args.chunk_shapefile_uri
     first_chunks = args.first_chunks
     year_range = args.year_range
     log_note = args.log_note
@@ -372,6 +372,6 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, use_shapefile,
+    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)
