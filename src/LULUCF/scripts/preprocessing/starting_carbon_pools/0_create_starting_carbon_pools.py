@@ -6,15 +6,15 @@ python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_p
 
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp -f 1 --year YYYY
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
 
 python -m scripts.utilities.create_cluster -n 60 -t 10 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing..starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
+python -m scripts.preprocessing..starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
 Max memory usage: ~18 GB/worker
 Time: 23:17 through calculation; 40:25 through tile stats; Credits: 170; Cost: $6.00
 
 python -m scripts.utilities.create_cluster -n 50 -t 12 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
 Max memory usage: ~20 GB/worker
 Time: 29:26 through calculation; 31:11 through tile stats; Credits: 116; Cost: $3.94
 -t 14 seemed high, so may be better to go back down to -t 12.

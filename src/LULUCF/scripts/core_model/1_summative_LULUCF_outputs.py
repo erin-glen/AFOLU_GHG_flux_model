@@ -11,11 +11,11 @@ python -m scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --
 Coiled test:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
 python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp -f 1 -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2015 2023 --run_date YYYYMMDD
 
 Full run:
 python -m scripts.utilities.create_cluster -n 50
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp
+python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp
 """
 
 import argparse

@@ -9,11 +9,11 @@ python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
 python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2015 2023 --run_date YYYYMMDD
 python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload -yr 2015 2023 --run_date YYYYMMDD
 python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp -f 1 -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -f 1 -yr 2015 2023 --run_date YYYYMMDD
 
 Full run:
 python -m scripts.utilities.create_cluster -n 200
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp --run_date YYYYMMDD  --log_note "This is a full run."
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --run_date YYYYMMDD  --log_note "This is a full run."
 """
 
 import argparse
@@ -1241,7 +1241,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
     logger_worker = lu.setup_logging_worker()
 
-    # try:
+    chunk_start_time = time.time()
 
     uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
 
@@ -1435,19 +1435,12 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
         lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}", is_final, logger_worker)
 
+    chunk_end_time = time.time()
 
-    return_message = f"Success for {bounds_str}: {uu.timestr()}"
+    return_message = f"Success for {bounds_str}, took {chunk_end_time - chunk_start_time} seconds: {uu.timestr()}"
 
     # Removes task tracking file from S3 once task is successful
     uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
-
-    # except Exception as e:
-    #
-    #     return_message = f"Error processing chunk {bounds}: {e}: {uu.timestr()}"
-    #
-    #     lu.print_and_log(return_message, is_final, logger_worker)
-    #     print(return_message)
-    #     uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
 
     return return_message, chunk_stats  # Return both the success message and the statistics
 

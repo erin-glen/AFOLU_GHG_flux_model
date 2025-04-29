@@ -17,11 +17,11 @@ python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_fores
 Coiled test:
 python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
 python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
-python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp -f 5
+python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 5
 
 Full run:
 python -m scripts.utilities.create_cluster -n 20 -t 19 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
+python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
 This goes very quickly, so -n 20 -t 19 is totally adequate. Could try -t 21 next time.
 Max memory: 8 GB. 12:30 to finish chunks; 12:51 with chunk stat aggregation; 23 Coiled credits; $0.83 AWS
 

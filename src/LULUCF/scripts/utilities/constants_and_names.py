@@ -123,6 +123,33 @@ trees_outside_forests_agc_rf_max = 2.8
 gwp_ch4 = 27 # AR6 WG1 Table 7.15
 gwp_n2o = 273 # AR6 WG1 Table 7.15
 
+
+### Crop residue and grassland burning constants
+
+# Value for cropland nodes in land state node decision tree (for gain, loss, or remaining)
+cropland_node = 4
+
+# Ratio of aboveground residue dry matter to harvested yield (Rag(T) (IPCC 2019, V4, Ch. 11, Table 11.1A- generic value)
+cropland_residue_harvest_ratio = 1.0
+
+# Emission factors for crop residue burning (IPCC 2019, V4, Ch. 2, Table 2.5-- agricultural residues)
+Gef_CH4_crop_residue = 2.7
+Gef_N2O_crop_residue = 0.07
+
+# Combustion factor for crop residue burning (IPCC 2019, V4, Ch. 2, Table 2.6-- agricultural residues, other crops)
+Cf_crop_residue = 0.85
+
+# Value for short/medium vegetation nodes in land state node decision tree (for gain, loss, or remaining)
+grassland_node = 5
+
+# Emission factors for savanna and grassland burning (IPCC 2019, V4, Ch. 2, Table 2.5-- savanna and grassland)
+Gef_CH4_grassland = 2.3
+Gef_N2O_grassland = 0.21
+
+# Combustion factor for savanna and grassland burning (IPCC 2019, V4, Ch. 2, Table 2.6-- all savanna grasslands (mid/late dry season burns)
+Cf_grassland = 0.77
+
+
 ### GLCLU cover codes
 cropland = 244
 builtup = 250
@@ -163,31 +190,6 @@ all_non_soil_pools = np.array([1, 1, 1, 1]).astype('uint8')
 SDPT_oil_palm_code = 1
 SDPT_wood_fiber_code = 2
 SDPT_other_code = 3
-
-# Value for cropland nodes in land state node decision tree (for gain, loss, or remaining)
-cropland_node = 4
-
-# Ratio of aboveground residue dry matter to harvested yield (Rag(T) (IPCC 2019, V4, Ch. 11, Table 11.1A- generic value)
-cropland_residue_harvest_ratio = 1.0
-
-# Emission factors for crop residue burning (IPCC 2019, V4, Ch. 2, Table 2.5-- agricultural residues)
-Gef_CH4_crop_residue = 2.7
-Gef_N2O_crop_residue = 0.07
-
-# Combustion factor for crop residue burning (IPCC 2019, V4, Ch. 2, Table 2.6-- agricultural residues, other crops)
-Cf_crop_residue = 0.85
-
-
-# Value for short/medium vegetation nodes in land state node decision tree (for gain, loss, or remaining)
-grassland_node = 5
-
-# Combustion factor for crop residue burning (IPCC 2019, V4, Ch. 2, Table 2.6-- agricultural residues, other crops)
-#TODO Need to confirm this!!
-Cf_grassland = 0.50
-
-# Emission factors for savanna and grassland burning (IPCC 2019, V4, Ch. 2, Table 2.5-- savanna and grassland)
-Gef_CH4_grassland = 2.3
-Gef_N2O_grassland = 0.21
 
 
 

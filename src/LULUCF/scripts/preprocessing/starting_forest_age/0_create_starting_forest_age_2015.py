@@ -31,7 +31,7 @@ python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age
 
 Full run:
 python -m scripts.utilities.create_cluster -n 12 -t 9 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250428/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
+python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
 When I ran with -n 7 -t 9, it would process only about 3 batches of 300 chunks (900 chunks) before failing,
 sometimes because it ran out of memory. Increasing the cluster size to -n 12 -t 9 made it run through 1800 chunks before failing!
 I think that the cluster with 7 workers simply couldn't handle all the data it was downloading at a certain point.
