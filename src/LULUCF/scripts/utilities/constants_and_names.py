@@ -89,7 +89,7 @@ non_tropical_litter_c_ratio = 0.04
 EF_RF_C_ratio_spreadsheet_URL = "http://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_model/LULUCF/rate_ratio_lookup_tables/"
 
 # Removal factor and carbon pool constant workbook
-RF_C_ratio_spreadsheet_name = "RF_rate_and_C_ratio_lookup_tables_20250414.xlsx"
+RF_C_ratio_spreadsheet_name = "RF_rate_and_C_ratio_lookup_tables_20250430.xlsx"
 RF_C_ratio_spreadsheet_full_path = f"{EF_RF_C_ratio_spreadsheet_URL}{RF_C_ratio_spreadsheet_name}"
 
 # IPCC Tier 1 removal factor spreadsheet by continent-ecozone-age category combination
@@ -112,8 +112,15 @@ oil_palm_bgc_rf = oil_palm_agc_rf * default_r_s_non_mang
 # One-time annual cropland removal factor (Mg C/ha) (IPCC 2019 Cropland Section 5.3.1.2)
 cropland_rf = 4.7
 
-# Cropland aboveground carbon density (global constant, static value) (Mg C/ha) (IPCC 2019 Cropland Section 5.3.1.2)
+# Cropland aboveground carbon density (global constant, static value) (Mg C/ha)
 cropland_agc_dens = cropland_rf
+
+# One-time annual short/medium vegetation removal factor (Mg C/ha) (IPCC 2019 V4, Ch. 2 Table 2.4-- all savanna grassland mid/late dry season burns)
+# IPCC value is 10 Mg AGB/ha, so 4.7 Mg AGC/ha
+short_med_veg_rf = 4.7
+
+# Short/medium vegetation carbon density (global constant, static value) (Mg C/ha)
+short_med_veg_dens = short_med_veg_rf
 
 # Aboveground carbon removal factor for trees outside forests (Mg C/ha/yr), assuming that the entire hectare is ToF
 # (IPCC 2019 Settlements Section 8.2.1.2 (p. 8.5))

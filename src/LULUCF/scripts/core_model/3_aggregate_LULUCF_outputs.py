@@ -6,15 +6,18 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m scripts.core_model.2_aggregate_LULUCF_outputs -yr 2015 2023 --first_10x10s_to_process 2 --run_date YYYYMMDD
+python -m scripts.core_model.3_aggregate_LULUCF_outputs -yr 2015 2023 --first_10x10s_to_process 2 --run_date YYYYMMDD
 
-Coiled test:
-python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
-python -m scripts.core_model.2_aggregate_LULUCF_outputs -cn LULUCF_model -yr 2015 2023 --first_10x10s_to_process 2 --run_date YYYYMMDD
+Coiled small test:
+python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_postprocessing
+python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --first_10x10s_to_process 2 --run_date YYYYMMDD
+
+Coiled large shapefile test:
+python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --run_date YYYYMMDD
 
 Full Coiled run:
-python -m scripts.utilities.create_cluster -n 50
-python -m scripts.core_model.2_aggregate_LULUCF_outputs -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20241125/ --run_date YYYYMMDD
+python -m scripts.utilities.create_cluster -n 50 -cn LULUCF_postprocessing
+python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --run_date YYYYMMDD
 
 From before:
 Took about 30 minutes to do the aggregated gross and net flux outputs. A few 10x10 tiles from many of the folders
@@ -151,7 +154,7 @@ def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 
-            resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
     # Prepares 10x10 deg chunk stats spreadsheet: pixel count for outputs
     if (not no_stats) and (success_count_10x10 > 0):

@@ -1105,14 +1105,30 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     return f"Success merging {s3_name_dict}", chunk_stats
 
 
-# Creates numpy array of rates or ratios from a tab in an Excel spreadsheet, e.g., removal factors or carbon pool ratios
+# Creates numpy array of rates or ratios from a tab in an Excel spreadsheet, e.g., removal factors or carbon pool ratios.
+# Tries to read from s3 first. If that doesn't work (because I'm in the office), it reads from my computer.
+# Courtesy of ChatGPT: https://chatgpt.com/share/e/aff31681-c9a7-40fe-85c1-73a1cab62066
 def convert_lookup_table_to_array(spreadsheet, sheet_name, fields_to_keep):
-    # Fetches the file content. Courtesy of ChatGPT: https://chatgpt.com/share/e/aff31681-c9a7-40fe-85c1-73a1cab62066
-    response = requests.get(spreadsheet)
-    response.raise_for_status()  # Ensure we notice bad responses
 
-    # Converts to Excel. Courtesy of ChatGPT: https://chatgpt.com/share/e/aff31681-c9a7-40fe-85c1-73a1cab62066
-    excel_df = pd.read_excel(BytesIO(response.content), sheet_name=sheet_name)
+    try:
+        # Try fetching the file from the S3 URL
+        print(f"Attempting to download file from URL: {spreadsheet}")
+        response = requests.get(spreadsheet, timeout=10)
+        response.raise_for_status()
+        excel_df = pd.read_excel(BytesIO(response.content), sheet_name=sheet_name)
+
+    except (requests.exceptions.RequestException, Exception) as e:
+        print(f"Failed to download file from S3. Falling back to local file. Error: {e}")
+        # Define the local fallback path
+        fallback_dir = r"/mnt/c/Users/David.Gibbs/OneDrive - World Resources Institute/Documents/Projects/AFOLU_flux_model__all_land_all_carbon/rate_ratio_lookup_tables"
+        fallback_filename = os.path.basename(spreadsheet)
+        fallback_path = os.path.join(fallback_dir, fallback_filename)
+
+        if not os.path.exists(fallback_path):
+            raise FileNotFoundError(f"Fallback file not found at {fallback_path}")
+
+        print(f"Reading file from local path: {fallback_path}")
+        excel_df = pd.read_excel(fallback_path, sheet_name=sheet_name)
 
     # Retains only the relevant columns
     filtered_data = excel_df[fields_to_keep]

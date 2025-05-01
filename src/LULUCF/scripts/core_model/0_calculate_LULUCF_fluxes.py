@@ -4,15 +4,18 @@ Run from src/LULUCF
 Local test (may not work):
 python -m scripts.core_model.0_calculate_LULUCF_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --no_upload -yr 2015 2023 --run_date YYYYMMDD
 
-Coiled test:
+Coiled small tests:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
 python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2015 2023 --run_date YYYYMMDD
 python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload -yr 2015 2023 --run_date YYYYMMDD
 python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -f 1 -yr 2015 2023 --run_date YYYYMMDD
+
+Coiled large shapefile test:
+python -m scripts.utilities.create_cluster -n 100 -cn LULUCF_model
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023 --run_date YYYYMMDD
 
 Full run:
-python -m scripts.utilities.create_cluster -n 200
+python -m scripts.utilities.create_cluster -n 200 -cn LULUCF_model
 python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --run_date YYYYMMDD  --log_note "This is a full run."
 """
 
@@ -1082,19 +1085,20 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
 
-                    ### Non-cropland AND non-tree to cropland gain (without tall vegetation)
+                    ### Non-cropland/non-tree to cropland (without tall vegetation)
                     elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
                         node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (4)
-                        state_out = nu.accrete_node(node, 1)  # Cropland gain node code (41)
+                        state_out = nu.accrete_node(node, 1)  # Cropland gain (41)
                         c_pools_EF_no_fire = cn.all_non_soil_pools  # Fire not considered in years of cropland gain
-                        rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
+                        RF_AGC_final = cn.cropland_rf
+                        rf_array = np.array([RF_AGC_final, 0, 0, 0]).astype('float32')
                         forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
-                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(c_pools_EF_no_fire, c_dens_in, rf_post_dist)
+                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(c_pools_EF_no_fire, c_dens_in, rf_array)
 
                     ### Cropland converted to non-cropland (without tall vegetation)
                     elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
                         node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (4)
-                        node = nu.accrete_node(node, 2)  # Cropland loss node code (42->421/422)
+                        node = nu.accrete_node(node, 2)  # Cropland loss (42->421/422)
                         c_pools_EF_no_fire = cn.agc_emissions_only  # There should only be AGC in cropland anyway
                         c_dens_in = [cn.cropland_agc_dens, 0, 0 ,0]  # Forces input AGC to cropland default; other pools forced to 0, regardless of existing value.
                         forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
@@ -1104,16 +1108,40 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     ### Cropland remaining cropland (without tall vegetation)
                     elif (LC_prev == cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
                         node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (4)
-                        node = nu.accrete_node(node, 3)  # Cropland->cropland node code (43->431/432)
+                        node = nu.accrete_node(node, 3)  # Cropland->cropland (43->431/432)
                         c_dens_in = [cn.cropland_agc_dens, 0, 0 ,0]  # Forces input AGC to cropland default; other pools forced to 0, regardless of existing value. Same values output.
                         forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
                         (state_out, c_gross_emis_out, c_gross_removals_out,
                          c_dens_out, non_co2_flux_out) = nu.calc_cropland_cropland(node, c_dens_in, most_recent_year_burned_during_interval)
 
+                    ### Non-tree/cropland/short/med veg. converted to short/med vegetation
+                    # TODO revisit constants used here. Never really resolved issues about starting carbon or what to do with residual carbon.
+                    elif not (short_veg_prev or med_veg_prev) and (short_veg_curr or med_veg_curr): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                        node = nu.accrete_node(node, cn.grassland_node)  # General short/med node code (5)
+                        state_out = nu.accrete_node(node, 1)  # Short/med veg gain (51)
+                        RF_AGC_final = cn.short_med_veg_rf
+                        RF_BGC_final = cn.short_med_veg_rf * r_s_ratio_non_mang   # TODO Revisit the BGC RF
+                        rf_array = np.array([RF_AGC_final, RF_BGC_final, 0, 0]).astype('float32')
+                        forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
+                        c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_shortmedveg_gain(rf_array)
+
+                    ### Short or medium vegetation converted to non-short/med vegetation, non-forest or non-cropland
+                    # TODO revisit this. Never really resolved issues about starting carbon or what to do with residual carbon.
+                    # TODO confirm that fire emissions are correct. Didn't check that.
+                    elif (short_veg_prev or med_veg_prev) and not (short_veg_curr or med_veg_curr): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                        node = nu.accrete_node(node, cn.grassland_node)  # General short/med node code (5)
+                        node = nu.accrete_node(node, 2)  # Short/medium vegetation loss (52->521/522)
+                        c_pools_EF_no_fire = cn.biomass_emissions_only
+                        forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
+                        (state_out, c_gross_emis_out, c_gross_removals_out,
+                         c_dens_out, non_co2_flux_out) = nu.calc_shortmedveg_loss(node, c_dens_in, c_pools_EF_no_fire, most_recent_year_burned_during_interval)
+
                     ### Short or medium vegetation remaining short or medium vegetation
-                    elif (short_veg_prev or med_veg_prev) and (short_veg_prev or short_veg_curr): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                        node = nu.accrete_node(node, cn.grassland_node)  # General grassland node code (5)
-                        node = nu.accrete_node(node, 3)  # Short/medium vegetation->Short/medium vegetation node code (53->531/532)
+                    # TODO revisit this. Never really resolved issues about starting carbon or what to do with residual carbon.
+                    # TODO confirm that fire emissions are correct. Didn't check that.
+                    elif (short_veg_prev or med_veg_prev) and (short_veg_curr or med_veg_curr): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                        node = nu.accrete_node(node, cn.grassland_node)  # General short/med node code (5)
+                        node = nu.accrete_node(node, 3)  # Short/medium vegetation->Short/medium vegetation (53->531/532)
                         forest_age_annual_cell = 0  # Sets forest age to 0 because there's no forest
                         (state_out, c_gross_emis_out, c_gross_removals_out,
                          c_dens_out, non_co2_flux_out) = nu.calc_shortmedveg_shortmedveg(node, c_dens_in, most_recent_year_burned_during_interval)
@@ -1126,7 +1154,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                         # If no decision tree branches apply, forest age set to 0 years
                         forest_age_annual_cell = 0
 
-                        # If no decision tree branches apply, densities set to 0 Mg C/ha
+                        # If no decision tree branches apply, carbon densities set to 0 Mg C/ha
                         c_dens_out = np.array([0, 0, 0, 0]).astype('float32')
 
                 else:
@@ -1331,7 +1359,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     numba_end = time.time()
     lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     lu.print_and_log(f"Memory usage after numba calculations completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", is_final, logger_worker)
-    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id} took {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Calculated LULUCF fluxes and carbon densities in {bounds_str} in {tile_id} in {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
 
     # print(out_dict_uint32)
     # print(out_dict_float32)
@@ -1436,8 +1464,9 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
         lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}", is_final, logger_worker)
 
     chunk_end_time = time.time()
+    lu.print_and_log(f"{bounds_str} took {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
-    return_message = f"Success for {bounds_str}, took {chunk_end_time - chunk_start_time} seconds: {uu.timestr()}"
+    return_message = f"Success for {bounds_str}: {uu.timestr()}"
 
     # Removes task tracking file from S3 once task is successful
     uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
@@ -1454,6 +1483,11 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Model stage being run
     stage = 'LULUCF_fluxes'
     model_type = 'standard_model'
+
+    # Runs chunks in batches of specified size.
+    # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
+    batch_size = 4000
+    # batch_size = 5  # For testing batch processing
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
@@ -1482,6 +1516,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
     main_logger.info(f"Run date: {run_date}")
+    main_logger.info(f"Batch size: {batch_size}")
 
     # Calculates the interval type, difference between start and end years of intervals, and the model output years
     # for the model run
@@ -1614,8 +1649,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Needs to by a numpy array for the numba function to use it.
     # Inputs are Mg AGB/ha/yr. Outputs are Mg AGB/ha/yr. Conversion to Mg AGC/ha/yr is done below.
     primary_forest_RF_array = uu.convert_lookup_table_to_array(cn.RF_C_ratio_spreadsheet_full_path,
-                                                               cn.IPCC_removal_factor_table_tab,
-                                                               ['gainEcoCon', 'growth_primary'])
+                                                               cn.IPCC_removal_factor_table_tab,['gainEcoCon', 'growth_primary'])
 
     # Converts primary forest AGB RFs to AGC RFs (Mg AGB/ha/yr -> Mg AGC/ha/yr)
     primary_forest_RF_array[:, 1] = primary_forest_RF_array[:, 1] * cn.biomass_to_carbon_non_mangrove
@@ -1643,9 +1677,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
     main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
-    # Runs in batches of specified size
-    # batch_size = 1000
-    batch_size = 20  # For testing
     chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
     main_logger.info(f"There are {len(chunk_batches)} batches to process: {uu.timestr()}")
 
@@ -1708,7 +1739,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 
-            resize_cluster.resize_coiled_cluster("LULUCF_model", 1)
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
     # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
