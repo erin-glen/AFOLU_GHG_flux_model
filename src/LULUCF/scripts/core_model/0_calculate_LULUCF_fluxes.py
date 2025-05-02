@@ -1486,7 +1486,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Runs chunks in batches of specified size.
     # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
-    batch_size = 4000
+    batch_size = 2000
     # batch_size = 5  # For testing batch processing
 
     # Determines if arguments for start and end year are valid

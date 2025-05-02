@@ -685,20 +685,20 @@ def check_for_tile(download_dict, is_final, logger):
 
 
 # Turns a list of basic output directory names into a list of fully specified directories based on output chunk size, run date, model type, and output years
-def create_output_dir_name_list(core_output_dirs, interval_type, start_year, chunk_size_pixels,
+def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_pixels,
                                 model_type, output_years, interval_duration, run_date):
 
     # List of directories for outputs
     output_full_dirs = []
 
     # Replaces the RUN_DATE, CHUNK_SIZE, and MODEL_TYPE parts of the directories with values specific to the run
-    core_output_dirs = [path.replace("MODEL_TYPE", model_type) for path in core_output_dirs]
-    core_output_dirs = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in core_output_dirs]
-    core_output_dirs = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in core_output_dirs]
-    core_output_dirs = [path.replace("RUN_DATE", run_date) for path in core_output_dirs]
+    dir_list = [path.replace("MODEL_TYPE", model_type) for path in dir_list]
+    dir_list = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in dir_list]
+    dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in dir_list]
+    dir_list = [path.replace("RUN_DATE", run_date) for path in dir_list]
 
     # Iterates through the list of core output directories and adds the correct output years (stocks) or year ranges (fluxes) to each
-    for basic_output in core_output_dirs:
+    for basic_output in dir_list:
         for count, output_year in enumerate(output_years):
 
             # For outputs that are a specific year (stocks)

@@ -13,10 +13,11 @@ python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_postprocessing
 python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --first_10x10s_to_process 2 --run_date YYYYMMDD
 
 Coiled large shapefile test:
+python -m scripts.utilities.create_cluster -n 50 -t 5 -cn LULUCF_postprocessing
 python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --run_date YYYYMMDD
 
 Full Coiled run:
-python -m scripts.utilities.create_cluster -n 50 -cn LULUCF_postprocessing
+python -m scripts.utilities.create_cluster -n 50 -t 5 -cn LULUCF_postprocessing
 python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --run_date YYYYMMDD
 
 From before:

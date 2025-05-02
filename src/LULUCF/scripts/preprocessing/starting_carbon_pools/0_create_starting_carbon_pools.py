@@ -2,19 +2,19 @@
 Run from src/LULUCF/
 
 Local:
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
 
-python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
+python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_preprocessing
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
 
-python -m scripts.utilities.create_cluster -n 60 -t 10 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing..starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
+python -m scripts.utilities.create_cluster -n 60 -t 10 -cn LULUCF_preprocessing
+python -m scripts.preprocessing..starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
 Max memory usage: ~18 GB/worker
 Time: 23:17 through calculation; 40:25 through tile stats; Credits: 170; Cost: $6.00
 
-python -m scripts.utilities.create_cluster -n 50 -t 12 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
+python -m scripts.utilities.create_cluster -n 50 -t 12 -cn LULUCF_preprocessing
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
 Max memory usage: ~20 GB/worker
 Time: 29:26 through calculation; 31:11 through tile stats; Credits: 116; Cost: $3.94
 -t 14 seemed high, so may be better to go back down to -t 12.
@@ -70,7 +70,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     continent_ecozone_block = in_dict_int16[cn.continent_ecozone_pattern]
 
     # Gets a fallback value for continent_ecozone for the chunk in case some pixels don't have one
-    continent_ecozone_fallback = nu.fallback_conteco_climzone_value(continent_ecozone_block)
+    continent_ecozone_fallback = nu.fallback_conteco_climzone_value(continent_ecozone_block, 2020)
 
     # AGB block sources (mangrove and non-mangrove) depend on the starting year
     # Numba can't handle two different possible datatypes for agb_non_mang_block,
@@ -405,6 +405,10 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
+    # Shapefile of chunk footprints to use if none is supplied on the command line
+    if not chunk_shapefile_uri:
+        chunk_shapefile_uri = cn.fishnet_1x1deg_uri
+
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
@@ -527,7 +531,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 
-            resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
     # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs

@@ -8,7 +8,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "0.3.0"
+model_version = "0.3.1"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets
@@ -270,12 +270,12 @@ mangrove_agb_2000_pattern = "mangrove_agb_t_ha_2000"
 
 # Carbon density patterns (also used in path names)
 agb_dens_pattern = "AGB_density_MgAGB_ha"
-agc_dens_pattern = "AGC_density_MgC_ha"
-bgc_dens_pattern = "BGC_density_MgC_ha"
-deadwood_c_dens_pattern = "deadwood_C_density_MgC_ha"
-litter_c_dens_pattern = "litter_C_density_MgC_ha"
-c_dens_non_soil_pattern = "carbon_density_non_soil_Mg_C_ha"
-soil_c_dens_pattern = "soil_c_MgC_ha"
+agc_dens_pattern = "carbon_density__AGC__MgC_ha"
+bgc_dens_pattern = "carbon_density__BGC__MgC_ha"
+deadwood_c_dens_pattern = "carbon_density__deadwood_C__MgC_ha"
+litter_c_dens_pattern = "carbon_density__litter_C__MgC_ha"
+c_dens_non_soil_pattern = "carbon_density__non_soil__MgC_ha"
+soil_c_dens_pattern = "carbon_density__soil_C__MgC_ha"
 
 ### Starting carbon pools (2000/2015)
 
