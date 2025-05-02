@@ -686,12 +686,13 @@ def check_for_tile(download_dict, is_final, logger):
 
 # Turns a list of basic output directory names into a list of fully specified directories based on output chunk size, run date, model type, and output years
 def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_pixels,
-                                model_type, output_years, interval_duration, run_date):
+                                model_type, output_years, interval_duration, run_date, pixel_meaning):
 
     # List of directories for outputs
     output_full_dirs = []
 
     # Replaces the RUN_DATE, CHUNK_SIZE, and MODEL_TYPE parts of the directories with values specific to the run
+    dir_list = [path.replace("PER_HA_OR_PIXEL", pixel_meaning) for path in dir_list]
     dir_list = [path.replace("MODEL_TYPE", model_type) for path in dir_list]
     dir_list = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in dir_list]
     dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in dir_list]
@@ -1619,16 +1620,14 @@ def strip_and_extract_years(key):
 
 
 # Extracts the pixel meaning (per-ha or per-pixel) from a string
-def strip_and_extract_pixel_meaning(key):
-
-    out_pattern_without_pixel_meaning = re.sub(cn.density_pattern, '', key)
+def strip_pixel_meaning(key, pixel_meaning):
 
     try:
-        pixel_meaning = re.search(cn.density_pattern, key).group()[1:]
+        out_pattern_without_pixel_meaning = re.sub(pixel_meaning, '', key)
     except:
-        pixel_meaning = 'no_pixel_meaning'
+        sys.exit(f'No pixel meaning found in {key}')
 
-    return out_pattern_without_pixel_meaning, pixel_meaning
+    return out_pattern_without_pixel_meaning
 
 
 # Creates a dataframe from the attribute table of the 1x1 deg fishnet with GADM iso joined to it

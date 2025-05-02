@@ -189,10 +189,10 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
     # Adds the output arrays to the dictionary with the appropriate data type
     # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
-    out_dict_float32[f"{cn.agc_dens_pattern}{cn.density_pattern}_{year}"] = agc_out_block.copy()
-    out_dict_float32[f"{cn.bgc_dens_pattern}{cn.density_pattern}_{year}"] = bgc_out_block.copy()
-    out_dict_float32[f"{cn.deadwood_c_dens_pattern}{cn.density_pattern}_{year}"] = deadwood_c_out_block.copy()
-    out_dict_float32[f"{cn.litter_c_dens_pattern}{cn.density_pattern}_{year}"] = litter_c_out_block.copy()
+    out_dict_float32[f"{cn.agc_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = agc_out_block.copy()
+    out_dict_float32[f"{cn.bgc_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = bgc_out_block.copy()
+    out_dict_float32[f"{cn.deadwood_c_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = deadwood_c_out_block.copy()
+    out_dict_float32[f"{cn.litter_c_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = litter_c_out_block.copy()
 
     # return output dictionary/ies
     return out_dict_float32
@@ -347,9 +347,8 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
             # print("out_pattern:", out_pattern)
             # print("year_range:", year_range)
 
-            out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_and_extract_pixel_meaning(out_pattern)
+            out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern, cn.C_density_pixel_meaning)
             # print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
-            # print("pixel_meaning:", pixel_meaning)
 
             # Retrieves the relevant output s3 path for this specific output  (list of one element)
             matched_output_s3_folder = [item for item in output_folders if out_pattern_without_pixel_meaning in item][0]
@@ -467,7 +466,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Creates list of output directories specific to the run
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
-    output_dir_list = [path.replace("PER_HA_OR_PIXEL", cn.density_pattern) for path in output_dir_list]
+    output_dir_list = [path.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning) for path in output_dir_list]
     # print(output_dir_list)
 
     # Returns the first tile in each input so that the datatype can be determined.

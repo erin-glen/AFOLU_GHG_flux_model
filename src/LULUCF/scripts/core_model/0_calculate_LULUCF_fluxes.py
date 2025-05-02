@@ -1,7 +1,7 @@
 """
 Run from src/LULUCF
 
-Local test (may not work):
+Local test (Dask part does not work):
 python -m scripts.core_model.0_calculate_LULUCF_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --no_upload -yr 2015 2023 --run_date YYYYMMDD
 
 Coiled small tests:
@@ -1219,29 +1219,29 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
         out_dict_uint32[f"{cn.land_state_pattern}_{year_range}"] = state_out_block.copy()
 
-        out_dict_float32[f"{cn.agc_rf_pre_dist_pattern}_{year_range}"] = agc_rf_pre_dist_out_block.copy()
+        out_dict_float32[f"{cn.agc_rf_pre_dist_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = agc_rf_pre_dist_out_block.copy()
 
         # Converts carbon pool fluxes from Mg C/ha/interval to Mg CO2/ha/yr.
         # Gross emissions are positive. Gross removals are negative.
-        out_dict_float32[f"{cn.agc_gross_emis_pattern}_{year_range}"] = (agc_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
-        out_dict_float32[f"{cn.bgc_gross_emis_pattern}_{year_range}"] = (bgc_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
-        out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}_{year_range}"] = (deadwood_c_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
-        out_dict_float32[f"{cn.litter_c_gross_emis_pattern}_{year_range}"] = (litter_c_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.agc_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (agc_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.bgc_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (bgc_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (deadwood_c_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.litter_c_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (litter_c_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
 
-        out_dict_float32[f"{cn.agc_gross_removals_pattern}_{year_range}"] = (agc_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
-        out_dict_float32[f"{cn.bgc_gross_removals_pattern}_{year_range}"] = (bgc_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
-        out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}_{year_range}"] = (deadwood_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
-        out_dict_float32[f"{cn.litter_c_gross_removals_pattern}_{year_range}"] = (litter_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.agc_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (agc_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.bgc_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (bgc_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (deadwood_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.litter_c_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (litter_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
 
         # Converts non-CO2 emissions from Mg CO2e/ha/interval to Mg CO2e/ha/yr. No conversion of Mg C/ha to Mg CO2 because these are already in Mg CO2e/ha.
-        out_dict_float32[f"{cn.ch4_flux_pattern}_{year_range}"] = (ch4_gross_emis_out_block / interval_length).copy()
-        out_dict_float32[f"{cn.n2o_flux_pattern}_{year_range}"] = (n2o_gross_emis_out_block / interval_length).copy()
+        out_dict_float32[f"{cn.ch4_flux_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (ch4_gross_emis_out_block / interval_length).copy()
+        out_dict_float32[f"{cn.n2o_flux_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (n2o_gross_emis_out_block / interval_length).copy()
 
         # Still Mg C/ha at the interval end year
-        out_dict_float32[f"{cn.agc_dens_pattern}_{interval_end_year}"] = agc_dens_block.copy()
-        out_dict_float32[f"{cn.bgc_dens_pattern}_{interval_end_year}"] = bgc_dens_block.copy()
-        out_dict_float32[f"{cn.deadwood_c_dens_pattern}_{interval_end_year}"] = deadwood_c_dens_block.copy()
-        out_dict_float32[f"{cn.litter_c_dens_pattern}_{interval_end_year}"] = litter_c_dens_block.copy()
+        out_dict_float32[f"{cn.agc_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = agc_dens_block.copy()
+        out_dict_float32[f"{cn.bgc_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = bgc_dens_block.copy()
+        out_dict_float32[f"{cn.deadwood_c_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = deadwood_c_dens_block.copy()
+        out_dict_float32[f"{cn.litter_c_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = litter_c_dens_block.copy()
 
         # Test/intermediate outputs only saved if not a large run
         if not is_final:
@@ -1432,13 +1432,20 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
             out_pattern, year_range = uu.strip_and_extract_years(key)
-            # print(out_pattern)
-            # print(year_range)
+            # print("out_pattern:", out_pattern)
+            # print("year_range:", year_range)
 
-            # Retrieves the relevant output s3 path for this specific output (list of one element).
+            # Replaces the pixel meaning placeholder with the pixel meaning for carbon densities or fluxes
+            if "density" in out_pattern:
+                out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern, cn.C_density_pixel_meaning)
+            else:
+                out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern, cn.flux_density_pixel_meaning)
+            # print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
+
+            # Retrieves the relevant output s3 path for this specific output  (list of one element)
             # First, finds the output folders for all intervals with the relevant patterns
-            matched_output_s3_folders = [item for item in output_folders if out_pattern in item]
-            # print(matched_output_s3_folders)
+            matched_output_s3_folders = [item for item in output_folders if out_pattern_without_pixel_meaning in item]
+            # print("matched_output_s3_folders:", matched_output_s3_folders)
 
             # Second, finds the output folder with the right interval for that pattern
             matched_output_s3_folder_list = [item for item in matched_output_s3_folders if year_range in item]
@@ -1544,6 +1551,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Otherwise, we'd have just the path but not the file name now and would have to add in the file name later
     # (probably at the chunk level).
     sample_tile_id = "00N_000E"
+    sample_tile_id = "00N_020E" #TODO for testing
 
     # Dictionary of data to download (inputs to model)
     download_dict = {
@@ -1618,9 +1626,13 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     if interval_type == cn.intervals_annual:
         download_dict[f"{cn.forest_age_start_year_pattern}"] = f"{cn.forest_age_2015_interpolated_dir}{sample_tile_id}__{cn.forest_age_2015_interpolated_pattern}.tif"
 
-    # Replaces the CHUNK_SIZE_pixels part of the input paths with 40000_pixels for any that have it
+    # Replaces the placeholder parts of the input paths with relevant values
     download_dict = {
         key: value.replace("CHUNK_SIZE", '40000')
+        for key, value in download_dict.items()
+    }
+    download_dict = {
+        key: value.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning)
         for key, value in download_dict.items()
     }
 
@@ -1642,14 +1654,16 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Creates a list of output directories (core and intermediates) for all outputs and intervals based on specifics of the model run
     output_dir_list_core_intermediate = cn.LULUCF_core_output_dirs + cn.LULUCF_intermediate_output_dirs
     output_dir_list = uu.create_output_dir_name_list(output_dir_list_core_intermediate, interval_type, start_year,
-                                                     chunk_size_pixels, model_type, interval_end_years, interval_year_diff, run_date)
+                                                     chunk_size_pixels, model_type, interval_end_years,
+                                                     interval_year_diff, run_date, cn.C_density_pixel_meaning)
     # print(output_dir_list)
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.
     # Inputs are Mg AGB/ha/yr. Outputs are Mg AGB/ha/yr. Conversion to Mg AGC/ha/yr is done below.
     primary_forest_RF_array = uu.convert_lookup_table_to_array(cn.RF_C_ratio_spreadsheet_full_path,
-                                                               cn.IPCC_removal_factor_table_tab,['gainEcoCon', 'growth_primary'])
+                                                               cn.IPCC_removal_factor_table_tab,
+                                                               ['gainEcoCon', 'growth_primary'])
 
     # Converts primary forest AGB RFs to AGC RFs (Mg AGB/ha/yr -> Mg AGC/ha/yr)
     primary_forest_RF_array[:, 1] = primary_forest_RF_array[:, 1] * cn.biomass_to_carbon_non_mangrove

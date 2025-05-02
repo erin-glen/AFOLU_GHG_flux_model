@@ -62,7 +62,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Creates list of output directories specific to the run
     output_dir_list = [path.replace("CHUNK_SIZE", str(4000)) for path in output_dir_list]
-    output_dir_list = [path.replace("PER_HA_OR_PIXEL", cn.density_pattern) for path in output_dir_list]
+    output_dir_list = [path.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning) for path in output_dir_list]
     main_logger.info(f"Directories to aggregate: {output_dir_list}")
 
 

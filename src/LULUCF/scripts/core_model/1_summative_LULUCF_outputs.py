@@ -387,11 +387,11 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # just once on the scheduler, as is more efficient for scripts that use numba.
     # Creates a list of input directories used in summative output creation based on specifics of the model run
     summative_inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year,
-                                                     chunk_size_pixels, model_type, interval_end_years, interval_year_diff, run_date)
+                                                                           chunk_size_pixels, model_type, interval_end_years, interval_year_diff, run_date, cn.C_density_pixel_meaning)
 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
     summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
-                                                     chunk_size_pixels, model_type, interval_end_years, interval_year_diff, run_date)
+                                                                            chunk_size_pixels, model_type, interval_end_years, interval_year_diff, run_date, cn.C_density_pixel_meaning)
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")

@@ -88,7 +88,7 @@ def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no
     LULUCF_aggreg_dirs = cn.LULUCF_core_output_dirs + cn.LULUCF_summative_output_dirs
 
     output_dir_list = uu.create_output_dir_name_list(LULUCF_aggreg_dirs, interval_type, start_year,'4000',
-                                                     model_type, interval_end_years, interval_year_diff, run_date)
+                                                     model_type, interval_end_years, interval_year_diff, run_date, cn.C_density_pixel_meaning)
 
     # # For testing- first folder only, so contents of all folders don't need to be listed
     # output_dir_list = output_dir_list[0:1]
