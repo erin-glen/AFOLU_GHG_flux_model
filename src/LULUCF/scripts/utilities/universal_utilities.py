@@ -705,7 +705,7 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
                 updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning)
             else:
                 updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_per_pixel_pixel_meaning)
-        else:  # Changes flux outputs
+        else:  # Changes flux outputs and removal factors
             if pixel_meaning == "per_ha":
                 updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_density_pixel_meaning)
             else:

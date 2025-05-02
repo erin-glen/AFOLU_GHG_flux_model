@@ -1435,7 +1435,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
             # print("out_pattern:", out_pattern)
             # print("year_range:", year_range)
 
-            # Replaces the pixel meaning placeholder with the pixel meaning for carbon densities or fluxes
+            # Replaces the pixel meaning placeholder with the pixel meaning for carbon densities or fluxes/removal factors
             if "density" in out_pattern:
                 out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern, cn.C_density_pixel_meaning)
             else:
@@ -1541,6 +1541,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
+    # is_final = True  # For simulating a large run
     if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model.")
