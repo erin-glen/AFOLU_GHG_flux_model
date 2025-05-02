@@ -459,10 +459,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         client.close()
 
 
-
-
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate summative outputs of core LULUCF model.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')

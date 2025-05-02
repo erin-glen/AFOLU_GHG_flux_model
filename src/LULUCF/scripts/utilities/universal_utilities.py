@@ -691,14 +691,31 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
     # List of directories for outputs
     output_full_dirs = []
 
-    # Replaces the RUN_DATE, CHUNK_SIZE, and MODEL_TYPE parts of the directories with values specific to the run
-    dir_list = [path.replace("PER_HA_OR_PIXEL", pixel_meaning) for path in dir_list]
+    # Replaces placeholders in paths with values specific to the run
     dir_list = [path.replace("MODEL_TYPE", model_type) for path in dir_list]
     dir_list = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in dir_list]
     dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in dir_list]
     dir_list = [path.replace("RUN_DATE", run_date) for path in dir_list]
 
-    # Iterates through the list of core output directories and adds the correct output years (stocks) or year ranges (fluxes) to each
+    # Replaces the pixel meaning placeholder with the per-ha or per-pixel meanings.
+    # Pixel meanings are formulated slightly differently depending on whether the output is C density or flux.
+    for i, basic_output in enumerate(dir_list):
+        if "density" in basic_output:  # Changes C density outputs
+            if pixel_meaning == "per_ha":
+                updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning)
+            else:
+                updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_per_pixel_pixel_meaning)
+        else:  # Changes flux outputs
+            if pixel_meaning == "per_ha":
+                updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_density_pixel_meaning)
+            else:
+                updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_per_pixel_pixel_meaning)
+
+        # Updates dir_list
+        dir_list[i] = updated_path
+
+
+    # Iterates through the list of core output directories and adds the correct output years (stocks) or year ranges (fluxes) to each.
     for basic_output in dir_list:
         for count, output_year in enumerate(output_years):
 
@@ -708,6 +725,7 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
             # For outputs that cover the start of the model to the end of the current interval
             elif "RUNSTART_END" in basic_output:
                 output_dir = basic_output.replace('RUNSTART_END', f"{str(start_year)}_{str(output_year)}")
+                output_dir = output_dir.replace("PER_HA_OR_PIXEL", cn.flux_density_pixel_meaning)
             # For outputs that cover a range of years (fluxes)
             else:
                 if interval_type == cn.intervals_five_years:
@@ -1113,7 +1131,7 @@ def convert_lookup_table_to_array(spreadsheet, sheet_name, fields_to_keep):
 
     try:
         # Try fetching the file from the S3 URL
-        print(f"Attempting to download file from URL: {spreadsheet}")
+        # print(f"Attempting to download file from URL: {spreadsheet}")
         response = requests.get(spreadsheet, timeout=10)
         response.raise_for_status()
         excel_df = pd.read_excel(BytesIO(response.content), sheet_name=sheet_name)

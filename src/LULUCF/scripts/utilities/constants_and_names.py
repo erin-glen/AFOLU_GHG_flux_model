@@ -228,6 +228,7 @@ fishnet_1x1deg_uri = f"{fishnet_1x1deg_s3_dir}{fishnet_1x1deg_all_land_name}"
 
 progress_tracking_path = "climate/AFOLU_flux_model/task_progress_txts/"
 
+# Pixel meanings: values per-hectare or per-pixel. Different for carbon pools vs. fluxes because of the temporal component.
 C_density_pixel_meaning = "_ha"
 C_per_pixel_pixel_meaning = "_pixel"
 

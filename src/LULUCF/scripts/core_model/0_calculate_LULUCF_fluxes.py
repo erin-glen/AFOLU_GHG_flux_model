@@ -1655,7 +1655,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     output_dir_list_core_intermediate = cn.LULUCF_core_output_dirs + cn.LULUCF_intermediate_output_dirs
     output_dir_list = uu.create_output_dir_name_list(output_dir_list_core_intermediate, interval_type, start_year,
                                                      chunk_size_pixels, model_type, interval_end_years,
-                                                     interval_year_diff, run_date, cn.C_density_pixel_meaning)
+                                                     interval_year_diff, run_date, "per_ha")
     # print(output_dir_list)
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
