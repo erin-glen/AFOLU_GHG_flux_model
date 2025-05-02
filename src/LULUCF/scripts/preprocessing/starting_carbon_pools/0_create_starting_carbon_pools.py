@@ -466,7 +466,6 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         sys.exit()
 
     # Creates list of output directories specific to the run
-    output_dir_list = [path.replace("RUN_DATE", uu.timestr()[:8]) for path in output_dir_list]
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
     output_dir_list = [path.replace("PER_HA_OR_PIXEL", cn.density_pattern) for path in output_dir_list]
     # print(output_dir_list)

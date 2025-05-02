@@ -2,15 +2,15 @@
 Run from src/LULUCF/
 
 Local test:
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools --year 2015 --first_10x10s_to_process 2 --run_date YYYYMMDD
+python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools --year 2015 --first_10x10s_to_process 2
 
 Coiled test:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015 --first_10x10s_to_process 2 --run_date YYYYMMDD
+python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015 --first_10x10s_to_process 2
 
 Full Coiled run:
 python -m scripts.utilities.create_cluster -n 40 -t 5 -cn LULUCF_model
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015 --run_date YYYYMMDD
+python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015
 Time: 16:32 through calculation; 16:48 through tile stats; Credits: 59; Cost: $1.90
 Using more than -t 5 seemed to cause some tile_ids to randomly fail, even though memory usage was not high.
 So, best to stay with -t 5 even though the Dask dashboard indicates low memory usage compared to what's available (e.g., 5 out of 32 GB being used).
@@ -28,7 +28,7 @@ from ...utilities import log_utilities as lu
 from ...utilities import resize_cluster
 
 
-def main(cluster_name, year, run_date, run_local=False, no_stats=False, no_log=False, no_upload= False,
+def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_upload= False,
          first_10x10s_to_process=None, log_note=None):
 
     ### Step 1: Preparation
@@ -56,11 +56,13 @@ def main(cluster_name, year, run_date, run_local=False, no_stats=False, no_log=F
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Year for initial carbon pools: {year}")
-    main_logger.info(f"Date for 1x1 deg rasters being aggregated: {run_date}")
+    input_date = re.findall(r"\d{8}", output_dir_list[0])[0]
+    main_logger.info(f"Date for 1x1 deg rasters being aggregated: {input_date}")
+
 
     # Creates list of output directories specific to the run
-    output_dir_list = [path.replace("RUN_DATE", run_date) for path in output_dir_list]
     output_dir_list = [path.replace("CHUNK_SIZE", str(4000)) for path in output_dir_list]
+    output_dir_list = [path.replace("PER_HA_OR_PIXEL", cn.density_pattern) for path in output_dir_list]
     main_logger.info(f"Directories to aggregate: {output_dir_list}")
 
 
@@ -149,7 +151,6 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-f', '--first_10x10s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('--year', type=int, required=True, help='Year for carbon pools')
-    parser.add_argument('--run_date', required=True, help='Date YYYYMMDD of carbon pool 1x1s to process')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
@@ -162,7 +163,6 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     first_10x10s_to_process = args.first_10x10s_to_process
     year = args.year
-    run_date = args.run_date
     log_note = args.log_note
 
     run_local = args.run_local
@@ -170,5 +170,5 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, year, run_date, run_local, no_stats, no_log, no_upload, first_10x10s_to_process=first_10x10s_to_process, log_note=log_note)
+    main(cluster_name, year, run_local, no_stats, no_log, no_upload, first_10x10s_to_process=first_10x10s_to_process, log_note=log_note)
 
