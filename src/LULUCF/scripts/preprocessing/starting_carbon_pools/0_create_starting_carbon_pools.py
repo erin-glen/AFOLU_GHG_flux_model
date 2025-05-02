@@ -189,10 +189,10 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
     # Adds the output arrays to the dictionary with the appropriate data type
     # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
-    out_dict_float32[f"{cn.agc_dens_pattern}_{year}"] = agc_out_block.copy()
-    out_dict_float32[f"{cn.bgc_dens_pattern}_{year}"] = bgc_out_block.copy()
-    out_dict_float32[f"{cn.deadwood_c_dens_pattern}_{year}"] = deadwood_c_out_block.copy()
-    out_dict_float32[f"{cn.litter_c_dens_pattern}_{year}"] = litter_c_out_block.copy()
+    out_dict_float32[f"{cn.agc_dens_pattern}{cn.density_pattern}_{year}"] = agc_out_block.copy()
+    out_dict_float32[f"{cn.bgc_dens_pattern}{cn.density_pattern}_{year}"] = bgc_out_block.copy()
+    out_dict_float32[f"{cn.deadwood_c_dens_pattern}{cn.density_pattern}_{year}"] = deadwood_c_out_block.copy()
+    out_dict_float32[f"{cn.litter_c_dens_pattern}{cn.density_pattern}_{year}"] = litter_c_out_block.copy()
 
     # return output dictionary/ies
     return out_dict_float32
@@ -208,180 +208,180 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
     logger_worker = lu.setup_logging_worker()
 
-    try:
+    uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
 
-        uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
+    bounds_str = uu.boundstr(bounds)  # String form of chunk bounds
+    tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
+    chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
 
-        bounds_str = uu.boundstr(bounds)  # String form of chunk bounds
-        tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
-        chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
+    ### Part 1: Downloads chunk.
+    ### No checks about whether the chunk has data because the way the chunk_list is constructed,
+    ### every chunk is relevant and should be processed, so they don't need to be checked.
 
-        ### Part 1: Downloads chunk.
-        ### No checks about whether the chunk has data because the way the chunk_list is constructed,
-        ### every chunk is relevant and should be processed, so they don't need to be checked.
+    # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
+    updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
 
-        # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
-        updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
+    # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
+    # Thus, this returns a complete set of inputs (missing chunks filled).
+    # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
+    # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
+    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
+    # print(futures)
 
-        # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
-        # Thus, this returns a complete set of inputs (missing chunks filled).
-        # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
-        # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
-        futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
-        # print(futures)
+    lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
-        lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+    # Dictionary that stores the dataset name (key) and downloaded data and download status (values)
+    layers = {}
 
-        # Dictionary that stores the dataset name (key) and downloaded data and download status (values)
-        layers = {}
+    # Ensures futures stores Future objects
+    # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages for chunks
+    for future in concurrent.futures.as_completed(futures):
+        layer = futures[future]  # Gets the corresponding key
+        data, status = future.result()  # Unpacks the tuple result
+        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+            lu.print_and_log(f"{status}", is_final, logger_worker)
+        layers[layer] = data
 
-        # Ensures futures stores Future objects
-        # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages for chunks
-        for future in concurrent.futures.as_completed(futures):
-            layer = futures[future]  # Gets the corresponding key
-            data, status = future.result()  # Unpacks the tuple result
-            if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
-                lu.print_and_log(f"{status}", is_final, logger_worker)
-            layers[layer] = data
-
-        # # Test prints
-        # print(layers)
-        # print(layers['AGB_2015_ESA_CCI_Mg_AGB_ha'].max())
-        # print(layers['AGB_2015_ESA_CCI_Mg_AGB_ha'].dtype)
+    # # Test prints
+    # print(layers)
+    # print(layers['AGB_2015_ESA_CCI_Mg_AGB_ha'].max())
+    # print(layers['AGB_2015_ESA_CCI_Mg_AGB_ha'].dtype)
 
 
-        ### Part 2: Calculates min, mean, and max for each input chunk.
-        ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
+    ### Part 2: Calculates min, mean, and max for each input chunk.
+    ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
 
-        # Calculates stats for the input layers
-        for key, array in layers.items():
-            chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer'))
-        # print(chunk_stats)
-
-
-        ### Part 3: Creates a separate dictionary for each chunk datatype so that they can be passed to Numba as separate arguments.
-        ### Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type (e.g., uint8, float32).
-        ### Note: need to add new code if inputs with other data types are added
-
-        lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
-
-        # Creates the typed dictionaries for all input layers (including those that originally had no data)
-        typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
-
-        # print("uint8_typed_list:", typed_dict_uint8)
-        # print("uint16_typed_list:", typed_dict_uint16)
-        # print("int16_typed_list:", typed_dict_int16)
-        # print("int32_typed_list:", typed_dict_int32)
-        # print("float32_typed_list:", typed_dict_float32)
+    # Calculates stats for the input layers
+    for key, array in layers.items():
+        chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer'))
+    # print(chunk_stats)
 
 
-        ### Part 4: Creates starting carbon pool densities
+    ### Part 3: Creates a separate dictionary for each chunk datatype so that they can be passed to Numba as separate arguments.
+    ### Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type (e.g., uint8, float32).
+    ### Note: need to add new code if inputs with other data types are added
 
-        lu.print_and_log(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker) # Prints during full runs
-        uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
+    lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
-        # Create AGC, BGC, deadwood C and litter C densities in selected starting year
-        out_dict_float32 = create_starting_C_densities(
-            typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32,
-            mangrove_C_ratio_array, year
-        )
+    # Creates the typed dictionaries for all input layers (including those that originally had no data)
+    typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
 
-        # Fresh non-Numba-constrained dictionary that stores all output numpy arrays of all datatypes.
-        # The dictionaries by datatype that are returned from the numba function have limitations on them,
-        # e.g., they can't be combined with other datatypes. This prevents the addition of attributes needed for uploading to s3.
-        # So the trick here is to copy the numba-exported arrays into normal Python arrays to which we can do anything in Python.
-        out_dict_all_dtypes = {}
-
-        # Transfers the dictionaries of numpy arrays for each data type to a new, Pythonic array
-        out_dicts = [out_dict_float32]
-
-        # Loop through each dictionary and update out_dict_all_dtypes
-        for out_dict in out_dicts:
-            for key, value in out_dict.items():
-                out_dict_all_dtypes[key] = value
-
-            # Clear memory of unneeded arrays
-            del out_dict
+    # print("uint8_typed_list:", typed_dict_uint8)
+    # print("uint16_typed_list:", typed_dict_uint16)
+    # print("int16_typed_list:", typed_dict_int16)
+    # print("int32_typed_list:", typed_dict_int32)
+    # print("float32_typed_list:", typed_dict_float32)
 
 
-        ### Part 5: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
-        ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
-        ### Also useful for a quick sum of outputs without doing zonal stats
+    ### Part 4: Creates starting carbon pool densities
 
-        # Deletes all unnecessary input dictionaries before the memory-intensive derived output calculations
-        # Suggested by ChatGPT: https://chatgpt.com/share/e/672bbf2e-ebbc-800a-aae3-3d92f5a1d663
-        in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
-        [in_dict.clear() for in_dict in in_dicts]
+    lu.print_and_log(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker) # Prints during full runs
+    uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
-        # The relevant pixel area (m^2) file in s3
-        pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
+    # Create AGC, BGC, deadwood C and litter C densities in selected starting year
+    out_dict_float32 = create_starting_C_densities(
+        typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32,
+        mangrove_C_ratio_array, year
+    )
 
-        # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
-        pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, bounds, chunk_length_pixels, 'Float32')
-        pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
+    # Fresh non-Numba-constrained dictionary that stores all output numpy arrays of all datatypes.
+    # The dictionaries by datatype that are returned from the numba function have limitations on them,
+    # e.g., they can't be combined with other datatypes. This prevents the addition of attributes needed for uploading to s3.
+    # So the trick here is to copy the numba-exported arrays into normal Python arrays to which we can do anything in Python.
+    out_dict_all_dtypes = {}
 
-        # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
-        for key, array_per_ha in out_dict_all_dtypes.items():
+    # Transfers the dictionaries of numpy arrays for each data type to a new, Pythonic array
+    out_dicts = [out_dict_float32]
 
-            # Converts per hectare values to per pixel values for the output numpy array
-            output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
+    # Loop through each dictionary and update out_dict_all_dtypes
+    for out_dict in out_dicts:
+        for key, value in out_dict.items():
+            out_dict_all_dtypes[key] = value
 
-            chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
+        # Clear memory of unneeded arrays
+        del out_dict
 
 
-        ### Part 6: Saves numpy arrays as rasters and uploads to s3
+    ### Part 5: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
+    ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
+    ### Also useful for a quick sum of outputs without doing zonal stats
 
-        uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
+    # Deletes all unnecessary input dictionaries before the memory-intensive derived output calculations
+    # Suggested by ChatGPT: https://chatgpt.com/share/e/672bbf2e-ebbc-800a-aae3-3d92f5a1d663
+    in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
+    [in_dict.clear() for in_dict in in_dicts]
 
-        # Only saves arrays to geotifs and uploads them to s3 if enabled
-        if not no_upload:
+    # The relevant pixel area (m^2) file in s3
+    pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
 
-            out_no_data_val = 0  # NoData value for output raster (optional)
+    # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
+    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, bounds, chunk_length_pixels, 'Float32')
+    pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
-            # Adds metadata used for uploading outputs to s3 to the dictionary
-            for key, value in out_dict_all_dtypes.items():
-                data_type = value.dtype.name
+    # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
+    for key, array_per_ha in out_dict_all_dtypes.items():
 
-                # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
-                out_pattern, year_range = uu.strip_and_extract_years(key)
+        # Converts per hectare values to per pixel values for the output numpy array
+        output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
 
-                # Retrieves the relevant output s3 path for this specific output  (list of one element)
-                matched_output_s3_folder = [item for item in output_folders if out_pattern in item][0]
+        chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
-                # Output paths without bucket (s3://gfw2-data)
-                s3_path_without_bucket = f"{matched_output_s3_folder[cn.full_bucket_prefix_length:]}"
 
-                # Dictionary with metadata for each array
-                out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
+    ### Part 6: Saves numpy arrays as rasters and uploads to s3
 
-            # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
-            upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
-                                                               out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
+    uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
 
-            # Only prints if not a final run
-            lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", is_final, logger_worker)
+    # Only saves arrays to geotifs and uploads them to s3 if enabled
+    if not no_upload:
 
-            # Executes uploads in parallel
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
+        out_no_data_val = 0  # NoData value for output raster (optional)
 
-            # Only prints if not a final run
-            lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+        # Adds metadata used for uploading outputs to s3 to the dictionary
+        for key, value in out_dict_all_dtypes.items():
 
-        # Clears memory of unneeded arrays
-        del out_dict_all_dtypes
+            data_type = value.dtype.name
+            # print("key:", key)
 
-        return_message = f"Success creating initial carbon pools for {bounds_str}: {uu.timestr()}"
+            # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
+            out_pattern, year_range = uu.strip_and_extract_years(key)
+            # print("out_pattern:", out_pattern)
+            # print("year_range:", year_range)
 
-        # Removes task tracking file from S3 once task is successful
-        uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
+            out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_and_extract_pixel_meaning(out_pattern)
+            # print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
+            # print("pixel_meaning:", pixel_meaning)
 
-    except Exception as e:
+            # Retrieves the relevant output s3 path for this specific output  (list of one element)
+            matched_output_s3_folder = [item for item in output_folders if out_pattern_without_pixel_meaning in item][0]
+            # print("matched_output_s3_folder:", matched_output_s3_folder)
 
-        return_message = f"Error processing chunk {bounds}: {e}: {uu.timestr()}"
+            # Output paths without bucket (s3://gfw2-data)
+            s3_path_without_bucket = f"{matched_output_s3_folder[cn.full_bucket_prefix_length:]}"
 
-        lu.print_and_log(return_message, False, logger_worker)
-        uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
+            # Dictionary with metadata for each array
+            out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
+
+        # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
+        upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
+                                                           out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
+
+        # Only prints if not a final run
+        lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", is_final, logger_worker)
+
+        # Executes uploads in parallel
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
+
+        # Only prints if not a final run
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+
+    # Clears memory of unneeded arrays
+    del out_dict_all_dtypes
+
+    return_message = f"Success creating initial carbon pools for {bounds_str}: {uu.timestr()}"
+
+    # Removes task tracking file from S3 once task is successful
+    uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
 
     return return_message, chunk_stats  # Return both the success message and the statistics
 
@@ -468,6 +468,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # Creates list of output directories specific to the run
     output_dir_list = [path.replace("RUN_DATE", uu.timestr()[:8]) for path in output_dir_list]
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
+    output_dir_list = [path.replace("PER_HA_OR_PIXEL", cn.density_pattern) for path in output_dir_list]
     # print(output_dir_list)
 
     # Returns the first tile in each input so that the datatype can be determined.

@@ -1618,6 +1618,19 @@ def strip_and_extract_years(key):
     return pattern, year_range
 
 
+# Extracts the pixel meaning (per-ha or per-pixel) from a string
+def strip_and_extract_pixel_meaning(key):
+
+    out_pattern_without_pixel_meaning = re.sub(cn.density_pattern, '', key)
+
+    try:
+        pixel_meaning = re.search(cn.density_pattern, key).group()[1:]
+    except:
+        pixel_meaning = 'no_pixel_meaning'
+
+    return out_pattern_without_pixel_meaning, pixel_meaning
+
+
 # Creates a dataframe from the attribute table of the 1x1 deg fishnet with GADM iso joined to it
 def fishnet_with_GADM_iso(shapefile_uri):
 
