@@ -692,10 +692,13 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
     output_full_dirs = []
 
     # Replaces placeholders in paths with values specific to the run
-    dir_list = [path.replace("MODEL_TYPE", model_type) for path in dir_list]
+    dir_list = [path.replace(cn.model_type_placholder, model_type) for path in dir_list]
     dir_list = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in dir_list]
     dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in dir_list]
     dir_list = [path.replace("RUN_DATE", run_date) for path in dir_list]
+
+    # Any entry that covers the entire model period, from start year to end of last interval
+    dir_list = [path.replace("FULL_MODEL", f"{start_year}_{output_years[-1]}") for path in dir_list]
 
     # Replaces the pixel meaning placeholder with the per-ha or per-pixel meanings.
     # Pixel meanings are formulated slightly differently depending on whether the output is C density or flux.
@@ -714,7 +717,6 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
         # Updates dir_list
         dir_list[i] = updated_path
 
-
     # Iterates through the list of core output directories and adds the correct output years (stocks) or year ranges (fluxes) to each.
     for basic_output in dir_list:
         for count, output_year in enumerate(output_years):
@@ -725,8 +727,7 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
             # For outputs that cover the start of the model to the end of the current interval
             elif "RUNSTART_END" in basic_output:
                 output_dir = basic_output.replace('RUNSTART_END', f"{str(start_year)}_{str(output_year)}")
-                output_dir = output_dir.replace("PER_HA_OR_PIXEL", cn.flux_density_pixel_meaning)
-            # For outputs that cover a range of years (fluxes)
+            # For outputs that cover an interval (fluxes)
             else:
                 if interval_type == cn.intervals_five_years:
                     output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration)}_{str(output_year)}")
@@ -737,7 +738,12 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
 
             output_full_dirs.append(output_dir)
 
-    return output_full_dirs
+    # Because outputs that are sums across the entire model period are re-created for every interval in the
+    # above for loop, we need to remove the duplication in the output list.
+    # This returns the outputs that are sums across the entire model period back to one element per output type.
+    output_full_dirs_unique = list(set(output_full_dirs))
+
+    return output_full_dirs_unique
 
 
 # Checks if a geotif has data in it.

@@ -6,20 +6,20 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.2_per_pixel_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
 
 Coiled small tests:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_postprocessing
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2015 2023 --run_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023 --run_date YYYYMMDD
 Consistently uses 27 GB per worker, so close to the maximum.
 
 Full run:
 python -m scripts.utilities.create_cluster -n 100 -cn LULUCF_postprocessing
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2015 2023 --run_date YYYYMMDD
 """
 
 import argparse
@@ -40,7 +40,7 @@ from ..utilities import log_utilities as lu
 from ..utilities import resize_cluster
 
 
-def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type, interval_year_diff, interval_length,
+def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type, interval_year_diff, interval_length,
                                     interval_end_years, is_final, no_upload,
                                     summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list,
                                     stage):
@@ -95,8 +95,6 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         # Value has to be a list because prepare_to_download_chunk expects the download dictionary keys to be lists.
         download_dict[f"{pattern_segment}_{interval_segment}"] = [f"{summative_input_by_interval}{tile_id}__{bounds_str}__{pattern_segment}{pix_meaning_segment}_{interval_segment}.tif"]
 
-    # print(download_dict)
-
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
@@ -120,120 +118,14 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
 
     ### Part 2: Creates summative outputs
 
-    lu.print_and_log(f"Summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Calculating per-pixel versions of outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
     # Everything in out_dict also needs to be in cn.LULUCF_summative_output_dirs
     # because that has the list of basic output directories which are customized for this run
     out_dict = {}
 
-    # Summative outputs for outputs with year ranges in their name (i.e. fluxes).
-    for interval_end_year in interval_end_years:
 
-        interval_year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
-
-        # Gross emissions across all carbon pools
-        out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"] = (
-                layers[f"{cn.agc_gross_emis_pattern}_{interval_year_range}"] + layers[f"{cn.bgc_gross_emis_pattern}_{interval_year_range}"]
-                + layers[f"{cn.deadwood_c_gross_emis_pattern}_{interval_year_range}"] + layers[f"{cn.litter_c_gross_emis_pattern}_{interval_year_range}"])
-
-        # Gross emissions for non-CO2 emissions
-        out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"] = (
-                layers[f"{cn.ch4_flux_pattern}_{interval_year_range}"]
-                + layers[f"{cn.n2o_flux_pattern}_{interval_year_range}"])
-
-        # Gross emissions for all carbon pools and all gases
-        out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"] = (
-            out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"]
-            + out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"]
-        )
-
-        # Gross removals across all carbon pools
-        out_dict[f"{cn.gross_removals_all_C_pools_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"] = (
-                layers[f"{cn.agc_gross_removals_pattern}_{interval_year_range}"]
-                + layers[f"{cn.bgc_gross_removals_pattern}_{interval_year_range}"]
-                + layers[f"{cn.deadwood_c_gross_removals_pattern}_{interval_year_range}"]
-                + layers[f"{cn.litter_c_gross_removals_pattern}_{interval_year_range}"])
-
-        # Net flux for each carbon pool
-        out_dict[f"{cn.net_flux_agc_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"] = layers[f"{cn.agc_gross_emis_pattern}_{interval_year_range}"] + layers[f"{cn.agc_gross_removals_pattern}_{interval_year_range}"]
-        out_dict[f"{cn.net_flux_bgc_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"] = layers[f"{cn.bgc_gross_emis_pattern}_{interval_year_range}"] + layers[f"{cn.bgc_gross_removals_pattern}_{interval_year_range}"]
-        out_dict[f"{cn.net_flux_deadwood_c_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"] = layers[f"{cn.deadwood_c_gross_emis_pattern}_{interval_year_range}"] + layers[f"{cn.deadwood_c_gross_removals_pattern}_{interval_year_range}"]
-        out_dict[f"{cn.net_flux_litter_c_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"] = layers[f"{cn.litter_c_gross_emis_pattern}_{interval_year_range}"] + layers[f"{cn.litter_c_gross_removals_pattern}_{interval_year_range}"]
-
-        # Net flux across all carbon pools but for CO2 only
-        out_dict[f"{cn.net_flux_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"] = (
-                out_dict[f"{cn.net_flux_agc_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"]
-                + out_dict[f"{cn.net_flux_bgc_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"]
-                + out_dict[f"{cn.net_flux_deadwood_c_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"]
-                + out_dict[f"{cn.net_flux_litter_c_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"])
-
-        # Net flux across all carbon pools, plus non-pool non-CO2 emissions
-        out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"] = (
-                out_dict[f"{cn.net_flux_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"]
-                + out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"])
-
-        # Summative outputs for outputs with specific years in their name (i.e. carbon densities)
-        out_dict[f"{cn.c_dens_non_soil_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = (
-                layers[f"{cn.agc_dens_pattern}_{interval_end_year}"]
-                + layers[f"{cn.bgc_dens_pattern}_{interval_end_year}"]
-                + layers[f"{cn.deadwood_c_dens_pattern}_{interval_end_year}"]
-                + layers[f"{cn.litter_c_dens_pattern}_{interval_end_year}"])
-
-    # print(out_dict)
-
-    # TODO The calculations seem to work but I haven't actually seen any rasters because
-    #I haven't been able to get these to upload. They aren't part of summative_inputs_by_interval_dir_list
-    #and I haven't figured out the best way to set that up.
-    # https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/681244d9-83dc-800a-b397-0706e79391c0
-    # Sum key output variables across all intervals
-    total_gross_emis = None
-    total_gross_removals = None
-    total_net_flux = None
-
-    for interval_end_year in interval_end_years:
-        interval_year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
-
-        gross_emis_key = f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-        gross_removals_key = f"{cn.gross_removals_all_C_pools_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-        net_flux_key = f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-
-        # Accumulate gross emissions
-        if total_gross_emis is None:
-            total_gross_emis = out_dict[gross_emis_key].copy()
-        else:
-            total_gross_emis += out_dict[gross_emis_key]
-
-        # Accumulate gross removals
-        if total_gross_removals is None:
-            total_gross_removals = out_dict[gross_removals_key].copy()
-        else:
-            total_gross_removals += out_dict[gross_removals_key]
-
-        # Accumulate net flux
-        if total_net_flux is None:
-            total_net_flux = out_dict[net_flux_key].copy()
-        else:
-            total_net_flux += out_dict[net_flux_key]
-
-        # print(gross_removals_key)
-        # print(out_dict[gross_removals_key].min())
-
-    # Store the summed outputs in out_dict with appropriate suffixes
-    full_period_label = f"{start_year}_{end_year}"
-    out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_emis
-    out_dict[f"{cn.gross_removals_all_C_pools_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_removals
-    out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux
-
-    # print(out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
-    # print(out_dict[f"{cn.gross_removals_all_C_pools_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
-    # print(out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
-    # print(out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"].max())
-    #
-    # sys.quit()
-
-    lu.print_and_log(f"Done summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-    lu.print_and_log(f"After creating summative outputs for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
 
 
     ### Part 3: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
@@ -250,7 +142,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
     # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
-    for key, array_per_ha in out_dict.items():
+    for key, array_per_ha in layers.items():
 
         # Converts per hectare values to per pixel values for the output numpy array
         output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
@@ -258,6 +150,8 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
     lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+
+    sys.quit()
 
 
     ### Part 4: Saves numpy arrays as rasters and uploads to s3
@@ -327,6 +221,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     return return_message, chunk_stats  # Return both the success message and the statistics
 
 
+
 def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
          chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
@@ -334,7 +229,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = 'LULUCF_summative_output_calculation'
+    stage = 'LULUCF_per_pixel_outputs'
     model_type = 'standard_model'
 
     # Determines if arguments for start and end year are valid
@@ -384,8 +279,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
-    # is_final = False
-    is_final = True  # For simulating a large run
+    is_final = False
     if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model.")
@@ -397,81 +291,15 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # (since it's not using numba), there's no need to centrally create a download dictionary with each input's datatype
     # just once on the scheduler, as is more efficient for scripts that use numba.
     # Creates a list of input directories used in summative output creation based on specifics of the model run
-    summative_inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year,
+    summative_inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
                                                                            chunk_size_pixels, model_type, interval_end_years,
                                                                            interval_year_diff, run_date, "per_ha")
     # print(summative_inputs_by_interval_dir_list)
 
-    # Creates a list of output directories for all outputs and intervals based on specifics of the model run
     summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
-                                                                            chunk_size_pixels, model_type, interval_end_years,
-                                                                            interval_year_diff, run_date, "per_ha")
-    print(summative_outputs_by_interval_dir_list)
-
-    # full_interval_summative_outputs_dir_list = []
-    #
-    # for i, summative_output_dir in enumerate(cn.LULUCF_summative_output_dirs):
-    #
-    #     if "gross" or "net" in summative_output_dir:
-    #         updated_path = summative_output_dir.replace(cn.model_type_placholder, model_type)
-    #         updated_path = updated_path.replace("MODEL_INTERVAL_TYPE", interval_type)
-    #         updated_path = updated_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
-    #         updated_path = updated_path.replace("RUN_DATE", run_date)
-    #         updated_path = updated_path.replace("PER_HA_OR_PIXEL", cn.C_per_pixel_pixel_meaning)
-    #         updated_path = updated_path.replace("START_END", f"{start_year}_{end_year}")
-    #     else:
-    #         continue
-    #
-    #     print(updated_path)
-    #     full_interval_summative_outputs_dir_list.append(updated_path)
-    #
-    # print(full_interval_summative_outputs_dir_list)
-
-    sys.quit()
-
-    # # Replaces the pixel meaning placeholder with the per-ha or per-pixel meanings.
-    # # Pixel meanings are formulated slightly differently depending on whether the output is C density or flux.
-    # for i, basic_output in enumerate(dir_list):
-    #     if "density" in basic_output:  # Changes C density outputs
-    #         if pixel_meaning == "per_ha":
-    #             updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning)
-    #         else:
-    #             updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_per_pixel_pixel_meaning)
-    #     else:  # Changes flux outputs and removal factors
-    #         if pixel_meaning == "per_ha":
-    #             updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_density_pixel_meaning)
-    #         else:
-    #             updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_per_pixel_pixel_meaning)
-    #
-    #     # Updates dir_list
-    #     dir_list[i] = updated_path
-    #
-    # # Iterates through the list of core output directories and adds the correct output years (stocks) or year ranges (fluxes) to each.
-    # for basic_output in dir_list:
-    #     for count, output_year in enumerate(output_years):
-    #
-    #         # For outputs that are a specific year (stocks)
-    #         if "YEAR" in basic_output:
-    #             output_dir = basic_output.replace('YEAR', str(output_year))
-    #         # For outputs that cover the start of the model to the end of the current interval
-    #         elif "RUNSTART_END" in basic_output:
-    #             output_dir = basic_output.replace('RUNSTART_END', f"{str(start_year)}_{str(output_year)}")
-    #             output_dir = output_dir.replace("PER_HA_OR_PIXEL", cn.flux_density_pixel_meaning)
-    #         # For outputs that cover a range of years (fluxes)
-    #         else:
-    #             if interval_type == cn.intervals_five_years:
-    #                 output_dir = basic_output.replace('START_END',
-    #                                                   f"{str(output_year - interval_duration)}_{str(output_year)}")
-    #             elif interval_type == cn.intervals_annual:
-    #                 output_dir = basic_output.replace('START_END',
-    #                                                   f"{str(output_year - interval_duration)}_{str(output_year)}")
-    #             else:  # Hybrid model (2000-2023)
-    #                 output_dir = basic_output.replace('START_END',
-    #                                                   f"{str(output_year - interval_duration[count])}_{str(output_year)}")
-    #
-    #         output_full_dirs.append(output_dir)
-    #
-    # return output_full_dirs
+                                                                           chunk_size_pixels, model_type, interval_end_years,
+                                                                           interval_year_diff, run_date, "per_pixel")
+    # print(summative_outputs_by_interval_dir_list)
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
@@ -480,7 +308,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     ### Step 2: Create 1x1 degree outputs
 
-    summative_output_delayed_results = [dask.delayed(create_summative_LULUCF_outputs)
+    summative_output_delayed_results = [dask.delayed(create_per_pixel_LULUCF_outputs)
                        (chunk, start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
                         is_final, no_upload,
                         summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list, stage)
