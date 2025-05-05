@@ -20,6 +20,14 @@ Consistently uses 27 GB per worker, so close to the maximum.
 Full run:
 python -m scripts.utilities.create_cluster -n 100 -cn LULUCF_postprocessing
 python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2015 2023 --run_date YYYYMMDD
+
+NOTE: I experimented with including the per-pixel output creation in this script, making a combined summative/per-pixel
+post-processing step. However, the per-pixel output creation seemed to require about 4GB of memory, which meant that
+I could process only one chunk at a time on a 32GB worker instead of two chunks at a time.
+Overall, even though creating the per-pixel outputs doesn't seem to take a lot of memory on its own,
+it seems more efficient to do it in its own script where I could process several chunks simultaneously.
+Also, if we ever want to create the summative outputs but not the per-pixel outputs, we can do that using
+the separate scripts.
 """
 
 import argparse
@@ -300,8 +308,8 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
             # print("out_pattern:", out_pattern)
             # print("year_range:", year_range)
 
-            # Replaces the pixel meaning placeholder with the pixel meaning for carbon densities or fluxes/removal factors
-            out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern)
+            # Gets the core filename pattern and pixel meaning
+            out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_pixel_meaning(out_pattern)
             # print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
 
             # Retrieves the relevant output s3 path for this specific output (list of one element).

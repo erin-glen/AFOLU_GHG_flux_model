@@ -347,7 +347,8 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
             # print("out_pattern:", out_pattern)
             # print("year_range:", year_range)
 
-            out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern)
+            # Gets the core filename pattern and pixel meaning
+            out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_pixel_meaning(out_pattern)
             # print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
 
             # Retrieves the relevant output s3 path for this specific output  (list of one element)

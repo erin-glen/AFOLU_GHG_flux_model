@@ -1651,7 +1651,7 @@ def strip_pixel_meaning(key):
         if meaning in key:
             out_pattern_without_pixel_meaning = re.sub(re.escape(meaning), '', key)
 
-            return out_pattern_without_pixel_meaning
+            return out_pattern_without_pixel_meaning, meaning
 
     # If none of the known suffixes are found
     sys.exit(f'No known pixel meaning found in {key}')

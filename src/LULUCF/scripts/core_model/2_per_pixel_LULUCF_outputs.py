@@ -93,7 +93,7 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
 
         # Constructs the dictionary entry.
         # Value has to be a list because prepare_to_download_chunk expects the download dictionary keys to be lists.
-        download_dict[f"{pattern_segment}_{interval_segment}"] = [f"{summative_input_by_interval}{tile_id}__{bounds_str}__{pattern_segment}{pix_meaning_segment}_{interval_segment}.tif"]
+        download_dict[f"{pattern_segment}_{interval_segment}{pix_meaning_segment}"] = [f"{summative_input_by_interval}{tile_id}__{bounds_str}__{pattern_segment}{pix_meaning_segment}_{interval_segment}.tif"]
 
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
     # Thus, this returns a complete set of inputs (missing chunks filled).
@@ -121,33 +121,40 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     lu.print_and_log(f"Calculating per-pixel versions of outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
-    out_dict_per_pixel = {}
+    out_dict = {}
 
-    for key, array_per_ha in out_dict_per_ha.items():
+    # The relevant pixel area (m^2) file in s3
+    pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
+
+    # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
+    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, bounds, chunk_length_pixels, 'Float32')
+    pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
+
+    for key, array_per_ha in layers.items():
 
         # Converts per hectare values to per pixel values for the output numpy array
         output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
 
+        # Gets the pattern and interval years from the filename
         out_pattern, interval_year_range = uu.strip_and_extract_years(key)
 
-        # Replaces the pixel meaning placeholder with the pixel meaning for carbon densities or fluxes/removal factors
-        out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern)
-        # print(out_pattern_without_pixel_meaning)
-        # print(interval_year_range)
+        # Gets the core filename pattern and pixel meaning
+        out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_pixel_meaning(out_pattern)
 
-        out_dict_per_pixel[f"{out_pattern_without_pixel_meaning}{cn.flux_per_pixel_pixel_meaning}_{interval_year_range}"] = output_per_pixel
+        # Replaces the per-ha pixel meaning with the appropriate per-pixel pixel meaning
+        if pixel_meaning == cn.C_density_pixel_meaning:
+            pixel_meaning = cn.C_per_pixel_pixel_meaning
+        elif pixel_meaning == cn.flux_density_pixel_meaning:
+            pixel_meaning = cn.flux_per_pixel_pixel_meaning
+        else:
+            sys.exit(f"Pixel meaning not found for {key}")
+
+        out_dict[f"{out_pattern_without_pixel_meaning}{pixel_meaning}_{interval_year_range}"] = output_per_pixel
 
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
     lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
-
-    # print(out_dict_per_pixel)
-
     lu.print_and_log(f"After creating per-pixel dict for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
-
-    merged_out_dict = out_dict_per_ha | out_dict_per_pixel
-
-    # print(merged_out_dict)
 
 
     ### Part 4: Saves numpy arrays as rasters and uploads to s3
@@ -160,39 +167,39 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         out_no_data_val = 0  # NoData value for output raster (optional)
 
         # Adds metadata used for uploading outputs to s3 to the dictionary
-        for key, value in merged_out_dict.items():
+        for key, value in out_dict.items():
             data_type = value.dtype.name
-            print("key:", key)
+            # print("key:", key)
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
             out_pattern, interval_year_range = uu.strip_and_extract_years(key)
-            print("out_pattern:", out_pattern)
-            print("year_range:", year_range)
+            # print("out_pattern:", out_pattern)
+            # print("year_range:", year_range)
 
-            # Replaces the pixel meaning placeholder with the pixel meaning for carbon densities or fluxes/removal factors
-            out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern)
-            print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
+            # Gets the core filename pattern and pixel meaning
+            out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_pixel_meaning(out_pattern)
+            # print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
 
             # Retrieves the relevant output s3 path for this specific output (list of one element).
             # First, finds the output folders for all intervals with the relevant patterns
             matched_output_s3_folders = [item for item in summative_outputs_by_interval_dir_list if out_pattern_without_pixel_meaning in item]
-            print("matched_output_s3_folders:", matched_output_s3_folders)
+            # print("matched_output_s3_folders:", matched_output_s3_folders)
 
             # Second, finds the output folder with the right interval for that pattern
             matched_output_s3_folder_list = [item for item in matched_output_s3_folders if interval_year_range in item]
-            print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
+            # print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
 
             # Output paths without bucket (s3://gfw2-data).
             # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
             s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
-            print("s3_path_without_bucket:", s3_path_without_bucket)
+            # print("s3_path_without_bucket:", s3_path_without_bucket)
 
             # Dictionary with metadata for each array
-            merged_out_dict[key] = [value, data_type, out_pattern, interval_year_range, s3_path_without_bucket]
+            out_dict[key] = [value, data_type, out_pattern, interval_year_range, s3_path_without_bucket]
 
         # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
         upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
-                                                           merged_out_dict, is_final, logger_worker, out_no_data_val)
+                                                           out_dict, is_final, logger_worker, out_no_data_val)
 
         lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", False, logger_worker)
 
@@ -212,7 +219,6 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
 
     return return_message, chunk_stats  # Return both the success message and the statistics
-
 
 
 def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
