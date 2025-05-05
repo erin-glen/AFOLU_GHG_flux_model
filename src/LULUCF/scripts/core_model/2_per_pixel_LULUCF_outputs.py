@@ -150,6 +150,7 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
     lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"After creating per-pixel outputs for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
 
     sys.quit()
 
@@ -175,9 +176,9 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
 
             # Replaces the pixel meaning placeholder with the pixel meaning for carbon densities or fluxes/removal factors
             if "density" in out_pattern:
-                out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern, cn.C_density_pixel_meaning)
+                out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern)
             else:
-                out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern, cn.flux_density_pixel_meaning)
+                out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern)
             print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
 
             # Retrieves the relevant output s3 path for this specific output (list of one element).

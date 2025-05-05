@@ -235,6 +235,10 @@ C_per_pixel_pixel_meaning = "_pixel"
 flux_density_pixel_meaning = "_ha_yr"
 flux_per_pixel_pixel_meaning = "_pixel_yr"
 
+# The four possible pixel meanings
+pixel_meanings = [C_density_pixel_meaning, C_per_pixel_pixel_meaning,
+                  flux_density_pixel_meaning, flux_per_pixel_pixel_meaning]
+
 ##### Inputs
 
 land_cover_5_year_path = f"{LULUCF_path}landcover/composite/five_year/v1/raw/"

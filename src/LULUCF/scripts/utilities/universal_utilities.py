@@ -1643,15 +1643,16 @@ def strip_and_extract_years(key):
     return pattern, year_range
 
 
-# Extracts the pixel meaning (per-ha or per-pixel) from a string
-def strip_pixel_meaning(key, pixel_meaning):
+# Removes the pixel meaning (per-ha or per-pixel) from a string
+def strip_pixel_meaning(key):
 
-    try:
-        out_pattern_without_pixel_meaning = re.sub(pixel_meaning, '', key)
-    except:
-        sys.exit(f'No pixel meaning found in {key}')
+    # Try each suffix in order
+    for meaning in cn.pixel_meanings:
+        if meaning in key:
+            return re.sub(re.escape(meaning), '', key)
 
-    return out_pattern_without_pixel_meaning
+    # If none of the known suffixes are found
+    sys.exit(f'No known pixel meaning found in {key}')
 
 
 # Creates a dataframe from the attribute table of the 1x1 deg fishnet with GADM iso joined to it

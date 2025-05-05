@@ -1437,9 +1437,9 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
             # Replaces the pixel meaning placeholder with the pixel meaning for carbon densities or fluxes/removal factors
             if "density" in out_pattern:
-                out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern, cn.C_density_pixel_meaning)
+                out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern)
             else:
-                out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern, cn.flux_density_pixel_meaning)
+                out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern)
             # print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
 
             # Retrieves the relevant output s3 path for this specific output  (list of one element)
