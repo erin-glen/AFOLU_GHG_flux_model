@@ -121,38 +121,33 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     lu.print_and_log(f"Calculating per-pixel versions of outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
-    # Everything in out_dict also needs to be in cn.LULUCF_summative_output_dirs
-    # because that has the list of basic output directories which are customized for this run
-    out_dict = {}
+    out_dict_per_pixel = {}
 
-
-
-
-    ### Part 3: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
-    ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
-    ### Also useful for a quick sum of outputs without doing zonal stats
-
-    lu.print_and_log(f"Populating chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-
-    # The relevant pixel area (m^2) file in s3
-    pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
-
-    # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
-    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, bounds, chunk_length_pixels, 'Float32')
-    pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
-
-    # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
-    for key, array_per_ha in layers.items():
+    for key, array_per_ha in out_dict_per_ha.items():
 
         # Converts per hectare values to per pixel values for the output numpy array
         output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
 
+        out_pattern, interval_year_range = uu.strip_and_extract_years(key)
+
+        # Replaces the pixel meaning placeholder with the pixel meaning for carbon densities or fluxes/removal factors
+        out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern)
+        # print(out_pattern_without_pixel_meaning)
+        # print(interval_year_range)
+
+        out_dict_per_pixel[f"{out_pattern_without_pixel_meaning}{cn.flux_per_pixel_pixel_meaning}_{interval_year_range}"] = output_per_pixel
+
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
     lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
-    lu.print_and_log(f"After creating per-pixel outputs for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
 
-    sys.quit()
+    # print(out_dict_per_pixel)
+
+    lu.print_and_log(f"After creating per-pixel dict for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+
+    merged_out_dict = out_dict_per_ha | out_dict_per_pixel
+
+    # print(merged_out_dict)
 
 
     ### Part 4: Saves numpy arrays as rasters and uploads to s3
@@ -165,7 +160,7 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         out_no_data_val = 0  # NoData value for output raster (optional)
 
         # Adds metadata used for uploading outputs to s3 to the dictionary
-        for key, value in out_dict.items():
+        for key, value in merged_out_dict.items():
             data_type = value.dtype.name
             print("key:", key)
 
@@ -175,10 +170,7 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
             print("year_range:", year_range)
 
             # Replaces the pixel meaning placeholder with the pixel meaning for carbon densities or fluxes/removal factors
-            if "density" in out_pattern:
-                out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern)
-            else:
-                out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern)
+            out_pattern_without_pixel_meaning = uu.strip_pixel_meaning(out_pattern)
             print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
 
             # Retrieves the relevant output s3 path for this specific output (list of one element).
@@ -196,11 +188,11 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
             print("s3_path_without_bucket:", s3_path_without_bucket)
 
             # Dictionary with metadata for each array
-            out_dict[key] = [value, data_type, out_pattern, interval_year_range, s3_path_without_bucket]
+            merged_out_dict[key] = [value, data_type, out_pattern, interval_year_range, s3_path_without_bucket]
 
         # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
         upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
-                                                           out_dict, is_final, logger_worker, out_no_data_val)
+                                                           merged_out_dict, is_final, logger_worker, out_no_data_val)
 
         lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", False, logger_worker)
 

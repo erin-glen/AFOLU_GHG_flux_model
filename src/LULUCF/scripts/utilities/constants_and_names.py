@@ -235,9 +235,12 @@ C_per_pixel_pixel_meaning = "_pixel"
 flux_density_pixel_meaning = "_ha_yr"
 flux_per_pixel_pixel_meaning = "_pixel_yr"
 
-# The four possible pixel meanings
-pixel_meanings = [C_density_pixel_meaning, C_per_pixel_pixel_meaning,
-                  flux_density_pixel_meaning, flux_per_pixel_pixel_meaning]
+# The four possible pixel meanings.
+# Order is important; the ones with _yr come first because otherwise a function that looks for these meanings in order
+# will always find the C meanings, even for flux outputs because flux outputs always have _ha or _pixel.
+# That is, it avoids issues of partial matches when this list is being iterated through.
+pixel_meanings = [flux_density_pixel_meaning, flux_per_pixel_pixel_meaning,
+                  C_density_pixel_meaning, C_per_pixel_pixel_meaning]
 
 ##### Inputs
 
