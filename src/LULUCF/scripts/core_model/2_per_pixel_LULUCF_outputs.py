@@ -121,6 +121,7 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     lu.print_and_log(f"Calculating per-pixel versions of outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
+    # Dictionary for per-pixel outputs
     out_dict = {}
 
     # The relevant pixel area (m^2) file in s3
