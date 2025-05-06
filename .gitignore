@@ -90,8 +90,8 @@ config/hot_export_token.txt
 *.exe
 
 .DS_Store
+*checkpoint.ipynb
 
-*.ipynb
 *.xlsx
 debug.py
 

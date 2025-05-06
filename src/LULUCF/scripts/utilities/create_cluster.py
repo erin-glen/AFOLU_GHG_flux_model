@@ -25,6 +25,7 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory, s
         # worker_vm_types=['r7i.large'],
         workspace='wri-forest-research',
         # mount_bucket="s3://gfw2-data",
+        tags = {"project": "AFOLU_flux_model"},
         scheduler_memory = scheduler_memory_str,
         worker_memory = worker_memory_str,
         worker_cpu = worker_cpu,
