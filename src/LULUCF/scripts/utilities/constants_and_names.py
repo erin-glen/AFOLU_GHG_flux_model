@@ -310,7 +310,7 @@ litter_c_2000_pattern = f"{litter_c_dens_pattern}_2000"
 soil_c_2000_dir = f"{full_bucket_prefix}/climate/carbon_model/carbon_pools/soil_carbon/intermediate_full_extent/standard/20231108/CHUNK_SIZE_pixels/20250307/"
 soil_c_2000_pattern = "soil_C_full_extent_2000_Mg_C_ha"
 
-carbon_2015_creation_date = '20250502'
+carbon_2015_creation_date = '20250507'
 
 agc_2015_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{agc_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
 agc_2015_pattern = f"{agc_dens_pattern}_2015"

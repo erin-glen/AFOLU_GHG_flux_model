@@ -14,10 +14,9 @@ Max memory usage: ~18 GB/worker
 Time: 23:17 through calculation; 40:25 through tile stats; Credits: 170; Cost: $6.00
 
 python -m scripts.utilities.create_cluster -n 50 -t 12 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation."
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1."
 Max memory usage: ~20 GB/worker
-Time: 29:26 through calculation; 31:11 through tile stats; Credits: 116; Cost: $3.94
--t 14 seemed high, so may be better to go back down to -t 12.
+Time: 45:50 through calculation; 47:47 through tile stats; Credits: 180; Cost: $6.30
 
 NOTE: Maybe there's some way to configure this to output 10x10 deg tiles but I can't figure it out.
 Instead, it creates 1x1 deg tiles and then merges them to 10x10 deg tiles.
@@ -429,6 +428,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
+    # is_final = True  # For simulating a large run
     if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model.")

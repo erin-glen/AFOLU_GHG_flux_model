@@ -1538,8 +1538,8 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
-    is_final = False
-    # is_final = True  # For simulating a large run
+    # is_final = False
+    is_final = True  # For simulating a large run
     if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model.")
@@ -1551,7 +1551,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # (probably at the chunk level).
     # It shouldn't really matter what the sample_tile_id is.
     sample_tile_id = "00N_000E"
-    sample_tile_id = "00N_020E" #TODO for testing
+    # sample_tile_id = "00N_020E" #TODO for testing
 
     # Dictionary of data to download (inputs to model)
     download_dict = {
@@ -1715,11 +1715,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                    interval_length, interval_end_years, is_final, no_upload, output_dir_list, stage)
             futures.append(future)
 
-        # try:
         batch_flux_results = client.gather(futures)
-        # except Exception as e:
-        #     main_logger.error(f"Batch {i + 1} failed: {e}: {uu.timestr()}")
-        #     sys.exit()
 
         all_flux_results.extend(batch_flux_results)
 
@@ -1730,18 +1726,10 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         del batch_flux_results
         client.run(gc.collect)
 
-        # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-        if not no_upload:
-            for output_folder in output_dir_list:
-
-                geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-                main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-                # print(geotiff_files)
-
         uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
 
-    ### Step 3: Chunk stats for 1x1 degree outputs, aggregates logs
+    ### Step 3: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
@@ -1754,6 +1742,14 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
             main_logger.info("Resizing cluster to 1 worker")
 
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
+
+    # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
+    if not no_upload:
+        for output_folder in output_dir_list:
+
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+            # print(geotiff_files)
 
     # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs

@@ -72,6 +72,7 @@ def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
     main_logger.info(f"Run date: {run_date}")
+    main_logger.info(f"no_upload: {no_upload}")
 
     # Calculates the interval type, difference between start and end years of intervals,
     # and the model output years for the model run

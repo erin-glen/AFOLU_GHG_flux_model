@@ -9,9 +9,9 @@ python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_model
 python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015 --first_10x10s_to_process 2
 
 Full Coiled run:
-python -m scripts.utilities.create_cluster -n 40 -t 5 -cn LULUCF_model
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015
-Time: 16:32 through calculation; 16:48 through tile stats; Credits: 59; Cost: $1.90
+python -m scripts.utilities.create_cluster -n 40 -t 5 -cn LULUCF_preprocessing
+python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2015
+Time: 28:23 through calculation; 30:23 through tile stats; Credits: 101; Cost: $3.49
 Using more than -t 5 seemed to cause some tile_ids to randomly fail, even though memory usage was not high.
 So, best to stay with -t 5 even though the Dask dashboard indicates low memory usage compared to what's available (e.g., 5 out of 32 GB being used).
 """
@@ -123,7 +123,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 
-            resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
     # Prepares 10x10 deg chunk stats spreadsheet: pixel count for outputs
     if (not no_stats) and (success_count_10x10 > 0):

@@ -212,7 +212,7 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
                          is_final, logger_worker)
 
     chunk_end_time = time.time()
-    lu.print_and_log(f"{bounds_str} took {chunk_end_time - chunk_start_time} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"{bounds_str} took {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
     return_message = f"Success for {bounds_str}: {uu.timestr()}"
 
@@ -259,6 +259,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
     main_logger.info(f"Run date: {input_date}")
+    main_logger.info(f"no_upload: {no_upload}")
 
     # Calculates the interval type, difference between start and end years of intervals,
     # and the model output years for the model run
@@ -320,18 +321,10 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     success_count, all_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, summative_output_results)
 
-
-    # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-    if not no_upload:
-        for output_folder in summative_outputs_by_interval_dir_list:
-            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-            # print(geotiff_files)
-
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
-    ### Step 3: Chunk stats for 1x1 degree outputs, aggregates logs
+    ### Step 3: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
@@ -344,6 +337,13 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
             main_logger.info("Resizing cluster to 1 worker")
 
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
+
+    # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
+    if not no_upload:
+        for output_folder in summative_outputs_by_interval_dir_list:
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+            # print(geotiff_files)
 
     # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
