@@ -8,7 +8,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "0.3.1"
+model_version = "0.3.2"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets

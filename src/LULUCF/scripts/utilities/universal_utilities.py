@@ -1653,8 +1653,8 @@ def strip_pixel_meaning(key):
 
             return out_pattern_without_pixel_meaning, meaning
 
-    # If none of the known suffixes are found
-    sys.exit(f'No known pixel meaning found in {key}')
+    # If none of the known pixel meanings are found, the key is returned as the pattern and the meaning is empty
+    return key, ''
 
 
 # Creates a dataframe from the attribute table of the 1x1 deg fishnet with GADM iso joined to it

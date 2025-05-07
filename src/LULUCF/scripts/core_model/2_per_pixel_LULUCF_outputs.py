@@ -6,20 +6,20 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m scripts.core_model.2_per_pixel_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.2_per_pixel_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --input_date YYYYMMDD
 
 Coiled small tests:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_postprocessing
-python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
-python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --input_date YYYYMMDD
+python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2015 2023 --input_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023 --input_date YYYYMMDD
 Consistently uses 27 GB per worker, so close to the maximum.
 
 Full run:
 python -m scripts.utilities.create_cluster -n 100 -cn LULUCF_postprocessing
-python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2015 2023 --input_date YYYYMMDD
 """
 
 import argparse
@@ -222,7 +222,7 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     return return_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
          chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
 
@@ -258,7 +258,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
-    main_logger.info(f"Run date: {run_date}")
+    main_logger.info(f"Run date: {input_date}")
 
     # Calculates the interval type, difference between start and end years of intervals,
     # and the model output years for the model run
@@ -279,7 +279,8 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
-    is_final = False
+    # is_final = False
+    is_final = True  # For simulating a large run
     if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model.")
@@ -293,12 +294,12 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Creates a list of input directories used in summative output creation based on specifics of the model run
     summative_inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
                                                                            chunk_size_pixels, model_type, interval_end_years,
-                                                                           interval_year_diff, run_date, "per_ha")
+                                                                           interval_year_diff, input_date, "per_ha")
     # print(summative_inputs_by_interval_dir_list)
 
     summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
                                                                            chunk_size_pixels, model_type, interval_end_years,
-                                                                           interval_year_diff, run_date, "per_pixel")
+                                                                           interval_year_diff, input_date, "per_pixel")
     # print(summative_outputs_by_interval_dir_list)
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
@@ -370,7 +371,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate summative outputs of core LULUCF model.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-rd', '--run_date', help='Date of run, in YYYYMMDD')
+    parser.add_argument('-rd', '--input_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
@@ -386,7 +387,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
-    run_date = args.run_date
+    input_date = args.input_date
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
     chunk_shapefile_uri = args.chunk_shapefile_uri
@@ -400,6 +401,6 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, run_date, year_range, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
+    main(cluster_name, input_date, year_range, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)

@@ -86,7 +86,7 @@ def setup_logging_worker():
 def print_and_log(text, is_final, logger):
     logger.info(f"flm: {text}")
     if not is_final:
-        print(f"flm: {text}", flush=True)  # flush=True is necessary for when the print is inside try-except
+        print(text, flush=True)
 
 
 # Log compilation and uploading

@@ -1412,8 +1412,6 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
-        # chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer'))
-
     lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
 
@@ -1422,13 +1420,15 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
 
     # Only saves arrays to geotifs and uploads them to s3 if enabled
-    if not no_upload:
+    if no_upload == False:
 
         out_no_data_val = 0  # NoData value for output raster (optional)
 
         # Adds metadata used for uploading outputs to s3 to the dictionary
         for key, value in out_dict_all_dtypes.items():
             data_type = value.dtype.name
+            # print("key", key)
+            # print(data_type)
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
             out_pattern, year_range = uu.strip_and_extract_years(key)
@@ -1451,9 +1451,11 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
             # Output paths without bucket (s3://gfw2-data).
             # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
             s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
+            # print("s3_path_without_bucket:", s3_path_without_bucket)
 
             # Dictionary with metadata for each array
             out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
+
 
         # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
         upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
@@ -1476,7 +1478,6 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
 
     return return_message, chunk_stats  # Return both the success message and the statistics
-
 
 
 def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
@@ -1515,12 +1516,12 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
-    # Starting time for stage
-    start_time = uu.timestr()
+    start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
     main_logger.info(f"Run date: {run_date}")
     main_logger.info(f"Batch size: {batch_size}")
+    main_logger.info(f"no_upload: {no_upload}")
 
     # Calculates the interval type, difference between start and end years of intervals, and the model output years
     # for the model run
@@ -1543,11 +1544,12 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         is_final = True
         main_logger.info("Running as final model.")
 
-    # This is just a placeholder tile_id that is used to obtain the datatype of each tile set.
+    # This is just a placeholder tile_id that is used to obtain the datatype of each input tile set.
     # It is overwritten when chunks are assigned and analyzed.
     # Using this placeholder allows the full path and tile name to be specified up front, which simplifies things.
     # Otherwise, we'd have just the path but not the file name now and would have to add in the file name later
     # (probably at the chunk level).
+    # It shouldn't really matter what the sample_tile_id is.
     sample_tile_id = "00N_000E"
     sample_tile_id = "00N_020E" #TODO for testing
 
