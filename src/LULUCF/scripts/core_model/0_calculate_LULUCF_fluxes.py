@@ -1551,7 +1551,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # (probably at the chunk level).
     # It shouldn't really matter what the sample_tile_id is.
     sample_tile_id = "00N_000E"
-    # sample_tile_id = "00N_020E" #TODO for testing
 
     # Dictionary of data to download (inputs to model)
     download_dict = {
