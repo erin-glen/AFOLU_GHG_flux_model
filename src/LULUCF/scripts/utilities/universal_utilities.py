@@ -526,7 +526,7 @@ def get_interval_info(end_year, main_logger, start_year):
 
 
 # Creates the list of chunks to process given an approach: a bounding box or a shapefile attribute table
-def create_chunk_list(bounding_box, use_shapefile, chunk_size_deg, first_chunks, fishnet_iso_df, main_logger):
+def create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size_deg, first_chunks, fishnet_iso_df, main_logger):
 
     # Makes list of chunks to analyze from the bounding box and chunk size (deg)
     # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
@@ -543,12 +543,12 @@ def create_chunk_list(bounding_box, use_shapefile, chunk_size_deg, first_chunks,
     # Makes list of chunks to analyze from an attribute table of a shapefile of 1x1 degree chunks.
     # Attribute table column must be formatted as W_S_E_N.
     # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
-    elif use_shapefile:
+    elif chunk_shapefile_uri:
 
         chunk_size_pixels = int(cn.full_raster_dims * 1/10)
 
         main_logger.info("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
-        main_logger.info(f"Chunk source: 1x1 degree tile index shapefile {cn.fishnet_1x1deg_uri}")
+        main_logger.info(f"Chunk source: 1x1 degree tile index shapefile {chunk_shapefile_uri}")
         main_logger.info(f"Chunk size: 1 degree, {chunk_size_pixels} pixels")
 
         # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
