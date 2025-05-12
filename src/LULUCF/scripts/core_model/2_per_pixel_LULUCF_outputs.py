@@ -14,8 +14,9 @@ python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessin
 python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2015 2023 --input_date YYYYMMDD
 
 Coiled large shapefile test:
+python -m scripts.utilities.create_cluster -n 50 -cn LULUCF_postprocessing
 python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023 --input_date YYYYMMDD
-Consistently uses 27 GB per worker, so close to the maximum.
+Consistently uses 22 GB per worker, so not enough room for another simultaneous task on 32 GB workers.
 
 Full run:
 python -m scripts.utilities.create_cluster -n 100 -cn LULUCF_postprocessing
