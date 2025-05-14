@@ -6,19 +6,19 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m scripts.core_model.3_aggregate_LULUCF_outputs -yr 2015 2023 --first_10x10s_to_process 2 --run_date YYYYMMDD
+python -m scripts.core_model.3_aggregate_LULUCF_outputs -yr 2015 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
 
 Coiled small test:
 python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_postprocessing
-python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --first_10x10s_to_process 2 --run_date YYYYMMDD
+python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
 
 Coiled large shapefile test:
 python -m scripts.utilities.create_cluster -n 50 -t 5 -cn LULUCF_postprocessing
-python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --input_date YYYYMMDD
 
 Full Coiled run:
 python -m scripts.utilities.create_cluster -n 50 -t 5 -cn LULUCF_postprocessing
-python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --input_date YYYYMMDD
 
 From before:
 Took about 30 minutes to do the aggregated gross and net flux outputs. A few 10x10 tiles from many of the folders
@@ -39,7 +39,7 @@ from ..utilities import universal_utilities as uu
 from ..utilities import resize_cluster
 
 
-def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
          first_10x10s_to_process=None, log_note=None):
 
 
@@ -71,7 +71,7 @@ def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
-    main_logger.info(f"Run date: {run_date}")
+    main_logger.info(f"Run date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
 
     # Calculates the interval type, difference between start and end years of intervals,
@@ -85,11 +85,20 @@ def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no
     # just once on the scheduler, as is more efficient for scripts that use numba.
     # Creates a list of input directories used in summative output creation based on specifics of the model run
 
-    # Combine the core LULUCF outputs and the summative ones into a single list that will be used for 1x1 deg aggregation
-    LULUCF_aggreg_dirs = cn.LULUCF_core_output_dirs + cn.LULUCF_summative_output_dirs
+    # Only make 10x10s of the summative outputs. It keeps the workload smaller and these are the only ones that
+    # have per-pixel outputs, which also need to be aggregated into 10x10s.
+    output_dir_list_per_ha = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,'4000',
+                                                     model_type, interval_end_years, interval_year_diff, input_date, "per_ha")
+    output_dir_list_per_pixel = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,'4000',
+                                                     model_type, interval_end_years, interval_year_diff, input_date, "per_pixel")
 
-    output_dir_list = uu.create_output_dir_name_list(LULUCF_aggreg_dirs, interval_type, start_year,'4000',
-                                                     model_type, interval_end_years, interval_year_diff, run_date, cn.C_density_pixel_meaning)
+    # Also need to aggregate the land state nodes
+    land_state_node_list = [s for s in cn.LULUCF_core_output_dirs if cn.land_state_pattern in s]
+    land_state_node_list = uu.create_output_dir_name_list(land_state_node_list, interval_type, start_year,'4000',
+                                                     model_type, interval_end_years, interval_year_diff, input_date)
+
+    # Full list of folders to aggregate
+    output_dir_list = output_dir_list_per_ha + output_dir_list_per_pixel + land_state_node_list
 
     # # For testing- first folder only, so contents of all folders don't need to be listed
     # output_dir_list = output_dir_list[0:1]
@@ -132,6 +141,7 @@ def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no
         main_logger.info("Running as final model.")
 
     main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
+
 
     # Each task is a single 10x10 deg aggregated geotif
     delayed_results_10x10_deg = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
@@ -182,7 +192,7 @@ def main(cluster_name, year_range, run_date, run_local=False, no_stats=False, no
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Aggregate 1x1 degree outputs from LULUCF model to 10x10 degree geotifs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-rd', '--run_date', help='Date of run, in YYYYMMDD')
+    parser.add_argument('-rd', '--input_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
     parser.add_argument('-f', '--first_10x10s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
@@ -195,7 +205,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
-    run_date = args.run_date
+    input_date = args.input_date
     year_range = args.year_range
     first_10x10s_to_process = args.first_10x10s_to_process
     log_note = args.log_note
@@ -205,4 +215,4 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, year_range, run_date, run_local, no_stats, no_log, no_upload, first_10x10s_to_process=first_10x10s_to_process, log_note=log_note)
+    main(cluster_name, year_range, input_date, run_local, no_stats, no_log, no_upload, first_10x10s_to_process=first_10x10s_to_process, log_note=log_note)

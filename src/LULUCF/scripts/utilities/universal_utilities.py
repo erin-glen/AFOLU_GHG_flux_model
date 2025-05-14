@@ -686,7 +686,7 @@ def check_for_tile(download_dict, is_final, logger):
 
 # Turns a list of basic output directory names into a list of fully specified directories based on output chunk size, run date, model type, and output years
 def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_pixels,
-                                model_type, output_years, interval_duration, run_date, pixel_meaning):
+                                model_type, output_years, interval_duration, run_date, pixel_meaning=None):
 
     # List of directories for outputs
     output_full_dirs = []
