@@ -110,8 +110,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     forest_age_start_year_block = in_dict_uint8[cn.forest_age_start_year_pattern]
 
     # Sets a fallback value for continent_ecozone for the chunk in case any pixels fall outside the continent-ecozone boundary.
+    # Also, excludes water codes (1022, 2022, 4022, 7022) from the fallback value.
+    # Note that these continent-ecozone values need to explicitly be ignored further down when
+    # the continent-ecozone pixel is applied.
+    # This only excludes certain continent-ecozone values from use in the creation of the fallback value.
     # fallback_value is only used if the chunk doesn't have any continent_ecozone pixels in it at all.
     continent_ecozone_fallback = nu.fallback_conteco_climzone_value(continent_ecozone_block, 2020)
+
 
     # Sets a fallback value for climate zone for the chunk in case any pixels fall outside the climate zone boundary.
     # fallback_value is only used if the chunk doesn't have any climate_zone pixels in it at all.
@@ -297,8 +302,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
                 forest_age_annual_cell = forest_age_annual_block[row, col]
 
-                # Applies the continent_ecozone fallback value when there isn't a value for the pixel
-                if continent_ecozone_cell == 0:
+                # Applies the continent_ecozone fallback value when there isn't a value for the pixel (0)
+                # or the value represents water (the XX22s).
+                # We don't want pixels that are in a water ecozone to not be included in land
+                # (and therefore not have a removal factor assigned); ecozone shouldn't delineate land.
+                # These water codes are also excluded from the creation of continent_ecozone_fallback.
+                if continent_ecozone_cell in [0, 1022, 2022, 4022, 7022]:
                     continent_ecozone_cell = continent_ecozone_fallback
 
                 # Applies the climate_zone fallback value when there isn't a value for the pixel
@@ -1538,8 +1547,8 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
-    # is_final = False
-    is_final = True  # For simulating a large run
+    is_final = False
+    # is_final = True  # For simulating a large run
     if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model.")

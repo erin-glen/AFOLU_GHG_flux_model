@@ -31,23 +31,30 @@ def pad_to_6_digits(state_out, max_digits_state_out):
 # There are many ways that are more efficient or at least succinct to calculate the mode of an array in Python,
 # but they don't work with Numba. So, I'm going with this.
 # https://chatgpt.com/share/e/67bf7958-351c-800a-bd00-259213586471
+# Excludes continent-ecozone codes for water.
 @jit(nopython=True)
 def fallback_conteco_climzone_value(conteco_or_climzone_block, fallback_value):
 
-    # Flattens 2D array to 1D for counting
-    conteco_or_climzone_block_flat = conteco_or_climzone_block.ravel()
+    # Flattens the array
+    flat = conteco_or_climzone_block.ravel()
 
-    # Removes 0s so that the mode of the remaining pixels can be determined
-    non_zero_values = conteco_or_climzone_block_flat[conteco_or_climzone_block_flat > 0]
-    counts = np.bincount(non_zero_values)  # Counts the number of pixels with that value
-    # print("Counts:", counts)
-    if len(counts) == 0:   # If the only values in the chunk are 0 -> there are no counts of non-zero pixels
-        conteco_or_climzone_fallback = fallback_value  # Sets an arbitrary continent-ecozone value. This is a real edge case.
-    else:   # Otherwise, there are non-zero values in the chunk -> uses the most common non-zero value
-        conteco_or_climzone_fallback = np.argmax(counts)
+    # Manually masks out values to ignore in calculating dominant continent-ecozone: 0, 1022, 2022, 4022, 7022 (water codes)
+    valid = []
+    for i in range(flat.size):
+        v = flat[i]
+        if v != 0 and v != 1022 and v != 2022 and v != 4022 and v != 7022:  # Last 4 are water codes
+            valid.append(v)
 
-    # print("Fallback 1 value for chunk:", conteco_or_climzone_fallback)
-    return conteco_or_climzone_fallback
+    # If no valid pixels after excluding the codes to ignore, the fallback value is used
+    if len(valid) == 0:
+        return fallback_value
+
+    # Converts list to NumPy array
+    valid_arr = np.array(valid)
+
+    # Gets the most common (mode) continent-ecozone
+    counts = np.bincount(valid_arr)
+    return np.argmax(counts)
 
 
 # Creates a separate dictionary for each chunk datatype so that they can be passed to Numba as separate arguments.

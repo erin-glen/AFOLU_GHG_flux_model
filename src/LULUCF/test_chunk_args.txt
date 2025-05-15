@@ -43,4 +43,5 @@
 -bb 10 49.75 10.25 50 -cs 0.25      # 0.25x0.25 deg, 1 chunk (has data)
 -bb 158 6 159 7 -cs 1               # 1x1 deg (10N_150E), 1 chunk (no WHRC AGB, only mangroves)
 -bb -161 22 -160 23 -cs 1           # 1x1 deg (30N_170W), 1 chunk (no R:S tile)
--bb -42.0 64.0 -41.0 65.0 -cs 1     # 1x1 deg (70N_050W), 1 chunk (no continent-ecozone)
+-bb -42.0 64.0 -41.0 65.0 -cs 1     # 1x1 deg (70N_050W), 1 chunk (no continent-ecozone, should default to cont_eco=2020)
+-bb 29 -7 30 -6 -cs 1               # 1x1 deg (00N_020E), 1 chunk (majority continent-ecozone is 1022, but that should be ignored and it should use 1018 instead)
