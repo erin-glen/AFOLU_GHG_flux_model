@@ -134,6 +134,7 @@ nutrient_status_codes = {
     'rich': 2
 }
 
+# TODO these need to be updated when SDPT finalized
 plantation_type_codes = {
     'unknown': 0,
     'long_rotation': 2,
