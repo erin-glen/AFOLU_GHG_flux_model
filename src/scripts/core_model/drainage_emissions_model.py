@@ -34,6 +34,7 @@ gwp_ch4 = np.float32(cn.gwp_ch4)
 gwp_n2o = np.float32(cn.gwp_n2o)
 gwp_co = np.float32(cn.gwp_co)
 combustion_factor = np.float32(cn.combustion_factor)
+m2_to_ha = np.float32(cn.m2_to_ha)
 
 forest_code = cn.ipcc_codes["forest"]
 cropland_code = cn.ipcc_codes["cropland"]
@@ -502,6 +503,10 @@ def calculate_and_upload_drainage(
     layers = uu.fill_missing_input_layers_with_no_data(
         layers, uint8, int16, [], float32, bstr, tid, is_final, logger
     )
+
+    # convert pixel area from m^2 to ha when present
+    if use_actual_pixel_area and "pixel_area_ha" in layers:
+        layers["pixel_area_ha"] = layers["pixel_area_ha"] * cn.m2_to_ha
 
     # stats for inputs
     for k, arr in layers.items():
