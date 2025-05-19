@@ -325,7 +325,7 @@ def calculate_drainage_and_emissions(
                         burned_node = nu.accrete_node(burned_node, 3)
                         if soil_block[row, col] == 2:
                             if (
-                                land_cover in (cropland_code,)
+                                land_cover == cropland_code
                                 or planted_forest_type > 0
                             ):
                                 bkey = "tropical_drained_crop_or_plantation"
