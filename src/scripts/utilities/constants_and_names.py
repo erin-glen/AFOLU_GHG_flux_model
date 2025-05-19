@@ -178,7 +178,11 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
         interval_end_year = interval_start_year
 
     lc_year = interval_end_year
-    interval_type = 'five_year' if lc_year in [2000, 2005, 2010, 2015, 2020] else 'annual'
+    interval_type = (
+        intervals_five_years
+        if lc_year in [2000, 2005, 2010, 2015, 2020]
+        else intervals_annual
+    )
 
     # LULUCF land cover dir update
     lulucf_land_cover_dir = posixpath.join(

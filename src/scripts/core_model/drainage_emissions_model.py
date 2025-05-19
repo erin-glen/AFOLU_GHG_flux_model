@@ -501,7 +501,11 @@ def calculate_and_upload_drainage(
     # upload rasters
     if not no_upload:
         year_tag = f"{iv_start}" if iv_start == iv_end else f"{iv_start}_{iv_end}"
-        interval_tag = "annual" if iv_start == iv_end else "five_years"
+        interval_tag = (
+            cn.intervals_annual
+            if iv_start == iv_end
+            else cn.intervals_five_years
+        )
         for k, arr in outputs.items():
             outputs[k] = [arr, arr.dtype.name, k, year_tag]
         uu.save_and_upload_small_raster_set(
@@ -561,7 +565,7 @@ def run_drainage_model(
 
     start_year = start_year or 2020
     end_year = end_year or start_year
-    if interval_type == "five_year":
+    if interval_type == cn.intervals_five_years:
         intervals = [
             (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
         ]
@@ -634,7 +638,7 @@ def main(argv=None):
             no_upload=False,
             start_year=2015,
             end_year=2019,
-            interval_type="five_year",
+            interval_type=cn.intervals_five_years,
             use_actual_pixel_area=False,
         )
         return
@@ -657,8 +661,9 @@ def main(argv=None):
     p.add_argument("--start_year", type=int, required=True)
     p.add_argument("--end_year", type=int, required=True)
     p.add_argument(
-        "--interval_type", choices=["annual", "five_year"], default="annual"
-    )
+        "--interval_type",
+        choices=[cn.intervals_annual, cn.intervals_five_years],
+        default=cn.intervals_annual,)
     p.add_argument("--use_actual_pixel_area", action="store_true")
     args = p.parse_args(argv)
 
@@ -687,5 +692,5 @@ python -m src.scripts.core_model.drainage_emissions_model \
   --chunk_size 2 \
   --start_year 2015 \
   --end_year 2019 \
-  --interval_type five_year
+  --interval_type five_years
 """
