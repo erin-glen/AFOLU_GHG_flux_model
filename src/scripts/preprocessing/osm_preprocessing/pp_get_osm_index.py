@@ -31,6 +31,7 @@ import logging
 import geopandas as gpd
 from shapely.geometry import Polygon, box
 import pandas as pd
+import src.scripts.preprocessing.preprocessing_constants as cn
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -249,10 +250,26 @@ def main():
     """
     Main function to process .poly files and overlay them with the tile index.
     """
-    poly_folder = r"C:\GIS\Data\Global\OSM\poly_files\OSM_bounds"
-    output_dir = r"C:\GIS\Data\Global\OSM\poly_files\OSM_bounds"
-    tile_index_path = r"C:\GIS\Data\Global\Wetlands\Raw\Global\gfw_peatlands\Global_Peatlands_Index\Global_Peatlands.shp"
-    output_tile_index_path = r"C:\GIS\Data\Global\Wetlands\Raw\Global\gfw_peatlands\Global_Peatlands_Index\Global_Peatlands_Indexed.shp"
+    poly_folder = os.path.join(cn.local_root, "OSM", "poly_files", "OSM_bounds")
+    output_dir = os.path.join(cn.local_root, "OSM", "poly_files", "OSM_bounds")
+    tile_index_path = os.path.join(
+        cn.local_root,
+        "Wetlands",
+        "Raw",
+        "Global",
+        "gfw_peatlands",
+        "Global_Peatlands_Index",
+        "Global_Peatlands.shp",
+    )
+    output_tile_index_path = os.path.join(
+        cn.local_root,
+        "Wetlands",
+        "Raw",
+        "Global",
+        "gfw_peatlands",
+        "Global_Peatlands_Index",
+        "Global_Peatlands_Indexed.shp",
+    )
 
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)

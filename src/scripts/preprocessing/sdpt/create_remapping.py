@@ -1,5 +1,7 @@
+import os
 import pandas as pd
 import logging
+import src.scripts.preprocessing.preprocessing_constants as cn
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -46,7 +48,11 @@ def remap_sdpt_attributes(input_csv, output_csv):
 
 # Example usage
 if __name__ == "__main__":
-    input_csv = r"C:\GIS\Data\Global\Plantation\plantation_attributes_v21_v09152024_FINAL.csv"
-    output_csv = r"C:\GIS\Data\Global\Plantation\rough_remapping.csv"
+    input_csv = os.path.join(
+        cn.local_root,
+        "Plantation",
+        "plantation_attributes_v21_v09152024_FINAL.csv",
+    )
+    output_csv = os.path.join(cn.local_root, "Plantation", "rough_remapping.csv")
 
     remap_sdpt_attributes(input_csv, output_csv)

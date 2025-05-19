@@ -1,7 +1,8 @@
+import os
 import geopandas as gpd
 from shapely.geometry import Polygon
 import numpy as np
-from utilities import get_tile_bounds  # Ensure this is correctly imported
+import src.scripts.preprocessing.preprocessing_constants as cn
 
 def get_chunk_bounds(minx, miny, maxx, maxy, chunk_size):
     """
@@ -82,7 +83,10 @@ def get_tile_bounds(global_index_shapefile, tile_id):
 
 # Main script to run the analysis
 if __name__ == "__main__":
-    global_index_shapefile = r"C:\tmp\Global_Peatlands.shp"
+    global_index_shapefile = os.getenv(
+        "GLOBAL_INDEX_SHP",
+        os.path.join(os.path.abspath(os.sep), "tmp", "Global_Peatlands.shp"),
+    )
     tile_id = "60N_010W"
     chunk_size = 2  # Set the desired chunk size
 
@@ -95,7 +99,13 @@ if __name__ == "__main__":
     print(f'chunk_params are: {chunk_params}')
 
     # Export the chunk bounds to a shapefile
-    output_filename = f"C:/GIS/Data/Global/Wetlands/Raw/chunk_bounds/{tile_id}_chunks.shp"
+    output_filename = os.path.join(
+        cn.local_root,
+        "Wetlands",
+        "Raw",
+        "chunk_bounds",
+        f"{tile_id}_chunks.shp",
+    )
     export_chunks_to_shapefile(chunk_params, output_filename)
 
     print(f"Chunk bounds exported to {output_filename}")

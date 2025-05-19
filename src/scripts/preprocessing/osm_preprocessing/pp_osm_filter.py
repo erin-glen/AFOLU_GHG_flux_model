@@ -18,25 +18,30 @@ files already exist to avoid redundant processing.
 import os
 import subprocess
 import logging
+import src.scripts.preprocessing.preprocessing_constants as cn
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Dictionary of PBF files
+base_pbf = os.path.join(cn.local_root, "OSM", "raw_by_region")
 pbf_files = {
-    "north-america-latest.osm.pbf": r"C:\GIS\Data\Global\OSM\raw_by_region\north-america-latest.osm.pbf",
-    "africa-latest.osm.pbf": r"C:\GIS\Data\Global\OSM\raw_by_region\africa-latest.osm.pbf",
-    "antarctica-latest.osm.pbf": r"C:\GIS\Data\Global\OSM\raw_by_region\antarctica-latest.osm.pbf",
-    "asia-latest.osm.pbf": r"C:\GIS\Data\Global\OSM\raw_by_region\asia-latest.osm.pbf",
-    "australia-oceania-latest.osm.pbf": r"C:\GIS\Data\Global\OSM\raw_by_region\australia-oceania-latest.osm.pbf",
-    "central-america-latest.osm.pbf": r"C:\GIS\Data\Global\OSM\raw_by_region\central-america-latest.osm.pbf",
-    "europe-latest.osm.pbf": r"C:\GIS\Data\Global\OSM\raw_by_region\europe-latest.osm.pbf",
-    "south-america-latest.osm.pbf": r"C:\GIS\Data\Global\OSM\raw_by_region\south-america-latest.osm.pbf"
+    name: os.path.join(base_pbf, name)
+    for name in [
+        "north-america-latest.osm.pbf",
+        "africa-latest.osm.pbf",
+        "antarctica-latest.osm.pbf",
+        "asia-latest.osm.pbf",
+        "australia-oceania-latest.osm.pbf",
+        "central-america-latest.osm.pbf",
+        "europe-latest.osm.pbf",
+        "south-america-latest.osm.pbf",
+    ]
 }
-
 # Output directories
-output_dir_highways = r"C:\GIS\Data\Global\OSM\filtered_highways"
-output_dir_canals = r"C:\GIS\Data\Global\OSM\filtered_canals"
+output_dir_highways = os.path.join(cn.local_root, "OSM", "filtered_highways")
+output_dir_canals = os.path.join(cn.local_root, "OSM", "filtered_canals")
 os.makedirs(output_dir_highways, exist_ok=True)
 os.makedirs(output_dir_canals, exist_ok=True)
 
