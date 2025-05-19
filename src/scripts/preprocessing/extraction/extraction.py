@@ -16,9 +16,9 @@ import shapely.speedups
 import gc
 
 # Import custom modules (ensure these are correctly set up in your environment)
-import utilities as uu  # Utilities module with helper functions
-import preprocessing_constants as cn  # Module containing constants like paths and S3 prefixes
-
+import src.scripts.preprocessing.utilities as uu  # Utilities module with helper functions
+import src.scripts.preprocessing.preprocessing_constants as cn  # Module containing constants like paths and S3 prefixes
+import argparse
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -584,6 +584,19 @@ def main(dataset='finland', tile_id=None, run_mode='default'):
         logging.info("Processing completed")
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+
+    parser = argparse.ArgumentParser(description="Process peat extraction datasets")
+    parser.add_argument("--dataset", required=True, choices=["finland", "ireland", "russia"],
+                        help="Dataset to process")
+    parser.add_argument("--tile_id", default=None, help="Optional tile ID to process")
+    parser.add_argument("--run_mode", default="default", choices=["default", "test"],
+                        help="Run mode")
+    args = parser.parse_args()
+
+    main(dataset=args.dataset, tile_id=args.tile_id, run_mode=args.run_mode)
+
+"""
     # Example usage
     # Process Finland dataset
     main(dataset='finland', tile_id=None, run_mode='default')
@@ -591,3 +604,4 @@ if __name__ == "__main__":
     main(dataset='ireland', tile_id=None, run_mode='default')
     # Process Russia dataset
     main(dataset='russia', tile_id=None, run_mode='default')
+"""
