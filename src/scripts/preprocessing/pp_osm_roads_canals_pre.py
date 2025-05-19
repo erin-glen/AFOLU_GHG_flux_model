@@ -38,18 +38,20 @@ from datetime import datetime
 import pandas as pd
 
 import pp_utilities as uu
+import src.scripts.preprocessing.constants_and_names as cn
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Paths TODO add logic to automatically create these paths and integrate with other osm preprocessing
-filtered_canals_path = r"C:\GIS\Data\Global\OSM\filtered_canals"
-filtered_highways_path = r"C:\GIS\Data\Global\OSM\filtered_highways"
-output_dir_roads = r"C:\GIS\Data\Global\OSM\roads_by_tile"
-output_dir_canals = r"C:\GIS\Data\Global\OSM\canals_by_tile"
-local_temp_dir = "C:/GIS/Data/Global/Wetlands/Processed/30_m_temp"
-s3_bucket_name = 'gfw2-data'
-index_shapefile_prefix = 'climate/AFOLU_flux_model/organic_soils/inputs/raw/index/Global_Peatlands'
+filtered_canals_path = cn.filtered_canals_dir
+filtered_highways_path = cn.filtered_highways_dir
+output_dir_roads = cn.osm_roads_by_tile_dir
+output_dir_canals = cn.osm_canals_by_tile_dir
+local_temp_dir = cn.wetlands_temp_dir
+s3_bucket_name = cn.s3_bucket_name
+index_shapefile_prefix = cn.index_shapefile_prefix
 
 os.makedirs(output_dir_roads, exist_ok=True)
 os.makedirs(output_dir_canals, exist_ok=True)

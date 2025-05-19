@@ -5,7 +5,13 @@ import gc
 import logging
 import os
 import boto3
-from utilities import download_shapefile_from_s3, read_shapefile_from_s3, rasterize_shapefile, compress_file, delete_file_if_exists
+from utilities import (
+    download_shapefile_from_s3,
+    read_shapefile_from_s3,
+    rasterize_shapefile,
+    compress_file,
+)
+import src.scripts.preprocessing.constants_and_names as cn
 
 """
 This script processes raster tiles for Finland extraction areas, converting vector data to raster format and uploading results to S3.
@@ -15,13 +21,13 @@ This script processes raster tiles for Finland extraction areas, converting vect
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 # AWS S3 setup
-s3_bucket_name = 'gfw2-data'
-s3_finland_shapefile_prefix = 'climate/AFOLU_flux_model/organic_soils/inputs/raw/extraction/Finland_turvetuotantoalueet/turvetuotantoalueet_jalkikaytto'
-s3_tiles_prefix = 'climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/'
-s3_tile_index_shapefile_prefix = 'climate/AFOLU_flux_model/organic_soils/inputs/raw/index/Global_Peatlands'
+s3_bucket_name = cn.s3_bucket_name
+s3_finland_shapefile_prefix = cn.datasets['extraction']['finland']['s3_raw']
+s3_tiles_prefix = cn.peat_tiles_prefix
+s3_tile_index_shapefile_prefix = cn.index_shapefile_prefix
 
 # Local paths
-local_temp_dir = "C:/GIS/Data/Global/Wetlands/Processed/30_m_temp"  # Update to your own temporary directory
+local_temp_dir = cn.wetlands_temp_dir
 os.makedirs(local_temp_dir, exist_ok=True)
 
 def filter_finland(gdf):
@@ -54,7 +60,9 @@ def process_tile(tile_key, finland_bounds):
     s3_input_path = f'/vsis3/{s3_bucket_name}/{tile_key}'
     local_output_path = os.path.join(local_temp_dir, f"finland_extraction_{tile_id}.tif")
     compressed_output_path = os.path.join(local_temp_dir, f"compressed_finland_extraction_{tile_id}.tif")
-    s3_output_path = f"climate/AFOLU_flux_model/organic_soils/inputs/processed/extraction/{tile_id}.tif"
+    s3_output_path = (
+        f"{cn.datasets['extraction']['finland']['s3_processed']}{tile_id}.tif"
+    )
 
     if os.path.exists(local_output_path):
         logging.info(f"Output file for tile {tile_id} already exists. Skipping processing.")

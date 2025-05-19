@@ -31,6 +31,26 @@ s3_client = boto3.client("s3")
 local_root = pp.join("C:", "GIS", "Data", "Global")
 local_temp_dir = "/tmp"  # works under WSL/mac/linux
 
+wetlands_temp_dir = pp.join(local_root, "Wetlands", "Processed", "30_m_temp")
+filtered_canals_dir = pp.join(local_root, "OSM", "filtered_canals")
+filtered_highways_dir = pp.join(local_root, "OSM", "filtered_highways")
+osm_roads_by_tile_dir = pp.join(local_root, "OSM", "roads_by_tile")
+osm_canals_by_tile_dir = pp.join(local_root, "OSM", "canals_by_tile")
+
+grip_density_prefix_1km = pp.join(project_dir, processed_dir,
+                                  "grip_density", "1km",
+                                  "grip_density_{tile_id}.tif")
+osm_canals_density_prefix_1km = pp.join(project_dir, processed_dir,
+                                        "osm_canals_density", "1km",
+                                        "canals_density_{tile_id}.tif")
+grip_density_prefix_30m = pp.join(project_dir, processed_dir,
+                                  "grip_density", "30m",
+                                  "grip_density_{tile_id}.tif")
+osm_canals_density_prefix_30m = pp.join(project_dir, processed_dir,
+                                        "osm_canals_density", "30m",
+                                        "canals_density_{tile_id}.tif")
+
+
 today_date = datetime.today().strftime("%Y%m%d")
 
 # Peat-tile info used by several scripts

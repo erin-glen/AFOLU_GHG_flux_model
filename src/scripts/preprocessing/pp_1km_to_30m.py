@@ -2,7 +2,12 @@ import os
 import logging
 import multiprocessing
 import boto3
-from pp_utilities import s3_file_exists, list_s3_files, resample_raster, compress_and_upload_directory_to_s3
+from pp_utilities import (
+    s3_file_exists,
+    list_s3_files,
+    resample_raster,
+)
+import src.scripts.preprocessing.constants_and_names as cn
 
 """
 This script processes and resamples tiles from S3, checks for existing files, resamples the rasters,
@@ -13,17 +18,17 @@ and uploads the results back to S3.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 # AWS S3 setup
-s3_bucket = "gfw2-data"
-local_temp_dir = r"C:\GIS\Data\Global\Wetlands\Processed\30_m_temp"
+s3_bucket = cn.s3_bucket_name
+local_temp_dir = cn.wetlands_temp_dir
 
 
 def process_tile(tile_id):
-    target_tiles = f'climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/{tile_id}_peat_mask_processed.tif'
-    grip_density = f"climate/AFOLU_flux_model/organic_soils/inputs/processed/grip_density/1km/grip_density_{tile_id}.tif"
-    osm_canals_density = f"climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_canals_density/1km/canals_density_{tile_id}.tif"
+    target_tiles = f"{cn.peat_tiles_prefix}{tile_id}_peat_mask_processed.tif"
+    grip_density = cn.grip_density_prefix_1km.format(tile_id=tile_id)
+    osm_canals_density = cn.osm_canals_density_prefix_1km.format(tile_id=tile_id)
 
-    grip_output = f"climate/AFOLU_flux_model/organic_soils/inputs/processed/grip_density/30m/grip_density_{tile_id}.tif"
-    osm_canals_output = f"climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_canals_density/30m/canals_density_{tile_id}.tif"
+    grip_output = cn.grip_density_prefix_30m.format(tile_id=tile_id)
+    osm_canals_output = cn.osm_canals_density_prefix_30m.format(tile_id=tile_id)
 
     paths = {
         'grip': (grip_density, grip_output),
@@ -73,9 +78,8 @@ def main(tile_id=None):
     try:
         if tile_id:
             logging.info(
-                f"Listing files in S3 bucket '{s3_bucket}' with prefix 'climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/'")
-            files = list_s3_files(s3_bucket,
-                                  'climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/')
+                   f"Listing files in S3 bucket '{s3_bucket}' with prefix '{cn.peat_tiles_prefix}'")
+            files = list_s3_files(s3_bucket, cn.peat_tiles_prefix)
             logging.info(f"Files in S3: {files}")
 
             process_tile(tile_id)
@@ -83,7 +87,7 @@ def main(tile_id=None):
             s3_client = boto3.client('s3')
             paginator = s3_client.get_paginator('list_objects_v2')
             page_iterator = paginator.paginate(Bucket=s3_bucket,
-                                               Prefix='climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/')
+                                               Prefix=cn.peat_tiles_prefix)
 
             tile_ids = []
             for page in page_iterator:
