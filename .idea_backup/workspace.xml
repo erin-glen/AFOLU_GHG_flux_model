@@ -1,0 +1,715 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="3b66a2d6-e614-4299-9260-dc35282adba1" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/AFOLU_GHG_flux_model.iml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/modules.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/scripts/models/drainage_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/scripts/models/drainage_model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/scripts/models/post_processing.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/scripts/models/post_processing.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/scripts/utilities/universal_utilities.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/scripts/utilities/universal_utilities.py" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="feature/LULUCF_model" />
+      </map>
+    </option>
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;erin-glen&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">
+    <option name="selectedUrlAndAccountId">
+      <UrlAndAccount>
+        <option name="accountId" value="416fe182-4536-4678-a224-25dc02e03bee" />
+        <option name="url" value="https://github.com/wri/AFOLU_GHG_flux_model.git" />
+      </UrlAndAccount>
+    </option>
+  </component>
+  <component name="MarkdownSettingsMigration">
+    <option name="stateVersion" value="1" />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 2
+}</component>
+  <component name="ProjectId" id="2f0cn36cSch8oV9mda6CIBxfojC" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;feature/organic__soils&quot;,
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/GIS/git/AFOLU_GHG_flux_model/src/preprocessing&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.toDoOptions&quot;
+  }
+}</component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\GIS\git\AFOLU_GHG_flux_model\src\preprocessing" />
+      <recent name="C:\GIS\git\AFOLU_GHG_flux_model\src" />
+      <recent name="C:\GIS\git\AFOLU_GHG_flux_model\src\preprocessing\osm_preprocessing" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\GIS\git\AFOLU_GHG_flux_model\src\scripts" />
+      <recent name="C:\GIS\git\AFOLU_GHG_flux_model\src\preprocessing" />
+      <recent name="C:\GIS\git\AFOLU_GHG_flux_model\src\preprocessing\osm_preprocessing\old_versions" />
+      <recent name="C:\GIS\git\AFOLU_GHG_flux_model\src\" />
+      <recent name="C:\GIS\git\AFOLU_GHG_flux_model\src\pp_bounds_to_poly.py" />
+    </key>
+  </component>
+  <component name="RunManager" selected="Python.drainage_model">
+    <configuration name="drainage_model" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="AFOLU_GHG_flux_model" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/src/scripts/models" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/scripts/models/drainage_model.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="pp_aggregate_tiles" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="AFOLU_GHG_flux_model" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/src/preprocessing" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/preprocessing/pp_aggregate_tiles.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="pp_dadap_engert" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="AFOLU_GHG_flux_model" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/src/preprocessing" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/preprocessing/pp_dadap_engert.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="pp_hansenize_gdal" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="AFOLU_GHG_flux_model" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/src/preprocessing" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/preprocessing/pp_hansenize_gdal.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="pp_hansenize_rio" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="AFOLU_GHG_flux_model" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/src/preprocessing" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/preprocessing/pp_hansenize_rio.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Python.drainage_model" />
+        <item itemvalue="Python.pp_aggregate_tiles" />
+        <item itemvalue="Python.pp_hansenize_gdal" />
+        <item itemvalue="Python.pp_dadap_engert" />
+        <item itemvalue="Python.pp_hansenize_rio" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="3b66a2d6-e614-4299-9260-dc35282adba1" name="Changes" comment="" />
+      <created>1712941598474</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1712941598474</updated>
+    </task>
+    <task id="LOCAL-00083" summary="Reverted to before starting coiled testing. Changed tmp path in cn">
+      <option name="closed" value="true" />
+      <created>1724282451314</created>
+      <option name="number" value="00083" />
+      <option name="presentableId" value="LOCAL-00083" />
+      <option name="project" value="LOCAL" />
+      <updated>1724282451314</updated>
+    </task>
+    <task id="LOCAL-00084" summary="Working but still need to figure infinity data issue and get working with coiled">
+      <option name="closed" value="true" />
+      <created>1724284228360</created>
+      <option name="number" value="00084" />
+      <option name="presentableId" value="LOCAL-00084" />
+      <option name="project" value="LOCAL" />
+      <updated>1724284228360</updated>
+    </task>
+    <task id="LOCAL-00085" summary="Implemented coiled logger for easier reading in command line">
+      <option name="closed" value="true" />
+      <created>1724343246197</created>
+      <option name="number" value="00085" />
+      <option name="presentableId" value="LOCAL-00085" />
+      <option name="project" value="LOCAL" />
+      <updated>1724343246197</updated>
+    </task>
+    <task id="LOCAL-00086" summary="Added more checks and logging to troubleshoot coiled issue. Getting error writing to directory: attempting to create a TIFF file in a directory that doesn't exist (/tmp/osm_canals_density/20240822/). Testing adding make directory in process chunk">
+      <option name="closed" value="true" />
+      <created>1724345373860</created>
+      <option name="number" value="00086" />
+      <option name="presentableId" value="LOCAL-00086" />
+      <option name="project" value="LOCAL" />
+      <updated>1724345373860</updated>
+    </task>
+    <task id="LOCAL-00087" summary="Working with coiled!!! &#10;&#10;The change was moving the make directory line into the process chunk function. &#10;&#10;Added documentation to functions and overall. &#10;&#10;Remaining non-critical issues: Linestring error in coiled; funky min and max values in visualization (this may be corrected by the aggregation step anyway). &#10;&#10;Running 0.42 credits for Tile ID 00N_110E. Conservative estimate 300 credits for all tiles and datasets">
+      <option name="closed" value="true" />
+      <created>1724346522371</created>
+      <option name="number" value="00087" />
+      <option name="presentableId" value="LOCAL-00087" />
+      <option name="project" value="LOCAL" />
+      <updated>1724346522371</updated>
+    </task>
+    <task id="LOCAL-00088" summary="Working for one tile - adding test and default run modes now">
+      <option name="closed" value="true" />
+      <created>1724440707373</created>
+      <option name="number" value="00088" />
+      <option name="presentableId" value="LOCAL-00088" />
+      <option name="project" value="LOCAL" />
+      <updated>1724440707373</updated>
+    </task>
+    <task id="LOCAL-00089" summary="Created seperate sets of functions for hansenze - gdal and rasterio. Both will need some fine tuning">
+      <option name="closed" value="true" />
+      <created>1724440734504</created>
+      <option name="number" value="00089" />
+      <option name="presentableId" value="LOCAL-00089" />
+      <option name="project" value="LOCAL" />
+      <updated>1724440734504</updated>
+    </task>
+    <task id="LOCAL-00090" summary="Changed data type handling">
+      <option name="closed" value="true" />
+      <created>1724447982517</created>
+      <option name="number" value="00090" />
+      <option name="presentableId" value="LOCAL-00090" />
+      <option name="project" value="LOCAL" />
+      <updated>1724447982517</updated>
+    </task>
+    <task id="LOCAL-00091" summary="Added descals data">
+      <option name="closed" value="true" />
+      <created>1724447992550</created>
+      <option name="number" value="00091" />
+      <option name="presentableId" value="LOCAL-00091" />
+      <option name="project" value="LOCAL" />
+      <updated>1724447992550</updated>
+    </task>
+    <task id="LOCAL-00092" summary="Added flexibility to run for both extent and year datasets. Everything working smoothly">
+      <option name="closed" value="true" />
+      <created>1724448017443</created>
+      <option name="number" value="00092" />
+      <option name="presentableId" value="LOCAL-00092" />
+      <option name="project" value="LOCAL" />
+      <updated>1724448017443</updated>
+    </task>
+    <task id="LOCAL-00093" summary="Updated structure to call in clip, removed no data and data type specifications">
+      <option name="closed" value="true" />
+      <created>1724448122531</created>
+      <option name="number" value="00093" />
+      <option name="presentableId" value="LOCAL-00093" />
+      <option name="project" value="LOCAL" />
+      <updated>1724448122531</updated>
+    </task>
+    <task id="LOCAL-00094" summary="Added extraction dictionaries to constants and names. Added functions to utilities for peat extraction processing. Extraction processing script working well for finland. Moving to Ireland and Russia now">
+      <option name="closed" value="true" />
+      <created>1726504049174</created>
+      <option name="number" value="00094" />
+      <option name="presentableId" value="LOCAL-00094" />
+      <option name="project" value="LOCAL" />
+      <updated>1726504049176</updated>
+    </task>
+    <task id="LOCAL-00095" summary="Improved efficiency through bounds checking">
+      <option name="closed" value="true" />
+      <created>1726507975815</created>
+      <option name="number" value="00095" />
+      <option name="presentableId" value="LOCAL-00095" />
+      <option name="project" value="LOCAL" />
+      <updated>1726507975816</updated>
+    </task>
+    <task id="LOCAL-00096" summary="Working for Ireland. Moving on to Russia">
+      <option name="closed" value="true" />
+      <created>1726510606416</created>
+      <option name="number" value="00096" />
+      <option name="presentableId" value="LOCAL-00096" />
+      <option name="project" value="LOCAL" />
+      <updated>1726510606416</updated>
+    </task>
+    <task id="LOCAL-00097" summary="Working for all three countries. Next steps are to clean and ensure integration with utilties script">
+      <option name="closed" value="true" />
+      <created>1726513637911</created>
+      <option name="number" value="00097" />
+      <option name="presentableId" value="LOCAL-00097" />
+      <option name="project" value="LOCAL" />
+      <updated>1726513637911</updated>
+    </task>
+    <task id="LOCAL-00098" summary="Minor change to Russia path">
+      <option name="closed" value="true" />
+      <created>1726513648432</created>
+      <option name="number" value="00098" />
+      <option name="presentableId" value="LOCAL-00098" />
+      <option name="project" value="LOCAL" />
+      <updated>1726513648432</updated>
+    </task>
+    <task id="LOCAL-00099" summary="Integrated with utilities and improved readability for filtering functions">
+      <option name="closed" value="true" />
+      <created>1726518462667</created>
+      <option name="number" value="00099" />
+      <option name="presentableId" value="LOCAL-00099" />
+      <option name="project" value="LOCAL" />
+      <updated>1726518462667</updated>
+    </task>
+    <task id="LOCAL-00100" summary="Created new directory for .py versions of main models">
+      <option name="closed" value="true" />
+      <created>1726518734846</created>
+      <option name="number" value="00100" />
+      <option name="presentableId" value="LOCAL-00100" />
+      <option name="project" value="LOCAL" />
+      <updated>1726518734846</updated>
+    </task>
+    <task id="LOCAL-00101" summary="Added documentation. Added filtering for Ireland and Finland">
+      <option name="closed" value="true" />
+      <created>1726530713717</created>
+      <option name="number" value="00101" />
+      <option name="presentableId" value="LOCAL-00101" />
+      <option name="project" value="LOCAL" />
+      <updated>1726530713717</updated>
+    </task>
+    <task id="LOCAL-00102" summary="Updated to hand two separate input datasets for Russia">
+      <option name="closed" value="true" />
+      <created>1726769326190</created>
+      <option name="number" value="00102" />
+      <option name="presentableId" value="LOCAL-00102" />
+      <option name="project" value="LOCAL" />
+      <updated>1726769326190</updated>
+    </task>
+    <task id="LOCAL-00103" summary="Corrected typo">
+      <option name="closed" value="true" />
+      <created>1726769335886</created>
+      <option name="number" value="00103" />
+      <option name="presentableId" value="LOCAL-00103" />
+      <option name="project" value="LOCAL" />
+      <updated>1726769335886</updated>
+    </task>
+    <task id="LOCAL-00104" summary="Added readme">
+      <option name="closed" value="true" />
+      <created>1726775475846</created>
+      <option name="number" value="00104" />
+      <option name="presentableId" value="LOCAL-00104" />
+      <option name="project" value="LOCAL" />
+      <updated>1726775475846</updated>
+    </task>
+    <task id="LOCAL-00105" summary="Organized utilities into separate scripts for readability and easier updating. Created init script for easier imports">
+      <option name="closed" value="true" />
+      <created>1726842128595</created>
+      <option name="number" value="00105" />
+      <option name="presentableId" value="LOCAL-00105" />
+      <option name="project" value="LOCAL" />
+      <updated>1726842128595</updated>
+    </task>
+    <task id="LOCAL-00106" summary="Updated configurations scripts">
+      <option name="closed" value="true" />
+      <created>1726842143076</created>
+      <option name="number" value="00106" />
+      <option name="presentableId" value="LOCAL-00106" />
+      <option name="project" value="LOCAL" />
+      <updated>1726842143076</updated>
+    </task>
+    <task id="LOCAL-00107" summary="Updated extraction pipeline with latest Russia data">
+      <option name="closed" value="true" />
+      <created>1726842168416</created>
+      <option name="number" value="00107" />
+      <option name="presentableId" value="LOCAL-00107" />
+      <option name="project" value="LOCAL" />
+      <updated>1726842168416</updated>
+    </task>
+    <task id="LOCAL-00108" summary="Began coding drainage model as python script">
+      <option name="closed" value="true" />
+      <created>1726842798761</created>
+      <option name="number" value="00108" />
+      <option name="presentableId" value="LOCAL-00108" />
+      <option name="project" value="LOCAL" />
+      <updated>1726842798761</updated>
+    </task>
+    <task id="LOCAL-00109" summary="Initial design for utilities and model interaction. Now testing design David has set up">
+      <option name="closed" value="true" />
+      <created>1727207961121</created>
+      <option name="number" value="00109" />
+      <option name="presentableId" value="LOCAL-00109" />
+      <option name="project" value="LOCAL" />
+      <updated>1727207961122</updated>
+    </task>
+    <task id="LOCAL-00110" summary="Restructured to match LULUCF model">
+      <option name="closed" value="true" />
+      <created>1727209205851</created>
+      <option name="number" value="00110" />
+      <option name="presentableId" value="LOCAL-00110" />
+      <option name="project" value="LOCAL" />
+      <updated>1727209205852</updated>
+    </task>
+    <task id="LOCAL-00111" summary="Restructured to match LULUCF model">
+      <option name="closed" value="true" />
+      <created>1727209254108</created>
+      <option name="number" value="00111" />
+      <option name="presentableId" value="LOCAL-00111" />
+      <option name="project" value="LOCAL" />
+      <updated>1727209254108</updated>
+    </task>
+    <task id="LOCAL-00112" summary="Restructured to match LULUCF model">
+      <option name="closed" value="true" />
+      <created>1727212346320</created>
+      <option name="number" value="00112" />
+      <option name="presentableId" value="LOCAL-00112" />
+      <option name="project" value="LOCAL" />
+      <updated>1727212346320</updated>
+    </task>
+    <task id="LOCAL-00113" summary="Changed structure of constants_and_names to include the download dict. Added &quot;working version&quot; to paths dictionary">
+      <option name="closed" value="true" />
+      <created>1727213383620</created>
+      <option name="number" value="00113" />
+      <option name="presentableId" value="LOCAL-00113" />
+      <option name="project" value="LOCAL" />
+      <updated>1727213383620</updated>
+    </task>
+    <task id="LOCAL-00114" summary="Added unit conversion for engert data">
+      <option name="closed" value="true" />
+      <created>1727296269846</created>
+      <option name="number" value="00114" />
+      <option name="presentableId" value="LOCAL-00114" />
+      <option name="project" value="LOCAL" />
+      <updated>1727296269846</updated>
+    </task>
+    <task id="LOCAL-00115" summary="Modified to use the hansenize_gdal script instead of utilities">
+      <option name="closed" value="true" />
+      <created>1727299219247</created>
+      <option name="number" value="00115" />
+      <option name="presentableId" value="LOCAL-00115" />
+      <option name="project" value="LOCAL" />
+      <updated>1727299219248</updated>
+    </task>
+    <task id="LOCAL-00116" summary="Updated paths">
+      <option name="closed" value="true" />
+      <created>1727299226546</created>
+      <option name="number" value="00116" />
+      <option name="presentableId" value="LOCAL-00116" />
+      <option name="project" value="LOCAL" />
+      <updated>1727299226546</updated>
+    </task>
+    <task id="LOCAL-00117" summary="Adjusted no data handling">
+      <option name="closed" value="true" />
+      <created>1727299236660</created>
+      <option name="number" value="00117" />
+      <option name="presentableId" value="LOCAL-00117" />
+      <option name="project" value="LOCAL" />
+      <updated>1727299236660</updated>
+    </task>
+    <task id="LOCAL-00118" summary="Re-ran for all datasets, added some notes on coiled cluster sizing">
+      <option name="closed" value="true" />
+      <created>1727363691326</created>
+      <option name="number" value="00118" />
+      <option name="presentableId" value="LOCAL-00118" />
+      <option name="project" value="LOCAL" />
+      <updated>1727363691326</updated>
+    </task>
+    <task id="LOCAL-00119" summary="Added post processing script for aggregating small tiles. Testing for roads and canals next">
+      <option name="closed" value="true" />
+      <created>1727363720317</created>
+      <option name="number" value="00119" />
+      <option name="presentableId" value="LOCAL-00119" />
+      <option name="project" value="LOCAL" />
+      <updated>1727363720317</updated>
+    </task>
+    <task id="LOCAL-00120" summary="Updated paths. Maintaining separate cn files currently but planning to combine">
+      <option name="closed" value="true" />
+      <created>1727363740868</created>
+      <option name="number" value="00120" />
+      <option name="presentableId" value="LOCAL-00120" />
+      <option name="project" value="LOCAL" />
+      <updated>1727363740868</updated>
+    </task>
+    <task id="LOCAL-00121" summary="Added paths for &quot;small&quot; s3 raster sets">
+      <option name="closed" value="true" />
+      <created>1727370180785</created>
+      <option name="number" value="00121" />
+      <option name="presentableId" value="LOCAL-00121" />
+      <option name="project" value="LOCAL" />
+      <updated>1727370180785</updated>
+    </task>
+    <task id="LOCAL-00122" summary="Working but running into memory issues. Working on efficiency improvements">
+      <option name="closed" value="true" />
+      <created>1727388990890</created>
+      <option name="number" value="00122" />
+      <option name="presentableId" value="LOCAL-00122" />
+      <option name="project" value="LOCAL" />
+      <updated>1727388990891</updated>
+    </task>
+    <task id="LOCAL-00123" summary="Added init files to directories">
+      <option name="closed" value="true" />
+      <created>1727389003533</created>
+      <option name="number" value="00123" />
+      <option name="presentableId" value="LOCAL-00123" />
+      <option name="project" value="LOCAL" />
+      <updated>1727389003533</updated>
+    </task>
+    <task id="LOCAL-00124" summary="Created aws permissions checker script to troubleshoot aws problems">
+      <option name="closed" value="true" />
+      <created>1727389022453</created>
+      <option name="number" value="00124" />
+      <option name="presentableId" value="LOCAL-00124" />
+      <option name="project" value="LOCAL" />
+      <updated>1727389022453</updated>
+    </task>
+    <task id="LOCAL-00125" summary="Updated paths. pp cn updated to general. Have not integrated with all scripts yet">
+      <option name="closed" value="true" />
+      <created>1727389045294</created>
+      <option name="number" value="00125" />
+      <option name="presentableId" value="LOCAL-00125" />
+      <option name="project" value="LOCAL" />
+      <updated>1727389045294</updated>
+    </task>
+    <task id="LOCAL-00126" summary="Modified with default workspace">
+      <option name="closed" value="true" />
+      <created>1727389059134</created>
+      <option name="number" value="00126" />
+      <option name="presentableId" value="LOCAL-00126" />
+      <option name="project" value="LOCAL" />
+      <updated>1727389059134</updated>
+    </task>
+    <task id="LOCAL-00127" summary="Modified merge function with more logging">
+      <option name="closed" value="true" />
+      <created>1727389073694</created>
+      <option name="number" value="00127" />
+      <option name="presentableId" value="LOCAL-00127" />
+      <option name="project" value="LOCAL" />
+      <updated>1727389073694</updated>
+    </task>
+    <task id="LOCAL-00128" summary="Modified list tile ids function">
+      <option name="closed" value="true" />
+      <created>1727389121521</created>
+      <option name="number" value="00128" />
+      <option name="presentableId" value="LOCAL-00128" />
+      <option name="project" value="LOCAL" />
+      <updated>1727389121521</updated>
+    </task>
+    <task id="LOCAL-00129" summary="Removed old hansenize function">
+      <option name="closed" value="true" />
+      <created>1727898347895</created>
+      <option name="number" value="00129" />
+      <option name="presentableId" value="LOCAL-00129" />
+      <option name="project" value="LOCAL" />
+      <updated>1727898347896</updated>
+    </task>
+    <task id="LOCAL-00130" summary="Running smoothly locally and in coiled. Added examples for command line runs. Removed extraneous arguments for setup coiled cluster">
+      <option name="closed" value="true" />
+      <created>1727898375276</created>
+      <option name="number" value="00130" />
+      <option name="presentableId" value="LOCAL-00130" />
+      <option name="project" value="LOCAL" />
+      <updated>1727898375276</updated>
+    </task>
+    <task id="LOCAL-00131" summary="Re-added index prefix that had been deleted accidentally">
+      <option name="closed" value="true" />
+      <created>1727898391189</created>
+      <option name="number" value="00131" />
+      <option name="presentableId" value="LOCAL-00131" />
+      <option name="project" value="LOCAL" />
+      <updated>1727898391190</updated>
+    </task>
+    <option name="localTasksCounter" value="132" />
+    <servers />
+  </component>
+  <component name="Vcs.Log.History.Properties">
+    <option name="COLUMN_ID_ORDER">
+      <list>
+        <option value="Default.Root" />
+        <option value="Default.Author" />
+        <option value="Default.Date" />
+        <option value="Default.Subject" />
+        <option value="Space.CommitStatus" />
+      </list>
+    </option>
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="Organized utilities into separate scripts for readability and easier updating. Created init script for easier imports" />
+    <MESSAGE value="Updated configurations scripts" />
+    <MESSAGE value="Updated extraction pipeline with latest Russia data" />
+    <MESSAGE value="Began coding drainage model as python script" />
+    <MESSAGE value="Initial design for utilities and model interaction. Now testing design David has set up" />
+    <MESSAGE value="Restructured to match LULUCF model" />
+    <MESSAGE value="Changed structure of constants_and_names to include the download dict. Added &quot;working version&quot; to paths dictionary" />
+    <MESSAGE value="Added unit conversion for engert data" />
+    <MESSAGE value="Modified to use the hansenize_gdal script instead of utilities" />
+    <MESSAGE value="Updated paths" />
+    <MESSAGE value="Adjusted no data handling" />
+    <MESSAGE value="Re-ran for all datasets, added some notes on coiled cluster sizing" />
+    <MESSAGE value="Added post processing script for aggregating small tiles. Testing for roads and canals next" />
+    <MESSAGE value="Updated paths. Maintaining separate cn files currently but planning to combine" />
+    <MESSAGE value="Added paths for &quot;small&quot; s3 raster sets" />
+    <MESSAGE value="Working but running into memory issues. Working on efficiency improvements" />
+    <MESSAGE value="Added init files to directories" />
+    <MESSAGE value="Created aws permissions checker script to troubleshoot aws problems" />
+    <MESSAGE value="Updated paths. pp cn updated to general. Have not integrated with all scripts yet" />
+    <MESSAGE value="Modified with default workspace" />
+    <MESSAGE value="Modified merge function with more logging" />
+    <MESSAGE value="Modified list tile ids function" />
+    <MESSAGE value="Removed old hansenize function" />
+    <MESSAGE value="Running smoothly locally and in coiled. Added examples for command line runs. Removed extraneous arguments for setup coiled cluster" />
+    <MESSAGE value="Re-added index prefix that had been deleted accidentally" />
+    <option name="LAST_COMMIT_MESSAGE" value="Re-added index prefix that had been deleted accidentally" />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/preprocessing/pp_30m_to_4km.py</url>
+          <option name="timeStamp" value="1" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/preprocessing/osm_preprocessing/pp_osm_filter.py</url>
+          <line>17</line>
+          <option name="timeStamp" value="5" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/preprocessing/extraction/utilities.py</url>
+          <line>17</line>
+          <option name="timeStamp" value="6" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/preprocessing/pp_utilities.py</url>
+          <line>843</line>
+          <option name="timeStamp" value="8" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/preprocessing/coiled_connection_test.py</url>
+          <line>9</line>
+          <option name="timeStamp" value="12" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/preprocessing/pp_roads_canals_chunks.py</url>
+          <option name="timeStamp" value="15" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/preprocessing/pp_roads_canals_chunks_rio.py</url>
+          <line>136</line>
+          <option name="timeStamp" value="16" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/preprocessing/pp_roads_canals_chunks_rio.py</url>
+          <line>343</line>
+          <option name="timeStamp" value="17" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/preprocessing/pp_dadap_engert.py</url>
+          <option name="timeStamp" value="18" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/scripts/utilities/constants_and_names.py</url>
+          <line>128</line>
+          <option name="timeStamp" value="19" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/src/preprocessing/pp_hansenize_rio.py</url>
+          <line>4</line>
+          <option name="timeStamp" value="20" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
+  </component>
+</project>

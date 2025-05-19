@@ -13,7 +13,7 @@ from osgeo import gdal
 
 # Import constants and utilities
 import src.scripts.utilities.constants_and_names as cn
-import src.scripts.preprocessing.pp_utilities as uu
+import src.scripts.preprocessing.utilities as uu
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')

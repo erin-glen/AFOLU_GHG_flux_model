@@ -1,0 +1,11 @@
+flm: Model type: organic_soils
+flm: Stage: drainage_model
+flm: Model version: 0.2
+flm: Number of workers: N/A - local run
+flm: Memory per worker: N/A - local run
+flm: Threads per worker: N/A - local run
+flm: Log note: Drainage model multi-interval run, lulucf-like concurrency
+flm: Bounding box: [112, -2, 113, -1]
+flm: Stage drainage_model started at: 20250411_17_09_34
+flm: use_actual_pixel_area=False
+flm: Queueing tasks for 2015-2019

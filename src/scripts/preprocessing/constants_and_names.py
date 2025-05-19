@@ -205,7 +205,7 @@ datasets = {
         }
     },
     # -----------------------------------------------------------------
-    # Peat-mask inputs – used by pp_peat_masks.py
+    # Peat-mask inputs – used by peat_masks.py
     # -----------------------------------------------------------------
     "peat": {
         'gfw': {

@@ -1,0 +1,9 @@
+flm: Model type: organic_soils
+flm: Stage: drainage_model
+flm: Model version: 0.2
+flm: Number of workers: N/A - local run
+flm: Memory per worker: N/A - local run
+flm: Threads per worker: N/A - local run
+flm: Log note: Organic soils model run
+flm: Bounding box: [112, -2, 113, -1]
+flm: Stage drainage_model started 20250411_18_17_30
