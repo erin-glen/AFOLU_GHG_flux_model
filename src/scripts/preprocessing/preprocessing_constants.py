@@ -163,12 +163,17 @@ datasets = {
             'local_processed': pp.join(local_temp_dir, 'peat', 'peatml', 'tiles') + '/'
         },
         'union_mask': {
-            '30m': pp.join(project_dir, processed_dir, 'peat_mask',
-                            'union', '30m' 'tiles') + '/',
-            '1km': pp.join(project_dir, processed_dir, 'peat_mask',
-                            'union', '1km' 'tiles') + '/',
-            '1km_3395': pp.join(project_dir, processed_dir, 'peat_mask',
-                            'union', '1km_3395' 'tiles') + '/'
+            '30m': pp.join(
+                project_dir, processed_dir, 'peat_mask', 'union', '30m', 'tiles'
+            )
+            + '/',
+            '1km': pp.join(
+                project_dir, processed_dir, 'peat_mask', 'union', '1km', 'tiles'
+            )
+            + '/',
+            '1km_3395': pp.join(project_dir,processed_dir, 'peat_mask','union','1km_3395','tiles',
+            )
+            + '/',
         }
     }
 }
