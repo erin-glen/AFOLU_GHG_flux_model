@@ -17,6 +17,7 @@ import gc
 
 # Import custom modules (ensure these are correctly set up in your environment)
 import src.scripts.preprocessing.utilities as uu  # Utilities module with helper functions
+from src.scripts.utilities import universal_utilities as uutil
 import src.scripts.preprocessing.preprocessing_constants as cn  # Module containing constants like paths and S3 prefixes
 import argparse
 
@@ -169,7 +170,7 @@ def process_vector_dataset(dataset, tile_id=None, run_mode='default'):
                     shapefile_path = os.path.join(cn.local_temp_dir, shapefile_name + '.shp')
                     if not os.path.exists(shapefile_path):
                         logging.info(f"{shapefile_name} shapefile not found locally, downloading from S3.")
-                        uu.download_shapefile_from_s3(s3_prefix, cn.local_temp_dir, cn.s3_bucket_name)
+                        uutil.download_shapefile_from_s3(s3_prefix, cn.local_temp_dir, cn.s3_bucket_name)
                     else:
                         logging.info(f"{shapefile_name} shapefile found locally at {shapefile_path}")
                     # Read the shapefile
@@ -188,7 +189,7 @@ def process_vector_dataset(dataset, tile_id=None, run_mode='default'):
             shapefile_path = os.path.join(cn.local_temp_dir, shapefile_name + '.shp')
             if not os.path.exists(shapefile_path):
                 logging.info(f"{dataset.capitalize()} shapefile not found locally, downloading from S3.")
-                uu.download_shapefile_from_s3(shapefile_s3_prefix, cn.local_temp_dir, cn.s3_bucket_name)
+                uutil.download_shapefile_from_s3(shapefile_s3_prefix, cn.local_temp_dir, cn.s3_bucket_name)
             else:
                 logging.info(f"{dataset.capitalize()} shapefile found locally at {shapefile_path}")
             gdf_dataset = gpd.read_file(shapefile_path)
@@ -206,7 +207,7 @@ def process_vector_dataset(dataset, tile_id=None, run_mode='default'):
         index_shapefile = os.path.join(cn.local_temp_dir, os.path.basename(cn.index_shapefile_prefix) + '.shp')
         if not os.path.exists(index_shapefile):
             logging.info("Global peatlands index not found locally. Downloading...")
-            uu.download_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
+            uutil.download_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
             if not os.path.exists(index_shapefile):
                 logging.error("Failed to download global peatlands index. Exiting.")
                 return
@@ -261,7 +262,7 @@ def process_vector_tile(dataset, tile_id, gdf_dataset, run_mode='default'):
 
     try:
         if run_mode != 'test':
-            if uu.s3_file_exists(cn.s3_bucket_name, s3_output_path):
+            if uutil.s3_file_exists(cn.s3_bucket_name, s3_output_path):
                 logging.info(f"{s3_output_path} already exists on S3. Skipping processing.")
                 return
             else:
@@ -360,7 +361,7 @@ def process_vector_tile(dataset, tile_id, gdf_dataset, run_mode='default'):
 
         if run_mode != 'test':
             # Upload to S3
-            uu.upload_file_to_s3(local_output_path, cn.s3_bucket_name, s3_output_path)
+            uutil.upload_file_to_s3(local_output_path, cn.s3_bucket_name, s3_output_path)
             logging.info(f"Uploaded {local_output_path} to s3://{cn.s3_bucket_name}/{s3_output_path}")
 
             # Remove local file
@@ -395,7 +396,7 @@ def process_raster_dataset(dataset, tile_id=None, run_mode='default'):
         # Download the raster if not already present locally
         if not os.path.exists(local_raster_path):
             logging.info(f"Downloading {dataset} raster dataset from S3.")
-            uu.download_file_from_s3(s3_raster_path, local_raster_path, cn.s3_bucket_name)
+            uutil.download_file_from_s3(s3_raster_path, local_raster_path, cn.s3_bucket_name)
 
         # Open the raster dataset
         with rasterio.open(local_raster_path) as raster_dataset:
@@ -424,7 +425,7 @@ def process_raster_dataset(dataset, tile_id=None, run_mode='default'):
         index_shapefile = os.path.join(cn.local_temp_dir, os.path.basename(cn.index_shapefile_prefix) + '.shp')
         if not os.path.exists(index_shapefile):
             logging.info("Global peatlands index not found locally. Downloading...")
-            uu.download_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
+            uutil.download_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
         gdf_tiles = gpd.read_file(index_shapefile)
         logging.info(f"Tile index shapefile CRS: {gdf_tiles.crs}")
 
@@ -479,7 +480,7 @@ def process_raster_tile(dataset, tile_id, local_raster_path, run_mode='default')
 
         # Check if the output already exists
         if run_mode != 'test':
-            if uu.s3_file_exists(cn.s3_bucket_name, s3_output_path):
+            if uutil.s3_file_exists(cn.s3_bucket_name, s3_output_path):
                 logging.info(f"{s3_output_path} already exists on S3. Skipping processing.")
                 return
 
@@ -546,7 +547,7 @@ def process_raster_tile(dataset, tile_id, local_raster_path, run_mode='default')
 
         if run_mode != 'test':
             # Upload to S3
-            uu.upload_file_to_s3(local_output_path, cn.s3_bucket_name, s3_output_path)
+            uutil.upload_file_to_s3(local_output_path, cn.s3_bucket_name, s3_output_path)
             logging.info(f"Uploaded {local_output_path} to s3://{cn.s3_bucket_name}/{s3_output_path}")
 
             # Remove local file

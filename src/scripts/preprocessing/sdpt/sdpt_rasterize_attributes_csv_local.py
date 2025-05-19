@@ -14,6 +14,7 @@ from osgeo import gdal
 # Import constants and utilities
 import src.scripts.utilities.constants_and_names as cn
 import src.scripts.preprocessing.utilities as uu
+from src.scripts.utilities import universal_utilities as uutil
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -39,7 +40,7 @@ LOCAL_SHP_DIR = r"C:\GIS\Data\Global\Plantation\sdpt_by_tiles"
 
 def load_species_reclassification(s3_csv_key):
     local_csv_path = os.path.join(tempfile.gettempdir(), os.path.basename(s3_csv_key))
-    uu.download_file_from_s3(s3_csv_key, local_csv_path, cn.s3_bucket_name)
+    uutil.download_file_from_s3(s3_csv_key, local_csv_path, cn.s3_bucket_name)
     df = pd.read_csv(local_csv_path)
     mapping = dict(zip(df["vernacName"].str.strip(), df["rotation_category"].str.strip()))
     return mapping
@@ -75,7 +76,7 @@ def rasterize_tile(tile_id, species_to_rotation, run_mode='default'):
         logging.info(f"Rasterizing tile {tile_id}")
 
         s3_raster_key = posixpath.join(cn.datasets['sdpt']['s3_processed'], f"{tile_id}_plantations.tif")
-        if run_mode == 'default' and uu.s3_file_exists(cn.s3_bucket_name, s3_raster_key):
+        if run_mode == 'default' and uutil.s3_file_exists(cn.s3_bucket_name, s3_raster_key):
             logging.info(f"Tile {tile_id} already processed. Skipping.")
             return
 
@@ -110,7 +111,7 @@ def rasterize_tile(tile_id, species_to_rotation, run_mode='default'):
             rasterize_to_tif(temp_shp_path, final_raster_path, minx, miny, maxx, maxy)
 
             if run_mode == 'default':
-                uu.upload_file_to_s3(final_raster_path, cn.s3_bucket_name, s3_raster_key)
+                uutil.upload_file_to_s3(final_raster_path, cn.s3_bucket_name, s3_raster_key)
 
         del gdf
 

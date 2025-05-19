@@ -1,9 +1,10 @@
 import os
 import logging
 import boto3
-import utilities as uu
+import src.scripts.preprocessing.utilities as uu
+from src.scripts.utilities import universal_utilities as uutil
 import rasterio
-import preprocessing_constants as cn
+import src.scripts.preprocessing.preprocessing_constants as cn
 from src.scripts.preprocessing.hansenize import hansenize_gdal as hg
 
 """
@@ -107,7 +108,7 @@ def process_all_tiles(dataset, run_mode='default'):
     try:
         # Ensure the index shapefile is downloaded and get the local path
         index_shapefile_path = os.path.join(cn.local_temp_dir, os.path.basename(cn.index_shapefile_prefix) + '.shp')
-        uu.read_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
+        uutil.read_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
 
         # Retrieve the list of tile IDs
         raw_raster_path = f'/vsis3/{cn.s3_bucket_name}/{cn.datasets[dataset]["s3_raw"]}'
@@ -137,7 +138,7 @@ def main(tile_id=None, dataset='engert', run_mode='default'):
         if tile_id:
             # Manually specify the tile bounds if a specific tile is requested
             index_shapefile_path = os.path.join(cn.local_temp_dir, os.path.basename(cn.index_shapefile_prefix) + '.shp')
-            uu.read_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
+            uutil.read_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
             tile_bounds = uu.get_tile_bounds(index_shapefile_path, tile_id)
             tile_key = f"{cn.peat_tiles_prefix}{tile_id}{cn.peat_pattern}"
             process_tile(tile_key, dataset, tile_bounds, run_mode)

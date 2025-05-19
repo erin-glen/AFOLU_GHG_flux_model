@@ -4,6 +4,7 @@ import logging
 import dask
 from dask.distributed import Client, LocalCluster
 from dask.diagnostics import ProgressBar
+from src.scripts.utilities import universal_utilities as uutil
 import pandas as pd
 import argparse
 import sys
@@ -18,8 +19,8 @@ import rioxarray
 import warnings
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 
-import constants_and_names as cn
-import preprocessing_constants as cn
+#import src.scripts.utilities.constants_and_names as cn # double check which one we're using
+import src.scripts.preprocessing.preprocessing_constants as cn
 
 
 """
@@ -398,7 +399,11 @@ def process_all_tiles(feature_type, run_mode='default'):
 def main(tile_id=None, feature_type='osm_roads', run_mode='default', client_type='local'):
     # Initialize Dask client based on the argument
     if client_type == 'coiled':
-        client, cluster = uu.setup_coiled_cluster()
+        client, cluster = uutil.connect_to_cluster(
+            cluster_name="roads_canals",
+            n_workers=20,
+            region="us-east-1",
+        )
     else:
         cluster = LocalCluster()
         client = Client(cluster)

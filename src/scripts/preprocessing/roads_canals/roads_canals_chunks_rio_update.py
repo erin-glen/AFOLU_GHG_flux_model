@@ -318,7 +318,11 @@ def process_all_tiles(feature_type, chunk_size=2):
 
 def main(tile_id=None, feature_type="osm_roads", chunk_bounds=None, chunk_size=2, client="local"):
     if client == "coiled":
-        dclient, cluster = uu.setup_coiled_cluster()
+        dclient, cluster = uutil.connect_to_cluster(
+            cluster_name="roads_canals",
+            n_workers=20,
+            region="us-east-1",
+        )
         logging.info(f"Using coiled cluster: {cluster.name}")
     else:
         cluster = LocalCluster()

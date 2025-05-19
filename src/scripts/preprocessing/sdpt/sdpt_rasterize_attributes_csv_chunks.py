@@ -12,6 +12,7 @@ from dask.distributed import Client, LocalCluster
 # Our universal constants & utilities
 import src.scripts.utilities.constants_and_names as cn
 import src.scripts.preprocessing.utilities as uu
+from src.scripts.utilities import universal_utilities as uutil
 
 warnings.filterwarnings('ignore', 'Geometry is in a geographic CRS.', UserWarning)
 
@@ -44,7 +45,7 @@ def load_species_reclassification():
     local_csv = os.path.join(cn.local_temp_dir, os.path.basename(SDPT_RECLASS_S3))
 
     if not os.path.exists(local_csv):
-        uu.download_file_from_s3(SDPT_RECLASS_S3, local_csv, cn.s3_bucket_name)
+        uutil.download_file_from_s3(SDPT_RECLASS_S3, local_csv, cn.s3_bucket_name)
         logging.info(f"Downloaded CSV => {local_csv}")
     else:
         logging.info(f"Local CSV already exists => {local_csv}, skipping download.")
@@ -137,7 +138,7 @@ def rasterize_chunk_shp(shp_path, bbox, tile_id, run_mode):
     # 1) If run_mode='default', skip if partial TIF already on S3
     #    If run_mode='test', skip if partial TIF local
     if run_mode == "default":
-        if uu.s3_file_exists(cn.s3_bucket_name, s3_chunk):
+        if uutil.s3_file_exists(cn.s3_bucket_name, s3_chunk):
             logging.info(f"Partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk} exists => skipping.")
             # remove shapefile pieces
             for ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
@@ -179,7 +180,7 @@ def rasterize_chunk_shp(shp_path, bbox, tile_id, run_mode):
     # 3) If run_mode='default', upload partial TIF to S3
     if run_mode == "default":
         logging.info(f"Uploading partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk}")
-        uu.upload_file_to_s3(out_tif, cn.s3_bucket_name, s3_chunk)
+        uutil.upload_file_to_s3(out_tif, cn.s3_bucket_name, s3_chunk)
         os.remove(out_tif)
     else:
         logging.info(f"Test mode => partial TIF => {out_tif} retained locally.")
@@ -329,7 +330,11 @@ def main(tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="default", cl
     """
     logging.info(f"SDPT chunk-based script => partial TIFs to {cn.datasets['sdpt']['s3_processed_small']}.")
     if client_type == "coiled":
-        client, cluster = uu.setup_coiled_cluster()
+        client, cluster = uutil.connect_to_cluster(
+            cluster_name="roads_canals",
+            n_workers=20,
+            region="us-east-1",
+        )
         logging.info(f"Coiled cluster => {cluster.name}")
     else:
         cluster = LocalCluster()

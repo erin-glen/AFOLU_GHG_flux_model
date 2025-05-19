@@ -13,6 +13,7 @@ from dask.distributed import Client
 # Import constants and utilities
 import src.scripts.utilities.constants_and_names as cn
 import src.scripts.preprocessing.utilities as uu
+from src.scripts.utilities import universal_utilities as uutil
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -37,7 +38,7 @@ def load_species_reclassification(local_csv_path=None, s3_csv_key=None):
     try:
         if s3_csv_key:
             local_csv_path = os.path.join(cn.local_temp_dir, os.path.basename(s3_csv_key))
-            uu.download_file_from_s3(s3_csv_key, local_csv_path, cn.s3_bucket_name)
+            uutil.download_file_from_s3(s3_csv_key, local_csv_path, cn.s3_bucket_name)
 
         df = pd.read_csv(local_csv_path)
         mapping = dict(zip(
@@ -67,7 +68,7 @@ def rasterize_tile(tile_id, species_to_rotation, run_mode='default'):
         logging.info(f"Rasterizing tile {tile_id}")
 
         s3_raster_key = posixpath.join(cn.datasets['sdpt']['s3_processed'], f"{tile_id}_plantations.tif")
-        if run_mode == 'default' and uu.s3_file_exists(cn.s3_bucket_name, s3_raster_key):
+        if run_mode == 'default' and uutil.s3_file_exists(cn.s3_bucket_name, s3_raster_key):
             logging.info(f"Tile {tile_id} already processed. Skipping.")
             return
 
@@ -116,7 +117,7 @@ def rasterize_tile(tile_id, species_to_rotation, run_mode='default'):
                 os.remove(p)
 
         if run_mode == 'default':
-            uu.upload_file_to_s3(final_raster_path, cn.s3_bucket_name, s3_raster_key)
+            uutil.upload_file_to_s3(final_raster_path, cn.s3_bucket_name, s3_raster_key)
             os.remove(final_raster_path)
 
         del gdf
@@ -141,7 +142,7 @@ def main(tile_id=None, run_mode='default', client_type='local'):
             tile_ids = [tile_id]
         else:
             s3_folder = cn.datasets['sdpt']['s3_raw']
-            existing_files = uu.list_s3_files(cn.s3_bucket_name, s3_folder)
+            existing_files = uutil.list_s3_files(cn.s3_bucket_name, s3_folder)
             tile_ids = [
                 base.replace("tile_", "").replace(".shp", "")
                 for key in existing_files

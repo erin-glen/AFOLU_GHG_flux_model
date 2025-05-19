@@ -2,11 +2,8 @@ import os
 import logging
 import multiprocessing
 import boto3
-from utilities import (
-    s3_file_exists,
-    list_s3_files,
-    resample_raster,
-)
+from src.scripts.preprocessing.utilities import resample_raster
+from src.scripts.utilities import universal_utilities as uutil
 import src.scripts.preprocessing.preprocessing_constants as cn
 
 """
@@ -37,7 +34,7 @@ def process_tile(tile_id):
 
     reference_path = f'/vsis3/{s3_bucket}/{target_tiles}'
     logging.info(f"Checking reference file: {reference_path}")
-    if not s3_file_exists(s3_bucket, target_tiles):
+    if not uutil.s3_file_exists(s3_bucket, target_tiles):
         logging.error(f"Reference file {target_tiles} does not exist.")
         return
 
@@ -55,12 +52,12 @@ def process_tile(tile_id):
             continue
 
         logging.info(f"Checking input file for {key}: {input_path}")
-        if not s3_file_exists(s3_bucket, input_path):
+        if not uutil.s3_file_exists(s3_bucket, input_path):
             logging.error(f"Input file {input_path} does not exist.")
             continue
 
         logging.info(f"Checking if output file exists for {key}: {output_path}")
-        if s3_file_exists(s3_bucket, output_path):
+        if uutil.s3_file_exists(s3_bucket, output_path):
             logging.info(f"Output file {output_path} already exists in S3. Skipping resampling for {key}.")
             continue
 
@@ -79,7 +76,7 @@ def main(tile_id=None):
         if tile_id:
             logging.info(
                    f"Listing files in S3 bucket '{s3_bucket}' with prefix '{cn.peat_tiles_prefix}'")
-            files = list_s3_files(s3_bucket, cn.peat_tiles_prefix)
+            files = uutil.list_s3_files(s3_bucket, cn.peat_tiles_prefix)
             logging.info(f"Files in S3: {files}")
 
             process_tile(tile_id)

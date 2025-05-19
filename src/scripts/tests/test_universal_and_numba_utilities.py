@@ -13,8 +13,22 @@ class TestUniversalUtilities(unittest.TestCase):
             [0, 10, 10, 20],
             [10, 10, 20, 20],
         ]
+
         result = uu.get_chunk_bounds(bounds, 10)
         self.assertEqual(result, expected)
+
+        result_explicit = uu.get_chunk_bounds(bounds, 10, as_polygons=False)
+        self.assertEqual(result_explicit, expected)
+
+        try:
+            from shapely.geometry import Polygon  # noqa: F401
+        except Exception:
+            with self.assertRaises(ImportError):
+                uu.get_chunk_bounds(bounds, 10, as_polygons=True)
+        else:
+            polys = uu.get_chunk_bounds(bounds, 10, as_polygons=True)
+            self.assertEqual(len(polys), 4)
+            self.assertTrue(all(hasattr(p, "bounds") for p in polys))
 
     def test_get_10x10_tile_bounds(self):
         self.assertEqual(uu.get_10x10_tile_bounds("02N_010E"), (10, -8, 20, 2))

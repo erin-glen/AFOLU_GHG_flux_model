@@ -59,7 +59,7 @@ def cache_shapefile(prefix, dest_dir):
         key = f"{prefix}{ext}"
         local = dest_dir / Path(key).name
         if not local.exists():
-            uu.download_file_from_s3(key, str(local), BUCKET)
+            uutil.download_file_from_s3(key, str(local), BUCKET)
 
 ################################################################################
 # Vector Processor (PEATMAP)
@@ -72,7 +72,7 @@ def vector_job(tid, mode="default"):
     ds_key = "peatmap"
     local_out, s3_out = output_paths(ds_key, tid)
 
-    if mode != "test" and uu.s3_file_exists(BUCKET, s3_out):
+    if mode != "test" and uutil.s3_file_exists(BUCKET, s3_out):
         log.info(f"[{ds_key}|{tid}] already on S3. Skipping.")
         return
 
@@ -85,7 +85,7 @@ def vector_job(tid, mode="default"):
 
     # Attempt to list .shp files in the folder/prefix
     try:
-        all_files = uu.list_s3_files(BUCKET, shp_folder.replace(f"s3://{BUCKET}/", "", 1))
+        all_files = uutil.list_s3_files(BUCKET, shp_folder.replace(f"s3://{BUCKET}/", "", 1))
     except botocore.exceptions.ClientError as e:
         if e.response["Error"]["Code"] == "AccessDenied":
             log.warning(f"[peatmap|{tid}] AccessDenied listing {shp_folder}. Skipping tile.")
@@ -141,7 +141,7 @@ def vector_job(tid, mode="default"):
     )
 
     if mode != "test":
-        uu.upload_file_to_s3(str(local_out), BUCKET, s3_out)
+        uutil.upload_file_to_s3(str(local_out), BUCKET, s3_out)
         local_out.unlink()
 
     log.info(f"[{ds_key}|{tid}] completed.")
@@ -157,7 +157,7 @@ def mosaic_and_warp_raster(ds_key, tid, mode="default"):
     ds = cn.datasets["peat"][ds_key]
     local_out, s3_out = output_paths(ds_key, tid)
 
-    if mode != "test" and uu.s3_file_exists(BUCKET, s3_out):
+    if mode != "test" and uutil.s3_file_exists(BUCKET, s3_out):
         log.info(f"[{ds_key}|{tid}] already on S3. Skipping.")
         return
 
@@ -178,7 +178,7 @@ def mosaic_and_warp_raster(ds_key, tid, mode="default"):
         raw_pattern = ds.get('raw_pattern', '*.tif')
 
         try:
-            all_rasters = uu.list_s3_files_with_pattern(listing_prefix, raw_pattern)
+            all_rasters = uutil.list_s3_files_with_pattern(listing_prefix, raw_pattern)
         except botocore.exceptions.ClientError as e:
             if e.response["Error"]["Code"] == "AccessDenied":
                 log.warning(f"[{ds_key}|{tid}] AccessDenied listing {listing_prefix} with pattern '{raw_pattern}'. Skipping tile.")
@@ -211,7 +211,7 @@ def mosaic_and_warp_raster(ds_key, tid, mode="default"):
         ymin=ymin,
         xmax=xmax,
         ymax=ymax,
-        dt=uu.string_to_gdal_dtype_mapping["Byte"],
+        dt=uutil.string_to_gdal_dtype_mapping["Byte"],
         no_data=0,
         tiled=True,
         x_pixel_window=400,
@@ -227,7 +227,7 @@ def mosaic_and_warp_raster(ds_key, tid, mode="default"):
             dst.write(arr, 1)
 
     if mode != "test":
-        uu.upload_file_to_s3(str(local_out), BUCKET, s3_out)
+        uutil.upload_file_to_s3(str(local_out), BUCKET, s3_out)
         local_out.unlink()
 
     log.info(f"[{ds_key}|{tid}] completed.")
@@ -254,7 +254,11 @@ def main(tile_id=None, dataset=None, client="coiled", run_mode="default"):
         client_obj = Client(cluster)
         log.info("Running locally.")
     else:
-        client_obj, cluster = uu.setup_coiled_cluster()
+        client_obj, cluster = uutil.connect_to_cluster(
+            cluster_name="roads_canals",
+            n_workers=20,
+            region="us-east-1",
+        )
         log.info(f"Running on Coiled: {cluster.name}")
 
     ds_keys = [dataset] if dataset else ["peatml", "gpd", "peatmap"]

@@ -37,7 +37,8 @@ import subprocess
 from datetime import datetime
 import pandas as pd
 
-import utilities as uu
+import src.scripts.preprocessing.utilities as uu
+from src.scripts.utilities import universal_utilities as uutil
 import src.scripts.preprocessing.preprocessing_constants as cn
 
 
@@ -75,7 +76,7 @@ def read_tiles_shapefile():
         GeoDataFrame: A GeoDataFrame containing the tiles.
     """
     logging.info("Downloading tiles shapefile from S3 to local directory")
-    uu.read_shapefile_from_s3(index_shapefile_prefix, local_temp_dir, s3_bucket_name)
+    uutil.read_shapefile_from_s3(index_shapefile_prefix, local_temp_dir, s3_bucket_name)
     shapefile_path = os.path.join(local_temp_dir, 'Global_Peatlands.shp')
     logging.info("Reading tiles shapefile from local directory")
     tiles_gdf = gpd.read_file(shapefile_path)

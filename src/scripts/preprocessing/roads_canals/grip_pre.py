@@ -8,8 +8,10 @@ import pandas as pd
 import argparse
 import sys
 
-import utilities as uu
-import preprocessing_constants as cn
+import src.scripts.preprocessing.utilities as uu
+from src.scripts.utilities import universal_utilities as uutil
+import src.scripts.preprocessing.preprocessing_constants as cn
+from src.scripts.utilities import universal_utilities as uutil
 
 """
 This script processes GRIP (Global Roads Inventory Project) roads by tiles using a pre-existing tile index shapefile.
@@ -58,7 +60,7 @@ def read_tiles_shapefile():
         gpd.GeoDataFrame: GeoDataFrame containing the tiles.
     """
     logging.info("Downloading tiles shapefile from S3 to local directory")
-    uu.read_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
+    uutil.read_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
     shapefile_path = os.path.join(cn.local_temp_dir, 'Global_Peatlands.shp')
     logging.info("Reading tiles shapefile from local directory")
     tiles_gdf = gpd.read_file(shapefile_path)
@@ -173,7 +175,7 @@ def upload_final_output_to_s3(output_path):
     s3_file_path = os.path.join(cn.datasets['grip']['roads']['s3_processed'], f"roads_{tile_id}.shp")
 
     if os.path.exists(local_file_path):
-        uu.upload_file_to_s3(local_file_path, cn.s3_bucket_name, s3_file_path)
+        uutil.upload_file_to_s3(local_file_path, cn.s3_bucket_name, s3_file_path)
         logging.info(f"Uploaded {local_file_path} to s3://{cn.s3_bucket_name}/{s3_file_path}")
         os.remove(local_file_path)  # Remove local file after upload
         logging.info(f"Removed local file {local_file_path}")
@@ -213,7 +215,11 @@ if __name__ == '__main__':
 
         # Initialize Dask client based on the direct execution setup
         if client_type == 'coiled':
-            client, cluster = uu.setup_coiled_cluster()
+            client, cluster = uutil.connect_to_cluster(
+                cluster_name="roads_canals",
+                n_workers=20,
+                region="us-east-1",
+            )
         else:
             cluster = LocalCluster()
             client = Client(cluster)
@@ -234,7 +240,11 @@ if __name__ == '__main__':
 
         # Initialize Dask client based on the direct execution setup
         if client_type == 'coiled':
-            client, cluster = uu.setup_coiled_cluster()
+            client, cluster = uutil.connect_to_cluster(
+                cluster_name="roads_canals",
+                n_workers=20,
+                region="us-east-1",
+            )
         else:
             cluster = LocalCluster()
             client = Client(cluster)
@@ -252,7 +262,11 @@ if __name__ == '__main__':
     else:
         # Initialize Dask client based on the argument
         if args.client == 'coiled':
-            client, cluster = uu.setup_coiled_cluster()
+            client, cluster = uutil.connect_to_cluster(
+                cluster_name="roads_canals",
+                n_workers=20,
+                region="us-east-1",
+            )
         else:
             cluster = LocalCluster()
             client = Client(cluster)

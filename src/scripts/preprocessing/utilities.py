@@ -8,13 +8,13 @@ from osgeo import gdal
 
 import boto3
 from botocore.exceptions import NoCredentialsError
+from src.scripts.utilities import universal_utilities as uutil
 import rioxarray
 import geopandas as gpd
 from shapely.geometry import box, Polygon
 
 import psutil
 from dask.distributed import Client
-import coiled
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -33,170 +33,6 @@ import botocore.exceptions
 import logging
 
 
-def s3_file_exists(bucket, key):
-    """
-    Check if a file exists in an S3 bucket.
-
-    Args:
-        bucket (str): The name of the S3 bucket.
-        key (str): The S3 key (path) of the file.
-
-    Returns:
-        bool: True if the file exists, False otherwise.
-    """
-    s3_client = boto3.client('s3')
-    try:
-        s3_client.head_object(Bucket=bucket, Key=key)
-        logging.info(f"File exists: s3://{bucket}/{key}")
-        return True
-    except botocore.exceptions.ClientError as e:
-        error_code = e.response['Error']['Code']
-        if error_code == '404':
-            logging.info(f"File does not exist: s3://{bucket}/{key}")
-            return False
-        else:
-            logging.error(f"Unexpected ClientError when checking file existence: {e}")
-            raise  # Re-raise the exception for unexpected ClientErrors
-    except (botocore.exceptions.NoCredentialsError, botocore.exceptions.PartialCredentialsError) as e:
-        logging.error(f"AWS credentials error: {e}")
-        raise  # Re-raise to handle credentials issues at a higher level
-    except Exception as e:
-        logging.error(f"Unexpected error checking file existence in S3: {e}")
-        raise  # Re-raise unexpected exceptions
-
-
-def list_s3_files(bucket, prefix):
-    """
-    List all files in a specified S3 bucket and prefix.
-
-    Args:
-        bucket (str): The name of the S3 bucket.
-        prefix (str): The prefix (path) in the S3 bucket.
-
-    Returns:
-        list: List of S3 keys (paths) of the files.
-    """
-    keys = []
-    try:
-        paginator = s3_client.get_paginator('list_objects_v2')
-        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-            for obj in page.get('Contents', []):
-                keys.append(obj['Key'])
-    except Exception as e:
-        logging.error(f"Error listing files in s3://{bucket}/{prefix}: {e}")
-    return keys
-
-
-def upload_file_to_s3(local_file_path, bucket_name, s3_file_path):
-    """
-    Upload a local file to an S3 bucket.
-
-    Args:
-        local_file_path (str): Path to the local file.
-        bucket_name (str): Name of the S3 bucket.
-        s3_file_path (str): S3 key (path) where the file will be uploaded.
-
-    Returns:
-        None
-    """
-    try:
-        s3_client.upload_file(local_file_path, bucket_name, s3_file_path)
-        logging.info(f"Successfully uploaded {local_file_path} to s3://{bucket_name}/{s3_file_path}")
-    except Exception as e:
-        logging.error(f"Error uploading file to S3: {e}")
-
-
-def download_file_from_s3(s3_file_path, local_file_path, bucket_name):
-    """
-    Download a file from S3 to a local path.
-
-    Args:
-        s3_file_path (str): S3 key (path) of the file to download.
-        local_file_path (str): Local path where the file will be saved.
-        bucket_name (str): Name of the S3 bucket.
-
-    Returns:
-        None
-    """
-    try:
-        s3_client.download_file(bucket_name, s3_file_path, local_file_path)
-        logging.info(f"Downloaded s3://{bucket_name}/{s3_file_path} to {local_file_path}")
-    except Exception as e:
-        logging.error(f"Error downloading file from S3: {e}")
-
-
-def download_shapefile_from_s3(s3_prefix, local_dir, s3_bucket_name):
-    """
-    Download the shapefile and its associated files from S3 to a local directory.
-
-    Args:
-        s3_prefix (str): The S3 prefix (path without the file extension) for the shapefile.
-        local_dir (str): The local directory where the files will be saved.
-        s3_bucket_name (str): The name of the S3 bucket.
-
-    Returns:
-        None
-    """
-    s3 = boto3.client('s3')
-    extensions = ['.shp', '.shx', '.dbf', '.prj', '.cpg']
-    try:
-        for ext in extensions:
-            s3_path = f"{s3_prefix}{ext}"
-            local_path = os.path.join(local_dir, os.path.basename(s3_prefix) + ext)
-            logging.info(f"Attempting to download: s3://{s3_bucket_name}/{s3_path} to {local_path}")
-            s3.download_file(s3_bucket_name, s3_path, local_path)
-            if os.path.exists(local_path):
-                logging.info(f"Downloaded: {local_path}")
-            else:
-                logging.error(f"Failed to download {s3_path} to {local_path}")
-    except Exception as e:
-        logging.error(f"Error downloading shapefile from S3: {e}")
-
-
-def read_shapefile_from_s3(s3_prefix, local_dir, s3_bucket_name):
-    """
-    Read a shapefile from S3 into a GeoDataFrame.
-
-    Args:
-        s3_prefix (str): The S3 prefix (path without the file extension) for the shapefile.
-        local_dir (str): The local directory where the files will be saved.
-        s3_bucket_name (str): The name of the S3 bucket.
-
-    Returns:
-        gpd.GeoDataFrame: The loaded GeoDataFrame.
-    """
-    try:
-        download_shapefile_from_s3(s3_prefix, local_dir, s3_bucket_name)
-        shapefile_path = os.path.join(local_dir, os.path.basename(s3_prefix) + '.shp')
-        gdf = gpd.read_file(shapefile_path)
-        return gdf
-    except Exception as e:
-        logging.error(f"Error reading shapefile from S3: {e}")
-        return gpd.GeoDataFrame()  # Return an empty GeoDataFrame in case of error
-
-
-def get_existing_s3_files(s3_bucket, s3_prefix):
-    """
-    Get a list of existing files in an S3 bucket and prefix.
-
-    Args:
-        s3_bucket (str): The name of the S3 bucket.
-        s3_prefix (str): The prefix (path) in the S3 bucket.
-
-    Returns:
-        set: A set of S3 keys (paths) of the existing files.
-    """
-    existing_files = set()
-    try:
-        paginator = s3_client.get_paginator('list_objects_v2')
-        pages = paginator.paginate(Bucket=s3_bucket, Prefix=s3_prefix)
-        for page in pages:
-            if 'Contents' in page:
-                for obj in page['Contents']:
-                    existing_files.add(obj['Key'])
-    except Exception as e:
-        logging.error(f"Error retrieving existing files from S3: {e}")
-    return existing_files
 
 
 # -------------------- File Utilities --------------------
@@ -268,7 +104,7 @@ def compress_and_upload_file_to_s3(local_file, s3_bucket, s3_key, nodata_value=N
     compressed_file = local_file.replace('.tif', '_compressed.tif')
     try:
         compress_file(local_file, compressed_file, nodata_value)
-        upload_file_to_s3(compressed_file, s3_bucket, s3_key)
+        uutil.upload_file_to_s3(compressed_file, s3_bucket, s3_key)
         delete_file_if_exists(compressed_file)
     except Exception as e:
         logging.error(f"Error compressing and uploading file {local_file}: {e}")
@@ -581,25 +417,6 @@ def close_dask_clusters():
                 logging.error(f"Failed to terminate {proc.info['name']} with PID {proc.info['pid']}: {e}")
 
 
-def setup_coiled_cluster():
-    """
-    Set up a Coiled Dask cluster.
-
-    Returns:
-        tuple: Dask client and cluster objects.
-    """
-    coiled_cluster = coiled.Cluster(
-        n_workers=20,
-        use_best_zone=True,
-        compute_purchase_option="spot_with_fallback",
-        idle_timeout="15 minutes",
-        region="us-east-1",
-        name="roads_canals",
-        account='wri-forest-research',
-        worker_memory="32GiB",
-    )
-    coiled_client = coiled_cluster.get_client()
-    return coiled_client, coiled_cluster
 
 
 # -------------------- Miscellaneous Utilities --------------------
@@ -806,26 +623,14 @@ def list_tile_ids(bucket, prefix, pattern):
 
 
 def get_chunk_bounds(minx, miny, maxx, maxy, chunk_size):
-    """
-    Divide a bounding box into smaller chunks of the specified size.
+    """Wrapper around :func:`universal_utilities.get_chunk_bounds`."""
+    from src.scripts.utilities import universal_utilities as uu
 
-    Args:
-        minx (float): Minimum x-coordinate of the bounding box.
-        miny (float): Minimum y-coordinate of the bounding box.
-        maxx (float): Maximum x-coordinate of the bounding box.
-        maxy (float): Maximum y-coordinate of the bounding box.
-        chunk_size (float): Size of each chunk.
-
-    Returns:
-        list: List of shapely.geometry.Polygon objects representing the chunks.
-    """
-    chunks = []
-    x_coords = list(range(int(minx), int(maxx), chunk_size))
-    y_coords = list(range(int(miny), int(maxy), chunk_size))
-    for x in x_coords:
-        for y in y_coords:
-            chunks.append(box(x, y, x + chunk_size, y + chunk_size))
-    return chunks
+    return uu.get_chunk_bounds(
+        [minx, miny, maxx, maxy],
+        chunk_size,
+        as_polygons=True,
+    )
 
 
 def export_chunks_to_shapefile(chunk_params, output_filename):
@@ -905,71 +710,3 @@ def merge_rasters(input_files, output_path):
 
     except Exception as e:
         logging.error(f"Error merging rasters: {e}")
-
-# List files in an S3 bucket with a certain pattern
-def list_s3_files_with_pattern(s3_path, pattern):
-    s3 = boto3.client("s3")
-    bucket_name, prefix = split_s3_path(s3_path)
-
-    matching_files = []
-    continuation_token = None  # For pagination
-
-    while True:
-        if continuation_token:
-            response = s3.list_objects_v2(
-                Bucket=bucket_name,
-                Prefix=prefix,
-                ContinuationToken=continuation_token
-            )
-        else:
-            response = s3.list_objects_v2(
-                Bucket=bucket_name,
-                Prefix=prefix
-            )
-
-        # Check if there are any contents
-        if "Contents" in response:
-            for obj in response["Contents"]:
-                key = obj["Key"]
-                if pattern in key:
-                    matching_files.append(f"s3://{bucket_name}/{key}")
-
-        # Check if there's more data to retrieve
-        if response.get("IsTruncated"):  # If True, there are more pages to fetch
-            continuation_token = response["NextContinuationToken"]
-        else:
-            break  # No more pages left
-
-    return matching_files
-
-
-# Splits a full s3 path "s3://bucket-name/rest_of_path" into "bucket-name" and "rest_of_path"
-def split_s3_path(s3_path):
-    s3_path = s3_path.replace("s3://", "")  # Remove the "s3://" prefix
-    bucket, key = s3_path.split("/", 1)  # Split the remaining string by the first "/"
-    return bucket, key
-
-
-# Maps GDAL data type to the appropriate string value
-gdal_to_string_dtype_mapping = {
-    gdal.GDT_Byte: 'Byte',
-    gdal.GDT_UInt16: 'UInt16',
-    gdal.GDT_Int16: 'Int16',
-    gdal.GDT_UInt32: 'UInt32',
-    gdal.GDT_Int32: 'Int32',
-    gdal.GDT_Float32: 'Float32',
-    gdal.GDT_Float64: 'Float64',
-    'Int8': 'Int8',  # GDAL doesn't have int8, apparently. Outside Coiled, this converts it correctly.
-    14: 'Int8'  # GDAL doesn't have int8, apparently. In Coiled, this converts it correctly.
-}
-
-# Maps GDAL data type to the appropriate string value
-string_to_gdal_dtype_mapping = {
-    'Byte': gdal.GDT_Byte,
-    'UInt16': gdal.GDT_UInt16,
-    'Int16': gdal.GDT_Int16,
-    'UInt32': gdal.GDT_UInt32,
-    'Int32': gdal.GDT_Int32,
-    'Float32': gdal.GDT_Float32,
-    'Float64': gdal.GDT_Float64
-}

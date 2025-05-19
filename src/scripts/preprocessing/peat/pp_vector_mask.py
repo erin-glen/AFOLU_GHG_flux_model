@@ -3,7 +3,8 @@ import logging
 import subprocess
 import rasterio
 import boto3
-import utilities as uu
+
+from src.scripts.utilities import universal_utilities as uutil
 import src.scripts.preprocessing.preprocessing_constants as cn
 
 """
@@ -87,7 +88,7 @@ def resample_tile(tile_key, tile_id, run_mode='default'):
 
         # Upload the resampled file to S3
         if run_mode != 'test':
-            uu.upload_file_to_s3(local_output_path, cn.s3_bucket_name, s3_output_path)
+            uutil.upload_file_to_s3(local_output_path, cn.s3_bucket_name, s3_output_path)
 
         logging.info(f"Resampling and upload of tile {tile_id} completed successfully.")
     except subprocess.CalledProcessError as e:
@@ -111,7 +112,7 @@ def process_all_tiles(run_mode='default'):
     """
     try:
         # List all tiles in the peat_tiles_prefix
-        tile_keys = uu.list_s3_files(cn.s3_bucket_name, cn.peat_tiles_prefix)
+        tile_keys = uutil.list_s3_files(cn.s3_bucket_name, cn.peat_tiles_prefix)
         logging.info(f"Found {len(tile_keys)} tiles to process.")
 
         for tile_key in tile_keys:

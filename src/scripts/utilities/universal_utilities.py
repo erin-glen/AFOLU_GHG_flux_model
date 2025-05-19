@@ -11,15 +11,16 @@ import os
 import posixpath
 import re
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 import boto3
 import coiled
 import numpy as np
 import pandas as pd
 import rasterio
+from osgeo import gdal
 from botocore.config import Config
-from dask.distributed import Client
+from dask.distributed import Client, LocalCluster
 from rasterio import open as rio_open
 from rasterio.windows import from_bounds
 
@@ -46,10 +47,28 @@ def stage_duration(start: str, end: str, stage: str) -> None:
 # ----------------------------------------------------------------------
 # tiling helpers
 # ----------------------------------------------------------------------
-def get_chunk_bounds(bounding_box: List[float], chunk_size: float) -> List[List[float]]:
-    """
-    Subdivide a bounding box [W, S, E, N] into square chunks that are
-    chunk_size degrees on a side.  Returns a list of [W,S,E,N] lists.
+def get_chunk_bounds(
+    bounding_box: List[float],
+    chunk_size: float,
+    *,
+    as_polygons: bool = False,
+) -> List[Union[List[float], "Polygon"]]:
+    """Subdivide *bounding_box* into square chunks.
+
+    Parameters
+    ----------
+    bounding_box : list[float]
+        Bounds in ``[W, S, E, N]`` order.
+    chunk_size : float
+        Size of each chunk in degrees.
+    as_polygons : bool, optional
+        If ``True`` return :class:`shapely.geometry.Polygon` objects,
+        otherwise return numeric bounds.  Defaults to ``False``.
+
+    Returns
+    -------
+    list
+        Sequence of chunk bounds or polygons.
     """
     min_x, min_y, max_x, max_y = bounding_box
     chunks = []
@@ -57,7 +76,14 @@ def get_chunk_bounds(bounding_box: List[float], chunk_size: float) -> List[List[
     while y < max_y:
         x = min_x
         while x < max_x:
-            chunks.append([x, y, x + chunk_size, y + chunk_size])
+            if as_polygons:
+                try:
+                    from shapely.geometry import box
+                except Exception as exc:  # pragma: no cover - import guard
+                    raise ImportError("shapely is required when as_polygons is True") from exc
+                chunks.append(box(x, y, x + chunk_size, y + chunk_size))
+            else:
+                chunks.append([x, y, x + chunk_size, y + chunk_size])
             x += chunk_size
         y += chunk_size
     return chunks
@@ -95,28 +121,149 @@ def xy_to_tile_id(x: float, y: float) -> str:
 # ----------------------------------------------------------------------
 # Coiled / Dask
 # ----------------------------------------------------------------------
-# Connects to a Coiled cluster of a specified name if the local flag isn't on
-def connect_to_cluster(cluster_name, run_local):
+# Connects to or creates a Coiled cluster unless running locally
+def connect_to_cluster(
+    cluster_name="afolu_cluster",
+    n_workers: int = 20,
+    region: str = "us-east-1",
+    run_local: bool = False,
+):
+    """Connect to an existing Coiled cluster or create one.
+
+    Parameters
+    ----------
+    cluster_name : str
+        Name of the cluster to connect to or create.
+    n_workers : int
+        Number of workers when creating a new cluster.
+    region : str
+        AWS region for the cluster.
+    run_local : bool
+        If ``True``, create a local cluster instead of using Coiled.
     """
-    Connect to an existing Coiled cluster with the specified name.
-    If no existing cluster is found, create a new one.
-    If run_local is True, skip Coiled and run locally.
-    """
+
     if run_local:
-        print("Running locally without Dask/Coiled.")
-        return None, None
-    else:
-        try:
-            # Attempt to connect to an existing cluster by name.
-            cluster = coiled.Cluster.from_name(cluster_name)
-            print(f"Connected to existing cluster: {cluster_name}")
-        except Exception as e:
-            # If no such cluster exists, create a new one.
-            print(f"No existing cluster with name '{cluster_name}' found. Creating a new cluster.")
-            cluster = coiled.Cluster(name=cluster_name, shutdown_on_close=False)
+        cluster = LocalCluster()
         client = Client(cluster)
         return cluster, client
 
+    try:
+        cluster = coiled.Cluster.from_name(cluster_name)
+        print(f"Connected to existing cluster: {cluster_name}")
+    except Exception:
+        print(f"No existing cluster with name '{cluster_name}' found. Creating a new cluster.")
+        cluster = coiled.Cluster(
+            name=cluster_name,
+            n_workers=n_workers,
+            use_best_zone=True,
+            compute_purchase_option="spot_with_fallback",
+            idle_timeout="15 minutes",
+            region=region,
+            account="wri-forest-research",
+            worker_memory="32GiB",
+            shutdown_on_close=False,
+        )
+    client = cluster.get_client()
+    return cluster, client
+
+
+
+# ----------------------------------------------------------------------
+# General S3 helpers
+# ----------------------------------------------------------------------
+
+def s3_file_exists(bucket: str, key: str) -> bool:
+    """Return True if the given S3 object exists."""
+    s3c = boto3.client("s3")
+    try:
+        s3c.head_object(Bucket=bucket, Key=key)
+        return True
+    except boto3.exceptions.Boto3Error:
+        return False
+    except Exception:
+        return False
+
+
+def list_s3_files(bucket: str, prefix: str) -> list:
+    """List all keys under *prefix* in *bucket*."""
+    keys = []
+    s3c = boto3.client("s3")
+    paginator = s3c.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            keys.append(obj["Key"])
+    return keys
+
+
+def upload_file_to_s3(local_file_path: str, bucket_name: str, s3_file_path: str) -> None:
+    """Upload a local file to S3."""
+    boto3.client("s3").upload_file(local_file_path, bucket_name, s3_file_path)
+
+
+def download_file_from_s3(s3_file_path: str, local_file_path: str, bucket_name: str) -> None:
+    """Download an S3 key to a local path."""
+    boto3.client("s3").download_file(bucket_name, s3_file_path, local_file_path)
+
+
+def download_shapefile_from_s3(s3_prefix: str, local_dir: str, s3_bucket_name: str) -> None:
+    """Download a shapefile (and sidecars) from S3 to ``local_dir``."""
+    s3c = boto3.client("s3")
+    os.makedirs(local_dir, exist_ok=True)
+    for ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
+        s3_path = f"{s3_prefix}{ext}"
+        local_path = os.path.join(local_dir, os.path.basename(s3_prefix) + ext)
+        s3c.download_file(s3_bucket_name, s3_path, local_path)
+
+
+def read_shapefile_from_s3(s3_prefix: str, local_dir: str, s3_bucket_name: str) -> gpd.GeoDataFrame:
+    """Return a GeoDataFrame loaded from a shapefile stored on S3."""
+    download_shapefile_from_s3(s3_prefix, local_dir, s3_bucket_name)
+    shp = os.path.join(local_dir, os.path.basename(s3_prefix) + ".shp")
+    return gpd.read_file(shp)
+
+
+def get_existing_s3_files(s3_bucket: str, s3_prefix: str) -> set:
+    """Return set of keys under ``s3_prefix``."""
+    existing = set()
+    s3c = boto3.client("s3")
+    paginator = s3c.get_paginator("list_objects_v2")
+    pages = paginator.paginate(Bucket=s3_bucket, Prefix=s3_prefix)
+    for page in pages:
+        for obj in page.get("Contents", []):
+            existing.add(obj["Key"])
+    return existing
+
+
+def list_s3_files_with_pattern(s3_path: str, pattern: str) -> list:
+    """Return a list of S3 paths under ``s3_path`` containing ``pattern``."""
+    bucket_name, prefix = split_s3_path(s3_path)
+    matching_files = []
+    s3c = boto3.client("s3")
+    continuation_token = None
+    while True:
+        if continuation_token:
+            resp = s3c.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=prefix,
+                ContinuationToken=continuation_token,
+            )
+        else:
+            resp = s3c.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+        for obj in resp.get("Contents", []):
+            key = obj["Key"]
+            if pattern in key:
+                matching_files.append(f"s3://{bucket_name}/{key}")
+        if resp.get("IsTruncated"):
+            continuation_token = resp["NextContinuationToken"]
+        else:
+            break
+    return matching_files
+
+
+def split_s3_path(s3_path: str) -> tuple:
+    """Split ``s3://bucket/key`` into (bucket, key)."""
+    s3_path = s3_path.replace("s3://", "")
+    return tuple(s3_path.split("/", 1))
 
 
 # ----------------------------------------------------------------------
@@ -131,6 +278,28 @@ _DTYPE_MAP = {
     "Int32": np.int32,
     "Float32": np.float32,
     "Float64": np.float64,
+}
+
+gdal_to_string_dtype_mapping = {
+    gdal.GDT_Byte: "Byte",
+    gdal.GDT_UInt16: "UInt16",
+    gdal.GDT_Int16: "Int16",
+    gdal.GDT_UInt32: "UInt32",
+    gdal.GDT_Int32: "Int32",
+    gdal.GDT_Float32: "Float32",
+    gdal.GDT_Float64: "Float64",
+    "Int8": "Int8",
+    14: "Int8",
+}
+
+string_to_gdal_dtype_mapping = {
+    "Byte": gdal.GDT_Byte,
+    "UInt16": gdal.GDT_UInt16,
+    "Int16": gdal.GDT_Int16,
+    "UInt32": gdal.GDT_UInt32,
+    "Int32": gdal.GDT_Int32,
+    "Float32": gdal.GDT_Float32,
+    "Float64": gdal.GDT_Float64,
 }
 
 

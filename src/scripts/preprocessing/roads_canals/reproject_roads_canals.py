@@ -11,6 +11,7 @@ import logging, warnings, os, subprocess, posixpath, dask, geopandas as gpd
 from dask.distributed import Client, LocalCluster
 import src.scripts.preprocessing.preprocessing_constants as cn
 import src.scripts.preprocessing.utilities as uu
+from src.scripts.utilities import universal_utilities as uutil
 
 # ---------- logging & warnings ----------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -18,17 +19,17 @@ warnings.filterwarnings("ignore", "Geometry is in a geographic CRS", UserWarning
 
 # ---------- S3 listing helpers ----------
 def list_vector_tiles(prefix, bucket=cn.s3_bucket_name):
-    return [k for k in uu.list_s3_files(bucket, prefix) if k.lower().endswith(".shp")]
+    return [k for k in uutil.list_s3_files(bucket, prefix) if k.lower().endswith(".shp")]
 
 def list_raster_tiles(prefix, bucket=cn.s3_bucket_name, ext=".tif"):
-    return [k for k in uu.list_s3_files(bucket, prefix) if k.lower().endswith(ext)]
+    return [k for k in uutil.list_s3_files(bucket, prefix) if k.lower().endswith(ext)]
 
 # ---------- “already done?” helpers ----------
 def _vector_done(layer, dst_prefix, bucket=cn.s3_bucket_name):
-    return uu.s3_file_exists(bucket, posixpath.join(dst_prefix, f"{layer}.shp"))
+    return uutil.s3_file_exists(bucket, posixpath.join(dst_prefix, f"{layer}.shp"))
 
 def _raster_done(base, dst_prefix, bucket=cn.s3_bucket_name):
-    return uu.s3_file_exists(bucket, posixpath.join(dst_prefix, f"{base}.tif"))
+    return uutil.s3_file_exists(bucket, posixpath.join(dst_prefix, f"{base}.tif"))
 
 # ---------- delayed reprojection tasks ----------
 @dask.delayed
@@ -53,7 +54,7 @@ def reproject_vector_shapefile(src_key, dst_prefix, target_crs="EPSG:3395", buck
     for ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
         lf  = local_shp.replace(".shp", ext)
         key = posixpath.join(dst_prefix, f"{layer}{ext}")
-        uu.upload_file_to_s3(lf, bucket, key)
+        uutil.upload_file_to_s3(lf, bucket, key)
         os.remove(lf)
 
 @dask.delayed
@@ -69,14 +70,14 @@ def reproject_raster_tile(src_key, dst_prefix, target_crs="EPSG:3395", bucket=cn
     local_in  = posixpath.join(tmp_dir, f"{base}_in.tif")
     local_out = posixpath.join(tmp_dir, f"{base}.tif")
 
-    uu.download_file_from_s3(src_key, local_in, bucket)
+    uutil.download_file_from_s3(src_key, local_in, bucket)
     subprocess.run([
         "gdalwarp", "-t_srs", target_crs, "-r", "near",
         "-co", "COMPRESS=LZW", "-co", "TILED=YES", "-overwrite",
         local_in, local_out
     ], check=True)
 
-    uu.upload_file_to_s3(local_out, bucket, posixpath.join(dst_prefix, f"{base}.tif"))
+    uutil.upload_file_to_s3(local_out, bucket, posixpath.join(dst_prefix, f"{base}.tif"))
     os.remove(local_in)
     os.remove(local_out)
 
@@ -159,7 +160,11 @@ def main(do_grip=True, do_osm_roads=True, do_osm_canals=True,
 
     # start cluster only when needed
     if client_type == "coiled":
-        client, cluster = uu.setup_coiled_cluster()
+        client, cluster = uutil.connect_to_cluster(
+            cluster_name="roads_canals",
+            n_workers=20,
+            region="us-east-1",
+        )
         logging.info(f"Using Coiled cluster: {cluster.name}")
     else:
         cluster = LocalCluster()

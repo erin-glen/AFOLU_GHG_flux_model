@@ -107,36 +107,14 @@ def ensure_crs(gdf, target_crs):
     return gdf
 
 def get_chunk_bounds(chunk_params):
-    """
-    Generate the bounds for each chunk within a tile.
-
-    Args:
-        chunk_params (list): A list containing [min_x, min_y, max_x, max_y, chunk_size].
-
-    Returns:
-        list: A list of chunk bounds in the format [min_x, min_y, max_x, max_y].
-    """
-    min_x = chunk_params[0]
-    min_y = chunk_params[1]
-    max_x = chunk_params[2]
-    max_y = chunk_params[3]
-    chunk_size = chunk_params[4]
-
-    x, y = (min_x, min_y)
-    chunks = []
+    """Wrapper for :func:`universal_utilities.get_chunk_bounds`."""
+    min_x, min_y, max_x, max_y, chunk_size = chunk_params
 
     logging.debug(f"Generating chunk bounds with chunk size {chunk_size}")
-
-    while y < max_y:
-        while x < max_x:
-            bounds = [x, y, x + chunk_size, y + chunk_size]
-            chunks.append(bounds)
-            logging.debug(f"Generated chunk bounds: {bounds}")
-            x += chunk_size
-        x = min_x
-        y += chunk_size
-
-    return chunks
+    return uutil.get_chunk_bounds(
+        [min_x, min_y, max_x, max_y],
+        chunk_size,
+    )
 
 def mask_raster(data, profile):
     """
@@ -490,7 +468,11 @@ def main(tile_id=None, feature_type='osm_roads', chunk_bounds=None, run_mode='de
     """
     logging.info("Initializing main processing function")
     if client_type == 'coiled':
-        client, cluster = uu.setup_coiled_cluster()
+        client, cluster = uutil.connect_to_cluster(
+            cluster_name="roads_canals",
+            n_workers=20,
+            region="us-east-1",
+        )
         logging.info(f"Coiled cluster initialized: {cluster.name}")
     else:
         cluster = LocalCluster()
