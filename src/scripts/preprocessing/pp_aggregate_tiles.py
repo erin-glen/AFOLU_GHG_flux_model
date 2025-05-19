@@ -13,7 +13,7 @@ import boto3
 import subprocess
 
 # Project imports
-import constants_and_names as cn
+import preprocessing_constants as cn
 import pp_utilities as uu  # Import utility functions from pp_utilities.py
 
 """

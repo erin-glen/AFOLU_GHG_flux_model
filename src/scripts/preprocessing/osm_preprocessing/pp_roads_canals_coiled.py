@@ -18,8 +18,9 @@ import rioxarray
 import warnings
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 
-import pp_utilities as uu
 import constants_and_names as cn
+import preprocessing_constants as cn
+
 
 """
 This script processes OSM and GRIP data specifically for roads and canals using tiled shapefiles.

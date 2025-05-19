@@ -30,7 +30,7 @@ from rasterio.features import rasterize
 from shapely.geometry import box
 from dask.distributed import Client, LocalCluster
 
-import src.scripts.preprocessing.constants_and_names as cn
+import src.scripts.preprocessing.preprocessing_constants as cn
 import src.scripts.preprocessing.pp_utilities as uu  # e.g. setup_coiled_cluster, s3_file_exists, etc.
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

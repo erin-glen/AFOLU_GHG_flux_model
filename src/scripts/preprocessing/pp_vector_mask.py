@@ -4,7 +4,7 @@ import subprocess
 import rasterio
 import boto3
 import pp_utilities as uu
-import constants_and_names as cn
+import src.scripts.preprocessing.preprocessing_constants as cn
 
 """
 This script reads all tiles in peat_tiles_prefix, resamples them to 0.01 degrees resolution using gdalwarp,

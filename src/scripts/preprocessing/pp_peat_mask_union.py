@@ -32,7 +32,7 @@ from dask import delayed
 from dask.distributed import Client, LocalCluster
 import dask
 
-import src.scripts.preprocessing.constants_and_names as cn
+import src.scripts.preprocessing.preprocessing_constants as cn
 import src.scripts.preprocessing.pp_utilities as uu
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

@@ -17,7 +17,7 @@ import gc
 
 # Import custom modules (ensure these are correctly set up in your environment)
 import pp_utilities as uu  # Utilities module with helper functions
-import constants_and_names as cn  # Module containing constants like paths and S3 prefixes
+import preprocessing_constants as cn  # Module containing constants like paths and S3 prefixes
 
 
 # Setup logging

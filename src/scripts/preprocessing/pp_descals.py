@@ -7,7 +7,7 @@ import geopandas as gpd
 import rasterio
 from shapely.geometry import box
 import pp_hansenize_gdal as hz  # Importing GDAL-based hansenize script
-import constants_and_names as cn
+import preprocessing_constants as cn
 
 """
 This script processes descals raster tiles by merging smaller input tiles,

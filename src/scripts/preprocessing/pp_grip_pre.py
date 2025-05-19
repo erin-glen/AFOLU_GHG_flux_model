@@ -9,7 +9,7 @@ import argparse
 import sys
 
 import pp_utilities as uu
-import constants_and_names as cn
+import preprocessing_constants as cn
 
 """
 This script processes GRIP (Global Roads Inventory Project) roads by tiles using a pre-existing tile index shapefile.

@@ -21,7 +21,7 @@ from dask.distributed import LocalCluster, Client
 from shapely.geometry import box
 
 # Adjust imports according to your folder structure
-import src.scripts.preprocessing.constants_and_names as cn
+import src.scripts.preprocessing.preprocessing_constants as cn
 import src.scripts.preprocessing.pp_utilities as uu
 from src.scripts.preprocessing.pp_hansenize_methods import (
     build_vrt_gdal_coiled,

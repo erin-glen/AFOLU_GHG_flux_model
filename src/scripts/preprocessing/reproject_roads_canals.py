@@ -9,7 +9,7 @@ Batch Reproject (EPSG:3395) – OSM roads, canals, GRIP roads, peat tiles,
 
 import logging, warnings, os, subprocess, posixpath, dask, geopandas as gpd
 from dask.distributed import Client, LocalCluster
-import src.scripts.preprocessing.constants_and_names as cn
+import src.scripts.preprocessing.preprocessing_constants as cn
 import src.scripts.preprocessing.pp_utilities as uu
 
 # ---------- logging & warnings ----------
