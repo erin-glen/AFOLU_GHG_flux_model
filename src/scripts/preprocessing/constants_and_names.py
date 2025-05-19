@@ -19,6 +19,14 @@ project_dir = "climate/AFOLU_flux_model/organic_soils"
 raw_dir = "inputs/raw"
 processed_dir = "inputs/processed"
 
+### s3 buckets
+s3 = boto3.resource('s3')
+short_bucket_prefix = "gfw2-data"
+full_bucket_prefix = "s3://" + short_bucket_prefix
+full_bucket_prefix_length = len(full_bucket_prefix)+1
+s3_client = boto3.client("s3")
+
+
 # Local scratch space
 local_root = pp.join("C:", "GIS", "Data", "Global")
 local_temp_dir = "/tmp"  # works under WSL/mac/linux
@@ -40,6 +48,27 @@ index_shapefile_prefix = pp.join(project_dir, raw_dir,
 sample_tile_id = "{tile_id}"
 full_raster_dims = 40000  # 10×10° at 0.00025°
 resolution = 0.000025  # ° (≈ 1 km)
+
+# directory containing per-pixel area rasters (hectares)
+pixel_area_ha_dir = pp.join(
+    full_bucket_prefix,
+    processed_dir,
+    'pixel_area_ha/40000_pixels/20240101'
+)
+
+# directory containing per-pixel area rasters (square meters)
+pixel_area_dir = pp.join(
+    full_bucket_prefix,
+    processed_dir,
+    'pixel_area_m2/40000_pixels/20240101'
+)
+
+# file pattern for pixel area rasters
+pixel_area_pattern = 'pixel_area'
+
+# conversion factor from square meters to hectares
+m2_to_ha = 1e-4
+
 
 # ---------------------------------------------------------------------
 # 2. Dataset configurations
