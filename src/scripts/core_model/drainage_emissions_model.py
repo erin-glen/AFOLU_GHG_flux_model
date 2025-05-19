@@ -24,6 +24,8 @@ from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
 from src.scripts.utilities import numba_utilities as nu
+from src.scripts.utilities import drainage_emission_factors as defac
+from src.scripts.utilities import burned_area_emission_factors as baf
 
 # ----------------------------------------------------------------------
 # constants pulled into locals for Numba speed
@@ -34,7 +36,6 @@ gwp_ch4 = np.float32(cn.gwp_ch4)
 gwp_n2o = np.float32(cn.gwp_n2o)
 gwp_co = np.float32(cn.gwp_co)
 combustion_factor = np.float32(cn.combustion_factor)
-m2_to_ha = np.float32(cn.m2_to_ha)
 
 forest_code = cn.ipcc_codes["forest"]
 cropland_code = cn.ipcc_codes["cropland"]
@@ -55,12 +56,30 @@ short_rotation_code = cn.plantation_type_codes["short_rotation"]
 oil_palm_code = cn.plantation_type_codes["oil_palm"]
 sago_palm_code = cn.plantation_type_codes["sago_palm"]
 
+# helpers for numba dict lookups
+@jit(nopython=True)
+def lookup_efs(key, table):
+    if key in table:
+        return table[key]
+    return defac.ZERO_ARRAY
+
+
+@jit(nopython=True)
+def lookup_befs(key, table):
+    if key in table:
+        return table[key]
+    return baf.ZERO_ARRAY
+
 # ----------------------------------------------------------------------
 # full decision‑tree function (unchanged logic, ASCII comments only)
 # ----------------------------------------------------------------------
 @jit(nopython=True)
 def calculate_drainage_and_emissions(
-    in_dict_uint8, in_dict_int16, in_dict_float32
+    in_dict_uint8,
+    in_dict_int16,
+    in_dict_float32,
+    drainage_table,
+    burned_table,
 ):
     """
     1) Drainage classification & state
@@ -175,133 +194,83 @@ def calculate_drainage_and_emissions(
             # B) Drainage emission factors --------------------------------
             if soil_block[row, col] == 2:  # only if drained
                 node = nu.accrete_node(node, 1)
+                key = ""
 
                 # BOREAL ---------------------------------------------------
                 if ecozone == boreal_code:
                     node = nu.accrete_node(node, 1)
-                    ef_co2_offsite = 0.12
                     if land_cover == forest_code:
                         node = nu.accrete_node(node, 1)
                         if nutrient == poor_nutrient_code:
                             node = nu.accrete_node(node, 1)
-                            ef_co2 = 0.25
-                            ef_n2o = 0.22
-                            ef_ch4_land = 7.0
-                            ef_ch4_ditch = 217.0
-                            frac_ditch = 0.025
+                            key = "boreal_forest_poor"
                         elif nutrient == rich_nutrient_code:
                             node = nu.accrete_node(node, 2)
-                            ef_co2 = 0.95
-                            ef_n2o = 3.2
-                            ef_ch4_land = 2.0
-                            ef_ch4_ditch = 217.0
-                            frac_ditch = 0.025
+                            key = "boreal_forest_rich"
                     elif land_cover == grassland_code:
                         node = nu.accrete_node(node, 2)
-                        ef_co2 = 5.7
-                        ef_n2o = 9.5
-                        ef_ch4_land = 1.4
-                        ef_ch4_ditch = 1165.0
-                        frac_ditch = 0.05
+                        key = "boreal_grassland"
                     elif land_cover == cropland_code:
                         node = nu.accrete_node(node, 3)
-                        ef_co2 = 7.9
-                        ef_n2o = 13.0
-                        ef_ch4_land = 0.0
-                        ef_ch4_ditch = 1165.0
-                        frac_ditch = 0.05
+                        key = "boreal_cropland"
                     elif extraction > 0:
                         node = nu.accrete_node(node, 4)
-                        ef_co2 = 2.8
-                        ef_n2o = 0.30
-                        ef_ch4_land = 6.1
-                        ef_ch4_ditch = 542.0
-                        frac_ditch = 0.05
+                        key = "boreal_extraction"
 
                 # TEMPERATE -----------------------------------------------
                 elif ecozone == temperate_code:
                     node = nu.accrete_node(node, 2)
-                    ef_co2_offsite = 0.31
                     if land_cover == forest_code:
                         node = nu.accrete_node(node, 1)
-                        ef_co2 = 2.6
-                        ef_n2o = 2.8
-                        ef_ch4_land = 2.5
-                        ef_ch4_ditch = 217.0
-                        frac_ditch = 0.05
+                        key = "temperate_forest"
                     elif land_cover == grassland_code:
                         node = nu.accrete_node(node, 2)
-                        ef_ch4_ditch = 1165.0
                         if nutrient == poor_nutrient_code:
                             node = nu.accrete_node(node, 1)
-                            ef_co2 = 5.3
-                            ef_n2o = 4.3
-                            ef_ch4_land = 1.8
-                            frac_ditch = 0.05
+                            key = "temperate_grassland_poor"
                         elif nutrient == rich_nutrient_code:
                             node = nu.accrete_node(node, 2)
-                            ef_co2 = 6.1
-                            ef_n2o = 8.2
-                            ef_ch4_land = 16.0
-                            frac_ditch = 0.05
+                            key = "temperate_grassland_rich"
                     elif land_cover == cropland_code:
                         node = nu.accrete_node(node, 3)
-                        ef_co2 = 10.5
-                        ef_n2o = 13.0
-                        ef_ch4_land = 0.0
-                        ef_ch4_ditch = 1165.0
-                        frac_ditch = 0.05
+                        key = "temperate_cropland"
                     elif extraction > 0:
                         node = nu.accrete_node(node, 4)
-                        ef_co2 = 3.0
-                        ef_n2o = 0.3
-                        ef_ch4_land = 6.1
-                        ef_ch4_ditch = 542.0
-                        frac_ditch = 0.05
+                        key = "temperate_extraction"
 
                 # TROPICAL -------------------------------------------------
                 elif ecozone == tropical_code:
                     node = nu.accrete_node(node, 3)
-                    ef_co2_offsite = 0.82
-                    ef_ch4_ditch = 2259.0
-                    frac_ditch = 0.02
                     if planted_forest_type > 0:
                         node = nu.accrete_node(node, 1)
                         if planted_forest_type == long_rotation_code:
-                            ef_co2 = 15.0
-                            ef_n2o = 2.4
-                            ef_ch4_land = 2.7
+                            key = "tropical_long_rotation"
                         elif planted_forest_type == short_rotation_code:
-                            ef_co2 = 20.0
-                            ef_n2o = 2.4
-                            ef_ch4_land = 2.7
+                            key = "tropical_short_rotation"
                         elif planted_forest_type == oil_palm_code:
-                            ef_co2 = 11.0
-                            ef_n2o = 1.2
-                            ef_ch4_land = 0.0
+                            key = "tropical_oil_palm"
                         elif planted_forest_type == sago_palm_code:
-                            ef_co2 = 1.5
-                            ef_n2o = 3.3
-                            ef_ch4_land = 26.2
+                            key = "tropical_sago_palm"
                     elif land_cover == forest_code:
                         node = nu.accrete_node(node, 2)
-                        ef_co2 = 5.3
-                        ef_n2o = 2.4
-                        ef_ch4_land = 4.9
+                        key = "tropical_forest"
                     elif land_cover == grassland_code:
                         node = nu.accrete_node(node, 3)
-                        ef_co2 = 9.6
-                        ef_n2o = 5.0
-                        ef_ch4_land = 7.0
+                        key = "tropical_grassland"
                     elif land_cover == cropland_code:
                         node = nu.accrete_node(node, 4)
-                        ef_co2 = 14.0
-                        ef_n2o = 5.0
-                        ef_ch4_land = 7.0
+                        key = "tropical_cropland"
                     elif extraction > 0:
                         node = nu.accrete_node(node, 5)
-                        ef_co2 = 2.0
-                        ef_n2o = 0.0
+                        key = "tropical_extraction"
+
+                vals = lookup_efs(key, drainage_table)
+                ef_co2 = vals[0]
+                ef_n2o = vals[1]
+                ef_ch4_land = vals[2]
+                ef_ch4_ditch = vals[3]
+                ef_co2_offsite = vals[4]
+                frac_ditch = vals[5]
 
                 # calculate drainage emissions ---------------------------
                 (
@@ -341,20 +310,16 @@ def calculate_drainage_and_emissions(
                     if ecozone == boreal_code:
                         burned_node = nu.accrete_node(burned_node, 1)
                         if soil_block[row, col] == 2:
-                            gef_co2, gef_co, gef_ch4 = 1650.0, 110.0, 12.0
-                            mass_burnt = 250.0
+                            bkey = "boreal_drained"
                         else:
-                            gef_co2, gef_co, gef_ch4 = 1450.0, 90.0, 10.0
-                            mass_burnt = 75.0
+                            bkey = "boreal_undrained"
 
                     elif ecozone == temperate_code:
                         burned_node = nu.accrete_node(burned_node, 2)
                         if soil_block[row, col] == 2:
-                            gef_co2, gef_co, gef_ch4 = 1650.0, 110.0, 12.0
-                            mass_burnt = 200.0
+                            bkey = "temperate_drained"
                         else:
-                            gef_co2, gef_co, gef_ch4 = 1450.0, 90.0, 10.0
-                            mass_burnt = 50.0
+                            bkey = "temperate_undrained"
 
                     elif ecozone == tropical_code:
                         burned_node = nu.accrete_node(burned_node, 3)
@@ -363,18 +328,20 @@ def calculate_drainage_and_emissions(
                                 land_cover in (cropland_code,)
                                 or planted_forest_type > 0
                             ):
-                                gef_co2, gef_co, gef_ch4 = 1700.0, 200.0, 15.0
-                                mass_burnt = 150.0
+                                bkey = "tropical_drained_crop_or_plantation"
                             else:
-                                gef_co2, gef_co, gef_ch4 = 1600.0, 180.0, 14.0
-                                mass_burnt = 300.0
+                                bkey = "tropical_drained_other"
                         else:
-                            gef_co2 = gef_co = gef_ch4 = 0.0
-                            mass_burnt = 0.0
+                            bkey = "tropical_undrained"
                     else:
                         burned_node = nu.accrete_node(burned_node, 4)
-                        gef_co2 = gef_co = gef_ch4 = 0.0
-                        mass_burnt = 0.0
+                        bkey = "other"
+
+                    bvals = lookup_befs(bkey, burned_table)
+                    gef_co2 = bvals[0]
+                    gef_co = bvals[1]
+                    gef_ch4 = bvals[2]
+                    mass_burnt = bvals[3]
 
                     (
                         burn_co2,
@@ -504,10 +471,6 @@ def calculate_and_upload_drainage(
         layers, uint8, int16, [], float32, bstr, tid, is_final, logger
     )
 
-    # convert pixel area from m^2 to ha when present
-    if use_actual_pixel_area and "pixel_area_ha" in layers:
-        layers["pixel_area_ha"] = layers["pixel_area_ha"] * cn.m2_to_ha
-
     # stats for inputs
     for k, arr in layers.items():
         chunk_stats.append(uu.calculate_stats(arr, k, bstr, tid, "input"))
@@ -522,7 +485,13 @@ def calculate_and_upload_drainage(
         is_final,
         logger,
     )
-    out_u32, out_f32 = calculate_drainage_and_emissions(td8, td16, td32f)
+    out_u32, out_f32 = calculate_drainage_and_emissions(
+        td8,
+        td16,
+        td32f,
+        defac.DEFAULT_TABLE,
+        baf.DEFAULT_TABLE,
+    )
     outputs = {**out_u32, **out_f32}
 
     # stats for outputs
