@@ -8,12 +8,10 @@ import logging
 import tempfile
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import geopandas as gpd
 import rasterio
 import fiona
-import boto3
 import botocore
 import dask
 from dask import delayed
@@ -23,7 +21,7 @@ from shapely.geometry import box
 # Adjust imports according to your folder structure
 import src.scripts.preprocessing.preprocessing_constants as cn
 import src.scripts.preprocessing.utilities as uu
-from src.scripts.preprocessing.hansenize_methods import (
+from src.scripts.preprocessing.hansenize.hansenize_coiled import (
     build_vrt_gdal_coiled,
     warp_to_hansen_coiled,
 )

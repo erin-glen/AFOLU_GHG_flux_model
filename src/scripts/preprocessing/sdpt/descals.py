@@ -6,7 +6,7 @@ import boto3
 import geopandas as gpd
 import rasterio
 from shapely.geometry import box
-import hansenize_gdal as hz  # Importing GDAL-based hansenize script
+from src.scripts.preprocessing.hansenize import hansenize_gdal as hz
 import preprocessing_constants as cn
 
 """

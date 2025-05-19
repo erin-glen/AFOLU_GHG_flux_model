@@ -1,12 +1,10 @@
 import os
 import logging
-import gc
 import boto3
 import utilities as uu
 import rasterio
 import preprocessing_constants as cn
-import hansenize_gdal as hg
-
+from src.scripts.preprocessing.hansenize import hansenize_gdal as hg
 
 """
 This script processes raster tiles by resampling them to a specified resolution,
