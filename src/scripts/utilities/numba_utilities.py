@@ -152,5 +152,5 @@ def calculate_burned_area_emissions(
     burn_co = pixel_area_ha * mass_burnt * combustion_factor * gef_co * 1e-3 * gwp_co
     burn_ch4 = pixel_area_ha * mass_burnt * combustion_factor * gef_ch4 * 1e-3 * gwp_ch4
 
-    total_burned_emissions_co2e = burn_co2 + (burn_co * gwp_co) + (burn_ch4 * gwp_ch4)
+    total_burned_emissions_co2e = burn_co2 + burn_co + burn_ch4
     return burn_co2, burn_co, burn_ch4, total_burned_emissions_co2e
