@@ -3,15 +3,11 @@
 import os
 import logging
 import subprocess
-import gc
 import re
 from osgeo import gdal
 
 import boto3
-from botocore.exceptions import NoCredentialsError, PartialCredentialsError
-
-import rasterio
-from rasterio.features import rasterize
+from botocore.exceptions import NoCredentialsError
 import rioxarray
 import geopandas as gpd
 from shapely.geometry import box, Polygon
