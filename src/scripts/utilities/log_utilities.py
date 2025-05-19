@@ -4,7 +4,7 @@ import os
 import sys
 import time
 
-from dask.distributed import print
+from dask.distributed import print as dask_print
 from datetime import datetime
 
 # Project imports
@@ -159,7 +159,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
                 with open(worker_log, "r") as infile_worker:
                     outfile.write(infile_worker.read())
 
-        print(f"Combined log saved as {combined_local_log}")
+        dask_print(f"Combined log saved as {combined_local_log}")
 
         # Upload to S3
         s3_client = boto3.client("s3")
@@ -171,7 +171,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
             os.remove(worker_log)
 
     except Exception as e:
-        print(f"Error merging/uploading logs: {e}")
+        dask_print(f"Error merging/uploading logs: {e}")
 
 
 ##############################################################################
@@ -184,5 +184,5 @@ def print_and_log(text, is_final, logger):
     """
     logger.info(f"flm: {text}")
     if not is_final:
-        print(f"flm: {text}", flush=True)
+        dask_print(f"flm: {text}", flush=True)
 
