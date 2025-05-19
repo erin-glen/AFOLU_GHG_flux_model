@@ -19,8 +19,9 @@ import warnings
 import time
 import math
 
-import preprocessing_constants as cn
-import utilities as uu
+from src.scripts.utilities import universal_utilities as uutil
+import src.scripts.preprocessing.preprocessing_constants as cn
+import src.scripts.preprocessing.utilities as uu
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -35,26 +36,6 @@ for dataset_key, dataset_info in cn.datasets.items():
             os.makedirs(sub_dataset['local_processed'], exist_ok=True)
 os.makedirs(cn.local_temp_dir, exist_ok=True)
 logging.info("Directories and paths set up")
-
-
-def get_10x10_tile_bounds(tile_id):
-    """Calculate the bounds for a 10x10 degree tile."""
-    if "S" in tile_id:
-        max_y = -1 * (int(tile_id[:2]))
-        min_y = -1 * (int(tile_id[:2]) + 10)
-    else:
-        max_y = (int(tile_id[:2]))
-        min_y = (int(tile_id[:2]) - 10)
-
-    if "W" in tile_id:
-        max_x = -1 * (int(tile_id[4:7]) - 10)
-        min_x = -1 * (int(tile_id[4:7]))
-    else:
-        max_x = (int(tile_id[4:7]) + 10)
-        min_x = (int(tile_id[4:7]))
-
-    return min_x, min_y, max_x, max_y  # W, S, E, N
-
 
 def ensure_crs(gdf, target_crs):
     if gdf.crs is None:
@@ -320,7 +301,7 @@ def process_chunk(bounds, feature_type, tile_id):
 
 def process_tile(tile_key, feature_type, chunk_bounds=None, run_mode='default'):
     tile_id = '_'.join(os.path.basename(tile_key).split('_')[:2])
-    tile_bounds = get_10x10_tile_bounds(tile_id)
+    tile_bounds = uutil.get_10x10_tile_bounds(tile_id)
     chunk_size = 2  # 1x1 degree chunks
 
     chunks = get_chunk_bounds([*tile_bounds, chunk_size])

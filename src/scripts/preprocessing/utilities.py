@@ -910,16 +910,6 @@ def merge_rasters(input_files, output_path):
     except Exception as e:
         logging.error(f"Error merging rasters: {e}")
 
-
-def get_10x10_tile_bounds(tile_id: str) -> tuple[int, int, int, int]:
-    """Return W,S,E,N bounds for a 10×10 degree tile like ``00N_110E``."""
-    lat = int(tile_id[:2]) * (-1 if "S" in tile_id else 1)
-    lon = int(tile_id[4:7]) * (-1 if "W" in tile_id else 1)
-    max_y, min_y = (lat, lat - 10)
-    min_x, max_x = (lon, lon + 10)
-    return min_x, min_y, max_x, max_y
-
-
 # List files in an S3 bucket with a certain pattern
 def list_s3_files_with_pattern(s3_path, pattern):
     s3 = boto3.client("s3")

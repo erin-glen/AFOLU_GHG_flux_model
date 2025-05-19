@@ -16,8 +16,9 @@ from rasterio.transform import from_origin
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 import warnings
 
-import preprocessing_constants as cn
-import utilities as uu
+from src.scripts.utilities import universal_utilities as uutil
+import src.scripts.preprocessing.preprocessing_constants as cn
+import src.scripts.preprocessing.utilities as uu
 
 
 """
@@ -84,35 +85,6 @@ for dataset_key, dataset_info in cn.datasets.items():
             os.makedirs(sub_dataset['local_processed'], exist_ok=True)
 os.makedirs(cn.local_temp_dir, exist_ok=True)
 logging.info("Directories and paths set up")
-
-def get_10x10_tile_bounds(tile_id):
-    """
-    Calculate the bounds for a 10x10 degree tile based on its tile ID.
-
-    Args:
-        tile_id (str): The ID of the tile (e.g., '00N_110E').
-
-    Returns:
-        tuple: The bounds of the tile in the format (min_x, min_y, max_x, max_y).
-    """
-    logging.debug(f"Calculating bounds for tile {tile_id}")
-
-    if "S" in tile_id:
-        max_y = -1 * (int(tile_id[:2]))
-        min_y = max_y - 10
-    else:
-        max_y = (int(tile_id[:2]))
-        min_y = max_y - 10
-
-    if "W" in tile_id:
-        min_x = -1 * (int(tile_id[4:7]))
-        max_x = min_x + 10
-    else:
-        min_x = (int(tile_id[4:7]))
-        max_x = min_x + 10
-
-    logging.debug(f"Bounds for tile {tile_id}: min_x={min_x}, min_y={min_y}, max_x={max_x}, max_y={max_y}")
-    return min_x, min_y, max_x, max_y  # W, S, E, N
 
 def ensure_crs(gdf, target_crs):
     """
@@ -459,7 +431,7 @@ def process_tile(tile_key, feature_type, chunk_bounds=None, run_mode='default'):
     """
     logging.info(f"Processing tile {tile_key} with feature type {feature_type}")
     tile_id = '_'.join(os.path.basename(tile_key).split('_')[:2])
-    tile_bounds = get_10x10_tile_bounds(tile_id)
+    tile_bounds = uutil.get_10x10_tile_bounds(tile_id)
     chunk_size = 2  # 1x1 degree chunks
 
     chunks = get_chunk_bounds([*tile_bounds, chunk_size])

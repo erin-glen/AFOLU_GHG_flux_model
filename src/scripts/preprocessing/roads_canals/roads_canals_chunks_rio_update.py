@@ -30,43 +30,15 @@ from rasterio.features import rasterize
 from shapely.geometry import box
 from dask.distributed import Client, LocalCluster
 
+from src.scripts.utilities import universal_utilities as uutil
 import src.scripts.preprocessing.preprocessing_constants as cn
-import src.scripts.preprocessing.utilities as uu  # e.g. setup_coiled_cluster, s3_file_exists, etc.
+import src.scripts.preprocessing.utilities as uu
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # If you store the 1 km union mask in "peat.union_mask.1km_3395",
 # define a pattern:
 PEAT_1KM_PATTERN = "_union_mask_1km.tif"
-
-def get_10x10_tile_bounds(tile_id):
-    """
-    Return bounding box for a 10×10 tile in EPSG:3395 coordinates
-    if it matches your numeric scheme.
-    If you're still using a numeric-lat/lon approach, adapt accordingly.
-    """
-    # If your tile_id is something like 00N_110E,
-    # The bounding box is the same as your older approach
-    # (just keep in mind that the data is now in EPSG:3395).
-    # For demonstration, we keep the older logic (like 4326)
-    # and rely on tile-based naming. If your data is truly in meters,
-    # you might have a different bounding scheme.
-
-    if "S" in tile_id:
-        max_y = -1 * (int(tile_id[:2]))
-        min_y = max_y - 10
-    else:
-        max_y = int(tile_id[:2])
-        min_y = max_y - 10
-
-    if "W" in tile_id:
-        min_x = -1 * int(tile_id[4:7])
-        max_x = min_x + 10
-    else:
-        min_x = int(tile_id[4:7])
-        max_x = min_x + 10
-
-    return (min_x, min_y, max_x, max_y)
 
 def build_chunk_bounds(tile_bounds, chunk_size=2):
     """
@@ -309,7 +281,7 @@ def process_tile(tile_id, feature_type, chunk_size=2, chunk_bounds=None):
     - chunk_size e.g. 2 => 2-degree sub-chunks
     - chunk_bounds => optional single sub-chunk
     """
-    tile_bb = get_10x10_tile_bounds(tile_id)
+    tile_bb = uutil.get_10x10_tile_bounds(tile_id)
     if chunk_bounds:
         chunks = [chunk_bounds]
     else:

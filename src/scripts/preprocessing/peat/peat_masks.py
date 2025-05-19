@@ -20,6 +20,7 @@ from shapely.geometry import box
 
 # Adjust imports according to your folder structure
 import src.scripts.preprocessing.preprocessing_constants as cn
+from src.scripts.utilities import universal_utilities as uutil
 import src.scripts.preprocessing.utilities as uu
 from src.scripts.preprocessing.hansenize.hansenize_coiled import (
     build_vrt_gdal_coiled,
@@ -39,7 +40,7 @@ PEAT_CACHE = Path(tempfile.gettempdir()) / "peatmap_cache"
 ################################################################################
 
 def bounds_for_tile(tid):
-    return uu.get_10x10_tile_bounds(tid)
+    return uutil.get_10x10_tile_bounds(tid)
 
 def output_paths(ds_key, tid):
     ds = cn.datasets["peat"][ds_key]
