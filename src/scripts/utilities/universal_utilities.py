@@ -402,7 +402,6 @@ def get_cluster_info(client, cluster):
     n_workers = len(workers)
 
     # Retrieves the number of threads per worker
-    # https://chatgpt.com/share/e/672503f1-eef8-800a-9218-281624acf27e
     first_worker_address = next(iter(workers.keys()))
     nthreads = workers[first_worker_address]["nthreads"]
 
