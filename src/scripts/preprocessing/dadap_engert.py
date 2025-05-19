@@ -4,7 +4,7 @@ import gc
 import boto3
 import utilities as uu
 import rasterio
-import constants_and_names as cn
+import preprocessing_constants as cn
 import hansenize_gdal as hg
 
 

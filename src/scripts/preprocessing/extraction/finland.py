@@ -11,7 +11,7 @@ from utilities import (
     rasterize_shapefile,
     compress_file,
 )
-import src.scripts.preprocessing.constants_and_names as cn
+import src.scripts.preprocessing.preprocessing_constants as cn
 
 """
 This script processes raster tiles for Finland extraction areas, converting vector data to raster format and uploading results to S3.

@@ -7,7 +7,7 @@ from utilities import (
     list_s3_files,
     resample_raster,
 )
-import src.scripts.preprocessing.constants_and_names as cn
+import src.scripts.preprocessing.preprocessing_constants as cn
 
 """
 This script processes and resamples tiles from S3, checks for existing files, resamples the rasters,

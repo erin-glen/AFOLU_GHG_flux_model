@@ -38,7 +38,7 @@ from datetime import datetime
 import pandas as pd
 
 import utilities as uu
-import src.scripts.preprocessing.constants_and_names as cn
+import src.scripts.preprocessing.preprocessing_constants as cn
 
 
 # Setup logging

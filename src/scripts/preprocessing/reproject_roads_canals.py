@@ -127,7 +127,7 @@ def tasks_peat_union_1km():
     Reprojects the newly created 1 km union peat mask.
     We'll assume its source is cn.datasets["peat"]["union_mask"]["1km"]
     and target is something like cn.datasets["peat"]["union_mask"]["1km_3395"]
-    which you define in constants_and_names.py.
+    which is defined in preprocessing_constants.py.
     """
     src_prefix = cn.datasets["peat"]["union_mask"]["1km"]
     dst_prefix = cn.datasets["peat"]["union_mask"]["1km_3395"]  # must exist
