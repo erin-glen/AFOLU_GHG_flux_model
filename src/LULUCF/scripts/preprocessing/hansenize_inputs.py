@@ -10,7 +10,7 @@ python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 1
 python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p secondary_natural_forest -bb -120 30 -110 40 -cs 10
 
 Coiled full run:
-python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 20 -m 8 -t 8
+python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 20 -t 12
 python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p secondary_natural_forest -bb -180 -60 180 80 -cs 10
 
 #QC
@@ -54,34 +54,41 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
 
     # Add Robinson et al. secondary natural forest growth rates
     if 'secondary_natural_forest' in process:
-        download_upload_dictionary["secondary_natural_forest_0_5"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_0_5.vrt",
-            'processed_dir': cn.secondary_natural_forest_0_5_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_0_5_pattern
-        }
-        download_upload_dictionary["secondary_natural_forest_6_10"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_6_10_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_6_10.vrt",
-            'processed_dir': cn.secondary_natural_forest_6_10_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_6_10_pattern
-        }
-        download_upload_dictionary["secondary_natural_forest_11_15"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_11_15_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_11_15.vrt",
-            'processed_dir': cn.secondary_natural_forest_11_15_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_11_15_pattern
-        }
-        download_upload_dictionary["secondary_natural_forest_16_20"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_16_20_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_16_20.vrt",
-            'processed_dir': cn.secondary_natural_forest_16_20_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_16_20_pattern
-        }
+        # download_upload_dictionary["secondary_natural_forest_0_5"] = {
+        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_0_5.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_0_5_processed_dir,
+        #     'processed_pattern': cn.secondary_natural_forest_0_5_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_6_10"] = {
+        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_6_10_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_6_10.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_6_10_processed_dir,
+        #     'processed_pattern': cn.secondary_natural_forest_6_10_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_11_15"] = {
+        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_11_15_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_11_15.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_11_15_processed_dir,
+        #     'processed_pattern': cn.secondary_natural_forest_11_15_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_16_20"] = {
+        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_16_20_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_16_20.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_16_20_processed_dir,
+        #     'processed_pattern': cn.secondary_natural_forest_16_20_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_21_100"] = {
+        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_21_100_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_21_100.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_21_100_processed_dir,
+        #     'processed_pattern': cn.secondary_natural_forest_21_100_pattern
+        # }
         download_upload_dictionary["secondary_natural_forest_21_40"] = {
             'raw_dir': cn.secondary_natural_forest_raw_dir,
             'raw_pattern': cn.secondary_natural_forest_21_40_pattern,
@@ -109,13 +116,6 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
             'vrt': f"/tmp/secondary_natural_forest_81_100.vrt",
             'processed_dir': cn.secondary_natural_forest_81_100_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_81_100_pattern
-        }
-        download_upload_dictionary["secondary_natural_forest_21_100"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_21_100_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_21_100.vrt",
-            'processed_dir': cn.secondary_natural_forest_21_100_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_21_100_pattern
         }
 
     if 'AGB2015' in process:
@@ -349,6 +349,7 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
                 tile_futures.append(tile_future)
 
         main_logger.info(f"Tiles to process: {len(tile_futures)}")
+        main_logger.info(f"Creating futures: {uu.timestr()}")
 
         # Collect the results once they are finished
         tile_results = client.gather(tile_futures)

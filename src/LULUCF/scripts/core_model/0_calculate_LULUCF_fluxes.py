@@ -1008,7 +1008,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                                                 rf_post_dist, most_recent_year_not_tall_veg,
                                                 Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                                 deadwood_c_ratio=0, litter_c_ratio=0)
-                                        else:  # Trees outside forests partially disturbed in the last interval with signif. height increase after (321222->3212221/3212222)
+                                        else:  # Trees outside forests partially disturbed in the last interval without signif. height increase after (321222->3212221/3212222)
                                             # NOTE: All annual interval data is expected to use this branch.
                                             node = nu.accrete_node(node, 2)
                                             # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency

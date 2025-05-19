@@ -376,28 +376,42 @@ forest_age_2015_interpolated_pattern = "forest_age_interpolated_2015"
 forest_age_start_year_pattern = "forest_age_interpolated_start_year"
 forest_age_output_pattern = "forest_age_at_end_of_interval"
 
-# GEE script that the global rasters are from is https://code.earthengine.google.com/3d8ac6f1dcc5cf36c766d0ddffaa3068 (each file takes about 15 minutes to export to Google Drive).
-# NOTE: GEE export function splits the exported global raster into two pieces. I merged the two pieces into a single file in ArcPro, then uploaded to s3.
-secondary_natural_forest_raw_dir =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/20241004/"
-secondary_natural_forest_0_5_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__0_5_years.tif"   # both the raw raster name and processed pattern for hansenized tiles
-secondary_natural_forest_6_10_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__6_10_years.tif"
-secondary_natural_forest_11_15_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__11_15_years.tif"
-secondary_natural_forest_16_20_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__16_20_years.tif"
-secondary_natural_forest_21_40_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years.tif"
-secondary_natural_forest_41_60_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__41_60_years.tif"
-secondary_natural_forest_61_80_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__61_80_years.tif"
-secondary_natural_forest_81_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__81_100_years.tif"
-secondary_natural_forest_21_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_100_years.tif"
-secondary_natural_forest_0_5_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_0_5/"
-secondary_natural_forest_6_10_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_6_10/"
-secondary_natural_forest_11_15_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_11_15/"
-secondary_natural_forest_16_20_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_16_20/"
-secondary_natural_forest_21_40_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_21_40/"
-secondary_natural_forest_41_60_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_41_60/"
-secondary_natural_forest_61_80_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_61_80/"
-secondary_natural_forest_81_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_81_100/"
-secondary_natural_forest_21_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/rate_21_100/"
+# GEE script that the global rasters are from is https://code.earthengine.google.com/805896f7a511c13eb873c4804a683abc (each file takes about 15 minutes to export to Google Drive).
+# NOTE: GEE export function splits the exported global raster into two pieces. I merged the two pieces into a single file in ArcPro,
+# then applied ArcPro nibble command to fill in gaps so that all pixels would have rates, for example:
+# out_raster = arcpy.sa.Nibble(
+#     in_raster=r"Robinson et al. rates\natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years.tif",
+#     in_mask_raster=r"Robinson et al. rates\natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years.tif",
+#     nibble_values="DATA_ONLY",
+#     nibble_nodata="PROCESS_NODATA",
+#     in_zone_raster=None
+# )
+# out_raster.save(r"C:\GIS\Carbon_seqr_mapping\secondary_forests\average_rates_for_LULUCF_model\natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years__nibble_20250516.tif")
+# Then, uploaded to s3.
+secondary_natural_forest_raw_dir =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/20250516/"
+secondary_natural_forest_0_5_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__0_5_years__nibble_20250516"   # both the raw raster name and processed pattern for hansenized tiles
+secondary_natural_forest_6_10_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__6_10_years__nibble_20250516"
+secondary_natural_forest_11_15_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__11_15_years__nibble_20250516"
+secondary_natural_forest_16_20_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__16_20_years__nibble_20250516"
+secondary_natural_forest_21_40_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years__nibble_20250516"
+secondary_natural_forest_41_60_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__41_60_years__nibble_20250516"
+secondary_natural_forest_61_80_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__61_80_years__nibble_20250516"
+secondary_natural_forest_81_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__81_100_years__nibble_20250516"
+secondary_natural_forest_21_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_100_years__nibble_20250516"
 
+Robinson_processed_date = '20250516'
+secondary_natural_forest_0_5_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_0_5/"
+secondary_natural_forest_6_10_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_6_10/"
+secondary_natural_forest_11_15_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_11_15/"
+secondary_natural_forest_16_20_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_16_20/"
+secondary_natural_forest_21_40_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_21_40/"
+secondary_natural_forest_41_60_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_41_60/"
+secondary_natural_forest_61_80_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_61_80/"
+secondary_natural_forest_81_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_81_100/"
+secondary_natural_forest_21_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_21_100/"
+
+# TODO switch to new processed date when all are ready
+# natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/"
 natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/"
 natural_forest_growth_curve_pattern = "natural_forest_mean_growth_rate__Mg_AGC_ha_yr"
 natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_40', '41_60', '61_80', '81_100', '21_100']
