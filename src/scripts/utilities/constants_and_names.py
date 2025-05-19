@@ -49,6 +49,27 @@ sample_tile_id = '{tile_id}'
 full_raster_dims = 40000
 chunk_stats_path = posixpath.join(local_temp_dir, 'chunk_stats')
 
+# directory containing per-pixel area rasters (hectares)
+pixel_area_ha_dir = posixpath.join(
+    full_bucket_prefix,
+    processed_dir,
+    'pixel_area_ha/40000_pixels/20240101'
+)
+
+# directory containing per-pixel area rasters (square meters)
+pixel_area_dir = posixpath.join(
+    full_bucket_prefix,
+    processed_dir,
+    'pixel_area_m2/40000_pixels/20240101'
+)
+
+# file pattern for pixel area rasters
+pixel_area_pattern = 'pixel_area'
+
+# conversion factor from square meters to hectares
+m2_to_ha = 1e-4
+
+
 # ---------------------------------------------------
 # 3. Dataset File Patterns
 # ---------------------------------------------------
