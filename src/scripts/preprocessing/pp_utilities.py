@@ -5,6 +5,7 @@ import logging
 import subprocess
 import gc
 import re
+from osgeo import gdal
 
 import boto3
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
@@ -34,6 +35,7 @@ s3_client = boto3.client('s3', config=config)
 import boto3
 import botocore.exceptions
 import logging
+
 
 def s3_file_exists(bucket, key):
     """
@@ -88,6 +90,7 @@ def list_s3_files(bucket, prefix):
         logging.error(f"Error listing files in s3://{bucket}/{prefix}: {e}")
     return keys
 
+
 def upload_file_to_s3(local_file_path, bucket_name, s3_file_path):
     """
     Upload a local file to an S3 bucket.
@@ -106,6 +109,7 @@ def upload_file_to_s3(local_file_path, bucket_name, s3_file_path):
     except Exception as e:
         logging.error(f"Error uploading file to S3: {e}")
 
+
 def download_file_from_s3(s3_file_path, local_file_path, bucket_name):
     """
     Download a file from S3 to a local path.
@@ -123,6 +127,7 @@ def download_file_from_s3(s3_file_path, local_file_path, bucket_name):
         logging.info(f"Downloaded s3://{bucket_name}/{s3_file_path} to {local_file_path}")
     except Exception as e:
         logging.error(f"Error downloading file from S3: {e}")
+
 
 def download_shapefile_from_s3(s3_prefix, local_dir, s3_bucket_name):
     """
@@ -173,6 +178,7 @@ def read_shapefile_from_s3(s3_prefix, local_dir, s3_bucket_name):
         logging.error(f"Error reading shapefile from S3: {e}")
         return gpd.GeoDataFrame()  # Return an empty GeoDataFrame in case of error
 
+
 def get_existing_s3_files(s3_bucket, s3_prefix):
     """
     Get a list of existing files in an S3 bucket and prefix.
@@ -196,6 +202,7 @@ def get_existing_s3_files(s3_bucket, s3_prefix):
         logging.error(f"Error retrieving existing files from S3: {e}")
     return existing_files
 
+
 # -------------------- File Utilities --------------------
 
 def delete_file_if_exists(file_path):
@@ -214,6 +221,7 @@ def delete_file_if_exists(file_path):
             logging.info(f"Deleted existing file: {file_path}")
     except Exception as e:
         logging.error(f"Error deleting file {file_path}: {e}")
+
 
 def compress_file(input_file, output_file, nodata_value=None):
     """
@@ -247,6 +255,7 @@ def compress_file(input_file, output_file, nodata_value=None):
     except subprocess.CalledProcessError as e:
         logging.error(f"Error compressing file {input_file}: {e}")
 
+
 def compress_and_upload_file_to_s3(local_file, s3_bucket, s3_key, nodata_value=None):
     """
     Compress a local file using LZW compression and upload it to S3.
@@ -268,6 +277,7 @@ def compress_and_upload_file_to_s3(local_file, s3_bucket, s3_key, nodata_value=N
     except Exception as e:
         logging.error(f"Error compressing and uploading file {local_file}: {e}")
 
+
 # -------------------- Raster Utilities --------------------
 
 def log_raster_properties(raster, name):
@@ -288,6 +298,7 @@ def log_raster_properties(raster, name):
     logging.info(f"  Height: {raster.rio.height}")
     logging.info(f"  Count: {raster.rio.count}")
     logging.info(f"  Dtype: {raster.dtype}")
+
 
 def resample_raster(input_path, output_path, reference_path):
     """
@@ -320,6 +331,7 @@ def resample_raster(input_path, output_path, reference_path):
     except Exception as e:
         logging.error(f"Error in resampling raster: {e}")
 
+
 def reproject_raster(input_raster_path, output_raster_path, target_crs):
     """
     Reproject a raster to the target CRS using GDAL.
@@ -346,6 +358,7 @@ def reproject_raster(input_raster_path, output_raster_path, target_crs):
         logging.info(f"Reprojected raster saved to {output_raster_path}")
     except subprocess.CalledProcessError as e:
         logging.error(f"Error reprojecting raster: {e}")
+
 
 def rasterize_shapefile(gdf, output_raster_path, reference_raster_path, fill_value=0, burn_value=1):
     """
@@ -396,9 +409,11 @@ def rasterize_shapefile(gdf, output_raster_path, reference_raster_path, fill_val
     except Exception as e:
         logging.error(f"Error rasterizing shapefile: {e}")
 
+
 import numpy as np
 from rasterio.features import rasterize
 from rasterio.transform import from_bounds
+
 
 def rasterize_shapefile_no_ref(gdf, output_raster_path, bounds, resolution, fill_value=0, burn_value=1, dtype='uint8'):
     """
@@ -485,6 +500,7 @@ def get_hansen_tiles(index_shapefile_prefix, local_temp_dir, s3_bucket_name):
 
     return tiles
 
+
 def get_tile_ids_from_raster(raster_path, index_shapefile_path):
     """
     Get the tile IDs that intersect with the bounds of the input raster.
@@ -507,6 +523,7 @@ def get_tile_ids_from_raster(raster_path, index_shapefile_path):
         logging.error(f"Error getting tile IDs from raster: {e}")
         tile_ids = []
     return tile_ids
+
 
 def get_tile_bounds(index_shapefile, tile_id):
     """
@@ -531,6 +548,7 @@ def get_tile_bounds(index_shapefile, tile_id):
         logging.error(f"Error retrieving tile bounds for {tile_id}: {e}")
         return None
 
+
 # -------------------- Dask Utilities --------------------
 
 def shutdown_dask_clients():
@@ -547,6 +565,7 @@ def shutdown_dask_clients():
         except Exception as e:
             logging.error(f"Error shutting down client: {e}")
     logging.info("All Dask clients have been shut down.")
+
 
 def close_dask_clusters():
     """
@@ -565,6 +584,7 @@ def close_dask_clusters():
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired) as e:
                 logging.error(f"Failed to terminate {proc.info['name']} with PID {proc.info['pid']}: {e}")
 
+
 def setup_coiled_cluster():
     """
     Set up a Coiled Dask cluster.
@@ -578,12 +598,13 @@ def setup_coiled_cluster():
         compute_purchase_option="spot_with_fallback",
         idle_timeout="15 minutes",
         region="us-east-1",
-        name="test_coiled_connection",
+        name="roads_canals",
         account='wri-forest-research',
-        worker_memory="64GiB"
+        worker_memory="32GiB",
     )
     coiled_client = coiled_cluster.get_client()
     return coiled_client, coiled_cluster
+
 
 # -------------------- Miscellaneous Utilities --------------------
 
@@ -609,6 +630,7 @@ def delete_local_directory(directory_path):
     except Exception as e:
         logging.error(f"Error deleting directory {directory_path}: {e}")
 
+
 def create_directory_if_not_exists(directory_path):
     """
     Create a directory if it does not exist.
@@ -624,6 +646,7 @@ def create_directory_if_not_exists(directory_path):
         logging.info(f"Directory ensured: {directory_path}")
     except Exception as e:
         logging.error(f"Error creating directory {directory_path}: {e}")
+
 
 def get_raster_files_from_local(directory):
     """
@@ -641,6 +664,7 @@ def get_raster_files_from_local(directory):
             if file.endswith('.tif'):
                 raster_files.append(os.path.join(root, file))
     return raster_files
+
 
 def get_raster_files_from_s3(s3_directory):
     """
@@ -663,6 +687,7 @@ def get_raster_files_from_s3(s3_directory):
     except Exception as e:
         logging.error(f"Error retrieving raster files from S3: {e}")
     return raster_files
+
 
 def create_tile_index_from_local(local_directories, output_dir):
     """
@@ -690,6 +715,7 @@ def create_tile_index_from_local(local_directories, output_dir):
         gdf.to_file(output_shapefile, driver='ESRI Shapefile')
         logging.info(f"Tile index shapefile created at {output_shapefile}")
 
+
 def create_tile_index_from_s3(s3_directories, output_dir):
     """
     Create tile index shapefiles from S3 directories.
@@ -715,6 +741,7 @@ def create_tile_index_from_s3(s3_directories, output_dir):
         output_shapefile = os.path.join(output_dir, f"{dataset_name}_tile_index.shp")
         gdf.to_file(output_shapefile, driver='ESRI Shapefile')
         logging.info(f"Tile index shapefile created at {output_shapefile}")
+
 
 # def list_tile_ids(bucket, prefix, pattern=r"(\d{2}[NS]_\d{3}[EW])_peat_mask_processed\.tif"):
 #     """
@@ -781,6 +808,7 @@ def list_tile_ids(bucket, prefix, pattern):
         logging.error(f"Error listing files in s3://{bucket}/{prefix}: {e}")
     return list(tile_ids)
 
+
 def get_chunk_bounds(minx, miny, maxx, maxy, chunk_size):
     """
     Divide a bounding box into smaller chunks of the specified size.
@@ -802,6 +830,7 @@ def get_chunk_bounds(minx, miny, maxx, maxy, chunk_size):
         for y in y_coords:
             chunks.append(box(x, y, x + chunk_size, y + chunk_size))
     return chunks
+
 
 def export_chunks_to_shapefile(chunk_params, output_filename):
     """
@@ -846,6 +875,7 @@ def export_chunks_to_shapefile(chunk_params, output_filename):
 import rasterio
 from rasterio.merge import merge
 
+
 def merge_rasters(input_files, output_path):
     """
     Merge multiple raster files into one.
@@ -879,3 +909,81 @@ def merge_rasters(input_files, output_path):
 
     except Exception as e:
         logging.error(f"Error merging rasters: {e}")
+
+
+def get_10x10_tile_bounds(tile_id: str) -> tuple[int, int, int, int]:
+    """Return W,S,E,N bounds for a 10×10 degree tile like ``00N_110E``."""
+    lat = int(tile_id[:2]) * (-1 if "S" in tile_id else 1)
+    lon = int(tile_id[4:7]) * (-1 if "W" in tile_id else 1)
+    max_y, min_y = (lat, lat - 10)
+    min_x, max_x = (lon, lon + 10)
+    return min_x, min_y, max_x, max_y
+
+
+# List files in an S3 bucket with a certain pattern
+def list_s3_files_with_pattern(s3_path, pattern):
+    s3 = boto3.client("s3")
+    bucket_name, prefix = split_s3_path(s3_path)
+
+    matching_files = []
+    continuation_token = None  # For pagination
+
+    while True:
+        if continuation_token:
+            response = s3.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=prefix,
+                ContinuationToken=continuation_token
+            )
+        else:
+            response = s3.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=prefix
+            )
+
+        # Check if there are any contents
+        if "Contents" in response:
+            for obj in response["Contents"]:
+                key = obj["Key"]
+                if pattern in key:
+                    matching_files.append(f"s3://{bucket_name}/{key}")
+
+        # Check if there's more data to retrieve
+        if response.get("IsTruncated"):  # If True, there are more pages to fetch
+            continuation_token = response["NextContinuationToken"]
+        else:
+            break  # No more pages left
+
+    return matching_files
+
+
+# Splits a full s3 path "s3://bucket-name/rest_of_path" into "bucket-name" and "rest_of_path"
+def split_s3_path(s3_path):
+    s3_path = s3_path.replace("s3://", "")  # Remove the "s3://" prefix
+    bucket, key = s3_path.split("/", 1)  # Split the remaining string by the first "/"
+    return bucket, key
+
+
+# Maps GDAL data type to the appropriate string value
+gdal_to_string_dtype_mapping = {
+    gdal.GDT_Byte: 'Byte',
+    gdal.GDT_UInt16: 'UInt16',
+    gdal.GDT_Int16: 'Int16',
+    gdal.GDT_UInt32: 'UInt32',
+    gdal.GDT_Int32: 'Int32',
+    gdal.GDT_Float32: 'Float32',
+    gdal.GDT_Float64: 'Float64',
+    'Int8': 'Int8',  # GDAL doesn't have int8, apparently. Outside Coiled, this converts it correctly.
+    14: 'Int8'  # GDAL doesn't have int8, apparently. In Coiled, this converts it correctly.
+}
+
+# Maps GDAL data type to the appropriate string value
+string_to_gdal_dtype_mapping = {
+    'Byte': gdal.GDT_Byte,
+    'UInt16': gdal.GDT_UInt16,
+    'Int16': gdal.GDT_Int16,
+    'UInt32': gdal.GDT_UInt32,
+    'Int32': gdal.GDT_Int32,
+    'Float32': gdal.GDT_Float32,
+    'Float64': gdal.GDT_Float64
+}
