@@ -198,25 +198,30 @@ def process_chunk(bounds, tile_id, feature_type):
         logging.info(f"[{tile_id}|{chunk_str}] lines do not intersect chunk => skip.")
         return
 
-    # partial line length per line segment
-    lines_clip["length_m"] = lines_clip.geometry.length
+    # Bring Dask GeoDataFrames to pandas for geometric ops
+    lines_gdf = lines_clip.compute()
+    fishnet_gdf = fishnet_dgdf.compute()
 
-    # Assign each partial line to a fishnet cell using a single overlay
-    fishnet_dgdf = fishnet_dgdf.reset_index(drop=True)
-    fishnet_dgdf["cell_id"] = fishnet_dgdf.index
-
-    joined = dgpd.overlay(lines_clip, fishnet_dgdf, how="intersection")
-    if len(joined) == 0:
-        logging.info(f"[{tile_id}|{chunk_str}] after overlay => no partial lines => skip.")
+    # Clip road segments to the fishnet grid (union of cells)
+    clipped = gpd.clip(lines_gdf, fishnet_gdf)
+    if clipped.empty:
+        logging.info(f"[{tile_id}|{chunk_str}] no lines within fishnet => skip.")
         return
 
-    joined["partial_len"] = joined.geometry.length
+    # Assign each clipped line to a cell and sum lengths per cell
+    fishnet_gdf = fishnet_gdf.reset_index(drop=True)
+    fishnet_gdf["cell_id"] = fishnet_gdf.index
+    joined = gpd.sjoin(clipped, fishnet_gdf[["geometry", "cell_id"]], how="inner", predicate="intersects")
+    if joined.empty:
+        logging.info(f"[{tile_id}|{chunk_str}] join produced no segments => skip.")
+        return
 
-    # Group by cell_id in a partitioned manner then compute
-    length_by_cell = joined.groupby("cell_id")["partial_len"].sum().compute().reset_index()
+    joined["partial_len"] = joined.apply(
+        lambda row: row.geometry.intersection(row.geometry_right).length,
+        axis=1,
+    )
+    length_by_cell = joined.groupby("cell_id")["partial_len"].sum().reset_index()
 
-    # Bring fishnet to pandas only for rasterization
-    fishnet_gdf = fishnet_dgdf.compute()
     fishnet_gdf = fishnet_gdf.merge(length_by_cell, on="cell_id", how="left")
     fishnet_gdf["partial_len"].fillna(0, inplace=True)
 
@@ -242,6 +247,7 @@ def process_chunk(bounds, tile_id, feature_type):
         dtype=np.float32,
         all_touched=True
     )
+
     # optional: convert to km
     burned /= 1000.0
 
