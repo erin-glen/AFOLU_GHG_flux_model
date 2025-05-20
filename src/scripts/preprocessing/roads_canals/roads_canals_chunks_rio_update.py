@@ -29,6 +29,7 @@ import rioxarray as rxr
 from rasterio.features import rasterize
 from shapely.geometry import box
 from dask.distributed import Client, LocalCluster
+from rasterio.warp import transform_bounds
 
 from src.scripts.utilities import universal_utilities as uutil
 import src.scripts.preprocessing.preprocessing_constants as cn
@@ -65,25 +66,26 @@ def mask_peatraster(data):
 
 def create_fishnet_from_masked(masked_data, transform):
     """
-    Create a fishnet (cells) where masked_data == 1, from a transform (Affine).
-    Return as a Dask GeoDataFrame.
+    Create a fishnet (cells) where ``masked_data`` equals 1.
+
+    This function used to iterate over every cell in the raster which was
+    expensive for large arrays.  We now locate only the non-zero pixels using
+    ``numpy.nonzero`` and build polygons for those locations.  The result is
+    wrapped in a ``dask_geopandas`` GeoDataFrame for parallel operations.
     """
-    rows, cols = masked_data.shape
+
+    rows, cols = np.nonzero(masked_data)
     polygons = []
-    for row in range(rows):
-        for col in range(cols):
-            if masked_data[row, col] == 1:
-                # Convert (row,col) => bounding box in the transform
-                # transform*(col,row) => (x, y) top-left
-                # transform*(col+1,row+1) => (x2,y2) bottom-right
-                x1, y1 = transform * (col, row)
-                x2, y2 = transform * (col+1, row+1)
-                polygons.append(box(x1, y1, x2, y2))
+    for r, c in zip(rows, cols):
+        x1, y1 = transform * (c, r)
+        x2, y2 = transform * (c + 1, r + 1)
+        polygons.append(box(x1, y1, x2, y2))
+
+    if not polygons:
+        return dgpd.from_geopandas(gpd.GeoDataFrame({'geometry': []}, crs="EPSG:3395"), npartitions=1)
 
     gdf = gpd.GeoDataFrame({'geometry': polygons}, crs="EPSG:3395")
-    # Wrap in dask for parallel ops if needed:
-    dgdf = dgpd.from_geopandas(gdf, npartitions=10)
-    return dgdf
+    return dgpd.from_geopandas(gdf, npartitions=10)
 
 def read_reprojected_lines_dask(tile_id, feature_type):
     """
@@ -143,6 +145,8 @@ def process_chunk(bounds, tile_id, feature_type):
 
     try:
         da = rxr.open_rasterio(raster_path, masked=True)
+        logging.debug(f"Union mask CRS: {da.rio.crs}")
+        logging.debug(f"Union mask bounds: {da.rio.bounds()}")
     except Exception as e:
         logging.error(f"[{tile_id}|{chunk_str}] Could not open union mask: {e}")
         return
@@ -150,7 +154,10 @@ def process_chunk(bounds, tile_id, feature_type):
     # 2) clip by bounds
     minx, miny, maxx, maxy = bounds
     try:
-        chunked_da = da.rio.clip_box(minx, miny, maxx, maxy)
+        minx, miny, maxx, maxy = transform_bounds(
+            "EPSG:4326", da.rio.crs, minx, miny, maxx, maxy, densify_pts=21
+        )
+        chunked_da = da.rio.clip_box(minx=minx, miny=miny, maxx=maxx, maxy=maxy)
         if chunked_da.isnull().all():
             logging.info(f"[{tile_id}|{chunk_str}] No data in this chunk's raster. Skipping.")
             return
@@ -181,42 +188,35 @@ def process_chunk(bounds, tile_id, feature_type):
     # We must do: fishnet_dgdf & lines_dgdf => partial line length
     # Because both are in EPSG:3395, we do approximate partial length.
 
-    # We'll compute them in memory. For large data, consider partitioned merges
-    fishnet_gdf = fishnet_dgdf.compute()
-    lines_gdf = lines_dgdf.compute()
-    if lines_gdf.empty:
-        logging.info(f"[{tile_id}|{chunk_str}] lines are empty after compute => skip.")
-        return
+    # Keep operations on the Dask GeoDataFrames as long as possible
+    # to avoid materializing large intermediate pandas objects.
 
-    # Filter lines that intersect chunk bounding box
+    # Filter lines that intersect the chunk bounds
     chunk_poly = box(minx, miny, maxx, maxy)
-    lines_clip = gpd.clip(lines_gdf, chunk_poly)
-    if lines_clip.empty:
+    lines_clip = dgpd.clip(lines_dgdf, chunk_poly)
+    if len(lines_clip) == 0:
         logging.info(f"[{tile_id}|{chunk_str}] lines do not intersect chunk => skip.")
         return
 
-    # partial line length
+    # partial line length per line segment
     lines_clip["length_m"] = lines_clip.geometry.length
 
-    # We want to figure out which fishnet cell each partial line belongs to.
-    # Typically we'd do a spatial join or overlay:
-    joined = gpd.overlay(lines_clip, fishnet_gdf, how="intersection")
-    if joined.empty:
+    # Assign each partial line to a fishnet cell using a single overlay
+    fishnet_dgdf = fishnet_dgdf.reset_index(drop=True)
+    fishnet_dgdf["cell_id"] = fishnet_dgdf.index
+
+    joined = dgpd.overlay(lines_clip, fishnet_dgdf, how="intersection")
+    if len(joined) == 0:
         logging.info(f"[{tile_id}|{chunk_str}] after overlay => no partial lines => skip.")
         return
 
-    # partial lines => length
     joined["partial_len"] = joined.geometry.length
-    # sum partial_len by the fishnet cell
-    # fishnet had no unique ID. We'll create one:
-    fishnet_gdf["cell_id"] = range(len(fishnet_gdf))
-    joined2 = gpd.overlay(lines_clip, fishnet_gdf, how="intersection")
-    joined2["partial_len"] = joined2.geometry.length
 
-    # sum by cell_id
-    length_by_cell = joined2.groupby("cell_id")["partial_len"].sum().reset_index()
+    # Group by cell_id in a partitioned manner then compute
+    length_by_cell = joined.groupby("cell_id")["partial_len"].sum().compute().reset_index()
 
-    # merge back into fishnet
+    # Bring fishnet to pandas only for rasterization
+    fishnet_gdf = fishnet_dgdf.compute()
     fishnet_gdf = fishnet_gdf.merge(length_by_cell, on="cell_id", how="left")
     fishnet_gdf["partial_len"].fillna(0, inplace=True)
 
@@ -318,7 +318,7 @@ def process_all_tiles(feature_type, chunk_size=2):
 
 def main(tile_id=None, feature_type="osm_roads", chunk_bounds=None, chunk_size=2, client="local"):
     if client == "coiled":
-        dclient, cluster = uutil.connect_to_cluster(
+        cluster, dclient = uutil.connect_to_cluster(
             cluster_name="roads_canals",
             n_workers=20,
             region="us-east-1",
@@ -331,12 +331,19 @@ def main(tile_id=None, feature_type="osm_roads", chunk_bounds=None, chunk_size=2
 
     try:
         if tile_id:
-            tasks = process_tile(tile_id, feature_type, chunk_size=chunk_size, chunk_bounds=chunk_bounds)
-            dask.compute(*tasks)
+            tasks = process_tile(
+                tile_id, feature_type, chunk_size=chunk_size, chunk_bounds=chunk_bounds
+            )
         else:
             tasks = process_all_tiles(feature_type, chunk_size=chunk_size)
-            dask.compute(*tasks)
+
+        if not tasks:
+            logging.warning("No tasks generated; nothing to compute.")
+            return
+
+        dask.compute(*tasks)
     finally:
+        # Cleanup resources after processing tasks or early exit
         dclient.close()
         if client == "coiled":
             cluster.close()
