@@ -7,7 +7,7 @@ pytest.importorskip("dask_geopandas")
 
 import dask_geopandas as dgpd
 
-from src.scripts.preprocessing.roads_canals import roads_canals_chunks_rio_update as rc
+from src.scripts.preprocessing.roads_canals.global_datasets import roads_canals_coiled as rc
 
 
 def test_create_fishnet_from_masked():
