@@ -23,12 +23,12 @@ from src.scripts.utilities.constants_and_names import (
 
 # Peat mask related paths
 peat_pattern = "_peat_mask_processed.tif"
-peat_tiles_prefix_1km = pp.join(project_dir, processed_dir, "peat_mask", "GFW", "1km") + "/"
-peat_tiles_prefix_1km_3395 = pp.join(project_dir, processed_dir, "peat_mask", "1km_3395") + "/"
+peat_tiles_prefix_1km = pp.join(processed_dir, "peat_mask", "GFW", "1km") + "/"
+peat_tiles_prefix_1km_3395 = pp.join(processed_dir, "peat_mask", "1km_3395") + "/"
 peat_tiles_prefix = "climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"
 
 # Global tile index (no extension)
-index_shapefile_prefix = pp.join(project_dir, raw_dir, "index/Global_Peatlands")
+index_shapefile_prefix = pp.join(raw_dir, "index/Global_Peatlands")
 
 # 30 m resolution in degrees (approx. 1 km)
 resolution = 0.000025
@@ -40,49 +40,49 @@ datasets = {
     'osm': {
         'roads': {
             's3_raw': pp.join(project_dir, raw_dir, 'roads', 'osm_roads', 'roads_by_tile'),
-            's3_processed_base': pp.join(project_dir, processed_dir, 'osm_roads_density'),
-            's3_processed_small': pp.join(project_dir, processed_dir, 'osm_roads_density',
+            's3_processed_base': pp.join(processed_dir, 'osm_roads_density'),
+            's3_processed_small': pp.join(processed_dir, 'osm_roads_density',
                                           '4000_pixels', today_date),
-            's3_processed': pp.join(project_dir, processed_dir, 'osm_roads_density', today_date),
+            's3_processed': pp.join(processed_dir, 'osm_roads_density', today_date),
             'local_processed': pp.join(local_temp_dir, 'osm_roads_density', today_date),
-            's3_projected': pp.join(project_dir, raw_dir, 'roads', 'osm_roads', 'roads_by_tile_3395')
+            's3_projected': pp.join(raw_dir, 'roads', 'osm_roads', 'roads_by_tile_3395')
         },
         'canals': {
-            's3_raw': pp.join(project_dir, raw_dir, 'roads', 'osm_roads', 'canals_by_tile'),
-            's3_processed_base': pp.join(project_dir, processed_dir, 'osm_canals_density'),
-            's3_processed_small': pp.join(project_dir, processed_dir, 'osm_canals_density',
+            's3_raw': pp.join(raw_dir, 'roads', 'osm_roads', 'canals_by_tile'),
+            's3_processed_base': pp.join(processed_dir, 'osm_canals_density'),
+            's3_processed_small': pp.join(processed_dir, 'osm_canals_density',
                                           '4000_pixels', today_date),
-            's3_processed': pp.join(project_dir, processed_dir, 'osm_canals_density', today_date),
-            'local_processed': pp.join(local_temp_dir, 'osm_canals_density', today_date),
-            's3_projected': pp.join(project_dir, raw_dir, 'roads', 'osm_roads', 'canals_by_tile_3395')
+            's3_processed': pp.join(processed_dir, 'osm_canals_density', today_date),
+            'local_processed': pp.join('osm_canals_density', today_date),
+            's3_projected': pp.join(raw_dir, 'roads', 'osm_roads', 'canals_by_tile_3395')
         }
     },
     'grip': {
         'roads': {
-            's3_raw': pp.join(project_dir, raw_dir, 'roads', 'grip_roads', 'roads_by_tile'),
-            's3_processed_base': pp.join(project_dir, processed_dir, 'grip_density'),
-            's3_processed_small': pp.join(project_dir, processed_dir, 'grip_density',
+            's3_raw': pp.join(raw_dir, 'roads', 'grip_roads', 'roads_by_tile'),
+            's3_processed_base': pp.join(processed_dir, 'grip_density'),
+            's3_processed_small': pp.join(processed_dir, 'grip_density',
                                           '4000_pixels', today_date),
-            's3_processed': pp.join(project_dir, processed_dir, 'grip_density', today_date),
+            's3_processed': pp.join(processed_dir, 'grip_density', today_date),
             'local_processed': pp.join(local_temp_dir, 'grip_density', today_date),
-            's3_projected': pp.join(project_dir, raw_dir, 'roads', 'grip_roads', 'roads_by_tile_3395')
+            's3_projected': pp.join(raw_dir, 'roads', 'grip_roads', 'roads_by_tile_3395')
         }
     },
     'engert': {
-        's3_raw': pp.join(project_dir, raw_dir, 'roads', 'engert_roads',
+        's3_raw': pp.join(raw_dir, 'roads', 'engert_roads',
                           'engert_asiapac_ghrdens_1km_resample_30m.tif'),
-        's3_processed_base': pp.join(project_dir, processed_dir, 'engert_density', '30m'),
-        's3_processed': pp.join(project_dir, processed_dir, 'engert_density', '30m', today_date),
-        'local_processed': pp.join(local_temp_dir, 'engert_density', today_date),
-        'working_version': pp.join(project_dir, processed_dir, 'engert_density', '30m', '20240925')
+        's3_processed_base': pp.join(processed_dir, 'engert_density', '30m'),
+        's3_processed': pp.join(processed_dir, 'engert_density', '30m', today_date),
+        'local_processed': pp.join('engert_density', today_date),
+        'working_version': pp.join(processed_dir, 'engert_density', '30m', '20240925')
     },
     'dadap': {
-        's3_raw': pp.join(project_dir, raw_dir, 'canals', 'Dadap_SEA_Drainage',
+        's3_raw': pp.join(raw_dir, 'canals', 'Dadap_SEA_Drainage',
                           'canal_length_data', 'canal_length_1km_resample_30m.tif'),
-        's3_processed_base': pp.join(project_dir, processed_dir, 'dadap_density', '30m'),
-        's3_processed': pp.join(project_dir, processed_dir, 'dadap_density', '30m', today_date),
+        's3_processed_base': pp.join(processed_dir, 'dadap_density', '30m'),
+        's3_processed': pp.join(processed_dir, 'dadap_density', '30m', today_date),
         'local_processed': pp.join(local_temp_dir, 'dadap_density', today_date),
-        'working_version': pp.join(project_dir, processed_dir, 'dadap_density', '30m', '20240925')
+        'working_version': pp.join(processed_dir, 'dadap_density', '30m', '20240925')
 
     },
     'planted_forest_type': {
@@ -91,47 +91,47 @@ datasets = {
     },
     'extraction': {
         'finland': {
-            's3_raw': f'{project_dir}/{raw_dir}/extraction/Finland/Finland_turvetuotantoalueet/'
+            's3_raw': f'{raw_dir}/extraction/Finland/Finland_turvetuotantoalueet/'
                       f'turvetuotantoalueet_jalkikaytto',
-            's3_processed_base': f'{project_dir}/{processed_dir}/extraction/',
-            's3_processed': f'{project_dir}/{processed_dir}/extraction/{today_date}/',
+            's3_processed_base': f'{processed_dir}/extraction/',
+            's3_processed': f'{processed_dir}/extraction/{today_date}/',
             'local_processed': f'{local_temp_dir}/extraction/finland/{today_date}/'
         },
         'ireland': {
-            's3_raw': f'{project_dir}/{raw_dir}/extraction/Ireland/Ireland_Habibetal/RF_S2_LU_5_11_23.tif',
-            's3_processed_base': f'{project_dir}/{processed_dir}/extraction/',
-            's3_processed': f'{project_dir}/{processed_dir}/extraction/{today_date}/',
+            's3_raw': f'{raw_dir}/extraction/Ireland/Ireland_Habibetal/RF_S2_LU_5_11_23.tif',
+            's3_processed_base': f'{processed_dir}/extraction/',
+            's3_processed': f'{processed_dir}/extraction/{today_date}/',
             'local_processed': f'{local_temp_dir}/extraction/ireland/{today_date}/'
         },
         'russia': {
             's3_raw': [
-                f'{project_dir}/{raw_dir}/extraction/Russia/allocated_without_licenses/'
+                f'{raw_dir}/extraction/Russia/allocated_without_licenses/'
                 f'allocated_mineral_reserve',
-                f'{project_dir}/{raw_dir}/extraction/Russia/allocated_with_licenses/'
+                f'{raw_dir}/extraction/Russia/allocated_with_licenses/'
                 f'peat_extraction_dates'
             ],
-            's3_processed_base': f'{project_dir}/{processed_dir}/extraction/',
-            's3_processed': f'{project_dir}/{processed_dir}/extraction/{today_date}/',
+            's3_processed_base': f'{processed_dir}/extraction/',
+            's3_processed': f'{processed_dir}/extraction/{today_date}/',
             'local_processed': f'{local_temp_dir}/extraction/russia/{today_date}/'
         }
     },
     'descals_oil_palm': {
         'plantation_year': {
-            's3_raw': pp.join(project_dir, raw_dir, 'plantations', 'plantation_year'),
-            's3_processed_base': pp.join(project_dir, processed_dir, 'descals_plantation', 'year'),
-            's3_processed': pp.join(project_dir, processed_dir, 'descals_plantation',
+            's3_raw': pp.join(raw_dir, 'plantations', 'plantation_year'),
+            's3_processed_base': pp.join(processed_dir, 'descals_plantation', 'year'),
+            's3_processed': pp.join(processed_dir, 'descals_plantation',
                                     'year', today_date),
             'local_processed': pp.join(local_temp_dir, 'descals_plantation', 'year', today_date),
-            'working_version': pp.join(project_dir, processed_dir, 'descals_plantation',
+            'working_version': pp.join(processed_dir, 'descals_plantation',
                                        'year', '20240823')
         },
         'plantation_type': {
-            's3_raw': pp.join(project_dir, raw_dir, 'plantations', 'plantation_extent'),
-            's3_processed_base': pp.join(project_dir, processed_dir, 'descals_plantation', 'extent'),
-            's3_processed': pp.join(project_dir, processed_dir, 'descals_plantation',
+            's3_raw': pp.join(raw_dir, 'plantations', 'plantation_extent'),
+            's3_processed_base': pp.join(processed_dir, 'descals_plantation', 'extent'),
+            's3_processed': pp.join(processed_dir, 'descals_plantation',
                                     'extent', today_date),
             'local_processed': pp.join(local_temp_dir, 'descals_plantation', 'extent', today_date),
-            'working_version': pp.join(project_dir, processed_dir, 'descals_plantation',
+            'working_version': pp.join(processed_dir, 'descals_plantation',
                                        'extent', '20240823')
         }
     },
@@ -141,37 +141,37 @@ datasets = {
         },
         'gpd': {
             'input_type': 'raster',
-            's3_raw': pp.join(project_dir, raw_dir, 'soils', 'GPD', 'peatGPA22WGS_2cl.tif'),
-            's3_processed': pp.join(project_dir, processed_dir, 'peat_mask', 'GPD', 'tiles') + '/',
+            's3_raw': pp.join(raw_dir, 'soils', 'GPD', 'peatGPA22WGS_2cl.tif'),
+            's3_processed': pp.join(processed_dir, 'peat_mask', 'GPD', 'tiles') + '/',
             'local_processed': pp.join(local_temp_dir, 'peat', 'gpd', 'tiles') + '/'
         },
         'peatmap': {
             'input_type': 'vector',
-            's3_raw': pp.join(project_dir, raw_dir, 'soils', 'PEATMAP'),
+            's3_raw': pp.join(raw_dir, 'soils', 'PEATMAP'),
             'file_pattern': '*.shp',
-            's3_processed': pp.join(project_dir, processed_dir, 'peat_mask',
+            's3_processed': pp.join(processed_dir, 'peat_mask',
                                     'PEATMAP', 'tiles') + '/',
             'local_processed': pp.join(local_temp_dir, 'peat', 'peatmap', 'tiles') + '/'
         },
         'peatml': {
             'input_type': 'raster',
             'threshold': 50,
-            's3_raw': pp.join(project_dir, raw_dir, 'soils',
+            's3_raw': pp.join(raw_dir, 'soils',
                               'PEATML', 'Peat-ML_global_peatland_extent.tif'),
-            's3_processed': pp.join(project_dir, processed_dir, 'peat_mask',
+            's3_processed': pp.join(processed_dir, 'peat_mask',
                                     'PEATML', 'tiles') + '/',
             'local_processed': pp.join(local_temp_dir, 'peat', 'peatml', 'tiles') + '/'
         },
         'union_mask': {
             '30m': pp.join(
-                project_dir, processed_dir, 'peat_mask', 'union', '30m', 'tiles'
+                processed_dir, 'peat_mask', 'union', '30m', 'tiles'
             )
             + '/',
             '1km': pp.join(
-                project_dir, processed_dir, 'peat_mask', 'union', '1km', 'tiles'
+                processed_dir, 'peat_mask', 'union', '1km', 'tiles'
             )
             + '/',
-            '1km_3395': pp.join(project_dir,processed_dir, 'peat_mask','union','1km_3395','tiles',
+            '1km_3395': pp.join(processed_dir, 'peat_mask','union','1km_3395',
             )
             + '/',
         }
