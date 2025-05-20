@@ -160,7 +160,7 @@ def main(do_grip=True, do_osm_roads=True, do_osm_canals=True,
 
     # start cluster only when needed
     if client_type == "coiled":
-        client, cluster = uutil.connect_to_cluster(
+        cluster, client = uutil.connect_to_cluster(
             cluster_name="roads_canals",
             n_workers=20,
             region="us-east-1",

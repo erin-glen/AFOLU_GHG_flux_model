@@ -330,7 +330,7 @@ def main(tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="default", cl
     """
     logging.info(f"SDPT chunk-based script => partial TIFs to {cn.datasets['sdpt']['s3_processed_small']}.")
     if client_type == "coiled":
-        client, cluster = uutil.connect_to_cluster(
+        cluster, client = uutil.connect_to_cluster(
             cluster_name="roads_canals",
             n_workers=20,
             region="us-east-1",
