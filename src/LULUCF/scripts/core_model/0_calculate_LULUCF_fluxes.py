@@ -1127,7 +1127,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                     # TODO revisit constants used here. Never really resolved issues about starting carbon or what to do with residual carbon.
                     elif not (short_veg_prev or med_veg_prev) and (short_veg_curr or med_veg_curr): ##TODO: @Mel If mangrove branch at top, no exception needed here?
                         node = nu.accrete_node(node, cn.grassland_node)  # General short/med node code (5)
-                        state_out = nu.accrete_node(node, 1)  # Short/med veg gain (51)
+                        state_out = nu.accrete_node(node, 1)  # Short/med vegetation gain (51)
                         RF_AGC_final = cn.short_med_veg_rf
                         RF_BGC_final = cn.short_med_veg_rf * r_s_ratio_non_mang   # TODO Revisit the BGC RF
                         rf_array = np.array([RF_AGC_final, RF_BGC_final, 0, 0]).astype('float32')
