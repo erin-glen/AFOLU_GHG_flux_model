@@ -211,16 +211,25 @@ def process_chunk(bounds, tile_id, feature_type):
     # Assign each clipped line to a cell and sum lengths per cell
     fishnet_gdf = fishnet_gdf.reset_index(drop=True)
     fishnet_gdf["cell_id"] = fishnet_gdf.index
-    joined = gpd.sjoin(clipped, fishnet_gdf[["geometry", "cell_id"]], how="inner", predicate="intersects")
+    joined = gpd.sjoin(
+        clipped,
+        fishnet_gdf[["geometry", "cell_id"]],
+        how="inner",
+        predicate="intersects",
+    )
     if joined.empty:
         logging.info(f"[{tile_id}|{chunk_str}] join produced no segments => skip.")
         return
 
     joined["partial_len"] = joined.apply(
-        lambda row: row.geometry.intersection(row.geometry_right).length,
+        lambda row: row.geometry.intersection(
+            fishnet_gdf.loc[row["index_right"], "geometry"]
+        ).length,
         axis=1,
     )
-    length_by_cell = joined.groupby("cell_id")["partial_len"].sum().reset_index()
+    length_by_cell = (
+        joined.groupby("cell_id")["partial_len"].sum().reset_index()
+    )
 
     fishnet_gdf = fishnet_gdf.merge(length_by_cell, on="cell_id", how="left")
     fishnet_gdf["partial_len"].fillna(0, inplace=True)
@@ -247,7 +256,6 @@ def process_chunk(bounds, tile_id, feature_type):
         dtype=np.float32,
         all_touched=True
     )
-
     # optional: convert to km
     burned /= 1000.0
 
