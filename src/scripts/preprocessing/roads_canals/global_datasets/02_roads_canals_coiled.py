@@ -90,7 +90,7 @@ def create_fishnet_from_masked(masked_data, transform):
 
 def dask_gdf_is_empty(dgdf):
     """Return True if a Dask GeoDataFrame has no rows."""
-    return dgdf.map_partitions(len).sum().compute() == 0
+    return dgdf.map_partitions(len).compute().sum() == 0
 
 def read_reprojected_lines_dask(tile_id, feature_type):
     """
