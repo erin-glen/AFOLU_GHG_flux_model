@@ -20,6 +20,7 @@ Usage example:
 import os
 import logging
 import gc
+import boto3
 import numpy as np
 import dask
 import dask_geopandas as dgpd
@@ -86,6 +87,10 @@ def create_fishnet_from_masked(masked_data, transform):
 
     gdf = gpd.GeoDataFrame({'geometry': polygons}, crs="EPSG:3395")
     return dgpd.from_geopandas(gdf, npartitions=10)
+
+def dask_gdf_is_empty(dgdf):
+    """Return True if a Dask GeoDataFrame has no rows."""
+    return dgdf.map_partitions(len).sum().compute() == 0
 
 def read_reprojected_lines_dask(tile_id, feature_type):
     """
@@ -174,13 +179,13 @@ def process_chunk(bounds, tile_id, feature_type):
     # create fishnet
     transform = chunked_da.rio.transform()
     fishnet_dgdf = create_fishnet_from_masked(masked, transform)
-    if len(fishnet_dgdf) == 0:
+    if dask_gdf_is_empty(fishnet_dgdf):
         logging.info(f"[{tile_id}|{chunk_str}] fishnet is empty => skipping.")
         return
 
     # 4) read lines => partial line length
     lines_dgdf = read_reprojected_lines_dask(tile_id, feature_type)
-    if len(lines_dgdf) == 0:
+    if dask_gdf_is_empty(lines_dgdf):
         logging.info(f"[{tile_id}|{chunk_str}] lines are empty => skip.")
         return
 
@@ -194,7 +199,7 @@ def process_chunk(bounds, tile_id, feature_type):
     # Filter lines that intersect the chunk bounds
     chunk_poly = box(minx, miny, maxx, maxy)
     lines_clip = dgpd.clip(lines_dgdf, chunk_poly)
-    if len(lines_clip) == 0:
+    if dask_gdf_is_empty(lines_clip):
         logging.info(f"[{tile_id}|{chunk_str}] lines do not intersect chunk => skip.")
         return
 
@@ -274,7 +279,6 @@ def process_chunk(bounds, tile_id, feature_type):
     logging.info(f"[{tile_id}|{chunk_str}] saved local => {local_out}")
 
     # upload
-    import boto3
     s3_client = boto3.client("s3")
     s3_client.upload_file(local_out, cn.s3_bucket_name, s3_out_key)
     logging.info(f"[{tile_id}|{chunk_str}] uploaded => s3://{cn.s3_bucket_name}/{s3_out_key}")
