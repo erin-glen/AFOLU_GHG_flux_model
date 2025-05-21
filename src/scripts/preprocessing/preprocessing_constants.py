@@ -53,7 +53,7 @@ datasets = {
             's3_processed_small': pp.join(processed_dir, 'osm_canals_density',
                                           '4000_pixels', today_date),
             's3_processed': pp.join(processed_dir, 'osm_canals_density', today_date),
-            'local_processed': pp.join('osm_canals_density', today_date),
+            'local_processed': pp.join(local_temp_dir, 'osm_canals_density', today_date),
             's3_projected': pp.join(raw_dir, 'roads', 'osm_roads', 'canals_by_tile_3395')
         }
     },
@@ -73,7 +73,7 @@ datasets = {
                           'engert_asiapac_ghrdens_1km_resample_30m.tif'),
         's3_processed_base': pp.join(processed_dir, 'engert_density', '30m'),
         's3_processed': pp.join(processed_dir, 'engert_density', '30m', today_date),
-        'local_processed': pp.join('engert_density', today_date),
+        'local_processed': pp.join(local_temp_dir, 'engert_density', today_date),
         'working_version': pp.join(processed_dir, 'engert_density', '30m', '20240925')
     },
     'dadap': {
