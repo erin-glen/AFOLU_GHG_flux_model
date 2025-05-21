@@ -8,8 +8,6 @@ Restored workflow using Dask GeoDataFrames to:
   3) Read reprojected roads/canals from S3 as a Dask GeoDataFrame (EPSG:3395).
   4) Intersect and assign partial line length to fishnet cells.
   5) Convert fishnet to a raster, write locally, and upload to S3.
-  6) Optionally mosaic the chunk outputs and warp to final Hansen-style tiles
-     using ``--postprocess``.
 
 Chunk-based approach:
   - We might chunk each 10×10 tile into sub-bounds (2° × 2°, etc.),
@@ -33,16 +31,10 @@ from rasterio.features import rasterize
 from shapely.geometry import box
 from dask.distributed import Client, LocalCluster
 from rasterio.warp import transform_bounds
-import posixpath
-import tempfile
 
 from src.scripts.utilities import universal_utilities as uutil
 import src.scripts.preprocessing.preprocessing_constants as cn
 import src.scripts.preprocessing.utilities as uu
-from src.scripts.preprocessing.hansenize.hansenize_coiled import (
-    build_vrt_gdal_coiled,
-    warp_to_hansen_coiled,
-)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -98,7 +90,7 @@ def create_fishnet_from_masked(masked_data, transform):
 
 def dask_gdf_is_empty(dgdf):
     """Return True if a Dask GeoDataFrame has no rows."""
-    return dgdf.map_partitions(len).compute().sum() == 0
+    return dgdf.map_partitions(len).sum().compute() == 0
 
 def read_reprojected_lines_dask(tile_id, feature_type):
     """
@@ -131,62 +123,6 @@ def read_reprojected_lines_dask(tile_id, feature_type):
         logging.error(f"Could not read reprojected lines: {e}")
         # Return empty
         return dgpd.from_geopandas(gpd.GeoDataFrame(columns=["geometry"], crs="EPSG:3395"), npartitions=1)
-
-
-def _chunk_paths(tile_id, feature_type):
-    """Return S3 paths for chunk rasters belonging to a tile."""
-    group, sub = feature_type.split("_", 1)
-    prefix = cn.datasets[group][sub]["s3_processed_small"].rstrip("/") + "/"
-    keys = uutil.list_s3_files(cn.s3_bucket_name, prefix)
-    out = []
-    for k in keys:
-        if tile_id in os.path.basename(k) and k.endswith(".tif"):
-            out.append(f"s3://{cn.s3_bucket_name}/{k}")
-    return out
-
-
-@dask.delayed
-def postprocess_tile(tile_id, feature_type, _deps=None):
-    """Mosaic chunk rasters and warp to Hansen-style GeoTIFF."""
-    group, sub = feature_type.split("_", 1)
-    out_prefix = cn.datasets[group][sub]["s3_processed"].rstrip("/")
-    local_dir = cn.datasets[group][sub]["local_processed"]
-    os.makedirs(local_dir, exist_ok=True)
-
-    chunk_paths = _chunk_paths(tile_id, feature_type)
-    if not chunk_paths:
-        logging.warning(f"[{feature_type}|{tile_id}] no chunk rasters found for postprocess")
-        return None
-
-    vrt_name = f"{tile_id}_{feature_type}_mosaic.vrt"
-    vrt_s3 = posixpath.join(out_prefix, vrt_name)
-    local_vrt = os.path.join(tempfile.gettempdir(), vrt_name)
-    build_vrt_gdal_coiled(chunk_paths, vrt_s3, local_vrt=local_vrt)
-
-    xmin, ymin, xmax, ymax = uutil.get_10x10_tile_bounds(tile_id)
-
-    local_out = os.path.join(local_dir, f"{tile_id}_{feature_type}_density.tif")
-    s3_out = posixpath.join(out_prefix, f"{tile_id}_{feature_type}_density.tif")
-
-    warp_to_hansen_coiled(
-        source_vrt_path=vrt_s3,
-        filename=os.path.basename(local_out),
-        output_raster_s3_path_and_name=None,
-        xmin=xmin,
-        ymin=ymin,
-        xmax=xmax,
-        ymax=ymax,
-        dt=uutil.string_to_gdal_dtype_mapping["Float32"],
-        no_data=0,
-        tiled=True,
-        x_pixel_window=400,
-        y_pixel_window=400,
-    )
-
-    uutil.upload_file_to_s3(local_out, cn.s3_bucket_name, s3_out)
-    os.remove(local_out)
-    logging.info(f"[{feature_type}|{tile_id}] hansenized")
-    return s3_out
 
 @dask.delayed
 def process_chunk(bounds, tile_id, feature_type):
@@ -354,7 +290,7 @@ def process_chunk(bounds, tile_id, feature_type):
 
     return f"[{tile_id}|{chunk_str}] done"
 
-def process_tile(tile_id, feature_type, chunk_size=2, chunk_bounds=None, postprocess=False):
+def process_tile(tile_id, feature_type, chunk_size=2, chunk_bounds=None):
     """
     Build tasks to process each sub-chunk of a tile in EPSG:3395.
 
@@ -369,13 +305,12 @@ def process_tile(tile_id, feature_type, chunk_size=2, chunk_bounds=None, postpro
     else:
         chunks = build_chunk_bounds(tile_bb, chunk_size=chunk_size)
 
-    tasks = [process_chunk(b, tile_id, feature_type) for b in chunks]
-    if postprocess:
-        post_task = postprocess_tile(tile_id, feature_type, tasks)
-        tasks.append(post_task)
+    tasks = []
+    for b in chunks:
+        tasks.append(process_chunk(b, tile_id, feature_type))
     return tasks
 
-def process_all_tiles(feature_type, chunk_size=2, postprocess=False):
+def process_all_tiles(feature_type, chunk_size=2):
     """
     Iterate over the S3 prefix with 1km union mask in EPSG:3395, build tasks for each tile.
     """
@@ -395,18 +330,11 @@ def process_all_tiles(feature_type, chunk_size=2, postprocess=False):
                     # e.g. "00N_110E_union_mask_1km.tif"
                     base_name = os.path.basename(key)
                     tile_id = base_name.replace(PEAT_1KM_PATTERN, "")
-                    tasks.extend(
-                        process_tile(
-                            tile_id,
-                            feature_type,
-                            chunk_size=chunk_size,
-                            postprocess=postprocess,
-                        )
-                    )
+                    tasks.extend(process_tile(tile_id, feature_type, chunk_size=chunk_size))
 
     return tasks
 
-def main(tile_id=None, feature_type="osm_roads", chunk_bounds=None, chunk_size=2, client="local", postprocess=False):
+def main(tile_id=None, feature_type="osm_roads", chunk_bounds=None, chunk_size=2, client="local"):
     if client == "coiled":
         cluster, dclient = uutil.connect_to_cluster(
             cluster_name="roads_canals",
@@ -422,18 +350,10 @@ def main(tile_id=None, feature_type="osm_roads", chunk_bounds=None, chunk_size=2
     try:
         if tile_id:
             tasks = process_tile(
-                tile_id,
-                feature_type,
-                chunk_size=chunk_size,
-                chunk_bounds=chunk_bounds,
-                postprocess=postprocess,
+                tile_id, feature_type, chunk_size=chunk_size, chunk_bounds=chunk_bounds
             )
         else:
-            tasks = process_all_tiles(
-                feature_type,
-                chunk_size=chunk_size,
-                postprocess=postprocess,
-            )
+            tasks = process_all_tiles(feature_type, chunk_size=chunk_size)
 
         if not tasks:
             logging.warning("No tasks generated; nothing to compute.")
@@ -458,18 +378,11 @@ if __name__ == "__main__":
                         help="Optional single chunk: 'minx,miny,maxx,maxy'")
     parser.add_argument("--chunk_size", type=float, default=2, help="Chunk size in degrees e.g. 2 => 2x2 sub-chunks")
     parser.add_argument("--client", default="local", choices=["local","coiled"])
-    parser.add_argument("--postprocess", action="store_true", help="Warp chunk outputs to final Hansen tiles")
     args = parser.parse_args()
 
     cb = None
     if args.chunk_bounds:
         cb = [float(x) for x in args.chunk_bounds.split(",")]
 
-    main(
-        tile_id=args.tile_id,
-        feature_type=args.feature_type,
-        chunk_bounds=cb,
-        chunk_size=args.chunk_size,
-        client=args.client,
-        postprocess=args.postprocess,
-    )
+    main(tile_id=args.tile_id, feature_type=args.feature_type,
+         chunk_bounds=cb, chunk_size=args.chunk_size, client=args.client)
