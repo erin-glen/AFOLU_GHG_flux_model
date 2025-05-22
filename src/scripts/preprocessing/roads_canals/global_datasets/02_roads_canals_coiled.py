@@ -31,6 +31,11 @@ from rasterio.features import rasterize
 from shapely.geometry import box
 from dask.distributed import Client, LocalCluster
 from rasterio.warp import transform_bounds
+import tempfile
+
+from src.scripts.preprocessing.hansenize.hansenize_coiled import (
+    warp_to_hansen_coiled,
+)
 
 from src.scripts.utilities import universal_utilities as uutil
 import src.scripts.preprocessing.preprocessing_constants as cn
@@ -138,8 +143,8 @@ def process_chunk(bounds, tile_id, feature_type):
     local_dir = cn.datasets[group][sub]['local_processed']
     s3_dir = cn.datasets[group][sub]['s3_processed_small']
 
-    local_out = os.path.join(local_dir, f"{tile_id}_{chunk_str}_{feature_type}_density_fishnet.tif")
-    s3_out_key = f"{s3_dir}/{tile_id}_{chunk_str}_{feature_type}_density_fishnet.tif"
+    local_out = os.path.join(local_dir, f"{tile_id}_{chunk_str}_{feature_type}_density.tif")
+    s3_out_key = f"{s3_dir}/{tile_id}_{chunk_str}_{feature_type}_density.tif"
 
     logging.info(f"[{tile_id}|{chunk_str}] Starting chunk processing")
 
@@ -157,6 +162,7 @@ def process_chunk(bounds, tile_id, feature_type):
         return
 
     # 2) clip by bounds
+    bounds_wgs84 = bounds
     minx, miny, maxx, maxy = bounds
     try:
         minx, miny, maxx, maxy = transform_bounds(
@@ -278,11 +284,33 @@ def process_chunk(bounds, tile_id, feature_type):
     xr_ras.rio.to_raster(local_out, compress="lzw")
     logging.info(f"[{tile_id}|{chunk_str}] saved local => {local_out}")
 
+    # resample to Hansen grid using hansenize_coiled
+    hansen_filename = os.path.basename(local_out)
+    warp_to_hansen_coiled(
+        source_vrt_path=local_out,
+        filename=hansen_filename,
+        output_raster_s3_path_and_name=None,
+        xmin=bounds_wgs84[0],
+        ymin=bounds_wgs84[1],
+        xmax=bounds_wgs84[2],
+        ymax=bounds_wgs84[3],
+        dt=uutil.string_to_gdal_dtype_mapping["Float32"],
+        no_data=0,
+        tiled=True,
+        x_pixel_window=400,
+        y_pixel_window=400,
+    )
+    hansen_local = os.path.join(tempfile.gettempdir(), hansen_filename)
+
     # upload
     s3_client = boto3.client("s3")
-    s3_client.upload_file(local_out, cn.s3_bucket_name, s3_out_key)
-    logging.info(f"[{tile_id}|{chunk_str}] uploaded => s3://{cn.s3_bucket_name}/{s3_out_key}")
+    s3_client.upload_file(hansen_local, cn.s3_bucket_name, s3_out_key)
+    logging.info(
+        f"[{tile_id}|{chunk_str}] uploaded => s3://{cn.s3_bucket_name}/{s3_out_key}"
+    )
     os.remove(local_out)
+    if os.path.exists(hansen_local):
+        os.remove(hansen_local)
 
     # cleanup
     del chunked_da, lines_dgdf, fishnet_dgdf
