@@ -3,7 +3,7 @@
 pp_roads_canals_chunks_fishnet.py
 
 Restored workflow using Dask GeoDataFrames to:
-  1) Read 1 km union peat mask from S3 (EPSG:3395).
+  1) Read 1km union peat mask from S3 (EPSG:3395).
   2) Create fishnet cells from the mask (where data == 1).
   3) Read reprojected roads/canals from S3 as a Dask GeoDataFrame (EPSG:3395).
   4) Intersect and assign partial line length to fishnet cells.
@@ -24,6 +24,7 @@ import boto3
 import numpy as np
 import dask
 import dask_geopandas as dgpd
+import posixpath
 import geopandas as gpd
 import xarray as xr
 import rioxarray as rxr
@@ -32,6 +33,10 @@ from shapely.geometry import box
 from dask.distributed import Client, LocalCluster
 from rasterio.warp import transform_bounds
 import tempfile
+
+from src.scripts.preprocessing.hansenize.hansenize_coiled import (
+    warp_to_hansen_coiled,
+)
 
 from src.scripts.preprocessing.hansenize.hansenize_coiled import (
     warp_to_hansen_coiled,
@@ -141,7 +146,12 @@ def process_chunk(bounds, tile_id, feature_type):
     chunk_str = "_".join(map(str, bounds))
     group, sub = feature_type.split('_', 1)
     local_dir = cn.datasets[group][sub]['local_processed']
-    s3_dir = cn.datasets[group][sub]['s3_processed_small']
+    chunk_px = uutil.calc_chunk_length_pixels(bounds)
+    s3_dir = posixpath.join(
+        cn.datasets[group][sub]['s3_processed_base'],
+        f"{chunk_px}_pixels",
+        cn.today_date,
+    )
 
     local_out = os.path.join(local_dir, f"{tile_id}_{chunk_str}_{feature_type}_density.tif")
     s3_out_key = f"{s3_dir}/{tile_id}_{chunk_str}_{feature_type}_density.tif"
