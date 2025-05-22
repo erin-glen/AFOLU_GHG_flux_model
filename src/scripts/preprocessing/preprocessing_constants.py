@@ -90,7 +90,7 @@ datasets = {
                                      'plantation_type', 'SDPTv2', '20230911')
     },
     'sdpt': {
-        's3_raw': pp.join(raw_dir, 'plantations', 'sdpt_by_tile'),
+        's3_raw': pp.join(raw_dir, 'plantations', 'sdpt'),
         's3_processed_base': pp.join(processed_dir, 'sdpt'),
         's3_processed_small': pp.join(processed_dir, 'sdpt', 'chunks', today_date),
         's3_processed': pp.join(processed_dir, 'sdpt', today_date),
