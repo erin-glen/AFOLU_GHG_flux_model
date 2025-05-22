@@ -89,6 +89,13 @@ datasets = {
         's3_processed_base': pp.join('climate', 'carbon_model', 'other_emissions_inputs',
                                      'plantation_type', 'SDPTv2', '20230911')
     },
+    'sdpt': {
+        's3_raw': pp.join(raw_dir, 'plantations', 'sdpt_by_tile'),
+        's3_processed_base': pp.join(processed_dir, 'sdpt'),
+        's3_processed_small': pp.join(processed_dir, 'sdpt', 'chunks', today_date),
+        's3_processed': pp.join(processed_dir, 'sdpt', today_date),
+        'local_processed': pp.join(local_temp_dir, 'sdpt', today_date)
+    },
     'extraction': {
         'finland': {
             's3_raw': f'{raw_dir}/extraction/Finland/Finland_turvetuotantoalueet/'

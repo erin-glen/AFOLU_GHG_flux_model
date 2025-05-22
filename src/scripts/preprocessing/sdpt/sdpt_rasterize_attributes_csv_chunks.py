@@ -23,6 +23,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Reclassification CSV in S3
 SDPT_RECLASS_S3 = "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/updated_classified_planted_forest_species.csv"
 
+# NOTE: The species to rotation mapping derived from this CSV is provisional
+# and will likely change when the SDPT dataset is finalized.
+
 # Final integer mapping
 FINAL_MAPPING = {
     'oil_palm': 1,
@@ -38,8 +41,11 @@ RASTER_NODATA = 0
 RASTER_DTYPE = 'Byte'
 
 def load_species_reclassification():
-    """
-    Download the reclassification CSV from S3 if needed, parse into dict.
+    """Load the species reclassification table.
+
+    Attempts to download the CSV from S3 if it is missing.  If the CSV cannot
+    be found, a very small default mapping bundled with the repository is used
+    for development or testing purposes.
     """
     import pandas as pd
     local_csv = os.path.join(cn.local_temp_dir, os.path.basename(SDPT_RECLASS_S3))
@@ -51,11 +57,17 @@ def load_species_reclassification():
         logging.info(f"Local CSV already exists => {local_csv}, skipping download.")
 
     if not os.path.exists(local_csv):
-        logging.warning("Species CSV not found => returning empty mapping.")
-        return {}
+        logging.warning(
+            "Species CSV not found => using default test mapping from repository."
+        )
+        from .default_species_mapping import DEFAULT_SPECIES_TO_ROTATION
+
+        return DEFAULT_SPECIES_TO_ROTATION
 
     df = pd.read_csv(local_csv)
-    mapping = dict(zip(df["vernacName"].str.strip(), df["rotation_category"].str.strip()))
+    mapping = dict(
+        zip(df["vernacName"].str.strip(), df["rotation_category"].str.strip())
+    )
     logging.info(f"Loaded {len(mapping)} species from CSV.")
     return mapping
 
@@ -75,47 +87,6 @@ def classify_plantation(row, species_map):
     else:
         return None
 
-def get_tile_bounds_10x10(tile_id):
-    """
-    For a tile like '00N_110E' => bounding box (minx, miny, maxx, maxy).
-    """
-    ns = tile_id[2]   # 'N' or 'S'
-    ew = tile_id[6]   # 'E' or 'W'
-    lat_deg = int(tile_id[:2])
-    lon_deg = int(tile_id[4:7])
-
-    if ns == 'S':
-        max_y = -lat_deg
-        min_y = max_y - 10
-    else:
-        max_y = lat_deg
-        min_y = max_y - 10
-
-    if ew == 'W':
-        min_x = -lon_deg
-        max_x = min_x + 10
-    else:
-        min_x = lon_deg
-        max_x = min_x + 10
-
-    return float(min_x), float(min_y), float(max_x), float(max_y)
-
-def generate_chunk_bounds(minx, miny, maxx, maxy, chunk_size):
-    """
-    Break the bounding box into chunk_size deg squares.
-    e.g. chunk_size=2 => up to 25 sub-chunks in a 10x10 tile.
-    """
-    chunks = []
-    y = miny
-    while y < maxy:
-        x = minx
-        while x < maxx:
-            xb = min(x + chunk_size, maxx)
-            yb = min(y + chunk_size, maxy)
-            chunks.append((x, y, xb, yb))
-            x += chunk_size
-        y += chunk_size
-    return chunks
 
 def rasterize_chunk_shp(shp_path, bbox, tile_id, run_mode):
     """
@@ -248,8 +219,8 @@ def process_tile(tile_id, chunk_size=2.0, run_mode="default"):
         return []
 
     # bounding boxes (10x10 deg)
-    minx, miny, maxx, maxy = get_tile_bounds_10x10(tile_id)
-    chunk_bboxes = generate_chunk_bounds(minx, miny, maxx, maxy, chunk_size)
+    minx, miny, maxx, maxy = uutil.get_10x10_tile_bounds(tile_id)
+    chunk_bboxes = uutil.get_chunk_bounds([minx, miny, maxx, maxy], chunk_size)
 
     # reclassification
     species_map = load_species_reclassification()
