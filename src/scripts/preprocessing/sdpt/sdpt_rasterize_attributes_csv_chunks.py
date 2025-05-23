@@ -127,7 +127,7 @@ def rasterize_chunk_shp(shp_path, bbox, tile_id, run_mode):
 
     chunk_str = uutil.boundstr(bbox)
     chunk_px = uutil.calc_chunk_length_pixels(bbox)
-    chunk_name = f"{tile_id}_{chunk_str}_sdpt.tif"
+    chunk_name = f"{tile_id}__{chunk_str}__sdpt.tif"
     local_dir = cn.datasets["sdpt"]["local_processed"]
     uu.create_directory_if_not_exists(local_dir)
     out_tif = os.path.join(local_dir, chunk_name)
@@ -225,7 +225,7 @@ def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
 
     chunk_str = uutil.boundstr(bbox)
     chunk_px = uutil.calc_chunk_length_pixels(bbox)
-    chunk_name = f"{tile_id}_{chunk_str}_sdpt.tif"
+    chunk_name = f"{tile_id}__{chunk_str}__sdpt.tif"
     local_dir = cn.datasets["sdpt"]["local_processed"]
     uu.create_directory_if_not_exists(local_dir)
     out_tif = os.path.join(local_dir, chunk_name)
