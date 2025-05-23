@@ -435,6 +435,7 @@ def main(
             cluster_name="sdpt_rasterization",
             n_workers=20,
             region="us-east-1",
+            worker_memory="64GiB",
         )
         logging.info(f"Coiled cluster => {cluster.name}")
     else:

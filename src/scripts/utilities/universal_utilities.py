@@ -127,6 +127,7 @@ def connect_to_cluster(
     n_workers: int = 20,
     region: str = "us-east-1",
     run_local: bool = False,
+    worker_memory: str = "32GiB",
 ):
     """Connect to an existing Coiled cluster or create one.
 
@@ -140,6 +141,8 @@ def connect_to_cluster(
         AWS region for the cluster.
     run_local : bool
         If ``True``, create a local cluster instead of using Coiled.
+        worker_memory : str
+        Memory limit for each worker when creating a new cluster.
     """
 
     if run_local:
@@ -160,7 +163,7 @@ def connect_to_cluster(
             idle_timeout="15 minutes",
             region=region,
             account="wri-forest-research",
-            worker_memory="32GiB",
+            worker_memory=worker_memory,
             shutdown_on_close=False,
         )
     client = cluster.get_client()
