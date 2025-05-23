@@ -120,18 +120,23 @@ def classify_plantation(row, species_map):
 def rasterize_chunk_shp(shp_path, bbox, tile_id, run_mode):
     """
     1) gdal_rasterize the shapefile chunk => partial TIF
-    2) If run_mode='default', upload partial TIF => s3_processed_small
+    2) If run_mode='default', upload partial TIF => s3_processed_base/<px>/YYYYMMDD
     3) If run_mode='test', keep partial TIF local
     """
     import subprocess
 
-    chunk_name = f"{tile_id}_{int(bbox[0])}_{int(bbox[1])}_chunk.tif"
-    local_dir = os.path.dirname(shp_path)
+    chunk_str = uutil.boundstr(bbox)
+    chunk_px = uutil.calc_chunk_length_pixels(bbox)
+    chunk_name = f"{tile_id}_{chunk_str}_sdpt.tif"
+    local_dir = cn.datasets["sdpt"]["local_processed"]
+    uu.create_directory_if_not_exists(local_dir)
     out_tif = os.path.join(local_dir, chunk_name)
 
     # Build the final S3 key for partial TIF
     s3_chunk = posixpath.join(
-        cn.datasets["sdpt"]["s3_processed_small"],  # e.g. '.../sdpt/YYYYMMDD'
+        cn.datasets["sdpt"]["s3_processed_base"],
+        f"{chunk_px}_pixels",
+        cn.today_date,
         chunk_name,
     )
 
@@ -218,13 +223,17 @@ def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
     operates on an in-memory dataframe.
     """
 
-    chunk_name = f"{tile_id}_{int(bbox[0])}_{int(bbox[1])}_chunk.tif"
-    local_dir = os.path.join(cn.local_temp_dir, f"sdpt_chunks_{tile_id}")
+    chunk_str = uutil.boundstr(bbox)
+    chunk_px = uutil.calc_chunk_length_pixels(bbox)
+    chunk_name = f"{tile_id}_{chunk_str}_sdpt.tif"
+    local_dir = cn.datasets["sdpt"]["local_processed"]
     uu.create_directory_if_not_exists(local_dir)
     out_tif = os.path.join(local_dir, chunk_name)
 
     s3_chunk = posixpath.join(
-        cn.datasets["sdpt"]["s3_processed_small"],
+        cn.datasets["sdpt"]["s3_processed_base"],
+        f"{chunk_px}_pixels",
+        cn.today_date,
         chunk_name,
     )
 
@@ -428,7 +437,7 @@ def main(
     Otherwise => chunk the entire 10x10 tile in N sub-chunks.
     """
     logging.info(
-        f"SDPT chunk-based script => partial TIFs to {cn.datasets['sdpt']['s3_processed_small']}."
+        f"SDPT chunk-based script => base S3 path {cn.datasets['sdpt']['s3_processed_base']}"
     )
     if client == "coiled":
         cluster, client = uutil.connect_to_cluster(
@@ -474,7 +483,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="SDPT chunk-based script => partial TIF => s3_processed_small."
+        description="SDPT chunk-based script => partial TIFs stored under s3_processed_base/<px>/YYYYMMDD."
     )
     parser.add_argument("--tile_id", type=str, help="Tile ID (e.g. 00N_110E).")
     parser.add_argument(
@@ -504,7 +513,7 @@ if __name__ == "__main__":
 
     if not any(sys.argv[1:]):
         logging.info(
-            "No CLI => example tile=00N_110E, chunk_size=2, run_mode=test, local => partial TIFs in local_processed_small."
+            "No CLI => example tile=00N_110E, chunk_size=2, run_mode=test, local => partial TIFs in local_processed path."
         )
         main(
             tile_id="00N_110E",
