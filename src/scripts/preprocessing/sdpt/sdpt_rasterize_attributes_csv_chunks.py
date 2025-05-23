@@ -5,7 +5,7 @@ Rasterize SDPT plantation attributes in small chunks using Dask:
   1) Download the species reclassification CSV from S3 if not present.
   2) Read a tile shapefile from S3 as a GeoDataFrame.
   3) Classify plantation features and split the tile into bounding boxes.
-  4) Rasterize each sub-bounding box to a partial GeoTIFF.
+  4) Rasterize each sub-bounding box in memory to a partial GeoTIFF.
   5) Upload partial rasters to S3 when run in default mode.
 
 Chunk-based approach:
@@ -26,6 +26,10 @@ import gc
 import dask
 import dask_geopandas as dgpd
 from dask.distributed import Client, LocalCluster
+import numpy as np
+import rasterio
+from rasterio.features import rasterize
+from rasterio.transform import from_origin
 
 # Our universal constants & utilities
 import src.scripts.preprocessing.preprocessing_constants as cn
@@ -58,7 +62,9 @@ FINAL_MAPPING = {
 # Rasterization settings
 RASTER_RES = 0.00025
 RASTER_NODATA = 0
-RASTER_DTYPE = "Byte"
+# Using a numpy dtype avoids ``rasterio`` ``TypeError`` when rasterising
+# attributes directly in memory.
+RASTER_DTYPE = np.uint8
 
 
 def load_species_reclassification():
@@ -170,7 +176,7 @@ def rasterize_chunk_shp(shp_path, bbox, tile_id, run_mode):
         "-init",
         str(RASTER_NODATA),
         "-ot",
-        RASTER_DTYPE,
+        "Byte" if RASTER_DTYPE == np.uint8 else str(RASTER_DTYPE),
         "-co",
         "COMPRESS=DEFLATE",
         "-co",
@@ -204,19 +210,92 @@ def rasterize_chunk_shp(shp_path, bbox, tile_id, run_mode):
     gc.collect()
 
 
-def create_shapefile_chunks(tile_id, tile_gdf, species_map, chunk_bounds, local_dir):
+def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
+    """Rasterize a GeoDataFrame subset directly in memory.
+
+    This avoids writing temporary shapefiles and uses ``rasterio`` to create
+    the partial raster.  The behaviour mirrors :func:`rasterize_chunk_shp` but
+    operates on an in-memory dataframe.
     """
-    For each bounding box => filter tile_gdf => classify => local .shp => return list[(chunk_shp, bbox), ...]
-    """
+
+    chunk_name = f"{tile_id}_{int(bbox[0])}_{int(bbox[1])}_chunk.tif"
+    local_dir = os.path.join(cn.local_temp_dir, f"sdpt_chunks_{tile_id}")
+    uu.create_directory_if_not_exists(local_dir)
+    out_tif = os.path.join(local_dir, chunk_name)
+
+    s3_chunk = posixpath.join(
+        cn.datasets["sdpt"]["s3_processed_small"],
+        chunk_name,
+    )
+
+    if run_mode == "default":
+        if uutil.s3_file_exists(cn.s3_bucket_name, s3_chunk):
+            logging.info(
+                f"Partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk} exists => skipping."
+            )
+            return
+    else:
+        if os.path.exists(out_tif):
+            logging.info(f"Partial TIF => {out_tif} exists locally => skipping.")
+            return
+
+    shapes = [
+        (geom, val) for geom, val in zip(subset_gdf.geometry, subset_gdf["raster_val"])
+    ]
+    if not shapes:
+        logging.info(f"No shapes to rasterize in {bbox}, skipping.")
+        return
+
+    minx, miny, maxx, maxy = bbox
+    width = int(round((maxx - minx) / RASTER_RES))
+    height = int(round((maxy - miny) / RASTER_RES))
+    transform = from_origin(minx, maxy, RASTER_RES, RASTER_RES)
+
+    burned = rasterize(
+        shapes,
+        out_shape=(height, width),
+        transform=transform,
+        fill=RASTER_NODATA,
+        dtype=RASTER_DTYPE,
+        all_touched=True,
+    )
+
+    meta = {
+        "driver": "GTiff",
+        "height": height,
+        "width": width,
+        "count": 1,
+        "dtype": RASTER_DTYPE,
+        "crs": "EPSG:4326",
+        "transform": transform,
+        "tiled": True,
+        "compress": "DEFLATE",
+        "nodata": RASTER_NODATA,
+    }
+    with rasterio.open(out_tif, "w", **meta) as dst:
+        dst.write(burned, 1)
+
+    if run_mode == "default":
+        logging.info(f"Uploading partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk}")
+        uutil.upload_file_to_s3(out_tif, cn.s3_bucket_name, s3_chunk)
+        os.remove(out_tif)
+    else:
+        logging.info(f"Test mode => partial TIF => {out_tif} retained locally.")
+
+    del burned
+    gc.collect()
+
+
+def create_chunk_subsets(tile_gdf, species_map, chunk_bounds):
+    """Return GeoDataFrame subsets for each bounding box."""
     results = []
     for bbox in chunk_bounds:
         minx, miny, maxx, maxy = bbox
-        subset = tile_gdf.cx[minx:maxx, miny:maxy]
+        subset = tile_gdf.cx[minx:maxx, miny:maxy].copy()
         if subset.empty:
             logging.info(f"No features in chunk => {bbox}, skipping.")
             continue
 
-        # classify
         subset["plantation_type"] = subset.apply(
             lambda r: classify_plantation(r, species_map), axis=1
         )
@@ -226,27 +305,18 @@ def create_shapefile_chunks(tile_id, tile_gdf, species_map, chunk_bounds, local_
             continue
 
         subset["raster_val"] = subset["plantation_type"].map(FINAL_MAPPING)
-        if subset["raster_val"].isnull().all():
+        subset = subset.dropna(subset=["raster_val"])
+        if subset.empty:
             logging.info(f"All mapped to null => {bbox}, skipping.")
             continue
 
-        # Save chunk shapefile
-        chunk_name = f"{tile_id}_{int(minx)}_{int(miny)}.shp"
-        chunk_path = os.path.join(local_dir, chunk_name)
-        subset.to_file(chunk_path)
-        results.append((chunk_path, bbox))
+        results.append((subset[["geometry", "raster_val"]].copy(), bbox))
 
     return results
 
 
-def process_tile(tile_id, chunk_size=2.0, run_mode="default"):
-    """
-    1) Read tile_{tile_id}.shp from /vsis3/ => .compute() => in-memory GeoDataFrame
-    2) chunk bounding boxes
-    3) classify => create chunk shapefiles
-    4) produce tasks => rasterize each chunk
-    """
-    logging.info(f"Processing entire tile => {tile_id} in ~{chunk_size} deg sub-chunks")
+def _load_tile_gdf(tile_id):
+    """Return the GeoDataFrame for ``tile_id`` or ``None`` on failure."""
 
     vsis3_tile_shp = (
         f"/vsis3/{cn.s3_bucket_name}/{cn.datasets['sdpt']['s3_raw']}/tile_{tile_id}.shp"
@@ -255,14 +325,29 @@ def process_tile(tile_id, chunk_size=2.0, run_mode="default"):
 
     try:
         ddf = dgpd.read_file(vsis3_tile_shp, npartitions=1)
-        # load entire tile in memory
         tile_gdf = ddf.compute()
     except Exception as e:
         logging.error(f"Error reading tile_{tile_id}.shp => {e}")
-        return []
+        return None
 
     if tile_gdf.empty:
         logging.info(f"No features found => tile {tile_id}")
+        return None
+
+    return tile_gdf
+
+
+def process_tile(tile_id, chunk_size=2.0, run_mode="default"):
+    """
+    1) Read tile_{tile_id}.shp from /vsis3/ => .compute() => in-memory GeoDataFrame
+    2) chunk bounding boxes
+    3) classify => build chunk GeoDataFrames
+    4) produce tasks => rasterize each chunk
+    """
+    logging.info(f"Processing entire tile => {tile_id} in ~{chunk_size} deg sub-chunks")
+
+    tile_gdf = _load_tile_gdf(tile_id)
+    if tile_gdf is None:
         return []
 
     # bounding boxes (10x10 deg)
@@ -272,20 +357,14 @@ def process_tile(tile_id, chunk_size=2.0, run_mode="default"):
     # reclassification
     species_map = load_species_reclassification()
 
-    # local outdir
-    local_dir = os.path.join(cn.local_temp_dir, f"sdpt_chunks_{tile_id}")
-    uu.create_directory_if_not_exists(local_dir)
-
-    # create chunk shapefiles
-    chunk_list = create_shapefile_chunks(
-        tile_id, tile_gdf, species_map, chunk_bboxes, local_dir
-    )
-    logging.info(f"Created {len(chunk_list)} chunk shapefiles for tile => {tile_id}")
+    # build chunk GeoDataFrames
+    chunk_list = create_chunk_subsets(tile_gdf, species_map, chunk_bboxes)
+    logging.info(f"Prepared {len(chunk_list)} chunk subsets for tile => {tile_id}")
 
     tasks = []
-    for shp_path, bbox in chunk_list:
+    for subset, bbox in chunk_list:
         tasks.append(
-            dask.delayed(rasterize_chunk_shp)(shp_path, bbox, tile_id, run_mode)
+            dask.delayed(rasterize_chunk_df)(subset, bbox, tile_id, run_mode)
         )
 
     return tasks
@@ -306,27 +385,12 @@ def process_tile_with_bounds(tile_id, chunk_bounds, run_mode="default"):
         minx, miny, maxx, maxy = map(float, chunk_bounds.split(","))
         chunk_bounds = (minx, miny, maxx, maxy)
 
-    vsis3_tile_shp = (
-        f"/vsis3/{cn.s3_bucket_name}/{cn.datasets['sdpt']['s3_raw']}/tile_{tile_id}.shp"
-    )
-    logging.info(f"Reading tile shapefile => {vsis3_tile_shp}")
-
-    try:
-        ddf = dgpd.read_file(vsis3_tile_shp, npartitions=1)
-        tile_gdf = ddf.compute()
-    except Exception as e:
-        logging.error(f"Error reading tile_{tile_id}.shp => {e}")
-        return []
-
-    if tile_gdf.empty:
-        logging.info(f"No features found => tile {tile_id}")
+    tile_gdf = _load_tile_gdf(tile_id)
+    if tile_gdf is None:
         return []
 
     # reclassification
     species_map = load_species_reclassification()
-
-    local_outdir = os.path.join(cn.local_temp_dir, f"sdpt_chunks_{tile_id}")
-    uu.create_directory_if_not_exists(local_outdir)
 
     subset = tile_gdf.cx[
         chunk_bounds[0] : chunk_bounds[2], chunk_bounds[1] : chunk_bounds[3]
@@ -346,16 +410,13 @@ def process_tile_with_bounds(tile_id, chunk_bounds, run_mode="default"):
         return []
 
     subset["raster_val"] = subset["plantation_type"].map(FINAL_MAPPING)
-    if subset["raster_val"].isnull().all():
+    subset = subset.dropna(subset=["raster_val"])
+    if subset.empty:
         logging.info(f"All mapped to null => bounding box {chunk_bounds}, skipping.")
         return []
 
-    chunk_name = f"{tile_id}_{int(chunk_bounds[0])}_{int(chunk_bounds[1])}.shp"
-    chunk_path = os.path.join(local_outdir, chunk_name)
-    subset.to_file(chunk_path)
-
     return [
-        dask.delayed(rasterize_chunk_shp)(chunk_path, chunk_bounds, tile_id, run_mode)
+        dask.delayed(rasterize_chunk_df)(subset[["geometry", "raster_val"]], chunk_bounds, tile_id, run_mode)
     ]
 
 
@@ -371,7 +432,7 @@ def main(
     )
     if client == "coiled":
         cluster, client = uutil.connect_to_cluster(
-            cluster_name="roads_canals",
+            cluster_name="sdpt_rasterization",
             n_workers=20,
             region="us-east-1",
         )
