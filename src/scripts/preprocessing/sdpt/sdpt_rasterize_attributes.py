@@ -45,19 +45,11 @@ logging.basicConfig(
 )
 
 # Reclassification CSV in S3
-SDPT_RECLASS_S3 = "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/updated_classified_planted_forest_species.csv"
-
-# NOTE: The species to rotation mapping derived from this CSV is provisional
-# and will likely change when the SDPT dataset is finalized.
-
-# Final integer mapping
-FINAL_MAPPING = {
-    "oil_palm": 1,
-    "unknown_tc": 2,
-    "short_rotation": 3,
-    "long_rotation": 4,
-    "unknown_rotation": 5,
-}
+# The advanced remapping table already contains numeric rotation codes.
+ADVANCED_REMAP_S3 = (
+    "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/"
+    "advanced_remapping.csv"
+)
 
 # Rasterization settings
 RASTER_RES = 0.00025
@@ -68,53 +60,75 @@ RASTER_DTYPE = np.uint8
 
 
 def load_species_reclassification():
-    """Load the species reclassification table.
+    """Return a mapping of vernacular names to numeric rotation codes.
 
-    Attempts to download the CSV from S3 if it is missing.  If the CSV cannot
-    be found, a very small default mapping bundled with the repository is used
-    for development or testing purposes.
+    The function looks for ``advanced_remapping.csv`` in the temporary
+    directory and attempts to download it from S3 if missing.  When the CSV
+    cannot be obtained the function returns an empty mapping so that
+    classification falls back to the logic defined in ``create_remapping``.
     """
     import pandas as pd
 
-    local_csv = os.path.join(cn.local_temp_dir, os.path.basename(SDPT_RECLASS_S3))
+    local_csv = os.path.join(cn.local_temp_dir, os.path.basename(ADVANCED_REMAP_S3))
 
     if not os.path.exists(local_csv):
-        uutil.download_file_from_s3(SDPT_RECLASS_S3, local_csv, cn.s3_bucket_name)
-        logging.info(f"Downloaded CSV => {local_csv}")
+        try:
+            uutil.download_file_from_s3(
+                ADVANCED_REMAP_S3, local_csv, cn.s3_bucket_name
+            )
+            logging.info(f"Downloaded CSV => {local_csv}")
+        except Exception as exc:  # pragma: no cover - network errors
+            logging.warning(f"Failed to download CSV from S3: {exc}")
     else:
-        logging.info(f"Local CSV already exists => {local_csv}, skipping download.")
+        logging.info(
+            f"Local CSV already exists => {local_csv}, skipping download."
+        )
 
     if not os.path.exists(local_csv):
         logging.warning(
-            "Species CSV not found => using default test mapping from repository."
+            "Advanced remapping CSV not found; falling back to classification logic."
         )
-        from .default_species_mapping import DEFAULT_SPECIES_TO_ROTATION
-
-        return DEFAULT_SPECIES_TO_ROTATION
+        return {}
 
     df = pd.read_csv(local_csv)
-    mapping = dict(
-        zip(df["vernacName"].str.strip(), df["rotation_category"].str.strip())
-    )
-    logging.info(f"Loaded {len(mapping)} species from CSV.")
+    try:
+        mapping = dict(zip(df["vernacName"].str.strip(), df["rotation_code"]))
+    except KeyError:
+        logging.warning("advanced_remapping.csv missing expected columns")
+        mapping = {}
+
+    logging.info(f"Loaded {len(mapping)} species from advanced remapping CSV.")
     return mapping
 
 
+from .create_remapping import classify as fallback_classify
+from .create_remapping import ROTATION_CLASS_CODES
+
+
 def classify_plantation(row, species_map):
+    """Return the numeric rotation code for ``row``.
+
+    If ``vernacName`` exists in ``species_map`` its numeric code is used
+    directly.  Otherwise the row is classified using the heuristic logic in
+    :mod:`create_remapping`.  Unknown tree crops are ignored.
     """
-    Classify each row => 'oil_palm', 'unknown_tc', 'short_rotation',
-                         'long_rotation', or 'unknown_rotation'.
-    """
+
     simple_type = str(row.get("simpleType", "")).strip().lower()
     simple_name = str(row.get("simpleName", "")).strip().lower()
     vernac_name = str(row.get("vernacName", "")).strip()
 
+    code = species_map.get(vernac_name)
+    if code is not None:
+        return code
+
     if simple_type == "tree crops":
-        return "oil_palm" if "oil palm" in simple_name else "unknown_tc"
-    elif simple_type == "planted forest":
-        return species_map.get(vernac_name, "unknown_rotation")
-    else:
-        return None
+        return ROTATION_CLASS_CODES.get("oil_palm") if "oil palm" in simple_name else None
+
+    if simple_type == "planted forest":
+        cls = fallback_classify(row)
+        return ROTATION_CLASS_CODES.get(cls)
+
+    return None
 
 
 def rasterize_chunk_shp(shp_path, bbox, tile_id, run_mode):
@@ -305,18 +319,12 @@ def create_chunk_subsets(tile_gdf, species_map, chunk_bounds):
             logging.info(f"No features in chunk => {bbox}, skipping.")
             continue
 
-        subset["plantation_type"] = subset.apply(
+        subset["raster_val"] = subset.apply(
             lambda r: classify_plantation(r, species_map), axis=1
         )
-        subset.dropna(subset=["plantation_type"], inplace=True)
+        subset.dropna(subset=["raster_val"], inplace=True)
         if subset.empty:
             logging.info(f"No plantation features => {bbox}, skipping.")
-            continue
-
-        subset["raster_val"] = subset["plantation_type"].map(FINAL_MAPPING)
-        subset = subset.dropna(subset=["raster_val"])
-        if subset.empty:
-            logging.info(f"All mapped to null => {bbox}, skipping.")
             continue
 
         results.append((subset[["geometry", "raster_val"]].copy(), bbox))
@@ -408,20 +416,14 @@ def process_tile_with_bounds(tile_id, chunk_bounds, run_mode="default"):
         logging.info(f"No features in user bounding box => {chunk_bounds}, skipping.")
         return []
 
-    subset["plantation_type"] = subset.apply(
+    subset["raster_val"] = subset.apply(
         lambda r: classify_plantation(r, species_map), axis=1
     )
-    subset.dropna(subset=["plantation_type"], inplace=True)
+    subset.dropna(subset=["raster_val"], inplace=True)
     if subset.empty:
         logging.info(
             f"No plantation features => bounding box {chunk_bounds}, skipping."
         )
-        return []
-
-    subset["raster_val"] = subset["plantation_type"].map(FINAL_MAPPING)
-    subset = subset.dropna(subset=["raster_val"])
-    if subset.empty:
-        logging.info(f"All mapped to null => bounding box {chunk_bounds}, skipping.")
         return []
 
     return [
