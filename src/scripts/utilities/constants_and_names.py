@@ -53,14 +53,14 @@ chunk_stats_path = posixpath.join(local_temp_dir, 'chunk_stats')
 pixel_area_ha_dir = posixpath.join(
     full_bucket_prefix,
     processed_dir,
-    'pixel_area_ha/40000_pixels/20240101'
+    f'pixel_area_ha/{full_raster_dims}_pixels/20240101'
 )
 
 # directory containing per-pixel area rasters (square meters)
 pixel_area_dir = posixpath.join(
     full_bucket_prefix,
     processed_dir,
-    'pixel_area_m2/40000_pixels/20240101'
+    f'pixel_area_m2/{full_raster_dims}_pixels/20240101'
 )
 
 # file pattern for pixel area rasters
@@ -98,10 +98,10 @@ dirs = {
     'peat': posixpath.join(full_bucket_prefix, raw_dir, 'soils/GFW_Global_Peatlands'),
     'dadap': posixpath.join(full_bucket_prefix, processed_dir, 'dadap_density/30m/20240925'),
     'engert': posixpath.join(full_bucket_prefix, processed_dir, 'engert_density/30m/20240925'),
-    'grip': posixpath.join(full_bucket_prefix, processed_dir, 'grip_density/40000_pixels/20240925'),
-    'osm_roads': posixpath.join(full_bucket_prefix, processed_dir, 'osm_roads_density/40000_pixels/20240925'),
-    'osm_canals': posixpath.join(full_bucket_prefix, processed_dir, 'osm_canals_density/40000_pixels/20240822'),
-    'planted_forest_type': posixpath.join(full_bucket_prefix, processed_dir, 'sdpt/40000_pixels/20240925'),
+    'grip': posixpath.join(full_bucket_prefix, processed_dir, f'grip_density/{full_raster_dims}_pixels/20240925'),
+    'osm_roads': posixpath.join(full_bucket_prefix, processed_dir, f'osm_roads_density/{full_raster_dims}_pixels/20240925'),
+    'osm_canals': posixpath.join(full_bucket_prefix, processed_dir, f'osm_canals_density/{full_raster_dims}_pixels/20240822'),
+    'planted_forest_type': posixpath.join(full_bucket_prefix, processed_dir, f'sdpt/{full_raster_dims}_pixels/20240925'),
     'extraction': posixpath.join(full_bucket_prefix, processed_dir, 'extraction/20241021'),
     'climate_domain': posixpath.join(full_bucket_prefix, 'climate/carbon_model/inputs_for_carbon_pools/processed/fao_ecozones_bor_tem_tro/20190418'),
     'descals_type': posixpath.join(full_bucket_prefix, processed_dir, 'descals_plantation/extent/20241105'),
