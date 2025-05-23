@@ -1,5 +1,5 @@
 """
-sdpt_rasterize_attributes_csv_chunks.py
+sdpt_rasterize_attributes.py
 
 Rasterize SDPT plantation attributes in small chunks using Dask:
   1) Download the species reclassification CSV from S3 if not present.
