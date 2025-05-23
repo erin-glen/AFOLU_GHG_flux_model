@@ -403,36 +403,36 @@ def calc_Cf_forest(climate_domain_cell, drivers_cell, ifl_primary_cell):
 
     if climate_domain_cell == 1:  # Tropical/subtropical
         if ifl_primary_cell:  # Tropical/subtropical, primary forest
-            Cf_forest = 0.36
+            Cf_forest = 0.36  # Row "All primary tropical forest"
         else:  # Tropical/subtropical, not primary forest
-            Cf_forest = 0.55
+            Cf_forest = 0.55  # Row "All secondary tropical forest"
     elif climate_domain_cell == 2:   # Temperate
         if drivers_cell in driver_group_1:  # Temperate, driver group 1
-            Cf_forest = 0.51
+            Cf_forest = 0.51     # Row "Felled and burned (land-clearing fire)" temperate forest
         elif drivers_cell in driver_group_2:  # Temperate, driver group 2
-            Cf_forest = 0.62
+            Cf_forest = 0.62     # Row "Post logging slash burn" temperate forest
         elif drivers_cell in driver_group_3:  # Temperate, driver group 3
-            Cf_forest = 0.45
+            Cf_forest = 0.45     # Row "all other temperate forest"
         else:  # Temperate, no driver assigned
             Cf_forest = 0.45
     elif climate_domain_cell == 3:
         if drivers_cell in driver_group_1:  # Boreal, driver group 1
-            Cf_forest = 0.59
+            Cf_forest = 0.59     # Row "Land clearing fire" boreal forest
         elif drivers_cell in driver_group_2:  # Boreal, driver group 2
-            Cf_forest = 0.33
+            Cf_forest = 0.33     # Row "Post logging slash burn" boreal forest
         elif drivers_cell in driver_group_3:  # Boreal, driver group 3
-            Cf_forest = 0.34
+            Cf_forest = 0.34     # Row "All boreal forest"
         else:  # Boreal, no driver assigned
-            Cf_forest = 0.34
+            Cf_forest = 0.34     # Row "All boreal forest"
     else:  # Outside ecozone bounds
         if drivers_cell in driver_group_1:  # Outside ecozone bounds, driver group 1
-            Cf_forest = 0.59
+            Cf_forest = 0.59     # Row "Land clearing fire" boreal forest
         elif drivers_cell in driver_group_2:  # Outside ecozone bounds, driver group 2
-            Cf_forest = 0.33
+            Cf_forest = 0.33     # Row "Post logging slash burn" boreal forest
         elif drivers_cell in driver_group_3:  # Outside ecozone bounds, driver group 2
-            Cf_forest = 0.34
+            Cf_forest = 0.34     # Row "All boreal forest"
         else:  # Outside ecozone bounds, no driver assigned
-            Cf_forest = 0.34
+            Cf_forest = 0.34     # Row "All boreal forest"
 
     return Cf_forest
 
@@ -443,17 +443,17 @@ def calc_Cf_forest(climate_domain_cell, drivers_cell, ifl_primary_cell):
 def calc_Gef_forest(climate_domain_cell):
 
     if climate_domain_cell == 1:  # Tropical/subtropical
-        Gef_CO2_forest = 1580.0
-        Gef_CH4_forest = 6.8
-        Gef_N2O_forest = 0.2
+        Gef_CO2_forest = 1580.0   # Row "tropical forest"
+        Gef_CH4_forest = 6.8      # Row "tropical forest"
+        Gef_N2O_forest = 0.2      # Row "tropical forest"
     elif climate_domain_cell == 2 or climate_domain_cell == 3:   # Temperate/boreal
-        Gef_CO2_forest = 1569.0
-        Gef_CH4_forest = 4.7
-        Gef_N2O_forest = 0.26
+        Gef_CO2_forest = 1569.0   # Row "extra-tropical forest"
+        Gef_CH4_forest = 4.7      # Row "extra-tropical forest"
+        Gef_N2O_forest = 0.26     # Row "extra-tropical forest"
     else:  # Outside ecozone bounds
-        Gef_CO2_forest = 1569.0
-        Gef_CH4_forest = 4.7
-        Gef_N2O_forest = 0.26
+        Gef_CO2_forest = 1569.0   # Row "extra-tropical forest"
+        Gef_CH4_forest = 4.7      # Row "extra-tropical forest"
+        Gef_N2O_forest = 0.26     # Row "extra-tropical forest"
 
     return Gef_CO2_forest, Gef_CH4_forest, Gef_N2O_forest
 
