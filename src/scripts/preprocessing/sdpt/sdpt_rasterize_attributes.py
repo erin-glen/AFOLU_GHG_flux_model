@@ -49,8 +49,7 @@ logging.basicConfig(
 # Reclassification CSV in S3
 # The advanced remapping table already contains numeric rotation codes.
 ADVANCED_REMAP_S3 = (
-    "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/remapping_tables"
-    "advanced_remapping.csv"
+    "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/remapping_tables/advanced_remapping.csv"
 )
 
 # Rasterization settings
