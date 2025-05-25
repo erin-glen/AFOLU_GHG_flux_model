@@ -443,12 +443,16 @@ def process_tile_with_bounds(tile_id, chunk_bounds, run_mode="default"):
 
 
 def process_all_tiles(chunk_size=2.0, run_mode="default"):
-    """Create rasterization tasks for every SDPT tile shapefile."""
-    tasks = []
+    """Process every SDPT tile sequentially to avoid memory blowout."""
+
     for shp_key in list_sdpt_shapefiles():
         tile_id = os.path.basename(shp_key)[len("tile_") : -4]
-        tasks.extend(process_tile(tile_id, chunk_size, run_mode))
-    return tasks
+        tasks = process_tile(tile_id, chunk_size, run_mode)
+        if tasks:
+            logging.info(
+                f"Computing {len(tasks)} chunk tasks for tile => {tile_id} ..."
+            )
+            dask.compute(*tasks)
 
 
 def main(
@@ -485,12 +489,12 @@ def main(
                 tasks = process_tile_with_bounds(tile_id, chunk_bounds, run_mode)
             else:
                 tasks = process_tile(tile_id, chunk_size, run_mode)
+
+            logging.info(f"Computing {len(tasks)} chunk tasks ...")
+            dask.compute(*tasks)
         else:
             logging.info("No tile_id provided => processing all tiles.")
-            tasks = process_all_tiles(chunk_size, run_mode)
-
-        logging.info(f"Computing {len(tasks)} chunk tasks ...")
-        dask.compute(*tasks)
+            process_all_tiles(chunk_size, run_mode)
 
     finally:
         client.close()
