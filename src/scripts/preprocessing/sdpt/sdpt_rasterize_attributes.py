@@ -10,9 +10,11 @@ Rasterize SDPT plantation attributes in small chunks using Dask:
 
 Chunk-based approach:
   - Works on sub-bounds (2° × 2°, etc.) to limit memory usage.
+  - If ``--tile_id`` is omitted, all tiles under ``sdpt`` raw S3 path are processed.
 
-Usage example:
+Usage examples:
   python -m sdpt_rasterize_attributes_csv_chunks --tile_id 00N_110E --chunk_bounds "112,-4,114,-2" --run_mode test
+  python -m src.scripts.preprocessing.sdpt.sdpt_rasterize_attributes --client local
 """
 
 import os
@@ -47,7 +49,7 @@ logging.basicConfig(
 # Reclassification CSV in S3
 # The advanced remapping table already contains numeric rotation codes.
 ADVANCED_REMAP_S3 = (
-    "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/"
+    "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/remapping_tables"
     "advanced_remapping.csv"
 )
 
@@ -57,6 +59,16 @@ RASTER_NODATA = 0
 # Using a numpy dtype avoids ``rasterio`` ``TypeError`` when rasterising
 # attributes directly in memory.
 RASTER_DTYPE = np.uint8
+
+
+def list_sdpt_shapefiles():
+    """Return the list of SDPT shapefiles stored on S3."""
+    prefix = cn.datasets["sdpt"]["s3_raw"]
+    return [
+        k
+        for k in uutil.list_s3_files(cn.s3_bucket_name, prefix)
+        if k.lower().endswith(".shp")
+    ]
 
 
 def load_species_reclassification():
@@ -431,6 +443,15 @@ def process_tile_with_bounds(tile_id, chunk_bounds, run_mode="default"):
     ]
 
 
+def process_all_tiles(chunk_size=2.0, run_mode="default"):
+    """Create rasterization tasks for every SDPT tile shapefile."""
+    tasks = []
+    for shp_key in list_sdpt_shapefiles():
+        tile_id = os.path.basename(shp_key)[len("tile_") : -4]
+        tasks.extend(process_tile(tile_id, chunk_size, run_mode))
+    return tasks
+
+
 def main(
     tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="default", client="local"
 ):
@@ -466,9 +487,8 @@ def main(
             else:
                 tasks = process_tile(tile_id, chunk_size, run_mode)
         else:
-            logging.error(
-                "No tile_id provided. (Add your 'process_all_tiles()' logic if needed.)"
-            )
+            logging.info("No tile_id provided => processing all tiles.")
+            tasks = process_all_tiles(chunk_size, run_mode)
 
         logging.info(f"Computing {len(tasks)} chunk tasks ...")
         dask.compute(*tasks)
@@ -487,7 +507,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="SDPT chunk-based script => partial TIFs stored under s3_processed_base/<px>/YYYYMMDD."
     )
-    parser.add_argument("--tile_id", type=str, help="Tile ID (e.g. 00N_110E).")
+    parser.add_argument(
+        "--tile_id",
+        type=str,
+        help="Tile ID (e.g. 00N_110E). Omit to process all tiles.",
+    )
     parser.add_argument(
         "--chunk_size", type=float, default=2.0, help="Chunk size (deg)."
     )
@@ -515,12 +539,12 @@ if __name__ == "__main__":
 
     if not any(sys.argv[1:]):
         logging.info(
-            "No CLI => example tile=00N_110E, chunk_size=2, run_mode=test, local => partial TIFs in local_processed path."
+            "No CLI => processing all tiles locally in test mode for demonstration."
         )
         main(
-            tile_id="00N_110E",
+            tile_id=None,
             chunk_size=2.0,
-            chunk_bounds="112,-4,114,-2",
+            chunk_bounds=None,
             run_mode="test",
             client="local",
         )
@@ -541,4 +565,5 @@ python -m src.preprocessing.sdpt.sdpt_rasterize_attributes_csv_chunks \
   --chunk_bounds "112,-4,114,-2" \
   --run_mode test \
   --client local
+python -m src.scripts.preprocessing.sdpt.sdpt_rasterize_attributes --client local
 """
