@@ -2,17 +2,17 @@
 """
 pp_union_peatmask.py
 
-1) Checks if the 30 m (~0.00025°) union mask already exists on S3. If so,
-   skip re-union. Otherwise, create the union from gfw/gpd/peatmap/peatml tiles.
+1) Checks if the 30m (~0.00025°) union mask already exists on S3. If so,
+   skip re-union. Otherwise, create the union from gfw/gpd/peatmap/peatml/ogh tiles.
 
 2) Optionally (--resample 1km) resample the union to 1 km, either from
-   the newly created 30 m union or from the existing one if it was found.
+   the newly created 30m union or from the existing one if it was found.
 
 Usage:
-  # Just do union at 30 m if missing:
-  python -m src.scripts.preprocessing.pp_union_peatmask --dataset_list gfw gpd peatmap peatml
+  # Just do union at 30m if missing:
+  python -m src.scripts.preprocessing.pp_union_peatmask --dataset_list gfw gpd peatmap peatml ogh
 
-  # Single tile, also do 1 km resample:
+  # Single tile, also do 1km resample:
   python -m src.scripts.preprocessing.pp_union_peatmask --tile_id 20N_020W --resample 1km
 
   # Local or Coiled:
@@ -27,13 +27,13 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
-from rasterio.warp import calculate_default_transform, Resampling
+from rasterio.warp import Resampling
 from dask import delayed
 from dask.distributed import Client, LocalCluster
 import dask
 
 import src.scripts.preprocessing.preprocessing_constants as cn
-import src.scripts.preprocessing.utilities as uu
+from src.scripts.utilities import universal_utilities as uu
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger("peat-union")
@@ -77,7 +77,7 @@ def union_tile(tile_id, ds_list, run_mode="default", do_resample=False):
     """
     log.info(f"[union|{tile_id}] Checking 30m union presence, do_resample={do_resample}")
     out_30m_path = get_union_output_path(tile_id, "30m")
-    s3_30m_key = out_30m_path.replace("s3://gfw2-data/", "", 1)  # for s3_file_exists
+    s3_30m_key = out_30m_path.replace(f"s3://{BUCKET}/", "", 1)
 
     local_temp = Path(tempfile.gettempdir()) / "union_peat"
     local_temp.mkdir(parents=True, exist_ok=True)
@@ -102,7 +102,7 @@ def union_tile(tile_id, ds_list, run_mode="default", do_resample=False):
         profile = None
         for ds_key in ds_list:
             tile_path = get_tile_path(ds_key, tile_id)
-            s3_key_for_check = tile_path.replace("s3://gfw2-data/", "", 1)
+            s3_key_for_check = tile_path.replace(f"s3://{BUCKET}/", "", 1)
             if not uu.s3_file_exists(BUCKET, s3_key_for_check):
                 log.warning(f"[union|{tile_id}] MISSING tile for {ds_key}: {tile_path}")
                 continue
@@ -159,7 +159,7 @@ def union_tile(tile_id, ds_list, run_mode="default", do_resample=False):
         )
 
         out_1km_path = get_union_output_path(tile_id, "1km")
-        s3_1km_key = out_1km_path.replace("s3://gfw2-data/", "", 1)
+        s3_1km_key = out_1km_path.replace(f"s3://{BUCKET}/", "", 1)
 
         if run_mode != "test":
             uu.upload_file_to_s3(str(local_1km), BUCKET, s3_1km_key)
@@ -236,14 +236,18 @@ def main(tile_id=None, dataset_list=None, client="coiled", run_mode="default", r
     If 30m union exists, skip re-union. If --resample=1km, do 1km step from
     existing or newly created 30m. 'none' => no resample.
     """
-    ds_list = dataset_list or ["gfw", "gpd", "peatmap", "peatml"]
+    ds_list = dataset_list or ["gfw", "gpd", "peatmap", "peatml", "ogh"]
 
     if client == "local":
         cluster = LocalCluster(processes=False, dashboard_address=None)
         client_obj = Client(cluster)
         log.info("Running locally.")
     else:
-        client_obj, cluster = uu.setup_coiled_cluster()
+        client_obj, cluster = uu.connect_to_cluster(
+            cluster_name="peat_union",
+            n_workers=20,
+            region="us-east-1"
+        )
         log.info(f"Running on Coiled: {cluster.name}")
 
     tile_ids = [tile_id] if tile_id else cn.tile_id_list
@@ -266,7 +270,7 @@ if __name__ == "__main__":
     parser.add_argument("--tile_id", help="Single tile ID (optional)")
     parser.add_argument(
         "--dataset_list", nargs="+", default=None,
-        help="Datasets to union. Default: gfw gpd peatmap peatml"
+        help="Datasets to union. Default: gfw gpd peatmap peatml ogh"
     )
     parser.add_argument(
         "--client", default="coiled", choices=["local","coiled"],
