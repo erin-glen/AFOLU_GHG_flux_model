@@ -201,6 +201,11 @@ def mosaic_and_warp_raster(ds_key, tid, mode="default"):
         else:
             source_for_warp = all_rasters[0]
 
+    # Verify the raster exists before warping
+    if not uutil.s3_file_exists(BUCKET, raw_path.replace(f"s3://{BUCKET}/", "", 1)):
+        log.error(f"[{ds_key}|{tid}] raw raster not found: {raw_path}")
+        return
+
     # Warp to 10×10 deg output
     xmin, ymin, xmax, ymax = bounds_for_tile(tid)
     warp_to_hansen_coiled(
@@ -254,7 +259,7 @@ def main(tile_id=None, dataset=None, client="coiled", run_mode="default"):
         client_obj = Client(cluster)
         log.info("Running locally.")
     else:
-        cluster, client = uutil.connect_to_cluster(
+        cluster, client_obj = uutil.connect_to_cluster(
             cluster_name="peat_masks",
             n_workers=20,
             region="us-east-1",
