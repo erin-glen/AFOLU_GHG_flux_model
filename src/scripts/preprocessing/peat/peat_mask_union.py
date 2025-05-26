@@ -243,10 +243,10 @@ def main(tile_id=None, dataset_list=None, client="coiled", run_mode="default", r
         client_obj = Client(cluster)
         log.info("Running locally.")
     else:
-        client_obj, cluster = uu.connect_to_cluster(
+        cluster, client_obj = uu.connect_to_cluster(
             cluster_name="peat_union",
             n_workers=20,
-            region="us-east-1"
+            region="us-east-1",
         )
         log.info(f"Running on Coiled: {cluster.name}")
 
