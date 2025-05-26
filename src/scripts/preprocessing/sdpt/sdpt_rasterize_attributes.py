@@ -32,8 +32,6 @@ import numpy as np
 import rasterio
 from rasterio.features import rasterize
 from rasterio.transform import from_origin
-import geopandas as gpd
-from shapely.geometry import box
 
 # Our universal constants & utilities
 import src.scripts.preprocessing.preprocessing_constants as cn
@@ -50,7 +48,9 @@ logging.basicConfig(
 
 # Reclassification CSV in S3
 # The advanced remapping table already contains numeric rotation codes.
-ADVANCED_REMAP_S3 = "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/remapping_tables/advanced_remapping.csv"
+ADVANCED_REMAP_S3 = (
+    "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/remapping_tables/advanced_remapping.csv"
+)
 
 # Rasterization settings
 RASTER_RES = 0.00025
@@ -84,12 +84,16 @@ def load_species_reclassification():
 
     if not os.path.exists(local_csv):
         try:
-            uutil.download_file_from_s3(ADVANCED_REMAP_S3, local_csv, cn.s3_bucket_name)
+            uutil.download_file_from_s3(
+                ADVANCED_REMAP_S3, local_csv, cn.s3_bucket_name
+            )
             logging.info(f"Downloaded CSV => {local_csv}")
         except Exception as exc:  # pragma: no cover - network errors
             logging.warning(f"Failed to download CSV from S3: {exc}")
     else:
-        logging.info(f"Local CSV already exists => {local_csv}, skipping download.")
+        logging.info(
+            f"Local CSV already exists => {local_csv}, skipping download."
+        )
 
     if not os.path.exists(local_csv):
         logging.warning(
@@ -129,9 +133,7 @@ def classify_plantation(row, species_map):
         return code
 
     if simple_type == "tree crops":
-        return (
-            ROTATION_CLASS_CODES.get("oil_palm") if "oil palm" in simple_name else None
-        )
+        return ROTATION_CLASS_CODES.get("oil_palm") if "oil palm" in simple_name else None
 
     if simple_type == "planted forest":
         cls = fallback_classify(row)
@@ -318,27 +320,14 @@ def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
     gc.collect()
 
 
-def create_chunk_subsets(tile_ddf, species_map, chunk_bounds):
-    """Return GeoDataFrame subsets for each bounding box.
-
-    ``tile_ddf`` is a :class:`dask_geopandas.GeoDataFrame`.  Each chunk is
-    selected from the Dask object using ``.cx`` and only that subset is
-    materialised with ``.compute()``.  This avoids loading the entire tile into
-    memory at once.
-    """
-
+def create_chunk_subsets(tile_gdf, species_map, chunk_bounds):
+    """Return GeoDataFrame subsets for each bounding box."""
     results = []
     for bbox in chunk_bounds:
         minx, miny, maxx, maxy = bbox
-        subset = tile_ddf.cx[minx:maxx, miny:maxy].compute()
+        subset = tile_gdf.cx[minx:maxx, miny:maxy].copy()
         if subset.empty:
             logging.info(f"No features in chunk => {bbox}, skipping.")
-            continue
-
-        shapely_box = box(minx, miny, maxx, maxy)
-        subset = gpd.clip(subset, shapely_box)
-        if subset.empty:
-            logging.info(f"No geometries within {bbox} after clipping, skipping.")
             continue
 
         subset["raster_val"] = subset.apply(
@@ -355,7 +344,7 @@ def create_chunk_subsets(tile_ddf, species_map, chunk_bounds):
 
 
 def _load_tile_gdf(tile_id):
-    """Return the Dask GeoDataFrame for ``tile_id`` or ``None`` on failure."""
+    """Return the GeoDataFrame for ``tile_id`` or ``None`` on failure."""
 
     vsis3_tile_shp = (
         f"/vsis3/{cn.s3_bucket_name}/{cn.datasets['sdpt']['s3_raw']}/tile_{tile_id}.shp"
@@ -363,32 +352,30 @@ def _load_tile_gdf(tile_id):
     logging.info(f"Reading tile shapefile => {vsis3_tile_shp}")
 
     try:
-        # Use multiple partitions so that each worker can process a portion of
-        # the tile in parallel.  ``GeoDataFrame.cx`` requires known spatial
-        # partitions when ``npartitions`` is provided, so we calculate them
-        # explicitly below.
-        tile_ddf = dgpd.read_file(vsis3_tile_shp, npartitions=8)
-        # ``read_file`` does not set spatial partitions automatically when
-        # ``npartitions`` is specified.
-        tile_ddf = tile_ddf.calculate_spatial_partitions()
+        ddf = dgpd.read_file(vsis3_tile_shp, npartitions=1)
+        tile_gdf = ddf.compute()
     except Exception as e:
         logging.error(f"Error reading tile_{tile_id}.shp => {e}")
         return None
 
-    return tile_ddf
+    if tile_gdf.empty:
+        logging.info(f"No features found => tile {tile_id}")
+        return None
+
+    return tile_gdf
 
 
-def process_tile(tile_id, chunk_size=1.0, run_mode="default"):
+def process_tile(tile_id, chunk_size=2.0, run_mode="default"):
     """
-    1) Read tile_{tile_id}.shp from /vsis3/ as a Dask GeoDataFrame
+    1) Read tile_{tile_id}.shp from /vsis3/ => .compute() => in-memory GeoDataFrame
     2) chunk bounding boxes
     3) classify => build chunk GeoDataFrames
     4) produce tasks => rasterize each chunk
     """
     logging.info(f"Processing entire tile => {tile_id} in ~{chunk_size} deg sub-chunks")
 
-    tile_ddf = _load_tile_gdf(tile_id)
-    if tile_ddf is None:
+    tile_gdf = _load_tile_gdf(tile_id)
+    if tile_gdf is None:
         return []
 
     # bounding boxes (10x10 deg)
@@ -399,12 +386,14 @@ def process_tile(tile_id, chunk_size=1.0, run_mode="default"):
     species_map = load_species_reclassification()
 
     # build chunk GeoDataFrames
-    chunk_list = create_chunk_subsets(tile_ddf, species_map, chunk_bboxes)
+    chunk_list = create_chunk_subsets(tile_gdf, species_map, chunk_bboxes)
     logging.info(f"Prepared {len(chunk_list)} chunk subsets for tile => {tile_id}")
 
     tasks = []
     for subset, bbox in chunk_list:
-        tasks.append(dask.delayed(rasterize_chunk_df)(subset, bbox, tile_id, run_mode))
+        tasks.append(
+            dask.delayed(rasterize_chunk_df)(subset, bbox, tile_id, run_mode)
+        )
 
     return tasks
 
@@ -424,16 +413,16 @@ def process_tile_with_bounds(tile_id, chunk_bounds, run_mode="default"):
         minx, miny, maxx, maxy = map(float, chunk_bounds.split(","))
         chunk_bounds = (minx, miny, maxx, maxy)
 
-    tile_ddf = _load_tile_gdf(tile_id)
-    if tile_ddf is None:
+    tile_gdf = _load_tile_gdf(tile_id)
+    if tile_gdf is None:
         return []
 
     # reclassification
     species_map = load_species_reclassification()
 
-    subset = tile_ddf.cx[
+    subset = tile_gdf.cx[
         chunk_bounds[0] : chunk_bounds[2], chunk_bounds[1] : chunk_bounds[3]
-    ].compute()
+    ]
     if subset.empty:
         logging.info(f"No features in user bounding box => {chunk_bounds}, skipping.")
         return []
@@ -449,27 +438,21 @@ def process_tile_with_bounds(tile_id, chunk_bounds, run_mode="default"):
         return []
 
     return [
-        dask.delayed(rasterize_chunk_df)(
-            subset[["geometry", "raster_val"]], chunk_bounds, tile_id, run_mode
-        )
+        dask.delayed(rasterize_chunk_df)(subset[["geometry", "raster_val"]], chunk_bounds, tile_id, run_mode)
     ]
 
 
-def process_all_tiles(chunk_size=1.0, run_mode="default"):
-    """Process every SDPT tile sequentially to avoid memory blowout."""
-
+def process_all_tiles(chunk_size=2.0, run_mode="default"):
+    """Create rasterization tasks for every SDPT tile shapefile."""
+    tasks = []
     for shp_key in list_sdpt_shapefiles():
         tile_id = os.path.basename(shp_key)[len("tile_") : -4]
-        tasks = process_tile(tile_id, chunk_size, run_mode)
-        if tasks:
-            logging.info(
-                f"Computing {len(tasks)} chunk tasks for tile => {tile_id} ..."
-            )
-            dask.compute(*tasks)
+        tasks.extend(process_tile(tile_id, chunk_size, run_mode))
+    return tasks
 
 
 def main(
-    tile_id=None, chunk_size=1.0, chunk_bounds=None, run_mode="default", client="local"
+    tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="default", client="local"
 ):
     """
     If chunk_bounds is provided => only process that bounding box.
@@ -481,9 +464,9 @@ def main(
     if client == "coiled":
         cluster, client = uutil.connect_to_cluster(
             cluster_name="sdpt_rasterization",
-            n_workers=40,
+            n_workers=20,
             region="us-east-1",
-            worker_memory="32GiB",
+            worker_memory="64GiB",
         )
         logging.info(f"Coiled cluster => {cluster.name}")
     else:
@@ -502,12 +485,12 @@ def main(
                 tasks = process_tile_with_bounds(tile_id, chunk_bounds, run_mode)
             else:
                 tasks = process_tile(tile_id, chunk_size, run_mode)
-
-            logging.info(f"Computing {len(tasks)} chunk tasks ...")
-            dask.compute(*tasks)
         else:
             logging.info("No tile_id provided => processing all tiles.")
-            process_all_tiles(chunk_size, run_mode)
+            tasks = process_all_tiles(chunk_size, run_mode)
+
+        logging.info(f"Computing {len(tasks)} chunk tasks ...")
+        dask.compute(*tasks)
 
     finally:
         client.close()
@@ -529,7 +512,7 @@ if __name__ == "__main__":
         help="Tile ID (e.g. 00N_110E). Omit to process all tiles.",
     )
     parser.add_argument(
-        "--chunk_size", type=float, default=1.0, help="Chunk size (deg)."
+        "--chunk_size", type=float, default=2.0, help="Chunk size (deg)."
     )
     parser.add_argument(
         "--chunk_bounds",
@@ -559,7 +542,7 @@ if __name__ == "__main__":
         )
         main(
             tile_id=None,
-            chunk_size=1.0,
+            chunk_size=2.0,
             chunk_bounds=None,
             run_mode="test",
             client="local",
