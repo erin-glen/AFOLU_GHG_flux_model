@@ -161,9 +161,10 @@ def main(do_grip=True, do_osm_roads=True, do_osm_canals=True,
     # start cluster only when needed
     if client_type == "coiled":
         cluster, client = uutil.connect_to_cluster(
-            cluster_name="roads_canals",
+            cluster_name="reproject",
             n_workers=20,
             region="us-east-1",
+            worker_memory= "64GiB"
         )
         logging.info(f"Using Coiled cluster: {cluster.name}")
     else:
