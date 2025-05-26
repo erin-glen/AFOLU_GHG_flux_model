@@ -363,7 +363,14 @@ def _load_tile_gdf(tile_id):
     logging.info(f"Reading tile shapefile => {vsis3_tile_shp}")
 
     try:
-        tile_ddf = dgpd.read_file(vsis3_tile_shp, npartitions=1)
+        # Use multiple partitions so that each worker can process a portion of
+        # the tile in parallel.  ``GeoDataFrame.cx`` requires known spatial
+        # partitions when ``npartitions`` is provided, so we calculate them
+        # explicitly below.
+        tile_ddf = dgpd.read_file(vsis3_tile_shp, npartitions=8)
+        # ``read_file`` does not set spatial partitions automatically when
+        # ``npartitions`` is specified.
+        tile_ddf = tile_ddf.calculate_spatial_partitions()
     except Exception as e:
         logging.error(f"Error reading tile_{tile_id}.shp => {e}")
         return None
@@ -371,7 +378,7 @@ def _load_tile_gdf(tile_id):
     return tile_ddf
 
 
-def process_tile(tile_id, chunk_size=2.0, run_mode="default"):
+def process_tile(tile_id, chunk_size=1.0, run_mode="default"):
     """
     1) Read tile_{tile_id}.shp from /vsis3/ as a Dask GeoDataFrame
     2) chunk bounding boxes
@@ -448,7 +455,7 @@ def process_tile_with_bounds(tile_id, chunk_bounds, run_mode="default"):
     ]
 
 
-def process_all_tiles(chunk_size=2.0, run_mode="default"):
+def process_all_tiles(chunk_size=1.0, run_mode="default"):
     """Process every SDPT tile sequentially to avoid memory blowout."""
 
     for shp_key in list_sdpt_shapefiles():
@@ -462,7 +469,7 @@ def process_all_tiles(chunk_size=2.0, run_mode="default"):
 
 
 def main(
-    tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="default", client="local"
+    tile_id=None, chunk_size=1.0, chunk_bounds=None, run_mode="default", client="local"
 ):
     """
     If chunk_bounds is provided => only process that bounding box.
@@ -474,9 +481,9 @@ def main(
     if client == "coiled":
         cluster, client = uutil.connect_to_cluster(
             cluster_name="sdpt_rasterization",
-            n_workers=20,
+            n_workers=40,
             region="us-east-1",
-            worker_memory="64GiB",
+            worker_memory="32GiB",
         )
         logging.info(f"Coiled cluster => {cluster.name}")
     else:
@@ -522,7 +529,7 @@ if __name__ == "__main__":
         help="Tile ID (e.g. 00N_110E). Omit to process all tiles.",
     )
     parser.add_argument(
-        "--chunk_size", type=float, default=2.0, help="Chunk size (deg)."
+        "--chunk_size", type=float, default=1.0, help="Chunk size (deg)."
     )
     parser.add_argument(
         "--chunk_bounds",
@@ -552,7 +559,7 @@ if __name__ == "__main__":
         )
         main(
             tile_id=None,
-            chunk_size=2.0,
+            chunk_size=1.0,
             chunk_bounds=None,
             run_mode="test",
             client="local",
