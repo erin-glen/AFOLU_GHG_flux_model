@@ -468,9 +468,9 @@ def main(
     if client == "coiled":
         cluster, client = uutil.connect_to_cluster(
             cluster_name="sdpt_rasterization",
-            n_workers=20,
+            n_workers=10,
             region="us-east-1",
-            worker_memory="64GiB",
+            worker_memory="128GiB",
         )
         logging.info(f"Coiled cluster => {cluster.name}")
     else:
