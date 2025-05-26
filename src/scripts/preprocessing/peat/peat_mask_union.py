@@ -1,444 +1,291 @@
+#!/usr/bin/env python
+"""
+pp_union_peatmask.py
+
+1) Checks if the 30 m (~0.00025°) union mask already exists on S3. If so,
+   skip re-union. Otherwise, create the union from gfw/gpd/peatmap/peatml tiles.
+
+2) Optionally (--resample 1km) resample the union to 1 km, either from
+   the newly created 30 m union or from the existing one if it was found.
+
+Usage:
+  # Just do union at 30 m if missing:
+  python -m src.scripts.preprocessing.pp_union_peatmask --dataset_list gfw gpd peatmap peatml
+
+  # Single tile, also do 1 km resample:
+  python -m src.scripts.preprocessing.pp_union_peatmask --tile_id 20N_020W --resample 1km
+
+  # Local or Coiled:
+  python -m src.scripts.preprocessing.pp_union_peatmask --client local
+"""
+
 import os
-import geopandas as gpd
-import logging
-import dask
-from dask.distributed import Client, LocalCluster
-from dask.diagnostics import ProgressBar
-from src.scripts.utilities import universal_utilities as uutil
-import pandas as pd
 import argparse
-import sys
-import boto3
-import gc
-import subprocess
+import logging
+import tempfile
+from pathlib import Path
+
+import numpy as np
 import rasterio
-from rasterio.enums import Resampling
-from rasterio.features import rasterize
-from shapely.geometry import box
-import rioxarray
-import warnings
-from botocore.exceptions import NoCredentialsError, PartialCredentialsError
+from rasterio.warp import calculate_default_transform, Resampling
+from dask import delayed
+from dask.distributed import Client, LocalCluster
+import dask
 
 import src.scripts.preprocessing.preprocessing_constants as cn
-from src.scripts.utilities import universal_utilities as uutil
+import src.scripts.preprocessing.utilities as uu
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+log = logging.getLogger("peat-union")
+
+BUCKET = cn.s3_bucket_name
+
+# Sample tile for 1 km alignment
+SAMPLE_1KM_TILE = f"/vsis3/{BUCKET}/{cn.peat_tiles_prefix_1km}00N_110E_peat_mask_processed.tif"
 
 
-"""
-This script processes OSM and GRIP data specifically for roads and canals using tiled shapefiles.
-It performs the following steps:
-1. Reads raster tiles from S3.
-2. Resamples the raster to a target resolution.
-3. Creates a fishnet grid.
-4. Reads corresponding roads or canals shapefiles for each tile.
-5. Assigns road/canal lengths to the fishnet cells.
-6. Converts the lengths to density.
-7. Saves the results as raster files locally and uploads them to S3.
+def get_tile_path(ds_key, tile_id):
+    ds = cn.datasets["peat"][ds_key]
+    s3_base = ds["s3_processed"]
+    tile_name = f"{tile_id}_{ds_key}_mask.tif"
+    tile_path = os.path.join(s3_base, tile_name).replace("\\", "/")
+    if not tile_path.startswith("s3://"):
+        tile_path = f"s3://{BUCKET}/{tile_path.lstrip('/')}"
+    return tile_path
 
-The script uses Dask to parallelize the processing of multiple tiles.
+def get_union_output_path(tile_id, resolution="30m"):
+    if resolution == "1km":
+        union_dir = cn.datasets["peat"]["union_mask"]["1km"]
+        out_name = f"{tile_id}_union_mask_1km.tif"
+    else:
+        union_dir = cn.datasets["peat"]["union_mask"]["30m"]
+        out_name = f"{tile_id}_union_mask.tif"
 
-Functions:
-- get_raster_bounds: Reads and returns the bounds of a raster file.
-- resample_raster: Resamples a raster to a target resolution.
-- mask_raster: Masks raster data to highlight specific values.
-- create_fishnet_from_raster: Creates a fishnet grid from raster data.
-- reproject_gdf: Reprojects a GeoDataFrame to a specified EPSG code.
-- read_tiled_features: Reads and reprojects shapefiles (roads or canals) for a given tile.
-- assign_segments_to_cells: Assigns features to fishnet cells and calculates lengths.
-- convert_length_to_density: Converts lengths of features to density (km/km^2).
-- fishnet_to_raster: Converts a fishnet GeoDataFrame to a raster and saves it.
-- resample_to_30m: Resamples a raster to 30 meters resolution.
-- compress_file: Compresses a file using GDAL.
-- get_existing_s3_files: Gets a list of existing files in an S3 bucket.
-- upload_final_output_to_s3: Uploads the final output file to S3 and deletes the local file.
-- process_tile: Processes a single tile.
-- process_all_tiles: Processes all tiles using Dask for parallelization.
-- main: Main function to execute the processing based on provided arguments.
+    out_path = os.path.join(union_dir, out_name).replace("\\", "/")
+    if not out_path.startswith("s3://"):
+        out_path = f"s3://{BUCKET}/{out_path.lstrip('/')}"
+    return out_path
 
-Usage examples:
-- Process a specific tile (00N_110E):
-  python script.py --tile_id 00N_110E --feature_type osm_roads --client local --run_mode default
 
-- Process all tiles:
-  python script.py --feature_type osm_roads --client local --run_mode default
-
-Dependencies:
-- geopandas
-- pandas
-- shapely
-- numpy
-- rasterio
-- rioxarray
-- boto3
-- fiona
-- dask
-- dask.distributed
-- dask.diagnostics
-- subprocess
-- botocore
-"""
-
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-
-# Suppress specific warnings
-warnings.filterwarnings('ignore', 'Geometry is in a geographic CRS. Results from', UserWarning)
-
-# Ensure local output directories exist
-for dataset_key, dataset_info in cn.datasets.items():
-    if dataset_key in ['osm', 'grip']:
-        for sub_key, sub_dataset in dataset_info.items():
-            os.makedirs(sub_dataset['local_processed'], exist_ok=True)
-os.makedirs(cn.local_temp_dir, exist_ok=True)
-logging.info("Directories and paths set up")
-
-def get_raster_bounds(raster_path):
-    logging.info(f"Reading raster bounds from {raster_path}")
-    with rasterio.open(raster_path) as src:
-        bounds = src.bounds
-    logging.info(f"Bounds of the raster: {bounds}")
-    return bounds
-
-def resample_raster(src, target_resolution_m):
-    logging.info(f"Resampling raster to {target_resolution_m} meter resolution (1 km by 1 km)")
-    target_resolution_deg = target_resolution_m / 111320
-
-    width = int((src.bounds.right - src.bounds.left) / target_resolution_deg)
-    height = int((src.bounds.top - src.bounds.bottom) / target_resolution_deg)
-
-    new_transform = rasterio.transform.from_bounds(
-        src.bounds.left, src.bounds.bottom, src.bounds.right, src.bounds.top, width, height)
-
-    profile = src.profile
-    profile.update(transform=new_transform, width=width, height=height)
-
-    data = src.read(
-        out_shape=(src.count, height, width),
-        resampling=Resampling.nearest
-    )
-
-    return data, profile
-
-def mask_raster(data, profile):
-    logging.info("Masking raster in memory for values equal to 1")
-    mask = data == 1
-    profile.update(dtype=rasterio.uint8)
-    return mask.astype(rasterio.uint8), profile
-
-def create_fishnet_from_raster(data, transform):
-    logging.info("Creating fishnet from raster data in memory")
-    rows, cols = data.shape
-    polygons = []
-
-    for row in range(rows):
-        for col in range(cols):
-            if data[row, col]:
-                x, y = transform * (col, row)
-                polygons.append(box(x, y, x + transform[0], y + transform[4]))
-
-    fishnet_gdf = gpd.GeoDataFrame({'geometry': polygons}, crs="EPSG:4326")
-    logging.info(f"Fishnet grid generated with {len(polygons)} cells")
-    return fishnet_gdf
-
-def reproject_gdf(gdf, epsg):
-    logging.info(f"Reprojecting GeoDataFrame to EPSG:{epsg}")
-    return gdf.to_crs(epsg=epsg)
-
-def read_tiled_features(tile_id, feature_type):
+@dask.delayed
+def union_tile(tile_id, ds_list, run_mode="default", do_resample=False):
     """
-    Reads and reprojects shapefiles (roads or canals) for a given tile.
-
-    Parameters:
-    tile_id (str): Tile ID.
-    feature_type (str): Type of feature ('osm_roads', 'osm_canals', or 'grip_roads').
-
-    Returns:
-    GeoDataFrame: Reprojected features GeoDataFrame.
+    1) Check if 30 m union already exists on S3. If so, skip union step.
+    2) If union not found, read each dataset tile and create union (0/1).
+    3) Optionally resample union to 1 km, either from newly created local file or
+       by downloading the existing 30 m union from S3 if it was found.
     """
-    try:
-        # Extract relevant directories
-        feature_key = feature_type.split('_')
-        feature_tile_dir = cn.datasets[feature_key[0]][feature_key[1]]['s3_raw']
+    log.info(f"[union|{tile_id}] Checking 30m union presence, do_resample={do_resample}")
+    out_30m_path = get_union_output_path(tile_id, "30m")
+    s3_30m_key = out_30m_path.replace("s3://gfw2-data/", "", 1)  # for s3_file_exists
 
-        # Construct the S3 path for the shapefile
-        tile_id = '_'.join(tile_id.split('_')[:2])
-        s3_file_path = os.path.join(feature_tile_dir, f"{feature_key[1]}_{tile_id}.shp")
-        full_s3_path = f"/vsis3/{cn.s3_bucket_name}/{s3_file_path}"
+    local_temp = Path(tempfile.gettempdir()) / "union_peat"
+    local_temp.mkdir(parents=True, exist_ok=True)
+    local_30m = local_temp / f"{tile_id}_union_30m.tif"
 
-        logging.info(f"Constructed S3 file path: {full_s3_path}")
+    # Check if union tile already on S3
+    union_exists = uu.s3_file_exists(BUCKET, s3_30m_key)
 
-        # Attempt to read the shapefile using GDAL virtual file system
-        features_gdf = gpd.read_file(full_s3_path)
-        if not features_gdf.empty:
-            logging.info(f"Read {len(features_gdf)} {feature_type} features for tile {tile_id}")
-            features_gdf = reproject_gdf(features_gdf, 3395)  # Reproject to EPSG:3395
-            return features_gdf
+    if union_exists and run_mode != "test":
+        log.info(f"[union|{tile_id}] 30m union already exists => skipping union step.")
+        # We'll download the existing union file if we need for resampling
+        if do_resample:
+            vsis3_path = out_30m_path.replace("s3://", "/vsis3/")
+            # Download or open directly. We'll just open directly for warp
+            log.info(f"[union|{tile_id}] will open existing 30m union from {vsis3_path}")
         else:
-            logging.warning(f"No data found in shapefile for tile {tile_id} at {full_s3_path}")
-            return gpd.GeoDataFrame(columns=['geometry'])
-
-    except fiona.errors.DriverError as e:
-        logging.error(f"Error reading {feature_type} shapefile: {e}")
-        return gpd.GeoDataFrame(columns=['geometry'])
-
-    except Exception as e:
-        logging.error(f"Unexpected error occurred while reading {feature_type} for tile {tile_id}: {e}")
-        return gpd.GeoDataFrame(columns=['geometry'])
-
-def assign_segments_to_cells(fishnet_gdf, features_gdf):
-    logging.info("Assigning features segments to fishnet cells and calculating lengths")
-    feature_lengths = []
-
-    for idx, cell in fishnet_gdf.iterrows():
-        features_in_cell = gpd.clip(features_gdf, cell.geometry)
-        total_length = features_in_cell.geometry.length.sum()
-        feature_lengths.append(total_length)
-
-    fishnet_gdf['length'] = feature_lengths
-    logging.info(f"Fishnet with feature lengths: {fishnet_gdf.head()}")
-    return fishnet_gdf
-
-def convert_length_to_density(fishnet_gdf, crs):
-    logging.info("Converting length to density (km/km2)")
-    if crs.axis_info[0].unit_name == 'metre':
-        fishnet_gdf['length_km'] = fishnet_gdf['length'] / 1000
-        fishnet_gdf['density'] = fishnet_gdf['length_km']
+            # If no resample => done
+            return f"[union|{tile_id}] union tile found => skip."
     else:
-        raise ValueError("Unsupported CRS units")
-    logging.info(f"Density values: {fishnet_gdf[['length', 'density']]}")
-    return fishnet_gdf
+        # union tile doesn't exist => create it
+        arrays = []
+        profile = None
+        for ds_key in ds_list:
+            tile_path = get_tile_path(ds_key, tile_id)
+            s3_key_for_check = tile_path.replace("s3://gfw2-data/", "", 1)
+            if not uu.s3_file_exists(BUCKET, s3_key_for_check):
+                log.warning(f"[union|{tile_id}] MISSING tile for {ds_key}: {tile_path}")
+                continue
 
-def fishnet_to_raster(fishnet_gdf, profile, output_raster_path):
-    logging.info(f"Converting fishnet to raster and saving to {output_raster_path}")
-    profile.update(dtype=rasterio.float32, count=1, compress='lzw')
+            vsis3_path = tile_path.replace("s3://", "/vsis3/")
+            try:
+                with rasterio.open(vsis3_path) as src:
+                    arr = src.read(1)
+                    arrays.append(arr > 0)
+                    if profile is None:
+                        profile = src.profile
+            except Exception as e:
+                log.warning(f"[union|{tile_id}] Error reading {ds_key}: {tile_path}, {e}")
+                continue
 
-    transform = profile['transform']
-    out_shape = (profile['height'], profile['width'])
-    fishnet_gdf = fishnet_gdf.to_crs(profile['crs'])
+        if not arrays:
+            log.info(f"[union|{tile_id}] All datasets missing => skipping union.")
+            return f"[union|{tile_id}] no data from any dataset"
 
-    if fishnet_gdf.empty:
-        logging.info(f"No valid geometries found for {output_raster_path}. Skipping rasterization.")
-        return
+        union_bool = np.any(np.stack(arrays, axis=0), axis=0)
+        union_uint8 = union_bool.astype("uint8")
 
-    rasterized = rasterize(
-        [(geom, value) for geom, value in zip(fishnet_gdf.geometry, fishnet_gdf['density'])],
-        out_shape=out_shape,
-        transform=transform,
-        fill=0,
-        all_touched=True,
-        dtype=rasterio.float32
-    )
-
-    if np.all(rasterized == 0) or np.all(np.isnan(rasterized)):
-        logging.info(f"Skipping export of {output_raster_path} as all values are 0 or nodata")
-        return
-
-    with rasterio.open(output_raster_path, 'w', **profile) as dst:
-        dst.write(rasterized, 1)
-
-    logging.info("Fishnet converted to raster and saved")
-
-def resample_to_30m(input_path, output_path, reference_path):
-    input_raster = rioxarray.open_rasterio(input_path, masked=True)
-    reference_raster = rioxarray.open_rasterio(reference_path, masked=True)
-
-    logging.info(f"Resampling {input_path} to match {reference_path}")
-    clipped_resampled_raster = input_raster.rio.clip_box(*reference_raster.rio.bounds())
-    clipped_resampled_raster = clipped_resampled_raster.rio.reproject_match(reference_raster)
-
-    clipped_resampled_raster.rio.to_raster(output_path)
-
-    if os.path.exists(output_path):
-        logging.info(f"Successfully saved resampled raster to {output_path}")
-    else:
-        logging.error(f"Failed to save resampled raster to {output_path}")
-
-def compress_file(input_file, output_file):
-    try:
-        subprocess.run(
-            ['gdal_translate', '-co', 'COMPRESS=LZW', '-co', 'TILED=YES', input_file, output_file],
-            check=True
+        out_profile = profile.copy()
+        out_profile.update(
+            driver="GTiff",
+            dtype="uint8",
+            count=1,
+            compress="DEFLATE",
+            tiled=True,
+            nodata=0
         )
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Error compressing file {input_file}: {e}")
 
-def get_existing_s3_files(s3_bucket, s3_prefix):
-    s3_client = boto3.client('s3')
-    existing_files = set()
+        with rasterio.open(local_30m, "w", **out_profile) as dst:
+            dst.write(union_uint8, 1)
 
-    paginator = s3_client.get_paginator('list_objects_v2')
-    pages = paginator.paginate(Bucket=s3_bucket, Prefix=s3_prefix)
+        if run_mode != "test":
+            uu.upload_file_to_s3(str(local_30m), BUCKET, s3_30m_key)
+            log.info(f"[union|{tile_id}] 30m union created and uploaded => {out_30m_path}")
 
-    for page in pages:
-        if 'Contents' in page:
-            for obj in page['Contents']:
-                existing_files.add(obj['Key'])
-
-    return existing_files
-
-def upload_final_output_to_s3(local_output_path, s3_output_path):
-    """
-    Uploads the final output file to S3 and deletes the local file.
-
-    Parameters:
-    local_output_path (str): Path to the local output file.
-    s3_output_path (str): Path to the S3 destination.
-
-    Returns:
-    None
-    """
-    s3_client = boto3.client('s3')
-    try:
-        logging.info(f"Uploading {local_output_path} to s3://{cn.s3_bucket_name}/{s3_output_path}")
-        s3_client.upload_file(local_output_path, cn.s3_bucket_name, s3_output_path)
-
-        logging.info(f"Successfully uploaded {local_output_path} to s3://{cn.s3_bucket_name}/{s3_output_path}")
-        os.remove(local_output_path)
-        logging.info(f"Deleted local file: {local_output_path}")
-
-    except (NoCredentialsError, PartialCredentialsError) as e:
-        logging.error(f"Credentials error: {e}")
-    except Exception as e:
-        logging.error(f"Failed to upload {local_output_path} to s3://{cn.s3_bucket_name}/{s3_output_path}: {e}")
-
-def process_tile(tile_key, feature_type, run_mode='default'):
-    output_dir = cn.datasets[feature_type.split('_')[0]][feature_type.split('_')[1]]['local_processed']
-    s3_output_dir = cn.datasets[feature_type.split('_')[0]][feature_type.split('_')[1]]['s3_processed']
-    tile_id = '_'.join(os.path.basename(tile_key).split('_')[:2])
-    local_output_path = os.path.join(output_dir, f"{feature_type}_density_{tile_id}.tif")
-    s3_output_path = f"{s3_output_dir}{feature_type}_density_{tile_id}.tif"
-
-    s3_client = boto3.client('s3')
-    if run_mode != 'test':
-        try:
-            s3_client.head_object(Bucket=cn.s3_bucket_name, Key=s3_output_path)
-            logging.info(f"{s3_output_path} already exists on S3. Skipping processing.")
-            return
-        except:
-            logging.info(f"{s3_output_path} does not exist on S3. Processing the tile.")
-
-    logging.info(f"Starting processing of the tile {tile_id}")
-
-    s3_input_path = f'/vsis3/{cn.s3_bucket_name}/{tile_key}'
-    logging.info(f"Constructed S3 input path: {s3_input_path}")
-
-    try:
-        with rasterio.Env(AWS_SESSION=boto3.Session()):
-            with rasterio.open(s3_input_path) as src:
-                target_resolution = 1000
-
-                resampled_data, resampled_profile = resample_raster(src, target_resolution)
-
-                masked_data, masked_profile = mask_raster(resampled_data[0], resampled_profile)
-
-                fishnet_gdf = create_fishnet_from_raster(masked_data, resampled_profile['transform'])
-                fishnet_gdf = reproject_gdf(fishnet_gdf, 3395)
-
-                features_gdf = read_tiled_features(tile_id, feature_type)
-
-                fishnet_with_lengths = assign_segments_to_cells(fishnet_gdf, features_gdf)
-
-                fishnet_with_density = convert_length_to_density(fishnet_with_lengths, fishnet_gdf.crs)
-
-                fishnet_to_raster(fishnet_with_density, masked_profile, local_output_path)
-
-                if run_mode == 'test':
-                    intermediate_dir = os.path.join(output_dir, 'intermediate')
-                    os.makedirs(intermediate_dir, exist_ok=True)
-
-                    resampled_path = os.path.join(intermediate_dir, f'resampled_{tile_id}.tif')
-                    masked_path = os.path.join(intermediate_dir, f'masked_{tile_id}.tif')
-                    fishnet_path = os.path.join(intermediate_dir, f'fishnet_{tile_id}.shp')
-                    lengths_path = os.path.join(intermediate_dir, f'lengths_{tile_id}.shp')
-                    density_path = os.path.join(intermediate_dir, f'density_{tile_id}.shp')
-
-                    with rasterio.open(resampled_path, 'w', **resampled_profile) as dst:
-                        dst.write(resampled_data[0], 1)
-
-                    with rasterio.open(masked_path, 'w', **masked_profile) as dst:
-                        dst.write(masked_data, 1)
-
-                    fishnet_gdf.to_file(fishnet_path)
-
-                    fishnet_with_lengths.to_file(lengths_path)
-
-                    fishnet_with_density.to_file(density_path)
-
-                logging.info(f"Saved {local_output_path}")
-
-                reference_path = f'/vsis3/{cn.s3_bucket_name}/{tile_key}'
-                local_30m_output_path = os.path.join(cn.local_temp_dir, os.path.basename(local_output_path))
-                resample_to_30m(local_output_path, local_30m_output_path, reference_path)
-
-                if run_mode == 'test':
-                    logging.info(f"Test mode: Outputs saved locally at {local_output_path} and {local_30m_output_path}")
-                else:
-                    upload_final_output_to_s3(local_output_path, s3_output_path)
-                    upload_final_output_to_s3(local_30m_output_path, s3_output_path.replace('.tif', '_30m.tif'))
-
-                del resampled_data, masked_data, fishnet_gdf, features_gdf, fishnet_with_lengths, fishnet_with_density
-                gc.collect()
-    except Exception as e:
-        logging.error(f"Error processing tile {tile_id}: {e}")
-
-def process_all_tiles(feature_type, run_mode='default'):
-    paginator = boto3.client('s3').get_paginator('list_objects_v2')
-    page_iterator = paginator.paginate(Bucket=cn.s3_bucket_name, Prefix=cn.peat_tiles_prefix)
-    tile_keys = []
-
-    for page in page_iterator:
-        if 'Contents' in page:
-            for obj in page['Contents']:
-                tile_key = obj['Key']
-                if tile_key.endswith(cn.peat_pattern):
-                    tile_keys.append(tile_key)
-
-    dask_tiles = [dask.delayed(process_tile)(tile_key, feature_type, run_mode) for tile_key in tile_keys]
-    with ProgressBar():
-        dask.compute(*dask_tiles)
-
-def main(tile_id=None, feature_type='osm_roads', run_mode='default', client_type='local'):
-    # Initialize Dask client based on the argument
-    if client_type == 'coiled':
-        cluster, client = uutil.connect_to_cluster(
-            cluster_name="roads_canals",
-            n_workers=20,
-            region="us-east-1",
-        )
-    else:
-        cluster = LocalCluster()
-        client = Client(cluster)
-
-    logging.info(f"Dask client initialized with {client_type} cluster")
-
-    try:
-        if tile_id:
-            tile_key = f"{cn.peat_tiles_prefix}{tile_id}{cn.peat_pattern}"
-            process_tile(tile_key, feature_type, run_mode)
+    # 2) Resample to 1 km if needed
+    if do_resample:
+        # If we didn't create local_30m (because it existed), we open from S3
+        if union_exists and run_mode != "test":
+            # open directly from /vsis3/ for warp
+            local_or_vsis3_30m = out_30m_path.replace("s3://", "/vsis3/")
         else:
-            process_all_tiles(feature_type, run_mode)
+            local_or_vsis3_30m = str(local_30m)
 
-    finally:
-        client.close()
-        logging.info("Dask client closed")
-        if client_type == 'coiled':
-            cluster.close()
-            logging.info("Coiled cluster closed")
+        local_1km = local_temp / f"{tile_id}_union_1km.tif"
+        resample_union_to_1km(
+            input_path=local_or_vsis3_30m,
+            sample_1km_tile=SAMPLE_1KM_TILE,
+            output_path=str(local_1km)
+        )
+
+        out_1km_path = get_union_output_path(tile_id, "1km")
+        s3_1km_key = out_1km_path.replace("s3://gfw2-data/", "", 1)
+
+        if run_mode != "test":
+            uu.upload_file_to_s3(str(local_1km), BUCKET, s3_1km_key)
+            log.info(f"[union|{tile_id}] 1 km union uploaded => {out_1km_path}")
+            local_1km.unlink()
+
+    # remove local 30m if we have it
+    if (not union_exists or run_mode=="test") and local_30m.exists():
+        local_30m.unlink()
+
+    return f"[union|{tile_id}] done"
+
+
+def resample_union_to_1km(input_path, sample_1km_tile, output_path):
+    """
+    Resample from ~30 m (0.00025°) to 1 km using nearest neighbor,
+    using the sample_1km_tile's alignment.
+    """
+    with rasterio.open(sample_1km_tile) as ref:
+        target_crs = ref.crs
+        target_transform = ref.transform
+        target_width = ref.width
+        target_height = ref.height
+
+    with rasterio.open(input_path) as src:
+        data_30m = src.read(1)
+        src_profile = src.profile
+        transform, width, height = rasterio.warp.calculate_default_transform(
+            src.crs,
+            target_crs,
+            src.width,
+            src.height,
+            *src.bounds,
+            dst_width=target_width,
+            dst_height=target_height
+        )
+        kwargs = src_profile.copy()
+        kwargs.update({
+            "crs": target_crs,
+            "transform": transform,
+            "width": width,
+            "height": height,
+            "driver": "GTiff",
+            "dtype": "uint8",
+            "compress": "DEFLATE",
+            "nodata": 0,
+            "tiled": True
+        })
+
+        data_1km = np.zeros((height, width), dtype="uint8")
+        from rasterio.warp import reproject, Resampling
+        reproject(
+            source=data_30m,
+            destination=data_1km,
+            src_transform=src.transform,
+            src_crs=src.crs,
+            dst_transform=transform,
+            dst_crs=target_crs,
+            resampling=Resampling.nearest
+        )
+
+    with rasterio.open(output_path, "w", **kwargs) as dst:
+        dst.write(data_1km, 1)
+
+
+def build_tasks(tile_ids, ds_list, run_mode="default", do_resample=False):
+    tasks = []
+    for tid in tile_ids:
+        tasks.append(union_tile(tid, ds_list, run_mode, do_resample))
+    return tasks
+
+def main(tile_id=None, dataset_list=None, client="coiled", run_mode="default", resample=None):
+    """
+    If 30m union exists, skip re-union. If --resample=1km, do 1km step from
+    existing or newly created 30m. 'none' => no resample.
+    """
+    ds_list = dataset_list or ["gfw", "gpd", "peatmap", "peatml"]
+
+    if client == "local":
+        cluster = LocalCluster(processes=False, dashboard_address=None)
+        client_obj = Client(cluster)
+        log.info("Running locally.")
+    else:
+        client_obj, cluster = uu.setup_coiled_cluster()
+        log.info(f"Running on Coiled: {cluster.name}")
+
+    tile_ids = [tile_id] if tile_id else cn.tile_id_list
+    do_resample_1km = (resample == "1km")
+
+    log.info(f"[union] Datasets: {ds_list}, Tiles: {len(tile_ids)}, do_resample_1km={do_resample_1km}")
+    tasks = build_tasks(tile_ids, ds_list, run_mode, do_resample_1km)
+    dask.compute(*tasks)
+
+    client_obj.close()
+    if client == "coiled":
+        cluster.close()
+    log.info("All union tasks completed.")
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Process OSM and GRIP data by tiles.')
-    parser.add_argument('--tile_id', type=str, help='Tile ID to process')
-    parser.add_argument('--feature_type', type=str, choices=['osm_roads', 'osm_canals', 'grip_roads'], default='osm_roads', help='Type of feature to process')
-    parser.add_argument('--client', type=str, choices=['local', 'coiled'], default='local', help='Dask client type to use (local or coiled)')
-    parser.add_argument('--run_mode', type=str, choices=['default', 'test'], default='default', help='Run mode for processing (default or test)')
+    parser = argparse.ArgumentParser(
+        description="Union peat masks at ~30m, optionally resample to 1km, skipping re-union if 30m tile found."
+    )
+    parser.add_argument("--tile_id", help="Single tile ID (optional)")
+    parser.add_argument(
+        "--dataset_list", nargs="+", default=None,
+        help="Datasets to union. Default: gfw gpd peatmap peatml"
+    )
+    parser.add_argument(
+        "--client", default="coiled", choices=["local","coiled"],
+        help="Run environment (coiled or local)."
+    )
+    parser.add_argument(
+        "--run_mode", default="default", choices=["default","test"],
+        help="default => do S3 upload, test => skip."
+    )
+    parser.add_argument(
+        "--resample", choices=["none", "1km"], default="none",
+        help="If '1km', also resample the union mask to 1km. If 30m union exists, skip union logic."
+    )
     args = parser.parse_args()
 
-    if not any(sys.argv[1:]):  # Check if there are no command-line arguments
-        # Direct execution examples for PyCharm
-        # Example usage for processing a specific tile with the local Dask client
-        main(tile_id='00N_110E', feature_type='osm_roads', run_mode='default', client_type='local')
-
-        # Example usage for processing all tiles with the local Dask client
-        # main(feature_type='osm_roads', run_mode='default', client_type='local')
-
-    else:
-        main(tile_id=args.tile_id, feature_type=args.feature_type, run_mode=args.run_mode, client_type=args.client)
+    main(
+        tile_id=args.tile_id,
+        dataset_list=args.dataset_list,
+        client=args.client,
+        run_mode=args.run_mode,
+        resample=args.resample
+    )
