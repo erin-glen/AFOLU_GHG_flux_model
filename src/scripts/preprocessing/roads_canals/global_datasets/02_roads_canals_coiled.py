@@ -106,7 +106,11 @@ def dask_gdf_is_empty(dgdf, data_path=None):
     shapefile path and treat the dataframe as empty so processing can continue.
     """
     try:
-        length = dgdf.map_partitions(len).compute().sum()
+        lengths = dgdf.map_partitions(len).compute()
+        # ``compute`` may return a pandas Series or a plain list depending on
+        # the partitions.  ``sum`` works for both cases, so use the builtin
+        # function instead of the Series method to avoid attribute errors.
+        length = sum(lengths)
     except FeatureError as exc:
         msg = f"FeatureError while reading {data_path}: {exc}"
         logging.error(msg)
