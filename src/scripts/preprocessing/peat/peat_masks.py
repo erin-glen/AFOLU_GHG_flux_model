@@ -266,7 +266,7 @@ def main(tile_id=None, dataset=None, client="coiled", run_mode="default"):
         )
         log.info(f"Running on Coiled: {cluster.name}")
 
-    ds_keys = [dataset] if dataset else ["peatml", "gpd", "peatmap", "ogh"]
+    ds_keys = [dataset] if dataset else ["peatml", "gpd", "peatmap", "ogh", "ogh_unthresholded"]
     tids = [tile_id] if tile_id else cn.tile_id_list
 
     log.info(f"Datasets: {ds_keys}, Tiles: {len(tids)}")
@@ -286,7 +286,7 @@ def main(tile_id=None, dataset=None, client="coiled", run_mode="default"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Robust peat-mask tiler")
     parser.add_argument("--tile_id", help="Single tile ID (optional)")
-    parser.add_argument("--dataset", choices=["peatml", "gpd", "peatmap", "ogh"], help="Dataset (optional)")
+    parser.add_argument("--dataset", choices=["peatml", "gpd", "peatmap", "ogh", "ogh_unthresholded"], help="Dataset (optional)")
     parser.add_argument("--client", default="coiled", choices=["local", "coiled"], help="Run mode (default: coiled)")
     parser.add_argument("--run_mode", default="default", choices=["default", "test"], help="Run mode")
     args = parser.parse_args()

@@ -174,7 +174,13 @@ datasets = {
             's3_raw': pp.join(raw_dir, 'soils', 'OGH', 'organic_soils_extent.tif'),
             's3_processed': pp.join(processed_dir, 'peat_mask', 'OGH', 'tiles') + '/',
             'local_processed': pp.join(local_temp_dir, 'peat', 'ogh', 'tiles') + '/',
-            'threshold': 0.23
+            'threshold': 23
+        },
+        'ogh_unthresholded': {
+            'input_type': 'raster',
+            's3_raw': pp.join(raw_dir, 'soils', 'OGH', 'organic_soils_extent.tif'),
+            's3_processed': pp.join(processed_dir, 'peat_mask', 'OGH', 'tiles_unthresholded') + '/',
+            'local_processed': pp.join(local_temp_dir, 'peat', 'ogh_unthresholded', 'tiles') + '/'
         },
         'union_mask': {
             '30m': pp.join(
@@ -206,6 +212,7 @@ file_patterns = {
     'peat_peatmap': "peat_peatmap",
     'peat_peatml': "peat_peatml",
     'peat_ogh': "peat_ogh",
+    'peat_ogh_unthresholded': "peat_ogh_unthresholded",
     'dadap': "dadap",
     'engert': "engert",
     'grip': "grip",
