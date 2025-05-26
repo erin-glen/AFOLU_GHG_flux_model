@@ -169,6 +169,12 @@ datasets = {
                                     'PEATML', 'tiles') + '/',
             'local_processed': pp.join(local_temp_dir, 'peat', 'peatml', 'tiles') + '/'
         },
+        'ogh': {
+            'input_type': 'raster',
+            's3_raw': pp.join(raw_dir, 'soils', 'OGH', 'OGH_global_peatlands.tif'),
+            's3_processed': pp.join(processed_dir, 'peat_mask', 'OGH', 'tiles') + '/',
+            'local_processed': pp.join(local_temp_dir, 'peat', 'ogh', 'tiles') + '/'
+        },
         'union_mask': {
             '30m': pp.join(
                 processed_dir, 'peat_mask', 'union', '30m', 'tiles'
@@ -198,6 +204,7 @@ file_patterns = {
     'peat_gpd': "peat_gpd",
     'peat_peatmap': "peat_peatmap",
     'peat_peatml': "peat_peatml",
+    'peat_ogh': "peat_ogh",
     'dadap': "dadap",
     'engert': "engert",
     'grip': "grip",

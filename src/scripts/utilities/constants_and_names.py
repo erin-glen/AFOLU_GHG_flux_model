@@ -86,6 +86,7 @@ patterns = {
     'extraction': "{tile_id}_extraction.tif",
     'climate_domain': "{tile_id}_fao_ecozones_bor_tem_tro_processed.tif",
     'descals_type': "plantation_type_{tile_id}.tif",
+    'ogh': "{tile_id}.tif",
     'burned_area_final': "{tile_id}_burned_area_final_{year}.tif"
 }
 
@@ -105,6 +106,7 @@ dirs = {
     'extraction': posixpath.join(full_bucket_prefix, processed_dir, 'extraction/20241021'),
     'climate_domain': posixpath.join(full_bucket_prefix, 'climate/carbon_model/inputs_for_carbon_pools/processed/fao_ecozones_bor_tem_tro/20190418'),
     'descals_type': posixpath.join(full_bucket_prefix, processed_dir, 'descals_plantation/extent/20241105'),
+    'ogh': posixpath.join(full_bucket_prefix, raw_dir, 'soils/OGH'),
     'burned_area_final': posixpath.join(full_bucket_prefix, 'fires/MODIS_burned_area/MCD64A1.061/2_final_outputs__Hansenized/{year}')
 }
 
@@ -207,6 +209,7 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
         'extraction': posixpath.join(dirs['extraction'], patterns['extraction'].format(tile_id=tile_id)),
         'climate_domain': posixpath.join(dirs['climate_domain'], patterns['climate_domain'].format(tile_id=tile_id)),
         'descals_type': posixpath.join(dirs['descals_type'], patterns['descals_type'].format(tile_id=tile_id)),
+        'ogh': posixpath.join(dirs['ogh'], patterns['ogh'].format(tile_id=tile_id)),
     }
 
     # Add burned area layers for each year in the interval
