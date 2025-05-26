@@ -255,7 +255,7 @@ def main(tile_id=None, dataset=None, client="coiled", run_mode="default"):
         log.info("Running locally.")
     else:
         cluster, client = uutil.connect_to_cluster(
-            cluster_name="roads_canals",
+            cluster_name="peat_masks",
             n_workers=20,
             region="us-east-1",
         )
