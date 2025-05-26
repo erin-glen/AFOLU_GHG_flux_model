@@ -245,8 +245,9 @@ def main(tile_id=None, dataset_list=None, client="coiled", run_mode="default", r
     else:
         cluster, client_obj = uu.connect_to_cluster(
             cluster_name="peat_union",
-            n_workers=20,
+            n_workers=40,
             region="us-east-1",
+            worker_memory="64GiB",
         )
         log.info(f"Running on Coiled: {cluster.name}")
 
