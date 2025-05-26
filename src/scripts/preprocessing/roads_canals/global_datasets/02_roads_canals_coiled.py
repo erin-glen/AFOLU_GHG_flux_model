@@ -28,6 +28,7 @@ import posixpath
 import geopandas as gpd
 import xarray as xr
 import rioxarray as rxr
+from pyogrio.errors import FeatureError
 from rasterio.features import rasterize
 from shapely.geometry import box
 from dask.distributed import Client, LocalCluster
@@ -98,8 +99,18 @@ def create_fishnet_from_masked(masked_data, transform):
     gdf = gpd.GeoDataFrame({'geometry': polygons}, crs="EPSG:3395")
     return dgpd.from_geopandas(gdf, npartitions=10)
 
-def dask_gdf_is_empty(dgdf):
-    length = dgdf.map_partitions(len).compute().sum()
+def dask_gdf_is_empty(dgdf, data_path=None):
+    """Return True if a Dask GeoDataFrame is empty.
+
+    If a ``pyogrio.errors.FeatureError`` occurs during ``compute``, log the
+    shapefile path and treat the dataframe as empty so processing can continue.
+    """
+    try:
+        length = dgdf.map_partitions(len).compute().sum()
+    except FeatureError as exc:
+        msg = f"FeatureError while reading {data_path}: {exc}"
+        logging.error(msg)
+        return True
     return length == 0
 
 def read_reprojected_lines_dask(tile_id, feature_type):
@@ -201,7 +212,15 @@ def process_chunk(bounds, tile_id, feature_type):
 
     # 4) read lines => partial line length
     lines_dgdf = read_reprojected_lines_dask(tile_id, feature_type)
-    if dask_gdf_is_empty(lines_dgdf):
+    # Build the path for logging in case compute fails
+    group, sub = feature_type.split('_', 1)
+    s3_proj_prefix = cn.datasets[group][sub]["s3_projected"]
+    base_name = "roads" if "roads" in feature_type else "canals" if "canals" in feature_type else "roads"
+    shp_name = f"{base_name}_{tile_id}.shp"
+    s3_path = os.path.join(s3_proj_prefix, shp_name).replace("\\", "/")
+    vsis3_path = f"/vsis3/{cn.s3_bucket_name}/{s3_path}"
+
+    if dask_gdf_is_empty(lines_dgdf, data_path=vsis3_path):
         logging.info(f"[{tile_id}|{chunk_str}] lines are empty => skip.")
         return
 
@@ -215,12 +234,17 @@ def process_chunk(bounds, tile_id, feature_type):
     # Filter lines that intersect the chunk bounds
     chunk_poly = box(minx, miny, maxx, maxy)
     lines_clip = dgpd.clip(lines_dgdf, chunk_poly)
-    if dask_gdf_is_empty(lines_clip):
+    if dask_gdf_is_empty(lines_clip, data_path=vsis3_path):
         logging.info(f"[{tile_id}|{chunk_str}] lines do not intersect chunk => skip.")
         return
 
     # Bring Dask GeoDataFrames to pandas for geometric ops
-    lines_gdf = lines_clip.compute()
+    try:
+        lines_gdf = lines_clip.compute()
+    except FeatureError as exc:
+        logging.error(f"FeatureError while reading {vsis3_path}: {exc}")
+        return
+
     fishnet_gdf = fishnet_dgdf.compute()
 
     # Clip road segments to the fishnet grid (union of cells)
