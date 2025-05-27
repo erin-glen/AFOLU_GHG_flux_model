@@ -80,7 +80,9 @@ def get_chunk_bounds(
                 try:
                     from shapely.geometry import box
                 except Exception as exc:  # pragma: no cover - import guard
-                    raise ImportError("shapely is required when as_polygons is True") from exc
+                    raise ImportError(
+                        "shapely is required when as_polygons is True"
+                    ) from exc
                 chunks.append(box(x, y, x + chunk_size, y + chunk_size))
             else:
                 chunks.append([x, y, x + chunk_size, y + chunk_size])
@@ -154,7 +156,9 @@ def connect_to_cluster(
         cluster = coiled.Cluster.from_name(cluster_name)
         print(f"Connected to existing cluster: {cluster_name}")
     except Exception:
-        print(f"No existing cluster with name '{cluster_name}' found. Creating a new cluster.")
+        print(
+            f"No existing cluster with name '{cluster_name}' found. Creating a new cluster."
+        )
         cluster = coiled.Cluster(
             name=cluster_name,
             n_workers=n_workers,
@@ -170,10 +174,10 @@ def connect_to_cluster(
     return cluster, client
 
 
-
 # ----------------------------------------------------------------------
 # General S3 helpers
 # ----------------------------------------------------------------------
+
 
 def s3_file_exists(bucket: str, key: str) -> bool:
     """Return True if the given S3 object exists."""
@@ -198,17 +202,30 @@ def list_s3_files(bucket: str, prefix: str) -> list:
     return keys
 
 
-def upload_file_to_s3(local_file_path: str, bucket_name: str, s3_file_path: str) -> None:
+def upload_file_to_s3(
+    local_file_path: str, bucket_name: str, s3_file_path: str
+) -> None:
     """Upload a local file to S3."""
     boto3.client("s3").upload_file(local_file_path, bucket_name, s3_file_path)
 
 
-def download_file_from_s3(s3_file_path: str, local_file_path: str, bucket_name: str) -> None:
+def upload_fileobj_to_s3(file_obj, bucket_name: str, s3_file_path: str) -> None:
+    """Upload a file-like object to S3."""
+    s3c = boto3.client("s3")
+    file_obj.seek(0)
+    s3c.upload_fileobj(file_obj, bucket_name, s3_file_path)
+
+
+def download_file_from_s3(
+    s3_file_path: str, local_file_path: str, bucket_name: str
+) -> None:
     """Download an S3 key to a local path."""
     boto3.client("s3").download_file(bucket_name, s3_file_path, local_file_path)
 
 
-def download_shapefile_from_s3(s3_prefix: str, local_dir: str, s3_bucket_name: str) -> None:
+def download_shapefile_from_s3(
+    s3_prefix: str, local_dir: str, s3_bucket_name: str
+) -> None:
     """Download a shapefile (and sidecars) from S3 to ``local_dir``."""
     s3c = boto3.client("s3")
     os.makedirs(local_dir, exist_ok=True)
@@ -218,7 +235,9 @@ def download_shapefile_from_s3(s3_prefix: str, local_dir: str, s3_bucket_name: s
         s3c.download_file(s3_bucket_name, s3_path, local_path)
 
 
-def read_shapefile_from_s3(s3_prefix: str, local_dir: str, s3_bucket_name: str) -> gpd.GeoDataFrame:
+def read_shapefile_from_s3(
+    s3_prefix: str, local_dir: str, s3_bucket_name: str
+) -> gpd.GeoDataFrame:
     """Return a GeoDataFrame loaded from a shapefile stored on S3."""
     download_shapefile_from_s3(s3_prefix, local_dir, s3_bucket_name)
     shp = os.path.join(local_dir, os.path.basename(s3_prefix) + ".shp")
@@ -339,7 +358,9 @@ def open_window_as_array(
         return np.zeros((chunk_px, chunk_px), dtype=_dtype(gdal_dtype))
 
 
-def queue_chunk_downloads(bounds, typed_dict, chunk_px, logger, max_threads=16, is_final=False):
+def queue_chunk_downloads(
+    bounds, typed_dict, chunk_px, logger, max_threads=16, is_final=False
+):
     futs = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as ex:
         for k, (uri, dt) in typed_dict.items():
@@ -355,7 +376,9 @@ def queue_chunk_downloads(bounds, typed_dict, chunk_px, logger, max_threads=16, 
 # tile existence quick‑check
 # ----------------------------------------------------------------------
 def check_for_tile(typed_dict, is_final, logger) -> bool:
-    s3c = boto3.client("s3", config=Config(retries={"max_attempts": 10, "mode": "standard"}))
+    s3c = boto3.client(
+        "s3", config=Config(retries={"max_attempts": 10, "mode": "standard"})
+    )
     for uri, _ in typed_dict.values():
         if uri is None:
             continue
@@ -410,7 +433,9 @@ def calculate_chunk_stats(all_stats, stage):
     path = os.path.join(out_dir, f"{stage}_chunk_stats_{timestr()}.xlsx")
     with pd.ExcelWriter(path) as xls:
         for val in df["in_out"].unique():
-            df[df["in_out"] == val].to_excel(xls, sheet_name=f"chunk_{val}", index=False)
+            df[df["in_out"] == val].to_excel(
+                xls, sheet_name=f"chunk_{val}", index=False
+            )
         df.groupby("layer_name").agg(
             min_value=("min_value", "min"), max_value=("max_value", "max")
         ).to_excel(xls, sheet_name="min_max", index=True)
@@ -455,7 +480,9 @@ def save_and_upload_small_raster_set(
     import tempfile
     from rasterio.transform import from_bounds
 
-    s3c = boto3.client("s3", config=Config(retries={"max_attempts": 10, "mode": "standard"}))
+    s3c = boto3.client(
+        "s3", config=Config(retries={"max_attempts": 10, "mode": "standard"})
+    )
     transform = from_bounds(*bounds, width=chunk_px, height=chunk_px)
     temp_dir = tempfile.gettempdir()
     os.makedirs(temp_dir, exist_ok=True)
@@ -565,6 +592,7 @@ def replace_tile_id_in_dict(d: Dict[str, List], new_tid: str):
         v[0] = re.sub(cn.tile_id_pattern, new_tid, v[0])
     return d
 
+
 def get_cluster_info(client, cluster):
 
     # Retrieves properties of the workers
@@ -578,13 +606,17 @@ def get_cluster_info(client, cluster):
     nthreads = workers[first_worker_address]["nthreads"]
 
     # Retrieves scheduler info for other cluster properties
-    scheduler_info = cluster.scheduler_info  # Access scheduler info directly as a dictionary
+    scheduler_info = (
+        cluster.scheduler_info
+    )  # Access scheduler info directly as a dictionary
 
     # Gets memory per worker.
     # Can't get it to report the worker instance type
     try:
-        worker_memory_bytes = scheduler_info['workers'][next(iter(scheduler_info['workers']))]['memory_limit']
-        worker_memory_gb = worker_memory_bytes / (1024 ** 3)  # Convert bytes to GB
+        worker_memory_bytes = scheduler_info["workers"][
+            next(iter(scheduler_info["workers"]))
+        ]["memory_limit"]
+        worker_memory_gb = worker_memory_bytes / (1024**3)  # Convert bytes to GB
         worker_memory = f"{worker_memory_gb:.2f} GB"  # Format to 2 decimal places
         # worker_type = coiled_cluster.config.get('worker_options', {}).get('instance_type', "Unknown")
     except KeyError:
