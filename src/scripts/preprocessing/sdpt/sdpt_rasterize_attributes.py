@@ -360,19 +360,12 @@ def _load_tile_gdf(tile_id):
 
 
 def process_tile(tile_id, species_map, chunk_size=2.0, run_mode="default"):
-    """
-    1) Read tile_{tile_id}.shp from /vsis3/ => .compute() => in-memory GeoDataFrame
-    2) chunk bounding boxes
-    3) classify => build chunk GeoDataFrames
-    4) produce tasks => rasterize each chunk
-    """
     logging.info(f"Processing entire tile => {tile_id} in ~{chunk_size} deg sub-chunks")
 
     tile_gdf = _load_tile_gdf(tile_id)
     if tile_gdf is None:
         return []
 
-    # bounding boxes (10x10 deg)
     minx, miny, maxx, maxy = uutil.get_10x10_tile_bounds(tile_id)
     chunk_bboxes = uutil.get_chunk_bounds([minx, miny, maxx, maxy], chunk_size)
 
@@ -383,7 +376,12 @@ def process_tile(tile_id, species_map, chunk_size=2.0, run_mode="default"):
             dask.delayed(rasterize_chunk_df)(classified, bbox, tile_id, run_mode)
         )
 
+    # Cleanup explicitly after creating tasks
+    del tile_gdf
+    gc.collect()
+
     return tasks
+
 
 
 def process_tile_with_bounds(tile_id, chunk_bounds, species_map, run_mode="default"):
@@ -442,9 +440,9 @@ def main(
     if client == "coiled":
         cluster, client = uutil.connect_to_cluster(
             cluster_name="sdpt_rasterization",
-            n_workers=60,
+            n_workers=25,
             region="us-east-1",
-            worker_memory="64GiB",
+            worker_memory="128GiB",
         )
         logging.info(f"Coiled cluster => {cluster.name}")
     else:
