@@ -24,8 +24,6 @@ import argparse
 import warnings
 import posixpath
 import gc
-from pyogrio.errors import FeatureError
-
 
 import dask
 import dask_geopandas as dgpd
@@ -34,8 +32,6 @@ import numpy as np
 import rasterio
 from rasterio.features import rasterize
 from rasterio.transform import from_origin
-from rasterio.io import MemoryFile
-import boto3
 
 # Our universal constants & utilities
 import src.scripts.preprocessing.preprocessing_constants as cn
@@ -52,7 +48,9 @@ logging.basicConfig(
 
 # Reclassification CSV in S3
 # The advanced remapping table already contains numeric rotation codes.
-ADVANCED_REMAP_S3 = "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/remapping_tables/advanced_remapping.csv"
+ADVANCED_REMAP_S3 = (
+    "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/remapping_tables/advanced_remapping.csv"
+)
 
 # Rasterization settings
 RASTER_RES = 0.00025
@@ -86,12 +84,16 @@ def load_species_reclassification():
 
     if not os.path.exists(local_csv):
         try:
-            uutil.download_file_from_s3(ADVANCED_REMAP_S3, local_csv, cn.s3_bucket_name)
+            uutil.download_file_from_s3(
+                ADVANCED_REMAP_S3, local_csv, cn.s3_bucket_name
+            )
             logging.info(f"Downloaded CSV => {local_csv}")
         except Exception as exc:  # pragma: no cover - network errors
             logging.warning(f"Failed to download CSV from S3: {exc}")
     else:
-        logging.info(f"Local CSV already exists => {local_csv}, skipping download.")
+        logging.info(
+            f"Local CSV already exists => {local_csv}, skipping download."
+        )
 
     if not os.path.exists(local_csv):
         logging.warning(
@@ -131,9 +133,7 @@ def classify_plantation(row, species_map):
         return code
 
     if simple_type == "tree crops":
-        return (
-            ROTATION_CLASS_CODES.get("oil_palm") if "oil palm" in simple_name else None
-        )
+        return ROTATION_CLASS_CODES.get("oil_palm") if "oil palm" in simple_name else None
 
     if simple_type == "planted forest":
         cls = fallback_classify(row)
@@ -306,20 +306,15 @@ def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
         "compress": "DEFLATE",
         "nodata": RASTER_NODATA,
     }
+    with rasterio.open(out_tif, "w", **meta) as dst:
+        dst.write(burned, 1)
 
-    with MemoryFile() as memfile:
-        with memfile.open(**meta) as dst:
-            dst.write(burned, 1)
-
-        if run_mode == "default":
-            logging.info(
-                f"Uploading partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk}"
-            )
-            uutil.upload_fileobj_to_s3(memfile, cn.s3_bucket_name, s3_chunk)
-        else:
-            with open(out_tif, "wb") as local_out:
-                local_out.write(memfile.read())
-            logging.info(f"Test mode => partial TIF => {out_tif} retained locally.")
+    if run_mode == "default":
+        logging.info(f"Uploading partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk}")
+        uutil.upload_file_to_s3(out_tif, cn.s3_bucket_name, s3_chunk)
+        os.remove(out_tif)
+    else:
+        logging.info(f"Test mode => partial TIF => {out_tif} retained locally.")
 
     del burned
     gc.collect()
@@ -335,8 +330,6 @@ def clip_geometries(tile_gdf, bbox):
 def classify_features(sub_gdf, species_map):
     if hasattr(species_map, "result"):
         species_map = species_map.result()
-    if hasattr(sub_gdf, "compute"):
-        sub_gdf = sub_gdf.compute()
     sub_gdf["raster_val"] = sub_gdf.apply(
         lambda r: classify_plantation(r, species_map), axis=1
     )
@@ -354,21 +347,21 @@ def _load_tile_gdf(tile_id):
 
     try:
         ddf = dgpd.read_file(vsis3_tile_shp, npartitions=1)
-        tile_gdf = ddf.persist()
-        count = tile_gdf.map_partitions(len, meta=('length', int)).compute().sum()
-        if count == 0:
-            logging.info(f"No features found => tile {tile_id}")
-            return None
+        tile_gdf = ddf.compute()
     except Exception as e:
         logging.error(f"Error reading tile_{tile_id}.shp => {e}")
+        return None
+
+    if tile_gdf.empty:
+        logging.info(f"No features found => tile {tile_id}")
         return None
 
     return tile_gdf
 
 
-def process_tile(tile_id, species_map, chunk_size=1.0, run_mode="default"):
+def process_tile(tile_id, species_map, chunk_size=2.0, run_mode="default"):
     """
-    1) Read tile_{tile_id}.shp from /vsis3/ lazily
+    1) Read tile_{tile_id}.shp from /vsis3/ => .compute() => in-memory GeoDataFrame
     2) chunk bounding boxes
     3) classify => build chunk GeoDataFrames
     4) produce tasks => rasterize each chunk
@@ -412,14 +405,18 @@ def process_tile_with_bounds(tile_id, chunk_bounds, species_map, run_mode="defau
     if tile_gdf is None:
         return []
 
-    classified = classify_features(clip_geometries(tile_gdf, chunk_bounds), species_map)
+    classified = classify_features(
+        clip_geometries(tile_gdf, chunk_bounds), species_map
+    )
 
     return [
-        dask.delayed(rasterize_chunk_df)(classified, chunk_bounds, tile_id, run_mode)
+        dask.delayed(rasterize_chunk_df)(
+            classified, chunk_bounds, tile_id, run_mode
+        )
     ]
 
 
-def process_all_tiles(species_map, chunk_size=1.0, run_mode="default"):
+def process_all_tiles(species_map, chunk_size=2.0, run_mode="default"):
     """Process every SDPT tile sequentially to avoid memory blowout."""
 
     for shp_key in list_sdpt_shapefiles():
@@ -433,7 +430,7 @@ def process_all_tiles(species_map, chunk_size=1.0, run_mode="default"):
 
 
 def main(
-    tile_id=None, chunk_size=1.0, chunk_bounds=None, run_mode="default", client="local"
+    tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="default", client="local"
 ):
     """
     If chunk_bounds is provided => only process that bounding box.
@@ -445,9 +442,9 @@ def main(
     if client == "coiled":
         cluster, client = uutil.connect_to_cluster(
             cluster_name="sdpt_rasterization",
-            n_workers=20,
+            n_workers=60,
             region="us-east-1",
-            worker_memory="128GiB",
+            worker_memory="64GiB",
         )
         logging.info(f"Coiled cluster => {cluster.name}")
     else:
@@ -499,7 +496,7 @@ if __name__ == "__main__":
         help="Tile ID (e.g. 00N_110E). Omit to process all tiles.",
     )
     parser.add_argument(
-        "--chunk_size", type=float, default=1.0, help="Chunk size (deg)."
+        "--chunk_size", type=float, default=2.0, help="Chunk size (deg)."
     )
     parser.add_argument(
         "--chunk_bounds",
@@ -529,7 +526,7 @@ if __name__ == "__main__":
         )
         main(
             tile_id=None,
-            chunk_size=1.0,
+            chunk_size=2.0,
             chunk_bounds=None,
             run_mode="test",
             client="local",
