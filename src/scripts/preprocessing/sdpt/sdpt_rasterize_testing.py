@@ -124,11 +124,6 @@ def load_and_clip_shapefile(vsis3_shp_path, bbox):
         return gpd.GeoDataFrame(columns=["geometry"])
     return gpd.GeoDataFrame.from_features(clipped_features)
 
-import json
-import geopandas as gpd
-from shapely.geometry import shape
-import gc
-
 def load_and_clip_shapefile(vsis3_shp_path, bbox, simplify_tolerance=0.0001):
     """Load, clip, validate, and simplify geometries using GDAL/OGR and GeoPandas."""
 
@@ -305,7 +300,6 @@ def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
 
 
 def process_tile(tile_id, species_map, chunk_size=2.0, run_mode="default"):
-    """Process an entire tile by reading each chunk directly with OGR."""
     logging.info(f"Processing entire tile => {tile_id} in ~{chunk_size} deg sub-chunks")
 
     minx, miny, maxx, maxy = uutil.get_10x10_tile_bounds(tile_id)
@@ -313,11 +307,38 @@ def process_tile(tile_id, species_map, chunk_size=2.0, run_mode="default"):
 
     tasks = []
     for bbox in chunk_bboxes:
+        # Construct output paths FIRST
+        chunk_str = uutil.boundstr(bbox)
+        chunk_px = uutil.calc_chunk_length_pixels(bbox)
+        chunk_name = f"{tile_id}__{chunk_str}__sdpt.tif"
+        local_dir = cn.datasets["sdpt"]["local_processed"]
+        uu.create_directory_if_not_exists(local_dir)
+        out_tif = os.path.join(local_dir, chunk_name)
+
+        s3_chunk = posixpath.join(
+            cn.datasets["sdpt"]["s3_processed_base"],
+            f"{chunk_px}_pixels",
+            cn.today_date,
+            chunk_name,
+        )
+
+        # Early check for existing outputs BEFORE expensive clipping/classifying
+        if run_mode == "default":
+            if uutil.s3_file_exists(cn.s3_bucket_name, s3_chunk):
+                logging.info(f"(Early Skip) Partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk} exists, skipping bbox {bbox}.")
+                continue
+        else:
+            if os.path.exists(out_tif):
+                logging.info(f"(Early Skip) Partial TIF => {out_tif} exists locally, skipping bbox {bbox}.")
+                continue
+
+        # Proceed only if chunk needs processing
         clipped = load_tile_bbox(tile_id, bbox)
         classified = classify_features(clipped, species_map)
         tasks.append(dask.delayed(rasterize_chunk_df)(classified, bbox, tile_id, run_mode))
 
     return tasks
+
 
 
 def process_tile_with_bounds(tile_id, chunk_bounds, species_map, run_mode="default"):
