@@ -320,27 +320,21 @@ def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
     gc.collect()
 
 
-def create_chunk_subsets(tile_gdf, species_map, chunk_bounds):
-    """Return GeoDataFrame subsets for each bounding box."""
-    results = []
-    for bbox in chunk_bounds:
-        minx, miny, maxx, maxy = bbox
-        subset = tile_gdf.cx[minx:maxx, miny:maxy].copy()
-        if subset.empty:
-            logging.info(f"No features in chunk => {bbox}, skipping.")
-            continue
+@dask.delayed
+def clip_geometries(tile_gdf, bbox):
+    minx, miny, maxx, maxy = bbox
+    return tile_gdf.cx[minx:maxx, miny:maxy].copy()
 
-        subset["raster_val"] = subset.apply(
-            lambda r: classify_plantation(r, species_map), axis=1
-        )
-        subset.dropna(subset=["raster_val"], inplace=True)
-        if subset.empty:
-            logging.info(f"No plantation features => {bbox}, skipping.")
-            continue
 
-        results.append((subset[["geometry", "raster_val"]].copy(), bbox))
-
-    return results
+@dask.delayed
+def classify_features(sub_gdf, species_map):
+    if hasattr(species_map, "result"):
+        species_map = species_map.result()
+    sub_gdf["raster_val"] = sub_gdf.apply(
+        lambda r: classify_plantation(r, species_map), axis=1
+    )
+    sub_gdf.dropna(subset=["raster_val"], inplace=True)
+    return sub_gdf[["geometry", "raster_val"]]
 
 
 def _load_tile_gdf(tile_id):
@@ -382,18 +376,11 @@ def process_tile(tile_id, species_map, chunk_size=2.0, run_mode="default"):
     minx, miny, maxx, maxy = uutil.get_10x10_tile_bounds(tile_id)
     chunk_bboxes = uutil.get_chunk_bounds([minx, miny, maxx, maxy], chunk_size)
 
-    # if scattered via Dask, grab the actual dict
-    if hasattr(species_map, "result"):
-        species_map = species_map.result()
-
-    # build chunk GeoDataFrames
-    chunk_list = create_chunk_subsets(tile_gdf, species_map, chunk_bboxes)
-    logging.info(f"Prepared {len(chunk_list)} chunk subsets for tile => {tile_id}")
-
     tasks = []
-    for subset, bbox in chunk_list:
+    for bbox in chunk_bboxes:
+        classified = classify_features(clip_geometries(tile_gdf, bbox), species_map)
         tasks.append(
-            dask.delayed(rasterize_chunk_df)(subset, bbox, tile_id, run_mode)
+            dask.delayed(rasterize_chunk_df)(classified, bbox, tile_id, run_mode)
         )
 
     return tasks
@@ -418,29 +405,14 @@ def process_tile_with_bounds(tile_id, chunk_bounds, species_map, run_mode="defau
     if tile_gdf is None:
         return []
 
-    # if scattered via Dask, grab the actual dict
-    if hasattr(species_map, "result"):
-        species_map = species_map.result()
-
-    subset = tile_gdf.cx[
-        chunk_bounds[0] : chunk_bounds[2], chunk_bounds[1] : chunk_bounds[3]
-    ]
-    if subset.empty:
-        logging.info(f"No features in user bounding box => {chunk_bounds}, skipping.")
-        return []
-
-    subset["raster_val"] = subset.apply(
-        lambda r: classify_plantation(r, species_map), axis=1
+    classified = classify_features(
+        clip_geometries(tile_gdf, chunk_bounds), species_map
     )
-    subset.dropna(subset=["raster_val"], inplace=True)
-    if subset.empty:
-        logging.info(
-            f"No plantation features => bounding box {chunk_bounds}, skipping."
-        )
-        return []
 
     return [
-        dask.delayed(rasterize_chunk_df)(subset[["geometry", "raster_val"]], chunk_bounds, tile_id, run_mode)
+        dask.delayed(rasterize_chunk_df)(
+            classified, chunk_bounds, tile_id, run_mode
+        )
     ]
 
 
