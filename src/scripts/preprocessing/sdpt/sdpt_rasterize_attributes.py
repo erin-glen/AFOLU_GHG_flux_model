@@ -355,7 +355,7 @@ def _load_tile_gdf(tile_id):
     try:
         ddf = dgpd.read_file(vsis3_tile_shp, npartitions=1)
         tile_gdf = ddf.persist()
-        count = tile_gdf.map_partitions(len).sum().compute()
+        count = tile_gdf.map_partitions(len, meta=('length', int)).compute().sum()
         if count == 0:
             logging.info(f"No features found => tile {tile_id}")
             return None
@@ -366,7 +366,7 @@ def _load_tile_gdf(tile_id):
     return tile_gdf
 
 
-def process_tile(tile_id, species_map, chunk_size=2.0, run_mode="default"):
+def process_tile(tile_id, species_map, chunk_size=1.0, run_mode="default"):
     """
     1) Read tile_{tile_id}.shp from /vsis3/ lazily
     2) chunk bounding boxes
@@ -419,7 +419,7 @@ def process_tile_with_bounds(tile_id, chunk_bounds, species_map, run_mode="defau
     ]
 
 
-def process_all_tiles(species_map, chunk_size=2.0, run_mode="default"):
+def process_all_tiles(species_map, chunk_size=1.0, run_mode="default"):
     """Process every SDPT tile sequentially to avoid memory blowout."""
 
     for shp_key in list_sdpt_shapefiles():
@@ -433,7 +433,7 @@ def process_all_tiles(species_map, chunk_size=2.0, run_mode="default"):
 
 
 def main(
-    tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="default", client="local"
+    tile_id=None, chunk_size=1.0, chunk_bounds=None, run_mode="default", client="local"
 ):
     """
     If chunk_bounds is provided => only process that bounding box.
@@ -447,7 +447,7 @@ def main(
             cluster_name="sdpt_rasterization",
             n_workers=20,
             region="us-east-1",
-            worker_memory="64GiB",
+            worker_memory="128GiB",
         )
         logging.info(f"Coiled cluster => {cluster.name}")
     else:
@@ -499,7 +499,7 @@ if __name__ == "__main__":
         help="Tile ID (e.g. 00N_110E). Omit to process all tiles.",
     )
     parser.add_argument(
-        "--chunk_size", type=float, default=2.0, help="Chunk size (deg)."
+        "--chunk_size", type=float, default=1.0, help="Chunk size (deg)."
     )
     parser.add_argument(
         "--chunk_bounds",
@@ -529,7 +529,7 @@ if __name__ == "__main__":
         )
         main(
             tile_id=None,
-            chunk_size=2.0,
+            chunk_size=1.0,
             chunk_bounds=None,
             run_mode="test",
             client="local",
