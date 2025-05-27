@@ -569,4 +569,7 @@ python -m src.preprocessing.sdpt.sdpt_rasterize_attributes_csv_chunks \
   --run_mode test \
   --client local
 python -m src.scripts.preprocessing.sdpt.sdpt_rasterize_attributes --client local
+
+test
 """
+
