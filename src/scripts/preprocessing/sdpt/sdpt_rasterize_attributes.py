@@ -365,7 +365,7 @@ def _load_tile_gdf(tile_id):
     return tile_gdf
 
 
-def process_tile(tile_id, chunk_size=2.0, run_mode="default"):
+def process_tile(tile_id, species_map, chunk_size=2.0, run_mode="default"):
     """
     1) Read tile_{tile_id}.shp from /vsis3/ => .compute() => in-memory GeoDataFrame
     2) chunk bounding boxes
@@ -382,8 +382,9 @@ def process_tile(tile_id, chunk_size=2.0, run_mode="default"):
     minx, miny, maxx, maxy = uutil.get_10x10_tile_bounds(tile_id)
     chunk_bboxes = uutil.get_chunk_bounds([minx, miny, maxx, maxy], chunk_size)
 
-    # reclassification
-    species_map = load_species_reclassification()
+    # if scattered via Dask, grab the actual dict
+    if hasattr(species_map, "result"):
+        species_map = species_map.result()
 
     # build chunk GeoDataFrames
     chunk_list = create_chunk_subsets(tile_gdf, species_map, chunk_bboxes)
@@ -398,7 +399,7 @@ def process_tile(tile_id, chunk_size=2.0, run_mode="default"):
     return tasks
 
 
-def process_tile_with_bounds(tile_id, chunk_bounds, run_mode="default"):
+def process_tile_with_bounds(tile_id, chunk_bounds, species_map, run_mode="default"):
     """
     If user passes a single bounding box => skip the big loop,
     only process that chunk bounding box.
@@ -417,8 +418,9 @@ def process_tile_with_bounds(tile_id, chunk_bounds, run_mode="default"):
     if tile_gdf is None:
         return []
 
-    # reclassification
-    species_map = load_species_reclassification()
+    # if scattered via Dask, grab the actual dict
+    if hasattr(species_map, "result"):
+        species_map = species_map.result()
 
     subset = tile_gdf.cx[
         chunk_bounds[0] : chunk_bounds[2], chunk_bounds[1] : chunk_bounds[3]
@@ -442,12 +444,12 @@ def process_tile_with_bounds(tile_id, chunk_bounds, run_mode="default"):
     ]
 
 
-def process_all_tiles(chunk_size=2.0, run_mode="default"):
+def process_all_tiles(species_map, chunk_size=2.0, run_mode="default"):
     """Process every SDPT tile sequentially to avoid memory blowout."""
 
     for shp_key in list_sdpt_shapefiles():
         tile_id = os.path.basename(shp_key)[len("tile_") : -4]
-        tasks = process_tile(tile_id, chunk_size, run_mode)
+        tasks = process_tile(tile_id, species_map, chunk_size, run_mode)
         if tasks:
             logging.info(
                 f"Computing {len(tasks)} chunk tasks for tile => {tile_id} ..."
@@ -468,15 +470,19 @@ def main(
     if client == "coiled":
         cluster, client = uutil.connect_to_cluster(
             cluster_name="sdpt_rasterization",
-            n_workers=10,
+            n_workers=20,
             region="us-east-1",
-            worker_memory="128GiB",
+            worker_memory="64GiB",
         )
         logging.info(f"Coiled cluster => {cluster.name}")
     else:
         cluster = LocalCluster()
         client = Client(cluster)
         logging.info("Local Dask client started.")
+
+    # Load and broadcast species reclassification table once
+    mapping = load_species_reclassification()
+    species_map = client.scatter(mapping, broadcast=True)
 
     tasks = []
 
@@ -486,15 +492,17 @@ def main(
                 logging.info(
                     f"Processing tile => {tile_id}, chunk bounds => {chunk_bounds}"
                 )
-                tasks = process_tile_with_bounds(tile_id, chunk_bounds, run_mode)
+                tasks = process_tile_with_bounds(
+                    tile_id, chunk_bounds, species_map, run_mode
+                )
             else:
-                tasks = process_tile(tile_id, chunk_size, run_mode)
+                tasks = process_tile(tile_id, species_map, chunk_size, run_mode)
 
             logging.info(f"Computing {len(tasks)} chunk tasks ...")
             dask.compute(*tasks)
         else:
             logging.info("No tile_id provided => processing all tiles.")
-            process_all_tiles(chunk_size, run_mode)
+            process_all_tiles(species_map, chunk_size, run_mode)
 
     finally:
         client.close()
@@ -572,4 +580,3 @@ python -m src.scripts.preprocessing.sdpt.sdpt_rasterize_attributes --client loca
 
 test
 """
-
