@@ -364,25 +364,30 @@ def create_list_for_aggregation(s3_in_folders: list, logger=None) -> list:
 
 
 def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
-    """Merge multiple 1° tiles into a single 10° tile using ``gdal_merge.py``."""
-
     logger = lu.setup_logging_worker()
     in_folder = list(s3_name_dict.keys())[0]
     out_file_name = list(s3_name_dict.values())[0][0]
 
-    s3_in_folder = in_folder
-    vsis3_in_folder = f"/vsis3/{in_folder[5:]}"
+    vsis3_in_folder = f"/vsis3/{in_folder[5:]}"  # Correct handling of vsis3 prefix
 
-    filenames = list_raster_names_in_s3_folder(s3_in_folder)
+    filenames = list_raster_names_in_s3_folder(in_folder)
     tile_id = out_file_name[:8]
     filenames_in_focus_area = [i for i in filenames if tile_id in i]
-    tile_paths = [vsis3_in_folder + fn for fn in filenames_in_focus_area]
+    tile_paths = [f"{vsis3_in_folder}/{fn}" for fn in filenames_in_focus_area]
 
     lu.print_and_log(
         f"Merging small rasters in {tile_id} in {vsis3_in_folder}",
         is_final,
         logger,
     )
+
+    if not tile_paths:
+        lu.print_and_log(
+            f"No tiles found for merging for {tile_id} in {vsis3_in_folder}",
+            is_final,
+            logger,
+        )
+        return f"no tiles found for {s3_name_dict}"
 
     out_folder = re.sub(r"\d+_pixels", f"{cn.full_raster_dims}_pixels", in_folder)
 
@@ -391,9 +396,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
     first_raster_path = tile_paths[0]
     ds = gdal.Open(first_raster_path)
     raster_datatype = ds.GetRasterBand(1).DataType
-    raster_nodata_value = ds.GetRasterBand(1).GetNoDataValue()
-    if raster_nodata_value is None:
-        raster_nodata_value = 0
+    raster_nodata_value = ds.GetRasterBand(1).GetNoDataValue() or 0
     ds = None
 
     dtype_str = gdal_to_string_dtype_mapping.get(raster_datatype, "Float32")
@@ -405,54 +408,38 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
         merged_file,
         "-of",
         "GTiff",
-        "-co",
-        "COMPRESS=DEFLATE",
-        "-co",
-        "TILED=YES",
-        "-co",
-        "BLOCKXSIZE=400",
-        "-co",
-        "BLOCKYSIZE=400",
+        "-co", "COMPRESS=DEFLATE",
+        "-co", "TILED=YES",
+        "-co", "BLOCKXSIZE=400",
+        "-co", "BLOCKYSIZE=400",
         "-ul_lr",
-        str(min_x),
-        str(max_y),
-        str(max_x),
-        str(min_y),
-        "-ot",
-        dtype_str,
-        "-a_nodata",
-        str(raster_nodata_value),
-    ]
-    merge_command.extend(tile_paths)
+        str(min_x), str(max_y), str(max_x), str(min_y),
+        "-ot", dtype_str,
+        "-a_nodata", str(raster_nodata_value),
+    ] + tile_paths
 
     try:
-        subprocess.check_call(merge_command)
-        lu.print_and_log(
-            f"Successfully merged rasters into {merged_file}", is_final, logger
-        )
+        subprocess.check_output(merge_command, stderr=subprocess.STDOUT)
+        lu.print_and_log(f"Successfully merged into {merged_file}", is_final, logger)
     except subprocess.CalledProcessError as exc:
-        lu.print_and_log(f"Error merging rasters: {exc}", is_final, logger)
+        lu.print_and_log(f"GDAL merge error: {exc.output.decode()}", is_final, logger)
         return f"failure for {s3_name_dict}"
+    finally:
+        if os.path.exists(merged_file):
+            os.remove(merged_file)
 
     if not no_upload:
         s3_client = boto3.client("s3")
-        out_key = f"{out_folder[15:]}{out_file_name}"
-        lu.print_and_log(
-            f"Saving {out_file_name} to s3: {out_folder}{out_file_name}",
-            is_final,
-            logger,
-        )
+        out_key = f"{out_folder[15:]}/{out_file_name}"
         try:
             s3_client.upload_file(merged_file, "gfw2-data", out_key)
-            lu.print_and_log(
-                f"Successfully uploaded {out_file_name} to s3", is_final, logger
-            )
+            lu.print_and_log(f"Uploaded {out_file_name} to s3", is_final, logger)
         except boto3.exceptions.S3UploadFailedError as exc:
-            lu.print_and_log(f"Error uploading file to s3: {exc}", is_final, logger)
-            return f"failure for {s3_name_dict}"
+            lu.print_and_log(f"Error uploading to s3: {exc}", is_final, logger)
+            return f"upload failure for {s3_name_dict}"
 
-    os.remove(merged_file)
     return f"success for {s3_name_dict}"
+
 
 
 def split_s3_path(s3_path: str) -> tuple:
