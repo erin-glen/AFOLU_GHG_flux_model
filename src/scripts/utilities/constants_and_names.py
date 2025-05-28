@@ -15,6 +15,9 @@ s3_bucket_name = 'gfw2-data'
 full_bucket_prefix = f"s3://{s3_bucket_name}"
 s3_region_name = 'us-east-1'
 
+short_bucket_prefix = "gfw2-data"
+full_bucket_prefix_length = len(full_bucket_prefix)+1
+
 project_dir = 'climate/AFOLU_flux_model/organic_soils'
 raw_dir = posixpath.join(project_dir, 'inputs/raw')
 processed_dir = posixpath.join(project_dir, 'inputs/processed')
