@@ -366,7 +366,7 @@ def create_list_for_aggregation(s3_in_folders: list, logger=None) -> list:
 def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
     """Merge multiple 1° tiles into a single 10° tile using ``gdal_merge.py``."""
 
-    logger = lu.setup_logging()
+    logger = lu.setup_logging_worker()
     in_folder = list(s3_name_dict.keys())[0]
     out_file_name = list(s3_name_dict.values())[0][0]
 
@@ -396,7 +396,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
         raster_nodata_value = 0
     ds = None
 
-    dtype_str = gdal_dtype_mapping.get(raster_datatype, "Float32")
+    dtype_str = gdal_to_string_dtype_mapping.get(raster_datatype, "Float32")
 
     merged_file = f"/tmp/merged_{out_file_name}"
     merge_command = [
