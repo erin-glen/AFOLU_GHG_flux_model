@@ -420,23 +420,27 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
 
     try:
         subprocess.check_output(merge_command, stderr=subprocess.STDOUT)
-        lu.print_and_log(f"Successfully merged into {merged_file}", is_final, logger)
+        lu.print_and_log(
+            f"Successfully merged into {merged_file}", is_final, logger
+        )
+
+        if not no_upload:
+            s3_client = boto3.client("s3")
+            out_key = f"{out_folder[15:]}/{out_file_name}"
+            try:
+                s3_client.upload_file(merged_file, "gfw2-data", out_key)
+                lu.print_and_log(
+                    f"Uploaded {out_file_name} to s3", is_final, logger
+                )
+            except boto3.exceptions.S3UploadFailedError as exc:
+                lu.print_and_log(f"Error uploading to s3: {exc}", is_final, logger)
+                return f"upload failure for {s3_name_dict}"
     except subprocess.CalledProcessError as exc:
         lu.print_and_log(f"GDAL merge error: {exc.output.decode()}", is_final, logger)
         return f"failure for {s3_name_dict}"
     finally:
         if os.path.exists(merged_file):
             os.remove(merged_file)
-
-    if not no_upload:
-        s3_client = boto3.client("s3")
-        out_key = f"{out_folder[15:]}/{out_file_name}"
-        try:
-            s3_client.upload_file(merged_file, "gfw2-data", out_key)
-            lu.print_and_log(f"Uploaded {out_file_name} to s3", is_final, logger)
-        except boto3.exceptions.S3UploadFailedError as exc:
-            lu.print_and_log(f"Error uploading to s3: {exc}", is_final, logger)
-            return f"upload failure for {s3_name_dict}"
 
     return f"success for {s3_name_dict}"
 

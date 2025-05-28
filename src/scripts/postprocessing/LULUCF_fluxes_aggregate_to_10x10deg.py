@@ -82,21 +82,14 @@ def main(
     uu.stage_duration(start_time, end_time, stage)
 
     log_note = f"{stage} run"
-    lu.compile_worker_logs(
-        no_log,
-        client,
-        cluster,
-        stage,
-        len(list_of_s3_name_dicts_total),
-        "10x10deg",
-        start_time,
-        end_time,
-        end_time,
-        0,
-        0,
-        "N/A",
-        log_note,
-    )
+    if not run_local:
+        lu.compile_worker_logs(
+            no_log,
+            cluster,
+            stage,
+            start_time,
+            logger,
+        )
 
     if not run_local:
         client.close()
