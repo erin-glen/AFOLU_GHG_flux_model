@@ -7,17 +7,26 @@ from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
 
 
-def robust_merge_small_tiles(s3_name_dict, is_final, no_upload, logger):
+def robust_merge_small_tiles(s3_name_dict, is_final, no_upload, no_log, logger):
+    """Wrapper for :func:`merge_small_tiles_gdal` with error handling."""
+
+    folder, output_names = next(iter(s3_name_dict.items()))
+    out_file = output_names[0]
     try:
-        uu.merge_small_tiles_gdal(s3_name_dict, is_final, no_upload)
-        logger.info(f"Successfully merged: {s3_name_dict['output_name']}")
-        return f"Success: {s3_name_dict['output_name']}"
+        uu.merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log)
+        logger.info(f"Successfully merged: {out_file}")
+        return f"Success: {out_file}"
     except Exception as e:
-        logger.error(f"Error merging {s3_name_dict['output_name']}: {e}")
-        return f"Failed: {s3_name_dict['output_name']} - {str(e)}"
+        logger.error(f"Error merging {out_file}: {e}")
+        return f"Failed: {out_file} - {e}"
 
-
-def main(cluster_name, run_local=False, no_upload=False, no_log=False, pixel_resolution='4000_pixels'):
+def main(
+    cluster_name,
+    run_local=False,
+    no_upload=False,
+    no_log=False,
+    pixel_resolution="4000_pixels",
+):
 
     logger = lu.setup_logging_main()
 
@@ -26,17 +35,19 @@ def main(cluster_name, run_local=False, no_upload=False, no_log=False, pixel_res
     # Connect to cluster or run locally
     cluster, client = uu.connect_to_cluster(cluster_name, run_local)
 
-    stage = f"LULUCF_flux_postprocessing__outputs_aggregated_to_10x10deg_{pixel_resolution}"
+    stage = (
+        f"LULUCF_flux_postprocessing__outputs_aggregated_to_10x10deg_{pixel_resolution}"
+    )
 
     start_time = uu.timestr()
     lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
 
     # Hardcoded datasets
     input_datasets = [
-        f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/sdpt/{pixel_resolution}/20250528",
-        f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_roads_density/{pixel_resolution}/20250526",
-        f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_canals_density/{pixel_resolution}/20250526",
-        f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/grip_density/{pixel_resolution}/20250526"
+        f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/sdpt/{pixel_resolution}/20250528"
+        # f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_roads_density/{pixel_resolution}/20250526",
+        # f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_canals_density/{pixel_resolution}/20250526",
+        # f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/grip_density/{pixel_resolution}/20250526",
     ]
 
     # Generate aggregation tasks
@@ -44,43 +55,81 @@ def main(cluster_name, run_local=False, no_upload=False, no_log=False, pixel_res
 
     # Execute aggregation tasks in parallel
     delayed_results = [
-        dask.delayed(robust_merge_small_tiles)(s3_name_dict, is_final, no_upload, logger)
+        dask.delayed(robust_merge_small_tiles)(
+            s3_name_dict, is_final, no_upload, no_log, logger
+        )
         for s3_name_dict in list_of_s3_name_dicts_total
     ]
 
     results = dask.compute(*delayed_results)
     lu.print_and_log(results, is_final, logger)
 
-    output_folders = [path.replace(pixel_resolution, "40000") for path in input_datasets]
+    output_folders = [
+        path.replace(pixel_resolution, "40000") for path in input_datasets
+    ]
 
     # Confirm aggregated outputs in S3
     for folder in output_folders:
-        geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(folder)
-        lu.print_and_log(f"Aggregated 10x10 deg outputs in {folder}: {file_count}", is_final, logger)
+        geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(
+            folder
+        )
+        lu.print_and_log(
+            f"Aggregated 10x10 deg outputs in {folder}: {file_count}", is_final, logger
+        )
 
     end_time = uu.timestr()
     lu.print_and_log(f"Stage {stage} ended at: {end_time}", is_final, logger)
     uu.stage_duration(start_time, end_time, stage)
 
     log_note = f"{stage} run"
-    lu.compile_worker_logs(no_log, client, cluster, stage,
-                           len(list_of_s3_name_dicts_total), '10x10deg',
-                           start_time, end_time, end_time,
-                           0, 0, 'N/A', log_note)
+    lu.compile_worker_logs(
+        no_log,
+        client,
+        cluster,
+        stage,
+        len(list_of_s3_name_dicts_total),
+        "10x10deg",
+        start_time,
+        end_time,
+        end_time,
+        0,
+        0,
+        "N/A",
+        log_note,
+    )
 
     if not run_local:
         client.close()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Aggregate LULUCF model outputs to 10x10 degree geotifs.")
-    parser.add_argument('-cn', '--cluster_name', required=True, help='Cluster name')
+    parser = argparse.ArgumentParser(
+        description="Aggregate LULUCF model outputs to 10x10 degree geotifs."
+    )
+    parser.add_argument("-cn", "--cluster_name", required=True, help="Cluster name")
 
-    parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
-    parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
-    parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to S3')
-    parser.add_argument('--pixel_resolution', choices=['4000_pixels', '8000_pixels'], default='4000_pixels', help='Input raster resolution to process')
+    parser.add_argument(
+        "--run_local", action="store_true", help="Run locally without Dask/Coiled"
+    )
+    parser.add_argument(
+        "--no_log", action="store_true", help="Do not create the combined log"
+    )
+    parser.add_argument(
+        "--no_upload", action="store_true", help="Do not save and upload outputs to S3"
+    )
+    parser.add_argument(
+        "--pixel_resolution",
+        choices=["4000_pixels", "8000_pixels"],
+        default="4000_pixels",
+        help="Input raster resolution to process",
+    )
 
     args = parser.parse_args()
 
-    main(args.cluster_name, args.run_local, args.no_upload, args.no_log, args.pixel_resolution)
+    main(
+        args.cluster_name,
+        args.run_local,
+        args.no_upload,
+        args.no_log,
+        args.pixel_resolution,
+    )
