@@ -33,10 +33,10 @@ def main(cluster_name, run_local=False, no_upload=False, no_log=False, pixel_res
 
     # Hardcoded datasets
     input_datasets = [
-        f"gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/sdpt/{pixel_resolution}/20250528",
-        f"climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_roads_density/{pixel_resolution}/20250526",
-        f"climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_canals_density/{pixel_resolution}/20250526",
-        f"climate/AFOLU_flux_model/organic_soils/inputs/processed/grip_density/{pixel_resolution}/20250526"
+        f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/sdpt/{pixel_resolution}/20250528",
+        f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_roads_density/{pixel_resolution}/20250526",
+        f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_canals_density/{pixel_resolution}/20250526",
+        f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/grip_density/{pixel_resolution}/20250526"
     ]
 
     # Generate aggregation tasks
