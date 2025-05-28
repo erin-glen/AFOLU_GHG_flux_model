@@ -24,6 +24,11 @@ from rasterio.features import rasterize
 from rasterio.transform import from_origin
 from osgeo import ogr
 
+# ---------------------------------------------------------------------------
+import json
+from shapely.geometry import shape
+
+
 # Our universal constants & utilities
 import src.scripts.preprocessing.preprocessing_constants as cn
 import src.scripts.preprocessing.utilities as uu
@@ -94,35 +99,6 @@ from .create_remapping import classify as fallback_classify
 from .create_remapping import ROTATION_CLASS_CODES
 
 
-# ---------------------------------------------------------------------------
-# GDAL/OGR loading utilities
-
-
-import json
-
-def load_and_clip_shapefile(vsis3_shp_path, bbox):
-    """Load and clip a shapefile using GDAL/OGR before creating a GeoDataFrame."""
-    minx, miny, maxx, maxy = bbox
-    bbox_geom = ogr.CreateGeometryFromWkt(
-        f"POLYGON(({minx} {miny}, {maxx} {miny}, {maxx} {maxy}, {minx} {maxy}, {minx} {miny}))"
-    )
-
-    shp_ds = ogr.Open(vsis3_shp_path)
-    if shp_ds is None:
-        raise RuntimeError(f"Failed to open {vsis3_shp_path}")
-    layer = shp_ds.GetLayer()
-    layer.SetSpatialFilter(bbox_geom)
-
-    clipped_features = []
-    for feature in layer:
-        json_feature = feature.ExportToJson()
-        clipped_features.append(json.loads(json_feature))  # Parse JSON string to dict
-
-    del shp_ds, layer
-
-    if not clipped_features:
-        return gpd.GeoDataFrame(columns=["geometry"])
-    return gpd.GeoDataFrame.from_features(clipped_features)
 
 def load_and_clip_shapefile(vsis3_shp_path, bbox, simplify_tolerance=0.0001):
     """Load, clip, validate, and simplify geometries using GDAL/OGR and GeoPandas."""
@@ -162,14 +138,12 @@ def load_and_clip_shapefile(vsis3_shp_path, bbox, simplify_tolerance=0.0001):
             "properties": properties
         })
 
-    # Clean up GDAL dataset
     del layer, shp_ds
     gc.collect()
 
     if not clipped_features:
         return gpd.GeoDataFrame(columns=["geometry"], crs="EPSG:4326")
 
-    # Create GeoDataFrame with explicitly set CRS
     gdf = gpd.GeoDataFrame.from_features(clipped_features, crs="EPSG:4326")
 
     del clipped_features
