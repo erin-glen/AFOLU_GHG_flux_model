@@ -296,23 +296,101 @@ def process_tile(tile_id, species_map, chunk_size=2.0, run_mode="default"):
             chunk_name,
         )
 
-        # Early check for existing outputs BEFORE expensive clipping/classifying
-        if run_mode == "default":
-            if uutil.s3_file_exists(cn.s3_bucket_name, s3_chunk):
-                logging.info(f"(Early Skip) Partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk} exists, skipping bbox {bbox}.")
-                continue
-        else:
-            if os.path.exists(out_tif):
-                logging.info(f"(Early Skip) Partial TIF => {out_tif} exists locally, skipping bbox {bbox}.")
-                continue
+        # Early check BEFORE creating any delayed objects
+        exists_in_s3 = (
+            uutil.s3_file_exists(cn.s3_bucket_name, s3_chunk)
+            if run_mode == "default"
+            else os.path.exists(out_tif)
+        )
 
-        # Proceed only if chunk needs processing
-        clipped = load_tile_bbox(tile_id, bbox)
-        classified = classify_features(clipped, species_map)
-        tasks.append(dask.delayed(rasterize_chunk_df)(classified, bbox, tile_id, run_mode))
+        if exists_in_s3:
+            logging.info(f"(Early Skip) Partial TIF exists => skipping bbox {bbox}.")
+            continue
+
+        # Only now create delayed tasks
+        task = dask.delayed(process_chunk)(
+            tile_id, bbox, species_map, run_mode
+        )
+        tasks.append(task)
 
     return tasks
 
+def process_chunk(tile_id, bbox, species_map, run_mode):
+    """Process individual chunk including clipping, classification, and rasterization."""
+    clipped_gdf = load_and_clip_shapefile(
+        f"/vsis3/{cn.s3_bucket_name}/{cn.datasets['sdpt']['s3_raw']}/tile_{tile_id}.shp",
+        bbox
+    )
+
+    classified_gdf = classify_features_sync(clipped_gdf, species_map)
+
+    rasterize_chunk_df_sync(classified_gdf, bbox, tile_id, run_mode)
+
+def classify_features_sync(gdf, species_map):
+    """Synchronous classification."""
+    gdf["raster_val"] = gdf.apply(lambda r: classify_plantation(r, species_map), axis=1)
+    gdf.dropna(subset=["raster_val"], inplace=True)
+    return gdf[["geometry", "raster_val"]]
+
+def rasterize_chunk_df_sync(subset_gdf, bbox, tile_id, run_mode):
+    """Synchronous rasterization (no Dask delay here)."""
+    chunk_str = uutil.boundstr(bbox)
+    chunk_px = uutil.calc_chunk_length_pixels(bbox)
+    chunk_name = f"{tile_id}__{chunk_str}__sdpt.tif"
+    local_dir = cn.datasets["sdpt"]["local_processed"]
+    uu.create_directory_if_not_exists(local_dir)
+    out_tif = os.path.join(local_dir, chunk_name)
+
+    s3_chunk = posixpath.join(
+        cn.datasets["sdpt"]["s3_processed_base"],
+        f"{chunk_px}_pixels",
+        cn.today_date,
+        chunk_name,
+    )
+
+    shapes = [(geom, val) for geom, val in zip(subset_gdf.geometry, subset_gdf["raster_val"])]
+    if not shapes:
+        logging.info(f"No shapes to rasterize in {bbox}, skipping.")
+        return
+
+    minx, miny, maxx, maxy = bbox
+    width = int(round((maxx - minx) / RASTER_RES))
+    height = int(round((maxy - miny) / RASTER_RES))
+    transform = from_origin(minx, maxy, RASTER_RES, RASTER_RES)
+
+    burned = rasterize(
+        shapes,
+        out_shape=(height, width),
+        transform=transform,
+        fill=RASTER_NODATA,
+        dtype=RASTER_DTYPE,
+        all_touched=True,
+    )
+
+    meta = {
+        "driver": "GTiff",
+        "height": height,
+        "width": width,
+        "count": 1,
+        "dtype": RASTER_DTYPE,
+        "crs": "EPSG:4326",
+        "transform": transform,
+        "tiled": True,
+        "compress": "DEFLATE",
+        "nodata": RASTER_NODATA,
+    }
+    with rasterio.open(out_tif, "w", **meta) as dst:
+        dst.write(burned, 1)
+
+    if run_mode == "default":
+        logging.info(f"Uploading partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk}")
+        uutil.upload_file_to_s3(out_tif, cn.s3_bucket_name, s3_chunk)
+        os.remove(out_tif)
+    else:
+        logging.info(f"Test mode => partial TIF => {out_tif} retained locally.")
+
+    del burned
+    gc.collect()
 
 
 def process_tile_with_bounds(tile_id, chunk_bounds, species_map, run_mode="default"):
