@@ -100,7 +100,7 @@ from .create_remapping import ROTATION_CLASS_CODES
 
 
 
-def load_and_clip_shapefile(vsis3_shp_path, bbox, simplify_tolerance=0.001):
+def load_and_clip_shapefile(vsis3_shp_path, bbox, simplify_tolerance=0.0001):
     """Load, clip, validate, and simplify geometries using GDAL/OGR and GeoPandas."""
 
     minx, miny, maxx, maxy = bbox
