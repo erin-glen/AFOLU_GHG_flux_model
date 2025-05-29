@@ -12,7 +12,7 @@ LONG_ROTATION_SIMPLE_NAMES = ['fruit', 'rubber']
 SHORT_ROTATION_SCI_NAMES = [
     'acacia', 'eucalyptus', 'alnus', 'populus', 'salix',
     'bambusa oldhamii', 'guadua angustifolia', 'gmelina arborea',
-    'gliricidia sepium', 'schizolobium', 'musa', 'casuarina',
+    'gliricidia', 'schizolobium', 'musa', 'casuarina',
     'melia azedarach', 'paulownia', 'prosopis', 'robinia', 'triplaris',
     'ochroma pyramidale', 'leucaena', 'unknown', 'bamboo'
 ]
