@@ -407,14 +407,67 @@ def process_tile_with_bounds(tile_id, chunk_bounds, species_map, run_mode="defau
     return [dask.delayed(rasterize_chunk_df)(classified, chunk_bounds, tile_id, run_mode)]
 
 
-def process_all_tiles(species_map, chunk_size=2.0, run_mode="default"):
-    """Process every SDPT tile sequentially."""
-    for shp_key in list_sdpt_shapefiles():
-        tile_id = os.path.basename(shp_key)[len("tile_") : -4]
-        tasks = process_tile(tile_id, species_map, chunk_size, run_mode)
-        if tasks:
-            logging.info(f"Computing {len(tasks)} chunk tasks for tile => {tile_id} ...")
-            dask.compute(*tasks)
+def process_all_tiles(species_map, chunk_size=2.0, run_mode="default", batch_size=20):
+    """Process tiles in batches concurrently without overwhelming the Dask scheduler."""
+    all_shp_keys = list_sdpt_shapefiles()
+    total_tiles = len(all_shp_keys)
+    logging.info(f"Total tiles to process: {total_tiles}, batch size: {batch_size}")
+
+    for i in range(0, total_tiles, batch_size):
+        batch_shp_keys = all_shp_keys[i:i + batch_size]
+        batch_tasks = []
+        batch_tile_ids = [os.path.basename(shp_key)[len("tile_"): -4] for shp_key in batch_shp_keys]
+
+        logging.info(f"Processing batch {i // batch_size + 1} with tiles: {batch_tile_ids}")
+
+        for tile_id in batch_tile_ids:
+            minx, miny, maxx, maxy = uutil.get_10x10_tile_bounds(tile_id)
+            chunk_bboxes = uutil.get_chunk_bounds([minx, miny, maxx, maxy], chunk_size)
+
+            # Check all chunks within tile before constructing tasks
+            tile_tasks = []
+            for bbox in chunk_bboxes:
+                chunk_str = uutil.boundstr(bbox)
+                chunk_px = uutil.calc_chunk_length_pixels(bbox)
+                chunk_name = f"{tile_id}__{chunk_str}__sdpt.tif"
+                local_dir = cn.datasets["sdpt"]["local_processed"]
+                uu.create_directory_if_not_exists(local_dir)
+                out_tif = os.path.join(local_dir, chunk_name)
+
+                s3_chunk = posixpath.join(
+                    cn.datasets["sdpt"]["s3_processed_base"],
+                    f"{chunk_px}_pixels",
+                    cn.today_date,
+                    chunk_name,
+                )
+
+                # Early existence check
+                exists_in_s3 = (
+                    uutil.s3_file_exists(cn.s3_bucket_name, s3_chunk)
+                    if run_mode == "default"
+                    else os.path.exists(out_tif)
+                )
+
+                if exists_in_s3:
+                    logging.info(f"(Early Skip) Partial TIF exists => skipping bbox {bbox}.")
+                    continue
+
+                # Only create task if necessary
+                task = dask.delayed(process_chunk)(tile_id, bbox, species_map, run_mode)
+                tile_tasks.append(task)
+
+            batch_tasks.extend(tile_tasks)
+
+        if batch_tasks:
+            logging.info(f"Computing {len(batch_tasks)} chunk tasks for batch {i // batch_size + 1}...")
+            dask.compute(*batch_tasks)
+            gc.collect()  # Clear memory after each batch
+        else:
+            logging.info(f"All chunks in batch {i // batch_size + 1} already processed, skipping.")
+
+    logging.info("Completed processing all tile batches.")
+
+
 
 
 # ---------------------------------------------------------------------------
