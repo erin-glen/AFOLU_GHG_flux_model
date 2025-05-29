@@ -100,7 +100,7 @@ from .create_remapping import ROTATION_CLASS_CODES
 
 
 
-def load_and_clip_shapefile(vsis3_shp_path, bbox, simplify_tolerance=0.0001):
+def load_and_clip_shapefile(vsis3_shp_path, bbox, simplify_tolerance=0.001):
     """Load, clip, validate, and simplify geometries using GDAL/OGR and GeoPandas."""
 
     minx, miny, maxx, maxy = bbox
@@ -429,7 +429,7 @@ def main(tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="default", cl
 
     if client == "coiled":
         cluster, client = uutil.connect_to_cluster(
-            cluster_name="sdpt_rasterization", n_workers=40, region="us-east-1", worker_memory="64GiB"
+            cluster_name="sdpt_rasterization", n_workers=60, region="us-east-1", worker_memory="64GiB"
         )
         logging.info(f"Coiled cluster => {cluster.name}")
     else:
