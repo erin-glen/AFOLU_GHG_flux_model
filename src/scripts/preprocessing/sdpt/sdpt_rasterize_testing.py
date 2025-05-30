@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 # Reclassification CSV in S3
 ADVANCED_REMAP_S3 = (
-    "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/remapping_tables/advanced_remapping.csv"
+    "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/remapping_tables/advanced_remapping_2.csv"
 )
 
 # Rasterisation settings
@@ -407,7 +407,7 @@ def process_tile_with_bounds(tile_id, chunk_bounds, species_map, run_mode="defau
     return [dask.delayed(rasterize_chunk_df)(classified, chunk_bounds, tile_id, run_mode)]
 
 
-def process_all_tiles(species_map, chunk_size=2.0, run_mode="default", batch_size=20):
+def process_all_tiles(species_map, chunk_size=2.0, run_mode="default", batch_size=50):
     """Process tiles in batches concurrently without overwhelming the Dask scheduler."""
     all_shp_keys = list_sdpt_shapefiles()
     total_tiles = len(all_shp_keys)
