@@ -24,6 +24,9 @@ from rasterio.features import rasterize
 from rasterio.transform import from_origin
 from osgeo import ogr
 
+# Temporary hardcoded output date to avoid duplicate work
+OUTPUT_DATE = "20240529"  # Set this to the date your original outputs began
+
 # ---------------------------------------------------------------------------
 import json
 from shapely.geometry import shape
@@ -211,7 +214,7 @@ def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
     s3_chunk = posixpath.join(
         cn.datasets["sdpt"]["s3_processed_base"],
         f"{chunk_px}_pixels",
-        cn.today_date,
+        OUTPUT_DATE,
         chunk_name,
     )
 
@@ -292,7 +295,7 @@ def process_tile(tile_id, species_map, chunk_size=2.0, run_mode="default"):
         s3_chunk = posixpath.join(
             cn.datasets["sdpt"]["s3_processed_base"],
             f"{chunk_px}_pixels",
-            cn.today_date,
+            OUTPUT_DATE,
             chunk_name,
         )
 
@@ -344,7 +347,7 @@ def rasterize_chunk_df_sync(subset_gdf, bbox, tile_id, run_mode):
     s3_chunk = posixpath.join(
         cn.datasets["sdpt"]["s3_processed_base"],
         f"{chunk_px}_pixels",
-        cn.today_date,
+        OUTPUT_DATE,
         chunk_name,
     )
 
@@ -407,7 +410,7 @@ def process_tile_with_bounds(tile_id, chunk_bounds, species_map, run_mode="defau
     return [dask.delayed(rasterize_chunk_df)(classified, chunk_bounds, tile_id, run_mode)]
 
 
-def process_all_tiles(species_map, chunk_size=2.0, run_mode="default", batch_size=50):
+def process_all_tiles(species_map, chunk_size=2.0, run_mode="default", batch_size=25):
     """Process tiles in batches concurrently without overwhelming the Dask scheduler."""
     all_shp_keys = list_sdpt_shapefiles()
     total_tiles = len(all_shp_keys)
@@ -437,7 +440,7 @@ def process_all_tiles(species_map, chunk_size=2.0, run_mode="default", batch_siz
                 s3_chunk = posixpath.join(
                     cn.datasets["sdpt"]["s3_processed_base"],
                     f"{chunk_px}_pixels",
-                    cn.today_date,
+                    OUTPUT_DATE,
                     chunk_name,
                 )
 
