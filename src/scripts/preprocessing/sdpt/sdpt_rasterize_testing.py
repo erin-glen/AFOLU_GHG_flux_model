@@ -25,7 +25,7 @@ from rasterio.transform import from_origin
 from osgeo import ogr
 
 # Temporary hardcoded output date to avoid duplicate work
-OUTPUT_DATE = "20240529"  # Set this to the date your original outputs began
+OUTPUT_DATE = "20240531"  # Set this to the date your original outputs began
 
 # ---------------------------------------------------------------------------
 import json
