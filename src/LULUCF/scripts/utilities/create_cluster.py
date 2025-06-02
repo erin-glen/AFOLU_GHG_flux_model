@@ -3,6 +3,10 @@ Run from src/LULUCF/
 python -m scripts.utilities.create_cluster -n 1 -t 2 -m 16 -cn LULUCF_model
 python -m scripts.utilities.create_cluster -n 5 -t 3 -m 32 -cn LULUCF_model
 python -m scripts.utilities.create_cluster -n 20 -t 4 -m 64 -cn LULUCF_model
+
+Used x8g.large for 32 GB workers because using x2gd for large clusters kept giving me the error after the cluster was created
+"error sending local AWS or Google Cloud credentials to cluster: Exception while trying to call remote method 'aws_update_credentials' using comm None."
+Then the cluster would terminate.
 """
 
 import coiled
@@ -20,15 +24,15 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory, i
 
     # Uses the larger workers if requested or if more workers are requested.
     # Assumes that if using more workers, you want bigger workers. 12 is a semi-arbitrary cutoff.
-    if (worker_memory == 64) or (n_workers > 12):
+    if worker_memory == 64:
         idle_timeout = 15
         scheduler_vm_type = "x2gd.xlarge"
         worker_vm_type = "x2gd.xlarge"
 
     elif worker_memory == 32:
         idle_timeout = 20
-        scheduler_vm_type = "x2gd.large"
-        worker_vm_type = "x2gd.large"
+        scheduler_vm_type = "x8g.large"
+        worker_vm_type = "x8g.large"
 
     elif worker_memory == 16:
         scheduler_vm_type = "x2gd.medium"
