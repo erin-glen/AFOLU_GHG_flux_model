@@ -44,7 +44,7 @@ def main(
 
     # Hardcoded datasets
     input_datasets = [
-        f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/sdpt/{pixel_resolution}/20250528"
+        f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/sdpt/{pixel_resolution}/20250531"
         # f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_roads_density/{pixel_resolution}/20250526",
         # f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_canals_density/{pixel_resolution}/20250526",
         # f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/grip_density/{pixel_resolution}/20250526",
