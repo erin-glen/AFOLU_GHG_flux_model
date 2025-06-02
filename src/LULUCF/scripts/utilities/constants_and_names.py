@@ -293,7 +293,7 @@ soil_c_dens_pattern = "carbon_density__soil_C__MgC"
 
 ### Starting carbon pools (2000/2015)
 
-carbon_2000_creation_date = '20250526'
+carbon_2000_creation_date = '20250602'
 
 agc_2000_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{agc_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2000_creation_date}/"
 agc_2000_pattern = f"{agc_dens_pattern}_2000"

@@ -15,12 +15,11 @@ import sys
 
 from . import constants_and_names as cn
 
-def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory, idle_timeout):
+def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
 
     # Converts worker_memory from an integer to the required format (e.g., 8 to "8GiB")
     worker_memory_str = f"{worker_memory}GiB"
     scheduler_memory_str = f"{worker_memory}GiB"
-    idle_timeout = f"{idle_timeout} minutes"
 
     # Uses the larger workers if requested or if more workers are requested.
     # Assumes that if using more workers, you want bigger workers. 12 is a semi-arbitrary cutoff.
@@ -35,11 +34,14 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory, i
         worker_vm_type = "x8g.large"
 
     elif worker_memory == 16:
+        idle_timeout = 25
         scheduler_vm_type = "x2gd.medium"
         worker_vm_type = "x2gd.medium"
 
     else:
         sys.exit('Memory argument not 16, 32, or 64 GB')
+
+    idle_timeout = f"{idle_timeout} minutes"
 
     cluster = coiled.Cluster(
         n_workers=n_workers,
@@ -69,7 +71,6 @@ if __name__ == "__main__":
     parser.add_argument('-n', '--n_workers', type=int, default=1, help='Number of workers for the cluster')
     parser.add_argument('-m', '--worker_memory', type=int, help='Memory per worker')
     parser.add_argument('-t', '--threads_per_worker', type=int, default='2', help='Number of threads/worker (default=2)')
-    parser.add_argument('-i', '--idle_timeout', default=25, help='Timeout if idle is cluster (minutes)')
 
     args = parser.parse_args()
 
@@ -77,7 +78,6 @@ if __name__ == "__main__":
     n_workers = args.n_workers
     worker_memory = args.worker_memory
     threads_per_worker = args.threads_per_worker
-    idle_timeout = args.idle_timeout
 
     # Create the cluster with command line arguments
-    create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory, idle_timeout)
+    create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory)

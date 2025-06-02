@@ -5,18 +5,17 @@ Local:
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
 
 python -m scripts.utilities.create_cluster -n 1 -t 2 -m 16 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -bb 116 -3 116.25 -2.75 -cs 0.25 --no_stats --year YYYY
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
 
 python -m scripts.utilities.create_cluster -n 50 -t 10 -m 32 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
 Max memory usage: ~18 GB/worker
-Time: 23:17 through calculation; 40:25 through tile stats; Credits: 170; Cost: $6.00
+Time: 25:03 through calculation; 26:05 through tile stats; Credits: 47; Cost: $2.30; peak memory: 16 GB/worker
 
 python -m scripts.utilities.create_cluster -n 50 -t 12 -m 32 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1."
 Max memory usage: ~20 GB/worker
-Time: 45:50 through calculation; 47:47 through tile stats; Credits: 180; Cost: $6.30
+Time: 45:50 through calculation; 47:47 through tile stats; Credits: 180; Cost: $6.30  (ran before specifying worker series and type, so costs are much higher)
 
 NOTE: Maybe there's some way to configure this to output 10x10 deg tiles but I can't figure it out.
 Instead, it creates 1x1 deg tiles and then merges them to 10x10 deg tiles.
