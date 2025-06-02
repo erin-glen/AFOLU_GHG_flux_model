@@ -4,9 +4,8 @@ python -m scripts.utilities.create_cluster -n 1 -t 2 -m 16 -cn LULUCF_model
 python -m scripts.utilities.create_cluster -n 5 -t 3 -m 32 -cn LULUCF_model
 python -m scripts.utilities.create_cluster -n 20 -t 4 -m 64 -cn LULUCF_model
 
-Used x8g.large for 32 GB workers because using x2gd for large clusters kept giving me the error after the cluster was created
-"error sending local AWS or Google Cloud credentials to cluster: Exception while trying to call remote method 'aws_update_credentials' using comm None."
-Then the cluster would terminate.
+These are the cheapest worker types and they have fewer vCPUs than usual for the memory.
+This makes them less costly on AWS and use fewer Coiled credits.
 """
 
 import coiled
