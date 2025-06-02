@@ -25,7 +25,7 @@ from rasterio.transform import from_origin
 from osgeo import ogr
 
 # Temporary hardcoded output date to avoid duplicate work
-OUTPUT_DATE = "20240531"  # Set this to the date your original outputs began
+OUTPUT_DATE = "20250531"  # Set this to the date your original outputs began
 
 # ---------------------------------------------------------------------------
 import json
@@ -505,7 +505,7 @@ def main(tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="default", cl
             dask.compute(*tasks)
         else:
             logging.info("No tile_id provided => processing all tiles.")
-            process_all_tiles(species_map, chunk_size, run_mode, batch_size=25, start_batch=7)
+            process_all_tiles(species_map, chunk_size, run_mode, batch_size=25, start_batch=1)
     finally:
         client.close()
         logging.info("Dask client closed.")
