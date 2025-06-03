@@ -470,6 +470,13 @@ burned_area_final_pattern = "burned_area_final"
 organic_soil_extent_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"
 organic_soil_extent_pattern = "peat_mask_processed"
 
+# GMWv3 mangrove extent
+mangrove_extent_years = [1996, 2007, 2008, 2009, 2010, 2015, 2016, 2017, 2018, 2019, 2020]
+mangrove_extent_raw_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/raw/raster/"
+mangrove_extent_raw_pattern = r"GMW_[NS][0-9]{2}[EW][0-9]{3}_[0-9]{4}_v3.tif"       #"GMW_N00E008_1996_v3.tif" in regex form
+mangrove_extent_processed_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/processed/raster/"
+mangrove_extent_processed_pattern = "mangrove_extent_GMWv3.tif"
+
 #cropland emissions
 cropland_emis_run_date =  '20241204'
 global_cropland_emissions_raw_dir = f"{AFOLU_path}cropland_emissions/raw__from_Cornell/20241126/year_2020/all_sources/"

@@ -6,12 +6,12 @@ python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 1
 python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p secondary_natural_forest -bb -120 30 -110 40 -cs 10
 
 Coiled test area with data:
-python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 1
-python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p secondary_natural_forest -bb -120 30 -110 40 -cs 10
+python -m scripts.utilities.create_cluster -cn GMWv3_preprocessing -n 1
+python -m scripts.preprocessing.hansenize_inputs -cn GMWv3_preprocessing -ct coiled -p mangroves -bb -120 30 -110 40 -cs 10
 
 Coiled full run:
 python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 20 -m 8 -t 8
-python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p secondary_natural_forest -bb -180 -60 180 80 -cs 10
+python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p mangroves -bb -180 -60 180 80 -cs 10
 
 #QC
 cluster_name = 'Hansenize_drivers_data'
@@ -135,6 +135,17 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
             'processed_dir': cn.climate_zone_processed_dir,
             'processed_pattern': cn.climate_zone_pattern
         }
+
+    if 'mangroves' in process:
+        for year in cn.mangrove_extent_years:
+            download_upload_dictionary[f"mangrove_extent_{year}"] = {
+                'raw_dir': f"{cn.mangrove_extent_raw_dir}{year}/",
+                'raw_pattern': cn.mangrove_extent_raw_pattern,
+                'vrt': f"/tmp/mangrove_extent_{year}.vrt",
+                'processed_dir': f"{cn.mangrove_extent_processed_dir}{year}/",
+                'processed_pattern': f"{year}_{cn.mangrove_extent_processed_pattern}"
+            }
+
 
     # if 'cropland_fertilizer' in process:
     #     download_upload_dictionary[""] = {
