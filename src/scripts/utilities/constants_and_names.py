@@ -192,7 +192,7 @@ land_cover_pattern = "land_cover"
 # 7. Dynamic Download Dictionary Function
 # ---------------------------------------------------
 
-def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=None, peat_dataset='gfw'):
+def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=None, peat_dataset='ogh'):
     if interval_end_year is None:
         interval_end_year = interval_start_year
 
