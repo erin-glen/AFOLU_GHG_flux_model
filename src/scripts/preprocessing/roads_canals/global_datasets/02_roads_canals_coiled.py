@@ -168,8 +168,9 @@ def process_chunk(bounds, tile_id, feature_type):
         cn.today_date,
     )
 
-    local_out = os.path.join(local_dir, f"{tile_id}_{chunk_str}_{feature_type}_density.tif")
-    s3_out_key = f"{s3_dir}/{tile_id}_{chunk_str}_{feature_type}_density.tif"
+    chunk_name = f"{tile_id}__{chunk_str}__{feature_type}_density.tif"
+    local_out = os.path.join(local_dir, chunk_name)
+    s3_out_key = f"{s3_dir}/{chunk_name}"
 
     logging.info(f"[{tile_id}|{chunk_str}] Starting chunk processing")
 
