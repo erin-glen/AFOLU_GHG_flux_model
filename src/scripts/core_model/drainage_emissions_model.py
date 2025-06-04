@@ -416,6 +416,7 @@ def calculate_and_upload_drainage(
     iv_start,
     iv_end,
     use_actual_pixel_area=False,
+    peat_dataset="ogh",
 ):
 
     logger = lu.setup_logging_worker()
@@ -518,7 +519,7 @@ def calculate_and_upload_drainage(
             is_final,
             logger,
             interval_type=interval_tag,
-            model_type="standard_model",
+            model_type=f"{peat_dataset}_standard_model",
             no_data_val=0,
         )
 
@@ -609,6 +610,7 @@ def run_drainage_model(
             t[1],
             t[2],
             use_actual_pixel_area,
+            peat_dataset,
         )
 
     results = bag.map(_wrap).compute()
