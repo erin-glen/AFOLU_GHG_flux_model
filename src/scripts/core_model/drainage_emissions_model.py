@@ -541,7 +541,7 @@ def run_drainage_model(
     interval_type="annual",
     use_actual_pixel_area=False,
     tile_ids=None,
-    peat_dataset="gfw",
+    peat_dataset="ogh",
 ):
 
     stage = "drainage_model"
@@ -655,7 +655,7 @@ def main(argv=None):
             end_year=2019,
             interval_type=cn.intervals_five_years,
             use_actual_pixel_area=False,
-            peat_dataset="gfw",
+            peat_dataset="ogh",
         )
         return
 
@@ -688,7 +688,7 @@ def main(argv=None):
     p.add_argument("--use_actual_pixel_area", action="store_true")
     p.add_argument(
         "--peat_dataset",
-        default="gfw",
+        default="ogh",
         choices=cn.peat_dataset_choices,
         help="Peat mask dataset to use",
     )
