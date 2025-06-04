@@ -46,6 +46,8 @@ today_date = datetime.today().strftime('%Y%m%d')
 
 tile_id_pattern = r"[0-9]{2}[A-Z][_][0-9]{3}[A-Z]"
 small_chunk_pattern = r"__-?\d+_-?\d+_-?\d+_-?\d+__"
+# Legacy single-underscore chunk notation, e.g., _8_-1_9_0_
+old_small_chunk_pattern = r"_-?\d+_-?\d+_-?\d+_-?\d+_"
 
 sample_tile_id = '{tile_id}'
 

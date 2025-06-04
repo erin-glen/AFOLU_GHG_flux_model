@@ -347,6 +347,8 @@ def create_list_for_aggregation(s3_in_folders: list, logger=None) -> list:
         simple_names = []
         for fname in list_raster_names_in_s3_folder(folder):
             simple = re.sub(cn.small_chunk_pattern, "__", fname)
+            # normalize legacy single-underscore chunks
+            simple = re.sub(cn.old_small_chunk_pattern, "__", simple)
             simple_names.append(simple)
         simple_names = np.unique(simple_names).tolist()
         list_of_s3_name_dicts = [{folder: [name]} for name in simple_names]
