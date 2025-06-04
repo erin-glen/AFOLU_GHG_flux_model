@@ -1,6 +1,5 @@
 import argparse
 import dask
-import logging
 
 # Project imports
 from src.scripts.utilities import universal_utilities as uu
@@ -33,7 +32,7 @@ def main(
     is_final = False
 
     # Connect to cluster or run locally
-    cluster, client = uu.connect_to_cluster(cluster_name, run_local)
+    cluster, client = uu.connect_to_cluster(cluster_name, run_local=run_local)
 
     stage = (
         f"LULUCF_flux_postprocessing__outputs_aggregated_to_10x10deg_{pixel_resolution}"
@@ -65,7 +64,7 @@ def main(
     lu.print_and_log(results, is_final, logger)
 
     output_folders = [
-        path.replace(pixel_resolution, "40000") for path in input_datasets
+        path.replace(pixel_resolution, "40000_pixels") for path in input_datasets
     ]
 
     # Confirm aggregated outputs in S3
