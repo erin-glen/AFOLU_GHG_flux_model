@@ -79,6 +79,7 @@ m2_to_ha = 1e-4
 # 3. Dataset File Patterns
 # ---------------------------------------------------
 
+# TODO add all peat patterns (and look at thresholds)
 patterns = {
     'land_cover': "{tile_id}.tif",
     'peat': "{tile_id}.tif",
@@ -116,6 +117,7 @@ dirs = {
 
 # directories for 30 m peat mask datasets
 peat_mask_dirs = {
+    # TODO add full gfw path here, change all references
     'gfw': dirs['peat'],
     'gpd': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/GPD/tiles'),
     'peatmap': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/PEATMAP/tiles'),
