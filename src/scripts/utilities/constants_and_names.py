@@ -91,7 +91,7 @@ patterns = {
     'extraction': "{tile_id}_extraction.tif",
     'climate_domain': "{tile_id}_fao_ecozones_bor_tem_tro_processed.tif",
     'descals_type': "plantation_type_{tile_id}.tif",
-    'ogh': "{tile_id}.tif",
+    'ogh': "{tile_id}_ogh_mask.tif",
     'burned_area_final': "{tile_id}_burned_area_final_{year}.tif"
 }
 
@@ -111,9 +111,21 @@ dirs = {
     'extraction': posixpath.join(full_bucket_prefix, processed_dir, 'extraction/20241021'),
     'climate_domain': posixpath.join(full_bucket_prefix, 'climate/carbon_model/inputs_for_carbon_pools/processed/fao_ecozones_bor_tem_tro/20190418'),
     'descals_type': posixpath.join(full_bucket_prefix, processed_dir, 'descals_plantation/extent/20241105'),
-    'ogh': posixpath.join(full_bucket_prefix, raw_dir, 'soils/OGH'),
     'burned_area_final': posixpath.join(full_bucket_prefix, 'fires/MODIS_burned_area/MCD64A1.061/2_final_outputs__Hansenized/{year}')
 }
+
+# directories for 30 m peat mask datasets
+peat_mask_dirs = {
+    'gfw': dirs['peat'],
+    'gpd': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/GPD/tiles'),
+    'peatmap': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/PEATMAP/tiles'),
+    'peatml': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/PEATML/tiles'),
+    'ogh': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/OGH/tiles'),
+    'ogh_unthresholded': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/OGH/tiles_unthresholded'),
+    'union_mask': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/union/30m/tiles'),
+}
+
+peat_dataset_choices = tuple(peat_mask_dirs.keys())
 
 # ---------------------------------------------------
 # 5. Classification and Conversion Constants
@@ -180,7 +192,7 @@ land_cover_pattern = "land_cover"
 # 7. Dynamic Download Dictionary Function
 # ---------------------------------------------------
 
-def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=None):
+def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=None, peat_dataset='gfw'):
     if interval_end_year is None:
         interval_end_year = interval_start_year
 
@@ -202,9 +214,29 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
     )
 
 
+    peat_dataset = peat_dataset.lower()
+    if peat_dataset not in peat_mask_dirs:
+        raise ValueError(f"Unknown peat dataset: {peat_dataset}")
+
+    if peat_dataset == 'gfw':
+        peat_path = posixpath.join(
+            peat_mask_dirs['gfw'], patterns['peat'].format(tile_id=tile_id)
+        )
+    elif peat_dataset == 'union_mask':
+        peat_path = posixpath.join(
+            peat_mask_dirs['union_mask'], f"{tile_id}_union_mask.tif"
+        )
+    else:
+        peat_path = posixpath.join(
+            peat_mask_dirs[peat_dataset], f"{tile_id}_{peat_dataset}_mask.tif"
+        )
+
     dynamic_dict = {
-        'land_cover': posixpath.join(lulucf_land_cover_dir, patterns['land_cover'].format(tile_id=tile_id)),
-        'peat': posixpath.join(dirs['peat'], patterns['peat'].format(tile_id=tile_id)),
+        'land_cover': posixpath.join(
+            lulucf_land_cover_dir,
+            patterns['land_cover'].format(tile_id=tile_id)
+        ),
+        'peat': peat_path,
         'dadap': posixpath.join(dirs['dadap'], patterns['dadap'].format(tile_id=tile_id)),
         'engert': posixpath.join(dirs['engert'], patterns['engert'].format(tile_id=tile_id)),
         'grip': posixpath.join(dirs['grip'], patterns['grip'].format(tile_id=tile_id)),
@@ -214,7 +246,7 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
         'extraction': posixpath.join(dirs['extraction'], patterns['extraction'].format(tile_id=tile_id)),
         'climate_domain': posixpath.join(dirs['climate_domain'], patterns['climate_domain'].format(tile_id=tile_id)),
         'descals_type': posixpath.join(dirs['descals_type'], patterns['descals_type'].format(tile_id=tile_id)),
-        'ogh': posixpath.join(dirs['ogh'], patterns['ogh'].format(tile_id=tile_id)),
+        'ogh': posixpath.join(peat_mask_dirs['ogh'], patterns['ogh'].format(tile_id=tile_id)),
     }
 
     # Add burned area layers for each year in the interval

@@ -541,6 +541,7 @@ def run_drainage_model(
     interval_type="annual",
     use_actual_pixel_area=False,
     tile_ids=None,
+    peat_dataset="gfw",
 ):
 
     stage = "drainage_model"
@@ -583,7 +584,12 @@ def run_drainage_model(
         intervals = [(y, y) for y in range(start_year, end_year + 1)]
 
     # figure out data types from first chunk
-    sample_dict = cn.get_dynamic_download_dict(sample_tid, start_year, end_year)
+    sample_dict = cn.get_dynamic_download_dict(
+        sample_tid,
+        start_year,
+        end_year,
+        peat_dataset=peat_dataset,
+    )
     if use_actual_pixel_area:
         sample_dict["pixel_area_ha"] = os.path.join(
             cn.pixel_area_ha_dir, f"{sample_tid}_pixel_area_ha.tif"
@@ -649,6 +655,7 @@ def main(argv=None):
             end_year=2019,
             interval_type=cn.intervals_five_years,
             use_actual_pixel_area=False,
+            peat_dataset="gfw",
         )
         return
 
@@ -679,6 +686,12 @@ def main(argv=None):
         choices=[cn.intervals_annual, cn.intervals_five_years],
         default=cn.intervals_annual,)
     p.add_argument("--use_actual_pixel_area", action="store_true")
+    p.add_argument(
+        "--peat_dataset",
+        default="gfw",
+        choices=cn.peat_dataset_choices,
+        help="Peat mask dataset to use",
+    )
     args = p.parse_args(argv)
 
     tile_ids = []
@@ -699,6 +712,7 @@ def main(argv=None):
         interval_type=args.interval_type,
         use_actual_pixel_area=args.use_actual_pixel_area,
         tile_ids=tile_ids,
+        peat_dataset=args.peat_dataset,
     )
 
 
