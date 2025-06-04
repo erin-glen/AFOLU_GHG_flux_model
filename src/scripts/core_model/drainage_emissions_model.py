@@ -5,6 +5,7 @@ Organic‑soils drainage and fire emissions model
 * full decision‑tree logic (drainage & burned‑area) kept intact
 * parallel execution via Coiled / Dask (mirrors LULUCF model)
 * outputs saved to S3 using universal_utilities.save_and_upload_small_raster_set
+* optionally target specific 10x10 degree tiles via the ``tile_ids`` option
 """
 
 from __future__ import annotations
@@ -539,6 +540,7 @@ def run_drainage_model(
     end_year=None,
     interval_type="annual",
     use_actual_pixel_area=False,
+    tile_ids=None,
 ):
 
     stage = "drainage_model"
@@ -548,7 +550,7 @@ def run_drainage_model(
     )
 
     main_logger, _ = lu.populate_main_log_header(
-        bounding_box=bounding_box,
+        bounding_box=None if tile_ids else bounding_box,
         use_shapefile=False,
         client=client,
         cluster=cluster,
@@ -558,9 +560,17 @@ def run_drainage_model(
         stage=stage,
     )
 
-    bounding_box = bounding_box or [110, -10, 120, 0]
     chunk_size = chunk_size or 2
-    chunks = uu.get_chunk_bounds(bounding_box, chunk_size)
+    if tile_ids:
+        chunks = []
+        for tid in tile_ids:
+            bds = uu.get_10x10_tile_bounds(tid)
+            chunks.extend(uu.get_chunk_bounds(bds, chunk_size))
+        sample_tid = tile_ids[0]
+    else:
+        bounding_box = bounding_box or [110, -10, 120, 0]
+        chunks = uu.get_chunk_bounds(bounding_box, chunk_size)
+        sample_tid = uu.xy_to_tile_id(chunks[0][0], chunks[0][3])
     is_final = len(chunks) > 20
 
     start_year = start_year or 2020
@@ -573,7 +583,6 @@ def run_drainage_model(
         intervals = [(y, y) for y in range(start_year, end_year + 1)]
 
     # figure out data types from first chunk
-    sample_tid = uu.xy_to_tile_id(chunks[0][0], chunks[0][3])
     sample_dict = cn.get_dynamic_download_dict(sample_tid, start_year, end_year)
     if use_actual_pixel_area:
         sample_dict["pixel_area_ha"] = os.path.join(
@@ -653,6 +662,11 @@ def main(argv=None):
         type=float,
         metavar=("W", "S", "E", "N"),
     )
+    p.add_argument(
+        "--tile_ids",
+        action="append",
+        help="Comma separated 10x10 tile IDs (e.g. 00N_110E). Can be used multiple times.",
+    )
     p.add_argument("--chunk_size", "-cs", type=float)
     p.add_argument("--run_local", action="store_true")
     p.add_argument("--no_stats", action="store_true")
@@ -667,6 +681,11 @@ def main(argv=None):
     p.add_argument("--use_actual_pixel_area", action="store_true")
     args = p.parse_args(argv)
 
+    tile_ids = []
+    if args.tile_ids:
+        for item in args.tile_ids:
+            tile_ids.extend(t.strip() for t in item.split(",") if t.strip())
+
     run_drainage_model(
         cluster_name=args.cluster_name,
         bounding_box=args.bounding_box,
@@ -679,6 +698,7 @@ def main(argv=None):
         end_year=args.end_year,
         interval_type=args.interval_type,
         use_actual_pixel_area=args.use_actual_pixel_area,
+        tile_ids=tile_ids,
     )
 
 
@@ -689,6 +709,14 @@ if __name__ == "__main__":
 python -m src.scripts.core_model.drainage_emissions_model \
   --cluster_name drainage_cluster \
   --bounding_box 110 -10 120 0 \
+  --chunk_size 2 \
+  --start_year 2015 \
+  --end_year 2019 \
+  --interval_type five_years
+
+python -m src.scripts.core_model.drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --tile_ids 00N_110E,00N_120E \
   --chunk_size 2 \
   --start_year 2015 \
   --end_year 2019 \
