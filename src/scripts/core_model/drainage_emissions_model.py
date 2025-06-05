@@ -55,7 +55,6 @@ rich_nutrient_code = cn.nutrient_status_codes["rich"]
 long_rotation_code = cn.plantation_type_codes["long_rotation"]
 short_rotation_code = cn.plantation_type_codes["short_rotation"]
 oil_palm_code = cn.plantation_type_codes["oil_palm"]
-sago_palm_code = cn.plantation_type_codes["sago_palm"]
 
 # helpers for numba dict lookups
 @jit(nopython=True)
@@ -250,8 +249,6 @@ def calculate_drainage_and_emissions(
                             key = "tropical_short_rotation"
                         elif planted_forest_type == oil_palm_code:
                             key = "tropical_oil_palm"
-                        elif planted_forest_type == sago_palm_code:
-                            key = "tropical_sago_palm"
                     elif land_cover == forest_code:
                         node = nu.accrete_node(node, 2)
                         key = "tropical_forest"
