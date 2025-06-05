@@ -605,23 +605,13 @@ def run_drainage_model(
         sample_tid = uu.xy_to_tile_id(chunks[0][0], chunks[0][3])
     is_final = len(chunks) > 20
 
-    if all_five_year_periods:
-        start_year = cn.five_year_inventory_periods[0][0]
-        end_year = cn.five_year_inventory_periods[-1][1]
-    else:
-        start_year = start_year or 2020
-        end_year = end_year or start_year
-
-    if interval_type == cn.intervals_annual and start_year < cn.annual_land_cover_start_year:
-        raise ValueError(
-            f"Annual interval start_year must be >= {cn.annual_land_cover_start_year}"
-        )
-    if interval_type == cn.intervals_five_years:
-        intervals = [
-            (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
-        ]
-    else:
-        intervals = [(y, y) for y in range(start_year, end_year + 1)]
+    # Normalize interval settings and compute interval list
+    intervals, start_year, end_year, interval_type = compute_intervals(
+        start_year,
+        end_year,
+        interval_type,
+        all_five_year_periods,
+    )
 
     # figure out data types from first chunk
     sample_dict = cn.get_dynamic_download_dict(
@@ -731,7 +721,10 @@ def main(argv=None):
     p.add_argument(
         "--all_five_year_periods",
         action="store_true",
-        help="Process all available five year inventory periods (forces five year mode)",
+        help=(
+            "Process all available five year inventory periods "
+            "(sets interval_type to five_years)"
+        ),
     )
     p.add_argument("--use_actual_pixel_area", action="store_true")
     p.add_argument(
@@ -772,7 +765,7 @@ if __name__ == "__main__":
 python -m src.scripts.core_model.drainage_emissions_model \
   --cluster_name drainage_cluster \
   --bounding_box 110 -10 120 0 \
-  --chunk_size 2 \
+  --chunk_size 1 \
   --start_year 2015 \
   --end_year 2019 \
   --interval_type five_years
@@ -780,7 +773,7 @@ python -m src.scripts.core_model.drainage_emissions_model \
 python -m src.scripts.core_model.drainage_emissions_model \
   --cluster_name drainage_cluster \
   --tile_ids 00N_110E,00N_120E \
-  --chunk_size 2 \
+  --chunk_size 1 \
   --start_year 2015 \
   --end_year 2019 \
   --interval_type five_years
