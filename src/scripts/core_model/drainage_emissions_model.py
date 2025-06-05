@@ -502,7 +502,13 @@ def calculate_and_upload_drainage(
 
     # upload rasters
     if not no_upload:
-        year_tag = f"{iv_start}" if iv_start == iv_end else f"{iv_start}_{iv_end}"
+        if iv_start == iv_end:
+            year_tag = f"{iv_start}"
+        else:
+            # Paths reflect the land cover year closing the period.
+            final_year = cn.five_year_inventory_periods[-1][1]
+            end_for_path = iv_end + 1 if iv_end < final_year else iv_end
+            year_tag = f"{iv_start}_{end_for_path}"
         interval_tag = (
             cn.intervals_annual
             if iv_start == iv_end
@@ -549,13 +555,8 @@ def compute_intervals(start_year, end_year, interval_type, all_five_year_periods
             end_year = start_year
 
     if interval_type == cn.intervals_five_years:
-        # Historically we used ``y + 4`` for the end year which produced
-        # intervals like ``2000-2004``.  The model, however, uses the land cover
-        # from the following year (e.g. the 2005 composite) so the interval label
-        # should reflect that.  ``y + 5`` ensures the output name matches the
-        # land cover year that caps the period.
         intervals = [
-            (y, min(y + 5, end_year)) for y in range(start_year, end_year + 1, 5)
+            (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
         ]
     else:
         intervals = [(y, y) for y in range(start_year, end_year + 1)]
