@@ -549,8 +549,13 @@ def compute_intervals(start_year, end_year, interval_type, all_five_year_periods
             end_year = start_year
 
     if interval_type == cn.intervals_five_years:
+        # Historically we used ``y + 4`` for the end year which produced
+        # intervals like ``2000-2004``.  The model, however, uses the land cover
+        # from the following year (e.g. the 2005 composite) so the interval label
+        # should reflect that.  ``y + 5`` ensures the output name matches the
+        # land cover year that caps the period.
         intervals = [
-            (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
+            (y, min(y + 5, end_year)) for y in range(start_year, end_year + 1, 5)
         ]
     else:
         intervals = [(y, y) for y in range(start_year, end_year + 1)]

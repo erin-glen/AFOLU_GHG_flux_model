@@ -194,11 +194,19 @@ five_year_land_cover_years = [2000, 2005, 2010, 2015, 2020, 2023]
 
 # Convenience list of five year inventory periods.  The final period uses the
 # 2023 land cover composite and spans 2020‑2023.
+#
+# NOTE:
+# Historically the end year for each interval was "start_year + 4" which lead
+# to outputs named "2000-2004", "2005-2009", etc.  These outputs actually used
+# the land cover from the following year (for example the 2005 composite for the
+# 2000-2004 period).  To make the interval labels reflect the land cover year
+# that closes the period we now define the intervals with ``start_year + 5`` as
+# the nominal end year.
 five_year_inventory_periods = [
-    (2000, 2004),
-    (2005, 2009),
-    (2010, 2014),
-    (2015, 2019),
+    (2000, 2005),
+    (2005, 2010),
+    (2010, 2015),
+    (2015, 2020),
     (2020, 2023),
 ]
 
