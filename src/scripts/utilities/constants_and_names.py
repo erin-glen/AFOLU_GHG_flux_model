@@ -88,7 +88,7 @@ patterns = {
     'grip': "{tile_id}_grip_density.tif",
     'osm_roads': "{tile_id}_osm_roads_density.tif",
     'osm_canals': "{tile_id}_osm_canals_density.tif",
-    'planted_forest_type': "{tile_id}_sdpt.tif",
+    'planted_forest_type': "{tile_id}__sdpt.tif",
     'extraction': "{tile_id}_extraction.tif",
     'climate_domain': "{tile_id}_fao_ecozones_bor_tem_tro_processed.tif",
     'descals_type': "plantation_type_{tile_id}.tif",
