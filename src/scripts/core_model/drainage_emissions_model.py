@@ -406,34 +406,6 @@ def combine_burned_area(layers: dict, iv_start: int, iv_end: int):
 
 
 # ----------------------------------------------------------------------
-# interval helper
-# ----------------------------------------------------------------------
-def compute_intervals(
-    start_year: int | None = None,
-    end_year: int | None = None,
-    interval_type: str = cn.intervals_annual,
-    all_five_year_periods: bool = False,
-):
-    """Return list of (start, end) year tuples for processing."""
-    if all_five_year_periods:
-        interval_type = cn.intervals_five_years
-        start_year = cn.five_year_inventory_periods[0][0]
-        end_year = cn.five_year_inventory_periods[-1][1]
-    else:
-        start_year = start_year or 2020
-        end_year = end_year or start_year
-
-    if interval_type == cn.intervals_five_years:
-        intervals = [
-            (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
-        ]
-    else:
-        intervals = [(y, y) for y in range(start_year, end_year + 1)]
-
-    return intervals, start_year, end_year, interval_type
-
-
-# ----------------------------------------------------------------------
 # per‑chunk wrapper
 # ----------------------------------------------------------------------
 def calculate_and_upload_drainage(
@@ -557,6 +529,35 @@ def calculate_and_upload_drainage(
 # ----------------------------------------------------------------------
 # driver
 # ----------------------------------------------------------------------
+
+
+def compute_intervals(start_year, end_year, interval_type, all_five_year_periods):
+    """Return list of interval tuples and normalized settings."""
+    if all_five_year_periods:
+        interval_type = cn.intervals_five_years
+        start_year = cn.five_year_inventory_periods[0][0]
+        end_year = cn.five_year_inventory_periods[-1][1]
+    else:
+        start_year = start_year or cn.annual_land_cover_start_year
+        end_year = end_year or cn.five_year_inventory_periods[-1][1]
+        if (
+            interval_type == cn.intervals_annual
+            and start_year < cn.annual_land_cover_start_year
+        ):
+            start_year = cn.annual_land_cover_start_year
+        if end_year < start_year:
+            end_year = start_year
+
+    if interval_type == cn.intervals_five_years:
+        intervals = [
+            (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
+        ]
+    else:
+        intervals = [(y, y) for y in range(start_year, end_year + 1)]
+
+    return intervals, start_year, end_year, interval_type
+
+
 def run_drainage_model(
     cluster_name=None,
     bounding_box=None,
@@ -604,12 +605,23 @@ def run_drainage_model(
         sample_tid = uu.xy_to_tile_id(chunks[0][0], chunks[0][3])
     is_final = len(chunks) > 20
 
-    intervals, start_year, end_year, interval_type = compute_intervals(
-        start_year=start_year,
-        end_year=end_year,
-        interval_type=interval_type,
-        all_five_year_periods=all_five_year_periods,
-    )
+    if all_five_year_periods:
+        start_year = cn.five_year_inventory_periods[0][0]
+        end_year = cn.five_year_inventory_periods[-1][1]
+    else:
+        start_year = start_year or 2020
+        end_year = end_year or start_year
+
+    if interval_type == cn.intervals_annual and start_year < cn.annual_land_cover_start_year:
+        raise ValueError(
+            f"Annual interval start_year must be >= {cn.annual_land_cover_start_year}"
+        )
+    if interval_type == cn.intervals_five_years:
+        intervals = [
+            (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
+        ]
+    else:
+        intervals = [(y, y) for y in range(start_year, end_year + 1)]
 
     # figure out data types from first chunk
     sample_dict = cn.get_dynamic_download_dict(
@@ -719,10 +731,7 @@ def main(argv=None):
     p.add_argument(
         "--all_five_year_periods",
         action="store_true",
-        help=(
-            "Process all available five year inventory periods "
-            "(overrides start_year, end_year and interval_type)"
-        ),
+        help="Process all available five year inventory periods (forces five year mode)",
     )
     p.add_argument("--use_actual_pixel_area", action="store_true")
     p.add_argument(
