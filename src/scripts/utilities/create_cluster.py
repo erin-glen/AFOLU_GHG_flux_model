@@ -49,7 +49,7 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         idle_timeout=idle_timeout,
         region="us-east-1",
         name=cluster_name,
-        workspace='wri-forest-research',
+        account='wri-forest-research',
         # mount_bucket="s3://gfw2-data",
         tags = {"project": "AFOLU_flux_model"},
         scheduler_vm_types = scheduler_vm_type,
