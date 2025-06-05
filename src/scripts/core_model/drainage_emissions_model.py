@@ -539,6 +539,7 @@ def run_drainage_model(
     no_upload=False,
     start_year=None,
     end_year=None,
+    all_five_year_periods=False,
     interval_type="annual",
     use_actual_pixel_area=False,
     tile_ids=None,
@@ -575,8 +576,12 @@ def run_drainage_model(
         sample_tid = uu.xy_to_tile_id(chunks[0][0], chunks[0][3])
     is_final = len(chunks) > 20
 
-    start_year = start_year or 2020
-    end_year = end_year or start_year
+    if all_five_year_periods:
+        start_year = cn.five_year_inventory_periods[0][0]
+        end_year = cn.five_year_inventory_periods[-1][1]
+    else:
+        start_year = start_year or 2020
+        end_year = end_year or start_year
     if interval_type == cn.intervals_five_years:
         intervals = [
             (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
@@ -656,6 +661,7 @@ def main(argv=None):
             start_year=2015,
             end_year=2019,
             interval_type=cn.intervals_five_years,
+            all_five_year_periods=False,
             use_actual_pixel_area=False,
             peat_dataset="ogh",
         )
@@ -681,12 +687,18 @@ def main(argv=None):
     p.add_argument("--no_stats", action="store_true")
     p.add_argument("--no_log", action="store_true")
     p.add_argument("--no_upload", action="store_true")
-    p.add_argument("--start_year", type=int, required=True)
-    p.add_argument("--end_year", type=int, required=True)
+    p.add_argument("--start_year", type=int)
+    p.add_argument("--end_year", type=int)
     p.add_argument(
         "--interval_type",
         choices=[cn.intervals_annual, cn.intervals_five_years],
-        default=cn.intervals_annual,)
+        default=cn.intervals_annual,
+    )
+    p.add_argument(
+        "--all_five_year_periods",
+        action="store_true",
+        help="Process all available five year inventory periods",
+    )
     p.add_argument("--use_actual_pixel_area", action="store_true")
     p.add_argument(
         "--peat_dataset",
@@ -712,6 +724,7 @@ def main(argv=None):
         start_year=args.start_year,
         end_year=args.end_year,
         interval_type=args.interval_type,
+        all_five_year_periods=args.all_five_year_periods,
         use_actual_pixel_area=args.use_actual_pixel_area,
         tile_ids=tile_ids,
         peat_dataset=args.peat_dataset,

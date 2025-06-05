@@ -187,6 +187,19 @@ intervals_annual = "annual"
 intervals_five_years = "five_years"
 intervals_hybrid = "hybrid"
 
+# End years that correspond to available five year land cover composites
+five_year_land_cover_years = [2000, 2005, 2010, 2015, 2020, 2023]
+
+# Convenience list of five year inventory periods.  The final period uses the
+# 2023 land cover composite and spans 2020‑2023.
+five_year_inventory_periods = [
+    (2000, 2004),
+    (2005, 2009),
+    (2010, 2014),
+    (2015, 2019),
+    (2020, 2023),
+]
+
 burned_area_final_pattern = "burned_area_final"
 land_cover_pattern = "land_cover"
 
@@ -201,7 +214,7 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
     lc_year = interval_end_year
     interval_type = (
         intervals_five_years
-        if lc_year in [2000, 2005, 2010, 2015, 2020]
+        if lc_year in five_year_land_cover_years
         else intervals_annual
     )
 
