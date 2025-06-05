@@ -655,9 +655,9 @@ def save_and_upload_small_raster_set(
 
     for key, (arr, dtype, data_meaning, year_out) in out_dict.items():
         fname = (
-            f"{tile_id}__{bstr}__{key}.tif"
+            f"{tile_id}__{bstr}__{key}__{year_out}.tif"
             if is_final
-            else f"{tile_id}__{bstr}__{key}__{timestr()}.tif"
+            else f"{tile_id}__{bstr}__{key}__{year_out}__{timestr()}.tif"
         )
         lpath = os.path.join(temp_dir, fname)
         profile = dict(
