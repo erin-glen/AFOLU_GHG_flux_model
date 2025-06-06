@@ -85,7 +85,7 @@ patterns = {
     'peat': "{tile_id}.tif",
     'dadap': "dadap_{tile_id}.tif",
     'engert': "engert_{tile_id}.tif",
-    'grip': "{tile_id}__grip_density.tif",
+    'grip': "{tile_id}__grip_roads_density.tif",
     'osm_roads': "{tile_id}__osm_roads_density.tif",
     'osm_canals': "{tile_id}__osm_canals_density.tif",
     'planted_forest_type': "{tile_id}__sdpt.tif",

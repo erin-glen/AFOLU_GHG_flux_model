@@ -114,9 +114,6 @@ def calculate_drainage_and_emissions(
             break
 
     rows, cols = peat_block.shape
-    pixel_area_block = in_dict_float32.get(
-        "pixel_area_ha", np.ones((rows, cols), dtype=np.float32)
-    )
 
     # output arrays ----------------------------------------------------
     soil_block = np.zeros((rows, cols), dtype=np.uint32)
@@ -140,7 +137,6 @@ def calculate_drainage_and_emissions(
         for col in range(cols):
 
             # pixel values
-            pixel_area_ha = pixel_area_block[row, col]
             peat = peat_block[row, col]
             land_cover = land_cover_block[row, col]
             planted_forest_type = planted_forest_type_block[row, col]
@@ -297,7 +293,6 @@ def calculate_drainage_and_emissions(
                     n2o_n_to_n2o,
                     gwp_n2o,
                     gwp_ch4,
-                    pixel_area_ha,
                 )
 
                 drained_co2_out[row, col] = co2_em
@@ -355,7 +350,6 @@ def calculate_drainage_and_emissions(
                         burn_ch4,
                         burn_total_co2e,
                     ) = nu.calculate_burned_area_emissions(
-                        np.float32(pixel_area_ha),
                         np.float32(mass_burnt),
                         combustion_factor,
                         np.float32(gef_co2),
@@ -420,7 +414,6 @@ def calculate_and_upload_drainage(
     no_upload,
     iv_start,
     iv_end,
-    use_actual_pixel_area=False,
     peat_dataset="ogh",
 ):
 
@@ -471,7 +464,6 @@ def calculate_and_upload_drainage(
         "osm_canals",
         "engert",
         "grip",
-        "pixel_area_ha",
     ]
     layers = uu.fill_missing_input_layers_with_no_data(
         layers, uint8, int16, [], float32, bstr, tid, is_final, logger
@@ -580,7 +572,6 @@ def run_drainage_model(
     end_year=None,
     all_five_year_periods=False,
     interval_type="annual",
-    use_actual_pixel_area=False,
     tile_ids=None,
     peat_dataset="ogh",
 ):
@@ -630,10 +621,6 @@ def run_drainage_model(
         end_year,
         peat_dataset=peat_dataset,
     )
-    if use_actual_pixel_area:
-        sample_dict["pixel_area_ha"] = os.path.join(
-            cn.pixel_area_ha_dir, f"{sample_tid}_pixel_area_ha.tif"
-        )
     typed_dict = uu.add_file_type_to_dict(sample_dict)
 
     # build task list & run with dask.bag
@@ -648,7 +635,6 @@ def run_drainage_model(
             no_upload,
             t[1],
             t[2],
-            use_actual_pixel_area,
             peat_dataset,
         )
 
@@ -696,7 +682,6 @@ def main(argv=None):
             end_year=2019,
             interval_type=cn.intervals_five_years,
             all_five_year_periods=False,
-            use_actual_pixel_area=False,
             peat_dataset="ogh",
         )
         return
@@ -736,7 +721,6 @@ def main(argv=None):
             "(sets interval_type to five_years)"
         ),
     )
-    p.add_argument("--use_actual_pixel_area", action="store_true")
     p.add_argument(
         "--peat_dataset",
         default="ogh",
@@ -762,7 +746,6 @@ def main(argv=None):
         end_year=args.end_year,
         interval_type=args.interval_type,
         all_five_year_periods=args.all_five_year_periods,
-        use_actual_pixel_area=args.use_actual_pixel_area,
         tile_ids=tile_ids,
         peat_dataset=args.peat_dataset,
     )

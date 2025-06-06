@@ -79,11 +79,10 @@ def create_typed_dicts(layers):
 def calculate_drainage_emissions_co2e(
         ef_co2, ef_n2o, ef_ch4_land, ef_ch4_ditch,
         ef_co2_offsite, frac_ditch,
-        c_to_co2, n2o_n_to_n2o, gwp_n2o, gwp_ch4,
-        pixel_area_ha
+        c_to_co2, n2o_n_to_n2o, gwp_n2o, gwp_ch4
 ):
     """
-    Returns drainage EFs in *tonnes per pixel* by multiplying inside this function.
+    Return drainage emission factors per hectare.
 
     Args:
       ef_co2 (float32): baseline CO2 in tonne C/ha/yr
@@ -92,9 +91,8 @@ def calculate_drainage_emissions_co2e(
       ef_ch4_ditch (float32): ditch CH4 in kg CH4/ha/yr
       ef_co2_offsite (float32): offsite CO2 in tonne C/ha/yr
       frac_ditch (float32): fraction for ditch area
-      pixel_area_ha (float32): area of pixel in ha
 
-      Returns drainage partial EFs plus total, all in **tonnes per pixel**.
+    Returns drainage partial EFs plus total, all in **tonnes CO2e per ha**.
     """
     # 1) Convert from tonne C to tonne CO2
     co2_emissions = ef_co2 * c_to_co2
@@ -116,27 +114,18 @@ def calculate_drainage_emissions_co2e(
             + co2_offsite_emissions
     )
 
-    # 5) Multiply by pixel_area_ha => final result is per pixel
-    co2_emissions *= pixel_area_ha
-    n2o_emissions_co2e *= pixel_area_ha
-    ch4_land_emissions_co2e *= pixel_area_ha
-    ch4_ditch_emissions_co2e *= pixel_area_ha
-    co2_offsite_emissions *= pixel_area_ha
-    drainage_total_co2e *= pixel_area_ha
-
     return (
         co2_emissions,
         n2o_emissions_co2e,
         ch4_land_emissions_co2e,
         ch4_ditch_emissions_co2e,
         co2_offsite_emissions,
-        drainage_total_co2e
+        drainage_total_co2e,
     )
 
 
 @jit(nopython=True)
 def calculate_burned_area_emissions(
-        pixel_area_ha,
         mass_burnt,
         combustion_factor,
         gef_co2,
@@ -146,11 +135,11 @@ def calculate_burned_area_emissions(
         gwp_ch4
 ):
     """
-    Already returns burned emissions in *tonnes per pixel* by multiplying inside here.
+    Return burned emissions per hectare.
     """
-    burn_co2 = pixel_area_ha * mass_burnt * combustion_factor * gef_co2 * 1e-3
-    burn_co = pixel_area_ha * mass_burnt * combustion_factor * gef_co * 1e-3 * gwp_co
-    burn_ch4 = pixel_area_ha * mass_burnt * combustion_factor * gef_ch4 * 1e-3 * gwp_ch4
+    burn_co2 = mass_burnt * combustion_factor * gef_co2 * 1e-3
+    burn_co = mass_burnt * combustion_factor * gef_co * 1e-3 * gwp_co
+    burn_ch4 = mass_burnt * combustion_factor * gef_ch4 * 1e-3 * gwp_ch4
 
     total_burned_emissions_co2e = burn_co2 + burn_co + burn_ch4
     return burn_co2, burn_co, burn_ch4, total_burned_emissions_co2e
