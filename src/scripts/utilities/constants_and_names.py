@@ -8,7 +8,7 @@ import os
 # ---------------------------------------------------
 
 # ── version helpers ──────────────────────────────────────────────
-model_version = "0.3.5"              # dotted string
+model_version = "0.3.6"              # dotted string
 model_version_underscore = model_version.replace(".", "_")   # "0_3_0"
 
 s3_bucket_name = 'gfw2-data'
