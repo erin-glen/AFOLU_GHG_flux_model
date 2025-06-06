@@ -102,7 +102,6 @@ def calculate_drainage_and_emissions(
     grip_block = in_dict_float32["grip"]
     extraction_block = in_dict_uint8["extraction"]
     ecozone_block = in_dict_int16["climate_domain"]
-    nutrient_block = in_dict_uint8["nutrient_status"]
     descals_type_block = in_dict_int16["descals_type"]
 
     # optional burned‑area mask
@@ -150,8 +149,15 @@ def calculate_drainage_and_emissions(
             grip = grip_block[row, col]
             extraction = extraction_block[row, col]
             ecozone = ecozone_block[row, col]
-            nutrient = nutrient_block[row, col]
             descals_type = descals_type_block[row, col]
+
+            # default nutrient status by ecozone
+            if ecozone == boreal_code:
+                nutrient = poor_nutrient_code
+            elif ecozone == temperate_code:
+                nutrient = rich_nutrient_code
+            else:
+                nutrient = cn.nutrient_status_codes["unknown"]
 
             # initialize
             ef_co2 = np.float32(0.0)
@@ -450,7 +456,6 @@ def calculate_and_upload_drainage(
         "peat",
         "planted_forest_type",
         "extraction",
-        "nutrient_status",
         "land_cover",
     ]
     uint8 += [
