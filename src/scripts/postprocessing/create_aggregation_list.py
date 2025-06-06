@@ -31,7 +31,7 @@ paths = []
 
 for period in inventory_periods:
     for data_type in data_types:
-        path = f'f"{base_url}/{data_type}/ogh_standard_model/five_years_intervals/{period}/{pixel_resolution}/{output_date}/",'
+        path = f'f"{base_url}/{data_type}/ogh_standard_model/five_years_intervals/{period}/{pixel_resolution}/{output_date}",'
         paths.append(path)
 
 # Complete list of paths with f-string, double quotes, and commas
