@@ -770,4 +770,12 @@ python -m src.scripts.core_model.drainage_emissions_model \
   --start_year 2015 \
   --end_year 2019 \
   --interval_type five_years
+  
+python -m src.scripts.core_model.drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --tile_ids 00N_110E,10N_020E,20N_020W,60N_010W,60N_110W \
+  --chunk_size 1 \
+  --start_year 2000 \
+  --end_year 2023 \
+  --interval_type five_years
 """
