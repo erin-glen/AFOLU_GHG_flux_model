@@ -118,6 +118,7 @@ def calculate_drainage_and_emissions(
     # output arrays ----------------------------------------------------
     soil_block = np.zeros((rows, cols), dtype=np.uint32)
     state_block = np.zeros((rows, cols), dtype=np.uint32)
+    emission_state_block = np.zeros((rows, cols), dtype=np.uint32)
 
     drained_co2_out = np.zeros((rows, cols), dtype=np.float32)
     drained_n2o_out = np.zeros((rows, cols), dtype=np.float32)
@@ -127,6 +128,7 @@ def calculate_drainage_and_emissions(
     drained_total_co2e_out = np.zeros((rows, cols), dtype=np.float32)
 
     burned_state_out = np.zeros((rows, cols), dtype=np.uint32)
+    burned_emission_state_block = np.zeros((rows, cols), dtype=np.uint32)
     burned_co2_out = np.zeros((rows, cols), dtype=np.float32)
     burned_co_out = np.zeros((rows, cols), dtype=np.float32)
     burned_ch4_out = np.zeros((rows, cols), dtype=np.float32)
@@ -165,6 +167,7 @@ def calculate_drainage_and_emissions(
             ef_co2_offsite = np.float32(0.0)
             frac_ditch = np.float32(0.0)
             node = 0
+            emission_node = 0
             drained = False
 
             # A) Drainage classification ----------------------------------
@@ -197,73 +200,76 @@ def calculate_drainage_and_emissions(
 
             # B) Drainage emission factors --------------------------------
             if soil_block[row, col] == 2:  # only if drained
-                node = nu.accrete_node(node, 1)
+                emission_node = nu.accrete_node(emission_node, 1)
                 key = ""
 
                 # BOREAL ---------------------------------------------------
                 if ecozone == boreal_code:
-                    node = nu.accrete_node(node, 1)
+                    emission_node = nu.accrete_node(emission_node, 1)
                     if land_cover == forest_code:
-                        node = nu.accrete_node(node, 1)
+                        emission_node = nu.accrete_node(emission_node, 1)
                         if nutrient == poor_nutrient_code:
-                            node = nu.accrete_node(node, 1)
+                            emission_node = nu.accrete_node(emission_node, 1)
                             key = "boreal_forest_poor"
                         elif nutrient == rich_nutrient_code:
-                            node = nu.accrete_node(node, 2)
+                            emission_node = nu.accrete_node(emission_node, 2)
                             key = "boreal_forest_rich"
                     elif land_cover == grassland_code:
-                        node = nu.accrete_node(node, 2)
+                        emission_node = nu.accrete_node(emission_node, 2)
                         key = "boreal_grassland"
                     elif land_cover == cropland_code:
-                        node = nu.accrete_node(node, 3)
+                        emission_node = nu.accrete_node(emission_node, 3)
                         key = "boreal_cropland"
                     elif extraction > 0:
-                        node = nu.accrete_node(node, 4)
+                        emission_node = nu.accrete_node(emission_node, 4)
                         key = "boreal_extraction"
 
                 # TEMPERATE -----------------------------------------------
                 elif ecozone == temperate_code:
-                    node = nu.accrete_node(node, 2)
+                    emission_node = nu.accrete_node(emission_node, 2)
                     if land_cover == forest_code:
-                        node = nu.accrete_node(node, 1)
+                        emission_node = nu.accrete_node(emission_node, 1)
                         key = "temperate_forest"
                     elif land_cover == grassland_code:
-                        node = nu.accrete_node(node, 2)
+                        emission_node = nu.accrete_node(emission_node, 2)
                         if nutrient == poor_nutrient_code:
-                            node = nu.accrete_node(node, 1)
+                            emission_node = nu.accrete_node(emission_node, 1)
                             key = "temperate_grassland_poor"
                         elif nutrient == rich_nutrient_code:
-                            node = nu.accrete_node(node, 2)
+                            emission_node = nu.accrete_node(emission_node, 2)
                             key = "temperate_grassland_rich"
                     elif land_cover == cropland_code:
-                        node = nu.accrete_node(node, 3)
+                        emission_node = nu.accrete_node(emission_node, 3)
                         key = "temperate_cropland"
                     elif extraction > 0:
-                        node = nu.accrete_node(node, 4)
+                        emission_node = nu.accrete_node(emission_node, 4)
                         key = "temperate_extraction"
 
                 # TROPICAL -------------------------------------------------
                 elif ecozone == tropical_code:
-                    node = nu.accrete_node(node, 3)
+                    emission_node = nu.accrete_node(emission_node, 3)
                     if planted_forest_type > 0:
-                        node = nu.accrete_node(node, 1)
+                        emission_node = nu.accrete_node(emission_node, 1)
                         if planted_forest_type == long_rotation_code:
+                            emission_node = nu.accrete_node(emission_node, 1)
                             key = "tropical_long_rotation"
                         elif planted_forest_type == short_rotation_code:
+                            emission_node = nu.accrete_node(emission_node, 2)
                             key = "tropical_short_rotation"
                         elif planted_forest_type == oil_palm_code:
+                            emission_node = nu.accrete_node(emission_node, 3)
                             key = "tropical_oil_palm"
                     elif land_cover == forest_code:
-                        node = nu.accrete_node(node, 2)
+                        emission_node = nu.accrete_node(emission_node, 2)
                         key = "tropical_forest"
                     elif land_cover == grassland_code:
-                        node = nu.accrete_node(node, 3)
+                        emission_node = nu.accrete_node(emission_node, 3)
                         key = "tropical_grassland"
                     elif land_cover == cropland_code:
-                        node = nu.accrete_node(node, 4)
+                        emission_node = nu.accrete_node(emission_node, 4)
                         key = "tropical_cropland"
                     elif extraction > 0:
-                        node = nu.accrete_node(node, 5)
+                        emission_node = nu.accrete_node(emission_node, 5)
                         key = "tropical_extraction"
 
                 vals = lookup_efs(key, drainage_table)
@@ -302,41 +308,55 @@ def calculate_drainage_and_emissions(
                 drained_co2_offsite_out[row, col] = co2_off
                 drained_total_co2e_out[row, col] = total_co2e
 
+            emission_state_block[row, col] = emission_node
+
             # C) Burned‑area emissions -------------------------------------
             burned_node = 0
+            burned_emission_node = 0
             if burned_block is not None:
                 burned_val = burned_block[row, col]
                 if burned_val > 0 and soil_block[row, col] in (1, 2):
 
                     if ecozone == boreal_code:
                         burned_node = nu.accrete_node(burned_node, 1)
+                        burned_emission_node = nu.accrete_node(burned_emission_node, 1)
                         if soil_block[row, col] == 2:
                             bkey = "boreal_drained"
+                            burned_emission_node = nu.accrete_node(burned_emission_node, 1)
                         else:
                             bkey = "boreal_undrained"
+                            burned_emission_node = nu.accrete_node(burned_emission_node, 2)
 
                     elif ecozone == temperate_code:
                         burned_node = nu.accrete_node(burned_node, 2)
+                        burned_emission_node = nu.accrete_node(burned_emission_node, 2)
                         if soil_block[row, col] == 2:
                             bkey = "temperate_drained"
+                            burned_emission_node = nu.accrete_node(burned_emission_node, 1)
                         else:
                             bkey = "temperate_undrained"
+                            burned_emission_node = nu.accrete_node(burned_emission_node, 2)
 
                     elif ecozone == tropical_code:
                         burned_node = nu.accrete_node(burned_node, 3)
+                        burned_emission_node = nu.accrete_node(burned_emission_node, 3)
                         if soil_block[row, col] == 2:
                             if (
                                 land_cover == cropland_code
                                 or planted_forest_type > 0
                             ):
                                 bkey = "tropical_drained_crop_or_plantation"
+                                burned_emission_node = nu.accrete_node(burned_emission_node, 1)
                             else:
                                 bkey = "tropical_drained_other"
+                                burned_emission_node = nu.accrete_node(burned_emission_node, 2)
                         else:
                             bkey = "tropical_undrained"
+                            burned_emission_node = nu.accrete_node(burned_emission_node, 3)
                     else:
                         burned_node = nu.accrete_node(burned_node, 4)
                         bkey = "other"
+                        burned_emission_node = nu.accrete_node(burned_emission_node, 4)
 
                     bvals = lookup_befs(bkey, burned_table)
                     gef_co2 = bvals[0]
@@ -365,11 +385,14 @@ def calculate_drainage_and_emissions(
                     burned_total_co2e_out[row, col] = burn_total_co2e
 
             burned_state_out[row, col] = burned_node
+            burned_emission_state_block[row, col] = burned_emission_node
 
     # pack outputs ----------------------------------------------------------
     out_dict_uint32["soil"] = soil_block
     out_dict_uint32["state"] = state_block
+    out_dict_uint32["emission_state"] = emission_state_block
     out_dict_uint32["burned_state"] = burned_state_out
+    out_dict_uint32["burned_emission_state"] = burned_emission_state_block
 
     out_dict_float32["drained_co2"] = drained_co2_out
     out_dict_float32["drained_n2o_co2e"] = drained_n2o_out
