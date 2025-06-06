@@ -51,6 +51,8 @@ tropical_code = cn.ecozone_codes["tropical"]
 
 poor_nutrient_code = cn.nutrient_status_codes["poor"]
 rich_nutrient_code = cn.nutrient_status_codes["rich"]
+unknown_nutrient_code = cn.nutrient_status_codes["unknown"]
+
 
 long_rotation_code = cn.plantation_type_codes["long_rotation"]
 short_rotation_code = cn.plantation_type_codes["short_rotation"]
@@ -157,7 +159,7 @@ def calculate_drainage_and_emissions(
             elif ecozone == temperate_code:
                 nutrient = rich_nutrient_code
             else:
-                nutrient = cn.nutrient_status_codes["unknown"]
+                nutrient = unknown_nutrient_code
 
             # initialize
             ef_co2 = np.float32(0.0)
