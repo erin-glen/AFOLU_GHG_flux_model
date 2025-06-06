@@ -149,6 +149,7 @@ def create_typed_dicts(layers):
 
 
 # Classifies vegetation height classes for start and end of current interval
+#TODO Elise and Radost are reevaluating the GLAD classification for desert and short veg. Follow up with them.
 @jit(nopython=True)
 def classify_veg_height(LC_curr, LC_prev):
     tall_veg_prev = (((LC_prev >= cn.tree_dry_min_height_code) and (LC_prev <= cn.tree_dry_max_height_code)) or
