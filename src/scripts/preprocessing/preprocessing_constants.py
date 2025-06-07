@@ -142,6 +142,11 @@ datasets = {
                                        'extent', '20240823')
         }
     },
+    'land_cover_ipcc': {
+        's3_processed_base': pp.join(processed_dir, 'land_cover_ipcc'),
+        's3_processed': pp.join(processed_dir, 'land_cover_ipcc', today_date),
+        'local_processed': pp.join(local_temp_dir, 'land_cover_ipcc', today_date),
+    },
     'peat': {
         'gfw': {
             's3_processed': 'climate/AFOLU_flux_model/organic_soils/inputs/raw/soils/GFW_Global_Peatlands/'
