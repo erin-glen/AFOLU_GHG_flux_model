@@ -16,8 +16,10 @@ import rasterio
 from rasterio.windows import from_bounds
 from dask.distributed import Client, LocalCluster
 
-import src.scripts.preprocessing.preprocessing_constants as cn
+from src.scripts.preprocessing import preprocessing_constants as pcn
+from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import universal_utilities as uutil
+from src.scripts.preprocessing import utilities as pp_util
 from src.scripts.utilities.constants_and_names import ipcc_codes
 
 NODATA = 0
@@ -58,12 +60,12 @@ def reclassify_glclu(arr):
 
 def reclassify_chunk(lc_path, bbox, mapping, tile_id, run_mode):
     chunk_str = uutil.boundstr(bbox)
-    out_dir = cn.datasets["land_cover_ipcc"]["local_processed"]
-    uutil.create_directory_if_not_exists(out_dir)
+    out_dir = pcn.datasets["land_cover_ipcc"]["local_processed"]
+    pp_util.create_directory_if_not_exists(out_dir)
     fname = f"{tile_id}__{chunk_str}__lc_ipcc.tif"
     out_path = os.path.join(out_dir, fname)
     s3_key = posixpath.join(
-        cn.datasets["land_cover_ipcc"]["s3_processed"], fname
+        pcn.datasets["land_cover_ipcc"]["s3_processed"], fname
     )
 
     with rasterio.open(lc_path) as src:
@@ -88,17 +90,6 @@ def reclassify_chunk(lc_path, bbox, mapping, tile_id, run_mode):
         "compress": "DEFLATE",
         "nodata": NODATA,
     }
-
-    with rasterio.open(out_path, "w", **profile) as dst:
-        dst.write(arr, 1)
-
-    if run_mode == "default":
-        uutil.upload_file_to_s3(out_path, cn.s3_bucket_name, s3_key)
-        os.remove(out_path)
-    else:
-        logging.info(f"Test mode => {out_path} retained locally")
-
-    return f"{tile_id}|{chunk_str} done"
 
 
 def process_tile(tile_id, lc_year, mapping, chunk_size=2.0, run_mode="default"):
@@ -136,7 +127,7 @@ def main(tile_id=None, year=2015, chunk_size=2.0, client="local", run_mode="defa
         if tile_id:
             process_tile(tile_id, year, mapping_future, chunk_size, run_mode)
         else:
-            for tid in cn.tile_id_list:
+            for tid in pcn.tile_id_list:
                 process_tile(tid, year, mapping_future, chunk_size, run_mode)
     finally:
         dclient.close()
