@@ -19,7 +19,6 @@ from dask.distributed import Client, LocalCluster
 from src.scripts.preprocessing import preprocessing_constants as pcn
 from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import universal_utilities as uutil
-from src.scripts.preprocessing import utilities as pp_util
 from src.scripts.utilities.constants_and_names import ipcc_codes
 
 NODATA = 0
@@ -39,6 +38,49 @@ GLCLU_MAPPING[241] = ipcc_codes["otherland"]
 GLCLU_MAPPING[244] = ipcc_codes["cropland"]
 GLCLU_MAPPING[250] = ipcc_codes["settlement"]
 GLCLU_MAPPING[254] = ipcc_codes["otherland"]
+
+
+def build_years(interval_type, start_year=None, end_year=None):
+    """Return a sorted list of years based on the interval type.
+
+    Parameters
+    ----------
+    interval_type : str
+        One of ``cn.intervals_annual``, ``cn.intervals_five_years`` or
+        ``cn.intervals_hybrid``.
+    start_year : int, optional
+        Starting year of the range. Defaults to
+        ``cn.annual_land_cover_start_year``.
+    end_year : int, optional
+        Ending year of the range. Defaults to the final inventory year from
+        ``cn.five_year_inventory_periods``.
+
+    Returns
+    -------
+    list[int]
+        Sorted list of unique years for which land cover data should be
+        processed.
+    """
+
+    start_year = start_year or cn.annual_land_cover_start_year
+    end_year = end_year or cn.five_year_inventory_periods[-1][1]
+
+    years = []
+
+    if interval_type in (cn.intervals_annual, cn.intervals_hybrid):
+        annual_start = max(start_year, cn.annual_land_cover_start_year)
+        annual_end = min(end_year, cn.five_year_inventory_periods[-1][1])
+        years.extend(range(annual_start, annual_end + 1))
+
+    if interval_type in (cn.intervals_five_years, cn.intervals_hybrid):
+        five_years = [
+            y
+            for y in cn.five_year_land_cover_years
+            if start_year <= y <= end_year
+        ]
+        years.extend(five_years)
+
+    return sorted(set(years))
 
 
 def load_mapping():
@@ -61,12 +103,25 @@ def reclassify_glclu(arr):
 def reclassify_chunk(lc_path, bbox, mapping, tile_id, run_mode):
     chunk_str = uutil.boundstr(bbox)
     out_dir = pcn.datasets["land_cover_ipcc"]["local_processed"]
-    pp_util.create_directory_if_not_exists(out_dir)
+    uutil.create_directory_if_not_exists(out_dir)
     fname = f"{tile_id}__{chunk_str}__lc_ipcc.tif"
     out_path = os.path.join(out_dir, fname)
     s3_key = posixpath.join(
         pcn.datasets["land_cover_ipcc"]["s3_processed"], fname
     )
+
+    # ------------------------------------------------------------------
+    # Early check to avoid redundant work
+    if run_mode == "default":
+        if uutil.s3_file_exists(cn.s3_bucket_name, s3_key):
+            logging.info(
+                f"Chunk TIF => s3://{cn.s3_bucket_name}/{s3_key} exists => skipping."
+            )
+            return
+    else:
+        if os.path.exists(out_path):
+            logging.info(f"Chunk TIF => {out_path} exists locally => skipping.")
+            return
 
     with rasterio.open(lc_path) as src:
         window = from_bounds(*bbox, src.transform)
@@ -90,6 +145,17 @@ def reclassify_chunk(lc_path, bbox, mapping, tile_id, run_mode):
         "compress": "DEFLATE",
         "nodata": NODATA,
     }
+
+    with rasterio.open(out_path, "w", **profile) as dst:
+        dst.write(arr, 1)
+
+    if run_mode == "default":
+        uutil.upload_file_to_s3(out_path, cn.s3_bucket_name, s3_key)
+        os.remove(out_path)
+    else:
+        logging.info(f"Test mode => {out_path} retained locally")
+
+    return f"{tile_id}|{chunk_str} done"
 
 
 def process_tile(tile_id, lc_year, mapping, chunk_size=2.0, run_mode="default"):
@@ -151,6 +217,3 @@ if __name__ == "__main__":
         client=args.client,
         run_mode=args.run_mode,
     )
-
-"""
-test"""
