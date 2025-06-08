@@ -181,7 +181,7 @@ n2o_n_to_n2o = np.float32(1.571)
 # ---------------------------------------------------
 
 intervals_annual = "annual"
-intervals_five_years = "five_years"
+intervals_five_year = "five_year"
 intervals_hybrid = "hybrid"
 
 annual_land_cover_start_year = 2015
@@ -215,7 +215,7 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
         # 2023 land cover composite is stored in the annual directory
         interval_type = intervals_annual
     elif lc_year in five_year_land_cover_years:
-        interval_type = intervals_five_years
+        interval_type = intervals_five_year
     else:
         interval_type = intervals_annual
 
