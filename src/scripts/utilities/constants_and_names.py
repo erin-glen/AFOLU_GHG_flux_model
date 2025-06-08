@@ -219,14 +219,16 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
     else:
         interval_type = intervals_annual
 
-    # LULUCF land cover dir update
-    lulucf_land_cover_dir = posixpath.join(
+    # Updated IPCC land cover directory
+    pixel_resolution = "8000_pixels"
+    land_cover_ipcc_dir = posixpath.join(
         full_bucket_prefix,
-        'climate/AFOLU_flux_model/LULUCF/landcover/composite',
+        processed_dir,
+        'land_cover_ipcc',
+        '20250608',
         interval_type,
-        'v1',
-        'raw',
-        str(lc_year)
+        str(lc_year),
+        pixel_resolution,
     )
 
 
@@ -249,7 +251,7 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
 
     dynamic_dict = {
         'land_cover': posixpath.join(
-            lulucf_land_cover_dir,
+            land_cover_ipcc_dir,
             patterns['land_cover'].format(tile_id=tile_id)
         ),
         'peat': peat_path,

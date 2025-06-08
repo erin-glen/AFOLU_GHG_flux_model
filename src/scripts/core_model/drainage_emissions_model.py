@@ -531,7 +531,7 @@ def calculate_and_upload_drainage(
         interval_tag = (
             cn.intervals_annual
             if iv_start == iv_end
-            else cn.intervals_five_years
+            else cn.intervals_five_year
         )
         for k, arr in outputs.items():
             outputs[k] = [arr, arr.dtype.name, k, year_tag]
@@ -559,7 +559,7 @@ def calculate_and_upload_drainage(
 def compute_intervals(start_year, end_year, interval_type, all_five_year_periods):
     """Return list of interval tuples and normalized settings."""
     if all_five_year_periods:
-        interval_type = cn.intervals_five_years
+        interval_type = cn.intervals_five_year
         start_year = cn.five_year_inventory_periods[0][0]
         end_year = cn.five_year_inventory_periods[-1][1]
     else:
@@ -573,7 +573,7 @@ def compute_intervals(start_year, end_year, interval_type, all_five_year_periods
         if end_year < start_year:
             end_year = start_year
 
-    if interval_type == cn.intervals_five_years:
+    if interval_type == cn.intervals_five_year:
         intervals = [
             (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
         ]
@@ -703,7 +703,7 @@ def main(argv=None):
             no_upload=False,
             start_year=2015,
             end_year=2019,
-            interval_type=cn.intervals_five_years,
+            interval_type=cn.intervals_five_year,
             all_five_year_periods=False,
             peat_dataset="ogh",
         )
@@ -733,7 +733,7 @@ def main(argv=None):
     p.add_argument("--end_year", type=int)
     p.add_argument(
         "--interval_type",
-        choices=[cn.intervals_annual, cn.intervals_five_years],
+        choices=[cn.intervals_annual, cn.intervals_five_year],
         default=cn.intervals_annual,
     )
     p.add_argument(
@@ -741,7 +741,7 @@ def main(argv=None):
         action="store_true",
         help=(
             "Process all available five year inventory periods "
-            "(sets interval_type to five_years)"
+            "(sets interval_type to five_year)"
         ),
     )
     p.add_argument(
@@ -784,7 +784,7 @@ python -m src.scripts.core_model.drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2015 \
   --end_year 2019 \
-  --interval_type five_years
+  --interval_type five_year
 
 python -m src.scripts.core_model.drainage_emissions_model \
   --cluster_name drainage_cluster \
@@ -792,7 +792,7 @@ python -m src.scripts.core_model.drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2015 \
   --end_year 2019 \
-  --interval_type five_years
+  --interval_type five_year
   
 python -m src.scripts.core_model.drainage_emissions_model \
   --cluster_name drainage_cluster \
@@ -800,5 +800,5 @@ python -m src.scripts.core_model.drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2000 \
   --end_year 2023 \
-  --interval_type five_years
+  --interval_type five_year
 """

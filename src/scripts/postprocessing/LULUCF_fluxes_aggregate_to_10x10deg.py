@@ -127,11 +127,11 @@ def main(
 
     input_datasets = [
                          # Five-year intervals
-                         f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/land_cover_ipcc/20250608/five_years/{year}/{pixel_resolution}/20250608"
+                         f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/land_cover_ipcc/20250608/five_year/{year}/{pixel_resolution}"
                          for year in [2000, 2005, 2010, 2015, 2020]
                      ] + [
                          # Annual intervals
-                         f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/land_cover_ipcc/20250608/annual/{year}/{pixel_resolution}/20250608"
+                         f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/land_cover_ipcc/20250608/annual/{year}/{pixel_resolution}"
                          for year in [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
                      ]
 
