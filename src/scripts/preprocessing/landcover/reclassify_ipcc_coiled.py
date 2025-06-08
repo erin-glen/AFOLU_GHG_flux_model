@@ -110,16 +110,36 @@ def reclassify_chunk(lc_path, bbox, mapping, tile_id, interval, year, pixel_reso
     return f"{tile_id}|{interval}|{year}|{chunk_str} done"
 
 
-def process_tile(tile_id, interval, year, mapping, pixel_resolution, chunk_size=2.0, run_mode="default"):
+def process_tile(
+    tile_id,
+    interval,
+    year,
+    mapping,
+    pixel_resolution,
+    chunk_size=2.0,
+    run_mode="default",
+):
+    """Create delayed tasks for one tile.
+
+    Returns a list of :func:`dask.delayed` tasks which reclassify chunks of the
+    tile. If the source raster does not exist on S3, an empty list is returned
+    so that callers can safely extend their task lists without additional
+    checks.
+    """
+
     lc_dict = cn.get_dynamic_download_dict(tile_id, year)
     lc_s3_path = lc_dict["land_cover"]
 
     # Check if source tile exists on S3
     s3_prefix = f"s3://{cn.s3_bucket_name}/"
-    s3_key = lc_s3_path[len(s3_prefix):] if lc_s3_path.startswith(s3_prefix) else lc_s3_path.replace("s3://", "")
+    s3_key = (
+        lc_s3_path[len(s3_prefix) :] if lc_s3_path.startswith(s3_prefix) else lc_s3_path.replace("s3://", "")
+    )
     if not uutil.s3_file_exists(cn.s3_bucket_name, s3_key):
-        logging.warning(f"Tile {tile_id}, Year {year}, Interval {interval}: Source raster {lc_s3_path} not found. Skipping tile.")
-        return
+        logging.warning(
+            f"Tile {tile_id}, Year {year}, Interval {interval}: Source raster {lc_s3_path} not found. Skipping tile."
+        )
+        return []
 
     # Correctly set lc_path for rasterio
     lc_path = lc_s3_path.replace("s3://", "/vsis3/")
@@ -128,17 +148,27 @@ def process_tile(tile_id, interval, year, mapping, pixel_resolution, chunk_size=
     chunks = uutil.get_chunk_bounds([minx, miny, maxx, maxy], chunk_size)
 
     tasks = [
-        dask.delayed(reclassify_chunk)(lc_path, b, mapping, tile_id, interval, year, pixel_resolution, run_mode)
+        dask.delayed(reclassify_chunk)(
+            lc_path,
+            b,
+            mapping,
+            tile_id,
+            interval,
+            year,
+            pixel_resolution,
+            run_mode,
+        )
         for b in chunks
     ]
-    dask.compute(*tasks)
+
+    return tasks
 
 
 
 def main(
     tile_id=None,
     chunk_size=2.0,
-    pixel_resolution="4000_pixels",
+    pixel_resolution="8000_pixels",
     client="local",
     run_mode="default",
 ):
@@ -166,18 +196,24 @@ def main(
 
     try:
         tiles = [tile_id] if tile_id else pcn.tile_id_list
+        all_tasks = []
         for interval, years in intervals:
             for year in years:
                 for tid in tiles:
-                    process_tile(
-                        tid,
-                        interval,
-                        year,
-                        mapping,
-                        pixel_resolution,
-                        chunk_size,
-                        run_mode,
+                    all_tasks.extend(
+                        process_tile(
+                            tid,
+                            interval,
+                            year,
+                            mapping,
+                            pixel_resolution,
+                            chunk_size,
+                            run_mode,
+                        )
                     )
+
+        if all_tasks:
+            dask.compute(*all_tasks)
     finally:
         dclient.close()
         cluster.close()
