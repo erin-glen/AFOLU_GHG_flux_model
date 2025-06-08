@@ -10,6 +10,7 @@ import argparse
 import logging
 import posixpath
 import tempfile
+import gc
 
 import dask
 import numpy as np
@@ -99,6 +100,10 @@ def reclassify_chunk(lc_path, bbox, mapping, tile_id, interval, year, pixel_reso
             dst.write(arr, 1)
         uutil.upload_file_to_s3(tmpfile.name, cn.s3_bucket_name, s3_key)
 
+    # cleanup
+    del arr
+    gc.collect()
+
     logging.info(f"Uploaded {s3_key}")
     return f"{tile_id}|{interval}|{year}|{chunk_str} done"
 
@@ -116,20 +121,49 @@ def process_tile(tile_id, interval, year, mapping, pixel_resolution, chunk_size=
     dask.compute(*tasks)
 
 
-def main(tile_id=None, chunk_size=2.0, pixel_resolution="4000_pixels", client="local", run_mode="default"):
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+def main(
+    tile_id=None,
+    chunk_size=2.0,
+    pixel_resolution="4000_pixels",
+    client="local",
+    run_mode="default",
+):
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
 
     intervals = [("five_years", FIVE_YEAR_YEARS), ("annual", ANNUAL_YEARS)]
 
-    cluster = LocalCluster()
-    dclient = Client(cluster)
+    if client == "coiled":
+        cluster, dclient = uutil.connect_to_cluster(
+            cluster_name="reclassify_ipcc",
+            n_workers=20,
+            region="us-east-1",
+        )
+        logging.info(f"Using coiled cluster: {cluster.name}")
+    else:
+        cluster = LocalCluster()
+        dclient = Client(cluster)
+        logging.info("Using local cluster")
+
+    mapping = GLCLU_MAPPING
+    if client != "local":
+        dclient.scatter(mapping, broadcast=True)
 
     try:
         tiles = [tile_id] if tile_id else pcn.tile_id_list
         for interval, years in intervals:
             for year in years:
                 for tid in tiles:
-                    process_tile(tid, interval, year, GLCLU_MAPPING, pixel_resolution, chunk_size, run_mode)
+                    process_tile(
+                        tid,
+                        interval,
+                        year,
+                        mapping,
+                        pixel_resolution,
+                        chunk_size,
+                        run_mode,
+                    )
     finally:
         dclient.close()
         cluster.close()
