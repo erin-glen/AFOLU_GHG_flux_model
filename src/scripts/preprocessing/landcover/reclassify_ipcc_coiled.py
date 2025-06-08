@@ -2,7 +2,7 @@
 """Reclassify land cover rasters to the 6 IPCC classes for multiple years.
 
 This script processes land cover tiles in chunks, writing GeoTIFFs directly to S3.
-It automatically iterates over the provided years and organizes outputs by year and pixel resolution.
+It automatically iterates over the provided years for both five-year and annual intervals, organizing outputs accordingly.
 """
 
 import os
@@ -25,7 +25,8 @@ from src.scripts.utilities.constants_and_names import ipcc_codes
 NODATA = 0
 DTYPE = np.uint8
 
-YEARS = [2000, 2005, 2010, 2015, 2020]
+FIVE_YEAR_YEARS = [2000, 2005, 2010, 2015, 2020]
+ANNUAL_YEARS = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
 
 GLCLU_MAPPING = {}
 GLCLU_MAPPING.update({i: ipcc_codes["otherland"] for i in range(0, 2)})
@@ -58,12 +59,12 @@ def reclassify_array(arr, mapping):
     return out
 
 
-def reclassify_chunk(lc_path, bbox, mapping, tile_id, year, pixel_resolution, run_mode):
+def reclassify_chunk(lc_path, bbox, mapping, tile_id, interval, year, pixel_resolution, run_mode):
     chunk_str = uutil.boundstr(bbox)
     fname = f"{tile_id}__{chunk_str}__lc_ipcc.tif"
     s3_key = posixpath.join(
         pcn.datasets["land_cover_ipcc"]["s3_processed"],
-        "five_years",
+        interval,
         str(year),
         pixel_resolution,
         fname
@@ -99,17 +100,17 @@ def reclassify_chunk(lc_path, bbox, mapping, tile_id, year, pixel_resolution, ru
         uutil.upload_file_to_s3(tmpfile.name, cn.s3_bucket_name, s3_key)
 
     logging.info(f"Uploaded {s3_key}")
-    return f"{tile_id}|{year}|{chunk_str} done"
+    return f"{tile_id}|{interval}|{year}|{chunk_str} done"
 
 
-def process_tile(tile_id, year, mapping, pixel_resolution, chunk_size=2.0, run_mode="default"):
+def process_tile(tile_id, interval, year, mapping, pixel_resolution, chunk_size=2.0, run_mode="default"):
     lc_dict = cn.get_dynamic_download_dict(tile_id, year)
-    lc_path = lc_dict['land_cover'].replace('s3://', '/vsis3/').replace('five_years', 'five_year')
+    lc_path = lc_dict['land_cover'].replace('s3://', '/vsis3/').replace('five_years' if interval == 'five_years' else 'annual', interval[:-1])
     minx, miny, maxx, maxy = uutil.get_10x10_tile_bounds(tile_id)
     chunks = uutil.get_chunk_bounds([minx, miny, maxx, maxy], chunk_size)
 
     tasks = [
-        dask.delayed(reclassify_chunk)(lc_path, b, mapping, tile_id, year, pixel_resolution, run_mode)
+        dask.delayed(reclassify_chunk)(lc_path, b, mapping, tile_id, interval, year, pixel_resolution, run_mode)
         for b in chunks
     ]
     dask.compute(*tasks)
@@ -118,30 +119,27 @@ def process_tile(tile_id, year, mapping, pixel_resolution, chunk_size=2.0, run_m
 def main(tile_id=None, chunk_size=2.0, pixel_resolution="4000_pixels", client="local", run_mode="default"):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-    if client == "coiled":
-        cluster, dclient = uutil.connect_to_cluster(
-            cluster_name="land_cover_ipcc", n_workers=20, region="us-east-1"
-        )
-    else:
-        cluster = LocalCluster()
-        dclient = Client(cluster)
+    intervals = [("five_years", FIVE_YEAR_YEARS), ("annual", ANNUAL_YEARS)]
+
+    cluster = LocalCluster()
+    dclient = Client(cluster)
 
     try:
         tiles = [tile_id] if tile_id else pcn.tile_id_list
-        for year in YEARS:
-            for tid in tiles:
-                process_tile(tid, year, GLCLU_MAPPING, pixel_resolution, chunk_size, run_mode)
+        for interval, years in intervals:
+            for year in years:
+                for tid in tiles:
+                    process_tile(tid, interval, year, GLCLU_MAPPING, pixel_resolution, chunk_size, run_mode)
     finally:
         dclient.close()
-        if client == "coiled":
-            cluster.close()
+        cluster.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Land cover reclassification to IPCC classes for multiple years")
     parser.add_argument("--tile_id", help="Tile ID to process")
     parser.add_argument("--chunk_size", type=float, default=2.0)
-    parser.add_argument("--pixel_resolution", default="4000_pixels")
+    parser.add_argument("--pixel_resolution", default="8000_pixels")
     parser.add_argument("--client", default="local", choices=["local", "coiled"])
     parser.add_argument("--run_mode", default="default", choices=["default", "test"])
     args = parser.parse_args()
