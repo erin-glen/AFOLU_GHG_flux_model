@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 """Reclassify land cover rasters to the 6 IPCC classes for multiple years.
 
-This script processes land cover tiles in chunks, writing GeoTIFFs directly to S3.
-It automatically iterates over the provided years for both five-year and annual intervals, organizing outputs accordingly.
+This script processes land cover tiles in chunks, writing GeoTIFFs directly to
+S3. It automatically iterates over the provided years for both five-year and
+annual intervals, organizing outputs accordingly. Tiles that are missing on S3
+are skipped gracefully.
 """
 
 import os
@@ -110,7 +112,18 @@ def reclassify_chunk(lc_path, bbox, mapping, tile_id, interval, year, pixel_reso
 
 def process_tile(tile_id, interval, year, mapping, pixel_resolution, chunk_size=2.0, run_mode="default"):
     lc_dict = cn.get_dynamic_download_dict(tile_id, year)
-    lc_path = lc_dict['land_cover'].replace('s3://', '/vsis3/').replace('five_years' if interval == 'five_years' else 'annual', interval[:-1])
+    lc_s3_path = lc_dict["land_cover"]
+
+    # Check if source tile exists on S3
+    s3_prefix = f"s3://{cn.s3_bucket_name}/"
+    s3_key = lc_s3_path[len(s3_prefix):] if lc_s3_path.startswith(s3_prefix) else lc_s3_path.replace("s3://", "")
+    if not uutil.s3_file_exists(cn.s3_bucket_name, s3_key):
+        logging.warning(f"Tile {tile_id}, Year {year}, Interval {interval}: Source raster {lc_s3_path} not found. Skipping tile.")
+        return
+
+    # Correctly set lc_path for rasterio
+    lc_path = lc_s3_path.replace("s3://", "/vsis3/")
+
     minx, miny, maxx, maxy = uutil.get_10x10_tile_bounds(tile_id)
     chunks = uutil.get_chunk_bounds([minx, miny, maxx, maxy], chunk_size)
 
@@ -119,6 +132,7 @@ def process_tile(tile_id, interval, year, mapping, pixel_resolution, chunk_size=
         for b in chunks
     ]
     dask.compute(*tasks)
+
 
 
 def main(
@@ -132,7 +146,7 @@ def main(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    intervals = [("five_years", FIVE_YEAR_YEARS), ("annual", ANNUAL_YEARS)]
+    intervals = [("five_year", FIVE_YEAR_YEARS), ("annual", ANNUAL_YEARS)]
 
     if client == "coiled":
         cluster, dclient = uutil.connect_to_cluster(
