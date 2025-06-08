@@ -77,10 +77,16 @@ def reclassify_chunk(lc_path, bbox, mapping, tile_id, interval, year, pixel_reso
         logging.info(f"Chunk {s3_key} exists on S3, skipping.")
         return
 
-    with rasterio.open(lc_path) as src:
-        window = from_bounds(*bbox, src.transform)
-        arr = src.read(1, window=window)
-        transform = rasterio.windows.transform(window, src.transform)
+    try:
+        with rasterio.open(lc_path) as src:
+            window = from_bounds(*bbox, src.transform)
+            arr = src.read(1, window=window)
+            transform = rasterio.windows.transform(window, src.transform)
+    except rasterio.errors.RasterioIOError as e:
+        logging.error(
+            f"Tile {tile_id}, Year {year}, Interval {interval}: {e}. Skipping tile."
+        )
+        return
 
     arr = reclassify_array(arr, mapping)
 
@@ -171,12 +177,18 @@ def main(
     pixel_resolution="8000_pixels",
     client="local",
     run_mode="default",
+    interval_choice="both",
 ):
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    intervals = [("five_year", FIVE_YEAR_YEARS), ("annual", ANNUAL_YEARS)]
+    if interval_choice == "five_year":
+        intervals = [("five_year", FIVE_YEAR_YEARS)]
+    elif interval_choice == "annual":
+        intervals = [("annual", ANNUAL_YEARS)]
+    else:
+        intervals = [("five_year", FIVE_YEAR_YEARS), ("annual", ANNUAL_YEARS)]
 
     if client == "coiled":
         cluster, dclient = uutil.connect_to_cluster(
@@ -229,10 +241,19 @@ if __name__ == "__main__":
     parser.add_argument("--pixel_resolution", default="8000_pixels")
     parser.add_argument("--client", default="local", choices=["local", "coiled"])
     parser.add_argument("--run_mode", default="default", choices=["default", "test"])
+    parser.add_argument(
+        "--interval",
+        default="both",
+        choices=["five_year", "annual", "both"],
+        help="Select time interval to process",
+    )
     args = parser.parse_args()
 
-    main(args.tile_id, args.chunk_size, args.pixel_resolution, args.client, args.run_mode)
-
-"""
-doc
-"""
+    main(
+        args.tile_id,
+        args.chunk_size,
+        args.pixel_resolution,
+        args.client,
+        args.run_mode,
+        args.interval,
+    )
