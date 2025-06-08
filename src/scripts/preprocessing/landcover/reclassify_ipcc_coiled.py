@@ -2,7 +2,7 @@
 """Reclassify land cover rasters to the 6 IPCC classes for multiple years.
 
 This script processes land cover tiles in chunks, writing GeoTIFFs directly to S3.
-It automatically iterates over the provided years and organizes outputs by year.
+It automatically iterates over the provided years and organizes outputs by year and pixel resolution.
 """
 
 import os
@@ -58,13 +58,14 @@ def reclassify_array(arr, mapping):
     return out
 
 
-def reclassify_chunk(lc_path, bbox, mapping, tile_id, year, run_mode):
+def reclassify_chunk(lc_path, bbox, mapping, tile_id, year, pixel_resolution, run_mode):
     chunk_str = uutil.boundstr(bbox)
     fname = f"{tile_id}__{chunk_str}__lc_ipcc.tif"
     s3_key = posixpath.join(
         pcn.datasets["land_cover_ipcc"]["s3_processed"],
         "five_years",
         str(year),
+        pixel_resolution,
         fname
     )
 
@@ -101,20 +102,20 @@ def reclassify_chunk(lc_path, bbox, mapping, tile_id, year, run_mode):
     return f"{tile_id}|{year}|{chunk_str} done"
 
 
-def process_tile(tile_id, year, mapping, chunk_size=2.0, run_mode="default"):
+def process_tile(tile_id, year, mapping, pixel_resolution, chunk_size=2.0, run_mode="default"):
     lc_dict = cn.get_dynamic_download_dict(tile_id, year)
     lc_path = lc_dict['land_cover'].replace('s3://', '/vsis3/').replace('five_years', 'five_year')
     minx, miny, maxx, maxy = uutil.get_10x10_tile_bounds(tile_id)
     chunks = uutil.get_chunk_bounds([minx, miny, maxx, maxy], chunk_size)
 
     tasks = [
-        dask.delayed(reclassify_chunk)(lc_path, b, mapping, tile_id, year, run_mode)
+        dask.delayed(reclassify_chunk)(lc_path, b, mapping, tile_id, year, pixel_resolution, run_mode)
         for b in chunks
     ]
     dask.compute(*tasks)
 
 
-def main(tile_id=None, chunk_size=2.0, client="local", run_mode="default"):
+def main(tile_id=None, chunk_size=2.0, pixel_resolution="4000_pixels", client="local", run_mode="default"):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
     if client == "coiled":
@@ -129,7 +130,7 @@ def main(tile_id=None, chunk_size=2.0, client="local", run_mode="default"):
         tiles = [tile_id] if tile_id else pcn.tile_id_list
         for year in YEARS:
             for tid in tiles:
-                process_tile(tid, year, GLCLU_MAPPING, chunk_size, run_mode)
+                process_tile(tid, year, GLCLU_MAPPING, pixel_resolution, chunk_size, run_mode)
     finally:
         dclient.close()
         if client == "coiled":
@@ -140,8 +141,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("Land cover reclassification to IPCC classes for multiple years")
     parser.add_argument("--tile_id", help="Tile ID to process")
     parser.add_argument("--chunk_size", type=float, default=2.0)
+    parser.add_argument("--pixel_resolution", default="4000_pixels")
     parser.add_argument("--client", default="local", choices=["local", "coiled"])
     parser.add_argument("--run_mode", default="default", choices=["default", "test"])
     args = parser.parse_args()
 
-    main(args.tile_id, args.chunk_size, args.client, args.run_mode)
+    main(args.tile_id, args.chunk_size, args.pixel_resolution, args.client, args.run_mode)
