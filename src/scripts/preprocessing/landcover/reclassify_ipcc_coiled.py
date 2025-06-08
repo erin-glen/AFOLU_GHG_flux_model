@@ -196,11 +196,11 @@ def main(
 
     try:
         tiles = [tile_id] if tile_id else pcn.tile_id_list
-        all_tasks = []
         for interval, years in intervals:
             for year in years:
+                year_tasks = []
                 for tid in tiles:
-                    all_tasks.extend(
+                    year_tasks.extend(
                         process_tile(
                             tid,
                             interval,
@@ -212,8 +212,11 @@ def main(
                         )
                     )
 
-        if all_tasks:
-            dask.compute(*all_tasks)
+                if year_tasks:
+                    logging.info(
+                        f"Computing {len(year_tasks)} tasks for {interval} {year}"
+                    )
+                    dask.compute(*year_tasks)
     finally:
         dclient.close()
         cluster.close()
