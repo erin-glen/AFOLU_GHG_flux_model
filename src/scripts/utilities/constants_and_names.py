@@ -81,7 +81,7 @@ m2_to_ha = 1e-4
 
 # TODO add all peat patterns (and look at thresholds)
 patterns = {
-    'land_cover': "{tile_id}.tif",
+    'land_cover': "{tile_id}__lc_ipcc.tif",
     'peat': "{tile_id}.tif",
     'dadap': "dadap_{tile_id}.tif",
     'engert': "engert_{tile_id}.tif",
@@ -220,7 +220,7 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
         interval_type = intervals_annual
 
     # Updated IPCC land cover directory
-    pixel_resolution = "8000_pixels"
+    pixel_resolution = "40000_pixels"
     land_cover_ipcc_dir = posixpath.join(
         full_bucket_prefix,
         processed_dir,
