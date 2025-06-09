@@ -5,7 +5,8 @@ Organic‑soils drainage and fire emissions model
 * full decision‑tree logic (drainage & burned‑area) kept intact
 * parallel execution via Coiled / Dask (mirrors LULUCF model)
 * outputs saved to S3 using universal_utilities.save_and_upload_small_raster_set
-* optionally target specific 10x10 degree tiles via the ``tile_ids`` option
+* optionally target specific 10x10 degree tiles via ``--tile_ids``
+* or process the entire list of tiles via ``--full_model``
 """
 
 from __future__ import annotations
@@ -724,6 +725,11 @@ def main(argv=None):
         action="append",
         help="Comma separated 10x10 tile IDs (e.g. 00N_110E). Can be used multiple times.",
     )
+    p.add_argument(
+        "--full_model",
+        action="store_true",
+        help="Process all available 10x10 degree tiles",
+    )
     p.add_argument("--chunk_size", "-cs", type=float)
     p.add_argument("--run_local", action="store_true")
     p.add_argument("--no_stats", action="store_true")
@@ -753,7 +759,9 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     tile_ids = []
-    if args.tile_ids:
+    if args.full_model:
+        tile_ids = list(cn.tile_id_list)
+    elif args.tile_ids:
         for item in args.tile_ids:
             tile_ids.extend(t.strip() for t in item.split(",") if t.strip())
 
@@ -797,6 +805,14 @@ python -m src.scripts.core_model.drainage_emissions_model \
 python -m src.scripts.core_model.drainage_emissions_model \
   --cluster_name drainage_cluster \
   --tile_ids 00N_110E,10N_020E,20N_020W,60N_010W,60N_110W \
+  --chunk_size 1 \
+  --start_year 2000 \
+  --end_year 2023 \
+  --interval_type five_year
+
+python -m src.scripts.core_model.drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --full_model \
   --chunk_size 1 \
   --start_year 2000 \
   --end_year 2023 \
