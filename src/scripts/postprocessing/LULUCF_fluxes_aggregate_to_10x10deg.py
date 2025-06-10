@@ -30,8 +30,8 @@ INVENTORY_PERIODS = [
     "2020_2023",
 ]
 
-BASE_URL = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_3_8"
-OUTPUT_DATE = "20250609"
+BASE_URL = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_3_9"
+OUTPUT_DATE = "20250610"
 
 
 def get_input_datasets(pixel_resolution: str = "4000_pixels") -> list:
