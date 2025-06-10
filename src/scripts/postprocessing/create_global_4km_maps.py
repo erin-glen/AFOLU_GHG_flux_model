@@ -1,5 +1,9 @@
-"""
-Aggregate 10x10° raster outputs into global ~4 km maps.
+"""Aggregate 10x10° raster outputs into global ~4 km maps.
+
+The script converts per‑hectare drainage emission outputs to per‑pixel values
+using pixel area rasters and then aggregates them to approximately 4 km
+resolution.  Passing ``--skip_pixel_area`` will bypass the conversion step and
+simply average the per‑hectare values when creating the 4 km products.
 """
 
 import argparse
@@ -40,7 +44,7 @@ BASE_URL = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/"
     "outputs/version_0_3_8"
 )
-OUTPUT_DATE = "20250610"
+OUTPUT_DATE = "20250609"
 
 
 def get_input_datasets(
@@ -63,38 +67,64 @@ def get_input_datasets(
     return paths
 
 
-def agg_4x4(tile_id, bounds, chunk_length_pixels, pixel_area_tile, mg_ha_yr_tile,
-            per_pixel_output_tile, per_pixel_output_path):
-    """Convert per-hectare tile to per-pixel and aggregate to 0.04°."""
+def agg_4x4(
+    tile_id,
+    bounds,
+    chunk_length_pixels,
+    pixel_area_tile,
+    mg_ha_yr_tile,
+    per_pixel_output_tile,
+    per_pixel_output_path,
+    use_pixel_area=True,
+):
+    """Aggregate a 10×10° tile to 0.04° resolution.
+
+    If ``use_pixel_area`` is ``True`` the function converts per‑hectare values to
+    per‑pixel values using the pixel‑area raster before aggregating. When
+    ``use_pixel_area`` is ``False`` it simply averages the per‑hectare values to
+    the coarser resolution.
+    """
     is_final = False
     logger = lu.setup_logging()
 
-    logger.info(f"Getting rasters for {tile_id}\n{pixel_area_tile}\n{mg_ha_yr_tile}")
-    pixel_area_tile_chunk = uu.get_tile_dataset_rio(
-        pixel_area_tile, "Float32", bounds, chunk_length_pixels, is_final, logger
-    )[0]
+    logger.info(
+        f"Getting rasters for {tile_id}\n{pixel_area_tile}\n{mg_ha_yr_tile}"
+    )
+
     mg_ha_yr_tile_chunk = uu.get_tile_dataset_rio(
         mg_ha_yr_tile, "Float32", bounds, chunk_length_pixels, is_final, logger
     )[0]
 
-    mg_yr_per_pixel_tile_chunk = (
-        mg_ha_yr_tile_chunk * pixel_area_tile_chunk * cn.m2_to_ha
-    )
+    if use_pixel_area:
+        pixel_area_tile_chunk = uu.get_tile_dataset_rio(
+            pixel_area_tile, "Float32", bounds, chunk_length_pixels, is_final, logger
+        )[0]
 
-    data_type = mg_yr_per_pixel_tile_chunk.dtype.name
-    uu.save_and_upload_single_raster(
-        bounds,
-        chunk_length_pixels,
-        tile_id,
-        mg_yr_per_pixel_tile_chunk,
-        data_type,
-        per_pixel_output_tile,
-        per_pixel_output_path,
-        is_final,
-        logger,
-    )
+        mg_per_pixel_tile_chunk = (
+            mg_ha_yr_tile_chunk * pixel_area_tile_chunk * cn.m2_to_ha
+        )
 
-    return uu.reaggregate_resolution(mg_yr_per_pixel_tile_chunk, 0.00025, 0.04)
+        data_type = mg_per_pixel_tile_chunk.dtype.name
+        uu.save_and_upload_single_raster(
+            bounds,
+            chunk_length_pixels,
+            tile_id,
+            mg_per_pixel_tile_chunk,
+            data_type,
+            per_pixel_output_tile,
+            per_pixel_output_path,
+            is_final,
+            logger,
+        )
+
+        return uu.reaggregate_resolution(
+            mg_per_pixel_tile_chunk, 0.00025, 0.04
+        )
+
+    # When pixel area is not used, aggregate the per-hectare array by averaging
+    summed = uu.reaggregate_resolution(mg_ha_yr_tile_chunk, 0.00025, 0.04)
+    factor = int(round(0.04 / 0.00025))
+    return summed / float(factor * factor)
 
 
 def combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, global_4km_output_path):
@@ -161,7 +191,12 @@ def build_download_upload_dict(pixel_resolution: str) -> dict:
     return dictionary
 
 
-def main(cluster_name: str, pixel_resolution: str, run_local: bool = False):
+def main(
+    cluster_name: str,
+    pixel_resolution: str,
+    run_local: bool = False,
+    use_pixel_area: bool = True,
+):
     logger = lu.setup_logging_main()
     is_final = not run_local
 
@@ -180,9 +215,14 @@ def main(cluster_name: str, pixel_resolution: str, run_local: bool = False):
             )
 
             mg_ha_yr_tile = f"{items['mg_ha_yr_dir']}{tile_id}{items['mg_ha_yr_pattern']}"
-            pixel_area_tile = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
+            pixel_area_tile = None
+            if use_pixel_area:
+                pixel_area_tile = (
+                    f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
+                )
             lu.print_and_log(
-                f"Processing {tile_id}:\nmg_ha_yr_tile: {mg_ha_yr_tile}\npixel_area_tile: {pixel_area_tile}",
+                f"Processing {tile_id}:\nmg_ha_yr_tile: {mg_ha_yr_tile}\n"
+                f"pixel_area_tile: {pixel_area_tile}",
                 is_final,
                 logger,
             )
@@ -202,6 +242,7 @@ def main(cluster_name: str, pixel_resolution: str, run_local: bool = False):
                     mg_ha_yr_tile,
                     per_pixel_tile_outfile,
                     per_pixel_output_path,
+                    use_pixel_area,
                 )
             )
 
@@ -248,7 +289,16 @@ if __name__ == "__main__":
         action="store_true",
         help="Run locally without Dask/Coiled",
     )
+    parser.add_argument(
+        "--skip_pixel_area",
+        action="store_true",
+        help="Do not use pixel area rasters (output values remain per hectare)",
+    )
     args = parser.parse_args()
 
-    main(args.cluster_name, args.pixel_resolution, args.run_local)
-
+    main(
+        args.cluster_name,
+        args.pixel_resolution,
+        args.run_local,
+        not args.skip_pixel_area,
+    )
