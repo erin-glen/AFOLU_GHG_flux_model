@@ -112,7 +112,7 @@ dirs = {
     'extraction': posixpath.join(full_bucket_prefix, processed_dir, 'extraction/20241021'),
     'climate_domain': posixpath.join(full_bucket_prefix, 'climate/carbon_model/inputs_for_carbon_pools/processed/fao_ecozones_bor_tem_tro/20190418'),
     'descals_type': posixpath.join(full_bucket_prefix, processed_dir, 'descals_plantation/extent/20241105'),
-    'burned_area_final': posixpath.join(full_bucket_prefix, 'fires/MODIS_burned_area/MCD64A1.061/2_final_outputs__Hansenized/{year}')
+    'burned_area_final': posixpath.join(full_bucket_prefix, processed_dir, 'fires/{year}')
 }
 
 # directories for 30 m peat mask datasets

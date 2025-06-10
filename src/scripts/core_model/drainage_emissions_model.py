@@ -565,7 +565,12 @@ def compute_intervals(start_year, end_year, interval_type, all_five_year_periods
         end_year = cn.five_year_inventory_periods[-1][1]
     else:
         start_year = start_year or cn.annual_land_cover_start_year
-        end_year = end_year or cn.five_year_inventory_periods[-1][1]
+        if end_year is None:
+            if interval_type == cn.intervals_five_year:
+                end_year = start_year + 4
+            else:
+                end_year = start_year
+        end_year = min(end_year, cn.five_year_inventory_periods[-1][1])
         if (
             interval_type == cn.intervals_annual
             and start_year < cn.annual_land_cover_start_year
@@ -620,7 +625,7 @@ def run_drainage_model(
         stage=stage,
     )
 
-    chunk_size = chunk_size or 2
+    chunk_size = chunk_size or 1
     if tile_ids:
         chunks = []
         for tid in tile_ids:
