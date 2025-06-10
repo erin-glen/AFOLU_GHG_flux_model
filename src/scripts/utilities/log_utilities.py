@@ -13,6 +13,30 @@ from . import universal_utilities as uu
 
 
 ##############################################################################
+# Generic logger for small scripts
+##############################################################################
+
+def setup_logging(log_filename: str | None = None) -> logging.Logger:
+    """Return a simple logger that writes to stdout and optionally a file."""
+    logger = logging.getLogger("afolu_logger")
+    logger.setLevel(logging.INFO)
+
+    if not logger.hasHandlers():
+        formatter = logging.Formatter("flm: %(message)s")
+
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+        if log_filename:
+            file_handler = logging.FileHandler(log_filename)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
+    return logger
+
+
+##############################################################################
 # LULUCF-Style Main Logging
 ##############################################################################
 
@@ -185,4 +209,3 @@ def print_and_log(text, is_final, logger):
     logger.info(f"flm: {text}")
     if not is_final:
         dask_print(f"flm: {text}", flush=True)
-
