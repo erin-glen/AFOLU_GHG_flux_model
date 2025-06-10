@@ -575,6 +575,9 @@ def compute_intervals(start_year, end_year, interval_type, all_five_year_periods
             end_year = start_year
 
     if interval_type == cn.intervals_five_year:
+        # Snap a 2019 start year to the final inventory period (2020–2023)
+        if start_year == 2019 and end_year >= 2023:
+            start_year = 2020
         intervals = [
             (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
         ]
