@@ -1,0 +1,2195 @@
+import os
+import coiled
+import boto3
+import time
+import math
+import numpy as np
+import pandas as pd
+import geopandas as gpd
+from pathlib import Path
+import pytz
+import sys
+import rasterio
+import rasterio.transform
+import rasterio.windows
+import subprocess
+import re
+import requests
+import concurrent.futures
+from botocore.config import Config
+from dask.distributed import print
+from dask.distributed import Client, LocalCluster
+from dask import delayed
+from datetime import datetime
+from io import BytesIO
+from numba import jit
+from osgeo import gdal
+
+# Project imports
+from . import constants_and_names as cn
+from . import log_utilities as lu
+
+###################################################################################################
+# S3 Utilities
+###################################################################################################
+# Splits a full s3 path "s3://bucket-name/rest_of_path" into "bucket-name" and "rest_of_path"
+def split_s3_path(s3_path):
+    s3_path = s3_path.replace("s3://", "")   # Remove the "s3://" prefix
+    bucket, key = s3_path.split("/", 1)    # Split the remaining string by the first "/"
+    return bucket, key
+
+# List files in an S3 bucket with a certain pattern
+def list_s3_files_with_pattern(s3_path, pattern):
+    s3 = boto3.client("s3")
+    bucket_name, prefix = split_s3_path(s3_path)
+
+    matching_files = []
+    continuation_token = None  # For pagination
+
+    while True:
+        if continuation_token:
+            response = s3.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=prefix,
+                ContinuationToken=continuation_token
+            )
+        else:
+            response = s3.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=prefix
+            )
+
+        # Check if there are any contents
+        if "Contents" in response:
+            for obj in response["Contents"]:
+                key = obj["Key"]
+                if pattern in key:
+                    matching_files.append(f"s3://{bucket_name}/{key}")
+
+        # Check if there's more data to retrieve
+        if response.get("IsTruncated"):  # If True, there are more pages to fetch
+            continuation_token = response["NextContinuationToken"]
+        else:
+            break  # No more pages left
+
+    return matching_files
+
+def download_s3_file(s3_path, local_path):
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    s3.download_file(bucket, key, local_path)
+
+def upload_s3_file(s3_path, local_path):
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    s3.upload_file(local_path, Bucket=bucket, Key=key)
+
+def check_s3_file_created(s3_path):
+    s3 = boto3.client('s3')
+    bucket, key = split_s3_path(s3_path)
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        print(f"File successfully created at: {s3_path}")
+        return True
+    except s3.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == "404":
+            raise RuntimeError(f"Failed to create file at: {s3_path}")
+        else:
+            raise RuntimeError(f"Error accessing S3: {e}")
+
+# Uploads local rasters to s3 and deletes the local versions after
+def upload_raster_to_s3(file_path, bucket, s3_key):
+
+    s3_client = boto3.client("s3")
+
+    try:
+        s3_client.upload_file(file_path, bucket, s3_key)
+        os.remove(file_path)  # Remove local temp file after upload
+    except Exception as e:
+        print(f"Upload failed for {s3_key}: {e}")
+
+
+# Saves arrays as rasters locally, then makes a list of tasks of rasters to upload. Does not actually upload.
+# NoData value for outputs is optional.
+# Parallelization based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67cf3a32-1bdc-800a-89c9-3ac153d999d4
+def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
+                                     bounds_str, output_dict, is_final, logger_worker,
+                                     no_data_val=None):
+
+    upload_tasks = []
+
+    transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
+
+    file_info = f'{tile_id}__{bounds_str}'
+
+    lu.print_and_log(f"Saving outputs locally for {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
+
+    # For every output file, saves from array to local raster, then to s3.
+    # Can't save directly to s3, unfortunately, so need to save locally first.
+    for key, value in output_dict.items():
+
+        data_array = value[0]
+        data_type = value[1]
+        data_meaning = value[2]
+        year_out = value[3]
+        full_s3_path = value[4]
+
+        if is_final:
+            file_name = f"{file_info}__{key}.tif"
+        else:
+            file_name = f"{file_info}__{key}__{timestr()}.tif"
+
+        # # Only prints if not a final run
+        # # Disabled this because it prints sooooo many lines that it's annoying to scroll through
+        # if not is_final:
+        #     lu.print_and_log(f"Saving {key} for {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger_worker)
+
+        # Includes NoData value in output raster
+        if no_data_val is not None:
+            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                               height=chunk_length_pixels, count=1,
+                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                               tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
+                dst.write(data_array, 1)
+
+        # No NoData value in output raster
+        else:
+            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                               height=chunk_length_pixels, count=1,
+                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                               tiled=True, blockxsize=400, blockysize=400) as dst:
+                dst.write(data_array, 1)
+
+        upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
+
+    return upload_tasks
+
+
+# Returns list of rasters in an s3 folder and returns their names as a list (but not full paths)
+def list_raster_names_in_s3_folder(full_in_folder):
+
+    cmd = ['aws', 's3', 'ls', full_in_folder]
+    s3_contents_bytes = subprocess.check_output(cmd)
+
+    # Converts subprocess results to useful string
+    s3_contents_str = s3_contents_bytes.decode('utf-8')
+    s3_contents_list = s3_contents_str.splitlines()
+    rasters = [line.split()[-1] for line in s3_contents_list]
+    rasters = [i for i in rasters if "tif" in i]
+
+    return rasters
+
+
+# Returns list of rasters (full paths and names) in an s3 folder, and also returns the count of them
+#Per https://chatgpt.com/share/e/67413a39-1b3c-800a-b582-72d1a8a17de1
+def list_raster_full_paths_in_s3_folder_and_count(s3_path):
+    """
+    List all GeoTIFF files from a list of full S3 paths using boto3 and return the count.
+
+    Args:
+        s3_paths (list): List of S3 paths (e.g., "s3://bucket-name/prefix/").
+
+    Returns:
+        tuple: A tuple containing:
+            - A flat list of GeoTIFF file paths.
+            - The total count of GeoTIFF files.
+    """
+
+    # Initialize the S3 client
+    s3_client = boto3.client('s3')
+    geotiff_files = []
+
+    try:
+        # Parses bucket and prefix from the S3 path
+        if s3_path.startswith("s3://"):
+            path_parts = s3_path[5:].split("/", 1)
+            bucket_name = path_parts[0]
+            prefix = path_parts[1] if len(path_parts) > 1 else ""
+        else:
+            raise ValueError(f"Invalid S3 path: {s3_path}")
+
+        # Uses pagination to handle more than 1,000 objects (otherwise, limited to list of 1000 elements)
+        paginator = s3_client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+            if 'Contents' in page:
+                files = [obj['Key'] for obj in page['Contents']]
+                geotiffs = [f"s3://{bucket_name}/{file}" for file in files if file.endswith(('.tif', '.tiff'))]
+                geotiff_files.extend(geotiffs)
+
+    except Exception as e:
+        print(f"Error accessing {s3_path}: {e}")
+
+    return geotiff_files, len(geotiff_files)
+
+
+# Uploads a shapefile to s3
+def upload_shp(in_folder, shp):
+
+    print(f"flm: Uploading to {in_folder}{shp}: {timestr()}")
+
+    shp_pattern = shp[:-4]
+
+    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
+    s3_client.upload_file(f"/tmp/{shp}", "gfw2-data", Key=f"{in_folder[cn.full_bucket_prefix_length:]}{shp}")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.dbf", "gfw2-data", Key=f"{in_folder[cn.full_bucket_prefix_length:]}{shp_pattern}.dbf")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.prj", "gfw2-data", Key=f"{in_folder[cn.full_bucket_prefix_length:]}{shp_pattern}.prj")
+    s3_client.upload_file(f"/tmp/{shp_pattern}.shx", "gfw2-data", Key=f"{in_folder[cn.full_bucket_prefix_length:]}{shp_pattern}.shx")
+
+    os.remove(f"/tmp/{shp}")
+    os.remove(f"/tmp/{shp_pattern}.dbf")
+    os.remove(f"/tmp/{shp_pattern}.prj")
+    os.remove(f"/tmp/{shp_pattern}.shx")
+
+    print(f"flm: Uploaded to {in_folder}{shp}: {timestr()}")
+
+# Saves a data array locally as a raster and then uploads it to s3
+def save_and_upload_raster_10x10(**kwargs):
+
+    s3_client = boto3.client("s3") # Needs to be in the same function as the upload_file call
+
+    data_array = kwargs['data']   # The data being saved
+    out_file_name = kwargs['out_file_name']   # The output file name
+    out_folder = kwargs['out_folder']   # The output folder
+
+    print(f"flm: Saving {out_file_name} locally")
+
+    profile_kwargs = {'compress': 'lzw'}   # Adds attribute to compress the output raster
+    # data_array.rio.to_raster(f"{out_file_name}", **profile_kwargs)
+    data_array.rio.to_raster(f"/tmp/{out_file_name}", **profile_kwargs)
+
+    print(f"flm: Saving {out_file_name} to {out_folder[10:]}{out_file_name}")
+
+    s3_client.upload_file(f"/tmp/{out_file_name}", "gfw2-data", Key=f"{out_folder[10:]}{out_file_name}")
+
+    # Deletes the local raster
+    os.remove(f"/tmp/{out_file_name}")
+
+# Gets the name of the first file in a dictionary of dataset names and folders in s3.
+# Returns dictionary of dataset names with the full path of the first file in the s3 folder.
+# From https://chatgpt.com/share/e/9a7bf947-1c32-4898-ba6b-3b932a5220c1
+def first_file_name_in_s3_folder(download_dict):
+
+    s3_client = boto3.client("s3")
+
+    # Initializes the dictionary to hold the first file paths
+    first_tiles = {}
+
+    # Iterates over the download_dict items
+    for key, folder_path in download_dict.items():
+
+        # Splits the path to get the directory part
+        dir_path = os.path.dirname(folder_path)
+
+        # Drops the s3://gfw2-data/ prefix and adds "/" to the end
+        dir_path = dir_path[len(cn.full_bucket_prefix)+1:] + "/"
+
+        # Lists metadata for everything in the bucket
+        response = s3_client.list_objects_v2(Bucket=cn.short_bucket_prefix, Prefix=dir_path, Delimiter='/')
+
+        # Checks if the folder contains any files
+        if 'Contents' in response:
+            # Filters the files to include only .tif files
+            tif_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.tif')]
+
+            # Check if any .tif files exist in the folder
+            if tif_files:
+                # Uses the first .tif file found
+                first_tiles[key] = cn.full_bucket_prefix + "/" + tif_files[0]
+            else:
+                first_tiles[key] = None  # No .tif files found
+                sys.exit(f"No tif files found in {key}, {folder_path}")
+        else:
+            first_tiles[key] = None  # No files found in the folder
+            sys.exit(f"No files found in {key}, {folder_path}")
+
+    return first_tiles
+
+
+###################################################################################################
+# LULUCF model utilities
+###################################################################################################
+# Time in Eastern US timezone as a string
+def timestr():
+
+    # Define the Eastern Time timezone
+    eastern = pytz.timezone('US/Eastern')
+
+    # Get the current time in UTC and convert to Eastern Time
+    eastern_time = datetime.now(eastern)
+
+    # Format the time as a string
+    return eastern_time.strftime("%Y%m%d_%H_%M_%S")
+
+
+# Connects to a Coiled cluster of a specified name if the local flag isn't on.
+# Does not create a Coiled cluster if the specified cluster name doesn't exist (contrary to default Coiled behavior).
+# Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67fff45a-ec78-800a-83e1-8b3618a7e09a
+def connect_to_Coiled_cluster(cluster_name, run_local):
+
+    # If local run flag is on, doesn't return a cluster or client
+    if run_local:
+        print("Running locally without Dask/Coiled.")
+        return None, None, run_local
+
+    # If no local run flag, it tries to attach to the named cluster
+    else:
+        # Gets info on all Coiled clusters (including terminated ones)
+        all_clusters = coiled.list_clusters()
+
+        # Iterates through clusters and identifies the running one of the correct name to connect to
+        for cluster in all_clusters:
+            if cluster.get("name") == cluster_name and cluster.get("current_state", {}).get("state") == 'ready':
+                print(f"Connecting to running cluster '{cluster_name}'.")
+                cluster = coiled.Cluster(name=cluster_name)
+                client = Client(cluster)
+                return cluster, client, run_local
+
+        print(f"Cluster named {cluster_name} not found. Running locally.")
+        run_local = True
+        return None, None, run_local
+
+
+#TODO: @Mel - find usages, change to using create_cluster.py instead. delete here after.
+# Creates a local client using dask or Coiled cluster with a specified name, # of worker, # of CPUs and # GiB
+def get_client_from_cluster_type(cluster_type, cluster_name=None, workers=None, cpu=None, memory=None):
+
+    if cluster_type == 'coiled':
+        coiled_cluster = coiled.Cluster(
+            n_workers=workers,
+            use_best_zone=True,
+            compute_purchase_option="spot_with_fallback",
+            idle_timeout="10 minutes",
+            region="us-east-1",
+            name=cluster_name,
+            workspace='wri-forest-research',
+            worker_cpu=cpu,
+            worker_memory=memory
+        )
+        client = coiled_cluster.get_client()
+
+    elif cluster_type == 'local':
+        local_cluster = LocalCluster()
+        client = Client(local_cluster)
+    else:
+        print("set cluster_type to one of the following: 'coiled', 'local'")
+
+    return client
+
+
+
+# Chunk bounds as a string
+def boundstr(bounds):
+    bounds_str = "_".join([str(round(x)) for x in bounds])
+    return bounds_str
+
+
+# Chunk length in pixels
+def calc_chunk_length_pixels(bounds):
+    chunk_length_pixels = int((bounds[3] - bounds[1]) * (40000 / 10))
+    return chunk_length_pixels
+
+
+# Creates list of bounding boxes for chunks from a dataframe column structured as W_S_E_N.
+# Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+def process_chunk_id(chunk_id):
+    # Split by underscore
+    bounding_box = list(map(float, chunk_id.split('_')))
+    return bounding_box
+
+
+# Maps GDAL data type to the appropriate string value
+gdal_to_string_dtype_mapping = {
+    gdal.GDT_Byte: 'Byte',
+    gdal.GDT_UInt16: 'UInt16',
+    gdal.GDT_Int16: 'Int16',
+    gdal.GDT_UInt32: 'UInt32',
+    gdal.GDT_Int32: 'Int32',
+    gdal.GDT_Float32: 'Float32',
+    gdal.GDT_Float64: 'Float64',
+    'Int8': 'Int8',  # GDAL doesn't have int8, apparently. Outside Coiled, this converts it correctly.
+    14: 'Int8'   # GDAL doesn't have int8, apparently. In Coiled, this converts it correctly.
+}
+
+# Maps GDAL data type to the appropriate string value
+string_to_gdal_dtype_mapping = {
+     'Byte': gdal.GDT_Byte,
+     'UInt16': gdal.GDT_UInt16,
+     'Int16': gdal.GDT_Int16,
+     'UInt32': gdal.GDT_UInt32,
+     'Int32': gdal.GDT_Int32,
+     'Float32': gdal.GDT_Float32,
+     'Float64': gdal.GDT_Float64
+}
+
+# Maps GDAL datatypes to numpy datatypes
+def map_to_numpy_dtype(data_type):
+    dtype_map = {
+        'Float32': 'float32',
+        'Float64': 'float64',
+        'Byte': 'uint8',
+        'Int32': 'int32',
+        'UInt32': 'uint32',
+        'Int16': 'int16',
+        'UInt16': 'uint16',
+        # Add more mappings as needed
+    }
+    return dtype_map.get(data_type, 'float32')  # Defaults to 'float32' if argument not found
+
+
+# Gets the W, S, E, N bounds of a 10x10 degree tile
+def get_10x10_tile_bounds(tile_id):
+    if "S" in tile_id:
+        max_y = -1 * (int(tile_id[:2]))
+        min_y = -1 * (int(tile_id[:2]) + 10)
+    else:
+        max_y = (int(tile_id[:2]))
+        min_y = (int(tile_id[:2]) - 10)
+
+    if "W" in tile_id:
+        max_x = -1 * (int(tile_id[4:7]) - 10)
+        min_x = -1 * (int(tile_id[4:7]))
+    else:
+        max_x = (int(tile_id[4:7]) + 10)
+        min_x = (int(tile_id[4:7]))
+
+    return min_x, min_y, max_x, max_y  # W, S, E, N
+
+
+# Returns list of all chunk boundaries within a bounding box for chunks of a given size
+def get_chunk_bounds_from_bounding_box(bounding_box, chunk_size):
+    min_x = bounding_box[0]
+    min_y = bounding_box[1]
+    max_x = bounding_box[2]
+    max_y = bounding_box[3]
+
+    x, y = (min_x, min_y)
+    chunks = []
+
+    # Polygon Size
+    while y < max_y:
+        while x < max_x:
+            bounds = [
+                x,
+                y,
+                x + chunk_size,
+                y + chunk_size,
+            ]
+            chunks.append(bounds)
+            x += chunk_size
+        x = min_x
+        y += chunk_size
+
+    return chunks
+
+
+# Returns the encompassing tile_id string in the form YYN/S_XXXE/W based on a coordinate
+def xy_to_tile_id(top_left_x, top_left_y):
+    lat_ceil = math.ceil(top_left_y / 10.0) * 10
+    lng_floor = math.floor(top_left_x / 10.0) * 10
+
+    lng: str = f"{str(lng_floor).zfill(3)}E" if (lng_floor >= 0) else f"{str(-lng_floor).zfill(3)}W"
+    lat: str = f"{str(lat_ceil).zfill(2)}N" if (lat_ceil >= 0) else f"{str(-lat_ceil).zfill(2)}S"
+
+    return f"{lat}_{lng}"
+
+# Interval info for model run.
+# interval_year_diff is the difference between the start and end years of the interval, not the number of years in the interval.
+# The difference between those arises for 5-year intervals (e.g., 2016-2020), where there are 5 years in the interval
+# but the difference between the start and end years is 4.
+def get_interval_info(end_year, main_logger, start_year):
+
+    if start_year == 2000 and end_year == 2020:
+        interval_type = cn.intervals_five_years
+        interval_year_diff = cn.five_year_interval_duration - 1  # -1 because the interval really starts one year after the end of the previous interval
+        interval_length = cn.five_year_interval_duration
+        output_years = cn.interval_end_years_5_years
+    elif start_year == 2015 and end_year == 2023:
+        interval_type = cn.intervals_annual
+        interval_year_diff = 1
+        interval_length = 1
+        output_years = cn.interval_end_years_annual
+    elif start_year == 2000 and end_year == 2023:  # Hybrid model (2000-2023)
+        interval_type = cn.intervals_hybrid
+        interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
+        interval_length = [cn.five_year_interval_duration] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
+        # intervals = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]
+        output_years = cn.interval_end_years_5_years[:-1] + cn.interval_end_years_annual
+    else:
+        main_logger.error("interval_type not valid")
+        sys.exit(1)
+
+    main_logger.info(f"Interval type: {interval_type}")
+    main_logger.info(f"Interval duration: {interval_length} years")
+    main_logger.info(f"Interval end years/Output years: {output_years}")
+
+    return interval_type, interval_year_diff, interval_length, output_years
+
+
+# Creates the list of chunks to process given an approach: a bounding box or a shapefile attribute table
+def create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size_deg, first_chunks, fishnet_iso_df, main_logger):
+
+    # Makes list of chunks to analyze from the bounding box and chunk size (deg)
+    # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+    if bounding_box and chunk_size_deg:
+
+        chunk_size_pixels = int(cn.full_raster_dims * chunk_size_deg / 10)
+
+        main_logger.info("Using bounding box and chunk size to determine chunks")
+        main_logger.info(f"Chunk source: Bounding box {bounding_box}")
+        main_logger.info(f"Chunk size: {chunk_size_deg} degree, {chunk_size_pixels} pixels")
+        chunk_list = get_chunk_bounds_from_bounding_box(bounding_box, chunk_size_deg)
+
+
+    # Makes list of chunks to analyze from an attribute table of a shapefile of 1x1 degree chunks.
+    # Attribute table column must be formatted as W_S_E_N.
+    # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+    elif chunk_shapefile_uri:
+
+        chunk_size_pixels = int(cn.full_raster_dims * 1/10)
+
+        main_logger.info("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
+        main_logger.info(f"Chunk source: 1x1 degree tile index shapefile {chunk_shapefile_uri}")
+        main_logger.info(f"Chunk size: 1 degree, {chunk_size_pixels} pixels")
+
+        # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
+        fishnet_1x1_chunk_id_df = fishnet_iso_df[['chunk_id']]  # Creates dataframe
+
+        # If argument for number of chunks in shapefile is supplied, limit to that
+        if first_chunks:
+            fishnet_1x1_chunk_id_df = fishnet_1x1_chunk_id_df[:first_chunks]
+
+        # Converts dataframe column of chunk bounds to nested list
+        # Per https://chatgpt.com/share/e/674747ee-d588-800a-995c-1f897a8ace31
+        chunk_list = fishnet_1x1_chunk_id_df['chunk_id'].apply(process_chunk_id).tolist()
+
+    else:
+        main_logger.info("Chunk list cannot be determined")
+        sys.exit()
+
+    return chunk_list, chunk_size_pixels
+
+
+# Calculates the elapsed time for a stage
+def stage_duration(start_time_str, end_time_str, stage, logger):
+
+    logger.info(f"Stage {stage} ended at: {end_time_str}")
+
+    start_time = datetime.strptime(start_time_str, "%Y%m%d_%H_%M_%S")
+    end_time = datetime.strptime(end_time_str, "%Y%m%d_%H_%M_%S")
+
+    logger.info(f"Elapsed time for {stage}: {end_time - start_time}" + "\n")
+
+
+# Lazily opens tile within provided bounds (i.e. one chunk) and returns as a numpy array.
+# If it can't open the uri for the chunk (tile does not exist), it creates a numpy array of all 0s
+# of the correct datatype for that input.
+# The returned chunk needs to have the correct datatype because it'll eventually be used in a
+# numba function, which is very particular about datatypes.
+# For example, a dataset that's float32 can't have NoData chunks that are uint8 because
+# the Numba functions won't be able to handle that (since they're so particular about datatypes).
+# So, that is addressed here through setting the array of 0s to the datatype of the dataset.
+# Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
+def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
+
+    bounds_str = boundstr(bounds)
+
+    # If the uri exists, the relevant window is opened and returned and returned as an array.
+    # Note that this chunk could still just have NoData values, which would be downloaded.
+    try:
+        with rasterio.open(uri) as ds:
+            window = rasterio.windows.from_bounds(*bounds, ds.transform)
+            data = ds.read(1, window=window)
+            status = "success"
+
+    # If the uri doesn't exist, a numpy array of the correct size and datatype populated with 0s is returned.
+    except Exception as e:
+
+        numpy_dtype = map_to_numpy_dtype(data_type)   # Translates the GDAL-style datatype to numpy-style datatype
+        data = np.full((chunk_length_pixels, chunk_length_pixels), 0).astype(numpy_dtype)
+        status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}"
+
+    return data, status
+
+
+# Prepares list of chunks to download.
+# Chunks are defined by a bounding box.
+# Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
+def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger):
+
+    futures = {}
+
+    bounds_str = boundstr(bounds)
+    tile_id = xy_to_tile_id(bounds[0], bounds[3])
+
+    # Submits requests to S3 for input chunks but doesn't actually download them yet.
+    # This queueing of the requests before downloading then speeds up the downloading.
+    # Approach is to download all the input chunks up front for every year to make downloading more efficient, even though it means storing more upfront.
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        lu.print_and_log(f"Requesting data in chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
+
+        for key, value in download_dict.items():
+
+            # When the values are a list with just the file to download, without the datatype
+            if len(value)==1:
+                future = executor.submit(get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, 'float32')
+                futures[future] = key  # Stores Future objects (data and status) as keys, layer names as values
+
+            # When the values are a list with the file to download and the datatype
+            elif len(value)==2:
+                future = executor.submit(get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, value[1])
+                futures[future] = key  # Stores Future objects (data and status) as keys, layer names as values
+
+            else:
+                sys.exit("Unexpected number of parameters in download dictionary")
+
+    return futures
+
+
+# Checks if tiles exist at all
+def check_for_tile(download_dict, is_final, logger):
+
+    # Configures S3 client with increased retries; retries can max out for global analyses
+    s3_config = Config(
+        retries={
+            'max_attempts': 10,  # Increases the number of retry attempts
+            'mode': 'standard'
+        }
+    )
+    s3_client = boto3.client("s3", config=s3_config)  # Uses the configured client with more retries
+
+    i = 0
+
+    while i < len(list(download_dict.values())):
+
+        # Tile path and name in s3, without s3://gfw2-data/ (hence, [len(cn.full_bucket_prefix)+1:])
+        # [0] is to select the s3 path element of the list in the dictionary value (as opposed to the datatype, which is [1]
+        s3_key = list(download_dict.values())[i][0][len(cn.full_bucket_prefix)+1:]
+
+        tile_id = re.findall(cn.tile_id_pattern, list(download_dict.values())[i][0])[0]  # Extracts the tile_id from the s3 path
+
+        # Breaks the loop if the tile exists. No need to keep checking other tiles because one exists.
+        try:
+            s3_client.head_object(Bucket='gfw2-data', Key=s3_key)
+
+            lu.print_and_log(f"Tile id {tile_id} exists for some inputs. Proceeding: {timestr()} ", is_final, logger)
+
+            return True
+        except:
+            pass
+
+        i += 1
+
+    lu.print_and_log(f"Tile id {tile_id} does not exist. Skipped chunk: {timestr()}", is_final, logger)
+
+    return False
+
+
+# Turns a list of basic output directory names into a list of fully specified directories based on output chunk size, run date, model type, and output years
+def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_pixels,
+                                model_type, output_years, interval_duration, run_date, pixel_meaning=None):
+
+    # List of directories for outputs
+    output_full_dirs = []
+
+    # Replaces placeholders in paths with values specific to the run
+    dir_list = [path.replace(cn.model_type_placholder, model_type) for path in dir_list]
+    dir_list = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in dir_list]
+    dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in dir_list]
+    dir_list = [path.replace("RUN_DATE", run_date) for path in dir_list]
+
+    # Any entry that covers the entire model period, from start year to end of last interval
+    dir_list = [path.replace("FULL_MODEL", f"{start_year}_{output_years[-1]}") for path in dir_list]
+
+    # Replaces the pixel meaning placeholder with the per-ha or per-pixel meanings.
+    # Pixel meanings are formulated slightly differently depending on whether the output is C density or flux.
+    for i, basic_output in enumerate(dir_list):
+        if "density" in basic_output:  # Changes C density outputs
+            if pixel_meaning == "per_ha":
+                updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning)
+            else:
+                updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_per_pixel_pixel_meaning)
+        else:  # Changes flux outputs and removal factors
+            if pixel_meaning == "per_ha":
+                updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_density_pixel_meaning)
+            else:
+                updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_per_pixel_pixel_meaning)
+
+        # Updates dir_list
+        dir_list[i] = updated_path
+
+    # Iterates through the list of core output directories and adds the correct output years (stocks) or year ranges (fluxes) to each.
+    for basic_output in dir_list:
+        for count, output_year in enumerate(output_years):
+
+            # For outputs that are a specific year (stocks)
+            if "YEAR" in basic_output:
+                output_dir = basic_output.replace('YEAR', str(output_year))
+            # For outputs that cover the start of the model to the end of the current interval
+            elif "RUNSTART_END" in basic_output:
+                output_dir = basic_output.replace('RUNSTART_END', f"{str(start_year)}_{str(output_year)}")
+            # For outputs that cover an interval (fluxes)
+            else:
+                if interval_type == cn.intervals_five_years:
+                    output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration)}_{str(output_year)}")
+                elif interval_type == cn.intervals_annual:
+                    output_dir = basic_output.replace('START_END',f"{str(output_year - interval_duration)}_{str(output_year)}")
+                else:  # Hybrid model (2000-2023)
+                    output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
+
+            output_full_dirs.append(output_dir)
+
+    # Because outputs that are sums across the entire model period are re-created for every interval in the
+    # above for loop, we need to remove the duplication in the output list.
+    # This returns the outputs that are sums across the entire model period back to one element per output type.
+    output_full_dirs_unique = list(set(output_full_dirs))
+
+    return output_full_dirs_unique
+
+
+# Checks if a geotif has data in it.
+# Goes window by window so that the entire raster isn't read into memory.
+# https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67b8c1d9-c850-800a-8f50-5f0c8edeeb40
+def check_geotiff_has_data(file_path, chunk_size=1000):
+
+    with rasterio.open(file_path) as src:
+        nodata_value = src.nodata
+
+        # Reads the raster in chunks (windows)
+        for j in range(0, src.height, chunk_size):
+            for i in range(0, src.width, chunk_size):
+                window = rasterio.windows.Window(i, j, min(chunk_size, src.width - i), min(chunk_size, src.height - j))
+                band = src.read(1, window=window)  # Reads only the chunk
+
+                # Checks for valid data
+                if nodata_value is not None:
+                    if np.any(band != nodata_value):
+                        return True
+                else:
+                    if np.any(~np.isnan(band)):
+                        return True
+
+    print(f"{file_path} is empty or contains only NoData values.")
+    return False
+
+
+# Checks whether a chunk has data in it.
+# There are two options for how to assess if a chunk has data (any_or_all argument): if any assessed input has data, or if all assessed inputs have data.
+# Any: To have data, a chunk have have at least one of the assessed inputs (layers).
+# All: To have data, a chunk must have all necessary inputs (layers).
+# If one or more necessary input is missing, the loop is terminated and the chunk ultimately skipped.
+def check_chunk_for_data(required_layers, bounds_str, tile_id, any_or_all, is_final, logger):
+    # Checks if ANY of the assessed inputs are present
+    if any_or_all == "any":
+
+        i = 0
+
+        while i < len(list(required_layers.values())):
+
+            # Checks if all the pixels have the nodata value.
+            # Assume no data in the chunk if the min and max values are the same for EVERY input raster.
+            # Can't use np.all because it doesn't work in chunks that are mostly water; says nodata in chunk even if there is land
+            # So, instead compare np.min and np.max.
+            min = np.min(list(required_layers.values())[i])
+
+            # Breaks the loop if there is data in the chunk.
+            # Don't need to keep checking chunk for data because the condition has been met
+            # (at least one chunk has data).
+            # The one print statement regardless of whether the model is full-scale or not.
+            if min != None:  # if min exists, there must be data in the chunk
+                logger.info(f"flm: Data in chunk {bounds_str}. Proceeding: {timestr()}")
+                print(f"flm: Data in chunk {bounds_str}. Proceeding: {timestr()}")
+                return True
+
+            i += 1
+
+        # Printed regardless of whether or not the model is full-scale
+        logger.info(f"flm: No data in chunk {bounds_str} for assessed inputs: {timestr()}")
+        print(f"flm: No data in chunk {bounds_str} for assessed inputs: {timestr()}")
+        return False
+
+    # Checks if ALL of the assessed inputs are present
+    elif any_or_all == "all":
+
+        # Iterates through all the required input layers
+        for i, (key, value) in enumerate(required_layers.items()):
+
+            # Assume no data in the chunk if the min and max values are the same for EVERY input raster.
+            # Can't use np.all because it doesn't work in chunks that are mostly water; says nodata in chunk even if there is land
+            # So, instead compare np.min and np.max.
+            min = np.min(value)
+            max = np.max(value)
+
+            # Breaks the loop if min and max are the same, i.e. chunk doesn't exist.
+            # We assume that if min and max are the same, there are no valid pixels
+            # Don't need to keep checking chunk for data because at least one input doesn't have data,
+            # so not ALL of the inputs exist
+            if min == max:
+                # Printed regardless of whether or not the model is full-scale
+                logger.info(f"flm: Chunk {bounds_str} does not exist for {key}. Skipped chunk: {timestr()}")  # The one print statement regardless of whether the model is full-scale or not
+                print(f"flm: Chunk {bounds_str} does not exist for {key}. Skipped chunk: {timestr()}")
+                return False
+
+        # If all required inputs are checked (for loop is completed), ALL inputs exist.
+        # Printed regardless of whether or not the model is full-scale.
+        logger.info(f"flm: Chunk {bounds_str} has data for all assessed inputs: {timestr()}")  # The one print statement regardless of whether the model is full-scale or not
+        print(f"flm: Chunk {bounds_str} has data for all assessed inputs: {timestr()}")
+        return True
+
+    else:
+
+        raise Exception("any_or_all argument not valid")
+
+
+# Makes a shapefile of the footprints of rasters in a folder, for checking geographical completeness of rasters
+def make_tile_footprint_shp(input_dict, no_upload):
+
+    logger_worker = lu.setup_logging_worker()
+
+    in_folder = list(input_dict.keys())[0]
+    pattern = list(input_dict.values())[0]
+
+    # Task properties
+    lu.print_and_log(f"flm: Making tile index shapefile for: {in_folder}: {timestr()}", True, logger_worker)
+
+    # Folder including s3 key
+    s3_in_folder = in_folder
+    vsis3_in_folder = f'/vsis3/{in_folder[5:]}' #[5] drops the s3:// at the front
+
+    # List of all the filenames in the folder
+    filenames = list_raster_names_in_s3_folder(s3_in_folder)
+
+    # List of the tile paths in the folder
+    tile_paths = [vsis3_in_folder + filename for filename in filenames]
+
+    file_paths_txt = f's3_paths_{pattern}.txt'
+
+    with open(f"/tmp/{file_paths_txt}", 'w') as file:
+        for item in tile_paths:
+            file.write(item + '\n')
+
+    # Output shapefile name
+    shp = f"raster_footprints_{pattern}.shp"
+
+    cmd = ["gdaltindex", "-t_srs", "EPSG:4326", f"/tmp/{shp}", "--optfile", f"/tmp/{file_paths_txt}"]
+    subprocess.check_call(cmd)
+
+    # Uploads shapefile to s3 if upload not disabled
+    if not no_upload:
+
+        upload_shp(s3_in_folder, shp)
+
+    os.remove(f"/tmp/{file_paths_txt}")
+
+    return(f"Index shapefile for {pattern} completed: {timestr()}")
+
+
+# Creates a list of 10x10 deg tiles to create, where the list is a list of dictionaries of the form
+# [{'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_000E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']},
+# {'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_010E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']}, ... ]
+# The keys are s3 destination foldes and the values are the output 10x10 deg file names
+def create_list_for_aggregation(s3_in_folders, main_logger):
+
+    list_of_s3_names_total = []  # Final list of dictionaries of input s3 paths and output aggregated 10x10 raster names
+
+    # Iterates through all the input s3 folders
+    for s3_in_folder in s3_in_folders:
+
+        main_logger.info(f"Listing files in {s3_in_folder}")
+
+        simple_output_file_names = []  # List of output aggregated output 10x10 rasters
+
+        # Raw filenames in an input folder, e.g., ['00N_000E__6_-2_8_0__IPCC_classes_2020.tif', '00N_000E__6_-4_8_-2__IPCC_classes_2020.tif',...]
+        filenames = list_raster_names_in_s3_folder(s3_in_folder)
+
+        # Iterates through all the files in a folder and converts them to the output names.
+        # Essentially [tile_id]__[pattern].tif. Drops the chunk bounds from the middle.
+        for filename in filenames:
+            result = re.sub(cn.small_chunk_pattern, '__', filename)
+            simple_output_file_names.append(result)  # New list of simplified file names used for 10x10 degree outputs
+
+        # Removes duplicate simplified file names.
+        # There are duplicates because each 10x10 output raster has many constituent chunks, each of which have the same aggregated, final name
+        # e.g., ['00N_000E__IPCC_classes_2020.tif', '00N_010E__IPCC_classes_2020.tif', ...]
+        simple_output_file_names = np.unique(simple_output_file_names).tolist()
+
+        # Makes nested lists of the file names. Nested for next step.
+        # e.g., [['00N_110E__AGC_density_MgC_ha_2000.tif']]
+        simple_output_file_names = [[item] for item in simple_output_file_names]
+
+        # Makes a list of dictionaries, where the key is the input s3 path and the value is the output aggregated name
+        # e.g., [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif']}]
+        list_of_s3_name_dicts = [{key: value} for value in simple_output_file_names for key in [s3_in_folder]]
+
+        # Adds the dictionary of s3 paths and output names for this folder to the list for all folders
+        list_of_s3_names_total.append(list_of_s3_name_dicts)
+
+    # Combines all the lists from individual output folders into a single list
+    # Now it's:
+    # [{'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_000E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']},
+    # {'s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr/2000_2005/4000_pixels/20241121/': ['00N_010E__gross_emissions_all_C_pools_all_gases__MgCO2_ha_yr_2000_2005.tif']}, ... ]
+    list_of_s3_names_total = flatten_list(list_of_s3_names_total)
+
+    main_logger.info(f"There are {len(list_of_s3_names_total)} 10x10 deg rasters to create across {len(s3_in_folders)} input folders.")
+
+    return list_of_s3_names_total
+
+
+# Flattens a nested list
+def flatten_list(nested_list):
+    return [x for xs in nested_list for x in xs]
+
+
+# Merges rasters that are <10x10 degrees into 10x10 degree rasters in the standard grid.
+# Approach is to merge rasters with gdal.Warp and then upload them to s3.
+def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
+
+    ### Part 1: Merges 1x1 deg rasters to 10x10 deg
+
+    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
+
+    logger_worker = lu.setup_logging_worker()
+
+    in_folder = list(s3_name_dict.keys())[0]  # The input s3 folder for the small rasters
+    out_file_name = list(s3_name_dict.values())[0][0]  # The output file name for the combined rasters
+
+    s3_in_folder = in_folder  # The input s3 folder with s3:// prepended
+    vsis3_in_folder = f'/vsis3/{in_folder[5:]}'  # The input s3 folder with /vsis3/ prepended
+
+    # Lists all the rasters in the specified s3 folder
+    filenames = list_raster_names_in_s3_folder(s3_in_folder)
+
+    # Gets the tile_id from the output file name in the standard format
+    tile_id = out_file_name[:8]
+
+    # Limits the input rasters to the specified tile_id (the relevant 10x10 area)
+    filenames_in_focus_area = [i for i in filenames if tile_id in i]
+
+    # Lists the tile paths for the relevant rasters
+    tile_paths = [vsis3_in_folder + filename for filename in filenames_in_focus_area]
+
+    lu.print_and_log(f"flm: Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger_worker)
+    if is_final:   # Prints to console if it is a final run
+        print(f"Merging small rasters in {tile_id} in {vsis3_in_folder}")
+
+    # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
+    out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
+
+    min_x, min_y, max_x, max_y = get_10x10_tile_bounds(tile_id)
+
+    # Dynamically sets the datatype for the merged raster based on the input rasters (courtesy of https://chatgpt.com/share/e/a91c4c98-b2b1-4680-a4a7-453f1a878052)
+    # Determines the data type of the first raster
+    first_raster_path = tile_paths[0]
+    ds = gdal.Open(first_raster_path)
+    raster_datatype = ds.GetRasterBand(1).DataType
+    raster_nodata_value = ds.GetRasterBand(1).GetNoDataValue()
+    if raster_nodata_value == None:  # In case no NoData value is assigned
+        raster_nodata_value = 0
+    ds = None
+
+    # Defaults to Float32 if not found
+    dtype_str = gdal_to_string_dtype_mapping.get(raster_datatype, 'Float32')
+
+    # Merges the rasters (courtesy of ChatGPT: https://chatgpt.com/share/e/13158ebb-dd0a-41d8-8dfb-9ee12e4c804e)
+    # This is the only system I found that maintains the extent of all the constituent rasters and doesn't change their resolution or pixel size or shift them.
+    # I also tried various gdal_translate, build_vrt, and numpy padding approaches, none of which worked in all cases.
+    merged_file = f"/tmp/merged_{out_file_name}"
+
+    #TODO Add -of COG to make it a COG, per https://gdal.org/en/stable/drivers/raster/cog.html?
+    merge_command = [
+        'gdal_merge.py',
+        '-o', merged_file,
+        '-of', 'GTiff',
+        '-co', 'COMPRESS=DEFLATE',
+        '-co', 'TILED=YES', # If not included, the size of the merged small rasters can be many times their sum. Answer at https://gis.stackexchange.com/a/258215
+        '-co', 'BLOCKXSIZE=400',  # Internal tiling
+        '-co', 'BLOCKYSIZE=400',  # Internal tiling
+        '-ul_lr', str(min_x), str(max_y), str(max_x), str(min_y),
+        '-ot', dtype_str,
+        '-a_nodata', str(raster_nodata_value)
+    ]
+
+    # Add the input tile paths
+    merge_command.extend(tile_paths)
+
+    try:
+        subprocess.check_call(merge_command)
+        lu.print_and_log(f"Successfully merged rasters into {merged_file}", is_final, logger_worker)
+    except subprocess.CalledProcessError as e:
+        lu.print_and_log(f"Error merging rasters: {e}: {timestr()}", False, logger_worker)
+        return f"failure merging {s3_name_dict}"
+
+    ### Part 2: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters)
+
+    # Computes valid pixel count in the output 10x10 raster for comparison with the sum of the constituent 1x1s
+    lu.print_and_log(f"Counting pixels in {tile_id} for {out_file_name}: {timestr()}", is_final, logger_worker)
+
+    # Computes count of valid pixels by reading raster in chunks (can't read full 10x10 into memory all at once
+    try:
+        ds = gdal.Open(merged_file)
+        if ds is not None:
+            band = ds.GetRasterBand(1)
+            valid_pixel_count = 0
+
+            # Gets raster dimensions
+            x_size = band.XSize
+            y_size = band.YSize
+
+            # Reads in chunks to avoid high memory usage
+            block_size_x, block_size_y = band.GetBlockSize()
+
+            for y in range(0, y_size, block_size_y):
+                rows_to_read = min(block_size_y, y_size - y)
+                for x in range(0, x_size, block_size_x):
+                    cols_to_read = min(block_size_x, x_size - x)
+
+                    # Reads only a portion of the raster at a time
+                    block = band.ReadAsArray(x, y, cols_to_read, rows_to_read)
+
+                    if block is not None:
+                        valid_pixel_count += np.count_nonzero(block != raster_nodata_value)
+
+            ds = None  # Closes dataset
+        else:
+            valid_pixel_count = -1  # Failed to open file
+    except Exception as e:
+        lu.print_and_log(f"Error counting pixels for {merged_file}: {e}", is_final, logger_worker)
+        print(f"Error counting pixels for {merged_file}: {e}")
+        return f"failure counting pixels for {s3_name_dict}"
+
+    # Gets the output file pattern and year/year_range
+    out_pattern, year_range = strip_and_extract_years(out_file_name)
+
+    # Most stats for the 10x10 aren't calculated.
+    # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
+    # Dictionary is in a list because it's necessary for chunk stats processing later.
+    chunk_stats = [{
+        'chunk_id': 'N/A',
+        'tile_id': tile_id,
+        'layer_name': out_file_name,
+        'tile_name': out_file_name,
+        'in_out': 'output_layer',
+        'pattern': out_pattern,
+        'years': year_range,
+        'min_value': 'no data',
+        'mean_value': 'no data',
+        'max_value': 'no data',
+        'count_value': valid_pixel_count,
+        'sum_value': 'no data',
+        'data_type': 'no data'
+    }]
+
+    ### Part 3: Uploads 10x10 to s3 using multipart uploading
+    ### https://chatgpt.com/share/e/67d848cf-8b08-800a-b0e8-79a72c9eb49a.
+
+    lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}: {timestr()}", is_final, logger_worker)
+
+    if not no_upload:
+
+        #Because boto3 does multipart uploading for files >100MB, this only adds multipart uploading for files
+        # between part_size and 100MB.
+        try:
+            lu.print_and_log(f"Uploading {out_file_name} to s3: {timestr()}", is_final, logger_worker)
+            part_size = 20 * 1024 * 1024  # 20MB chunks
+
+            # Starts multipart upload
+            response = s3_client.create_multipart_upload(Bucket=cn.short_bucket_prefix, Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}")
+            upload_id = response['UploadId']
+
+            parts = []
+            with open(merged_file, 'rb') as f:
+                part_number = 1
+                while chunk := f.read(part_size):
+                    response = s3_client.upload_part(
+                        Bucket=cn.short_bucket_prefix,
+                        Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}",
+                        PartNumber=part_number,
+                        UploadId=upload_id,
+                        Body=chunk
+                    )
+                    parts.append({'PartNumber': part_number, 'ETag': response['ETag']})
+                    part_number += 1
+
+            # Completes the multipart upload
+            s3_client.complete_multipart_upload(
+                Bucket=cn.short_bucket_prefix,
+                Key=f"{out_folder[cn.full_bucket_prefix_length:]}{out_file_name}",
+                UploadId=upload_id,
+                MultipartUpload={'Parts': parts}
+            )
+            lu.print_and_log(f"Uploaded {out_file_name} to s3: {timestr()}", is_final, logger_worker)
+
+
+        except Exception as e:
+            lu.print_and_log(f"Error uploading file to s3: {e}: {timestr()}", is_final, logger_worker)
+            print(f"Error uploading file to s3: {e}: {timestr()}")
+            return f"failure uploading {s3_name_dict}"
+
+    # Deletes the local merged raster
+    os.remove(merged_file)
+
+    return f"Success merging {s3_name_dict}", chunk_stats
+
+
+# Creates numpy array of rates or ratios from a tab in an Excel spreadsheet, e.g., removal factors or carbon pool ratios.
+# Tries to read from s3 first. If that doesn't work (because I'm in the office), it reads from my computer.
+# Courtesy of ChatGPT: https://chatgpt.com/share/e/aff31681-c9a7-40fe-85c1-73a1cab62066
+def convert_lookup_table_to_array(spreadsheet, sheet_name, fields_to_keep):
+
+    try:
+        # Try fetching the file from the S3 URL
+        # print(f"Attempting to download file from URL: {spreadsheet}")
+        response = requests.get(spreadsheet, timeout=10)
+        response.raise_for_status()
+        excel_df = pd.read_excel(BytesIO(response.content), sheet_name=sheet_name)
+
+    except (requests.exceptions.RequestException, Exception) as e:
+        print(f"Failed to download file from S3. Falling back to local file. Error: {e}")
+        # Define the local fallback path
+        fallback_dir = r"/mnt/c/Users/David.Gibbs/OneDrive - World Resources Institute/Documents/Projects/AFOLU_flux_model__all_land_all_carbon/rate_ratio_lookup_tables"
+        fallback_filename = os.path.basename(spreadsheet)
+        fallback_path = os.path.join(fallback_dir, fallback_filename)
+
+        if not os.path.exists(fallback_path):
+            raise FileNotFoundError(f"Fallback file not found at {fallback_path}")
+
+        print(f"Reading file from local path: {fallback_path}")
+        excel_df = pd.read_excel(fallback_path, sheet_name=sheet_name)
+
+    # Retains only the relevant columns
+    filtered_data = excel_df[fields_to_keep]
+
+    # Converts from dataframe to Numpy array
+    filtered_array = filtered_data.to_numpy().astype(float)  # Need to convert Pandas dataframe to numpy array because Numba jit-decorated function can't use dataframes.
+    filtered_array = filtered_array.astype(float)  # Convert from object dtype to float dtype-- necessary for numba to use it
+
+    return filtered_array
+
+# Creates arrays of 0s for any missing inputs and puts them in the corresponding typed dictionary
+def complete_inputs(existing_input_list, typed_dict, datatype, chunk_length_pixels, bounds_str, tile_id, is_final, logger):
+    for dataset_name in existing_input_list:
+        if dataset_name not in typed_dict.keys():
+            typed_dict[dataset_name] = np.full((chunk_length_pixels, chunk_length_pixels), 0, dtype=datatype)
+            lu.print_and_log(f"Created {dataset_name} for chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
+    return typed_dict
+
+
+# Counts the number of successful and skipped chunks after processing
+# Based on https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
+def count_successful_chunks(chunk_list, is_final, main_logger, results):
+
+    # Arrays of chunk stats and return messages
+    all_stats = []
+    return_messages = []
+
+    # Initializes counters for different types of return messages
+    success_count = 0
+    skipping_chunk_count = 0
+    error_chunk_count = 0
+    other_message_count = 0
+
+    # Processes the chunk stats and returned messages
+    # Results are the messages from the chunks and chunk stats
+    for result in results:
+
+        return_message, chunk_stats = result
+
+        if "Success" in return_message:
+            success_count += 1
+        elif "Skipped chunk" in return_message:
+            skipping_chunk_count += 1
+        elif "Error" in return_message:
+            error_chunk_count += 1
+        else:
+            other_message_count += 1
+
+        if return_message:
+            return_messages.append(return_message)
+
+        # Ensures chunk_stats is a list. Needs to be a list for further processing.
+        chunk_stats = chunk_stats if isinstance(chunk_stats, list) else [chunk_stats]
+
+        if chunk_stats is not None:
+            all_stats.extend(chunk_stats)
+
+
+    # Prints the returned messages if not a large (is_final) run
+    if not is_final:
+        for message in return_messages:
+            main_logger.info(message)
+
+    # Print the counts of successful and skipped chunks
+    main_logger.info(f"Number of 'Success' chunks: {success_count}")
+    main_logger.info(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
+    main_logger.info(f"Number of 'Error' chunks: {error_chunk_count}")
+    main_logger.info(f"Number of 'Other message' chunks: {other_message_count}")
+
+    # Doesn't compare the difference between submitted and processed chunks if it is reporting on
+    # merging 1x1 deg rasters because calculating the difference is too complicated.
+    if "Success merging" not in return_messages[0]:
+        main_logger.info(f"Difference between submitted chunks and processed chunks: {len(chunk_list) - (success_count + skipping_chunk_count + error_chunk_count + other_message_count)}")
+    main_logger.info("\n")
+
+    return success_count, all_stats
+
+
+
+# Calculates stats for a chunk (numpy array), mostly using per hectare values
+# but optionally summing per pixel values to get a chunk total.
+# Also joins ISO from GADM to each entry.
+# Stats calculations adapted from https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
+# Joining iso adapted from https://chatgpt.com/share/e/6744de08-6b64-800a-b8c4-6a20833f7e3a
+# def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, fishnet_iso_df, array_per_pixel=None):
+def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_pixel=None):
+
+    # Sums the per pixel totals if relevant
+    if in_out == 'output_layer' and array_per_pixel is not None:
+        sum_value = np.sum(array_per_pixel)
+    else:
+        sum_value = 'N/A- input layer or no per-pixel array supplied'
+
+    # Gets the output file pattern and year/year_range
+    out_pattern, year_range = strip_and_extract_years(name)
+
+    if array_per_ha is None or not np.any(array_per_ha):  # Checks if the array is None or empty
+        return {
+            'chunk_id': bounds_str,
+            'tile_id': tile_id,
+            'layer_name': name,
+            'pattern': out_pattern,
+            'years': year_range,
+            'chunk_name': f'{tile_id}__{bounds_str}__{out_pattern}_{year_range}.tif',
+            'tile_name': f'{tile_id}__{out_pattern}_{year_range}.tif',
+            'in_out': in_out,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': 'no data',
+            'sum_value': 'no data',
+            'data_type': 'no data'
+        }
+    else:    # Only calculates stats if there is data in the array
+        return {
+            'chunk_id': bounds_str,
+            'tile_id': tile_id,
+            'layer_name': name,
+            'pattern': out_pattern,
+            'years': year_range,
+            'chunk_name': f'{tile_id}__{bounds_str}__{out_pattern}_{year_range}.tif',
+            'tile_name': f'{tile_id}__{out_pattern}_{year_range}.tif',
+            'in_out': in_out,
+            'min_value': np.min(array_per_ha),
+            'mean_value': np.mean(array_per_ha),
+            'max_value': np.max(array_per_ha),
+            'count_value': np.count_nonzero(array_per_ha),
+            'sum_value': sum_value,
+            'data_type': array_per_ha.dtype.name
+        }
+
+
+# Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet.
+# Calculates the min and max value for each input and output across all chunks.
+# Calculates difference between pixel counts in all 1x1s in a 10x10 vs. the corresponding 10x10
+# to make sure that aggregation of 1x1s didn't lose any data (difference should be 0).
+# From https://chatgpt.com/share/e/67d5d68d-7168-800a-ada1-e42f8c3e9253
+def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger):
+
+    ### Part 1: Organizes chunk stats for 1x1 degree chunks (inputs and outputs)
+
+    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
+
+    main_logger.info(f"Starting to aggregate and export tile stats: {timestr()}")
+
+    # Converts accumulated 1x1 chunk statistics to a DataFrame
+    df_all_1x1_stats = pd.DataFrame(all_1x1_stats)
+
+    # Converts problematic non-numeric values to NaN
+    df_all_1x1_stats['min_value'] = pd.to_numeric(df_all_1x1_stats['min_value'], errors='coerce')
+    df_all_1x1_stats['max_value'] = pd.to_numeric(df_all_1x1_stats['max_value'], errors='coerce')
+
+    # Sorts the DataFrame by 'in_out' and 'layer_name'
+    main_logger.info(f"Sorting 1x1 tile stats by properties: {timestr()}")
+    sorted_1x1_stats = df_all_1x1_stats.sort_values(by=['in_out', 'layer_name']).reset_index(drop=True)
+
+    # Calculates the min and max values for each layer_name across all chunks
+    main_logger.info(f"Calculating min and max values across all 1x1 chunks: {timestr()}")
+    min_max_1x1_stats = df_all_1x1_stats.groupby('layer_name').agg(
+        min_value=('min_value', 'min'),
+        max_value=('max_value', 'max'),
+        count=('layer_name', 'count')
+    ).reset_index()
+
+    # Reads the shapefile from S3 to extract "chunk_id" and "iso" fields
+    # Based on https://chatgpt.com/share/e/6744de08-6b64-800a-b8c4-6a20833f7e3a
+    gdf = gpd.read_file(chunk_shapefile_uri)
+
+    # Creates a DataFrame with "chunk_id" and "iso" fields
+    fishnet_shapefile_df = gdf[['chunk_id', 'iso']]
+
+    # Merges the shapefile data with the statistics DataFrame
+    main_logger.info(f"Merging country code to 1x1 chunk stats table: {timestr()}")
+    merged_1x1_stats = sorted_1x1_stats.merge(fishnet_shapefile_df, on='chunk_id', how='left')
+
+    # When iso isn't assigned, empty cells are filled.
+    # iso is only assigned when the chunks are 1x1 deg (since that's what the fishnet uses)
+    merged_1x1_stats['iso'] = merged_1x1_stats['iso'].fillna('no iso assigned')
+
+    # There are so many chunks with so many inputs and outputs in a full model run that Excel can't handle all the rows
+    # and they need to be split across multiple workbook tabs.
+
+    # Separates input rows (in_out == 'input') and output rows (in_out == 'output')
+    main_logger.info(f"Separating 1x1 outputs into different tables: {timestr()}")
+    input_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'] == 'input_layer']
+    output_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'] == 'output_layer']
+
+    # Groups inputs that are a timeseries so they can go in their own tab so that no tab is too many rows
+    timeseries_input_layers = f'{cn.burned_area_final_pattern}|{cn.forest_disturbance_layer_name}|{cn.vegetation_height_pattern}|{cn.land_cover_pattern}'
+
+    # Splits input rows based on whether they are a timeseries input
+    annual_1x1_inputs = input_1x1_rows[input_1x1_rows['layer_name'].str.contains(timeseries_input_layers, case=False, na=False)]
+
+    # Puts output rows that aren't a timeseries input in their own tab
+    other_1x1_inputs = input_1x1_rows[~input_1x1_rows['layer_name'].str.contains(timeseries_input_layers, case=False, na=False)]
+
+    # Splits output rows based on 'layer_name' containing 'flux', 'gross', or 'net'
+    gross_flux_1x1_outputs = output_1x1_rows[output_1x1_rows['layer_name'].str.contains('gross', case=False, na=False)]
+    net_flux_1x1_outputs = output_1x1_rows[output_1x1_rows['layer_name'].str.contains('net|flux', case=False, na=False)]
+
+    # Puts output rows that don't contain 'flux|gross|net' in a separate tab
+    other_1x1_outputs = output_1x1_rows[~output_1x1_rows['layer_name'].str.contains('flux|gross|net', case=False, na=False)]
+
+
+    ### Part 2: Sums pixel counts for 1x1 degree outputs to their 10x10s, to make sure pixels aren't being lost in aggregation
+
+    # Counts the number of pixels in 1x1 chunks within each 10x10 chunk
+    main_logger.info(f"Calculating number of pixels in 1x1 chunk within each 10x10 chunk: {timestr()}")
+
+    # Forces pixel counts to numeric if they're not
+    output_1x1_rows.loc[:, 'count_value'] = pd.to_numeric(output_1x1_rows['count_value'], errors='coerce').fillna(0)
+
+    # Groups by tile_id and layer_name, summing count_value and sum_value
+    sum_1x1_to_10x10 = output_1x1_rows.groupby(['tile_id', 'layer_name']).agg(total_count=('count_value', 'sum')).reset_index()
+
+    # Creates the tile_name column
+    sum_1x1_to_10x10['tile_name'] = sum_1x1_to_10x10['tile_id'] + '__' + sum_1x1_to_10x10['layer_name'] + '.tif'
+
+    # Reorders columns to place tile_name between layer_name and total_count
+    sum_1x1_to_10x10 = sum_1x1_to_10x10[['tile_id', 'layer_name', 'tile_name', 'total_count']]
+
+
+    ### Part 3: Organizes pixel counts for aggregated 10x10 outputs (if created).
+    ### Calculates the difference between the pixel counts. Difference should be 0 for every 10x10 output.
+
+    # # Gets pixel counts in 10x10 deg chunks and joins the 1x1 pixel counts summed to 10x10 to their table
+    # if all_10x10_stats:
+    #
+    #     # Converts accumulated 1x1 chunk statistics to a DataFrame
+    #     df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
+    #
+    #     # Merges totals_10x10 with df_all_10x10_stats on tile_name
+    #     merged_1x1_10x10_counts = sum_1x1_to_10x10.merge(df_all_10x10_stats[['tile_name', 'count_value']], on='tile_name', how='left')
+    #
+    #     # Computes the difference between the pixel counts in the summed 1x1s and the corresponding 10x10
+    #     merged_1x1_10x10_counts['count_difference'] = merged_1x1_10x10_counts['total_count'] - merged_1x1_10x10_counts['count_value']
+    #     merged_1x1_10x10_counts = merged_1x1_10x10_counts.rename(columns={'total_count': 'pixel_count_1x1_summed', 'count_value': 'pixel_count_10x10'})
+    #
+    #     sum_difference = merged_1x1_10x10_counts['count_difference'].sum()
+    #     if sum_difference == 0:
+    #         main_logger.info(f"Difference between pixel counts in 1x1s vs. their respective 10x10s: {sum_difference} pixels: {timestr()}")
+    #     else:
+    #         main_logger.warning(f"WARNING: Difference between pixel counts in 1x1s vs. their respective 10x10s: {sum_difference} pixels: {timestr()}")
+
+
+    ### Part 4: Saves dataframes to Excel spreadsheet
+
+    # Writes the data to a single Excel file with separate sheets.
+    # Should continue with model post-processing even if chunk stats don't work for some reason
+    # (e.g., more many rows output than rows in an Excel spreadsheet)
+    out_spreadsheet = f'{stage}_1x1_chunk_statistics_{timestr()}.xlsx'
+    local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+
+    main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
+    try:
+        with pd.ExcelWriter(local_spreadsheet) as writer:
+
+            # Writes input rows to one sheet
+            main_logger.info(f"Writing inputs to spreadsheet: {timestr()}")
+            annual_1x1_inputs.to_excel(writer, sheet_name='annual_1x1_inputs', index=False)
+            other_1x1_inputs.to_excel(writer, sheet_name='other_1x1_inputs', index=False)
+
+            # Writes output rows based on layer_name conditions to separate sheets
+            main_logger.info(f"Writing outputs to spreadsheet: {timestr()}")
+            gross_flux_1x1_outputs.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
+            net_flux_1x1_outputs.to_excel(writer, sheet_name='net_outputs_1x1', index=False)
+            other_1x1_outputs.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
+
+            # Writes the min and max statistics to the second sheet
+            min_max_1x1_stats.to_excel(writer, sheet_name='min_max_for_layers_1x1', index=False)
+
+            # Writes the 1x1s summed to 10x10, if available
+            sum_1x1_to_10x10.to_excel(writer, sheet_name='1x1_counts_in_10x10', index=False)
+
+            # # Writes the 10x10 pixel counts, if calculated
+            # if all_10x10_stats:
+            #     merged_1x1_10x10_counts.to_excel(writer, sheet_name='pix_counts_compa_10x10_1x1', index=False)
+
+        main_logger.info(merged_1x1_stats.head())  # Show first few rows of the stats DataFrame for inspection
+
+        main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
+
+    except Exception as e:
+        main_logger.info(f"Can't print chunk stats: {e}")
+
+    if not no_upload:
+        main_logger.info(f"Uploading chunk stats spreadsheet to s3: {timestr()}")
+        s3_client.upload_file(local_spreadsheet, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
+        main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}")
+
+
+def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
+
+    ### Part 1: Organizes chunk stats for 1x1 degree chunks (inputs and outputs)
+
+    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
+
+    main_logger.info(f"Starting to aggregate and export tile stats: {timestr()}")
+
+    # Converts accumulated 1x1 chunk statistics to a DataFrame
+    df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
+
+    # Writes the data to a single Excel file with separate sheets.
+    # Should continue with model post-processing even if chunk stats don't work for some reason
+    # (e.g., more many rows output than rows in an Excel spreadsheet)
+    out_spreadsheet = f'{stage}_10x10_chunk_statistics_{timestr()}.xlsx'
+    local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+
+    main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
+    try:
+        with pd.ExcelWriter(local_spreadsheet) as writer:
+
+            df_all_10x10_stats.to_excel(writer, sheet_name='pix_counts_compa_10x10_1x1', index=False)
+
+        main_logger.info(df_all_10x10_stats.head())  # Show first few rows of the stats DataFrame for inspection
+
+        main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
+
+    except Exception as e:
+        main_logger.info(f"Can't print chunk stats: {e}")
+
+    if not no_upload:
+        main_logger.info(f"Uploading chunk stats spreadsheet to s3: {timestr()}")
+        s3_client.upload_file(local_spreadsheet, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
+        main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}")
+
+
+# Gets the datatype of a raster in s3.
+# This seems much faster than the rasterio version that ChatGPT suggested later in the chat.
+# From https://chatgpt.com/share/e/a48c768d-0331-43da-9fc6-ef8a84af586c
+def get_dtype_from_s3(key, s3_path):
+
+    # Constructs the /vsis3/ path
+    try:
+        vsis3_path = f'/vsis3/{s3_path[len("s3://"):]}'
+        data_type = get_dtype_from_raster(vsis3_path)
+        return data_type
+
+    except Exception as e:
+        print(f"Error: s3 path not available for getting datatype of first tile in {key}: {e}")
+        sys.exit(1)
+
+# Gets the datatype of a raster in a Coiled cluster
+def get_dtype_from_coiled(s3_path, local_path):
+    file = download_s3_file(s3_path, local_path)
+    data_type = get_dtype_from_raster(file)
+    return data_type
+
+# Gets the datatype of a raster
+def get_dtype_from_raster(file_path):
+
+    try:
+        dataset = gdal.Open(file_path)
+        if dataset is None:
+            raise ValueError(f"Could not open file {file_path}")
+
+        band = dataset.GetRasterBand(1)
+        if band is None:
+            raise ValueError(f"No raster bands found in file {file_path}")
+
+        data_type = gdal.GetDataTypeName(band.DataType)
+        return data_type
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return None  # Return None or an appropriate fallback value
+
+
+
+# Creates a dictionary of inputs where the keys are the dataset names and the values are a list with the first
+# tile of the dataset in s3 and the datatype,
+# e.g., {'land_cover_2000': ['s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/composite/2000/raw/00N_010E.tif', 'Byte'],
+# 'agc_2000': ['s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/40000_pixels/20240821/00N_010E__AGC_density_MgC_ha_2000.tif', 'Float32'],
+# 'drivers': ['s3://gfw2-data/climate/carbon_model/other_emissions_inputs/tree_cover_loss_drivers/processed/drivers_2022/20230407/00N_010E_tree_cover_loss_driver_processed.tif', 'Byte']}
+def add_file_type_to_dict(first_tiles):
+
+    # Dictionary where the keys are the dataset names and the values are a list with the first
+    # tile of the dataset in s3 and the datatype
+    download_dict_with_data_types = {}
+
+    # Iterates through the first tile of each tile set in s3 in the input dictionary
+    for key, file_path in first_tiles.items():
+
+        # Gets the datatype from the first tile of the dataset in s3
+        dtype = get_dtype_from_s3(key, file_path)
+        # Adds file path and dtype as a list as the value in the dictionary
+        download_dict_with_data_types[key] = [file_path, dtype]
+
+        # print(f"Key: {key}, File Path: {file_path}, Data Type: {dtype}")
+
+    return download_dict_with_data_types
+
+
+# Replaces a tile_id in s3 paths in a dictionary with another tile_id
+def replace_tile_id_in_dict(data_dict, new_tile_id):
+
+    # Loop through the dictionary and modify the values
+    for key, value in data_dict.items():
+        # Assuming value is a list where the first item is the file path
+        file_path = value[0]
+        # Replace the pattern in the file path with the new tile_id
+        updated_file_path = re.sub(cn.tile_id_pattern, new_tile_id, file_path)
+
+        # Update the dictionary with the new file path
+        data_dict[key][0] = updated_file_path
+
+    return data_dict
+
+
+# Identifies all chunks (1x1 deg tiles) that are adjacent to a focal chunk, plus the focal chunk.
+# Does not limit to chunks that actually exist.
+def get_adjacent_1x1_chunks(bbox):
+    """
+    Given a bounding box (W, S, E, N), return a list of 1x1 degree tile bounding boxes
+    that intersect it. Each tile is assumed to be aligned on integer degrees.
+
+    Parameters:
+    - bbox: tuple (W, S, E, N)
+
+    Returns:
+    - List of (xmin, ymin, xmax, ymax) tuples for intersecting tiles
+    """
+    west, south, east, north = bbox
+
+    # Floor west/south, ceil east/north to get inclusive range of tiles
+    xmin_tiles = int(np.floor(west))
+    xmax_tiles = int(np.ceil(east))
+    ymin_tiles = int(np.floor(south))
+    ymax_tiles = int(np.ceil(north))
+
+    tile_bounds = []
+    for x in range(xmin_tiles, xmax_tiles):
+        for y in range(ymin_tiles, ymax_tiles):
+            tile_bounds.append((x, y, x + 1, y + 1))  # 1x1 degree tile
+
+    return tile_bounds
+
+
+
+# Fills any missing chunks (layers) with NoData (0s) of the correct datatype.
+# The 0s must be the correct datatype so that the numba function receives consistent datatypes for each input dataset.
+# Needs to be expanded if additional datatypes are being used.
+def fill_missing_input_layers_with_no_data(layers, uint8_list, int16_list, int32_list, float32_list,
+                                           bounds_str, tile_id, is_final, logger):
+
+   # Fills missing layers with arrays of the appropriate data type and size
+    for key, array in layers.items():
+        if array is None:
+
+            # Determines the appropriate dtype based on the categorized lists
+            if key in uint8_list:
+                dtype = np.uint8
+            elif key in int16_list:
+                dtype = np.int16
+            elif key in int32_list:
+                dtype = np.int32
+            elif key in float32_list:
+                dtype = np.float32
+            else:
+                raise ValueError(f"Key {key} for chunk {bounds_str} in {tile_id} not found in any data type lists: {timestr()}")
+
+            # Finds an existing array to use as a template for size
+            existing_array = next((arr for arr in layers.values() if arr is not None), None)
+            if existing_array is not None:
+                # Creates an array of zeros with the same shape and the determined dtype
+                layers[key] = np.zeros(existing_array.shape, dtype=dtype)
+                # print(f"Filled missing layer '{key}' with an array of zeros (dtype={dtype}).")
+                lu.print_and_log(f"Created {key} for chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
+            else:
+                # Handles the case where no data exists at all
+                raise ValueError(f"No data available to determine the size for the missing layer {key} for chunk {bounds_str} in {tile_id}: {timestr()}")
+
+    return layers
+
+
+# Extracts the file name pattern and year (or year range) from a string
+# Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/670e9a35-71b8-800a-aae1-9bbff7485a30 (including the pattern)
+def strip_and_extract_years(key):
+
+    pattern = re.sub(cn.date_date_range_pattern, '', key)
+
+    try:
+        year_range = re.search(cn.date_date_range_pattern, key).group()[1:]
+    except:
+        year_range = 'no year range'
+
+    return pattern, year_range
+
+
+# Removes the pixel meaning (per-ha or per-pixel) from a string
+def strip_pixel_meaning(key):
+
+    # Try each suffix in order
+    for meaning in cn.pixel_meanings:
+        if meaning in key:
+            out_pattern_without_pixel_meaning = re.sub(re.escape(meaning), '', key)
+
+            return out_pattern_without_pixel_meaning, meaning
+
+    # If none of the known pixel meanings are found, the key is returned as the pattern and the meaning is empty
+    return key, ''
+
+
+# Creates a dataframe from the attribute table of the 1x1 deg fishnet with GADM iso joined to it
+def fishnet_with_GADM_iso(shapefile_uri):
+
+    # Reads the 1x1 deg fishnet with GADM iso joined from S3 to extract "chunk_id" and "iso" fields
+    gdf = gpd.read_file(shapefile_uri)
+
+    # Creates a DataFrame of the 1x1def fishnet with "chunk_id" and "iso" fields
+    fishnet_df = gdf[['chunk_id', 'iso']]
+
+    return fishnet_df
+
+
+def get_cluster_info(client, cluster):
+
+    # Retrieves properties of the workers
+    workers = client.scheduler_info()["workers"]
+
+    # Retrieves the number of workers
+    n_workers = len(workers)
+
+    # Retrieves the number of threads per worker
+    # https://chatgpt.com/share/e/672503f1-eef8-800a-9218-281624acf27e
+    first_worker_address = next(iter(workers.keys()))
+    nthreads = workers[first_worker_address]["nthreads"]
+
+    # Retrieves scheduler info for other cluster properties
+    scheduler_info = cluster.scheduler_info  # Access scheduler info directly as a dictionary
+
+    # Gets memory per worker.
+    # Can't get it to report the worker instance type
+    try:
+        worker_memory_bytes = scheduler_info['workers'][next(iter(scheduler_info['workers']))]['memory_limit']
+        worker_memory_gb = worker_memory_bytes / (1024 ** 3)  # Convert bytes to GB
+        worker_memory = f"{worker_memory_gb:.2f} GB"  # Format to 2 decimal places
+        # worker_type = coiled_cluster.config.get('worker_options', {}).get('instance_type', "Unknown")
+    except KeyError:
+        worker_memory = "Unknown"
+        # worker_type = "Unknown"
+
+    return worker_memory, n_workers, nthreads
+
+
+# Creates an empty txt file for each chunk in s3.
+# Uses concurrent.futures to parallelize the txt creation. Otherwise, it's very slow.
+# Based on https://chatgpt.com/share/e/67bf0fd9-7cb0-800a-8666-2becd97d45a7
+# Uses ThreadPoolExecutor and `as_completed()` to avoid blocking.
+def create_s3_task_files(stage, chunk_list):
+
+    s3 = boto3.client("s3")
+
+    # Uploads a single task file to S3.
+    def upload_task_file(chunk):
+
+        chunk_id_str = boundstr(chunk)  # Converts chunk ID to string
+        tile_id = xy_to_tile_id(chunk[0], chunk[3])
+        key = f"{cn.progress_tracking_path}pending_{tile_id}_{chunk_id_str}_{stage}.txt"
+
+        try:
+            s3.put_object(Bucket=cn.short_bucket_prefix, Key=key, Body="")
+            return f"Created: {key}"
+        except Exception as e:
+            return f"Error creating task file {key}: {e}"
+
+    # Uses ThreadPoolExecutor for parallel uploads
+    max_workers = min(100, len(chunk_list))  # Limits workers to 100 or chunk count
+
+    start_time = time.time()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_chunk = {executor.submit(upload_task_file, chunk): chunk for chunk in chunk_list}
+
+        for future in concurrent.futures.as_completed(future_to_chunk):
+            result = future.result()
+            # print(result)  # Print each upload result in real-time
+
+    elapsed_time = time.time() - start_time
+    print(f"Created task tracking files in {cn.progress_tracking_path} in {elapsed_time:.2f} seconds")
+
+
+# Renames the tracking file from 'pending' to 'in_progress' when a task starts
+def rename_s3_task_file(stage, chunk_id, new_status, is_final, logger_worker):
+
+    s3 = boto3.client("s3")
+    chunk_id_str = boundstr(chunk_id)  # Converts chunk ID to string
+    tile_id = xy_to_tile_id(chunk_id[0], chunk_id[3])
+
+    # Iterates through the task status prefixes to find the status of the specific chunk .
+    # Order of statuses matters: first one found is renamed.
+    for prefix in cn.possible_task_statuses:
+        old_key = f"{cn.progress_tracking_path}{prefix}{tile_id}_{chunk_id_str}_{stage}.txt"
+        new_key = f"{cn.progress_tracking_path}{new_status}{tile_id}_{chunk_id_str}_{stage}.txt"
+
+        try:
+            # Copies to new name and delete the old file
+            s3.copy_object(Bucket=cn.short_bucket_prefix,
+                           CopySource={'Bucket': cn.short_bucket_prefix, 'Key': old_key}, Key=new_key)
+            s3.delete_object(Bucket=cn.short_bucket_prefix, Key=old_key)
+            return  # Stop after renaming the first matching file
+        except s3.exceptions.ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                continue  # Try the next possible prefix
+            else:
+                print(f"Error renaming task file {old_key}: {e}")
+                return
+
+    lu.print_and_log(f"No existing task file found for chunk {chunk_id}. Skipping rename.", is_final, logger_worker)
+
+
+# Deletes the tracking txt file from S3 when a task is completed
+def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
+
+    s3 = boto3.client("s3")
+    chunk_id_str = boundstr(chunk_id)  # Converts chunk ID to string
+    tile_id = xy_to_tile_id(chunk_id[0], chunk_id[3])
+
+    # Iterates through the task status prefixes to find the status of the specific chunk
+    for prefix in cn.possible_task_statuses:
+        key = f"{cn.progress_tracking_path}{prefix}{tile_id}_{chunk_id_str}_{stage}.txt"
+
+        try:
+            s3.delete_object(Bucket=cn.short_bucket_prefix, Key=key)
+            # print(f"Deleted: {key}")
+            deleted = True  # Marks that at least one file was deleted
+        except s3.exceptions.ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                continue  # Moves to the next possible file if a file with that status doesn't exist
+            else:
+                # print(f"Error deleting task file {key}: {e}")
+                return  # Exit if there's a real error
+
+    # Logs if no files were deleted
+    if not deleted:
+
+        lu.print_and_log(f"No task file found for chunk {chunk_id}. Nothing to delete.", is_final, logger_worker)
+
+
+###################################################################################################
+# Hansenize Functions
+###################################################################################################
+# Function to build a VRT using GDAL with vsis3 paths
+    # raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
+    # output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is created
+def build_vrt_gdal_local(raw_raster_paths_list_s3, output_vrt_s3):
+    # Set the environment variable to enable random writes for S3 using vsis3
+    os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
+
+    # Convert S3 paths to vsis3 format
+    raw_raster_paths_list_vsis3 = [path.replace("s3://", "/vsis3/") for path in raw_raster_paths_list_s3]
+    output_vrt_vsis3 = output_vrt_s3.replace("s3://", "/vsis3/")
+
+    # Use GDAL to build the VRT
+    gdal.BuildVRT(output_vrt_vsis3, raw_raster_paths_list_vsis3)
+
+    #Check that s3 file exists
+    check_s3_file_created(output_vrt_s3)
+
+# Checks if a VRT already exists in s3
+# https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67dc3f96-40f0-800a-9c89-2895c332bd01
+def vrt_exists_in_s3(output_vrt_s3):
+
+    s3 = boto3.client("s3")
+
+    # Parse the S3 path
+    s3_path_parts = output_vrt_s3.replace("s3://", "").split("/", 1)
+    bucket_name = s3_path_parts[0]
+    object_key = s3_path_parts[1]
+
+    try:
+        # Check if the file exists in S3
+        s3.head_object(Bucket=bucket_name, Key=object_key)
+        return True  # File exists
+    except s3.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return False  # File does not exist
+        else:
+            raise  # Some other error occurred
+
+
+# Function to build a VRT using GDAL using tmp dir as intermediate step to download input files and build VRT
+# raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
+# output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is saved to
+def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
+
+    # Check if the VRT file already exists in S3
+    if vrt_exists_in_s3(output_vrt_s3):
+        print(f"VRT file already exists in S3: {output_vrt_s3}. Skipping creation.")
+        return
+
+    vsis3_paths = []
+    for s3_path in raw_raster_paths_list_s3:
+        vsis3_path = s3_path.replace("s3://", "/vsis3/")
+        vsis3_paths.append(vsis3_path)
+
+    # Use GDAL to build the VRT
+    # gdal.BuildVRT(local_vrt, "/vsis3/gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/N00E010_ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0.tif")
+    gdal.BuildVRT(local_vrt, vsis3_paths)
+    print(f"Built vrt: {timestr()}")
+
+    # Various checks that vrt was created and has data in it
+    try:
+        vrt_dataset = rasterio.open(local_vrt)
+    except rasterio.errors.RasterioIOError:
+        print("Error: VRT file not found or invalid.")
+        exit()
+
+    if vrt_dataset.count == 0:
+        print("VRT has no data or invalid sources.")
+        exit()
+    else:
+        print("VRT contains data.")
+
+    if vrt_dataset.bounds:
+        print("VRT contains data or has valid metadata.")
+    else:
+        print("VRT has no data or invalid metadata.")
+        exit()
+
+    vrt_dataset.close()
+
+    print(f"File '{local_vrt}' exists at {os.path.abspath(local_vrt)}.")
+    upload_s3_file(output_vrt_s3, local_vrt)
+    check_s3_file_created(output_vrt_s3)
+
+
+# Function to read a VRT from S3 using GDAL and vsis3
+def warp_to_hansen_local(source_raster_s3_path, output_raster_s3_path, xmin, ymin, xmax, ymax, dt, no_data, tiled=True,
+                   x_pixel_window=400, y_pixel_window=400):
+    #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
+
+    # Set the environment variable to enable random writes for S3
+    os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
+
+    # Check that pixel window arguments are given if tiled = True
+    if tiled and not (x_pixel_window and y_pixel_window):
+        raise ValueError("If tiled = True, x_pixel_window and y_pixel_window must be passed as arguments")
+
+    # Convert the S3 paths to GDAL's vsis3 paths
+    source_gdal_path = source_raster_s3_path.replace("s3://", "/vsis3/")
+    output_gdal_path = output_raster_s3_path.replace("s3://", "/vsis3/")
+
+    # Open the VRT
+    dataset = gdal.Open(source_gdal_path)
+
+    if dataset:
+        if tiled == True:
+            # Warp the VRT to the new raster
+            options = gdal.WarpOptions(
+                dstSRS='EPSG:4326',  # Reproject to WGS84
+                xRes=0.00025,  # X resolution (10 degrees)
+                yRes=0.00025,  # Y resolution (10 degrees)
+                targetAlignedPixels=True,  # Ensure target aligned pixels (-tap)
+                outputBounds=[xmin, ymin, xmax, ymax],  # Output bounds
+                dstNodata=no_data,  # Set no data to 0
+                outputType=dt,  # Output data type
+                creationOptions=['COMPRESS=DEFLATE', 'TILED=YES',   # Tiling with user-specified dimensions
+                                 f'BLOCKXSIZE={x_pixel_window}',
+                                 f'BLOCKYSIZE={y_pixel_window}'],
+                format='GTiff'  # Output format
+            )
+        else:
+            # Warp the VRT to the new raster
+            options = gdal.WarpOptions(
+                dstSRS='EPSG:4326',
+                xRes=0.00025,
+                yRes=0.00025,
+                targetAlignedPixels=True,
+                outputBounds=[xmin, ymin, xmax, ymax],
+                dstNodata=no_data,
+                outputType=dt,
+                creationOptions=['COMPRESS=DEFLATE', 'TILED=NO'],  # No tiling (i.e. 40,000 x 1)
+                format='GTiff'
+            )
+
+        gdal.Warp(output_gdal_path, source_gdal_path, options=options)
+
+        # Check that file exists
+        check_s3_file_created(output_raster_s3_path)
+
+    else:
+        raise RuntimeError(f"Failed to open VRT: {source_gdal_path}")
+
+# Creates a 10x10 deg raster at 0.00025x0.00025 resolution from a VRT for a specified bounding box
+def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_name, xmin, ymin, xmax, ymax,
+                          dt, no_data, tiled=True, x_pixel_window=400, y_pixel_window=400):
+    #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
+
+    logger_worker = lu.setup_logging_worker()
+
+    source_vrt_path = source_vrt_path.replace("s3://", "/vsis3/")  #VRT has to be accessed using /vsis3/
+
+    lu.print_and_log(f"Creating {filename}: {timestr()}...", False, logger_worker)
+
+    # Check that pixel window arguments are given if tiled = True
+    if tiled and not (x_pixel_window and y_pixel_window):
+        raise ValueError("If tiled = True, x_pixel_window and y_pixel_window must be passed as arguments")
+
+    # Open the VRT
+    dataset = gdal.Open(str(Path(source_vrt_path)))
+
+    #Code to run gdal warp using Python API
+    if dataset:
+        if tiled == True:
+            # Warp the VRT to the new raster
+            options = gdal.WarpOptions(
+                dstSRS='EPSG:4326',  # Reproject to WGS84
+                xRes=cn.resolution,  # X resolution (10 degrees)
+                yRes=cn.resolution,  # Y resolution (10 degrees)
+                targetAlignedPixels=True,  # Ensure target aligned pixels (-tap)
+                outputBounds=[xmin, ymin, xmax, ymax],  # Output bounds
+                dstNodata=no_data,  # Set no data to 0
+                outputType=dt,  # Output data type
+                creationOptions=['COMPRESS=DEFLATE', 'TILED=YES',  # Tiling with user-specified dimensions
+                                 f'BLOCKXSIZE={x_pixel_window}',
+                                 f'BLOCKYSIZE={y_pixel_window}'],
+                format='GTiff'  # Output format
+            )
+        else:
+            # Warp the VRT to the new raster
+            options = gdal.WarpOptions(
+                dstSRS='EPSG:4326',
+                xRes=cn.resolution,
+                yRes=cn.resolution,
+                targetAlignedPixels=True,
+                outputBounds=[xmin, ymin, xmax, ymax],
+                dstNodata=no_data,
+                outputType=dt,
+                creationOptions=['COMPRESS=DEFLATE', 'TILED=NO'],  # No tiling (i.e. 40,000 x 1)
+                format='GTiff'
+            )
+
+        gdal.Warp(str(Path(filename)), str(Path(source_vrt_path)), options=options)
+        lu.print_and_log(f"{filename} created: {timestr()}", True, logger_worker)
+
+        lu.print_and_log(f"Checking if {filename} contains data: {timestr()}", True, logger_worker)
+        if check_geotiff_has_data(filename):
+            lu.print_and_log(f"{filename} contains data. Uploading to s3: {timestr()}", True, logger_worker)
+        else:
+            lu.print_and_log(f"{filename} is empty or contains only NoData values. Not uploading to s3: {timestr()}", False, logger_worker)
+            return f"{filename} is empty or contains only NoData values. Not uploading to s3: {timestr()}"
+
+        # Uploads tile to s3
+        upload_s3_file(output_raster_s3_path_and_name, filename)
+        lu.print_and_log(f"{filename} uploaded to s3: {timestr()}", True, logger_worker)
+
+        # Deletes rasters from cluster after uploading to s3
+        os.remove(str(Path(filename)))
+
+        success_message = f"Success Hansenizing {filename}: {timestr()}"
+        return success_message  # Return both the success message and the statistics
+
+    else:
+        raise RuntimeError(f"Failed to open VRT: {source_vrt_path}")
+
+
+def delete_build_vrt_input_files(raw_raster_paths_list_s3, vrt):
+    # Delete local input files
+    for s3_path in raw_raster_paths_list_s3:
+        local_file = s3_path.split('/')[-1]
+        os.remove(str(Path(local_file)))
+
+    # Delete local vrt
+    os.remove(str(Path(vrt)))
+
+
+###################################################################################################
+# 4km Map Function
+###################################################################################################
+def reaggregate_resolution(data, original_res, target_res):
+    #Courtesy of ChatGPT
+    #TODO include the ChatGPT conversation link. Useful to come back to it sometimes...
+    """
+    Reaggregates a numpy array by summing values within the target resolution window.
+
+    Parameters:
+        data (numpy array): The input array at high resolution.
+        original_res (float): The resolution of the input data.
+        target_res (float): The desired resolution for the output data.
+
+    Returns:
+        numpy array: The reaggregated array at the desired resolution.
+    """
+    factor = int(target_res / original_res)
+    new_shape = (
+        data.shape[0] // factor,
+        factor,
+        data.shape[1] // factor,
+        factor
+    )
+    # Reshape and sum
+    return data.reshape(new_shape).sum(axis=(1, 3))
+
+
+###################################################################################################
+# Zonal Stats Functions
+###################################################################################################
+# Function to calculate the number of bits needed to represent the maximum value in the array
+def calculate_bits_needed(max_value):
+    return int(np.ceil(np.log2(max_value + 1)))
+
+
+# Convert numpy arrays to dask arrays if needed
+def ensure_dask_array(array, chunks="auto"):
+    if isinstance(array, np.ndarray):
+        return da.from_array(array, chunks=chunks)
+    return array
+
+
+# Ensure all layers have a consistent data type (int16) for bit-shifting
+def ensure_dtype(layer_array, dtype=np.int16):
+    if layer_array.dtype != dtype:
+        return layer_array.astype(dtype)
+    return layer_array
+
+
+# Dynamically combine layers using bit-shifting
+def combine_zone_layers(sorted_layers):
+    combined_array = None
+    total_shift = 0
+
+    # Loop through each layer
+    for layer_name, layer_array in sorted_layers:
+        # Convert to dask.array if it's a numpy array
+        layer_array = ensure_dask_array(layer_array)
+
+        # Convert layer to int16 if necessary for safe bit-shifting
+        layer_array = ensure_dtype(layer_array)
+
+        # Find the maximum value in the layer
+        max_value = da.max(layer_array).compute()  # Compute to get the actual maximum value
+
+        # Determine the number of bits needed to represent this layer
+        bits_needed = calculate_bits_needed(max_value)
+
+        # Print unique values in the current layer before shifting
+        # print(f"Unique values in layer '{layer_name}' before shifting: {np.unique(layer_array.compute())}")
+
+        # Shift the layer by the cumulative number of bits (based on previous layers)
+        shifted_layer = layer_array << total_shift
+
+        # Print unique values in the current layer after shifting
+        # print(f"Unique values in layer '{layer_name}' after shifting: {np.unique(shifted_layer.compute())}")
+
+        # If this is the first layer, initialize the combined array
+        if combined_array is None:
+            combined_array = shifted_layer
+        else:
+            # Use bitwise OR to combine the shifted layer with the previous layers
+            combined_array = combined_array | shifted_layer
+
+        # Update the total bit shift for the next layer
+        total_shift += bits_needed
+
+    return combined_array
+
+
+# converts all numpy arrays in data dictionary to same type (default set to float32)
+def to_numpy_type(input_dict, check_type=np.float32):
+    out_dict = dict()
+    for key, value in input_dict.items():
+        if value.dtype != check_type:
+            out_dict[key] = value.astype(check_type)
+        else:
+            out_dict[key] = value
+    return out_dict
+
+
+# converts a python dictionary to a numba dictionary (data dictionaries all need to be the same type)
+def to_numba_dict(input_dict):
+    from numba import from_dtype
+    out = None
+
+    for key, value in input_dict.items():
+        if out is None:
+            dict_type = from_dtype(value.dtype)
+            ndim = value.ndim
+            out = Dict.empty(key_type=types.unicode_type, value_type=types.Array(dict_type, ndim, "A"))
+        out[key] = value
+    return out
+
+
+# calculates per-pixel carbon stocks/ fluxes by converting square meter pixel area rasters to hectares and multiplying densities/ factors by pixel area in hectares
+@jit(nopython=True)
+def calculate_total_mgc(numba_dict, input_units="MgC_ha", rep_str="MgC", pixel_area_name="pixel_area_m",
+                        area_ha_name="pixel_area_ha"):
+    output_dict = dict()
+    dense_flux_arrays = dict()
+    pixel_area = numba_dict[pixel_area_name]
+
+    for key, value in numba_dict.items():
+        if key != pixel_area_name:
+            updated_key = key.replace(input_units, rep_str)
+            output_dict[updated_key] = np.zeros_like(value)
+            dense_flux_arrays[updated_key] = value
+    output_dict[area_ha_name] = np.zeros_like(pixel_area)
+
+    # Loop over each pixel
+    for key, value in dense_flux_arrays.items():
+        for i in range(value.shape[0]):
+            for j in range(value.shape[1]):
+                # Convert pixel_area from square meters to hectares
+                square_meters_to_hectares = np.float32(10000.0)
+                area_in_hectares = pixel_area[i, j] / square_meters_to_hectares
+                output_dict[key][i, j] = value[i, j] * area_in_hectares
+                output_dict[area_ha_name][i, j] = area_in_hectares
+
+    return output_dict
+
+
+# Function to reverse the bit-shifting process
+def reverse_bit_shifting(df, column_name, sorted_layers):
+    # Calculate bits_needed_per_layer based on max values from Dask arrays in sorted_layers
+    bits_needed_per_layer = []
+
+    for layer_name, layer_array in sorted_layers:
+        # Ensure the layer is a Dask array and calculate max value
+        layer_array = ensure_dask_array(layer_array)
+        max_value = da.max(layer_array).compute()  # Compute the maximum value
+
+        # Determine the number of bits needed to represent this layer
+        bits_needed = calculate_bits_needed(max_value)
+        bits_needed_per_layer.append(bits_needed)
+
+    total_shift = sum(bits_needed_per_layer)  # Start with the total bits used
+
+    # Reverse bit-shifting: loop through each layer in reverse order
+    layers = [layer_name for layer_name, _ in sorted_layers]  # Get the sorted layer names
+    for i in range(len(layers) - 1, -1, -1):
+        layer = layers[i]
+        bits_needed = bits_needed_per_layer[i]
+        total_shift -= bits_needed
+        # Create a mask for extracting the current layer
+        mask = (1 << bits_needed) - 1
+        # Shift right and apply the mask to extract the current layer's values
+        df[layer] = df[column_name].apply(lambda x: (x >> total_shift) & mask)
+
+    return df

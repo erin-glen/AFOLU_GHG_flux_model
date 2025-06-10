@@ -32,15 +32,15 @@ INVENTORY_PERIODS = [
     # "2000_2005",
     # "2005_2010",
     # "2010_2015",
-    "2015_2020",
-    # "2020_2023"
+    # "2015_2020",
+    "2020_2023"
 ]
 
 BASE_URL = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/"
     "outputs/version_0_3_8"
 )
-OUTPUT_DATE = "20250609"
+OUTPUT_DATE = "20250610"
 
 
 def get_input_datasets(
