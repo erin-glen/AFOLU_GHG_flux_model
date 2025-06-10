@@ -9,7 +9,58 @@ import numpy as np
 from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
 from ..utilities import log_utilities as lu
-from .LULUCF_fluxes_aggregate_to_10x10deg import get_input_datasets
+
+DATA_TYPES = [
+    # "burned_ch4_co2e",
+    "burned_co2"
+    # "burned_co_co2e",
+    # "burned_state",
+    # "burned_emission_state",
+    # "burned_total_co2e",
+    # "drained_ch4_ditch_co2e",
+    # "drained_ch4_land_co2e",
+    # "drained_co2",
+    # "drained_co2_offsite",
+    # "drained_n2o_co2e",
+    # "drained_total_co2e",
+    # "emission_state",
+    # "soil",
+    # "state",
+]
+
+INVENTORY_PERIODS = [
+    # "2000_2005",
+    # "2005_2010",
+    # "2010_2015",
+    "2015_2020",
+    # "2020_2023"
+]
+
+BASE_URL = (
+    "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/"
+    "outputs/version_0_3_8"
+)
+OUTPUT_DATE = "20250609"
+
+
+def get_input_datasets(
+    pixel_resolution: str,
+    data_types: list[str] | None = None,
+    inventory_periods: list[str] | None = None,
+) -> list[str]:
+    """Return list of S3 folders for organic soil outputs."""
+    data_types = data_types or DATA_TYPES
+    inventory_periods = inventory_periods or INVENTORY_PERIODS
+
+    paths = []
+    for period in inventory_periods:
+        for dtype in data_types:
+            path = (
+                f"{BASE_URL}/{dtype}/ogh_standard_model/"
+                f"five_year_intervals/{period}/{pixel_resolution}/{OUTPUT_DATE}"
+            )
+            paths.append(path)
+    return paths
 
 
 def agg_4x4(tile_id, bounds, chunk_length_pixels, pixel_area_tile, mg_ha_yr_tile,
@@ -90,9 +141,9 @@ def build_download_upload_dict(pixel_resolution: str) -> dict:
         parts = path.rstrip("/").split("/")
         dataset = parts[8]
         interval = parts[11]
-        key = f"{dataset}_{interval}"
+        key = f"{dataset}__{interval}"
         mg_ha_yr_dir = path if path.endswith("/") else f"{path}/"
-        mg_ha_yr_pattern = f"__{dataset}_{interval}.tif"
+        mg_ha_yr_pattern = f"__{dataset}__{interval}.tif"
         mg_per_pixel_dir = mg_ha_yr_dir.replace(pixel_resolution, "per_pixel")
         mg_per_pixel_pattern = f"__{dataset}_per_pixel_{interval}.tif"
         out_dir = (
@@ -166,7 +217,6 @@ def main(cluster_name: str, pixel_resolution: str):
 
     client.close()
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Aggregate AFOLU model output into global ~4km rasters."
@@ -181,3 +231,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args.cluster_name, args.pixel_resolution)
+
+
