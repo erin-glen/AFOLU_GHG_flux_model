@@ -12,14 +12,14 @@ from ..utilities import log_utilities as lu
 
 DATA_TYPES = [
     # "burned_ch4_co2e",
-    "burned_co2"
+    # "burned_co2"
     # "burned_co_co2e",
     # "burned_state",
     # "burned_emission_state",
     # "burned_total_co2e",
     # "drained_ch4_ditch_co2e",
     # "drained_ch4_land_co2e",
-    # "drained_co2",
+    "drained_co2",
     # "drained_co2_offsite",
     # "drained_n2o_co2e",
     # "drained_total_co2e",
@@ -32,8 +32,8 @@ INVENTORY_PERIODS = [
     # "2000_2005",
     # "2005_2010",
     # "2010_2015",
-    # "2015_2020",
-    "2020_2023"
+    "2015_2020",
+    # "2020_2023"
 ]
 
 BASE_URL = (
@@ -161,8 +161,10 @@ def build_download_upload_dict(pixel_resolution: str) -> dict:
     return dictionary
 
 
-def main(cluster_name: str, pixel_resolution: str):
-    run_local = False
+def main(cluster_name: str, pixel_resolution: str, run_local: bool = False):
+    logger = lu.setup_logging_main()
+    is_final = not run_local
+
     cluster, client = uu.connect_to_cluster(cluster_name, run_local)
 
     download_upload_dictionary = build_download_upload_dict(pixel_resolution)
@@ -173,10 +175,17 @@ def main(cluster_name: str, pixel_resolution: str):
         for tile_id in cn.tile_id_list:
             stage = f"create 0.04x0.04 deg tile rasters for {key}"
             start_time = uu.timestr()
-            print(f"Stage {stage} started at: {start_time}")
+            lu.print_and_log(
+                f"Stage {stage} started at: {start_time}", is_final, logger
+            )
 
             mg_ha_yr_tile = f"{items['mg_ha_yr_dir']}{tile_id}{items['mg_ha_yr_pattern']}"
             pixel_area_tile = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
+            lu.print_and_log(
+                f"Processing {tile_id}:\nmg_ha_yr_tile: {mg_ha_yr_tile}\npixel_area_tile: {pixel_area_tile}",
+                is_final,
+                logger,
+            )
             per_pixel_tile_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
             per_pixel_output_path = items["mg_per_pixel_dir"]
 
@@ -198,7 +207,9 @@ def main(cluster_name: str, pixel_resolution: str):
 
         stage = f"create 0.04x0.04 degree global raster for {key}"
         start_time = uu.timestr()
-        print(f"Stage {stage} started at: {start_time}")
+        lu.print_and_log(
+            f"Stage {stage} started at: {start_time}", is_final, logger
+        )
 
         tiles = dask.compute(*delayed_results)
 
@@ -213,7 +224,11 @@ def main(cluster_name: str, pixel_resolution: str):
             global_4km_outfile,
             global_4km_output_path,
         )
-        print(result)
+        lu.print_and_log(
+            f"Global raster saved to {global_4km_output_path}{global_4km_outfile}",
+            is_final,
+            logger,
+        )
 
     client.close()
 
@@ -228,8 +243,12 @@ if __name__ == "__main__":
         default="40000_pixels",
         help="Input raster resolution",
     )
+    parser.add_argument(
+        "--run_local",
+        action="store_true",
+        help="Run locally without Dask/Coiled",
+    )
     args = parser.parse_args()
 
-    main(args.cluster_name, args.pixel_resolution)
-
+    main(args.cluster_name, args.pixel_resolution, args.run_local)
 
