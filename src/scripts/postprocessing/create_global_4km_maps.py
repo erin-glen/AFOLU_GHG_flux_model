@@ -175,7 +175,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-p",
         "--pixel_resolution",
-        default="4000_pixels",
+        default="40000_pixels",
         help="Input raster resolution",
     )
     args = parser.parse_args()
