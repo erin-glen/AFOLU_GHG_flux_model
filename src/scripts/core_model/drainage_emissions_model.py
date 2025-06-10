@@ -452,8 +452,18 @@ def calculate_and_upload_drainage(
     import re
 
     dwn = copy.deepcopy(typed_dict)
-    for k, (uri, dt) in dwn.items():
+    for k, (uri, dt) in list(dwn.items()):
         dwn[k] = (re.sub(cn.tile_id_pattern, tid, uri), dt)
+
+    # Drop burned area years outside the current interval
+    for k in list(dwn.keys()):
+        if k.startswith(cn.burned_area_final_pattern):
+            try:
+                yr = int(k.split("_")[-1])
+            except ValueError:
+                continue
+            if yr < iv_start or yr > iv_end:
+                dwn.pop(k)
 
     if not uu.check_for_tile(dwn, is_final, logger):
         return f"Skipped {bstr} (tile absent)", chunk_stats
