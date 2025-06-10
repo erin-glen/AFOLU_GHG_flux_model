@@ -112,7 +112,7 @@ def build_download_upload_dict(pixel_resolution: str) -> dict:
 
 def main(cluster_name: str, pixel_resolution: str):
     run_local = False
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    cluster, client = uu.connect_to_cluster(cluster_name, run_local)
 
     download_upload_dictionary = build_download_upload_dict(pixel_resolution)
 
