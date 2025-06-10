@@ -524,6 +524,54 @@ def open_window_as_array(
         return np.zeros((chunk_px, chunk_px), dtype=_dtype(gdal_dtype))
 
 
+def get_tile_dataset_rio(
+    uri: str,
+    dtype_str: str,
+    bounds: list,
+    chunk_px: int,
+    is_final: bool,
+    logger,
+) -> tuple:
+    """Return array window from *uri* using rasterio.
+
+    Parameters
+    ----------
+    uri : str
+        Local or S3 path to GeoTIFF.
+    dtype_str : str
+        GDAL datatype name like ``"Float32"``.
+    bounds : list
+        Window bounds in ``[W, S, E, N]`` order.
+    chunk_px : int
+        Output array size in pixels (width/height).
+    is_final : bool
+        If ``True`` log at info level; otherwise debug.
+    logger : logging.Logger
+
+    Returns
+    -------
+    tuple
+        ``(array, True)`` if successful else ``(zeros, False)``.
+    """
+
+    dtype = _dtype(dtype_str)
+    if uri is None:
+        return np.zeros((chunk_px, chunk_px), dtype=dtype), False
+
+    path = uri
+    if uri.startswith("s3://"):
+        path = f"/vsis3/{uri[5:]}"
+
+    try:
+        with rasterio.Env():
+            with rasterio.open(path) as ds:
+                arr = ds.read(1, window=from_bounds(*bounds, ds.transform))
+        return arr.astype(dtype), True
+    except Exception as exc:  # pragma: no cover - network/gdal issues
+        lu.print_and_log(f"WARNING: {uri} failed ({exc}) -> zeros", is_final, logger)
+        return np.zeros((chunk_px, chunk_px), dtype=dtype), False
+
+
 def queue_chunk_downloads(
     bounds, typed_dict, chunk_px, logger, max_threads=16, is_final=False
 ):
@@ -685,6 +733,56 @@ def save_and_upload_small_raster_set(
         lu.print_and_log(f"uploaded {fname} to {s3_folder}", is_final, logger)
 
 
+def save_and_upload_single_raster(
+    bounds,
+    chunk_px,
+    tile_id,
+    arr,
+    dtype,
+    outfile,
+    outdir,
+    is_final,
+    logger,
+    no_data_val=None,
+):
+    """Write *arr* to GeoTIFF and upload to ``outdir`` on S3."""
+    import tempfile
+    from rasterio.transform import from_bounds
+
+    s3c = boto3.client(
+        "s3", config=Config(retries={"max_attempts": 10, "mode": "standard"})
+    )
+    transform = from_bounds(*bounds, width=chunk_px, height=chunk_px)
+    temp_dir = tempfile.gettempdir()
+    os.makedirs(temp_dir, exist_ok=True)
+
+    fname = outfile if is_final else f"{os.path.splitext(outfile)[0]}__{timestr()}.tif"
+    lpath = os.path.join(temp_dir, fname)
+
+    profile = dict(
+        driver="GTiff",
+        width=chunk_px,
+        height=chunk_px,
+        count=1,
+        dtype=dtype,
+        crs="EPSG:4326",
+        transform=transform,
+        compress="lzw",
+        blockxsize=400,
+        blockysize=400,
+    )
+    if no_data_val is not None:
+        profile["nodata"] = no_data_val
+
+    with rasterio.open(lpath, "w", **profile) as dst:
+        dst.write(arr, 1)
+
+    s3_key = posixpath.join(outdir.removeprefix("s3://gfw2-data/"), fname)
+    s3c.upload_file(lpath, "gfw2-data", s3_key)
+    os.remove(lpath)
+    lu.print_and_log(f"uploaded {fname} to {outdir}", is_final, logger)
+
+
 # ----------------------------------------------------------------------
 # helpers required by drainage model
 # ----------------------------------------------------------------------
@@ -757,6 +855,26 @@ def replace_tile_id_in_dict(d: Dict[str, List], new_tid: str):
     for k, v in d.items():
         v[0] = re.sub(cn.tile_id_pattern, new_tid, v[0])
     return d
+
+
+def reaggregate_resolution(arr: np.ndarray, in_res: float, out_res: float) -> np.ndarray:
+    """Aggregate ``arr`` from *in_res* degrees to *out_res* degrees.
+
+    The output resolution must be an integer multiple of the input resolution.
+    Values are summed within each block.
+    """
+
+    factor = out_res / in_res
+    if factor <= 0 or abs(round(factor) - factor) > 1e-6:
+        raise ValueError("out_res must be a positive multiple of in_res")
+    factor = int(round(factor))
+
+    rows, cols = arr.shape
+    new_rows = rows // factor
+    new_cols = cols // factor
+    trimmed = arr[: new_rows * factor, : new_cols * factor]
+    reshaped = trimmed.reshape(new_rows, factor, new_cols, factor)
+    return reshaped.sum(axis=(1, 3))
 
 
 def get_cluster_info(client, cluster):
