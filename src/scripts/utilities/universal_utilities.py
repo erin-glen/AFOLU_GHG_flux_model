@@ -877,6 +877,34 @@ def reaggregate_resolution(arr: np.ndarray, in_res: float, out_res: float) -> np
     return reshaped.sum(axis=(1, 3))
 
 
+def reaggregate_mode(arr: np.ndarray, in_res: float, out_res: float) -> np.ndarray:
+    """Aggregate ``arr`` from *in_res* degrees to *out_res* degrees using the mode.
+
+    The output resolution must be an integer multiple of the input resolution.
+    The modal (most common) value within each block is returned.  Ties are
+    resolved by choosing the smallest value.
+    """
+
+    factor = out_res / in_res
+    if factor <= 0 or abs(round(factor) - factor) > 1e-6:
+        raise ValueError("out_res must be a positive multiple of in_res")
+    factor = int(round(factor))
+
+    rows, cols = arr.shape
+    new_rows = rows // factor
+    new_cols = cols // factor
+    trimmed = arr[: new_rows * factor, : new_cols * factor]
+    reshaped = trimmed.reshape(new_rows, factor, new_cols, factor)
+
+    out = np.zeros((new_rows, new_cols), dtype=arr.dtype)
+    for i in range(new_rows):
+        for j in range(new_cols):
+            block = reshaped[i, :, j, :].ravel()
+            vals, counts = np.unique(block, return_counts=True)
+            out[i, j] = vals[counts.argmax()]
+    return out
+
+
 def get_cluster_info(client, cluster):
 
     # Retrieves properties of the workers
