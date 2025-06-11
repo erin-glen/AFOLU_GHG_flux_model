@@ -1,14 +1,17 @@
 """Aggregate 10x10° raster outputs into global ~4 km maps.
 
-The script converts per‑hectare drainage emission outputs to per‑pixel values
-using pixel area rasters and then aggregates them to approximately 4 km
-resolution.  Passing ``--skip_pixel_area`` will bypass the conversion step and
-simply average the per‑hectare values when creating the 4 km products.
+    The script converts per‑hectare drainage emission outputs to per‑pixel values
+    using pixel area rasters and then aggregates them to approximately 4 km
+    resolution.  Passing ``--skip_pixel_area`` will bypass the conversion step and
+    simply average the per‑hectare values when creating the 4 km products.  When
+    pixel area rasters are skipped the output filenames omit the ``per_pixel``
+    suffix used in the default workflow.
 """
 
 import argparse
 import dask
 import numpy as np
+import posixpath
 
 from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
@@ -19,7 +22,7 @@ DATA_TYPES = [
     # "burned_co2"
     # "burned_co_co2e",
     "burned_state",
-    "burned_emission_state",
+    # "burned_emission_state",
     "burned_total_co2e",
     # "drained_ch4_ditch_co2e",
     # "drained_ch4_land_co2e",
@@ -32,11 +35,19 @@ DATA_TYPES = [
     "state",
 ]
 
+INTEGER_DATASETS = {
+    "state",
+    "burned_state",
+    "emission_state",
+    "burned_emission_state",
+    "soil",
+}
+
 INVENTORY_PERIODS = [
-    "2000_2005",
-    "2005_2010",
-    "2010_2015",
-    "2015_2020",
+    # "2000_2005",
+    # "2005_2010",
+    # "2010_2015",
+    # "2015_2020",
     "2020_2023"
 ]
 
@@ -95,7 +106,12 @@ def agg_4x4(
         mg_ha_yr_tile, "Float32", bounds, chunk_length_pixels, is_final, logger
     )[0]
 
-    if use_pixel_area:
+    dataset_name = posixpath.basename(mg_ha_yr_tile).split("__")[1]
+    is_integer = dataset_name in INTEGER_DATASETS
+    if is_integer:
+        mg_ha_yr_tile_chunk = mg_ha_yr_tile_chunk.astype(np.int32)
+
+    if use_pixel_area and not is_integer:
         pixel_area_tile_chunk = uu.get_tile_dataset_rio(
             pixel_area_tile, "Float32", bounds, chunk_length_pixels, is_final, logger
         )[0]
@@ -120,6 +136,8 @@ def agg_4x4(
         return uu.reaggregate_resolution(
             mg_per_pixel_tile_chunk, 0.00025, 0.04
         )
+    if is_integer:
+        return uu.reaggregate_mode(mg_ha_yr_tile_chunk, 0.00025, 0.04)
 
     # When pixel area is not used, aggregate the per-hectare array by averaging
     summed = uu.reaggregate_resolution(mg_ha_yr_tile_chunk, 0.00025, 0.04)
@@ -226,8 +244,12 @@ def main(
                 is_final,
                 logger,
             )
-            per_pixel_tile_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
-            per_pixel_output_path = items["mg_per_pixel_dir"]
+            if use_pixel_area:
+                per_pixel_tile_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
+                per_pixel_output_path = items["mg_per_pixel_dir"]
+            else:
+                per_pixel_tile_outfile = None
+                per_pixel_output_path = None
 
             bounds = uu.get_10x10_tile_bounds(tile_id)
             bounds_list.append(bounds)
@@ -255,7 +277,10 @@ def main(
         tiles = dask.compute(*delayed_results)
 
         tile_id = "0_04deg_global"
-        global_4km_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
+        if use_pixel_area:
+            global_4km_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
+        else:
+            global_4km_outfile = items["4km_pattern"]
         global_4km_output_path = items["4km_dir"]
 
         result = combine_global_raster(
