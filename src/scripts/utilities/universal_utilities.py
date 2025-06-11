@@ -398,7 +398,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
     first_raster_path = tile_paths[0]
     ds = gdal.Open(first_raster_path)
     raster_datatype = ds.GetRasterBand(1).DataType
-    raster_nodata_value = ds.GetRasterBand(1).GetNoDataValue() or 0
+    raster_nodata_value = ds.GetRasterBand(1).GetNoDataValue()
     ds = None
 
     dtype_str = gdal_to_string_dtype_mapping.get(raster_datatype, "Float32")
@@ -417,14 +417,35 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
         "-ul_lr",
         str(min_x), str(max_y), str(max_x), str(min_y),
         "-ot", dtype_str,
-        "-a_nodata", str(raster_nodata_value),
-    ] + tile_paths
+    ]
+
+    if raster_nodata_value is not None:
+        merge_command.extend(["-a_nodata", str(raster_nodata_value)])
+
+    merge_command += tile_paths
 
     try:
+        lu.print_and_log(f"merge command: {' '.join(merge_command)}", is_final, logger)
+        lu.print_and_log(f"tile paths: {tile_paths}", is_final, logger)
         subprocess.check_output(merge_command, stderr=subprocess.STDOUT)
         lu.print_and_log(
             f"Successfully merged into {merged_file}", is_final, logger
         )
+
+        # --------------------------------------------------------------
+        # verify that the merged raster contains the expected number of
+        # valid pixels relative to the sum of the inputs
+        # --------------------------------------------------------------
+        merged_valid = _count_valid_pixels(merged_file, raster_nodata_value)
+        tile_valid_counts = [
+            _count_valid_pixels(path, raster_nodata_value) for path in tile_paths
+        ]
+        input_total = sum(c for c in tile_valid_counts if c != -1)
+        if merged_valid != input_total:
+            logger.warning(
+                f"Valid pixel mismatch for {tile_id}: "
+                f"merged {merged_valid} vs input {input_total}"
+            )
 
         if not no_upload:
             s3_client = boto3.client("s3")
@@ -445,6 +466,27 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
             os.remove(merged_file)
 
     return f"success for {s3_name_dict}"
+
+
+def _count_valid_pixels(raster_path: str, nodata_value: float) -> int:
+    """Return number of pixels not equal to *nodata_value* in ``raster_path``."""
+    ds = gdal.Open(raster_path)
+    if ds is None:
+        return -1
+    band = ds.GetRasterBand(1)
+    x_size = band.XSize
+    y_size = band.YSize
+    block_x, block_y = band.GetBlockSize()
+    valid = 0
+    for y in range(0, y_size, block_y):
+        rows = min(block_y, y_size - y)
+        for x in range(0, x_size, block_x):
+            cols = min(block_x, x_size - x)
+            block = band.ReadAsArray(x, y, cols, rows)
+            if block is not None:
+                valid += np.count_nonzero(block != nodata_value)
+    ds = None
+    return valid
 
 
 
