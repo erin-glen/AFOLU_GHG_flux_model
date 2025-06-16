@@ -8,7 +8,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "0.3.3"
+model_version = "0.4.0"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets
@@ -158,14 +158,21 @@ Cf_grassland = 0.77
 
 
 ### GLCLU cover codes
+### Classifications proposed by Elise Mazur 2025-06-05 by email. Agreed on 2025-06-09
+# Short vegetation
+short_veg_dry_min_code = 5
+short_veg_dry_max_code = 26
+short_veg_wet_min_code = 105
+short_veg_wet_max_code = 126
+
+# Tall vegetation
+tall_veg_dry_min_code = 27
+tall_veg_dry_max_code = 48
+tall_veg_wet_min_code = 127
+tall_veg_wet_max_code = 148
+
 cropland = 244
 builtup = 250
-
-tree_dry_min_height_code = 27
-tree_dry_max_height_code = 48
-tree_wet_min_height_code = 127
-tree_wet_max_height_code = 148
-
 
 ### Miscellaneous
 

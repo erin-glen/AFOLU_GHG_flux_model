@@ -148,20 +148,16 @@ def create_typed_dicts(layers):
     return typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32
 
 
-# Classifies vegetation height classes for start and end of current interval
-#TODO Elise and Radost are reevaluating the GLAD classification for desert and short veg. Follow up with them.
+# Classifies GLCLU as short (<5 m) or tall (>= 5 m) vegetation
+# No medium-height vegetation used as it's not available from annual GLCLU data.
 @jit(nopython=True)
-def classify_veg_height(LC_curr, LC_prev):
-    tall_veg_prev = (((LC_prev >= cn.tree_dry_min_height_code) and (LC_prev <= cn.tree_dry_max_height_code)) or
-                     ((LC_prev >= cn.tree_wet_min_height_code) and (LC_prev <= cn.tree_wet_max_height_code)))
-    tall_veg_curr = (((LC_curr >= cn.tree_dry_min_height_code) and (LC_curr <= cn.tree_dry_max_height_code)) or
-                     ((LC_curr >= cn.tree_wet_min_height_code) and (LC_curr <= cn.tree_wet_max_height_code)))
-    med_veg_prev = (((LC_prev >= 25) and (LC_prev <= 26)) or ((LC_prev >= 125) and (LC_prev <= 126)))
-    med_veg_curr = (((LC_curr >= 25) and (LC_curr <= 26)) or ((LC_curr >= 125) and (LC_curr <= 126)))
-    short_veg_prev = (((LC_prev >= 2) and (LC_prev <= 24)) or ((LC_prev >= 102) and (LC_prev <= 124)))
-    short_veg_curr = (((LC_curr >= 2) and (LC_curr <= 24)) or ((LC_curr >= 102) and (LC_curr <= 124)))
+def classify_veg_height(LC):
+    short_veg = (((LC >= cn.short_veg_dry_min_code) and (LC <= cn.short_veg_dry_max_code)) or
+                      ((LC >= cn.short_veg_wet_min_code) and (LC <= cn.short_veg_wet_max_code)))
+    tall_veg = (((LC >= cn.tall_veg_dry_min_code) and (LC <= cn.tall_veg_dry_max_code)) or
+                ((LC >= cn.tall_veg_wet_min_code) and (LC <= cn.tall_veg_wet_max_code)))
 
-    return short_veg_prev, short_veg_curr, med_veg_prev, med_veg_curr, tall_veg_prev, tall_veg_curr
+    return short_veg, tall_veg
 
 
 # Checks if pixel does not have tall vegetation. If so, updates the value to the most recent year without tall vegetation.
@@ -180,9 +176,9 @@ def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_f
 
         # Criteria for excluding tall vegetation land cover
         not_tall_veg_condition = (
-                (LC_prev < cn.tree_dry_min_height_code) |
-                ((LC_prev > cn.tree_dry_max_height_code) & (LC_prev < cn.tree_wet_min_height_code))
-                | (LC_prev > cn.tree_wet_max_height_code)
+                (LC_prev < cn.tall_veg_dry_min_code) |
+                ((LC_prev > cn.tall_veg_dry_max_code) & (LC_prev < cn.tall_veg_wet_min_code))
+                | (LC_prev > cn.tall_veg_wet_max_code)
         )
 
         # Sets cell to the model start year wherever land cover is not tall vegetation
@@ -193,9 +189,9 @@ def check_most_recent_year_not_tall_veg(LC_curr, LC_prev, most_recent_year_not_f
     # Checks the current end of interval land cover
     # Criteria for excluding tall vegetation land cover
     not_tall_veg_condition = (
-            (LC_curr < cn.tree_dry_min_height_code) |
-            ((LC_curr > cn.tree_dry_max_height_code) & (LC_curr < cn.tree_wet_min_height_code))
-            | (LC_curr > cn.tree_wet_max_height_code)
+            (LC_curr < cn.tall_veg_dry_min_code) |
+            ((LC_curr > cn.tall_veg_dry_max_code) & (LC_curr < cn.tall_veg_wet_min_code))
+            | (LC_curr > cn.tall_veg_wet_max_code)
     )
 
     # Sets cell to interval end year wherever land cover is not tall vegetation
@@ -281,45 +277,45 @@ def calc_deadwood_litter_ratios(elevation, climate_domain, precipitation):
     return float(deadwood_c_ratio), float(litter_c_ratio)
 
 
-# Returns AGC and BGC one-time removal factors for the gain of medium-height vegetation (Mg C/ha)
+# Returns AGC and BGC one-time removal factors for the gain of short-height vegetation (Mg C/ha)
 # Values are from IPCC 2006, V4, Ch. 6, Table 6.4- DEFAULT BIOMASS STOCKS PRESENT ON GRASSLAND, AFTER CONVERSION FROM OTHER LAND USE (no 2019 update).
-# medium_height_veg_AGB_RF is from the "peak above-ground biomass" columns.
-# medium_height_veg_BGB_RF is the difference between medium_height_veg_AGB_RF and the "total (above-ground and below-ground) non-woody biomass" column.
+# short_veg_AGB_RF is from the "peak above-ground biomass" columns.
+# short_veg_BGB_RF is the difference between short_veg_AGB_RF and the "total (above-ground and below-ground) non-woody biomass" column.
 @jit(nopython=True)
-def calc_medium_height_veg_removals(climate_zone):
+def calc_short_veg_removals(climate_zone):
 
     if climate_zone >= 9:  # Boreal- dry and wet (and polar)
-        medium_height_veg_AGB_RF = 1.7
-        medium_height_veg_BGB_RF = (8.5 - medium_height_veg_AGB_RF)
+        short_veg_AGB_RF = 1.7
+        short_veg_BGB_RF = (8.5 - short_veg_AGB_RF)
     elif climate_zone == 8:  # Cold temperate- dry
-        medium_height_veg_AGB_RF = 1.7
-        medium_height_veg_BGB_RF = (6.5 - medium_height_veg_AGB_RF)
+        short_veg_AGB_RF = 1.7
+        short_veg_BGB_RF = (6.5 - short_veg_AGB_RF)
     elif climate_zone == 7:  # Cold temperate- wet
-        medium_height_veg_AGB_RF = 2.4
-        medium_height_veg_BGB_RF = (13.6 - medium_height_veg_AGB_RF)
+        short_veg_AGB_RF = 2.4
+        short_veg_BGB_RF = (13.6 - short_veg_AGB_RF)
     elif climate_zone == 6:  # Warm temperate- dry
-        medium_height_veg_AGB_RF = 1.6
-        medium_height_veg_BGB_RF = (6.1 - medium_height_veg_AGB_RF)
+        short_veg_AGB_RF = 1.6
+        short_veg_BGB_RF = (6.1 - short_veg_AGB_RF)
     elif climate_zone == 5:  # Warm temperate- wet
-        medium_height_veg_AGB_RF = 2.7
-        medium_height_veg_BGB_RF = (13.5 - medium_height_veg_AGB_RF)
+        short_veg_AGB_RF = 2.7
+        short_veg_BGB_RF = (13.5 - short_veg_AGB_RF)
     elif climate_zone == 4:  # Tropical- dry
-        medium_height_veg_AGB_RF = 2.3
-        medium_height_veg_BGB_RF = (8.7 - medium_height_veg_AGB_RF)
+        short_veg_AGB_RF = 2.3
+        short_veg_BGB_RF = (8.7 - short_veg_AGB_RF)
     elif climate_zone == 2 or climate_zone == 3:  # Tropical- wet/moist
-        medium_height_veg_AGB_RF = 6.2
-        medium_height_veg_BGB_RF = (16.1 - medium_height_veg_AGB_RF)
+        short_veg_AGB_RF = 6.2
+        short_veg_BGB_RF = (16.1 - short_veg_AGB_RF)
     elif climate_zone == 1:  # Tropical- montane (average of tropical dry and tropical wet/moist values)
-        medium_height_veg_AGB_RF = (2.3 + 6.2)/2
-        medium_height_veg_BGB_RF = (((8.7 + 16.1)/2) - medium_height_veg_AGB_RF)
+        short_veg_AGB_RF = (2.3 + 6.2)/2
+        short_veg_BGB_RF = (((8.7 + 16.1)/2) - short_veg_AGB_RF)
     else: # Outside ecozone bounds-- apply boreal values
-        medium_height_veg_AGB_RF = 1.7
-        medium_height_veg_BGB_RF = (8.5-medium_height_veg_AGB_RF)
+        short_veg_AGB_RF = 1.7
+        short_veg_BGB_RF = (8.5-short_veg_AGB_RF)
 
-    medium_height_veg_AGC_RF = medium_height_veg_AGB_RF * cn.biomass_to_carbon_non_mangrove
-    medium_height_veg_BGC_RF = medium_height_veg_BGB_RF * cn.biomass_to_carbon_non_mangrove
+    short_veg_AGC_RF = short_veg_AGB_RF * cn.biomass_to_carbon_non_mangrove
+    short_veg_BGC_RF = short_veg_BGB_RF * cn.biomass_to_carbon_non_mangrove
 
-    return medium_height_veg_AGC_RF, medium_height_veg_BGC_RF
+    return short_veg_AGC_RF, short_veg_BGC_RF
 
 
 # Returns the starting carbon density for each carbon pool
@@ -482,18 +478,18 @@ def non_CO2_fire_equations(carbon_in, Cf, Gef_ch4, Gef_n2o):
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 # Applies to 5-year intervals and annual intervals. Only difference is the gain_year_count.
 @jit(nopython=True)
-def calc_NT_T(interval_type, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
+def calc_NT_T(interval_length, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
 
     # Step 1: Calculates the number of years of carbon gain (years)
-    if interval_type == cn.intervals_five_years:
+    if interval_length == 5:
         gain_year_count = cn.NT_T_gain_year_count_default
-    elif interval_type == cn.intervals_annual:
+    elif interval_length == 1:
         gain_year_count = 1
     else:
-        raise ValueError("interval_type not valid: 'hybrid' not supported yet")
+        raise ValueError("interval_length not valid: must be 1 or 5")
 
     # Step 2: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
     agc_gross_removals_out = float((agc_rf * gain_year_count) * -1)  #float() necessary for Numba typing
@@ -503,6 +499,7 @@ def calc_NT_T(interval_type, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter
 
     # Step 3: Calculates gross emissions by carbon pools (Mg C/ha/interval). Gross emissions are positive.
     # There are no gross emissions in NT->T pixels, so C pool emissions set to 0.
+    # Included here just for completeness.
     agc_gross_emis_out = 0
     bgc_gross_emis_out = 0
     deadwood_c_gross_emis_out = 0
@@ -521,8 +518,9 @@ def calc_NT_T(interval_type, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter
     c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')  # Mg C/ha/interval
     c_dens_out = np.array([agc_dens_out, bgc_dens_out, deadwood_c_dens_out, litter_c_dens_out]).astype('float32')  # Mg C/ha
 
-    # Step 6: Increments the forest age
-    forest_age = gain_year_count
+    # Step 6: Increments the forest age (years).
+    # Forest age starts at 0 years by definition for NT->T.
+    forest_age = 0 + gain_year_count
 
     return c_gross_emissions_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age
 
@@ -534,7 +532,7 @@ def calc_NT_T(interval_type, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter
 # Applies to 5-year intervals and annual intervals. Main difference is that the calculation of gain before loss
 # only applies to the former.
 @jit(nopython=True)
-def calc_T_NT(node, interval_type, burned_in_prev_interval, RF_AGC_in, RF_BGC_in, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
+def calc_T_NT(node, interval_length, burned_in_prev_interval, RF_AGC_in, RF_BGC_in, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
               forest_dist_last, interval_end_year, c_dens_in,
               post_dist_regrowth, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4, Gef_n2o,
               deadwood_c_ratio, litter_c_ratio):
@@ -554,7 +552,7 @@ def calc_T_NT(node, interval_type, burned_in_prev_interval, RF_AGC_in, RF_BGC_in
 
     # Step 1: Calculates the number of years of carbon gain before loss occurred (years).
     # Annual model has no gain before loss, so gain_year_count = 0.
-    if interval_type == cn.intervals_five_years:
+    if interval_length == 5:
         if forest_dist_last > 0:
             # If a forest disturbance was detected, the gain_year_count are the number of years until detection of the last disturbance.
             # There is no growth in the year of disturbance or the years after.
@@ -574,11 +572,11 @@ def calc_T_NT(node, interval_type, burned_in_prev_interval, RF_AGC_in, RF_BGC_in
             # disturbance or the years after.
             gain_year_count = math.floor(cn.five_year_interval_duration / 2)
 
-    elif interval_type == cn.intervals_annual:
+    elif interval_length == 1:
         gain_year_count = 0
 
     else:
-        raise ValueError("interval_type not valid: 'hybrid' not supported yet")
+        raise ValueError("interval_length not valid: must be 1 or 5")
 
 
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless).
@@ -595,7 +593,7 @@ def calc_T_NT(node, interval_type, burned_in_prev_interval, RF_AGC_in, RF_BGC_in
 
     # Step 3: Calculates pre-disturbance gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
     # This should only have a non-0 value for 5-year intervals; it should be 0 for annual intervals.
-    if interval_type == cn.intervals_five_years:
+    if interval_length == 5:
 
         # Assigns the pre-disturbance RFs to the output RFs for the interval.
         # This way, the pre-disturbance RFs are reported for this 5-year interval.
@@ -612,7 +610,7 @@ def calc_T_NT(node, interval_type, burned_in_prev_interval, RF_AGC_in, RF_BGC_in
         c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')
 
     # Assigns pre-disturbance RFs and gross removals 0 for consistency between 5-year and annual intervals
-    elif interval_type == cn.intervals_annual:
+    elif interval_length == 1:
 
         # Because there are no removals during a 1-year interval in which there is tree loss, RFs are reassigned to 0.
         # This way, not RFs are reported for this 1-year interval.
@@ -627,13 +625,13 @@ def calc_T_NT(node, interval_type, burned_in_prev_interval, RF_AGC_in, RF_BGC_in
         c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')
 
     else:
-        raise ValueError("interval_type not valid: 'hybrid' not supported yet")
+        raise ValueError("interval_length not valid: must be 1 or 5")
 
 
     # Step 4: Calculates carbon densities at the year of loss by carbon pool (Mg C/ha). This is not output from the model.
     # For 5-year intervals, C pools pre-disturbance differ from input carbon pools.
     # For annual intervals, C pools pre-disturbance are the same as input carbon pools because there is no gain before loss.
-    if interval_type == cn.intervals_five_years:
+    if interval_length == 5:
         agc_pre_disturb = agc_dens_in - agc_gross_removals_out
         bgc_pre_disturb = bgc_dens_in - bgc_gross_removals_out
         deadwood_c_pre_disturb = deadwood_c_dens_in - deadwood_c_gross_removals_out
@@ -642,7 +640,7 @@ def calc_T_NT(node, interval_type, burned_in_prev_interval, RF_AGC_in, RF_BGC_in
         # Pre-disturbance carbon densities as an array, used as input for non-CO2 fire emissions and post-disturbance removals (if applicable)
         c_pre_disturb = np.array([agc_pre_disturb, bgc_pre_disturb, deadwood_c_pre_disturb, litter_c_pre_disturb]).astype('float32')
 
-    elif interval_type == cn.intervals_annual:
+    elif interval_length == 1:
         agc_pre_disturb = agc_dens_in
         bgc_pre_disturb = bgc_dens_in
         deadwood_c_pre_disturb = deadwood_c_dens_in
@@ -650,7 +648,7 @@ def calc_T_NT(node, interval_type, burned_in_prev_interval, RF_AGC_in, RF_BGC_in
         c_pre_disturb = np.array(c_dens_in).astype('float32')
 
     else:
-        raise ValueError("interval_type not valid: 'hybrid' not supported yet")
+        raise ValueError("interval_length not valid: must be 1 or 5")
 
 
     # Step 5: Calculates CO2 gross emissions by carbon pools (Mg C/ha/interval). Gross emissions are positive.
@@ -740,7 +738,7 @@ def calc_T_NT(node, interval_type, burned_in_prev_interval, RF_AGC_in, RF_BGC_in
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 # Applies to 5-year intervals and annual intervals.
 @jit(nopython=True)
-def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF_AGC_pre_dist_in, RF_BGC_pre_dist_in,
+def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_prev_interval, RF_AGC_pre_dist_in, RF_BGC_pre_dist_in,
                                 c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
                                 forest_dist_last, interval_end_year, c_dens_in,
                                 RF_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_co2, Gef_ch4, Gef_n2o,
@@ -760,7 +758,7 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF
     # Step 1: Calculates the number of years of carbon gain before the non-stand-replacing disturbance occurred (years).
     # Annual model has no gain before disturbance (no gain in disturbance year),
     # so in this function gain_year_count_pre_dist = 0 always.
-    if interval_type == cn.intervals_five_years:
+    if interval_length == 5:
         if forest_dist_last > 0:
             # If a forest disturbance was detected, the gain_year_count_pre_dist are the number of years until detection of the last disturbance.
             # There is no growth in the year of disturbance or the years after.
@@ -780,11 +778,11 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF
             # disturbance or the years after.
             gain_year_count_pre_dist = math.floor(cn.five_year_interval_duration / 2)
 
-    elif interval_type == cn.intervals_annual:
+    elif interval_length == 1:
         gain_year_count_pre_dist = 0
 
     else:
-        raise ValueError("interval_type not valid: 'hybrid' not supported yet")
+        raise ValueError("interval_length not valid: must be 1 or 5")
 
 
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless).
@@ -800,7 +798,7 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF
 
     # Step 3: Calculates pre-disturbance gross removals by carbon pools (Mg CO2/ha/interval) for 5-year intervals. Gross removals are negative.
     # This should only have a non-0 value for 5-year intervals; it should be 0 for annual intervals.
-    if interval_type == cn.intervals_five_years:
+    if interval_length == 5:
 
         # Assigns the pre-disturbance RFs to the output RFs for the interval.
         # This way, the pre-disturbance RFs are reported for this 5-year interval.
@@ -819,7 +817,7 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF
     # Assigns pre-disturbance RFs and gross removals 0 for consistency between 5-year and annual intervals.
     # There are no removals in the year of disturbance, so we know removals in a partially disturbed forest with annual intervals
     # is always 0 and can skip the calculations in the 5-year interval branch to save some time.
-    elif interval_type == cn.intervals_annual:
+    elif interval_length == 1:
 
         # Because there are no removals during a 1-year interval in which there is tree loss, RFs are reassigned to 0.
         # This way, not RFs are reported for this 1-year interval.
@@ -834,13 +832,13 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF
         c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')
 
     else:
-        raise ValueError("interval_type not valid: 'hybrid' not supported yet")
+        raise ValueError("interval_length not valid: must be 1 or 5")
 
 
     # Step 4: Calculates carbon densities at the year of disturbance by carbon pool (Mg C/ha). This is not output from the model.
     # For 5-year intervals, C pools pre-disturbance differ from input carbon pools.
     # For annual intervals, C pools pre-disturbance are the same as input carbon pools because there is no gain before loss.
-    if interval_type == cn.intervals_five_years:
+    if interval_length == 5:
         agc_pre_disturb = agc_dens_in - agc_gross_removals_out
         bgc_pre_disturb = bgc_dens_in - bgc_gross_removals_out
         deadwood_c_pre_disturb = deadwood_c_dens_in - deadwood_c_gross_removals_out
@@ -849,7 +847,7 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF
         # Pre-disturbance carbon densities as an array, used as input for non-CO2 fire emissions and post-disturbance removals (if applicable)
         c_pre_disturb = np.array([agc_pre_disturb, bgc_pre_disturb, deadwood_c_pre_disturb, litter_c_pre_disturb]).astype('float32')
 
-    elif interval_type == cn.intervals_annual:
+    elif interval_length == 1:
         agc_pre_disturb = agc_dens_in
         bgc_pre_disturb = bgc_dens_in
         deadwood_c_pre_disturb = deadwood_c_dens_in
@@ -857,7 +855,7 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF
         c_pre_disturb = np.array(c_dens_in).astype('float32')
 
     else:
-        raise ValueError("interval_type not valid: 'hybrid' not supported yet")
+        raise ValueError("interval_length not valid: must be 1 or 5")
 
 
     # Step 5: Calculates CO2 gross emissions by carbon pools (Mg C/ha/interval). Gross emissions are positive.
@@ -901,7 +899,7 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF
     # if applicable (>=5 m height gain) (Mg C/ha/interval).
     # gain_year_count_post_dist here is the number of years between the disturbance and the end of the interval.
     # This applies only to 5-year interval data. There is no gross removals adjustment to annual data.
-    if interval_type == cn.intervals_five_years:
+    if interval_length == 5:
         gain_year_count_post_dist = cn.five_year_interval_duration - gain_year_count_pre_dist - 1
         post_dist_gross_removals = gain_year_count_post_dist * RF_post_dist
 
@@ -963,7 +961,7 @@ def calc_T_T_non_stand_disturbs(node, interval_type, burned_in_prev_interval, RF
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 # Applies to 5-year intervals and annual intervals.
 @jit(nopython=True)
-def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_recent_year_burned_during_interval, RF_AGC, RF_BGC,
+def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, most_recent_year_burned_during_interval, RF_AGC, RF_BGC,
                          c_pools_fire_CO2, c_pools_fire_non_CO2, interval_end_year, c_dens_in,
                          most_recent_year_not_tall_veg, Cf_forest, Gef_co2, Gef_ch4, Gef_n2o,
                          deadwood_c_ratio, litter_c_ratio):
@@ -980,7 +978,7 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
     # until the fire (i.e. carbon densities at the year of fire).
     # Annual model has no gain in the year of disturbance (including fire),
     # so gain_year_count_pre_dist = 0 when there is fire and = 1 when there is no fire.
-    if interval_type == cn.intervals_five_years:
+    if interval_length == 5:
         if most_recent_year_burned_during_interval > 0:
             # If a forest disturbance was detected, the gain_year_count_pre_dist are the number of years until detection of the last disturbance.
             # There is no growth in the year of disturbance or the years after.
@@ -998,14 +996,14 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
             # If no fire was detected, removals occurred every year
             gain_year_count_pre_dist = cn.five_year_interval_duration
 
-    elif interval_type == cn.intervals_annual:
+    elif interval_length == 1:
         if most_recent_year_burned_during_interval > 0:
             gain_year_count_pre_dist = 0  # No removals in a disturbance/fire year, so no removals during annual interval with fire
         else:
             gain_year_count_pre_dist = 1  # One year of gain when there is no fire
 
     else:
-        raise ValueError("interval_type not valid: 'hybrid' not supported yet")
+        raise ValueError("interval_length not valid: must be 1 or 5")
 
 
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless).
@@ -1035,7 +1033,7 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
     # Step 4: Calculates carbon densities at the year of fire by carbon pool (Mg C/ha). This is not output from the model.
     # For 5-year intervals, C pools pre-disturbance differ from input carbon pools.
     # For annual intervals, C pools pre-disturbance are the same as input carbon pools because there is no gain before disturbance/fire.
-    if interval_type == cn.intervals_five_years:
+    if interval_length == 5:
         agc_pre_disturb = agc_dens_in - agc_gross_removals_out
         bgc_pre_disturb = bgc_dens_in - bgc_gross_removals_out
         deadwood_c_pre_disturb = deadwood_c_dens_in - deadwood_c_gross_removals_out
@@ -1046,7 +1044,7 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
 
     # Assigning interval start C pools to pre-disturbance C pools rather than calculating them like in the 5-year interval
     # branch reduces the number of calculations and is more explicit
-    elif interval_type == cn.intervals_annual:
+    elif interval_length == 1:
         agc_pre_disturb = agc_dens_in
         bgc_pre_disturb = bgc_dens_in
         deadwood_c_pre_disturb = deadwood_c_dens_in
@@ -1054,7 +1052,7 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
         c_pre_disturb = np.array(c_dens_in).astype('float32')
 
     else:
-        raise ValueError("interval_type not valid: 'hybrid' not supported yet")
+        raise ValueError("interval_length not valid: must be 1 or 5")
 
 
     # Step 5: Calculates CO2 gross emissions from fire by carbon pools (Mg C/ha/interval).  Which ones are emitted depends on whether fire was detected.
@@ -1098,7 +1096,7 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
     # gain year count is the number of years between the disturbance and the end of the interval.
     # This uses the same RFs before and after the fire.
     # Only applies to 5-year interval data.
-    if most_recent_year_burned_during_interval > 0 and interval_type == cn.intervals_five_years:
+    if (most_recent_year_burned_during_interval > 0) and (interval_length == 5):
 
         post_dist_RF = np.array([RF_AGC, RF_BGC, RF_AGC * deadwood_c_ratio, RF_AGC * litter_c_ratio]).astype('float32')
         gain_year_count_post_dist = cn.five_year_interval_duration - gain_year_count_pre_dist - 1
@@ -1160,12 +1158,12 @@ def calc_T_T_no_disturbs(node, interval_type, forest_age_interval_start, most_re
 
     # Step 9: Updates the forest age. Increments by the number of years in the interval.
     # Age is not affected by fire, so age always increases in this function.
-    if interval_type == cn.intervals_five_years:
+    if interval_length == 5:
         forest_age_interval_end = forest_age_interval_start + cn.five_year_interval_duration
-    elif interval_type == cn.intervals_annual:
+    elif interval_length == 1:
         forest_age_interval_end = forest_age_interval_start + 1
     else:
-        raise ValueError("interval_type not valid: 'hybrid' not supported yet")
+        raise ValueError("interval_length not valid: must be 1 or 5")
 
     return state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out, gain_year_count_pre_dist, forest_age_interval_end
 
