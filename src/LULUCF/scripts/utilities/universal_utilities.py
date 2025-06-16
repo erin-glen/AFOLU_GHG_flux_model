@@ -494,7 +494,7 @@ def xy_to_tile_id(top_left_x, top_left_y):
 
 # Interval info for model run.
 # interval_year_diff is the difference between the start and end years of the interval, not the number of years in the interval.
-# The difference between those arises for 5-year intervals (e.g., 2016-2020), where there are 5 years in the interval
+# The difference between interval_length and interval_year_diff arises for 5-year intervals (e.g., 2016-2020), where there are 5 years in the interval
 # but the difference between the start and end years is 4.
 def get_interval_info(end_year, main_logger, start_year):
 
@@ -511,14 +511,16 @@ def get_interval_info(end_year, main_logger, start_year):
     elif start_year == 2000 and end_year == 2023:  # Hybrid model (2000-2023)
         interval_type = cn.intervals_hybrid
         interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
+        # interval_year_diff = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2023
         interval_length = [cn.five_year_interval_duration] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
-        # intervals = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]
+        # interval_length = [5, 5, 5, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2023
         output_years = cn.interval_end_years_5_years[:-1] + cn.interval_end_years_annual
     else:
         main_logger.error("interval_type not valid")
         sys.exit(1)
 
     main_logger.info(f"Interval type: {interval_type}")
+    main_logger.info(f"Interval year difference: {interval_year_diff} years")
     main_logger.info(f"Interval duration: {interval_length} years")
     main_logger.info(f"Interval end years/Output years: {output_years}")
 

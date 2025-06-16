@@ -397,7 +397,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # and the model output years for the model run
     interval_type, interval_year_diff, interval_length, interval_end_years = uu.get_interval_info(end_year, main_logger, start_year)
 
-    # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
+    # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
     fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)

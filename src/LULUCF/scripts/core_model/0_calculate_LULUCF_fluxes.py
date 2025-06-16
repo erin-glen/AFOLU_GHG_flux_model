@@ -2,21 +2,21 @@
 Run from src/LULUCF
 
 Local test (Dask part does not work):
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --no_upload -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --no_upload -yr 2000 2023 --run_date YYYYMMDD
 
 Coiled small tests:
 python -m scripts.utilities.create_cluster -n 1 -t 2 -m 16 -cn LULUCF_model
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2015 2023 --run_date YYYYMMDD
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload -yr 2015 2023 --run_date YYYYMMDD
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2000 2023 --run_date YYYYMMDD
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload -yr 2000 2023 --run_date YYYYMMDD
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --run_date YYYYMMDD
 
 Coiled large shapefile test:
 python -m scripts.utilities.create_cluster -n 100 -t 2 -m 32 -cn LULUCF_model
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023 --run_date YYYYMMDD
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2023 --run_date YYYYMMDD
 
 Full run:
 python -m scripts.utilities.create_cluster -n 200 -t 2 -m 32 -cn LULUCF_model
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --run_date YYYYMMDD  --log_note "This is a full run."
+python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --run_date YYYYMMDD  --log_note "This is a full run."
 """
 
 import argparse
@@ -1529,14 +1529,14 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
     main_logger.info(f"Run date: {run_date}")
-    main_logger.info(f"Batch size: {batch_size}")
+    main_logger.info(f"Batch size: {batch_size} chunks")
     main_logger.info(f"no_upload: {no_upload}")
 
     # Calculates the interval type, difference between start and end years of intervals, and the model output years
     # for the model run
     interval_type, interval_year_diff, interval_length, interval_end_years = uu.get_interval_info(end_year, main_logger, start_year)
 
-    # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
+    # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
     fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
@@ -1561,9 +1561,9 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # It shouldn't really matter what the sample_tile_id is.
     sample_tile_id = "00N_000E"
 
-    # Dictionary of data to download (inputs to model)
+    # Dictionary of data to download (inputs to model).
+    # These inputs don't depend on the starting year of the model.
     download_dict = {
-
         cn.r_s_ratio_non_mang_pattern: f"{cn.r_s_ratio_non_mang_dir}{sample_tile_id}_{cn.r_s_ratio_non_mang_pattern}.tif",
 
         cn.drivers_pattern: f"{cn.drivers_path}{sample_tile_id}_{cn.drivers_pattern}.tif",
@@ -1582,47 +1582,67 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         cn.climate_zone_pattern: f"{cn.climate_zone_processed_dir}{sample_tile_id}_{cn.climate_zone_pattern}.tif",
         cn.precipitation_pattern: f"{cn.precipitation_dir}{sample_tile_id}_{cn.precipitation_pattern}.tif",
         # "ecozone": f"s3://gfw2-data/fao_ecozones/v2000/raster/epsg-4326/10/40000/class/gdal-geotiff/{sample_tile_id}.tif",   # Originally from gfw-data-lake, so it's in 400x400 windows
-        # "iso": f"s3://gfw2-data/gadm_administrative_boundaries/v3.6/raster/epsg-4326/10/40000/adm0/gdal-geotiff/{sample_tile_id}.tif",  # Originally from gfw-data-lake, so it's in 400x400 windows
         cn.ifl_primary_pattern: f"{cn.ifl_primary_dir}{sample_tile_id}_{cn.ifl_primary_pattern}.tif",
         cn.continent_ecozone_pattern: f"{cn.continent_ecozone_dir}{sample_tile_id}_{cn.continent_ecozone_pattern}.tif",
         cn.pixel_area_pattern: f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{sample_tile_id}.tif"
     }
 
-    if interval_type == cn.intervals_five_years:
+    # Starting carbon pools depend on the starting year
+    # Uses the carbon maps for 2000 for 5-year and hybrid-interval models
+    if interval_type in [cn.intervals_five_years, cn.intervals_hybrid]:
         download_dict[cn.agc_dens_pattern] = f"{cn.agc_2000_dir}{sample_tile_id}__{cn.agc_2000_pattern}.tif"
         download_dict[cn.bgc_dens_pattern] = f"{cn.bgc_2000_dir}{sample_tile_id}__{cn.bgc_2000_pattern}.tif"
         download_dict[cn.deadwood_c_dens_pattern] = f"{cn.deadwood_c_2000_dir}{sample_tile_id}__{cn.deadwood_c_2000_pattern}.tif"
         download_dict[cn.litter_c_dens_pattern] = f"{cn.litter_c_2000_dir}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif"
-
     ##TODO: 2015 carbon maps are still using the 2000 mangrove carbon map!!
-    if interval_type == cn.intervals_annual:
+    elif interval_type == cn.intervals_annual:
         download_dict[cn.agc_dens_pattern] = f"{cn.agc_2015_dir}{sample_tile_id}__{cn.agc_2015_pattern}.tif"
         download_dict[cn.bgc_dens_pattern] = f"{cn.bgc_2015_dir}{sample_tile_id}__{cn.bgc_2015_pattern}.tif"
         download_dict[cn.deadwood_c_dens_pattern] = f"{cn.deadwood_c_2015_dir}{sample_tile_id}__{cn.deadwood_c_2015_pattern}.tif"
         download_dict[cn.litter_c_dens_pattern] = f"{cn.litter_c_2015_dir}{sample_tile_id}__{cn.litter_c_2015_pattern}.tif"
+    else:
+        sys.exit('interval_type not found')
 
+    # Land cover and vegetation height timeseries depend on interval_type
     if interval_type == cn.intervals_five_years:
         # Land cover and vegetation height rasters (5-year intervals)
         for year in range(cn.first_model_year_5_years, cn.last_model_year_5_years + 1, cn.five_year_interval_duration):
             download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_5_year_path}{year}/{sample_tile_id}.tif"
             download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_5_year_path}{year}/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_{year}.tif"
-
-    if interval_type == cn.intervals_annual:
+    elif interval_type == cn.intervals_annual:
         # Land cover and vegetation height rasters (annual intervals)
         for year in range(cn.first_model_year_annual, cn.last_model_year_annual + 1):
             download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_annual_path}{year}/{sample_tile_id}.tif"
             download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_annual_path}{year}/{sample_tile_id}.tif"
+    elif interval_type == cn.intervals_hybrid:
+        # Land cover and vegetation height rasters (5-year intervals for 2000, 2005, and 2010 only)
+        for year in range(cn.first_model_year_5_years, 2010+1, cn.five_year_interval_duration):
+            download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_5_year_path}{year}/{sample_tile_id}.tif"
+            download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_5_year_path}{year}/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_{year}.tif"
+        # Land cover and vegetation height rasters (annual intervals for 2015 onwards)
+        for year in range(cn.first_model_year_annual, cn.last_model_year_annual + 1):
+            download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_annual_path}{year}/{sample_tile_id}.tif"
+            download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_annual_path}{year}/{sample_tile_id}.tif"
+    else:
+        sys.exit('interval_type not found')
 
-    # Burned area rasters (every year)-- same code for annual, 5-year model, or hybrid
-    # All years need to be in their own folder
+
+    # Burned area rasters (every year)-- same code for annual, 5-year model, or hybrid.
+    # Each burned area year needs to be in its own folder.
     for year in range(start_year, end_year + 1):  # Annual burned area maps start in 2000
         download_dict[f"{cn.burned_area_final_pattern}_{year}"] = f"{cn.full_bucket_prefix}/{cn.burned_area_final_dir}{year}/{sample_tile_id}_{cn.burned_area_final_pattern}_{year}.tif"
 
     # Forest disturbance rasters (every year)-- only for 5-year intervals
     # All years need to be in their own folder
-    if interval_type == cn.intervals_five_years:
+    if interval_type in cn.intervals_five_years:
         for year in range(cn.first_model_year_5_years + 1, cn.last_model_year_5_years + 1):  # Annual forest disturbance maps start in 2001 and ends in 2020
             download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.forest_disturbance_annual_dir}{year}/{year}_{sample_tile_id}.tif"
+    elif interval_type in cn.intervals_hybrid:
+        for year in range(cn.first_model_year_5_years + 1, 2015):  # Hybrid model uses annual disturbance data through 2014. Annual data used in 2015 onwards.
+            download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.forest_disturbance_annual_dir}{year}/{year}_{sample_tile_id}.tif"
+    else:  # Annual model does not use annual disturbance data
+        pass
+
 
     # Young natural forest rasters (several age intervals)
     # Each growth interval's rate is in its own folder
@@ -1630,8 +1650,10 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         download_dict[f"{cn.natural_forest_growth_curve_pattern}__{growth_interval}_years"] = f"{cn.natural_forest_growth_curve_dir}rate_{growth_interval}/{sample_tile_id}_{cn.natural_forest_growth_curve_pattern}__{growth_interval}_years.tif"
 
     # Starting forest age
-    # TODO: Need to make starting forest age for 2000
     if interval_type == cn.intervals_annual:
+        download_dict[f"{cn.forest_age_start_year_pattern}"] = f"{cn.forest_age_2015_interpolated_dir}{sample_tile_id}__{cn.forest_age_2015_interpolated_pattern}.tif"
+    # TODO: Need to make starting forest age for 2000
+    else:
         download_dict[f"{cn.forest_age_start_year_pattern}"] = f"{cn.forest_age_2015_interpolated_dir}{sample_tile_id}__{cn.forest_age_2015_interpolated_pattern}.tif"
 
     # Replaces the placeholder parts of the input paths with relevant values

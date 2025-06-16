@@ -246,7 +246,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Years for burned area Hansenization: {processed_years}")
 
-    # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
+    # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
     fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
