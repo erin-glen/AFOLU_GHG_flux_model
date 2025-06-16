@@ -2,7 +2,7 @@
 
 Run from src/LULUCF/
 python -m scripts.utilities.create_cluster -n 11 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.Potapov_to_s3_copy -cn AFOLU_flux_model_scripts
+python -m scripts.preprocessing.Potapov_file_system_to_s3_copy -cn AFOLU_flux_model_scripts
 
 For 2015-2023, there are 2826 files. Takes <10 minutes to transfer them.
 
@@ -82,8 +82,8 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     run_local = args.run_local
 
-    # Connects to Coiled cluster if not running locally
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    # Connects to Coiled cluster if not running locally and the named cluster exists
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
 
     # Create tasks for all years

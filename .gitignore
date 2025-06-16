@@ -85,12 +85,13 @@ config/hot_export_token.txt
 *.ini
 *.txt.zml
 *.tif
+*.tif.ovr
 *.csv
 *.exe
 
 .DS_Store
+*checkpoint.ipynb
 
-*.ipynb
 *.xlsx
 debug.py
 

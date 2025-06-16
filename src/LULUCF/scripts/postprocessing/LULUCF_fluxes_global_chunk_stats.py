@@ -46,14 +46,14 @@ def get_chunk_stats(tile_to_process_uri):
     lu.print_and_log(f"Calculating chunk stats in {bounds_str} for {file_name} in {tile_id}: {uu.timestr()}", is_final, logger)
 
     # The relevant pixel area (m^2) file in s3
-    pixel_area_uri = f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{tile_id}.tif"
+    pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
-    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, 'Float32', bounds_list, 4000, is_final, logger)
+    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, bounds_list, 4000, 'Float32')
     pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
     try:
-        tile_to_process_chunk_per_ha = uu.get_tile_dataset_rio(tile_to_process_uri, 'Float32', bounds_list, 4000, is_final, logger)
+        tile_to_process_chunk_per_ha = uu.get_tile_dataset_rio(tile_to_process_uri, bounds_list, 4000, 'Float32')
     except Exception as e:
         return f"Failed to pixel area raster for {bounds_list}: {e}"
 
@@ -76,10 +76,10 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 
     is_final = False
 
-    # Connects to Coiled cluster if not running locally
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    # Connects to Coiled cluster if not running locally and the named cluster exists
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
-    # Model stage being running
+    # Model stage being run
     stage = 'LULUCF_flux_postprocessing__chunk_totals'
 
     # Starting time for stage
@@ -173,10 +173,10 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",
         f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2015_2020/4000_pixels/{date}/"
 
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2005_2010/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2010_2015/4000_pixels/{date}/",
-        # f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/4000_pixels/{date}/"
+        # f"{cn.outputs_path}{cn.land_state_pattern}/2000_2005/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.land_state_pattern}/2005_2010/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.land_state_pattern}/2010_2015/4000_pixels/{date}/",
+        # f"{cn.outputs_path}{cn.land_state_pattern}/2015_2020/4000_pixels/{date}/"
     ]
 
     tiles_to_process = []
@@ -205,7 +205,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     # print(tiles_to_process)
 
     # Returns a dataframe of chunk_id and ISO, to be joined with chunk stats
-    fishnet_iso_df = uu.fishnet_with_GADM_iso()
+    fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
 
     # For local runs
     if run_local:
@@ -231,7 +231,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
     # print(results)
 
     # Creates a chunk stats spreadsheet and optionally uploads it to s3
-    uu.aggregate_chunk_stats(results, stage, no_upload, logger)
+    uu.compile_1x1_chunk_stats(results, chunk_shapefile_uri, stage, no_upload, logger)
 
     # Ending time for stage
     end_time = uu.timestr()

@@ -12,10 +12,10 @@ when all chunks in a list are expected to be uploaded to s3. Here, only outputs 
 so there'd be lots of chunks left over in s3 that were processed but just didn't have data.
 
 python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts -yr 2001 -bb 40 50 50 60 -cs 10
+python -m scripts.preprocessing.burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts -yr 2001 -bb 40 50 50 60 -cs 10 -yr 2000 2024
 
 python -m scripts.utilities.create_cluster -n 30 -t 5 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 10
+python -m scripts.preprocessing.burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 10 -yr 2000 2024
 Max memory usage: ~20 GB/worker
 Time: 1.5 hours through calculation, 1.5 hours with tile stats; Credits: 190; Cost: $9.30
 
@@ -224,20 +224,22 @@ def process_10x10_tile(year, bounds, is_final, fishnet_iso_df):
 
 
 ### Main Function
-def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False, use_shapefile=False,
-         bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
+def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
+         chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     start_year = year_range[0]
     end_year = year_range[1]
     processed_years = list(range(start_year, end_year+1))
 
-    # Model stage being running
+    # Model stage being run
     stage = f'Hansenize_burned_area_{start_year}_{end_year}'
+    model_type = 'standard'
 
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    # Connects to Coiled cluster if not running locally and the named cluster exists
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header("N/A", False, client, cluster, log_note, run_local, stage)
+    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
     # Starting time for stage
     start_time = uu.timestr()
@@ -247,10 +249,10 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
-    fishnet_iso_df = uu.fishnet_with_GADM_iso()
+    fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_list = uu.create_chunk_list(bounding_box, use_shapefile, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
     # chunk_list = get_10x10_grid()
     # chunk_list = [[40, 50, 50, 60]]  # Test area in central Russia that originally wasn't getting all the MODIS tiles within this 10x10 deg area
@@ -277,7 +279,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         output_folders.append(f"{cn.burned_area_final_dir}{year}/")
 
     # Creates list of tasks to run (1 task = 1 chunk)
-    main_logger.info("Workers' logs appended after main function log"+ "\n")
+    main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
     # Iterates through selected years
     for year in processed_years:
@@ -300,7 +302,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         n_workers = len(workers)
 
         # Reduces number of workers in the cluster down to 1 if there is more than 10
-        # TODO Or maybe just have it terminate the cluster altogether, rather than resize it. Need to make sure that chunk stats and log still work, though.
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 
@@ -310,7 +311,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Iterates through output folders and counts the number of output rasters.
     for output_folder in output_folders:
         output_folder = re.sub('RES_pixels', '4000_pixels', output_folder)
-        output_folder = re.sub('DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
+        output_folder = re.sub('RUN_DATE', uu.timestr()[:8], output_folder)  # Converts YYYYMMDD_HH_MM_SS to YYYYMMDD
         output_folder = f"{cn.full_bucket_prefix}/{output_folder}"   # Need to prepend s3 and bucket name for counting
 
         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
@@ -323,7 +324,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count > 0):
-        uu.aggregate_chunk_stats(all_stats, stage, no_upload, main_logger)
+        uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
@@ -346,7 +347,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('-cshp', '--use_shapefile', action='store_true', help='Use shapefile to determine chunks')
+    parser.add_argument('-cshp', '--chunk_shapefile_uri', action='store_true', help='Use shapefile to determine chunks')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for burned area processing')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
@@ -361,7 +362,7 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     bounding_box = args.bounding_box
     chunk_size = args.chunk_size
-    use_shapefile = args.use_shapefile
+    chunk_shapefile_uri = args.chunk_shapefile_uri
     first_chunks = args.first_chunks
     year_range = args.year_range
     log_note = args.log_note
@@ -371,6 +372,6 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, use_shapefile,
+    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)

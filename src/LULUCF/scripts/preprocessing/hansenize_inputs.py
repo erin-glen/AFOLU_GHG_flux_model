@@ -1,16 +1,17 @@
 """
 Run from src/LULUCF
 
-Local:
-python -m scripts.preprocessing.hansenize -ct local -p drivers
+Coiled test area without land (i.e. no data):
+python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 1
+python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p secondary_natural_forest -bb -120 30 -110 40 -cs 10
 
-Coiled test area:
-python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
-python -m scripts.preprocessing.hansenize_restructure -cn AFOLU_flux_model_scripts -ct coiled -p drivers -bb -120 30 -110 40 -cs 10
+Coiled test area with data:
+python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 1
+python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p secondary_natural_forest -bb -120 30 -110 40 -cs 10
 
 Coiled full run:
-python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 20 -m 8 -t 8
-python -m scripts.preprocessing.hansenize_restructure -cn AFOLU_flux_model_scripts -ct coiled -p drivers -bb -180 -60 180 80 -cs 10
+python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 20 -t 12
+python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p secondary_natural_forest -bb -180 -60 180 80 -cs 10
 
 #QC
 cluster_name = 'Hansenize_drivers_data'
@@ -20,10 +21,12 @@ process = ['drivers']
 
 """
 import os
+import sys
 import argparse
 import dask
 from dask.distributed import print
 from ..utilities import constants_and_names as cn
+from ..utilities import log_utilities as lu
 from ..utilities import universal_utilities as uu
 
 
@@ -34,6 +37,8 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
     # Step 1: Create download/ upload dictionary from list of processes to run
     # Create empty dictionary
     download_upload_dictionary = {}
+
+    start_time = uu.timestr()
 
     # Add drivers data
     if 'drivers' in process:
@@ -49,63 +54,87 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
 
     # Add Robinson et al. secondary natural forest growth rates
     if 'secondary_natural_forest' in process:
-        download_upload_dictionary["secondary_natural_forest_0_5"] = {
+        # download_upload_dictionary["secondary_natural_forest_0_5"] = {
+        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_0_5.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_0_5_processed_dir,
+        #     'processed_pattern': cn.secondary_natural_forest_0_5_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_6_10"] = {
+        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_6_10_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_6_10.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_6_10_processed_dir,
+        #     'processed_pattern': cn.secondary_natural_forest_6_10_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_11_15"] = {
+        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_11_15_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_11_15.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_11_15_processed_dir,
+        #     'processed_pattern': cn.secondary_natural_forest_11_15_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_16_20"] = {
+        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_16_20_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_16_20.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_16_20_processed_dir,
+        #     'processed_pattern': cn.secondary_natural_forest_16_20_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_21_100"] = {
+        #     'raw_dir': cn.secondary_natural_forest_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_21_100_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_21_100.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_21_100_processed_dir,
+        #     'processed_pattern': cn.secondary_natural_forest_21_100_pattern
+        # }
+        download_upload_dictionary["secondary_natural_forest_21_40"] = {
             'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_0_5.vrt",
-            'processed_dir': cn.secondary_natural_forest_0_5_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_0_5_pattern
+            'raw_pattern': cn.secondary_natural_forest_21_40_pattern,
+            'vrt': f"/tmp/secondary_natural_forest_21_40.vrt",
+            'processed_dir': cn.secondary_natural_forest_21_40_processed_dir,
+            'processed_pattern': cn.secondary_natural_forest_21_40_pattern
         }
-
-        download_upload_dictionary["secondary_natural_forest_6_10"] = {
+        download_upload_dictionary["secondary_natural_forest_41_60"] = {
             'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_6_10_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_6_10.vrt",
-            'processed_dir': cn.secondary_natural_forest_6_10_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_6_10_pattern
+            'raw_pattern': cn.secondary_natural_forest_41_60_pattern,
+            'vrt': f"/tmp/secondary_natural_forest_41_60.vrt",
+            'processed_dir': cn.secondary_natural_forest_41_60_processed_dir,
+            'processed_pattern': cn.secondary_natural_forest_41_60_pattern
         }
-
-        download_upload_dictionary["secondary_natural_forest_11_15"] = {
+        download_upload_dictionary["secondary_natural_forest_61_80"] = {
             'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_11_15_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_11_15.vrt",
-            'processed_dir': cn.secondary_natural_forest_11_15_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_11_15_pattern
+            'raw_pattern': cn.secondary_natural_forest_61_80_pattern,
+            'vrt': f"/tmp/secondary_natural_forest_61_80.vrt",
+            'processed_dir': cn.secondary_natural_forest_61_80_processed_dir,
+            'processed_pattern': cn.secondary_natural_forest_61_80_pattern
         }
-
-        download_upload_dictionary["secondary_natural_forest_16_20"] = {
+        download_upload_dictionary["secondary_natural_forest_81_100"] = {
             'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_16_20_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_16_20.vrt",
-            'processed_dir': cn.secondary_natural_forest_16_20_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_16_20_pattern
-        }
-
-        download_upload_dictionary["secondary_natural_forest_21_100"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_21_100_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_21_100.vrt",
-            'processed_dir': cn.secondary_natural_forest_21_100_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_21_100_pattern
+            'raw_pattern': cn.secondary_natural_forest_81_100_pattern,
+            'vrt': f"/tmp/secondary_natural_forest_81_100.vrt",
+            'processed_dir': cn.secondary_natural_forest_81_100_processed_dir,
+            'processed_pattern': cn.secondary_natural_forest_81_100_pattern
         }
 
     if 'AGB2015' in process:
         download_upload_dictionary["AGB2015"] = {
-            'raw_dir': cn.agb_2015_path_raw,
+            'raw_dir': cn.agb_2015_dir_raw,
             'raw_pattern': cn.agb_2015_pattern_raw,
             'vrt': f"/tmp/agb2015.vrt",
-            'processed_dir': cn.agb_2015_path_processed,
+            'processed_dir': cn.agb_2015_dir_processed,
             'processed_pattern': cn.agb_2015_pattern
         }
 
-
-    # Step 2: Create chunk list
-    # Makes list of chunks to analyze from the bounding box and chunk size (deg)
-    # Output list form is [[110, -10, 120, 0], [...], [...], ...]  (W, S, E, N)
-    print("Using bounding box and chunk size to determine chunks")
-    chunk_list = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
-    print(f"Chunks identified: {len(chunk_list)}")
-
+    if 'climate_zone' in process:
+        download_upload_dictionary["climate_zone"] = {
+            'raw_dir': cn.climate_zone_raw_dir,
+            'raw_pattern': cn.climate_zone_raw_pattern,
+            'vrt': f"/tmp/climate_zone.vrt",
+            'processed_dir': cn.climate_zone_processed_dir,
+            'processed_pattern': cn.climate_zone_pattern
+        }
 
     # if 'cropland_fertilizer' in process:
     #     download_upload_dictionary[""] = {
@@ -166,29 +195,41 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
     if cluster_type == 'coiled':
 
         if not run_local:
-            # Connects to Coiled cluster if not running locally
-            cluster, client = uu.connect_to_Coiled_cluster(cluster_name, False)
+            # Connects to Coiled cluster if not running locally and the named cluster exists
+            cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, False)
             client
+
+        # Creates the log for the main function and populates it with basic run information
+        main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, f"Preprocessing: {process}", run_local,
+                                                                       'standard', f'Hansenize_{process}')
+
+        # Step 2: Create chunk list
+        # Makes list of chunks to analyze from the bounding box and chunk size (deg)
+        # Output list form is [[110, -10, 120, 0], [...], [...], ...]  (W, S, E, N)
+        main_logger.info("Using bounding box and chunk size to determine chunks")
+        chunk_list = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
+        main_logger.info(f"Chunks identified: {len(chunk_list)}")
 
 
         # Step 3: Create a VRT for each dataset
-
         for key, items in download_upload_dictionary.items():
 
             # Add output_vrt_s3 to dictionary
             output_vrt_s3 = f"{items['raw_dir']}{os.path.basename(items['vrt'])}"
-            # print("output_vrt_s3:", output_vrt_s3)
+            # main_logger.info("output_vrt_s3:", output_vrt_s3)
             download_upload_dictionary[key]["output_vrt_s3"] = output_vrt_s3
-            print("download_upload_dictionary:", download_upload_dictionary)
+            main_logger.info("download_upload_dictionary:", download_upload_dictionary)
 
             # Find all files in s3 that match the raw pattern (w/ '*.tif') and add s3 paths to download_upload_dictionary
             input_raster_list_s3 = uu.list_s3_files_with_pattern(items["raw_dir"], items["raw_pattern"])
+            main_logger.info(f"There are {len(input_raster_list_s3)} rasters in the folder to include in the vrt")
             if input_raster_list_s3:
                 download_upload_dictionary[key]["raw_raster_list"] = input_raster_list_s3
 
             # Create a vrt from all raw input rasters
-            print(f"Building vrt for {key}: {uu.timestr()}")
+            main_logger.info(f"Building vrt for {key}: {uu.timestr()}")
             uu.build_vrt_gdal_coiled(input_raster_list_s3, output_vrt_s3, items["vrt"])
+            main_logger.info(f"Done building vrt for {key}: {uu.timestr()}")
 
 
         # Step 4: Get GDAL datatype of each dataset using the first tile in that dataset
@@ -265,14 +306,14 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
 
     # -------------------------------------------------------------------------------------------------------------------
     else:
-        print("Set cluster_type to one of the following: 'coiled', 'local'")
+        sys.exit("Set cluster_type to one of the following: 'coiled', 'local'")
 
 
     ###########################################################################################################
     #Step 5: Use warp_to_hansen to preprocess each dataset into 10x10 degree tiles
 
     # Iterates through all input datasets
-    for key,items in download_upload_dictionary.items():
+    for key, items in download_upload_dictionary.items():
 
         # Separate tile_futures list for each dataset being processed
         tile_futures = []
@@ -289,6 +330,9 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
             xmin, ymin, xmax, ymax = uu.get_10x10_tile_bounds(tile_id)
             dt = items['dt']
 
+            output_vrt_s3 = f"{items['raw_dir']}{os.path.basename(items['vrt'])}"
+            main_logger.info(f"Using {output_vrt_s3} for Hansenization")
+
             # Create 10 x 10 degree hansenized tile for each dataset in dictionary
             if cluster_type == 'coiled' or cluster_type == 'test':
 
@@ -304,15 +348,19 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
                                             xmin, ymin, xmax, ymax, dt, 0, True, 400, 400)
                 tile_futures.append(tile_future)
 
-        print(f"Tiles to process: {len(tile_futures)}")
+        main_logger.info(f"Tiles to process: {len(tile_futures)}")
+        main_logger.info(f"Creating futures: {uu.timestr()}")
 
         # Collect the results once they are finished
         tile_results = client.gather(tile_futures)
-        print(tile_results)
-        print(f"Completed tile set: {uu.timestr()}")
+        main_logger.info(tile_results)
+        main_logger.info(f"Completed Hansenizing tile set {key} from {items['raw_dir']}: {uu.timestr()}")
+        uu.stage_duration(start_time, uu.timestr(), f"Hansenize_{key}", main_logger)
 
 
         # Step 6: Creates a tile index shapefile of the output rasters to check completeness of Hansenization
+
+        main_logger.info(f"Making index shapefile for {key} from {items['raw_dir']}: {uu.timestr()}")
 
         # Creates a list of dictionaries of s3 tile set path with corresponding tile index shapefile names,
         # e.g., [{'s3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/processed/20250217/': 'AGB_2015_ESA_CCI_Mg_AGB_ha'}]
@@ -335,7 +383,10 @@ def main(cluster_name, cluster_type, process, bounding_box, chunk_size, run_loca
 
         # Actually runs analysis
         results = dask.compute(*delayed_result)
-        print(results)
+        main_logger.info(results)
+
+        main_logger.info(f"Finished making index shapefile for {path} from {items['raw_dir']}: {uu.timestr()}" + "\n" + "\n")
+        uu.stage_duration(start_time, uu.timestr(), f"shapefile_index_for_Hansenized_{key}", main_logger)
 
     # Closes the Dask client if not running locally
     if not run_local:
@@ -345,7 +396,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Hansenize AFOLU model raster inputs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-ct', '--cluster_type', action='store', help='Run locally with Dask (local), test with 1 worker in coiled (test), or run with full coiled cluster (full)')
-    parser.add_argument('-p', '--processes', action='store', nargs='+', help='What datasets do you want to hansenize? Options: drivers, secondary_natural_forest, AGB2015, burned_area')
+    parser.add_argument('-p', '--processes', action='store', nargs='+', help='What datasets do you want to hansenize?')
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 

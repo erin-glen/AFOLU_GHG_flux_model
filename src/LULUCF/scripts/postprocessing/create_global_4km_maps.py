@@ -32,9 +32,9 @@ def agg_4x4(tile_id, bounds, chunk_length_pixels, pixel_area_tile, mg_ha_yr_tile
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
     print(f"Getting rasters for {tile_id}: \n {pixel_area_tile} \n {mg_ha_yr_tile}")
-    pixel_area_tile_chunk = uu.get_tile_dataset_rio(pixel_area_tile, 'Float32', bounds, chunk_length_pixels, is_final, logger)
+    pixel_area_tile_chunk = uu.get_tile_dataset_rio(pixel_area_tile, bounds, chunk_length_pixels, 'Float32')
     pixel_area_tile_chunk = pixel_area_tile_chunk[0]  # Converts downloaded tuple (array, status) to just the array
-    mg_ha_yr_tile_chunk = uu.get_tile_dataset_rio(mg_ha_yr_tile, 'Float32', bounds, chunk_length_pixels, is_final, logger)
+    mg_ha_yr_tile_chunk = uu.get_tile_dataset_rio(mg_ha_yr_tile, bounds, chunk_length_pixels, 'Float32')
     mg_ha_yr_tile_chunk = mg_ha_yr_tile_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
     # Converts per hectare values to per pixel values in the numpy array
@@ -104,9 +104,9 @@ def combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, globa
 
 def main(cluster_name):
     # -------------------------------------------------------------------------------------------------------------------
-    # Step 1: Connects to Coiled cluster if not running locally
+    # Step 1: Connects to Coiled cluster if not running locally and the named cluster exists
     run_local = False
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # -------------------------------------------------------------------------------------------------------------------
     # Step 2: Create download/ upload dictionary from list of processes to run
@@ -178,7 +178,7 @@ def main(cluster_name):
             print(f"Stage {stage} started at: {start_time}")
 
             mg_ha_yr_tile = f"{items['mg_ha_yr_dir']}{tile_id}{items['mg_ha_yr_pattern']}"
-            pixel_area_tile = f"{cn.pixel_area_path}{cn.pixel_area_pattern}_{tile_id}.tif"
+            pixel_area_tile = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
             per_pixel_tile_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
             per_pixel_output_path = items["mg_per_pixel_dir"]
 

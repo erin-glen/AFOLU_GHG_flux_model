@@ -14,16 +14,16 @@ import dask
 from dask.distributed import print
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import log_utilities as lu
-from ..utilities import universal_utilities as uu
+from src.LULUCF.scripts.utilities import constants_and_names as cn
+from src.LULUCF.scripts.utilities import log_utilities as lu
+from src.LULUCF.scripts.utilities import universal_utilities as uu
 
 def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 
-    # Connects to Coiled cluster if not running locally
-    cluster, client = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+    # Connects to Coiled cluster if not running locally and the named cluster exists
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
-    # Model stage being running
+    # Model stage being run
     stage = 'LULUCF_flux_postprocessing__tile_index_1x1_deg'
 
     # Starting time for stage
@@ -88,10 +88,10 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
         f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
 
-        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.gross_emis_non_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/2015_2020/4000_pixels/{date}/",
 
         f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2000_2005/4000_pixels/{date}/",
         f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/2005_2010/4000_pixels/{date}/",
@@ -113,10 +113,10 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2010_2015/4000_pixels/{date}/",
         f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/2015_2020/4000_pixels/{date}/",
 
-        f"{cn.outputs_path}{cn.land_state_node_path_part}/2000_2005/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.land_state_node_path_part}/2005_2010/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.land_state_node_path_part}/2010_2015/4000_pixels/{date}/",
-        f"{cn.outputs_path}{cn.land_state_node_path_part}/2015_2020/4000_pixels/{date}/"
+        f"{cn.outputs_path}{cn.land_state_pattern}/2000_2005/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.land_state_pattern}/2005_2010/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.land_state_pattern}/2010_2015/4000_pixels/{date}/",
+        f"{cn.outputs_path}{cn.land_state_pattern}/2015_2020/4000_pixels/{date}/"
     ]
 
     # Creates a list of dictionaries of s3 tile set path with corresponding tile index shapefile names,
@@ -130,7 +130,7 @@ def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
         # Replaces '/' with '__'
         value = path_suffix.rstrip('/').replace("/", "__")
 
-        # Creatres the dictionary,
+        # Creates the dictionary,
         # e.g., {'s3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/processed/20250217/': 'AGB_2015_ESA_CCI_Mg_AGB_ha'}
         s3_in_folders_list_of_dicts.append({path: value})
 
