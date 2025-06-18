@@ -581,12 +581,12 @@ def calc_T_NT(node, interval_length, burned_in_prev_interval, RF_AGC_in, RF_BGC_
 
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless).
     # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest only).
-    # Thus, we need to check whether the pixel was non-tall vegetation at some point during the model before the end of this interval.
+    # Thus, we need to check whether the pixel was ever not tall vegetation at some point during the model before the end of this interval.
     # If conditions aren't met, the deadwood and litter ratios are set to 0 (no removals).
     # For simplicity, there are no deadwood or litter removals in loss intervals.
-    # This isn't used for annual intervals (just used to calculate gain before loss) but not limiting it to just 5-year intervals
+    # These reatios aren't used for annual intervals (just used to calculate gain before loss) but not limiting it to just 5-year intervals
     # because it's not much computation.
-    if most_recent_year_not_tall_veg == 0 or most_recent_year_not_tall_veg == interval_end_year:
+    if (most_recent_year_not_tall_veg == 0) or (most_recent_year_not_tall_veg == interval_end_year):
         deadwood_c_ratio = 0.0
         litter_c_ratio = 0.0
 
@@ -613,11 +613,11 @@ def calc_T_NT(node, interval_length, burned_in_prev_interval, RF_AGC_in, RF_BGC_
     elif interval_length == 1:
 
         # Because there are no removals during a 1-year interval in which there is tree loss, RFs are reassigned to 0.
-        # This way, not RFs are reported for this 1-year interval.
+        # This way, no RFs are reported for this 1-year interval.
         RF_AGC_out = 0
         RF_BGC_out = 0
 
-        # Assigns gross removals to 0 for annual intervals because no removals in the year of loss.
+        # Assigns 0 to gross removals for annual intervals because no removals in the year of loss.
         agc_gross_removals_out = 0
         bgc_gross_removals_out = 0
         deadwood_c_gross_removals_out = 0
@@ -629,10 +629,10 @@ def calc_T_NT(node, interval_length, burned_in_prev_interval, RF_AGC_in, RF_BGC_
 
 
     # Step 4: Calculates carbon densities at the year of loss by carbon pool (Mg C/ha). This is not output from the model.
-    # For 5-year intervals, C pools pre-disturbance differ from input carbon pools.
+    # For 5-year intervals, C pools pre-disturbance can differ from input carbon pools because there can be gain before loss.
     # For annual intervals, C pools pre-disturbance are the same as input carbon pools because there is no gain before loss.
     if interval_length == 5:
-        agc_pre_disturb = agc_dens_in - agc_gross_removals_out
+        agc_pre_disturb = agc_dens_in - agc_gross_removals_out  # Gross removals is negative, so this adds carbon
         bgc_pre_disturb = bgc_dens_in - bgc_gross_removals_out
         deadwood_c_pre_disturb = deadwood_c_dens_in - deadwood_c_gross_removals_out
         litter_c_pre_disturb = litter_c_dens_in - litter_c_gross_removals_out
