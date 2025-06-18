@@ -46,6 +46,8 @@ def list_s3_files_with_pattern(s3_path, pattern):
     matching_files = []
     continuation_token = None  # For pagination
 
+    compiled_pattern = re.compile(pattern)
+
     while True:
         if continuation_token:
             response = s3.list_objects_v2(
@@ -63,7 +65,8 @@ def list_s3_files_with_pattern(s3_path, pattern):
         if "Contents" in response:
             for obj in response["Contents"]:
                 key = obj["Key"]
-                if pattern in key:
+                filename = key.split("/")[-1]  # get just the filename from the S3 key
+                if compiled_pattern.fullmatch(filename):
                     matching_files.append(f"s3://{bucket_name}/{key}")
 
         # Check if there's more data to retrieve
@@ -309,7 +312,7 @@ def first_file_name_in_s3_folder(download_dict):
 # LULUCF model utilities
 ###################################################################################################
 # Time in Eastern US timezone as a string
-def timestr():
+def timestr(format="full"):
 
     # Define the Eastern Time timezone
     eastern = pytz.timezone('US/Eastern')
@@ -318,13 +321,15 @@ def timestr():
     eastern_time = datetime.now(eastern)
 
     # Format the time as a string
-    return eastern_time.strftime("%Y%m%d_%H_%M_%S")
-
+    if format == "time":
+        return eastern_time.strftime("%H:%M:%S")
+    else:
+        return eastern_time.strftime("%Y%m%d_%H_%M_%S")
 
 # Connects to a Coiled cluster of a specified name if the local flag isn't on.
 # Does not create a Coiled cluster if the specified cluster name doesn't exist (contrary to default Coiled behavior).
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67fff45a-ec78-800a-83e1-8b3618a7e09a
-def connect_to_Coiled_cluster(cluster_name, run_local):
+def connect_to_Coiled_cluster(cluster_name, run_local, fallback_to_local_on_failure=True):
 
     # If local run flag is on, doesn't return a cluster or client
     if run_local:
@@ -332,7 +337,7 @@ def connect_to_Coiled_cluster(cluster_name, run_local):
         return None, None, run_local
 
     # If no local run flag, it tries to attach to the named cluster
-    else:
+    try:
         # Gets info on all Coiled clusters (including terminated ones)
         all_clusters = coiled.list_clusters()
 
@@ -344,38 +349,19 @@ def connect_to_Coiled_cluster(cluster_name, run_local):
                 client = Client(cluster)
                 return cluster, client, run_local
 
-        print(f"Cluster named {cluster_name} not found. Running locally.")
-        run_local = True
-        return None, None, run_local
+        if fallback_to_local_on_failure:
+            print(f"Cluster named {cluster_name} not found. Running locally.")
+            return None, None, True
+        else:
+            raise RuntimeError(f"No running cluster named '{cluster_name}' found.")
 
-
-#TODO: @Mel - find usages, change to using create_cluster.py instead. delete here after.
-# Creates a local client using dask or Coiled cluster with a specified name, # of worker, # of CPUs and # GiB
-def get_client_from_cluster_type(cluster_type, cluster_name=None, workers=None, cpu=None, memory=None):
-
-    if cluster_type == 'coiled':
-        coiled_cluster = coiled.Cluster(
-            n_workers=workers,
-            use_best_zone=True,
-            compute_purchase_option="spot_with_fallback",
-            idle_timeout="10 minutes",
-            region="us-east-1",
-            name=cluster_name,
-            workspace='wri-forest-research',
-            worker_cpu=cpu,
-            worker_memory=memory
-        )
-        client = coiled_cluster.get_client()
-
-    elif cluster_type == 'local':
-        local_cluster = LocalCluster()
-        client = Client(local_cluster)
-    else:
-        print("set cluster_type to one of the following: 'coiled', 'local'")
-
-    return client
-
-
+    except Exception as e:
+        if fallback_to_local_on_failure:
+            print(f"Error while connecting to Coiled cluster: {e}\nRunning locally instead.")
+            return None, None, True
+        else:
+            raise
+#TODO raise error from coiled, test with previous worksace
 
 # Chunk bounds as a string
 def boundstr(bounds):
@@ -1853,7 +1839,7 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
     # Use GDAL to build the VRT
     # gdal.BuildVRT(local_vrt, "/vsis3/gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/N00E010_ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0.tif")
     gdal.BuildVRT(local_vrt, vsis3_paths)
-    print(f"Built vrt: {timestr()}")
+    #print(f"Built vrt: {timestr()}")
 
     # Various checks that vrt was created and has data in it
     try:
@@ -1865,18 +1851,18 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
     if vrt_dataset.count == 0:
         print("VRT has no data or invalid sources.")
         exit()
-    else:
-        print("VRT contains data.")
+    #else:
+        #print("VRT contains data.")
 
-    if vrt_dataset.bounds:
-        print("VRT contains data or has valid metadata.")
+    #if vrt_dataset.bounds:
+        #print("VRT contains data or has valid metadata.")
     else:
         print("VRT has no data or invalid metadata.")
         exit()
 
     vrt_dataset.close()
 
-    print(f"File '{local_vrt}' exists at {os.path.abspath(local_vrt)}.")
+    #print(f"File '{local_vrt}' exists at {os.path.abspath(local_vrt)}.")
     upload_s3_file(output_vrt_s3, local_vrt)
     check_s3_file_created(output_vrt_s3)
 
