@@ -1269,6 +1269,7 @@ def calc_cropland_non_cropland(node, c_dens_in, c_pools_no_fire, most_recent_yea
 # Gross fluxes and ending carbon stocks for cropland remaining cropland (without tall vegetation).
 # Carbon densities don't change.
 # No CO2 emissions or removals but there are non-CO2 emissions if there is fire (crop residue burning).
+#TODO Allow cropland to have multiple fire emissions instances during a 5-year interval
 @jit(nopython=True)
 def calc_cropland_cropland(node, c_dens_in, most_recent_year_burned_during_interval):
 
@@ -1318,7 +1319,7 @@ def calc_cropland_cropland(node, c_dens_in, most_recent_year_burned_during_inter
 # Gross fluxes and ending carbon stocks for non-short/med vegetation converted to short/med vegetation
 # Applies to 5-year intervals and annual intervals.
 @jit(nopython=True)
-def calc_shortmedveg_gain(rf):
+def calc_short_veg_gain(rf):
 
     c_dens_in = [0, 0, 0, 0]
 
@@ -1342,7 +1343,7 @@ def calc_shortmedveg_gain(rf):
 # Carbon densities don't change.
 # No CO2 emissions or removals but there are non-CO2 emissions if there is fire (biomass burning).
 @jit(nopython=True)
-def calc_shortmedveg_loss(node, c_dens_in, c_pools_no_fire, most_recent_year_burned_during_interval):
+def calc_short_veg_loss(node, c_dens_in, c_pools_no_fire, most_recent_year_burned_during_interval):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
@@ -1403,8 +1404,9 @@ def calc_shortmedveg_loss(node, c_dens_in, c_pools_no_fire, most_recent_year_bur
 # Gross fluxes and ending carbon stocks for short/medium vegetation remaining short/medium vegetation.
 # Carbon densities don't change.
 # No CO2 emissions or removals but there are non-CO2 emissions if there is fire (biomass burning).
+#TODO Allow short veg to have multiple fire emissions instances during a 5-year interval
 @jit(nopython=True)
-def calc_shortmedveg_shortmedveg(node, c_dens_in, most_recent_year_burned_during_interval):
+def calc_short_veg_short_veg(node, c_dens_in, most_recent_year_burned_during_interval):
 
     # Step 1: Calculates carbon densities, carbon gross emissions and carbon gross removals (no changes to any)
     c_dens_out = np.array(c_dens_in).astype('float32')
