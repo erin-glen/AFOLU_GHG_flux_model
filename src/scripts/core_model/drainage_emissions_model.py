@@ -618,6 +618,8 @@ def run_drainage_model(
     cluster_name=None,
     bounding_box=None,
     chunk_size=None,
+    chunk_shapefile_uri=None,
+    first_chunks=None,
     run_local=False,
     no_stats=False,
     no_log=False,
@@ -638,7 +640,7 @@ def run_drainage_model(
 
     main_logger, _ = lu.populate_main_log_header(
         bounding_box=None if tile_ids else bounding_box,
-        use_shapefile=False,
+        use_shapefile=chunk_shapefile_uri if chunk_shapefile_uri else False,
         client=client,
         cluster=cluster,
         log_note="Organic-soils drainage model",
@@ -654,6 +656,17 @@ def run_drainage_model(
             bds = uu.get_10x10_tile_bounds(tid)
             chunks.extend(uu.get_chunk_bounds(bds, chunk_size))
         sample_tid = tile_ids[0]
+    elif chunk_shapefile_uri:
+        fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
+        chunks, _ = uu.create_chunk_list(
+            bounding_box,
+            chunk_shapefile_uri,
+            chunk_size,
+            first_chunks,
+            fishnet_iso_df,
+            main_logger,
+        )
+        sample_tid = uu.xy_to_tile_id(chunks[0][0], chunks[0][3])
     else:
         bounding_box = bounding_box or [110, -10, 120, 0]
         chunks = uu.get_chunk_bounds(bounding_box, chunk_size)
@@ -728,6 +741,8 @@ def main(argv=None):
             cluster_name=None,
             bounding_box=[112, -2, 113, -1],  # 1 x 1 degree tile
             chunk_size=1,
+            chunk_shapefile_uri=None,
+            first_chunks=None,
             run_local=True,
             no_stats=False,
             no_log=False,
@@ -761,6 +776,17 @@ def main(argv=None):
         help="Process all available 10x10 degree tiles",
     )
     p.add_argument("--chunk_size", "-cs", type=float)
+    p.add_argument(
+        "-cshp",
+        "--chunk_shapefile_uri",
+        help="S3 location for shapefile of 1x1 deg chunk footprints",
+    )
+    p.add_argument(
+        "-f",
+        "--first_chunks",
+        type=int,
+        help="Number of chunks to process from shapefile",
+    )
     p.add_argument("--run_local", action="store_true")
     p.add_argument("--no_stats", action="store_true")
     p.add_argument("--no_log", action="store_true")
@@ -799,6 +825,8 @@ def main(argv=None):
         cluster_name=args.cluster_name,
         bounding_box=args.bounding_box,
         chunk_size=args.chunk_size,
+        chunk_shapefile_uri=args.chunk_shapefile_uri,
+        first_chunks=args.first_chunks,
         run_local=args.run_local,
         no_stats=args.no_stats,
         no_log=args.no_log,
@@ -820,6 +848,14 @@ python -m src.scripts.core_model.drainage_emissions_model \
   --cluster_name drainage_cluster \
   --bounding_box 110 -10 120 0 \
   --chunk_size 1 \
+  --start_year 2015 \
+  --end_year 2019 \
+  --interval_type five_year
+
+python -m src.scripts.core_model.drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --chunk_shapefile_uri s3://path/to/fishnet.shp \
+  --first_chunks 10 \
   --start_year 2015 \
   --end_year 2019 \
   --interval_type five_year

@@ -10,6 +10,7 @@ import math
 import os
 import posixpath
 import re
+import sys
 from datetime import datetime
 from typing import Dict, List, Tuple, Union
 
@@ -18,6 +19,7 @@ import boto3
 import coiled
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 import rasterio
 from osgeo import gdal
 from botocore.config import Config
@@ -119,6 +121,70 @@ def xy_to_tile_id(x: float, y: float) -> str:
     lat_part = f"{abs(lat):02d}{'N' if lat >= 0 else 'S'}"
     lon_part = f"{abs(lon):03d}{'E' if lon >= 0 else 'W'}"
     return f"{lat_part}_{lon_part}"
+
+
+# Creates list of bounding boxes for chunks from a dataframe column structured as W_S_E_N.
+# Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+def process_chunk_id(chunk_id):
+    # Split by underscore
+    bounding_box = list(map(float, chunk_id.split('_')))
+    return bounding_box
+
+
+# Creates the list of chunks to process given an approach: a bounding box or a shapefile attribute table
+def create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size_deg, first_chunks, fishnet_iso_df, main_logger):
+
+    # Makes list of chunks to analyze from the bounding box and chunk size (deg)
+    # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+    if bounding_box and chunk_size_deg:
+
+        chunk_size_pixels = int(cn.full_raster_dims * chunk_size_deg / 10)
+
+        main_logger.info("Using bounding box and chunk size to determine chunks")
+        main_logger.info(f"Chunk source: Bounding box {bounding_box} (W, S, E, N)")
+        main_logger.info(f"Chunk size: {chunk_size_deg} degree, {chunk_size_pixels} pixels")
+        chunk_list = get_chunk_bounds_from_bounding_box(bounding_box, chunk_size_deg)
+
+
+    # Makes list of chunks to analyze from an attribute table of a shapefile of 1x1 degree chunks.
+    # Attribute table column must be formatted as W_S_E_N.
+    # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
+    elif chunk_shapefile_uri:
+
+        chunk_size_pixels = int(cn.full_raster_dims * 1/10)
+
+        main_logger.info("Using chunk list shapefile (and optional number of test chunks) to determine 1x1 deg chunks")
+        main_logger.info(f"Chunk source: 1x1 degree tile index shapefile {chunk_shapefile_uri}")
+        main_logger.info(f"Chunk size: 1 degree, {chunk_size_pixels} pixels")
+
+        # gdf = gpd.read_file(cn.fishnet_s3_uri)  # Reads shapefile attribute table
+        fishnet_1x1_chunk_id_df = fishnet_iso_df[['chunk_id']]  # Creates dataframe
+
+        # If argument for number of chunks in shapefile is supplied, limit to that
+        if first_chunks:
+            fishnet_1x1_chunk_id_df = fishnet_1x1_chunk_id_df[:first_chunks]
+
+        # Converts dataframe column of chunk bounds to nested list
+        # Per https://chatgpt.com/share/e/674747ee-d588-800a-995c-1f897a8ace31
+        chunk_list = fishnet_1x1_chunk_id_df['chunk_id'].apply(process_chunk_id).tolist()
+
+    else:
+        main_logger.info("Chunk list cannot be determined")
+        sys.exit()
+
+    return chunk_list, chunk_size_pixels
+
+
+# Creates a dataframe from the attribute table of the 1x1 deg fishnet with GADM iso joined to it
+def fishnet_with_GADM_iso(shapefile_uri):
+
+    # Reads the 1x1 deg fishnet with GADM iso joined from S3 to extract "chunk_id" and "iso" fields
+    gdf = gpd.read_file(shapefile_uri)
+
+    # Creates a DataFrame of the 1x1def fishnet with "chunk_id" and "iso" fields
+    fishnet_df = gdf[['chunk_id', 'iso']]
+
+    return fishnet_df
 
 
 # ----------------------------------------------------------------------
