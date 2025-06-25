@@ -126,53 +126,43 @@ def xy_to_tile_id(x: float, y: float) -> str:
 # ----------------------------------------------------------------------
 # Connects to or creates a Coiled cluster unless running locally
 def connect_to_cluster(
-    cluster_name="afolu_cluster",
+    cluster_name: str = "afolu_cluster",
     n_workers: int = 20,
     region: str = "us-east-1",
     run_local: bool = False,
     worker_memory: str = "32GiB",
 ):
-    """Connect to an existing Coiled cluster or create one.
+    """Connect to a running Coiled cluster or run locally.
 
     Parameters
     ----------
     cluster_name : str
-        Name of the cluster to connect to or create.
+        Name of the cluster to connect to.
     n_workers : int
-        Number of workers when creating a new cluster.
+        Unused. Kept for backwards compatibility.
     region : str
-        AWS region for the cluster.
+        AWS region for the cluster (unused).
     run_local : bool
-        If ``True``, create a local cluster instead of using Coiled.
-        worker_memory : str
-        Memory limit for each worker when creating a new cluster.
+        If ``True`` run locally without Dask/Coiled.
+    worker_memory : str
+        Unused. Kept for backwards compatibility.
     """
 
     if run_local:
-        cluster = LocalCluster()
-        client = Client(cluster)
-        return cluster, client
+        print("Running locally without Dask/Coiled.")
+        return None, None, run_local
 
-    try:
-        cluster = coiled.Cluster.from_name(cluster_name)
-        print(f"Connected to existing cluster: {cluster_name}")
-    except Exception:
-        print(
-            f"No existing cluster with name '{cluster_name}' found. Creating a new cluster."
-        )
-        cluster = coiled.Cluster(
-            name=cluster_name,
-            n_workers=n_workers,
-            use_best_zone=True,
-            compute_purchase_option="spot_with_fallback",
-            idle_timeout="15 minutes",
-            region=region,
-            account="wri-forest-research",
-            worker_memory=worker_memory,
-            shutdown_on_close=False,
-        )
-    client = cluster.get_client()
-    return cluster, client
+    all_clusters = coiled.list_clusters()
+    for info in all_clusters:
+        if info.get("name") == cluster_name and info.get("current_state", {}).get("state") == "ready":
+            print(f"Connecting to running cluster '{cluster_name}'.")
+            cluster = coiled.Cluster(name=cluster_name)
+            client = Client(cluster)
+            return cluster, client, run_local
+
+    print(f"Cluster named {cluster_name} not found. Running locally.")
+    run_local = True
+    return None, None, run_local
 
 
 # ----------------------------------------------------------------------

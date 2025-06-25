@@ -620,7 +620,7 @@ def run_drainage_model(
 
     stage = "drainage_model"
     start_ts = uu.timestr()
-    cluster, client = uu.connect_to_cluster(
+    cluster, client, run_local = uu.connect_to_cluster(
         cluster_name=cluster_name, run_local=run_local
     )
 

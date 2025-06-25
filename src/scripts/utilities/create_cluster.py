@@ -80,3 +80,8 @@ if __name__ == "__main__":
 
     # Create the cluster with command line arguments
     create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory)
+
+"""
+quick test: 
+python -m src.scripts.utilities.create_cluster -n 4 -m 32 -cn drainage_cluster
+"""
