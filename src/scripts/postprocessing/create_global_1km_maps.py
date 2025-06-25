@@ -328,7 +328,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--out_res_km",
         type=float,
-        default=1,
+        default=0.025,
         help="Target resolution in kilometres (e.g. 1 for ~1 km, 2 for ~2 km)",
     )
     args = parser.parse_args()
