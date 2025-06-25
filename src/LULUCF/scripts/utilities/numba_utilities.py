@@ -412,7 +412,7 @@ def calc_Cf_forest(climate_domain_cell, drivers_cell, ifl_primary_cell):
             Cf_forest = 0.45     # Row "all other temperate forest"
         else:  # Temperate, no driver assigned
             Cf_forest = 0.45
-    elif climate_domain_cell == 3:
+    elif climate_domain_cell == 3:  # Boreal
         if drivers_cell in driver_group_1:  # Boreal, driver group 1
             Cf_forest = 0.59     # Row "Land clearing fire" boreal forest
         elif drivers_cell in driver_group_2:  # Boreal, driver group 2
@@ -731,14 +731,14 @@ def calc_T_NT(node, interval_length, burned_in_prev_interval, RF_AGC_in, RF_BGC_
     forest_age_interval_end = 0
 
     return (state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out,
-            RF_AGC_out, RF_BGC_out, gain_year_count, forest_age_interval_end)
+            RF_AGC_out, RF_BGC_out, agc_ef_CO2, gain_year_count, forest_age_interval_end)
 
 
 # Gross fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 # Applies to 5-year intervals and annual intervals.
 @jit(nopython=True)
-def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_prev_interval, RF_AGC_pre_dist_in, RF_BGC_pre_dist_in,
+def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_curr_interval, RF_AGC_pre_dist_in, RF_BGC_pre_dist_in,
                                 c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
                                 forest_dist_last, interval_end_year, c_dens_in,
                                 RF_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_co2, Gef_ch4, Gef_n2o,
@@ -749,7 +749,7 @@ def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_prev_interval, 
 
     # Establishes which carbon pools are emitted depending on whether fire was detected during the interval.
     # For T->T, emission factors can range between 0 and 1, with 0 meaning no emissions and 1 meaning full emissions.
-    if burned_in_prev_interval:      # Carbon pools that are emitted as CO2 if fire was detected.
+    if burned_in_curr_interval:      # Carbon pools that are emitted as CO2 if fire was detected.
         agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = unpack_emission_factors(c_pools_fire_CO2)
     else:          # Carbon pools that are emitted as CO2 if fire was not detected.
         agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = unpack_emission_factors(c_pools_no_fire)
@@ -864,7 +864,7 @@ def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_prev_interval, 
     # if a Gef for CO2 is supplied AND if there was fire during the interval.
     # This is used for non-stand replacing forest disturbances (as opposed to entire C pools being combusted).
     # From IPCC 2019 Eqn. 2.27
-    if burned_in_prev_interval:
+    if burned_in_curr_interval:
 
         # Equations divide by C_to_CO2 to put the emissions back in Mg C/ha. They are later converted back to Mg CO2/ha,
         # but we need CO2 fire emissions in Mg C/ha here for consistency with all other outputs.
@@ -918,7 +918,7 @@ def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_prev_interval, 
     n2o_flux_out = 0
 
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
-    if burned_in_prev_interval:
+    if burned_in_curr_interval:
 
         state_out = accrete_node(node, 1)
 
@@ -954,7 +954,7 @@ def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_prev_interval, 
     forest_age_interval_end = 0
 
     return (state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out,
-            RF_AGC_pre_dist_out, RF_BGC_pre_dist_out, gain_year_count_pre_dist, forest_age_interval_end)
+            RF_AGC_pre_dist_out, RF_BGC_pre_dist_out, agc_ef_CO2, gain_year_count_pre_dist, forest_age_interval_end)
 
 
 # Gross fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances.
@@ -1165,7 +1165,7 @@ def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, most_
     else:
         raise ValueError("interval_length not valid: must be 1 or 5")
 
-    return state_out, c_gross_emissions_out, c_gross_removals_out, non_co2_fluxes_out, c_dens_out, gain_year_count_pre_dist, forest_age_interval_end
+    return state_out, c_gross_emissions_out, c_gross_removals_out, agc_ef_CO2, non_co2_fluxes_out, c_dens_out, gain_year_count_pre_dist, forest_age_interval_end
 
 
 # Gross fluxes and ending carbon stocks for non-cropland (without tall vegetation) converted to cropland (without tall vegetation).
@@ -1318,6 +1318,7 @@ def calc_cropland_cropland(node, c_dens_in, most_recent_year_burned_during_inter
 
 # Gross fluxes and ending carbon stocks for non-short/med vegetation converted to short/med vegetation
 # Applies to 5-year intervals and annual intervals.
+# TODO c_dens_in is all 0s. Is that right? When would it not use 0s?
 @jit(nopython=True)
 def calc_short_veg_gain(rf):
 

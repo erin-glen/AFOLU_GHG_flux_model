@@ -17,7 +17,6 @@
 -bb 10 44 16 50 -cs 1               # 6x6 deg (50N_010E), 36 chunks
 -bb 110 -10 115 -5 -cs 1            # 5x5 deg (00N_110E), 25 chunks
 -bb 110 -10 114 -6 -cs 1            # 4x4 deg (00N_110E), 16 chunks
--bb 10 46 14 50 -cs 2               # 4x4 deg (50N_010E), 4 chunks
 -bb 10 48 12 50 -cs 1               # 2x2 deg (50N_010E), 4 chunks
 -bb 10 49 11 50 -cs 1               # 1x1 deg (50N_010E), 1 chunk
 -bb 10 49.5 10.5 50 -cs 0.5         # 0.5x0.5 deg (50N_010E), 1 chunk

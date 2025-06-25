@@ -117,10 +117,10 @@ cropland_agc_dens = cropland_rf
 
 # One-time annual short/medium vegetation removal factor (Mg C/ha) (IPCC 2019 V4, Ch. 2 Table 2.4-- all savanna grassland mid/late dry season burns)
 # IPCC value is 10 Mg AGB/ha, so 4.7 Mg AGC/ha
-short_med_veg_rf = 4.7
+short_veg_rf = 4.7
 
 # Short/medium vegetation carbon density (global constant, static value) (Mg C/ha)
-short_med_veg_dens = short_med_veg_rf
+short_veg_dens = short_veg_rf
 
 # Aboveground carbon removal factor for trees outside forests (Mg C/ha/yr), assuming that the entire hectare is ToF
 # (IPCC 2019 Settlements Section 8.2.1.2 (p. 8.5))
@@ -605,6 +605,7 @@ max_height_since_last_time_not_tall_veg = "max_height_since_last_time_not_tall_v
 first_time_sig_loss_from_max_height = "first_time_sig_loss_from_max_height"
 part_or_full_dist_in_prev_interval = "partial_or_full_dist_in_previous_interval"
 burned_in_curr_interval = "burned_in_current_interval"
+agc_emission_factor = "AGC_emission_factor__fraction"
 
 model_type_placholder = "MODEL_TYPE"
 
@@ -667,7 +668,8 @@ LULUCF_intermediate_output_dirs = [
     f"{outputs_path}{max_height_since_last_time_not_tall_veg}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{first_time_sig_loss_from_max_height}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{part_or_full_dist_in_prev_interval}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{burned_in_curr_interval}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/"
+    f"{outputs_path}{burned_in_curr_interval}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{agc_emission_factor}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
 # TODO @Mel We shouldn't need this eventually.

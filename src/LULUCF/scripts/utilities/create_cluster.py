@@ -9,6 +9,7 @@ This makes them less costly on AWS and use fewer Coiled credits.
 """
 
 import coiled
+import dask
 import argparse
 import sys
 
@@ -26,16 +27,22 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         idle_timeout = 15
         scheduler_vm_type = "x2gd.xlarge"
         worker_vm_type = "x2gd.xlarge"
+        # scheduler_vm_type = "m5.4xlarge"
+        # worker_vm_type = "m5.4xlarge"
 
     elif worker_memory == 32:
         idle_timeout = 20
         scheduler_vm_type = "x8g.large"
         worker_vm_type = "x8g.large"
+        # scheduler_vm_type = "m5.2xlarge"
+        # worker_vm_type = "m5.2xlarge"
 
     elif worker_memory == 16:
         idle_timeout = 25
         scheduler_vm_type = "x2gd.medium"
         worker_vm_type = "x2gd.medium"
+        # scheduler_vm_type = "m5.xlarge"
+        # worker_vm_type = "m5.xlarge"
 
     else:
         sys.exit('Memory argument not 16, 32, or 64 GB')
@@ -56,8 +63,11 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         worker_vm_types = worker_vm_type,
         worker_options={
             "nthreads": threads_per_worker
-        }
+        },
+        # software="afolu-ttl800sec-env",
     )
+
+    dask.config.set({'distributed.scheduler.worker-ttl': '500s'})
 
     print(f"Cluster created with name: {cluster.name}")
     print(f"Number of workers: {n_workers}; worker memory: {worker_memory_str}; scheduler memory: {scheduler_memory_str}; threads per worker: {threads_per_worker}")
