@@ -620,11 +620,11 @@ def run_drainage_model(
 
     stage = "drainage_model"
     start_ts = uu.timestr()
-    cluster, client, run_local = uu.connect_to_cluster(
+    cluster, client = uu.connect_to_cluster(
         cluster_name=cluster_name, run_local=run_local
     )
 
-    main_logger, _ = lu.populate_main_log_header(
+    main_logger, main_log_local_path = lu.populate_main_log_header(
         bounding_box=None if tile_ids else bounding_box,
         use_shapefile=False,
         client=client,
@@ -690,8 +690,14 @@ def run_drainage_model(
     if not no_stats:
         uu.calculate_chunk_stats(all_stats, stage)
 
-    uu.stage_duration(start_ts, uu.timestr(), stage)
+    uu.stage_duration(start_ts, uu.timestr(), f"{stage} with chunk stats")
+
     if not run_local:
+        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_ts, main_logger)
+        uu.stage_duration(start_ts, uu.timestr(), f"{stage} with chunk stats and worker log compilation")
+
+        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
+
         client.close()
         cluster.close()
 
