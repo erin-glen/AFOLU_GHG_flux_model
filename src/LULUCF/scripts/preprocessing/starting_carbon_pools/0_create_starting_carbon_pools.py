@@ -45,7 +45,7 @@ from ...utilities import resize_cluster
 
 # Function to create initial (year 2000) non-soil carbon pool densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-@jit(nopython=True)
+# @jit(nopython=True)
 def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                                 in_dict_int32, in_dict_float32, mangrove_C_ratio_array, year):
 
@@ -66,9 +66,8 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     climate_domain_block = in_dict_int16[cn.climate_domain_pattern]
     precipitation_block = in_dict_int32[cn.precipitation_pattern]
     continent_ecozone_block = in_dict_int16[cn.continent_ecozone_pattern]
-
-    # Gets a fallback value for continent_ecozone for the chunk in case some pixels don't have one
-    continent_ecozone_fallback = nu.fallback_conteco_climzone_value(continent_ecozone_block, 2020)
+    climate_zone_block = in_dict_uint8[cn.climate_zone_pattern]
+    LC_composite_block = in_dict_uint8[cn.land_cover_pattern]  # LC composite of the year being processed. Pattern is the same regardless of starting year.
 
     # AGB block sources (mangrove and non-mangrove) depend on the starting year
     # Numba can't handle two different possible datatypes for agb_non_mang_block,
@@ -80,7 +79,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
         agb_non_mang_block = in_dict_uint16[cn.agb_2015_pattern].astype(np.int16)
         mangrove_agb_block = in_dict_float32[cn.mangrove_agb_2000_pattern]
     else:
-        out_dict_float32[f"{cn.agc_dens_pattern}_{year}"] = np.full(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape, 9999).astype('float32')
+        out_dict_float32[f"{cn.agc_raw_dens_pattern}_{year}"] = np.full(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape, 9999).astype('float32')
         return out_dict_float32
 
     mangrove_in_chunk = True  # Flag for whether chunk has mangrove in it
@@ -95,10 +94,22 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
     # Output blocks
     # Need to specify the output datatype or it will default to float32
-    agc_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
-    bgc_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
-    deadwood_c_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
-    litter_c_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+    agc_raw_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+    bgc_raw_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+    deadwood_c_raw_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+    litter_c_raw_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+
+    agc_LC_masked_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+    bgc_LC_masked_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+    deadwood_c_LC_masked_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+    litter_c_LC_masked_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+
+    # Gets a fallback value for continent_ecozone for the chunk in case some pixels don't have one
+    continent_ecozone_fallback = nu.fallback_conteco_climzone_value(continent_ecozone_block, 2020)
+
+    # Sets a fallback value for climate zone for the chunk in case any pixels fall outside the climate zone boundary.
+    # fallback_value is only used if the chunk doesn't have any climate_zone pixels in it at all.
+    climate_zone_fallback = nu.fallback_conteco_climzone_value(climate_zone_block, 5)
 
     # Iterates through all pixels in the chunk
     for row in range(continent_ecozone_block.shape[0]):
@@ -112,17 +123,30 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             precipitation = precipitation_block[row, col]
             r_s_ratio = r_s_ratio_block[row, col]
             continent_ecozone_cell = continent_ecozone_block[row, col]
+            LC_composite_cell = LC_composite_block[row, col]
+            climate_zone_cell = climate_zone_block[row, col]
+
+            # Applies the continent_ecozne fallback value when there isn't a value for the pixel
+            if continent_ecozone_cell == 0:
+                continent_ecozone_cell = continent_ecozone_fallback
+
+            # Applies the climate_zone fallback value when there isn't a value for the pixel
+            if climate_zone_cell == 0:
+                climate_zone_cell = climate_zone_fallback
+
+            # Carbon density for short vegetation (Mg C/ha) based on climate zone (IPCC default)
+            short_veg_AGC_RF, short_veg_BGC_RF = nu.calc_short_veg_removals(climate_zone_cell)
 
             # If mangrove AGB is present, AGC is calculated from it, overwriting any AGC that is based on non-mang AGB that is already there
             if (mangrove_in_chunk) and (mangrove_agb_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
-                agc_out_block[row, col] = mangrove_agb_cell * cn.biomass_to_carbon_mangrove
+                agc_raw_out_block[row, col] = mangrove_agb_cell * cn.biomass_to_carbon_mangrove
 
             # If non-mang AGB is present, AGC is calculated from it
             elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
-                agc_out_block[row, col] = agb_non_mang_cell * cn.biomass_to_carbon_non_mangrove
+                agc_raw_out_block[row, col] = agb_non_mang_cell * cn.biomass_to_carbon_non_mangrove
 
             else:
-                agc_out_block[row, col] = 0
+                agc_raw_out_block[row, col] = 0
 
             # Separate branches for assigning BGC, deadwood C, and litter C ratios depending on whether the pixel has mangroves.
             # Calculation of BGC, deadwood C, and litter C are done after the decision tree assigns the ratios.
@@ -130,10 +154,6 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             # Mangrove carbon pool ratio branch
             # From IPCC 2013 Wetland Supplement
             if (mangrove_in_chunk) and (mangrove_agb_cell > 0):  # Only replaces non-mangrove AGB if mangrove chunk exists and if mangrove value in that pixel
-
-                # Applies the continent_ecozne fallback value when there isn't a value for the pixel
-                if continent_ecozone_cell == 0:
-                    continent_ecozone_cell = continent_ecozone_fallback
 
                 bgc_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 1]
                 deadwood_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 2]
@@ -181,16 +201,21 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                 litter_c_ratio = -20
 
             # Actually calculates BGC, deadwood C, and litter C using the ratios assigned in the above decision tree
-            bgc_out_block[row, col] = agc_out_block[row, col] * bgc_ratio
-            deadwood_c_out_block[row, col] = agc_out_block[row, col] * deadwood_c_ratio
-            litter_c_out_block[row, col] = agc_out_block[row, col] * litter_c_ratio
+            bgc_raw_out_block[row, col] = agc_raw_out_block[row, col] * bgc_ratio
+            deadwood_c_raw_out_block[row, col] = agc_raw_out_block[row, col] * deadwood_c_ratio
+            litter_c_raw_out_block[row, col] = agc_raw_out_block[row, col] * litter_c_ratio
 
     # Adds the output arrays to the dictionary with the appropriate data type
     # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
-    out_dict_float32[f"{cn.agc_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = agc_out_block.copy()
-    out_dict_float32[f"{cn.bgc_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = bgc_out_block.copy()
-    out_dict_float32[f"{cn.deadwood_c_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = deadwood_c_out_block.copy()
-    out_dict_float32[f"{cn.litter_c_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = litter_c_out_block.copy()
+    out_dict_float32[f"{cn.agc_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = agc_raw_out_block.copy()
+    out_dict_float32[f"{cn.bgc_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = bgc_raw_out_block.copy()
+    out_dict_float32[f"{cn.deadwood_c_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = deadwood_c_raw_out_block.copy()
+    out_dict_float32[f"{cn.litter_c_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = litter_c_raw_out_block.copy()
+
+    out_dict_float32[f"{cn.agc_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = agc_LC_masked_out_block.copy()
+    out_dict_float32[f"{cn.bgc_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = bgc_LC_masked_out_block.copy()
+    out_dict_float32[f"{cn.deadwood_c_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = deadwood_c_LC_masked_out_block.copy()
+    out_dict_float32[f"{cn.litter_c_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = litter_c_LC_masked_out_block.copy()
 
     # return output dictionary/ies
     return out_dict_float32
@@ -443,6 +468,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     download_dict = {
         cn.elevation_pattern: f"{cn.elevation_dir}{sample_tile_id}_{cn.elevation_pattern}.tif",
         cn.climate_domain_pattern: f"{cn.climate_domain_dir}{sample_tile_id}_{cn.climate_domain_pattern}.tif",
+        cn.climate_zone_pattern: f"{cn.climate_zone_processed_dir}{sample_tile_id}_{cn.climate_zone_pattern}.tif",
         cn.precipitation_pattern: f"{cn.precipitation_dir}{sample_tile_id}_{cn.precipitation_pattern}.tif",
         cn.r_s_ratio_non_mang_pattern: f"{cn.r_s_ratio_non_mang_dir}{sample_tile_id}_{cn.r_s_ratio_non_mang_pattern}.tif",
         cn.continent_ecozone_pattern: f"{cn.continent_ecozone_dir}{sample_tile_id}_{cn.continent_ecozone_pattern}.tif"
@@ -452,17 +478,22 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     if year == 2000:
         download_dict[cn.agb_2000_pattern] = f"{cn.agb_2000_dir}{sample_tile_id}_{cn.agb_2000_pattern}.tif"
         download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_dir}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
-        output_dir_list = [cn.agc_2000_dir, cn.bgc_2000_dir, cn.deadwood_c_2000_dir, cn.litter_c_2000_dir]
+        download_dict[cn.land_cover_pattern] = f"{cn.land_cover_5_year_path}2000/{sample_tile_id}.tif"
+        output_dir_list = [cn.agc_2000_raw_dir, cn.bgc_2000_raw_dir, cn.deadwood_c_2000_raw_dir, cn.litter_c_2000_raw_dir,
+                           cn.agc_2000_LC_masked_dir, cn.bgc_2000_LC_masked_dir, cn.deadwood_c_2000_LC_masked_dir, cn.litter_c_2000_LC_masked_dir]
 
     elif year == 2015:
         download_dict[cn.agb_2015_pattern] = f"{cn.agb_2015_dir_processed}{sample_tile_id}_{cn.agb_2015_pattern}.tif"
         ##TODO Using mangrove AGB2000 for 2015 model start! Need to use something else for 2015!!!!!!
         download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_dir}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
-        output_dir_list = [cn.agc_2015_dir, cn.bgc_2015_dir, cn.deadwood_c_2015_dir, cn.litter_c_2015_dir]
+        download_dict[cn.land_cover_pattern] = f"{cn.land_cover_annual_path}2015/{sample_tile_id}.tif"
+        output_dir_list = [cn.agc_2015_raw_dir, cn.bgc_2015_raw_dir, cn.deadwood_c_2015_raw_dir, cn.litter_c_2015_raw_dir,
+                           cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir]
 
     else:
         print(f"Year input {year} not valid. Terminating.")
         sys.exit()
+    # print(download_dict)
 
     # Creates list of output directories specific to the run
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]

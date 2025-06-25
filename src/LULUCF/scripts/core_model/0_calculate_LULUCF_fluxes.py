@@ -23,6 +23,7 @@ python scripts/utilities/download_outputs_local.py v1 23_-4_24_-3
 
 Using more than 1 thread/worker slows down processing a lot when there are more tasks than workers for the core LULUCF model,
 which is the situation for large analyses, obviously.
+https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210641504248464?focus=true
 """
 
 import argparse
@@ -68,10 +69,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
 
     # Carbon density arrays determined by the starting year of the model (Mg C/ha),
     # but the starting C densities have the same key in the dictionary regardless of the starting year
-    agc_dens_block = in_dict_float32[cn.agc_dens_pattern].astype('float32')
-    bgc_dens_block = in_dict_float32[cn.bgc_dens_pattern].astype('float32')
-    deadwood_c_dens_block = in_dict_float32[cn.deadwood_c_dens_pattern].astype('float32')
-    litter_c_dens_block = in_dict_float32[cn.litter_c_dens_pattern].astype('float32')
+    agc_dens_block = in_dict_float32[cn.agc_raw_dens_pattern].astype('float32')
+    bgc_dens_block = in_dict_float32[cn.bgc_raw_dens_pattern].astype('float32')
+    deadwood_c_dens_block = in_dict_float32[cn.deadwood_c_raw_dens_pattern].astype('float32')
+    litter_c_dens_block = in_dict_float32[cn.litter_c_raw_dens_pattern].astype('float32')
 
     # print(agc_dens_block.max())
     # print(bgc_dens_block.max())
@@ -96,7 +97,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     # Because this is used to store the RF from the previous interval,
     # it persists from one interval to the next. Therefore, it must be defined before the first iteration.
     # That way, removal factors can be over-written by those used in the most recent interval.
-    agc_rf_pre_dist_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
+    agc_rf_pre_dist_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('float32')
 
     planted_forest_type_block = in_dict_uint8[cn.planted_forest_type_pattern]
     planted_forest_tree_crop_block = in_dict_uint8[cn.planted_forest_tree_crop_pattern]
@@ -138,17 +139,17 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     # 0=Always tall vegetation so far. Other values represent the last year of non-tall vegetation.
     # This is assessed at the pixel level because numba wouldn't allow the needed logical operations on numpy arrays (chunks).
     # Tall vegetation is basd on the composite land cover maps, not the canopy height maps.
-    most_recent_year_not_tall_veg_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint16')
+    most_recent_year_not_tall_veg_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('uint16')
 
     # Forest age for each output year of the model
     forest_age_annual_block = forest_age_start_year_block
 
     # Year in which forest loss occurs/is assigned during an interval (0 if no loss)
     ### TODO Never actually used. What did I intend to do with this?
-    year_of_forest_loss_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint16')
+    year_of_forest_loss_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('uint16')
 
     # Maximum height of vegetation since the last interval in which there was not forest
-    max_height_since_last_time_not_tall_veg_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
+    max_height_since_last_time_not_tall_veg_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('uint8')
 
     # Tracks whether the height has already decreased more than the signif. height loss threshold compared to
     # maximum vegetation height since the last time the pixel was non-tall vegetation land cover.
@@ -158,7 +159,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
     # 0=no significant height loss relative to the maximum vegetation height since last non-tall vegetation.
     # 1=height loss relative to the maximum vegetation height occurred in this interval.
     # 2=height loss relative to the maximum vegetation height occurred in a previous interval.
-    first_time_sig_loss_from_max_height_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
+    first_time_sig_loss_from_max_height_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('uint8')
 
     # print("interval_end_years:", interval_end_years)
 
@@ -250,34 +251,34 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         # Tracks whether a partial disturbance occurred in the last interval due to any cause (not including just fire,
         # which does not count as a partial disturbance in this model if height does not decrease significantly with it).
         # Rewritten for every interval. Hence, it is defined inside the interval loop.
-        part_or_full_dist_in_prev_interval_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
+        part_or_full_dist_in_prev_interval_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('uint8')
 
         # Tracks whether there was fire in the last interval
-        burned_in_curr_interval_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
+        burned_in_curr_interval_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('uint8')
 
         # Numpy arrays for outputs that don't depend on previous interval's values
-        state_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint32')  # Land cover state at end of interval
+        state_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('uint32')  # Land cover state at end of interval
 
         # Number of years of canopy growth.
         # First digit is pre-disturbance years of growth.
         # Second digit (if it exists) is post-disturbance years of growth
-        gain_year_count_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('uint8')
+        gain_year_count_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('uint8')
 
-        agc_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
-        bgc_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
-        deadwood_c_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
-        litter_c_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
+        agc_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('float32')
+        bgc_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('float32')
+        deadwood_c_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('float32')
+        litter_c_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('float32')
 
-        ch4_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
-        n2o_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
+        ch4_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('float32')
+        n2o_gross_emis_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('float32')
 
-        agc_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
-        bgc_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
-        deadwood_c_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
-        litter_c_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
+        agc_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('float32')
+        bgc_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('float32')
+        deadwood_c_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('float32')
+        litter_c_gross_removals_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('float32')
 
         # Aboveground carbon emission factors
-        agc_ef_out_block = np.zeros(in_dict_float32[cn.agc_dens_pattern].shape).astype('float32')
+        agc_ef_out_block = np.zeros(in_dict_float32[cn.agc_raw_dens_pattern].shape).astype('float32')
 
 
         # Iterates through all pixels in the chunk
@@ -440,7 +441,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
                 c_dens_in_NT_T = [np.float32(0), np.float32(0), deadwood_c_dens_in, litter_c_dens_in]
 
                 # One-time removal factor for gain of short vegetation (Mg C/ha) based on climate zone
-                # TODO confirm that we want to use this for all short (i.e. <5 m) veg for both GLCLU datasets
                 short_veg_AGC_RF, short_veg_BGC_RF = nu.calc_short_veg_removals(climate_zone_cell)
 
 
@@ -1309,10 +1309,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_int16, in_dict_int32, in_dict_float32,
         out_dict_float32[f"{cn.n2o_flux_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (n2o_gross_emis_out_block / interval_length).copy()
 
         # Still Mg C/ha at the interval end year
-        out_dict_float32[f"{cn.agc_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = agc_dens_block.copy()
-        out_dict_float32[f"{cn.bgc_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = bgc_dens_block.copy()
-        out_dict_float32[f"{cn.deadwood_c_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = deadwood_c_dens_block.copy()
-        out_dict_float32[f"{cn.litter_c_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = litter_c_dens_block.copy()
+        out_dict_float32[f"{cn.agc_raw_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = agc_dens_block.copy()
+        out_dict_float32[f"{cn.bgc_raw_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = bgc_dens_block.copy()
+        out_dict_float32[f"{cn.deadwood_c_raw_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = deadwood_c_dens_block.copy()
+        out_dict_float32[f"{cn.litter_c_raw_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = litter_c_dens_block.copy()
 
         # Test/intermediate outputs only saved if not a large run
         if not is_final:
@@ -1657,16 +1657,16 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Starting carbon pools depend on the starting year
     # Uses the carbon maps for 2000 for 5-year and hybrid-interval models
     if interval_type in [cn.intervals_five_years, cn.intervals_hybrid]:
-        download_dict[cn.agc_dens_pattern] = f"{cn.agc_2000_dir}{sample_tile_id}__{cn.agc_2000_pattern}.tif"
-        download_dict[cn.bgc_dens_pattern] = f"{cn.bgc_2000_dir}{sample_tile_id}__{cn.bgc_2000_pattern}.tif"
-        download_dict[cn.deadwood_c_dens_pattern] = f"{cn.deadwood_c_2000_dir}{sample_tile_id}__{cn.deadwood_c_2000_pattern}.tif"
-        download_dict[cn.litter_c_dens_pattern] = f"{cn.litter_c_2000_dir}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif"
+        download_dict[cn.agc_raw_dens_pattern] = f"{cn.agc_2000_dir}{sample_tile_id}__{cn.agc_2000_pattern}.tif"
+        download_dict[cn.bgc_raw_dens_pattern] = f"{cn.bgc_2000_dir}{sample_tile_id}__{cn.bgc_2000_pattern}.tif"
+        download_dict[cn.deadwood_c_raw_dens_pattern] = f"{cn.deadwood_c_2000_dir}{sample_tile_id}__{cn.deadwood_c_2000_pattern}.tif"
+        download_dict[cn.litter_c_raw_dens_pattern] = f"{cn.litter_c_2000_dir}{sample_tile_id}__{cn.litter_c_2000_pattern}.tif"
     ##TODO: 2015 carbon maps are still using the 2000 mangrove carbon map!!
     elif interval_type == cn.intervals_annual:
-        download_dict[cn.agc_dens_pattern] = f"{cn.agc_2015_dir}{sample_tile_id}__{cn.agc_2015_pattern}.tif"
-        download_dict[cn.bgc_dens_pattern] = f"{cn.bgc_2015_dir}{sample_tile_id}__{cn.bgc_2015_pattern}.tif"
-        download_dict[cn.deadwood_c_dens_pattern] = f"{cn.deadwood_c_2015_dir}{sample_tile_id}__{cn.deadwood_c_2015_pattern}.tif"
-        download_dict[cn.litter_c_dens_pattern] = f"{cn.litter_c_2015_dir}{sample_tile_id}__{cn.litter_c_2015_pattern}.tif"
+        download_dict[cn.agc_raw_dens_pattern] = f"{cn.agc_2015_dir}{sample_tile_id}__{cn.agc_2015_pattern}.tif"
+        download_dict[cn.bgc_raw_dens_pattern] = f"{cn.bgc_2015_dir}{sample_tile_id}__{cn.bgc_2015_pattern}.tif"
+        download_dict[cn.deadwood_c_raw_dens_pattern] = f"{cn.deadwood_c_2015_dir}{sample_tile_id}__{cn.deadwood_c_2015_pattern}.tif"
+        download_dict[cn.litter_c_raw_dens_pattern] = f"{cn.litter_c_2015_dir}{sample_tile_id}__{cn.litter_c_2015_pattern}.tif"
     else:
         sys.exit('interval_type not found')
 
