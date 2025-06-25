@@ -25,6 +25,9 @@ from io import BytesIO
 from numba import jit
 from osgeo import gdal
 
+# Turns off a FutureWarning about gdal.UseExceptions() vs. gdal.DontUseExceptions()
+gdal.UseExceptions()
+
 # Project imports
 from . import constants_and_names as cn
 from . import log_utilities as lu
@@ -494,33 +497,39 @@ def xy_to_tile_id(top_left_x, top_left_y):
 
 # Interval info for model run.
 # interval_year_diff is the difference between the start and end years of the interval, not the number of years in the interval.
-# The difference between those arises for 5-year intervals (e.g., 2016-2020), where there are 5 years in the interval
+# The difference between interval_length and interval_year_diff arises for 5-year intervals (e.g., 2016-2020), where there are 5 years in the interval
 # but the difference between the start and end years is 4.
 def get_interval_info(end_year, main_logger, start_year):
 
     if start_year == 2000 and end_year == 2020:
         interval_type = cn.intervals_five_years
-        interval_year_diff = cn.five_year_interval_duration - 1  # -1 because the interval really starts one year after the end of the previous interval
-        interval_length = cn.five_year_interval_duration
+        interval_length = [cn.five_year_interval_duration] * len(cn.interval_end_years_5_years)
+        # interval_year_diff = [5, 5, 5, 5]  # Expected for 2000-2020
+        interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years)  # -1 because the interval really starts one year after the end of the previous interval
+        # interval_year_diff = [4, 4, 4, 4]  # Expected for 2000-2020
         output_years = cn.interval_end_years_5_years
     elif start_year == 2015 and end_year == 2023:
         interval_type = cn.intervals_annual
-        interval_year_diff = 1
-        interval_length = 1
+        interval_length = [1] * len(cn.interval_end_years_annual)
+        # interval_length = [1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2023
+        interval_year_diff = [1] * len(cn.interval_end_years_annual)
+        # interval_year_diff = [1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2023
         output_years = cn.interval_end_years_annual
     elif start_year == 2000 and end_year == 2023:  # Hybrid model (2000-2023)
         interval_type = cn.intervals_hybrid
-        interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
         interval_length = [cn.five_year_interval_duration] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
-        # intervals = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]
+        # interval_length = [5, 5, 5, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2023
+        interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
+        # interval_year_diff = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2023
         output_years = cn.interval_end_years_5_years[:-1] + cn.interval_end_years_annual
     else:
         main_logger.error("interval_type not valid")
         sys.exit(1)
 
     main_logger.info(f"Interval type: {interval_type}")
-    main_logger.info(f"Interval duration: {interval_length} years")
     main_logger.info(f"Interval end years/Output years: {output_years}")
+    main_logger.info(f"Interval duration: {interval_length} years")
+    main_logger.info(f"Interval year difference: {interval_year_diff} years")
 
     return interval_type, interval_year_diff, interval_length, output_years
 
@@ -535,7 +544,7 @@ def create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size_deg, first_c
         chunk_size_pixels = int(cn.full_raster_dims * chunk_size_deg / 10)
 
         main_logger.info("Using bounding box and chunk size to determine chunks")
-        main_logger.info(f"Chunk source: Bounding box {bounding_box}")
+        main_logger.info(f"Chunk source: Bounding box {bounding_box} (W, S, E, N)")
         main_logger.info(f"Chunk size: {chunk_size_deg} degree, {chunk_size_pixels} pixels")
         chunk_list = get_chunk_bounds_from_bounding_box(bounding_box, chunk_size_deg)
 
@@ -730,9 +739,9 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
             # For outputs that cover an interval (fluxes)
             else:
                 if interval_type == cn.intervals_five_years:
-                    output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration)}_{str(output_year)}")
+                    output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
                 elif interval_type == cn.intervals_annual:
-                    output_dir = basic_output.replace('START_END',f"{str(output_year - interval_duration)}_{str(output_year)}")
+                    output_dir = basic_output.replace('START_END',f"{str(output_year - interval_duration[count])}_{str(output_year)}")
                 else:  # Hybrid model (2000-2023)
                     output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
 
