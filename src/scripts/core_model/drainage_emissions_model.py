@@ -546,7 +546,7 @@ def calculate_and_upload_drainage(
         )
         for k, arr in outputs.items():
             outputs[k] = [arr, arr.dtype.name, k, year_tag]
-        uu.save_and_upload_small_raster_set(
+        upload_tasks = uu.save_and_upload_small_raster_set(
             bounds,
             chunk_px,
             tid,
@@ -557,6 +557,18 @@ def calculate_and_upload_drainage(
             interval_type=interval_tag,
             model_type=f"{peat_dataset}_standard_model",
             no_data_val=0,
+        )
+        lu.print_and_log(
+            f"Upload tasks created for {bstr} in {tid}. Uploading now: {uu.timestr()}",
+            False,
+            logger,
+        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+            ex.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
+        lu.print_and_log(
+            f"Uploads completed for {bstr} in {tid} using {cn.outputs_path}: {uu.timestr()}",
+            is_final,
+            logger,
         )
 
     return f"Success {bstr} {iv_start}-{iv_end}", chunk_stats
@@ -620,11 +632,11 @@ def run_drainage_model(
 
     stage = "drainage_model"
     start_ts = uu.timestr()
-    cluster, client = uu.connect_to_cluster(
+    cluster, client, run_local = uu.connect_to_cluster(
         cluster_name=cluster_name, run_local=run_local
     )
 
-    main_logger, main_log_local_path = lu.populate_main_log_header(
+    main_logger, _ = lu.populate_main_log_header(
         bounding_box=None if tile_ids else bounding_box,
         use_shapefile=False,
         client=client,
@@ -690,14 +702,8 @@ def run_drainage_model(
     if not no_stats:
         uu.calculate_chunk_stats(all_stats, stage)
 
-    uu.stage_duration(start_ts, uu.timestr(), f"{stage} with chunk stats")
-
+    uu.stage_duration(start_ts, uu.timestr(), stage)
     if not run_local:
-        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_ts, main_logger)
-        uu.stage_duration(start_ts, uu.timestr(), f"{stage} with chunk stats and worker log compilation")
-
-        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
-
         client.close()
         cluster.close()
 

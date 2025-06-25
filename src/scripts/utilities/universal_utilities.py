@@ -207,6 +207,16 @@ def upload_fileobj_to_s3(file_obj, bucket_name: str, s3_file_path: str) -> None:
     s3c.upload_fileobj(file_obj, bucket_name, s3_file_path)
 
 
+def upload_raster_to_s3(file_path: str, bucket: str, s3_key: str) -> None:
+    """Upload a raster from ``file_path`` to S3 and remove the local file."""
+    s3c = boto3.client("s3")
+    try:
+        s3c.upload_file(file_path, bucket, s3_key)
+        os.remove(file_path)
+    except Exception as exc:  # pragma: no cover - network issues
+        print(f"Upload failed for {s3_key}: {exc}")
+
+
 def download_file_from_s3(
     s3_file_path: str, local_file_path: str, bucket_name: str
 ) -> None:
@@ -723,23 +733,36 @@ def save_and_upload_small_raster_set(
     model_type="standard_model",
     no_data_val=None,
 ):
+    """Save arrays as GeoTIFFs locally and return upload tasks.
+
+    Each entry of ``out_dict`` should be ``key: (array, dtype, data_meaning,
+    year_out)``. The function saves the arrays to ``/tmp`` and returns a list
+    of ``(local_path, bucket, key)`` tuples for uploading via
+    :func:`upload_raster_to_s3`.
+    """
+
     import tempfile
     from rasterio.transform import from_bounds
 
-    s3c = boto3.client(
-        "s3", config=Config(retries={"max_attempts": 10, "mode": "standard"})
-    )
+    upload_tasks = []
+
     transform = from_bounds(*bounds, width=chunk_px, height=chunk_px)
     temp_dir = tempfile.gettempdir()
     os.makedirs(temp_dir, exist_ok=True)
 
+    file_info = f"{tile_id}__{bstr}"
+    lu.print_and_log(
+        f"Saving outputs locally for {bstr} in {tile_id}: {timestr()}",
+        is_final,
+        logger,
+    )
+
     for key, (arr, dtype, data_meaning, year_out) in out_dict.items():
         fname = (
-            f"{tile_id}__{bstr}__{key}__{year_out}.tif"
-            if is_final
-            else f"{tile_id}__{bstr}__{key}__{year_out}__{timestr()}.tif"
+            f"{file_info}__{key}__{year_out}.tif" if is_final else f"{file_info}__{key}__{year_out}__{timestr()}.tif"
         )
         lpath = os.path.join(temp_dir, fname)
+
         profile = dict(
             driver="GTiff",
             width=chunk_px,
@@ -754,15 +777,17 @@ def save_and_upload_small_raster_set(
         )
         if no_data_val is not None:
             profile["nodata"] = no_data_val
+
         with rasterio.open(lpath, "w", **profile) as dst:
             dst.write(arr, 1)
+
         s3_folder = build_output_s3_folder(
             data_meaning, year_out, chunk_px, interval_type, model_type
         )
         s3_key = posixpath.join(s3_folder.removeprefix("s3://gfw2-data/"), fname)
-        s3c.upload_file(lpath, "gfw2-data", s3_key)
-        os.remove(lpath)
-        lu.print_and_log(f"uploaded {fname} to {s3_folder}", is_final, logger)
+        upload_tasks.append((lpath, "gfw2-data", s3_key))
+
+    return upload_tasks
 
 
 def save_and_upload_single_raster(
