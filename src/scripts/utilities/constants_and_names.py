@@ -32,6 +32,14 @@ outputs_path = posixpath.join(
 
 s3_log_path = posixpath.join(project_dir, 'model_logs')
 
+# Shapefile of global 1x1 degree chunks with GADM ISO codes
+fishnet_1x1deg_uri = posixpath.join(
+    full_bucket_prefix,
+    'climate/AFOLU_flux_model/fishnet_1x1deg/20250429',
+    'fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp'
+)
+
+
 local_log_path = "./logs/"
 os.makedirs(local_log_path, exist_ok=True)
 
