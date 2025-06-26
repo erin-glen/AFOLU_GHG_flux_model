@@ -25,18 +25,19 @@
 -bb 10 49.5 10.5 50 -cs 0.25        # 0.5x0.5 deg, 4 chunks
 -bb 10 49.75 10.25 50 -cs 0.25      # 0.25x0.25 deg, 1 chunk (has data, no fire)
 -bb 15 41.75 15.25 42 -cs 0.25      # 0.25x0.25 deg, 1 chunk (has data with fire)
--bb 116 -3 116.25 -2.75 -cs 0.25    # 0.25x0.25 deg, 1 chunk (has mangroves)
+
 -bb 115.75 -3.75 116 -3.5 -cs 0.25   # 0.25x0.25 deg, 1 chunk (has forest converted to cropland, has burned forest-- both 2015-2016)
 -bb 115.25 -3.75 115.5 -3.5 -cs 0.25   # 0.25x0.25 deg, 1 chunk (has oil palm 2000 extent and Descals planting year outside SDPTv2 extent; has primary forest)
 
 
-# Range of no-data cases for testing
+# Range of edge cases for testing
+-bb 10 49.75 10.25 50 -cs 0.25      # 0.25x0.25 deg (50N_010E), 1 chunk (should be a normal tile)
 -bb 20 -70 20.25 -69.75 -cs 0.25    # 0.25x0.25 deg, 1 chunk (tile does not exist)
 -bb 20 69.75 20.25 70 -cs 0.25      # 0.25x0.25 deg, 1 chunk (tile exists for GLCLU but not all other inputs, e.g., fire)
 -bb 0 79.75 0.25 80 -cs 0.25        # 0.25x0.25 deg, 1 chunk (some inputs exist for 80N_000E exist and others don't)
 -bb 10.75 41.75 11 42 -cs 0.25      # 0.25x0.25 deg, 1 chunk (entirely GLCLU code=255 for ocean, so no actual data-- nothing should be be output)
 -bb -10 21.75 -9.75 22 -cs 0.25     # 0.25x0.25 deg, 1 chunk (has data but entirely desert (fully GLCLU code=0))
--bb 10 49.75 10.25 50 -cs 0.25      # 0.25x0.25 deg, 1 chunk (has data)
+-bb 114.5 -4 115 -3.5 -cs 0.5       # 0.5x0.5 deg (00N_110E), 1 chunk (has mangroves without WHRC AGB 2000)
 -bb 158 6 159 7 -cs 1               # 1x1 deg (10N_150E), 1 chunk (no WHRC AGB, only mangroves)
 -bb -161 22 -160 23 -cs 1           # 1x1 deg (30N_170W), 1 chunk (no R:S tile)
 -bb -42.0 64.0 -41.0 65.0 -cs 1     # 1x1 deg (70N_050W), 1 chunk (no continent-ecozone, should default to cont_eco=2020)

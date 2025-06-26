@@ -5,26 +5,23 @@ Local:
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
 
 Coiled small test:
-python -m scripts.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --year YYYY
+python -m scripts.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
+
+
 
 Coiled shapefile test:
-python -m scripts.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_preprocessing
+python -m scripts.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
 
-Full run:
-python -m scripts.utilities.create_cluster -n 50 -t 10 -m 32 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
-Max memory usage: ~18 GB/worker
-Time: 25:03 through calculation; 26:05 through tile stats; Credits: 47; Cost: $2.30; peak memory: 16 GB/worker
+Full run 2000:
+python -m scripts.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
 
-python -m scripts.utilities.create_cluster -n 50 -t 12 -m 32 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2015 -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1."
-Max memory usage: ~20 GB/worker
-Time: 45:50 through calculation; 47:47 through tile stats; Credits: 180; Cost: $6.30  (ran before specifying worker series and type, so costs are much higher)
+Full run 2015
+python -m scripts.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1."
 
-NOTE: Maybe there's some way to configure this to output 10x10 deg tiles but I can't figure it out.
-Instead, it creates 1x1 deg tiles and then merges them to 10x10 deg tiles.
+
 
 To create a vrt of the 10x10 deg outputs, do:
 aws s3 ls s3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/litter_C_density_MgC_ha/40000_pixels/ --recursive | grep .tif$ | awk '{print "/vsis3/gfw2-data/"$4}' > litter_C_2015_file_list.txt
@@ -227,7 +224,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             short_veg_AGC, short_veg_BGC = nu.calc_short_veg_removals(climate_zone_cell)
 
             # Assigns carbon densities based on vegetation height and composite landcover
-            if veg_height_cell >= cn.tree_threshold:
+            if (veg_height_cell >= cn.tree_threshold) or ((mangrove_in_chunk) and (mangrove_agb_cell > 0)):
                 agc_LC_masked_out_cell = agc_raw_out_cell
                 bgc_LC_masked_out_cell = bgc_raw_out_cell
                 deadwood_c_LC_masked_out_cell = deadwood_c_raw_out_cell
