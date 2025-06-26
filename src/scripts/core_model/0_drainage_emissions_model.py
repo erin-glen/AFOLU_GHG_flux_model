@@ -1,5 +1,5 @@
 """
-0_drainage_emissions_model.py
+drainage_emissions_model.py
 Organic‑soils drainage and fire emissions model
 
 * full decision‑tree logic (drainage & burned‑area) kept intact
@@ -638,6 +638,9 @@ def run_drainage_model(
         cluster_name=cluster_name, run_local=run_local
     )
 
+    shapefile_provided = bool(chunk_shapefile_uri)
+    chunk_shapefile_uri = chunk_shapefile_uri or cn.fishnet_1x1deg_uri
+
     main_logger, _ = lu.populate_main_log_header(
         bounding_box=None if tile_ids else bounding_box,
         use_shapefile=chunk_shapefile_uri if chunk_shapefile_uri else False,
@@ -648,6 +651,16 @@ def run_drainage_model(
         model_type="organic_soils",
         stage=stage,
     )
+
+    if chunk_shapefile_uri:
+        if shapefile_provided:
+            main_logger.info(
+                f"Using user-supplied chunk shapefile: {chunk_shapefile_uri}"
+            )
+        else:
+            main_logger.info(
+                f"Using default chunk shapefile: {chunk_shapefile_uri}"
+            )
 
     chunk_size = chunk_size or 1
     if tile_ids:
