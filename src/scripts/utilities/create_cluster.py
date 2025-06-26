@@ -69,7 +69,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', type=str, help='Coiled cluster name')
     parser.add_argument('-n', '--n_workers', type=int, default=1, help='Number of workers for the cluster')
     parser.add_argument('-m', '--worker_memory', type=int, help='Memory per worker')
-    parser.add_argument('-t', '--threads_per_worker', type=int, default='2', help='Number of threads/worker (default=2)')
+    parser.add_argument('-t', '--threads_per_worker', type=int, default='1', help='Number of threads/worker (default=2)')
 
     args = parser.parse_args()
 
