@@ -4,9 +4,15 @@ Run from src/LULUCF/
 Local:
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
 
-python -m scripts.utilities.create_cluster -n 1 -t 2 -m 16 -cn LULUCF_preprocessing
+Coiled small test:
+python -m scripts.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_preprocessing
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --year YYYY
+
+Coiled shapefile test:
+python -m scripts.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
 
+Full run:
 python -m scripts.utilities.create_cluster -n 50 -t 10 -m 32 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --year 2000 -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
 Max memory usage: ~18 GB/worker
@@ -29,7 +35,10 @@ import argparse
 import concurrent.futures
 import dask
 import numpy as np
+import os
+import psutil
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from dask.distributed import print
@@ -45,7 +54,7 @@ from ...utilities import resize_cluster
 
 # Function to create initial (year 2000) non-soil carbon pool densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-# @jit(nopython=True)
+@jit(nopython=True)
 def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                                 in_dict_int32, in_dict_float32, mangrove_C_ratio_array, year):
 
@@ -68,6 +77,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     continent_ecozone_block = in_dict_int16[cn.continent_ecozone_pattern]
     climate_zone_block = in_dict_uint8[cn.climate_zone_pattern]
     LC_composite_block = in_dict_uint8[cn.land_cover_pattern]  # LC composite of the year being processed. Pattern is the same regardless of starting year.
+    veg_height_block = in_dict_uint8[cn.vegetation_height_pattern]  # Veg height of the year being processed. Pattern is the same regardless of starting year.
 
     # AGB block sources (mangrove and non-mangrove) depend on the starting year
     # Numba can't handle two different possible datatypes for agb_non_mang_block,
@@ -115,6 +125,8 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     for row in range(continent_ecozone_block.shape[0]):
         for col in range(continent_ecozone_block.shape[1]):
 
+            ### Part 1: Pixel-level values
+
             # Input values for this specific cell
             agb_non_mang_cell = agb_non_mang_block[row, col]
             mangrove_agb_cell = mangrove_agb_block[row, col]
@@ -123,8 +135,9 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             precipitation = precipitation_block[row, col]
             r_s_ratio = r_s_ratio_block[row, col]
             continent_ecozone_cell = continent_ecozone_block[row, col]
-            LC_composite_cell = LC_composite_block[row, col]
             climate_zone_cell = climate_zone_block[row, col]
+            LC_composite_cell = LC_composite_block[row, col]
+            veg_height_cell = veg_height_block[row, col]
 
             # Applies the continent_ecozne fallback value when there isn't a value for the pixel
             if continent_ecozone_cell == 0:
@@ -134,19 +147,19 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             if climate_zone_cell == 0:
                 climate_zone_cell = climate_zone_fallback
 
-            # Carbon density for short vegetation (Mg C/ha) based on climate zone (IPCC default)
-            short_veg_AGC_RF, short_veg_BGC_RF = nu.calc_short_veg_removals(climate_zone_cell)
+
+            ### Part 2: Calculation of raw carbon density outputs (not masked by veg height/land cover)
 
             # If mangrove AGB is present, AGC is calculated from it, overwriting any AGC that is based on non-mang AGB that is already there
             if (mangrove_in_chunk) and (mangrove_agb_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
-                agc_raw_out_block[row, col] = mangrove_agb_cell * cn.biomass_to_carbon_mangrove
+                agc_raw_out_cell = mangrove_agb_cell * cn.biomass_to_carbon_mangrove
 
             # If non-mang AGB is present, AGC is calculated from it
             elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
-                agc_raw_out_block[row, col] = agb_non_mang_cell * cn.biomass_to_carbon_non_mangrove
+                agc_raw_out_cell = agb_non_mang_cell * cn.biomass_to_carbon_non_mangrove
 
             else:
-                agc_raw_out_block[row, col] = 0
+                agc_raw_out_cell = 0
 
             # Separate branches for assigning BGC, deadwood C, and litter C ratios depending on whether the pixel has mangroves.
             # Calculation of BGC, deadwood C, and litter C are done after the decision tree assigns the ratios.
@@ -200,10 +213,52 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                 deadwood_c_ratio = -10
                 litter_c_ratio = -20
 
-            # Actually calculates BGC, deadwood C, and litter C using the ratios assigned in the above decision tree
-            bgc_raw_out_block[row, col] = agc_raw_out_block[row, col] * bgc_ratio
-            deadwood_c_raw_out_block[row, col] = agc_raw_out_block[row, col] * deadwood_c_ratio
-            litter_c_raw_out_block[row, col] = agc_raw_out_block[row, col] * litter_c_ratio
+            # Actually calculates BGC, deadwood C, and litter C using the ratios assigned in the above decision tree for raw outputs
+            bgc_raw_out_cell = agc_raw_out_cell * bgc_ratio
+            deadwood_c_raw_out_cell = agc_raw_out_cell * deadwood_c_ratio
+            litter_c_raw_out_cell = agc_raw_out_cell * litter_c_ratio
+
+
+            ### Part 3: Calculation of carbon density outputs masked by veg height/land cover
+
+            short_veg_LC, tall_veg_LC = nu.classify_veg_height(LC_composite_cell)
+
+            # Carbon density for short vegetation (Mg C/ha) based on climate zone (IPCC default)
+            short_veg_AGC, short_veg_BGC = nu.calc_short_veg_removals(climate_zone_cell)
+
+            # Assigns carbon densities based on vegetation height and composite landcover
+            if veg_height_cell >= cn.tree_threshold:
+                agc_LC_masked_out_cell = agc_raw_out_cell
+                bgc_LC_masked_out_cell = bgc_raw_out_cell
+                deadwood_c_LC_masked_out_cell = deadwood_c_raw_out_cell
+                litter_c_LC_masked_out_cell = litter_c_raw_out_cell
+            elif short_veg_LC:
+                agc_LC_masked_out_cell = short_veg_AGC
+                bgc_LC_masked_out_cell = short_veg_BGC
+                deadwood_c_LC_masked_out_cell = 0
+                litter_c_LC_masked_out_cell = 0
+            elif LC_composite_cell == cn.cropland:
+                agc_LC_masked_out_cell = cn.cropland_agc_dens
+                bgc_LC_masked_out_cell = 0
+                deadwood_c_LC_masked_out_cell = 0
+                litter_c_LC_masked_out_cell = 0
+            else:
+                agc_LC_masked_out_cell = 0
+                bgc_LC_masked_out_cell = 0
+                deadwood_c_LC_masked_out_cell = 0
+                litter_c_LC_masked_out_cell = 0
+
+
+            # Assigns cell outputs to blocks
+            agc_raw_out_block[row, col] = agc_raw_out_cell
+            bgc_raw_out_block[row, col] = bgc_raw_out_cell
+            deadwood_c_raw_out_block[row, col] = deadwood_c_raw_out_cell
+            litter_c_raw_out_block[row, col] = litter_c_raw_out_cell
+
+            agc_LC_masked_out_block[row, col] = agc_LC_masked_out_cell
+            bgc_LC_masked_out_block[row, col] = bgc_LC_masked_out_cell
+            deadwood_c_LC_masked_out_block[row, col] = deadwood_c_LC_masked_out_cell
+            litter_c_LC_masked_out_block[row, col] = litter_c_LC_masked_out_cell
 
     # Adds the output arrays to the dictionary with the appropriate data type
     # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
@@ -229,7 +284,11 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
 
+    process = psutil.Process(os.getpid())
+
     logger_worker = lu.setup_logging_worker()
+
+    chunk_start_time = time.time()
 
     uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
 
@@ -300,12 +359,19 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
     lu.print_and_log(f"Creating starting C densities for {year} in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker) # Prints during full runs
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
+    numba_start = time.time()
 
     # Create AGC, BGC, deadwood C and litter C densities in selected starting year
     out_dict_float32 = create_starting_C_densities(
         typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32,
         mangrove_C_ratio_array, year
     )
+
+    numba_end = time.time()
+    lu.print_and_log(f"Done calculating carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Memory usage after numba calculations completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", is_final, logger_worker)
+    lu.print_and_log(f"Calculated carbon densities in {bounds_str} in {tile_id} in {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
+
 
     # Fresh non-Numba-constrained dictionary that stores all output numpy arrays of all datatypes.
     # The dictionaries by datatype that are returned from the numba function have limitations on them,
@@ -401,6 +467,9 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
     # Clears memory of unneeded arrays
     del out_dict_all_dtypes
 
+    chunk_end_time = time.time()
+    lu.print_and_log(f"{bounds_str} took {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+
     return_message = f"Success creating initial carbon pools for {bounds_str}: {uu.timestr()}"
 
     # Removes task tracking file from S3 once task is successful
@@ -479,6 +548,8 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         download_dict[cn.agb_2000_pattern] = f"{cn.agb_2000_dir}{sample_tile_id}_{cn.agb_2000_pattern}.tif"
         download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_dir}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
         download_dict[cn.land_cover_pattern] = f"{cn.land_cover_5_year_path}2000/{sample_tile_id}.tif"
+        download_dict[cn.vegetation_height_pattern] = f"{cn.vegetation_height_5_year_path}2000/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_2000.tif"
+
         output_dir_list = [cn.agc_2000_raw_dir, cn.bgc_2000_raw_dir, cn.deadwood_c_2000_raw_dir, cn.litter_c_2000_raw_dir,
                            cn.agc_2000_LC_masked_dir, cn.bgc_2000_LC_masked_dir, cn.deadwood_c_2000_LC_masked_dir, cn.litter_c_2000_LC_masked_dir]
 
@@ -487,6 +558,8 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         ##TODO Using mangrove AGB2000 for 2015 model start! Need to use something else for 2015!!!!!!
         download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_dir}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
         download_dict[cn.land_cover_pattern] = f"{cn.land_cover_annual_path}2015/{sample_tile_id}.tif"
+        download_dict[cn.vegetation_height_pattern] = f"{cn.vegetation_height_annual_path}2015/{sample_tile_id}.tif"
+
         output_dir_list = [cn.agc_2015_raw_dir, cn.bgc_2015_raw_dir, cn.deadwood_c_2015_raw_dir, cn.litter_c_2015_raw_dir,
                            cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir]
 

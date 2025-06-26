@@ -33,10 +33,7 @@
 # Range of no-data cases for testing
 -bb 20 -70 20.25 -69.75 -cs 0.25    # 0.25x0.25 deg, 1 chunk (tile does not exist)
 -bb 20 69.75 20.25 70 -cs 0.25      # 0.25x0.25 deg, 1 chunk (tile exists for GLCLU but not all other inputs, e.g., fire)
--bb 110 -10 120 0 -cs 2             # 10x10 deg (00N_110E), 25 chunks (all chunks have land and should be output)
--bb 110 -20 120 -10 -cs 2           # 10x10 deg (10S_110E), 25 chunks (all chunks have land and should be output)
 -bb 0 79.75 0.25 80 -cs 0.25        # 0.25x0.25 deg, 1 chunk (some inputs exist for 80N_000E exist and others don't)
--bb 112 -12 116 -8 -cs 2            # 2x2 deg, 1 chunk (bottom of Java, has data but mostly ocean)
 -bb 10.75 41.75 11 42 -cs 0.25      # 0.25x0.25 deg, 1 chunk (entirely GLCLU code=255 for ocean, so no actual data-- nothing should be be output)
 -bb -10 21.75 -9.75 22 -cs 0.25     # 0.25x0.25 deg, 1 chunk (has data but entirely desert (fully GLCLU code=0))
 -bb 10 49.75 10.25 50 -cs 0.25      # 0.25x0.25 deg, 1 chunk (has data)

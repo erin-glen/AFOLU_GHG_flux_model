@@ -44,8 +44,23 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         scheduler_vm_type = "x2gd.medium"
         worker_vm_type = "x2gd.medium"
 
+    elif worker_memory == 8:
+        idle_timeout = 25
+        scheduler_vm_type = "r8g.medium"
+        worker_vm_type = "r8g.medium"
+
+    elif worker_memory == 4:
+        idle_timeout = 25
+        scheduler_vm_type = "m8g.medium"
+        worker_vm_type = "m8g.medium"
+
+    elif worker_memory == 2:
+        idle_timeout = 25
+        scheduler_vm_type = "t2.small"
+        worker_vm_type = "t2.small"
+
     else:
-        sys.exit('Memory argument not 16, 32, or 64 GB')
+        sys.exit('Memory argument not 2, 4, 8, 16, 32, or 64 GB')
 
     idle_timeout = f"{idle_timeout} minutes"
 
@@ -65,8 +80,6 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
             "nthreads": threads_per_worker
         },
     )
-
-    dask.config.set({'distributed.scheduler.worker-ttl': '500s'})
 
     print(f"Cluster created with name: {cluster.name}")
     print(f"Number of workers: {n_workers}; worker memory: {worker_memory_str}; scheduler memory: {scheduler_memory_str}; threads per worker: {threads_per_worker}")
