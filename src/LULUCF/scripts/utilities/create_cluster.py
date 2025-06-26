@@ -56,8 +56,8 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
 
     elif worker_memory == 2:
         idle_timeout = 25
-        scheduler_vm_type = "t2.small"
-        worker_vm_type = "t2.small"
+        scheduler_vm_type = "t3.small"
+        worker_vm_type = "t3.small"
 
     else:
         sys.exit('Memory argument not 2, 4, 8, 16, 32, or 64 GB')

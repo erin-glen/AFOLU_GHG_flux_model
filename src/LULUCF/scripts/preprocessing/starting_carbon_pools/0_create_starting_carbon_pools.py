@@ -4,10 +4,11 @@ Run from src/LULUCF/
 Local:
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
 
+Needs 4GB workers for 1x1 deg chunks; 2GB workers are too small.
+
 Coiled small test:
 python -m scripts.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
-
-
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --year YYYY
 
 Coiled shapefile test:
 python -m scripts.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
@@ -15,12 +16,25 @@ python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_p
 
 Full run 2000:
 python -m scripts.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation."
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
+Peak memory per worker: ~ GB
+Time for numba processing for each task: ~1 second
+Time for total processing for each task: 15-20 seconds
+Time until chunk stats: 24:26,
+Time after chunk stats: 25:56,
+Coiled credits: 92, (198/hr for 200 m8g.medium workers, according to dashboard)
+AWS cost: $4.10,
 
 Full run 2015
 python -m scripts.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1."
-
+python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
+Peak memory per worker:
+Time for numba processing for each task:
+Time for total processing for each task:
+Time until chunk stats:
+Time after chunk stats:
+Coiled credits:   (198/hr for 200 m8g.medium workers, according to dashboard)
+AWS cost:
 
 
 To create a vrt of the 10x10 deg outputs, do:
@@ -105,11 +119,13 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     bgc_raw_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
     deadwood_c_raw_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
     litter_c_raw_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+    non_soil_c_raw_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
 
     agc_LC_masked_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
     bgc_LC_masked_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
     deadwood_c_LC_masked_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
     litter_c_LC_masked_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+    non_soil_c_LC_masked_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
 
     # Gets a fallback value for continent_ecozone for the chunk in case some pixels don't have one
     continent_ecozone_fallback = nu.fallback_conteco_climzone_value(continent_ecozone_block, 2020)
@@ -251,11 +267,15 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             bgc_raw_out_block[row, col] = bgc_raw_out_cell
             deadwood_c_raw_out_block[row, col] = deadwood_c_raw_out_cell
             litter_c_raw_out_block[row, col] = litter_c_raw_out_cell
+            non_soil_c_raw_out_block[row, col] = (agc_raw_out_cell + bgc_raw_out_cell +
+                                                  deadwood_c_raw_out_cell + litter_c_raw_out_cell)
 
             agc_LC_masked_out_block[row, col] = agc_LC_masked_out_cell
             bgc_LC_masked_out_block[row, col] = bgc_LC_masked_out_cell
             deadwood_c_LC_masked_out_block[row, col] = deadwood_c_LC_masked_out_cell
             litter_c_LC_masked_out_block[row, col] = litter_c_LC_masked_out_cell
+            non_soil_c_LC_masked_out_block[row, col] = (agc_LC_masked_out_cell + bgc_LC_masked_out_cell +
+                                                        deadwood_c_LC_masked_out_cell + litter_c_LC_masked_out_cell)
 
     # Adds the output arrays to the dictionary with the appropriate data type
     # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
@@ -263,11 +283,13 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     out_dict_float32[f"{cn.bgc_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = bgc_raw_out_block.copy()
     out_dict_float32[f"{cn.deadwood_c_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = deadwood_c_raw_out_block.copy()
     out_dict_float32[f"{cn.litter_c_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = litter_c_raw_out_block.copy()
+    out_dict_float32[f"{cn.non_soil_c_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = non_soil_c_raw_out_block.copy()
 
     out_dict_float32[f"{cn.agc_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = agc_LC_masked_out_block.copy()
     out_dict_float32[f"{cn.bgc_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = bgc_LC_masked_out_block.copy()
     out_dict_float32[f"{cn.deadwood_c_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = deadwood_c_LC_masked_out_block.copy()
     out_dict_float32[f"{cn.litter_c_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = litter_c_LC_masked_out_block.copy()
+    out_dict_float32[f"{cn.non_soil_c_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = non_soil_c_LC_masked_out_block.copy()
 
     # return output dictionary/ies
     return out_dict_float32
@@ -547,8 +569,8 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         download_dict[cn.land_cover_pattern] = f"{cn.land_cover_5_year_path}2000/{sample_tile_id}.tif"
         download_dict[cn.vegetation_height_pattern] = f"{cn.vegetation_height_5_year_path}2000/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_2000.tif"
 
-        output_dir_list = [cn.agc_2000_raw_dir, cn.bgc_2000_raw_dir, cn.deadwood_c_2000_raw_dir, cn.litter_c_2000_raw_dir,
-                           cn.agc_2000_LC_masked_dir, cn.bgc_2000_LC_masked_dir, cn.deadwood_c_2000_LC_masked_dir, cn.litter_c_2000_LC_masked_dir]
+        output_dir_list = [cn.agc_2000_raw_dir, cn.bgc_2000_raw_dir, cn.deadwood_c_2000_raw_dir, cn.litter_c_2000_raw_dir, cn.non_soil_c_2000_raw_dir,
+                           cn.agc_2000_LC_masked_dir, cn.bgc_2000_LC_masked_dir, cn.deadwood_c_2000_LC_masked_dir, cn.litter_c_2000_LC_masked_dir, cn.non_soil_c_2000_LC_masked_dir]
 
     elif year == 2015:
         download_dict[cn.agb_2015_pattern] = f"{cn.agb_2015_dir_processed}{sample_tile_id}_{cn.agb_2015_pattern}.tif"
@@ -557,8 +579,8 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         download_dict[cn.land_cover_pattern] = f"{cn.land_cover_annual_path}2015/{sample_tile_id}.tif"
         download_dict[cn.vegetation_height_pattern] = f"{cn.vegetation_height_annual_path}2015/{sample_tile_id}.tif"
 
-        output_dir_list = [cn.agc_2015_raw_dir, cn.bgc_2015_raw_dir, cn.deadwood_c_2015_raw_dir, cn.litter_c_2015_raw_dir,
-                           cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir]
+        output_dir_list = [cn.agc_2015_raw_dir, cn.bgc_2015_raw_dir, cn.deadwood_c_2015_raw_dir, cn.litter_c_2015_raw_dir, cn.non_soil_c_2015_raw_dir,
+                           cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir, cn.non_soil_c_2015_LC_masked_dir]
 
     else:
         print(f"Year input {year} not valid. Terminating.")

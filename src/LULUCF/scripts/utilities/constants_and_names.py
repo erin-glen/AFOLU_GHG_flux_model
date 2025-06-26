@@ -297,15 +297,15 @@ agc_raw_dens_pattern = "carbon_density__AGC__raw__MgC"
 bgc_raw_dens_pattern = "carbon_density__BGC__raw__MgC"
 deadwood_c_raw_dens_pattern = "carbon_density__deadwood_C__raw__MgC"
 litter_c_raw_dens_pattern = "carbon_density__litter_C__raw__MgC"
-c_dens_raw_non_soil_pattern = "carbon_density__non_soil__raw__MgC"
-soil_c_dens_raw_pattern = "carbon_density__soil_C__Mraw__gC"
+non_soil_c_raw_dens_pattern = "carbon_density__non_soil__raw__MgC"
+soil_c_dens_raw_pattern = "carbon_density__soil_C__raw__MgC"
 
 # Carbon density, masked by landcover composite
 agc_LC_masked_dens_pattern = "carbon_density__AGC__landcover_masked__MgC"
 bgc_LC_masked_dens_pattern = "carbon_density__BGC__landcover_masked__MgC"
 deadwood_c_LC_masked_dens_pattern = "carbon_density__deadwood_C__landcover_masked__MgC"
 litter_c_LC_masked_dens_pattern = "carbon_density__litter_C__landcover_masked__MgC"
-c_dens_LC_masked_non_soil_pattern = "carbon_density__non_soil__landcover_masked__MgC"
+non_soil_c_LC_masked_dens_pattern = "carbon_density__non_soil__landcover_masked__MgC"
 soil_c_dens_LC_masked_pattern = "carbon_density__soil_C__landcover_masked__MgC"
 
 ### Carbon pools in starting year (2000/2015)
@@ -326,6 +326,9 @@ deadwood_c_2000_raw_pattern = f"{deadwood_c_raw_dens_pattern}_2000"
 litter_c_2000_raw_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{litter_c_raw_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2000_creation_date}/"
 litter_c_2000_raw_pattern = f"{litter_c_raw_dens_pattern}_2000"
 
+non_soil_c_2000_raw_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{non_soil_c_raw_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2000_creation_date}/"
+non_soil_c_2000_raw_pattern = f"{non_soil_c_raw_dens_pattern}_2000"
+
 # Carbon density, masked by landcover composite
 agc_2000_LC_masked_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{agc_LC_masked_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2000_creation_date}/"
 agc_2000_LC_masked_pattern = f"{agc_LC_masked_dens_pattern}_2000"
@@ -338,6 +341,9 @@ deadwood_c_2000_LC_masked_pattern = f"{deadwood_c_LC_masked_dens_pattern}_2000"
 
 litter_c_2000_LC_masked_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{litter_c_LC_masked_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2000_creation_date}/"
 litter_c_2000_LC_masked_pattern = f"{litter_c_LC_masked_dens_pattern}_2000"
+
+non_soil_c_2000_LC_masked_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{non_soil_c_LC_masked_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2000_creation_date}/"
+non_soil_c_2000_LC_masked_pattern = f"{non_soil_c_LC_masked_dens_pattern}_2000"
 
 ## 2015
 carbon_2015_creation_date = '20250626'
@@ -354,6 +360,9 @@ deadwood_c_2015_raw_pattern = f"{deadwood_c_raw_dens_pattern}_2015"
 litter_c_2015_raw_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{litter_c_raw_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
 litter_c_2015_raw_pattern = f"{litter_c_raw_dens_pattern}_2015"
 
+non_soil_c_2015_raw_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{non_soil_c_raw_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
+non_soil_c_2015_raw_pattern = f"{non_soil_c_raw_dens_pattern}_2015"
+
 # Carbon density, masked by landcover composite
 agc_2015_LC_masked_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{agc_LC_masked_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
 agc_2015_LC_masked_pattern = f"{agc_LC_masked_dens_pattern}_2015"
@@ -366,6 +375,9 @@ deadwood_c_2015_LC_masked_pattern = f"{deadwood_c_LC_masked_dens_pattern}_2015"
 
 litter_c_2015_LC_masked_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{litter_c_LC_masked_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
 litter_c_2015_LC_masked_pattern = f"{litter_c_LC_masked_dens_pattern}_2015"
+
+non_soil_c_2015_LC_masked_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{non_soil_c_LC_masked_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
+non_soil_c_2015_LC_masked_pattern = f"{non_soil_c_LC_masked_dens_pattern}_2015"
 
 
 ### Other inputs
@@ -678,7 +690,7 @@ LULUCF_summative_output_dirs = [
     f"{outputs_path}{net_flux_litter_c_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{c_dens_raw_non_soil_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",  # Only per interval
+    f"{outputs_path}{non_soil_c_LC_masked_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",  # Only per interval
 
     # Outputs that cover the entire model (start year to end of model).
     # These also need to be specifically specified in the summative outputs script.
