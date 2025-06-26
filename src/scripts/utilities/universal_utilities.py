@@ -1059,3 +1059,29 @@ def get_cluster_info(client, cluster):
         # worker_type = "Unknown"
 
     return worker_memory, n_workers, nthreads
+
+# Returns list of all chunk boundaries within a bounding box for chunks of a given size
+def get_chunk_bounds_from_bounding_box(bounding_box, chunk_size):
+    min_x = bounding_box[0]
+    min_y = bounding_box[1]
+    max_x = bounding_box[2]
+    max_y = bounding_box[3]
+
+    x, y = (min_x, min_y)
+    chunks = []
+
+    # Polygon Size
+    while y < max_y:
+        while x < max_x:
+            bounds = [
+                x,
+                y,
+                x + chunk_size,
+                y + chunk_size,
+            ]
+            chunks.append(bounds)
+            x += chunk_size
+        x = min_x
+        y += chunk_size
+
+    return chunks
