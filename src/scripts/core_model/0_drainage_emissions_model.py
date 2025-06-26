@@ -857,7 +857,7 @@ if __name__ == "__main__":
     main()
 
 """
-python -m src.scripts.core_model.drainage_emissions_model \
+python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --bounding_box 110 -10 120 0 \
   --chunk_size 1 \
@@ -865,7 +865,7 @@ python -m src.scripts.core_model.drainage_emissions_model \
   --end_year 2019 \
   --interval_type five_year
 
-python -m src.scripts.core_model.drainage_emissions_model \
+python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --chunk_shapefile_uri s3://path/to/fishnet.shp \
   --first_chunks 10 \
@@ -873,15 +873,16 @@ python -m src.scripts.core_model.drainage_emissions_model \
   --end_year 2019 \
   --interval_type five_year
 
-python -m src.scripts.core_model.drainage_emissions_model \
+python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --tile_ids 00N_110E,00N_120E \
   --chunk_size 1 \
   --start_year 2015 \
   --end_year 2019 \
-  --interval_type five_year
-  
-python -m src.scripts.core_model.drainage_emissions_model \
+  --interval_type five_year \
+  --peat_dataset peatmap
+
+python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --tile_ids 00N_110E,10N_020E,20N_020W,60N_010W,60N_110W \
   --chunk_size 1 \
@@ -889,11 +890,11 @@ python -m src.scripts.core_model.drainage_emissions_model \
   --end_year 2023 \
   --interval_type five_year
 
-python -m src.scripts.core_model.drainage_emissions_model \
+python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --full_model \
   --chunk_size 1 \
   --start_year 2000 \
   --end_year 2023 \
-  --interval_type five_year
+  --all_five_year_periods
 """
