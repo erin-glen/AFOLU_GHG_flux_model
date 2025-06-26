@@ -497,8 +497,10 @@ secondary_natural_forest_81_100_processed_dir = f"{full_bucket_prefix}/climate/s
 secondary_natural_forest_21_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_21_100/"
 
 # TODO switch to new processed date when all are ready
-# natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/"
-natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/"
+Robinson_processed_date = '20250516'
+natural_forest_growth_curve_raw_path =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/20250516/"
+natural_forest_growth_curve_raw_pattern =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/20250516/"
+natural_forest_growth_curve_path = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/"
 natural_forest_growth_curve_pattern = "natural_forest_mean_growth_rate__Mg_AGC_ha_yr"
 natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_40', '41_60', '61_80', '81_100', '21_100']
 
@@ -570,12 +572,13 @@ burned_area_final_pattern = "burned_area_final"
 organic_soil_extent_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"
 organic_soil_extent_pattern = "peat_mask_processed"
 
-# GMWv3 mangrove extent
+# GMW mangrove extent
+GMW_version = "v3"
 mangrove_extent_years = [1996, 2007, 2008, 2009, 2010, 2015, 2016, 2017, 2018, 2019, 2020]
 mangrove_extent_raw_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/raw/raster/"
-mangrove_extent_raw_pattern = r"GMW_[NS][0-9]{2}[EW][0-9]{3}_[0-9]{4}_v3.tif"       #"GMW_N00E008_1996_v3.tif" in regex form
-mangrove_extent_processed_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/processed/raster/"
-mangrove_extent_processed_pattern = "mangrove_extent_v3.tif"
+mangrove_extent_raw_pattern = r"GMW_[NS][0-9]{2}[EW][0-9]{3}_[0-9]{4}_v3.tif"       # e.g "GMW_N00E008_1996_v3.tif" in regex form
+mangrove_extent_processed_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/hansenized/raster/"
+mangrove_extent_processed_pattern = f"GMW{GMW_version}_mangrove_extent"
 
 #cropland emissions
 cropland_emis_run_date =  '20241204'

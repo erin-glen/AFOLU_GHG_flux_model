@@ -1,8 +1,8 @@
 """
-Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
-python -m src.utilities.create_cluster -n 1 -m 16 -cn LULUCF_model
-python -m src.utilities.create_cluster -n 5 -m 32 -cn LULUCF_model
-python -m src.utilities.create_cluster -n 20 -m 64 -cn LULUCF_model
+Run from src/LULUCF/
+python -m scripts.utilities.create_cluster -n 1 -m 16 -cn LULUCF_model
+python -m scripts.utilities.create_cluster -n 5 -m 32 -cn LULUCF_model
+python -m scripts.utilities.create_cluster -n 20 -m 64 -cn LULUCF_model
 
 Table of instance types: https://aws.amazon.com/ec2/instance-types/
 Table of spot pricing: https://aws.amazon.com/ec2/spot/pricing/
