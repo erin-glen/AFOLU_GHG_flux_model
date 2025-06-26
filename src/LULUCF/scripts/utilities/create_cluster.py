@@ -9,6 +9,7 @@ This makes them less costly on AWS and use fewer Coiled credits.
 """
 
 import coiled
+import dask
 import argparse
 import sys
 
@@ -20,6 +21,7 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
     worker_memory_str = f"{worker_memory}GiB"
     scheduler_memory_str = f"{worker_memory}GiB"
 
+    # TODO Consider using x2iedn.xlarge for large runs. They have a 32:1 RAM:vCPU. Would require running multiple tasks per worker simultaneously.
     # Uses the larger workers if requested or if more workers are requested.
     # Assumes that if using more workers, you want bigger workers. 12 is a semi-arbitrary cutoff.
     if worker_memory == 64:
@@ -37,8 +39,23 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         scheduler_vm_type = "x2gd.medium"
         worker_vm_type = "x2gd.medium"
 
+    elif worker_memory == 8:
+        idle_timeout = 25
+        scheduler_vm_type = "r8g.medium"
+        worker_vm_type = "r8g.medium"
+
+    elif worker_memory == 4:
+        idle_timeout = 25
+        scheduler_vm_type = "m8g.medium"
+        worker_vm_type = "m8g.medium"
+
+    elif worker_memory == 2:
+        idle_timeout = 25
+        scheduler_vm_type = "t2.small"
+        worker_vm_type = "t2.small"
+
     else:
-        sys.exit('Memory argument not 16, 32, or 64 GB')
+        sys.exit('Memory argument not 2, 4, 8, 16, 32, or 64 GB')
 
     idle_timeout = f"{idle_timeout} minutes"
 
@@ -56,7 +73,7 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         worker_vm_types = worker_vm_type,
         worker_options={
             "nthreads": threads_per_worker
-        }
+        },
     )
 
     print(f"Cluster created with name: {cluster.name}")
@@ -69,7 +86,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', type=str, help='Coiled cluster name')
     parser.add_argument('-n', '--n_workers', type=int, default=1, help='Number of workers for the cluster')
     parser.add_argument('-m', '--worker_memory', type=int, help='Memory per worker')
-    parser.add_argument('-t', '--threads_per_worker', type=int, default='2', help='Number of threads/worker (default=2)')
+    parser.add_argument('-t', '--threads_per_worker', type=int, default='1', help='Number of threads/worker (default=1)')
 
     args = parser.parse_args()
 
