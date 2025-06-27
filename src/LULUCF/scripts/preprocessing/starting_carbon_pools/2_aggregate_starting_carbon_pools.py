@@ -38,10 +38,12 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Directories to process
     if year == 2000:
-        output_dir_list = [cn.agc_2000_dir, cn.bgc_2000_dir, cn.deadwood_c_2000_dir, cn.litter_c_2000_dir]
-    elif year == 2015:
-        output_dir_list = [cn.agc_2015_dir, cn.bgc_2015_dir, cn.deadwood_c_2015_dir, cn.litter_c_2015_dir]
+        output_dir_list = [cn.agc_2000_raw_dir, cn.bgc_2000_raw_dir, cn.deadwood_c_2000_raw_dir, cn.litter_c_2000_raw_dir, cn.non_soil_c_2000_raw_dir,
+                           cn.agc_2000_LC_masked_dir, cn.bgc_2000_LC_masked_dir, cn.deadwood_c_2000_LC_masked_dir, cn.litter_c_2000_LC_masked_dir, cn.non_soil_c_2000_LC_masked_dir]
         # output_dir_list = [cn.deadwood_c_2015_dir]  # To test a specific carbon pool
+    elif year == 2015:
+        output_dir_list = [cn.agc_2015_raw_dir, cn.bgc_2015_raw_dir, cn.deadwood_c_2015_raw_dir, cn.litter_c_2015_raw_dir, cn.non_soil_c_2015_raw_dir,
+                           cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir, cn.non_soil_c_2015_LC_masked_dir]
     else:
         print(f"Year input {year} not valid. Terminating.")
         sys.exit()
@@ -146,7 +148,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Create carbon pools in 2000.")
+    parser = argparse.ArgumentParser(description="Aggregate 1x1 degree starting carbon densities to 10x10 degree COGs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-f', '--first_10x10s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('--year', type=int, required=True, help='Year for carbon pools')

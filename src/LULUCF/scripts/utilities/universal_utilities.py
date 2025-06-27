@@ -1004,12 +1004,16 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     merged_file = f"/tmp/merged_{out_file_name}"
 
     #TODO Add -of COG to make it a COG, per https://gdal.org/en/stable/drivers/raster/cog.html?
+    # https://gfw.atlassian.net/wiki/spaces/LCL/pages/1918238725/STAC-API+pre-flight+checklist
     merge_command = [
         'gdal_merge.py',
         '-o', merged_file,
-        '-of', 'GTiff',
+        '-of', 'COG',
         '-co', 'COMPRESS=DEFLATE',
         '-co', 'TILED=YES', # If not included, the size of the merged small rasters can be many times their sum. Answer at https://gis.stackexchange.com/a/258215
+        '-co', 'PREDICTOR=2',  # For COG creation
+        '-co', 'BIGTIFF=IF_SAFER',  # For COG creation
+        '-co', 'OVERVIEW_RESAMPLING=average',  # For COG creation
         '-co', 'BLOCKXSIZE=400',  # Internal tiling
         '-co', 'BLOCKYSIZE=400',  # Internal tiling
         '-ul_lr', str(min_x), str(max_y), str(max_x), str(min_y),

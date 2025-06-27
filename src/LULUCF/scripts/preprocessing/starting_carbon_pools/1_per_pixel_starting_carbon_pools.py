@@ -22,22 +22,24 @@ python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbo
 Full run 2000:
 python -m scripts.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global per-pixel run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
-Peak memory per worker: ~2.2 GB
-Time for total processing for each task: 15-25 seconds (based on scanning the console)
-Time until chunk stats: X
-Time after chunk stats: X
-Coiled credits: X (100/hr for 100 m8g.medium workers, according to dashboard)
-AWS cost: $Y ($4.45/hr for 100 m8g.medium workers, according to dashboard)
+Peak memory per worker: ~2.3 GB
+Time for total processing for each task: 30-45 seconds (based on scanning the console)
+Time until chunk stats: 2:00:11
+Time after chunk stats: 2:02:57
+Coiled credits: 204 (100/hr for 100 m8g.medium workers, according to dashboard)
+AWS cost: $9.19 ($4.45/hr for 100 m8g.medium workers, according to dashboard)
 
 Full run 2015:
-python -m scripts.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m scripts.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global per-pixel run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
-Peak memory per worker: ~ GB
-Time for total processing for each task: 15-25 seconds (based on scanning the console)
-Time until chunk stats: X
-Time after chunk stats: X
-Coiled credits: X (100/hr for 100 m8g.medium workers, according to dashboard)
-AWS cost: $Y ($4.45/hr for 100 m8g.medium workers, according to dashboard)
+Peak memory per worker: ~2.3 GB
+Time for total processing for each task: 30-45 seconds (based on scanning the console)
+Time until chunk stats: 1:00:24
+Time after chunk stats: 1:01:53
+Coiled credits: 210 (200/hr for 200 m8g.medium workers, according to dashboard)
+AWS cost: $9.47 ($8.89/hr for 200 m8g.medium workers, according to dashboard)
+Upped it to 200 workers because running for 2000 with 100 workers took a long time!
+This is also a good chance to do a performance/cost comparison between 100 and 200 workers.
 
 """
 
