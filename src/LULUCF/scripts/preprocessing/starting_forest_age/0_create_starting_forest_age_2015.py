@@ -16,6 +16,9 @@ but that simply did not scale.
 Note that I also tried processing 10x10 degree chunks but the problem there was that the processing of the chunks
 once downloaded took too much memory and would've required really large workers.
 
+Mini GEE app for age viewing from Simon Besnard (email 6/27/25):
+https://besnardsim.users.earthengine.app/view/globalforestage
+
 Run from src/LULUCF
 
 Local:

@@ -5,22 +5,22 @@ Can only run on 1x1 degree chunks that do not have the run timestamp in the file
 The way this builds the input file names, it can't handle filenames with the run timestamp.
 It also can't handle chunks smaller than 1x1 degree.
 
-Local test:
-python -m scripts.core_model.2_per_pixel_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --input_date YYYYMMDD
+Local:
+python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -bb 10 49 11 50 -cs 1 --no_upload --year 2000 --input_date 20250626
 
 Coiled small tests:
-python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_postprocessing
-python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --input_date YYYYMMDD
-python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2015 2023 --input_date YYYYMMDD
+python -m scripts.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --no_upload --year 2000 --input_date 20250626
+python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2015 2023
 
 Coiled large shapefile test:
-python -m scripts.utilities.create_cluster -n 50 -cn LULUCF_postprocessing
-python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023 --input_date YYYYMMDD
+python -m scripts.utilities.create_cluster -n 50 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023
 Consistently uses 22 GB per worker, so not enough room for another simultaneous task on 32 GB workers.
 
 Full run:
-python -m scripts.utilities.create_cluster -n 100 -cn LULUCF_postprocessing
-python -m scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2015 2023 --input_date YYYYMMDD
+python -m scripts.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2015 2023
 """
 
 import argparse
@@ -35,16 +35,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dask.distributed import print
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import universal_utilities as uu
-from ..utilities import log_utilities as lu
-from ..utilities import resize_cluster
+from ...utilities import constants_and_names as cn
+from ...utilities import universal_utilities as uu
+from ...utilities import log_utilities as lu
+from ...utilities import resize_cluster
 
-
-def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type, interval_year_diff, interval_length,
-                                    interval_end_years, is_final, no_upload,
-                                    summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list,
-                                    stage):
+def create_per_pixel_starting_carbon_pools(bounds, year, is_final, no_upload,
+                                           input_dir_list, output_dir_list,
+                                           stage):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -69,18 +67,15 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     download_dict = {}
 
     # Iterates through inputs and creates the dictionary of patterns and download paths
-    for summative_input_by_interval in summative_inputs_by_interval_dir_list:
+    for input_dir in input_dir_list:
 
         # All the components of the input path
-        parts = summative_input_by_interval.strip('/').split('/')
+        parts = input_dir.strip('/').split('/')
 
         # Gets the segment for the input pattern
-        pattern_idx = parts.index(f"version_{cn.model_version_underscore}")
+        pattern_idx = parts.index(f"year_{year}_derived_carbon_pools")
         pattern_segment = parts[pattern_idx + 1]
-
-        # Gets the segment for the input interval
-        interval_idx = parts.index(f"{interval_type}_intervals")
-        interval_segment = parts[interval_idx + 1]
+        # print(pattern_segment)
 
         # Gets the segment for the pixel meaning. Different possibilities for carbon pools, fluxes, and everything else.
         if "_ha_yr" in parts:
@@ -91,10 +86,13 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
             pix_meaning_segment = parts[pix_meaning_idx]
         else:
             pix_meaning_segment = ''
+        # print(pix_meaning_segment)
 
         # Constructs the dictionary entry.
         # Value has to be a list because prepare_to_download_chunk expects the download dictionary keys to be lists.
-        download_dict[f"{pattern_segment}_{interval_segment}{pix_meaning_segment}"] = [f"{summative_input_by_interval}{tile_id}__{bounds_str}__{pattern_segment}{pix_meaning_segment}_{interval_segment}.tif"]
+        download_dict[f"{pattern_segment}{pix_meaning_segment}_{year}"] = [f"{input_dir}{tile_id}__{bounds_str}__{pattern_segment}{pix_meaning_segment}_{year}.tif"]
+
+    # print(download_dict)
 
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
     # Thus, this returns a complete set of inputs (missing chunks filled).
@@ -138,10 +136,11 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
 
         # Gets the pattern and interval years from the filename
-        out_pattern, interval_year_range = uu.strip_and_extract_years(key)
+        out_pattern, out_year = uu.strip_and_extract_years(key)
 
         # Gets the core filename pattern and pixel meaning
         out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_pixel_meaning(out_pattern)
+        # print(out_pattern_without_pixel_meaning)
 
         # Replaces the per-ha pixel meaning with the appropriate per-pixel pixel meaning
         if pixel_meaning == cn.C_density_pixel_meaning:
@@ -151,7 +150,7 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         else:
             sys.exit(f"Pixel meaning not found for {key}")
 
-        out_dict[f"{out_pattern_without_pixel_meaning}{pixel_meaning}_{interval_year_range}"] = output_per_pixel
+        out_dict[f"{out_pattern_without_pixel_meaning}{pixel_meaning}_{out_year}"] = output_per_pixel
 
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
@@ -174,9 +173,9 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
             # print("key:", key)
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
-            out_pattern, interval_year_range = uu.strip_and_extract_years(key)
+            out_pattern, out_year = uu.strip_and_extract_years(key)
             # print("out_pattern:", out_pattern)
-            # print("year_range:", year_range)
+            # print("out_year:", out_year)
 
             # Gets the core filename pattern and pixel meaning
             out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_pixel_meaning(out_pattern)
@@ -184,11 +183,11 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
 
             # Retrieves the relevant output s3 path for this specific output (list of one element).
             # First, finds the output folders for all intervals with the relevant patterns
-            matched_output_s3_folders = [item for item in summative_outputs_by_interval_dir_list if out_pattern_without_pixel_meaning in item]
+            matched_output_s3_folders = [item for item in output_dir_list if out_pattern_without_pixel_meaning in item]
             # print("matched_output_s3_folders:", matched_output_s3_folders)
 
             # Second, finds the output folder with the right interval for that pattern
-            matched_output_s3_folder_list = [item for item in matched_output_s3_folders if interval_year_range in item]
+            matched_output_s3_folder_list = [item for item in matched_output_s3_folders if out_year in item]
             # print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
 
             # Output paths without bucket (s3://gfw2-data).
@@ -197,7 +196,7 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
             # print("s3_path_without_bucket:", s3_path_without_bucket)
 
             # Dictionary with metadata for each array
-            out_dict[key] = [value, data_type, out_pattern, interval_year_range, s3_path_without_bucket]
+            out_dict[key] = [value, data_type, out_pattern, out_year, s3_path_without_bucket]
 
         # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
         upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
@@ -223,27 +222,22 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     return return_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, input_date, year, run_local=False, no_stats=False, no_log=False, no_upload=False,
          chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
 
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = 'LULUCF_per_pixel_outputs'
+    stage = 'starting_carbon_pool_per_pixel_outputs'
     model_type = 'standard_model'
 
-    # Determines if arguments for start and end year are valid
-    if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
-                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2023
-                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2023
-        print("Year range selection not valid")
-        sys.exit()
+    # Determines if argument for year is valid
+    if year in [2000, 2015]:
+        print("Year selection valid")
     else:
-        start_year = year_range[0]
-        end_year = year_range[1]
-        # print(f"Start year: {start_year}")
-        # print(f"End year: {end_year}")
+        print("Year selection not valid")
+        sys.exit()
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -258,13 +252,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Starting time for stage
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
-    main_logger.info(f"Start year: {start_year}; end year: {end_year}")
-    main_logger.info(f"Run date: {input_date}")
-    main_logger.info(f"no_upload: {no_upload}")
-
-    # Calculates the interval type, difference between start and end years of intervals,
-    # and the model output years for the model run
-    interval_type, interval_year_diff, interval_length, interval_end_years = uu.get_interval_info(end_year, main_logger, start_year)
+    main_logger.info(f"Year for carbon pools: {year}")
 
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -288,21 +276,31 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
         main_logger.info("Running as final model.")
 
 
+    # Outputs to process
+    if year == 2000:
+        dir_list_to_process = [cn.agc_2000_raw_dir, cn.bgc_2000_raw_dir, cn.deadwood_c_2000_raw_dir, cn.litter_c_2000_raw_dir, cn.non_soil_c_2000_raw_dir,
+                           cn.agc_2000_LC_masked_dir, cn.bgc_2000_LC_masked_dir, cn.deadwood_c_2000_LC_masked_dir, cn.litter_c_2000_LC_masked_dir, cn.non_soil_c_2000_LC_masked_dir]
+    elif year == 2015:
+        dir_list_to_process = [cn.agc_2015_raw_dir, cn.bgc_2015_raw_dir, cn.deadwood_c_2015_raw_dir, cn.litter_c_2015_raw_dir, cn.non_soil_c_2015_raw_dir,
+                           cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir, cn.non_soil_c_2015_LC_masked_dir]
+    else:
+        print(f"Year input {year} not valid. Terminating.")
+        sys.exit()
+
+
     # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
     # Instead, it creates a list of input folders, from which a download dictionary is created for each chunk (in the chunk-level function).
     # It's a little simpler this way. Since the datatypes of the inputs don't need to be specified in advance for this script
     # (since it's not using numba), there's no need to centrally create a download dictionary with each input's datatype
     # just once on the scheduler, as is more efficient for scripts that use numba.
     # Creates a list of input directories used in summative output creation based on specifics of the model run
-    summative_inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
-                                                                           chunk_size_pixels, model_type, interval_end_years,
-                                                                           interval_year_diff, input_date, "per_ha")
-    # print(summative_inputs_by_interval_dir_list)
+    input_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in dir_list_to_process]
+    input_dir_list = [path.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning) for path in input_dir_list]
 
-    summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
-                                                                           chunk_size_pixels, model_type, interval_end_years,
-                                                                           interval_year_diff, input_date, "per_pixel")
-    # print(summative_outputs_by_interval_dir_list)
+    output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in dir_list_to_process]
+    output_dir_list = [path.replace("PER_HA_OR_PIXEL", cn.C_per_pixel_pixel_meaning) for path in output_dir_list]
+    # print(input_dir_list)
+    # print(output_dir_list)
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
@@ -311,16 +309,15 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     ### Step 2: Create 1x1 degree outputs
 
-    summative_output_delayed_results = [dask.delayed(create_per_pixel_LULUCF_outputs)
-                       (chunk, start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
-                        is_final, no_upload,
-                        summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list, stage)
+    output_delayed_results = [dask.delayed(create_per_pixel_starting_carbon_pools)
+                       (chunk, year, is_final, no_upload,
+                        input_dir_list, output_dir_list, stage)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results
-    summative_output_results = dask.compute(*summative_output_delayed_results)
+    output_results = dask.compute(*output_delayed_results)
 
-    success_count, all_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, summative_output_results)
+    success_count, all_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, output_results)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
@@ -341,7 +338,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
     if not no_upload:
-        for output_folder in summative_outputs_by_interval_dir_list:
+        for output_folder in output_dir_list:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output rasters in {output_folder}: {file_count}")
             # print(geotiff_files)
@@ -370,14 +367,14 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Calculate per-pixel outputs from LULUCF model.")
+    parser = argparse.ArgumentParser(description="Calculate per-pixel starting carbon pools.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-rd', '--input_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
-    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
+    parser.add_argument('--year', type=int, required=True, help='Year for carbon pools')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
@@ -393,7 +390,7 @@ if __name__ == "__main__":
     chunk_size = args.chunk_size
     chunk_shapefile_uri = args.chunk_shapefile_uri
     first_chunks = args.first_chunks
-    year_range = args.year_range
+    year = args.year
     log_note = args.log_note
 
     run_local = args.run_local
@@ -402,6 +399,6 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, input_date, year_range, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
+    main(cluster_name, input_date, year, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)

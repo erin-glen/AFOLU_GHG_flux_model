@@ -2,16 +2,16 @@
 Run from src/LULUCF/
 
 Local test:
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools --year 2015 --first_10x10s_to_process 2
+python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools --year 2015 --first_10x10s_to_process 2
 
 Coiled test:
 python -m scripts.utilities.create_cluster -n 1 -t 2 -m 16 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015 --first_10x10s_to_process 2
+python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015 --first_10x10s_to_process 2
 
 Full Coiled run:
 python -m scripts.utilities.create_cluster -n 40 -t 7 -m 32 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2015
+python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000
+python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2015
 Time: 24:24 through calculation; 24:40 through tile stats; Credits: 35.5; Cost: $1.80; peak memory: 8 GB/worker
 """
 

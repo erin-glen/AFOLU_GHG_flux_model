@@ -4,7 +4,7 @@ Run from src/LULUCF/
 Local:
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
 
-Needs 4GB workers for 1x1 deg chunks; 2GB workers are too small.
+Needs 4GB Coiled workers for 1x1 deg chunks; 2GB workers are too small.
 
 Coiled small test:
 python -m scripts.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
