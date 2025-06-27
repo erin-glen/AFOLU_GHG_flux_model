@@ -17,24 +17,24 @@ python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_p
 Full run 2000:
 python -m scripts.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
-Peak memory per worker: ~ GB
-Time for numba processing for each task: ~1 second
-Time for total processing for each task: 15-20 seconds
-Time until chunk stats: 24:26,
-Time after chunk stats: 25:56,
-Coiled credits: 92, (198/hr for 200 m8g.medium workers, according to dashboard)
-AWS cost: $4.10,
+Peak memory per worker: ~2.8 GB
+Time for numba processing for each task: ~1 second (based on scanning the console)
+Time for total processing for each task: 15-25 seconds (based on scanning the console)
+Time until chunk stats: 24:26 (no non-soil C sum), 25:43 (with non-soil C sum)
+Time after chunk stats: 25:56 (no non-soil C sum), 27:06 (with non-soil C sum)
+Coiled credits: 92 (no non-soil C sum), 99 (with non-soil C sum) (200/hr for 200 m8g.medium workers, according to dashboard)
+AWS cost: $4.10 (no non-soil C sum), $4.50 (with non-soil C sum)
 
 Full run 2015
 python -m scripts.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
-Peak memory per worker:
-Time for numba processing for each task:
-Time for total processing for each task:
-Time until chunk stats:
-Time after chunk stats:
-Coiled credits:   (198/hr for 200 m8g.medium workers, according to dashboard)
-AWS cost:
+Peak memory per worker: ~2.8 GB
+Time for numba processing for each task: ~1 second (based on scanning the console)
+Time for total processing for each task: 15-25 seconds (based on scanning the console)
+Time until chunk stats: 24:53 (with non-soil C sum)
+Time after chunk stats: 26:11 (with non-soil C sum)
+Coiled credits: 91.5 (with non-soil C sum) (200/hr for 200 m8g.medium workers, according to dashboard)
+AWS cost: $4.21 (with non-soil C sum)
 
 
 To create a vrt of the 10x10 deg outputs, do:
