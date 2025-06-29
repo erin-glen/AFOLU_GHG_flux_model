@@ -40,7 +40,7 @@ Coiled credits: 210 (200/hr for 200 m8g.medium workers, according to dashboard)
 AWS cost: $9.47 ($8.89/hr for 200 m8g.medium workers, according to dashboard)
 Upped it to 200 workers because running for 2000 with 100 workers took a long time!
 This is also a good chance to do a performance/cost comparison between 100 and 200 workers.
-
+Conclusion: The two configurations were equivalent in terms of resources.
 """
 
 import argparse

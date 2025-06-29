@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
+import psutil
 import pytz
 import sys
 import rasterio
@@ -952,6 +953,8 @@ def flatten_list(nested_list):
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
 def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
+    process = psutil.Process(os.getpid())
+
     ### Part 1: Merges 1x1 deg rasters to 10x10 deg
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
@@ -976,9 +979,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     # Lists the tile paths for the relevant rasters
     tile_paths = [vsis3_in_folder + filename for filename in filenames_in_focus_area]
 
-    lu.print_and_log(f"flm: Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger_worker)
-    if is_final:   # Prints to console if it is a final run
-        print(f"Merging small rasters in {tile_id} in {vsis3_in_folder}")
+    lu.print_and_log(f"flm: Merging small rasters in {tile_id} in {vsis3_in_folder}: {timestr()}", False, logger_worker)
 
     # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
     out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
@@ -1001,19 +1002,16 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     # Merges the rasters (courtesy of ChatGPT: https://chatgpt.com/share/e/13158ebb-dd0a-41d8-8dfb-9ee12e4c804e)
     # This is the only system I found that maintains the extent of all the constituent rasters and doesn't change their resolution or pixel size or shift them.
     # I also tried various gdal_translate, build_vrt, and numpy padding approaches, none of which worked in all cases.
-    merged_file = f"/tmp/merged_{out_file_name}"
+    merged_file = f"/tmp/merged_non_COG_{out_file_name}"
 
     #TODO Add -of COG to make it a COG, per https://gdal.org/en/stable/drivers/raster/cog.html?
     # https://gfw.atlassian.net/wiki/spaces/LCL/pages/1918238725/STAC-API+pre-flight+checklist
     merge_command = [
         'gdal_merge.py',
         '-o', merged_file,
-        '-of', 'COG',
+        '-of', 'GTiff',
         '-co', 'COMPRESS=DEFLATE',
         '-co', 'TILED=YES', # If not included, the size of the merged small rasters can be many times their sum. Answer at https://gis.stackexchange.com/a/258215
-        '-co', 'PREDICTOR=2',  # For COG creation
-        '-co', 'BIGTIFF=IF_SAFER',  # For COG creation
-        '-co', 'OVERVIEW_RESAMPLING=average',  # For COG creation
         '-co', 'BLOCKXSIZE=400',  # Internal tiling
         '-co', 'BLOCKYSIZE=400',  # Internal tiling
         '-ul_lr', str(min_x), str(max_y), str(max_x), str(min_y),
@@ -1026,19 +1024,43 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
     try:
         subprocess.check_call(merge_command)
-        lu.print_and_log(f"Successfully merged rasters into {merged_file}", is_final, logger_worker)
+        lu.print_and_log(f"Successfully merged rasters into {merged_file}: {timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"After creating geotif for {merged_file}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
     except subprocess.CalledProcessError as e:
         lu.print_and_log(f"Error merging rasters: {e}: {timestr()}", False, logger_worker)
         return f"failure merging {s3_name_dict}"
 
-    ### Part 2: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters)
+    ### Part 2: Converts geotifs to COGs
+
+    # Convert to Cloud Optimized GeoTIFF
+    merged_cog_file = f"/tmp/merged_cog_{out_file_name}"
+    translate_command = [
+        'gdal_translate',
+        merged_file,
+        merged_cog_file,
+        '-of', 'COG',
+        '-co', 'COMPRESS=DEFLATE',
+        '-co', 'PREDICTOR=2',
+        '-co', 'BIGTIFF=IF_SAFER',
+        '-co', 'OVERVIEW_RESAMPLING=average'
+    ]
+
+    try:
+        subprocess.check_call(translate_command)
+        lu.print_and_log(f"Successfully created COG: {merged_cog_file}: {timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"After creating COG for {merged_cog_file}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+    except subprocess.CalledProcessError as e:
+        lu.print_and_log(f"Error converting to COG: {e}: {timestr()}", False, logger_worker)
+        return f"failure converting to COG for {s3_name_dict}"
+
+    ### Part 3: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters)
 
     # Computes valid pixel count in the output 10x10 raster for comparison with the sum of the constituent 1x1s
     lu.print_and_log(f"Counting pixels in {tile_id} for {out_file_name}: {timestr()}", is_final, logger_worker)
 
     # Computes count of valid pixels by reading raster in chunks (can't read full 10x10 into memory all at once
     try:
-        ds = gdal.Open(merged_file)
+        ds = gdal.Open(merged_cog_file)
         if ds is not None:
             band = ds.GetRasterBand(1)
             valid_pixel_count = 0
@@ -1065,8 +1087,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         else:
             valid_pixel_count = -1  # Failed to open file
     except Exception as e:
-        lu.print_and_log(f"Error counting pixels for {merged_file}: {e}", is_final, logger_worker)
-        print(f"Error counting pixels for {merged_file}: {e}")
+        lu.print_and_log(f"Error counting pixels for {merged_cog_file}: {e}", is_final, logger_worker)
+        print(f"Error counting pixels for {merged_cog_file}: {e}")
         return f"failure counting pixels for {s3_name_dict}"
 
     # Gets the output file pattern and year/year_range
@@ -1091,7 +1113,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         'data_type': 'no data'
     }]
 
-    ### Part 3: Uploads 10x10 to s3 using multipart uploading
+    ### Part 4: Uploads 10x10 to s3 using multipart uploading
     ### https://chatgpt.com/share/e/67d848cf-8b08-800a-b0e8-79a72c9eb49a.
 
     lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}: {timestr()}", is_final, logger_worker)
@@ -1139,6 +1161,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
     # Deletes the local merged raster
     os.remove(merged_file)
+    os.remove(merged_cog_file)
 
     return f"Success merging {s3_name_dict}", chunk_stats
 

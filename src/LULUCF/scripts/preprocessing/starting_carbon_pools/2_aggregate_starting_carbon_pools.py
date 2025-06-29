@@ -6,11 +6,20 @@ python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbo
 
 Coiled test:
 python -m scripts.utilities.create_cluster -n 1 -t 2 -m 16 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015 --first_10x10s_to_process 2
+python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 --first_10x10s_to_process 2
 
-Full Coiled run:
+Full run 2000:
 python -m scripts.utilities.create_cluster -n 40 -t 7 -m 32 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000
+Peak memory per worker: ~X GB
+Time for total processing for each task: X seconds (based on scanning the console)
+Time until chunk stats: X
+Time after chunk stats: X
+Coiled credits: X (X/hr for X X workers, according to dashboard)
+AWS cost: $X (X/hr for X X workers, according to dashboard)
+
+Full run 2015:
+python -m scripts.utilities.create_cluster -n 40 -t 7 -m 32 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2015
 Time: 24:24 through calculation; 24:40 through tile stats; Credits: 35.5; Cost: $1.80; peak memory: 8 GB/worker
 """
@@ -40,7 +49,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     if year == 2000:
         output_dir_list = [cn.agc_2000_raw_dir, cn.bgc_2000_raw_dir, cn.deadwood_c_2000_raw_dir, cn.litter_c_2000_raw_dir, cn.non_soil_c_2000_raw_dir,
                            cn.agc_2000_LC_masked_dir, cn.bgc_2000_LC_masked_dir, cn.deadwood_c_2000_LC_masked_dir, cn.litter_c_2000_LC_masked_dir, cn.non_soil_c_2000_LC_masked_dir]
-        # output_dir_list = [cn.deadwood_c_2015_dir]  # To test a specific carbon pool
+        output_dir_list = [cn.agc_2000_raw_dir]  # To test a specific carbon pool
     elif year == 2015:
         output_dir_list = [cn.agc_2015_raw_dir, cn.bgc_2015_raw_dir, cn.deadwood_c_2015_raw_dir, cn.litter_c_2015_raw_dir, cn.non_soil_c_2015_raw_dir,
                            cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir, cn.non_soil_c_2015_LC_masked_dir]
