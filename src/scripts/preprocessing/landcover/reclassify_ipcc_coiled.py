@@ -5,6 +5,10 @@ This script processes land cover tiles in chunks, writing GeoTIFFs directly to
 S3. It automatically iterates over the provided years for both five-year and
 annual intervals, organizing outputs accordingly. Tiles that are missing on S3
 are skipped gracefully.
+
+The workflow first attempts to attach to a running Coiled cluster. The cluster
+name can be specified via ``--cluster_name`` (default ``reclassify_ipcc``). If
+no matching cluster is found, computation falls back to a local Dask cluster.
 """
 
 import os
@@ -175,7 +179,8 @@ def main(
     tile_id=None,
     chunk_size=2.0,
     pixel_resolution="8000_pixels",
-    client="local",
+    cluster_name="reclassify_ipcc",
+    run_local=False,
     run_mode="default",
     interval_choice="both",
 ):
@@ -190,20 +195,25 @@ def main(
     else:
         intervals = [("five_year", FIVE_YEAR_YEARS), ("annual", ANNUAL_YEARS)]
 
-    if client == "coiled":
-        cluster, dclient = uutil.connect_to_cluster(
-            cluster_name="reclassify_ipcc",
-            n_workers=20,
-            region="us-east-1",
-        )
-        logging.info(f"Using coiled cluster: {cluster.name}")
-    else:
+    cluster, dclient, run_local = uutil.connect_to_cluster(
+        cluster_name=cluster_name,
+        n_workers=20,
+        region="us-east-1",
+        run_local=run_local,
+    )
+
+    # If ``connect_to_cluster`` failed to attach to a Coiled cluster it returns
+    # ``run_local=True`` and ``cluster``/``dclient`` as ``None``. In that case we
+    # start a local Dask cluster instead.
+    if run_local:
         cluster = LocalCluster()
         dclient = Client(cluster)
-        logging.info("Using local cluster")
+        logging.info("Running locally.")
+    else:
+        logging.info(f"Using coiled cluster: {cluster.name}")
 
     mapping = GLCLU_MAPPING
-    if client != "local":
+    if not run_local:
         dclient.scatter(mapping, broadcast=True)
 
     try:
@@ -230,8 +240,10 @@ def main(
                     )
                     dask.compute(*year_tasks)
     finally:
-        dclient.close()
-        cluster.close()
+        if dclient:
+            dclient.close()
+        if cluster:
+            cluster.close()
 
 
 if __name__ == "__main__":
@@ -239,7 +251,16 @@ if __name__ == "__main__":
     parser.add_argument("--tile_id", help="Tile ID to process")
     parser.add_argument("--chunk_size", type=float, default=2.0)
     parser.add_argument("--pixel_resolution", default="8000_pixels")
-    parser.add_argument("--client", default="local", choices=["local", "coiled"])
+    parser.add_argument(
+        "--cluster_name",
+        default="reclassify_ipcc",
+        help="Name of the Coiled cluster to attach to",
+    )
+    parser.add_argument(
+        "--run_local",
+        action="store_true",
+        help="Run locally without Dask/Coiled",
+    )
     parser.add_argument("--run_mode", default="default", choices=["default", "test"])
     parser.add_argument(
         "--interval",
@@ -253,7 +274,8 @@ if __name__ == "__main__":
         args.tile_id,
         args.chunk_size,
         args.pixel_resolution,
-        args.client,
+        args.cluster_name,
+        args.run_local,
         args.run_mode,
         args.interval,
     )
