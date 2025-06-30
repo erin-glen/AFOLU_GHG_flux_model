@@ -293,7 +293,7 @@ mangrove_agb_2000_pattern = "mangrove_agb_t_ha_2000"
 # Carbon density patterns (also used in path names)
 agb_dens_pattern = "AGB_density_MgAGB_ha"
 
-# Raw carbon density, not masked by landcover composite
+# Raw carbon density patterns, not masked by landcover composite
 agc_raw_dens_pattern = "carbon_density__AGC__raw__MgC"
 bgc_raw_dens_pattern = "carbon_density__BGC__raw__MgC"
 deadwood_c_raw_dens_pattern = "carbon_density__deadwood_C__raw__MgC"
@@ -301,13 +301,20 @@ litter_c_raw_dens_pattern = "carbon_density__litter_C__raw__MgC"
 non_soil_c_raw_dens_pattern = "carbon_density__non_soil__raw__MgC"
 soil_c_dens_raw_pattern = "carbon_density__soil_C__raw__MgC"
 
-# Carbon density, masked by landcover composite
+# Carbon density patterns when masked by landcover composite
 agc_LC_masked_dens_pattern = "carbon_density__AGC__landcover_masked__MgC"
 bgc_LC_masked_dens_pattern = "carbon_density__BGC__landcover_masked__MgC"
 deadwood_c_LC_masked_dens_pattern = "carbon_density__deadwood_C__landcover_masked__MgC"
 litter_c_LC_masked_dens_pattern = "carbon_density__litter_C__landcover_masked__MgC"
 non_soil_c_LC_masked_dens_pattern = "carbon_density__non_soil__landcover_masked__MgC"
 soil_c_dens_LC_masked_pattern = "carbon_density__soil_C__landcover_masked__MgC"
+
+# Carbon density pattern for LULUCF model outputs
+agc_modeled_dens_pattern = "carbon_density__AGC__MgC"
+bgc_modeled_dens_pattern = "carbon_density__BGC__MgC"
+deadwood_c_modeled_dens_pattern = "carbon_density__deadwood_C__MgC"
+litter_c_modeled_dens_pattern = "carbon_density__litter_C__MgC"
+non_soil_c_modeled_dens_pattern = "carbon_density__non_soil__MgC"
 
 ### Carbon pools in starting year (2000/2015)
 
