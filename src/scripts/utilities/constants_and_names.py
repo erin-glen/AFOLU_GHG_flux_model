@@ -287,7 +287,7 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
         full_bucket_prefix,
         processed_dir,
         'land_cover_ipcc',
-        '20250608',
+        '20250630',
         interval_type,
         str(lc_year),
         pixel_resolution,
