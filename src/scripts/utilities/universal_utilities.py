@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple, Union
 
 import subprocess
+import time
 import boto3
 import coiled
 import numpy as np
@@ -229,6 +230,28 @@ def connect_to_cluster(
     print(f"Cluster named {cluster_name} not found. Running locally.")
     run_local = True
     return None, None, run_local
+
+
+# ----------------------------------------------------------------------
+# Compatibility alias
+# ----------------------------------------------------------------------
+
+def connect_to_Coiled_cluster(
+    cluster_name: str = "afolu_cluster",
+    run_local: bool = False,
+    n_workers: int = 20,
+    region: str = "us-east-1",
+    worker_memory: str = "32GiB",
+):
+    """Alias for :func:`connect_to_cluster` for backward compatibility."""
+
+    return connect_to_cluster(
+        cluster_name=cluster_name,
+        n_workers=n_workers,
+        region=region,
+        run_local=run_local,
+        worker_memory=worker_memory,
+    )
 
 
 # ----------------------------------------------------------------------
@@ -1085,3 +1108,248 @@ def get_chunk_bounds_from_bounding_box(bounding_box, chunk_size):
         y += chunk_size
 
     return chunks
+
+
+# ----------------------------------------------------------------------
+# task tracking helpers (ported from LULUCF utilities)
+# ----------------------------------------------------------------------
+
+def connect_to_Coiled_cluster(cluster_name: str, run_local: bool):
+    """Wrapper for :func:`connect_to_cluster` using the LULUCF signature."""
+
+    return connect_to_cluster(cluster_name=cluster_name, run_local=run_local)
+
+
+def create_s3_task_files(stage, chunk_list):
+    """Create empty S3 files used to track chunk processing."""
+
+    s3 = boto3.client("s3")
+
+    def _upload(chunk):
+        bstr = boundstr(chunk)
+        tid = xy_to_tile_id(chunk[0], chunk[3])
+        key = f"{cn.progress_tracking_path}pending_{tid}_{bstr}_{stage}.txt"
+        try:
+            s3.put_object(Bucket=cn.short_bucket_prefix, Key=key, Body="")
+            return f"Created: {key}"
+        except Exception as exc:
+            return f"Error creating task file {key}: {exc}"
+
+    max_workers = min(100, len(chunk_list))
+    start = time.time()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = {ex.submit(_upload, chk): chk for chk in chunk_list}
+        for fut in concurrent.futures.as_completed(futs):
+            fut.result()  # ignore individual messages
+    elapsed = time.time() - start
+    print(
+        f"Created task tracking files in {cn.progress_tracking_path} in {elapsed:.2f} seconds"
+    )
+
+
+def rename_s3_task_file(stage, chunk_id, new_status, is_final, logger_worker):
+    """Rename a chunk tracking file on S3."""
+
+    s3 = boto3.client("s3")
+    bstr = boundstr(chunk_id)
+    tid = xy_to_tile_id(chunk_id[0], chunk_id[3])
+    for prefix in cn.possible_task_statuses:
+        old_key = f"{cn.progress_tracking_path}{prefix}{tid}_{bstr}_{stage}.txt"
+        new_key = f"{cn.progress_tracking_path}{new_status}{tid}_{bstr}_{stage}.txt"
+        try:
+            s3.copy_object(
+                Bucket=cn.short_bucket_prefix,
+                CopySource={"Bucket": cn.short_bucket_prefix, "Key": old_key},
+                Key=new_key,
+            )
+            s3.delete_object(Bucket=cn.short_bucket_prefix, Key=old_key)
+            return
+        except s3.exceptions.ClientError as exc:
+            if exc.response["Error"]["Code"] == "NoSuchKey":
+                continue
+            print(f"Error renaming task file {old_key}: {exc}")
+            return
+    lu.print_and_log(
+        f"No existing task file found for chunk {chunk_id}. Skipping rename.",
+        is_final,
+        logger_worker,
+    )
+
+
+def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
+    """Remove tracking files for a chunk from S3."""
+
+    s3 = boto3.client("s3")
+    bstr = boundstr(chunk_id)
+    tid = xy_to_tile_id(chunk_id[0], chunk_id[3])
+    deleted = False
+    for prefix in cn.possible_task_statuses:
+        key = f"{cn.progress_tracking_path}{prefix}{tid}_{bstr}_{stage}.txt"
+        try:
+            s3.delete_object(Bucket=cn.short_bucket_prefix, Key=key)
+            deleted = True
+        except s3.exceptions.ClientError as exc:
+            if exc.response["Error"]["Code"] != "NoSuchKey":
+                return
+    if not deleted:
+        lu.print_and_log(
+            f"No task file found for chunk {chunk_id}. Nothing to delete.",
+            is_final,
+            logger_worker,
+        )
+
+
+def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger):
+    """Queue up S3 reads for all layers in ``download_dict``."""
+
+    futures = {}
+    bstr = boundstr(bounds)
+    tid = xy_to_tile_id(bounds[0], bounds[3])
+    with concurrent.futures.ThreadPoolExecutor() as ex:
+        lu.print_and_log(
+            f"Requesting data in chunk {bstr} in {tid}: {timestr()}",
+            is_final,
+            logger,
+        )
+        for key, value in download_dict.items():
+            if len(value) == 1:
+                fut = ex.submit(
+                    get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, "Float32"
+                )
+            elif len(value) == 2:
+                fut = ex.submit(
+                    get_tile_dataset_rio,
+                    value[0],
+                    bounds,
+                    chunk_length_pixels,
+                    value[1],
+                )
+            else:
+                sys.exit("Unexpected number of parameters in download dictionary")
+            futures[fut] = key
+    return futures
+
+
+def count_successful_chunks(chunk_list, is_final, main_logger, results):
+    """Summarize success messages returned from chunk workers."""
+
+    all_stats = []
+    return_messages = []
+    success_count = 0
+    skipping_chunk_count = 0
+    error_chunk_count = 0
+    other_message_count = 0
+    for result in results:
+        return_message, chunk_stats = result
+        if "Success" in return_message:
+            success_count += 1
+        elif "Skipped chunk" in return_message:
+            skipping_chunk_count += 1
+        elif "Error" in return_message:
+            error_chunk_count += 1
+        else:
+            other_message_count += 1
+        if return_message:
+            return_messages.append(return_message)
+        chunk_stats = chunk_stats if isinstance(chunk_stats, list) else [chunk_stats]
+        if chunk_stats is not None:
+            all_stats.extend(chunk_stats)
+    if not is_final:
+        for message in return_messages:
+            main_logger.info(message)
+    main_logger.info(f"Number of 'Success' chunks: {success_count}")
+    main_logger.info(f"Number of 'Skipped' chunks: {skipping_chunk_count}")
+    main_logger.info(f"Number of 'Error' chunks: {error_chunk_count}")
+    main_logger.info(f"Number of 'Other message' chunks: {other_message_count}")
+    if return_messages and "Success merging" not in return_messages[0]:
+        diff = len(chunk_list) - (
+            success_count + skipping_chunk_count + error_chunk_count + other_message_count
+        )
+        main_logger.info(
+            f"Difference between submitted chunks and processed chunks: {diff}"
+        )
+    main_logger.info("\n")
+    return success_count, all_stats
+
+
+def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger):
+    """Aggregate per‑chunk statistics and upload them to S3."""
+
+    s3_client = boto3.client("s3")
+    main_logger.info(f"Starting to aggregate and export tile stats: {timestr()}")
+
+    df_all_1x1_stats = pd.DataFrame(all_1x1_stats)
+    df_all_1x1_stats["min_value"] = pd.to_numeric(df_all_1x1_stats["min_value"], errors="coerce")
+    df_all_1x1_stats["max_value"] = pd.to_numeric(df_all_1x1_stats["max_value"], errors="coerce")
+
+    main_logger.info(f"Sorting 1x1 tile stats by properties: {timestr()}")
+    sorted_1x1_stats = df_all_1x1_stats.sort_values(by=["in_out", "layer_name"]).reset_index(drop=True)
+
+    main_logger.info(f"Calculating min and max values across all 1x1 chunks: {timestr()}")
+    min_max_1x1_stats = (
+        df_all_1x1_stats.groupby("layer_name").agg(
+            min_value=("min_value", "min"), max_value=("max_value", "max"), count=("layer_name", "count")
+        ).reset_index()
+    )
+
+    gdf = gpd.read_file(chunk_shapefile_uri)
+    fishnet_shapefile_df = gdf[["chunk_id", "iso"]]
+
+    main_logger.info(f"Merging country code to 1x1 chunk stats table: {timestr()}")
+    merged_1x1_stats = sorted_1x1_stats.merge(fishnet_shapefile_df, on="chunk_id", how="left")
+    merged_1x1_stats["iso"] = merged_1x1_stats["iso"].fillna("no iso assigned")
+
+    main_logger.info(f"Separating 1x1 outputs into different tables: {timestr()}")
+    input_rows = merged_1x1_stats[merged_1x1_stats["in_out"] == "input_layer"]
+    output_rows = merged_1x1_stats[merged_1x1_stats["in_out"] == "output_layer"]
+
+    timeseries_layers = f"{cn.burned_area_final_pattern}|{cn.forest_disturbance_layer_name}|{cn.vegetation_height_pattern}|{cn.land_cover_pattern}"
+    annual_inputs = input_rows[input_rows["layer_name"].str.contains(timeseries_layers, case=False, na=False)]
+    other_inputs = input_rows[~input_rows["layer_name"].str.contains(timeseries_layers, case=False, na=False)]
+
+    gross_outputs = output_rows[output_rows["layer_name"].str.contains("gross", case=False, na=False)]
+    net_outputs = output_rows[output_rows["layer_name"].str.contains("net|flux", case=False, na=False)]
+    other_outputs = output_rows[~output_rows["layer_name"].str.contains("flux|gross|net", case=False, na=False)]
+
+    main_logger.info(
+        f"Calculating number of pixels in 1x1 chunk within each 10x10 chunk: {timestr()}"
+    )
+    output_rows.loc[:, "count_value"] = pd.to_numeric(output_rows["count_value"], errors="coerce").fillna(0)
+    sum_1x1_to_10x10 = (
+        output_rows.groupby(["tile_id", "layer_name"]).agg(total_count=("count_value", "sum")).reset_index()
+    )
+    sum_1x1_to_10x10["tile_name"] = sum_1x1_to_10x10["tile_id"] + "__" + sum_1x1_to_10x10["layer_name"] + ".tif"
+    sum_1x1_to_10x10 = sum_1x1_to_10x10[["tile_id", "layer_name", "tile_name", "total_count"]]
+
+    out_spreadsheet = f"{stage}_1x1_chunk_statistics_{timestr()}.xlsx"
+    local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+
+    main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
+    try:
+        with pd.ExcelWriter(local_spreadsheet) as writer:
+            main_logger.info(f"Writing inputs to spreadsheet: {timestr()}")
+            annual_inputs.to_excel(writer, sheet_name="annual_1x1_inputs", index=False)
+            other_inputs.to_excel(writer, sheet_name="other_1x1_inputs", index=False)
+
+            main_logger.info(f"Writing outputs to spreadsheet: {timestr()}")
+            gross_outputs.to_excel(writer, sheet_name="gross_outputs_1x1", index=False)
+            net_outputs.to_excel(writer, sheet_name="net_outputs_1x1", index=False)
+            other_outputs.to_excel(writer, sheet_name="other_outputs_1x1", index=False)
+
+            min_max_1x1_stats.to_excel(writer, sheet_name="min_max_for_layers_1x1", index=False)
+            sum_1x1_to_10x10.to_excel(writer, sheet_name="1x1_counts_in_10x10", index=False)
+        main_logger.info(merged_1x1_stats.head())
+        main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
+    except Exception as exc:  # pragma: no cover - network/file issues
+        main_logger.info(f"Can't print chunk stats: {exc}")
+
+    if not no_upload:
+        main_logger.info(f"Uploading chunk stats spreadsheet to s3: {timestr()}")
+        s3_client.upload_file(
+            local_spreadsheet,
+            cn.short_bucket_prefix,
+            Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}",
+        )
+        main_logger.info(
+            f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}"
+        )

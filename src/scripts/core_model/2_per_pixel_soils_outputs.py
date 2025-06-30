@@ -2,7 +2,6 @@ import argparse
 import concurrent.futures
 import dask
 import os
-import psutil
 import sys
 import time
 
@@ -187,7 +186,6 @@ def create_per_pixel_soils_outputs(bounds, input_dirs, is_final, no_upload, stag
 
 def main(
     cluster_name,
-    year_range,
     run_local=False,
     no_stats=False,
     no_log=False,
@@ -212,7 +210,6 @@ def main(
 
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
-    main_logger.info(f"Year range: {year_range}")
     main_logger.info(f"no_upload: {no_upload}")
 
     fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
@@ -281,7 +278,6 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create per-pixel organic soil outputs")
     parser.add_argument("-cn", "--cluster_name", help="Coiled cluster name")
-    parser.add_argument("-yr", "--year_range", nargs=2, type=int, required=True, help="Start and end years")
     parser.add_argument("-bb", "--bounding_box", nargs=4, type=float, help="W, S, E, N")
     parser.add_argument("-cs", "--chunk_size", type=float, help="Chunk size (degrees)")
     parser.add_argument("-cshp", "--chunk_shapefile_uri", help="s3 path to chunk shapefile")
@@ -296,7 +292,6 @@ if __name__ == "__main__":
 
     main(
         args.cluster_name,
-        args.year_range,
         run_local=args.run_local,
         no_stats=args.no_stats,
         no_log=args.no_log,
