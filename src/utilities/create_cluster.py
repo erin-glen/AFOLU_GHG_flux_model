@@ -1,8 +1,8 @@
 """
-Run from src/LULUCF/
-python -m scripts.utilities.create_cluster -n 1 -m 16 -cn LULUCF_model
-python -m scripts.utilities.create_cluster -n 5 -m 32 -cn LULUCF_model
-python -m scripts.utilities.create_cluster -n 20 -m 64 -cn LULUCF_model
+Run from git/AFOLU_GHG_flux_model/
+python -m src.utilities.create_cluster -n 1 -m 16 -cn LULUCF_model
+python -m src.utilities.create_cluster -n 5 -m 32 -cn LULUCF_model
+python -m src.utilities.create_cluster -n 20 -m 64 -cn LULUCF_model
 
 Table of instance types: https://aws.amazon.com/ec2/instance-types/
 Table of spot pricing: https://aws.amazon.com/ec2/spot/pricing/
@@ -14,11 +14,9 @@ which is the situation for large analyses, obviously.
 """
 
 import coiled
-import dask
 import argparse
 import sys
 
-from . import constants_and_names as cn
 
 def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
 

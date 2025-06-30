@@ -1,25 +1,25 @@
 """
-Run from src/LULUCF
+Run from git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work):
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --no_upload -yr 2000 2023 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --no_upload -yr 2000 2023 --run_date YYYYMMDD
 
 Coiled small tests:
-python -m scripts.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2000 2023 --run_date YYYYMMDD
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload -yr 2000 2023 --run_date YYYYMMDD
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --run_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2000 2023 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 --no_upload -yr 2000 2023 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --run_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m scripts.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_model
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2023 --run_date YYYYMMDD
+python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_model
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2023 --run_date YYYYMMDD
 
 Full run:
-python -m scripts.utilities.create_cluster -n 200 -t 1 -m 32 -cn LULUCF_model
-python -m scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --run_date YYYYMMDD  --log_note "This is a full run."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn LULUCF_model
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --run_date YYYYMMDD  --log_note "This is a full run."
 
 To download all outputs locally:
-python scripts/utilities/download_outputs_local.py v1 23_-4_24_-3
+python src/utilities/download_outputs_local.py v1 23_-4_24_-3
 
 Using more than 1 thread/worker slows down processing a lot when there are more tasks than workers for the core LULUCF model,
 which is the situation for large analyses, obviously.
@@ -41,11 +41,11 @@ from dask.distributed import print
 from numba import jit
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import universal_utilities as uu
-from ..utilities import log_utilities as lu
-from ..utilities import numba_utilities as nu
-from ..utilities import resize_cluster
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+from src.utilities import numba_utilities as nu
+from src.utilities import universal_utilities as uu
+from src.utilities import resize_cluster
 
 
 # Function to calculate LULUCF fluxes and carbon densities

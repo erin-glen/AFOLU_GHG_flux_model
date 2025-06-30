@@ -19,22 +19,22 @@ once downloaded took too much memory and would've required really large workers.
 Mini GEE app for age viewing from Simon Besnard (email 6/27/25):
 https://besnardsim.users.earthengine.app/view/globalforestage
 
-Run from src/LULUCF
+Run from git/AFOLU_GHG_flux_model
 
 Local:
-python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
 
 Coiled tiny test:
-python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
-python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
+python -m src.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
 
 Coiled larger test (because this doesn't always scale beyond 1 chunk well):
-python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 4 -t 4
-python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 47 13 50 -cs 1
+python -m src.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 4 -t 4
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 47 13 50 -cs 1
 
 Full run:
-python -m scripts.utilities.create_cluster -n 12 -t 9 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
+python -m src.utilities.create_cluster -n 12 -t 9 -cn AFOLU_flux_model_scripts
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
 When I ran with -n 7 -t 9, it would process only about 3 batches of 300 chunks (900 chunks) before failing,
 sometimes because it ran out of memory. Increasing the cluster size to -n 12 -t 9 made it run through 1800 chunks before failing!
 I think that the cluster with 7 workers simply couldn't handle all the data it was downloading at a certain point.
@@ -73,9 +73,9 @@ import fsspec
 from fsspec.implementations.cached import CachingFileSystem
 
 # Project imports
-from ...utilities import constants_and_names as cn
-from ...utilities import log_utilities as lu
-from ...utilities import universal_utilities as uu
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+from src.utilities import universal_utilities as uu
 
 
 def try_open_zarr(url, cache_path, consolidated=True):

@@ -1,27 +1,27 @@
 """
-Run from src/LULUCF
+Run from git/AFOLU_GHG_flux_model
 
 Can only run on 1x1 degree chunks that do not have the run timestamp in the file name.
 The way this builds the input file names, it can't handle filenames with the run timestamp.
 It also can't handle chunks smaller than 1x1 degree.
 
 Local:
-python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -bb 10 49 11 50 -cs 1 --no_upload --year 2000 --input_date 20250626
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -bb 10 49 11 50 -cs 1 --no_upload --year 2000 --input_date 20250626
 
 Needs 4GB Coiled workers with 1 thread for 1x1 deg chunks; 2GB workers are too small.
 
 Coiled small tests:
-python -m scripts.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --no_upload --year 2000 --input_date 20250626
-python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --no_upload --year 2000 --input_date 20250626
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1
 
 Coiled large shapefile test:
-python -m scripts.utilities.create_cluster -n 50 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp
+python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp
 
 Full run 2000:
-python -m scripts.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global per-pixel run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
+python -m src.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global per-pixel run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
 Peak memory per worker: ~2.3 GB
 Time for total processing for each task: 30-45 seconds (based on scanning the console)
 Time until chunk stats: 2:00:11
@@ -30,8 +30,8 @@ Coiled credits: 204 (100/hr for 100 m8g.medium workers, according to dashboard)
 AWS cost: $9.19 ($4.45/hr for 100 m8g.medium workers, according to dashboard)
 
 Full run 2015:
-python -m scripts.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global per-pixel run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global per-pixel run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
 Peak memory per worker: ~2.3 GB
 Time for total processing for each task: 30-45 seconds (based on scanning the console)
 Time until chunk stats: 1:00:24
@@ -55,10 +55,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dask.distributed import print
 
 # Project imports
-from ...utilities import constants_and_names as cn
-from ...utilities import universal_utilities as uu
-from ...utilities import log_utilities as lu
-from ...utilities import resize_cluster
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+from src.utilities import universal_utilities as uu
+from src.utilities import resize_cluster
+
 
 def create_per_pixel_starting_carbon_pools(bounds, year, is_final, no_upload,
                                            input_dir_list, output_dir_list,

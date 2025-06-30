@@ -1,10 +1,11 @@
 """
-Run from src/LULUCF/
-python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts --first_10x10s_to_process 2 --run_local
+Run from git/AFOLU_GHG_flux_model/
 
-python -m scripts.utilities.create_cluster -n 33 -t 7 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts
+python -m src.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts --first_10x10s_to_process 2 --run_local
+
+python -m src.utilities.create_cluster -n 33 -t 7 -cn AFOLU_flux_model_scripts
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts
 
 Time: 2:02 through aggregation; 2:19 through tile stats; Credits: 9.3; Cost: $0.34
 -n 33 -t 7 worked fine.
@@ -18,10 +19,10 @@ import dask
 import re
 
 # Project imports
-from ...utilities import constants_and_names as cn
-from ...utilities import universal_utilities as uu
-from ...utilities import log_utilities as lu
-from ...utilities import resize_cluster
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+from src.utilities import universal_utilities as uu
+from src.utilities import resize_cluster
 
 
 def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload= False,

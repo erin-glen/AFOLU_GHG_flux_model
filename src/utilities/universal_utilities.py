@@ -20,7 +20,6 @@ import concurrent.futures
 from botocore.config import Config
 from dask.distributed import print
 from dask.distributed import Client, LocalCluster
-from dask import delayed
 from datetime import datetime
 from io import BytesIO
 from numba import jit
@@ -30,8 +29,8 @@ from osgeo import gdal
 gdal.UseExceptions()
 
 # Project imports
-from . import constants_and_names as cn
-from . import log_utilities as lu
+from src.utilities import constants_and_names as cn, log_utilities as lu
+
 
 ###################################################################################################
 # S3 Utilities

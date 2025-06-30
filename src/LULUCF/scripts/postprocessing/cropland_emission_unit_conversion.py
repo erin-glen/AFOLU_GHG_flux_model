@@ -1,16 +1,15 @@
 """
-Run from src/LULUCF
+Run from git/AFOLU_GHG_flux_model
 
-python -m scripts.utilities.create_cluster -n 40 -m 32 -t 1 -cn cropland_emissions_test
+python -m src.utilities.create_cluster -n 40 -m 32 -t 1 -cn cropland_emissions_test
 python -m scripts.postprocessing.create_global_4km_maps -cn cropland_emissions_test
 
 """
 import argparse
 import dask
 from dask.distributed import print
-from ..utilities import constants_and_names as cn
-from ..utilities import universal_utilities as uu
-from ..utilities import log_utilities as lu
+from src.utilities import log_utilities as lu, universal_utilities as uu
+
 
 ########################################################################################################################
 

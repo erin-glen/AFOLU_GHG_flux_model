@@ -1,22 +1,22 @@
 """
-Run from src/LULUCF/
+Run from git/AFOLU_GHG_flux_model/
 
 Local:
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
 
 Needs 4GB Coiled workers with 1 thread for 1x1 deg chunks; 2GB workers are too small.
 
 Coiled small test:
-python -m scripts.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --year YYYY
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --year YYYY
 
 Coiled shapefile test:
-python -m scripts.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
 
 Full run 2000:
-python -m scripts.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
 Peak memory per worker: ~2.8 GB
 Time for numba processing for each task: ~1 second (based on scanning the console)
 Time for total processing for each task: 15-25 seconds (based on scanning the console)
@@ -26,8 +26,8 @@ Coiled credits: 92 (no non-soil C sum), 99 (with non-soil C sum) (200/hr for 200
 AWS cost: $4.10 (no non-soil C sum), $4.50 (with non-soil C sum)
 
 Full run 2015:
-python -m scripts.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
 Peak memory per worker: ~2.8 GB
 Time for numba processing for each task: ~1 second (based on scanning the console)
 Time for total processing for each task: 15-25 seconds (based on scanning the console)
@@ -56,11 +56,11 @@ from dask.distributed import print
 from numba import jit
 
 # Project imports
-from ...utilities import constants_and_names as cn
-from ...utilities import universal_utilities as uu
-from ...utilities import log_utilities as lu
-from ...utilities import numba_utilities as nu
-from ...utilities import resize_cluster
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+from src.utilities import numba_utilities as nu
+from src.utilities import universal_utilities as uu
+from src.utilities import resize_cluster
 
 
 # Function to create initial (year 2000) non-soil carbon pool densities

@@ -1,26 +1,26 @@
 """
-Run from src/LULUCF
+Run from git/AFOLU_GHG_flux_model
 
 Can only run on 1x1 degree chunks that do not have the run timestamp in the file name.
 The way this builds the input file names, it can't handle filenames with the run timestamp.
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --input_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs a 32GB worker):
-python -m scripts.utilities.create_cluster -n 1 -m 32 -c 4 -cn LULUCF_postprocessing
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --input_date YYYYMMDD
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2015 2023 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -m 32 -c 4 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2015 2023 --input_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m scripts.utilities.create_cluster -n 50 -cn LULUCF_postprocessing
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 50 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023 --input_date YYYYMMDD
 Consistently uses 27 GB per worker, so close to the maximum with 2 simultaneous tasks/worker.
 
 Full run:
-python -m scripts.utilities.create_cluster -n 100 -cn LULUCF_postprocessing
-python -m scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2015 2023 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 100 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2015 2023 --input_date YYYYMMDD
 
 NOTE: I experimented with including the per-pixel output creation in this script, making a combined summative/per-pixel
 post-processing step. However, the per-pixel output creation seemed to require about 4GB of memory, which meant that
@@ -43,10 +43,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dask.distributed import print
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import universal_utilities as uu
-from ..utilities import log_utilities as lu
-from ..utilities import resize_cluster
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+from src.utilities import universal_utilities as uu
+from src.utilities import resize_cluster
 
 
 def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type, interval_year_diff, interval_length,

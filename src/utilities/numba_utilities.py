@@ -1,4 +1,3 @@
-import sys
 import math
 import numpy as np
 from numba import jit
@@ -6,8 +5,7 @@ from numba.typed import Dict
 from numba.core import types
 
 # Project imports
-from . import constants_and_names as cn
-from .constants_and_names import gain_year_count_pattern
+from src.utilities import constants_and_names as cn
 
 
 # Adds latest decision tree branch to the state node

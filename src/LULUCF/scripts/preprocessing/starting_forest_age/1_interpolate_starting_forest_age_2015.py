@@ -6,22 +6,22 @@ Interpolation uses the age in the focal chunk and all adjacent chunks that exist
 artifacts for age interpolation around the edges of chunks (or at least they are reduced because ages in surrounding
 chunks are considered).
 
-Run from src/LULUCF
+Run from git/AFOLU_GHG_flux_model
 
 Local:
 Has age data (should not have any 0s):
-python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
 Does not have age data (should output a raster full of 0s):
-python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb -28 -60 -27 -59 -cs 1 --run_local
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb -28 -60 -27 -59 -cs 1 --run_local
 
 Coiled test:
-python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
-python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
-python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 5
+python -m src.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 5
 
 Full run:
-python -m scripts.utilities.create_cluster -n 20 -t 19 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
+python -m src.utilities.create_cluster -n 20 -t 19 -cn AFOLU_flux_model_scripts
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
 This goes very quickly, so -n 20 -t 19 is totally adequate. Could try -t 21 next time.
 Max memory: 8 GB. 12:30 to finish chunks; 12:51 with chunk stat aggregation; 23 Coiled credits; $0.83 AWS
 
@@ -37,15 +37,15 @@ import rasterio.merge
 import dask
 import fsspec
 
-from rasterio.windows import from_bounds, transform
+from rasterio.windows import from_bounds
 from scipy.ndimage import distance_transform_edt
 
 
 # Project imports
-from ...utilities import constants_and_names as cn
-from ...utilities import log_utilities as lu
-from ...utilities import universal_utilities as uu
-from ...utilities import resize_cluster
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+from src.utilities import universal_utilities as uu
+from src.utilities import resize_cluster
 
 
 def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list, stage):

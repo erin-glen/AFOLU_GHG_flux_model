@@ -1,8 +1,8 @@
 """
-Run from src/LULUCF
+Run from git/AFOLU_GHG_flux_model
 
-python -m scripts.utilities.create_cluster -n 1 -t 4
-python -m scripts.utilities.create_cluster -n 200 -t 4 #In practice, the tasks seem so short that it can't actually use that many threads at once
+python -m src.utilities.create_cluster -n 1 -t 4
+python -m src.utilities.create_cluster -n 200 -t 4 #In practice, the tasks seem so short that it can't actually use that many threads at once
 python -m scripts.postprocessing.LULUCF_fluxes_global_chunk_stats -cn AFOLU_flux_model_scripts -d 20241121
 
 """
@@ -15,9 +15,8 @@ import re
 from dask.distributed import print
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import log_utilities as lu
-from ..utilities import universal_utilities as uu
+from src.utilities import constants_and_names as cn, log_utilities as lu, universal_utilities as uu
+
 
 # Calculates statistics for 1x1 degree rasters and summarizes them in a spreadsheet
 # Per https://chatgpt.com/share/e/674105d3-6924-800a-ba00-a942ca95ac32

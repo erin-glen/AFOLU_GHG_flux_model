@@ -20,7 +20,7 @@ Usage (example):
       --task-file my_tasks.json \\
       --resume  [Optional: to resume a copy that was in process]
 
-python -m scripts.utilities.create_cluster -n 11 -t 4 -cn AFOLU_flux_model_scripts
+python -m src.utilities.create_cluster -n 11 -t 4 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.GCS_to_s3_copy -cn AFOLU_flux_model_scripts --source_root gs://earthenginepartners-hansen/LCLU_2015_2023_v1 --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULULCF/landcover/composite/annual/v1/raw --task_file my_tasks.json
 
 Authentication:
@@ -33,7 +33,6 @@ Modified by David Gibbs to run in WSL2 Ubuntu system with everything else in the
 
 import json
 import argparse
-import coiled
 import dask.bag as db
 import gcsfs
 import s3fs
@@ -41,8 +40,7 @@ from botocore.exceptions import ClientError
 from dask.distributed import print
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import universal_utilities as uu
+from src.utilities import universal_utilities as uu
 
 
 def list_all_files_gcs(source_path: str):

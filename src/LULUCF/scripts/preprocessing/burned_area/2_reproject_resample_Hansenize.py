@@ -11,11 +11,11 @@ It does not currently track task progress through the s3 txt file system because
 when all chunks in a list are expected to be uploaded to s3. Here, only outputs with burned area are uploaded,
 so there'd be lots of chunks left over in s3 that were processed but just didn't have data.
 
-python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts -yr 2001 -bb 40 50 50 60 -cs 10 -yr 2000 2024
+python -m src.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
+python -m src.LULUCF.scripts.preprocessing.burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts -yr 2001 -bb 40 50 50 60 -cs 10 -yr 2000 2024
 
-python -m scripts.utilities.create_cluster -n 30 -t 5 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 10 -yr 2000 2024
+python -m src.utilities.create_cluster -n 30 -t 5 -cn AFOLU_flux_model_scripts
+python -m src.LULUCF.scripts.preprocessing.burned_area.2_reproject_resample_Hansenize -cn AFOLU_flux_model_scripts -bb -180 -60 180 80 -cs 10 -yr 2000 2024
 Max memory usage: ~20 GB/worker
 Time: 1.5 hours through calculation, 1.5 hours with tile stats; Credits: 190; Cost: $9.30
 
@@ -33,19 +33,18 @@ import rasterio
 import re
 import numpy as np
 import dask
-from rasterio.warp import calculate_default_transform, reproject, Resampling
+from rasterio.warp import reproject, Resampling
 from rasterio.merge import merge
 from rasterio.transform import from_bounds
-from dask.distributed import Client, print
+from dask.distributed import print
 from shapely.geometry import box
 from pyproj import Transformer
 
 # Project imports
-from ...utilities import constants_and_names as cn
-from ...utilities import universal_utilities as uu
-from ...utilities import log_utilities as lu
-from ...utilities import resize_cluster
-
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+from src.utilities import universal_utilities as uu
+from src.utilities import resize_cluster
 
 # CRS Definitions
 MODIS_SINUSOIDAL = "+proj=sinu +lon_0=0 +datum=WGS84 +a=6371007.181 +b=6371007.181 +units=m +no_defs"

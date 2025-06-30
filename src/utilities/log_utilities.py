@@ -5,10 +5,9 @@ import sys
 import time
 
 from dask.distributed import print
-from datetime import datetime
 
-from . import constants_and_names as cn
-from . import universal_utilities as uu
+from src.utilities import constants_and_names as cn, universal_utilities as uu
+
 
 # Log for main function
 # per https://chatgpt.com/share/e/67ae4ae8-ff64-800a-8b75-484d388e6a43

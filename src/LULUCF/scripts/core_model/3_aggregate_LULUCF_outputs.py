@@ -1,24 +1,24 @@
 """
-Run from src/LULUCF
+Run from git/AFOLU_GHG_flux_model
 
 Can only run on 1x1 degree chunks that do not have the run timestamp in the file name.
 The way this builds the input file names, it can't handle filenames with the run timestamp.
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m scripts.core_model.3_aggregate_LULUCF_outputs -yr 2015 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -yr 2015 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
 
 Coiled small test:
-python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_postprocessing
-python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m scripts.utilities.create_cluster -n 50 -t 5 -cn LULUCF_postprocessing
-python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 50 -t 5 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --input_date YYYYMMDD
 
 Full Coiled run:
-python -m scripts.utilities.create_cluster -n 50 -t 5 -cn LULUCF_postprocessing
-python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 50 -t 5 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --input_date YYYYMMDD
 
 From before:
 Took about 30 minutes to do the aggregated gross and net flux outputs. A few 10x10 tiles from many of the folders
@@ -33,10 +33,10 @@ import re
 import sys
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import log_utilities as lu
-from ..utilities import universal_utilities as uu
-from ..utilities import resize_cluster
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+from src.utilities import universal_utilities as uu
+from src.utilities import resize_cluster
 
 
 def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
