@@ -5,23 +5,31 @@ Local test:
 python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools --year 2015 --first_10x10s_to_process 2
 
 Coiled test:
-python -m scripts.utilities.create_cluster -n 1 -t 2 -m 16 -cn LULUCF_preprocessing
+python -m scripts.utilities.create_cluster -n 1 -t 1 -m 2 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 --first_10x10s_to_process 2
 
 Full run 2000:
-python -m scripts.utilities.create_cluster -n 40 -t 7 -m 32 -cn LULUCF_preprocessing
+python -m scripts.utilities.create_cluster -n 200 -t 1 -m 2 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000
-Peak memory per worker: ~X GB
-Time for total processing for each task: X seconds (based on scanning the console)
-Time until chunk stats: X
-Time after chunk stats: X
-Coiled credits: X (X/hr for X X workers, according to dashboard)
-AWS cost: $X (X/hr for X X workers, according to dashboard)
+Peak memory per worker: ~350-400 MB
+Time for total processing for each task: average of 303 seconds, min of 87 seconds and max of 1327 seconds (based on extraction from log)
+Time until chunk stats: 1:43:55
+Time after chunk stats: 1:44:22
+Coiled credits: 737.4 (402/hr for 200 t3.small workers, according to dashboard)
+AWS cost: $3.86 ($2.10/hr for 200 t3.small workers, according to dashboard)
 
 Full run 2015:
-python -m scripts.utilities.create_cluster -n 40 -t 7 -m 32 -cn LULUCF_preprocessing
+python -m scripts.utilities.create_cluster -n 200 -t 1 -m 2 -cn LULUCF_preprocessing
 python -m scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2015
-Time: 24:24 through calculation; 24:40 through tile stats; Credits: 35.5; Cost: $1.80; peak memory: 8 GB/worker
+Peak memory per worker: ~X-Y MB
+Time for total processing for each task: average of X seconds, min of X seconds and max of X seconds (based on extraction from log)
+Time until chunk stats: X
+Time after chunk stats: X
+Coiled credits: X (402/hr for 200 t3.small workers, according to dashboard)
+AWS cost: $X ($X/hr for 200 t3.small workers, according to dashboard)
+
+
+There are 3560 10x10s across 10 folders (356/folder), so 200 workers seems appropriate.
 """
 
 import argparse
@@ -49,7 +57,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     if year == 2000:
         output_dir_list = [cn.agc_2000_raw_dir, cn.bgc_2000_raw_dir, cn.deadwood_c_2000_raw_dir, cn.litter_c_2000_raw_dir, cn.non_soil_c_2000_raw_dir,
                            cn.agc_2000_LC_masked_dir, cn.bgc_2000_LC_masked_dir, cn.deadwood_c_2000_LC_masked_dir, cn.litter_c_2000_LC_masked_dir, cn.non_soil_c_2000_LC_masked_dir]
-        output_dir_list = [cn.agc_2000_raw_dir]  # To test a specific carbon pool
+        # output_dir_list = [cn.agc_2000_raw_dir]  # To test a specific carbon pool
     elif year == 2015:
         output_dir_list = [cn.agc_2015_raw_dir, cn.bgc_2015_raw_dir, cn.deadwood_c_2015_raw_dir, cn.litter_c_2015_raw_dir, cn.non_soil_c_2015_raw_dir,
                            cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir, cn.non_soil_c_2015_LC_masked_dir]

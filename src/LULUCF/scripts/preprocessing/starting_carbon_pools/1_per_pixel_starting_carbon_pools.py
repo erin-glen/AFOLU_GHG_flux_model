@@ -249,7 +249,7 @@ def main(cluster_name, input_date, year, run_local=False, no_stats=False, no_log
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = 'starting_carbon_pool_per_pixel_outputs'
+    stage = f'starting_carbon_pools_{year}_per_pixel_outputs'
     model_type = 'standard_model'
 
     # Determines if argument for year is valid

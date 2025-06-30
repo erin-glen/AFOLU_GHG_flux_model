@@ -955,6 +955,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
     process = psutil.Process(os.getpid())
 
+    chunk_start_time = time.time()
+
     ### Part 1: Merges 1x1 deg rasters to 10x10 deg
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call for uploading to work
@@ -1030,6 +1032,9 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         lu.print_and_log(f"Error merging rasters: {e}: {timestr()}", False, logger_worker)
         return f"failure merging {s3_name_dict}"
 
+    chunk_non_cog_end_time = time.time()
+    lu.print_and_log(f"Merging {merged_file} took {round(chunk_non_cog_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
+
     ### Part 2: Converts geotifs to COGs
 
     # Convert to Cloud Optimized GeoTIFF
@@ -1052,6 +1057,9 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     except subprocess.CalledProcessError as e:
         lu.print_and_log(f"Error converting to COG: {e}: {timestr()}", False, logger_worker)
         return f"failure converting to COG for {s3_name_dict}"
+
+    chunk_cog_end_time = time.time()
+    lu.print_and_log(f"Through COG creation for {merged_cog_file} took {round(chunk_cog_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
 
     ### Part 3: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters)
 
@@ -1131,7 +1139,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
             upload_id = response['UploadId']
 
             parts = []
-            with open(merged_file, 'rb') as f:
+            with open(merged_cog_file, 'rb') as f:
                 part_number = 1
                 while chunk := f.read(part_size):
                     response = s3_client.upload_part(
@@ -1162,6 +1170,9 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     # Deletes the local merged raster
     os.remove(merged_file)
     os.remove(merged_cog_file)
+
+    chunk_end_time = time.time()
+    lu.print_and_log(f"Full processing for {merged_cog_file} took {round(chunk_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
 
     return f"Success merging {s3_name_dict}", chunk_stats
 
