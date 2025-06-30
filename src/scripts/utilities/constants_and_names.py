@@ -2,6 +2,10 @@ import posixpath
 from datetime import datetime
 import numpy as np
 import os
+from src.scripts.utilities.lulucf_constants_and_names import (
+    climate_domain_dir as lulucf_climate_domain_dir,
+    climate_domain_pattern as lulucf_climate_domain_pattern,
+)
 
 # ---------------------------------------------------
 # 1. General Configuration
@@ -98,7 +102,7 @@ patterns = {
     'osm_canals': "{tile_id}__osm_canals_density.tif",
     'planted_forest_type': "{tile_id}__sdpt.tif",
     'extraction': "{tile_id}_extraction.tif",
-    'climate_domain': "{tile_id}_fao_ecozones_bor_tem_tro_processed.tif",
+    'climate_domain': f"{{tile_id}}_{lulucf_climate_domain_pattern}.tif",
     'descals_type': "plantation_type_{tile_id}.tif",
     'ogh': "{tile_id}_ogh_mask.tif",
     'burned_area_final': "{tile_id}_burned_area_final_{year}.tif"
@@ -118,7 +122,7 @@ dirs = {
     'osm_canals': posixpath.join(full_bucket_prefix, processed_dir, f'osm_canals_density/{full_raster_dims}_pixels/20250526'),
     'planted_forest_type': posixpath.join(full_bucket_prefix, processed_dir, f'sdpt/{full_raster_dims}_pixels/20250531'),
     'extraction': posixpath.join(full_bucket_prefix, processed_dir, 'extraction/20241021'),
-    'climate_domain': posixpath.join(full_bucket_prefix, 'climate/carbon_model/inputs_for_carbon_pools/processed/fao_ecozones_bor_tem_tro/20190418'),
+    'climate_domain': lulucf_climate_domain_dir,
     'descals_type': posixpath.join(full_bucket_prefix, processed_dir, 'descals_plantation/extent/20241105'),
     'burned_area_final': posixpath.join(full_bucket_prefix, processed_dir, 'fires/{year}')
 }
@@ -155,6 +159,14 @@ ecozone_codes = {
     'tropical': 1,
     'boreal': 2,
     'temperate': 3
+}
+
+# Mapping from FAO ecozone classes to simplified climate domain codes
+climate_domain_remap = {
+    0: ecozone_codes['unknown'],
+    1: ecozone_codes['tropical'],
+    2: ecozone_codes['boreal'],
+    3: ecozone_codes['temperate'],
 }
 
 nutrient_status_codes = {
@@ -324,7 +336,10 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
         'osm_canals': posixpath.join(dirs['osm_canals'], patterns['osm_canals'].format(tile_id=tile_id)),
         'planted_forest_type': posixpath.join(dirs['planted_forest_type'], patterns['planted_forest_type'].format(tile_id=tile_id)),
         'extraction': posixpath.join(dirs['extraction'], patterns['extraction'].format(tile_id=tile_id)),
-        'climate_domain': posixpath.join(dirs['climate_domain'], patterns['climate_domain'].format(tile_id=tile_id)),
+        'climate_domain': posixpath.join(
+            dirs['climate_domain'],
+            patterns['climate_domain'].format(tile_id=tile_id),
+        ),
         'descals_type': posixpath.join(dirs['descals_type'], patterns['descals_type'].format(tile_id=tile_id)),
         'ogh': posixpath.join(peat_mask_dirs['ogh'], patterns['ogh'].format(tile_id=tile_id)),
     }

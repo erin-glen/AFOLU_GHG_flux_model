@@ -509,6 +509,14 @@ def calculate_and_upload_drainage(
 
     combine_burned_area(layers, iv_start, iv_end)
 
+    # Remap FAO ecozone values to simplified climate domain codes
+    if "climate_domain" in layers:
+        cd = layers["climate_domain"].astype(np.int16, copy=False)
+        remapped = np.zeros_like(cd, dtype=np.int16)
+        for src_val, dst_val in cn.climate_domain_remap.items():
+            remapped[cd == src_val] = np.int16(dst_val)
+        layers["climate_domain"] = remapped
+
     # create typed dicts for numba
     td8, td16, td32, td32f = nu.create_typed_dicts(layers)
 
