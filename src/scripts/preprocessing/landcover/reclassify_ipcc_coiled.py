@@ -32,11 +32,11 @@ FIVE_YEAR_YEARS = [2000, 2005, 2010, 2015, 2020]
 ANNUAL_YEARS = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
 
 GLCLU_MAPPING = {}
-GLCLU_MAPPING.update({i: ipcc_codes["otherland"] for i in range(0, 2)})
-GLCLU_MAPPING.update({i: ipcc_codes["grassland"] for i in range(2, 27)})
+GLCLU_MAPPING.update({i: ipcc_codes["otherland"] for i in range(0, 5)})
+GLCLU_MAPPING.update({i: ipcc_codes["grassland"] for i in range(5, 27)})
 GLCLU_MAPPING.update({i: ipcc_codes["forest"] for i in range(27, 49)})
-GLCLU_MAPPING.update({i: ipcc_codes["wetland"] for i in range(100, 102)})
-GLCLU_MAPPING.update({i: ipcc_codes["grassland"] for i in range(102, 127)})
+GLCLU_MAPPING.update({i: ipcc_codes["otherland"] for i in range(100, 105)})
+GLCLU_MAPPING.update({i: ipcc_codes["grassland"] for i in range(105, 127)})
 GLCLU_MAPPING.update({i: ipcc_codes["forest"] for i in range(127, 149)})
 GLCLU_MAPPING.update({i: ipcc_codes["wetland"] for i in range(200, 205)})
 GLCLU_MAPPING.update({i: ipcc_codes["otherland"] for i in range(205, 208)})
