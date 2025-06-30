@@ -1,6 +1,8 @@
 """
 Run from git/AFOLU_GHG_flux_model/
 
+Currently only aggregates per-ha outputs to 10x10 deg, not per-pixel outputs.
+
 Local test:
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools --year 2015 --first_10x10s_to_process 2
 
@@ -21,13 +23,13 @@ AWS cost: $3.86 ($2.10/hr for 200 t3.small workers, according to dashboard)
 Full run 2015:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 2 -cn LULUCF_preprocessing
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2015
-Peak memory per worker: ~X-Y MB
-Time for total processing for each task: average of X seconds, min of X seconds and max of X seconds (based on extraction from log)
-Time until chunk stats: X
-Time after chunk stats: X
-Coiled credits: X (402/hr for 200 t3.small workers, according to dashboard)
-AWS cost: $X ($X/hr for 200 t3.small workers, according to dashboard)
-
+Peak memory per worker: ~350-400 MB
+Time for total processing for each task: average of 231 seconds, min of 86 seconds and max of 690 seconds (based on extraction from log)
+Time until chunk stats: 1:17:04
+Time after chunk stats: 1:17:23
+Coiled credits: 557 (402/hr for 200 t3.small workers, according to dashboard)
+AWS cost: $2.93 ($2.10/hr for 200 t3.small workers, according to dashboard)
+I don't know why the 2015 was 30 minutes faster and used almost 200 fewer Coiled credits than the 2000 one. Maybe just luck of the cluster?
 
 There are 3560 10x10s across 10 folders (356/folder), so 200 workers seems appropriate.
 """

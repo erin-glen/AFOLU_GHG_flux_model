@@ -92,6 +92,8 @@ config/hot_export_token.txt
 .DS_Store
 *checkpoint.ipynb
 
+*chunk_statistics*
+
 debug.py
 
 tmp/

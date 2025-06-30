@@ -217,6 +217,7 @@ date_date_range_pattern = r'_\d{4}(_\d{4})?'   # Pattern for date (XXXX) or date
 
 AFOLU_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/"
 LULUCF_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/"
+cropland_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/cropland_emissions/"
 
 local_log_path = "logs/"
 s3_log_path = "climate/AFOLU_flux_model/LULUCF/model_logs/"
