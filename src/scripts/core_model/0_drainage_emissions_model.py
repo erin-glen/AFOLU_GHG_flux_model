@@ -728,13 +728,17 @@ def run_drainage_model(
 
     results = bag.map(_wrap).compute()
 
-    successes = sum("Success" in r[0] for r in results)
-    skips = sum("Skipped" in r[0] for r in results)
-    all_stats = [stat for _, lst in results for stat in lst]
+    # Summarize chunk results and gather per-chunk statistics
+    success_count, all_stats = uu.count_successful_chunks(
+        bag_items, is_final, main_logger, results
+    )
 
-    main_logger.info(f"successes={successes} | skips={skips}")
-    if not no_stats:
-        uu.calculate_chunk_stats(all_stats, stage)
+    # Aggregate per‑chunk statistics and merge with the fishnet shapefile
+    if (not no_stats) and (success_count > 0):
+        uu.compile_1x1_chunk_stats(
+            all_stats, chunk_shapefile_uri, stage, no_upload, main_logger
+        )
+
 
     uu.stage_duration(start_ts, uu.timestr(), stage)
     if not run_local:

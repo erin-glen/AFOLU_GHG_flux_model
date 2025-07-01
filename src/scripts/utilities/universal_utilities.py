@@ -1303,7 +1303,7 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     input_rows = merged_1x1_stats[merged_1x1_stats["in_out"] == "input_layer"]
     output_rows = merged_1x1_stats[merged_1x1_stats["in_out"] == "output_layer"]
 
-    timeseries_layers = f"{cn.burned_area_final_pattern}|{cn.forest_disturbance_layer_name}|{cn.vegetation_height_pattern}|{cn.land_cover_pattern}"
+    timeseries_layers = f"{cn.burned_area_final_pattern}|{cn.land_cover_pattern}"
     annual_inputs = input_rows[input_rows["layer_name"].str.contains(timeseries_layers, case=False, na=False)]
     other_inputs = input_rows[~input_rows["layer_name"].str.contains(timeseries_layers, case=False, na=False)]
 
