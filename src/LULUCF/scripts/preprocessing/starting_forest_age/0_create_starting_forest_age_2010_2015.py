@@ -22,20 +22,20 @@ GEE asset: projects/ee-besnardsim/assets/GAMI_v2_0_mean_100m
 
 Run from git/AFOLU_GHG_flux_model
 
-Local:
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
+Local (won't run Dask locally because of usage of submit):
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -bb 10 49 11 50 -cs 1 --run_local --no_upload
 
 Coiled tiny test:
-python -m src.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
+python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 1 -t 1 -m 2
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1
 
 Coiled larger test (because this doesn't always scale beyond 1 chunk well):
-python -m src.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 4 -t 4
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn AFOLU_flux_model_scripts -bb 10 47 13 50 -cs 1
+python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 4 -t 4 -m 4
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -bb 10 47 13 50 -cs 1
 
 Full run:
-python -m src.utilities.create_cluster -n 12 -t 9 -cn AFOLU_flux_model_scripts
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
+python -m src.utilities.create_cluster -n 12 -t 9 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
 When I ran with -n 7 -t 9, it would process only about 3 batches of 300 chunks (900 chunks) before failing,
 sometimes because it ran out of memory. Increasing the cluster size to -n 12 -t 9 made it run through 1800 chunks before failing!
 I think that the cluster with 7 workers simply couldn't handle all the data it was downloading at a certain point.
@@ -167,11 +167,11 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         lu.print_and_log(f"Interpolating {bounds_str}: {uu.timestr()}", is_final, logger_worker)
         da_resampled = da_median.interp(latitude=new_lat, longitude=new_lon, method="nearest")
 
-        # Rounds from float to int, sets min as 0 and max as 100, and makes NoData = 0
-        da_2010 = da_resampled.round().clip(0, 100).fillna(0).astype("int8")
+        # Rounds from float to int and makes NoData = 0
+        da_2010 = da_resampled.round().fillna(0).astype("int8")
         arr_2010 = da_2010.values
 
-        # Creates the 2015 age map by adding 5 to the 2010 age map where it does not equal 0, then setting to max to 100
+        # Creates the 2015 age map by adding 5 to the 2010 age map where it does not equal 0, then setting to max to 115
         arr_2015 = np.where(arr_2010 != 0, arr_2010 + 5, 0).clip(0, 100).astype("int8")
 
         transform = Affine.translation(lon_min, lat_max) * Affine.scale(cn.resolution, -cn.resolution)
@@ -263,6 +263,10 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Years for age maps: {age_years}")
+
+    # Shapefile of chunk footprints to use if none is supplied on the command line
+    if not chunk_shapefile_uri:
+        chunk_shapefile_uri = cn.fishnet_1x1deg_uri
 
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.

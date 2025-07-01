@@ -4,8 +4,7 @@
 Run from git/AFOLU_GHG_flux_model
 
 Local:
-Has age data (should not have any 0s):
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_create_starting_forest_age_2000 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --run_local --no_upload
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_create_starting_forest_age_2000 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --run_local --no_upload --no_stats --no_log
 
 Coiled test:
 python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 1
@@ -16,12 +15,15 @@ python -m src.utilities.create_cluster -n 20 -t 19 -cn LULUCF_preprocessing
 """
 
 import argparse
+import concurrent.futures
 import numpy as np
 import os
 import rasterio
 import rasterio.merge
 import dask
 import fsspec
+import psutil
+import time
 
 from rasterio.windows import from_bounds
 from scipy.ndimage import distance_transform_edt
@@ -34,11 +36,16 @@ from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
 
 
-def create_starting_forest_age_2000(bounds, is_final, no_upload, output_dir_list, stage):
+def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year, chunk_size_pixels,
+                                    is_final, no_upload, output_dir_list, stage):
 
     chunk_stats = []
 
+    process = psutil.Process(os.getpid())
+
     logger_worker = lu.setup_logging_worker()
+
+    chunk_start_time = time.time()
 
     uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
 
@@ -46,135 +53,111 @@ def create_starting_forest_age_2000(bounds, is_final, no_upload, output_dir_list
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
 
-    ### Part 1: Identifies chunks adjacent to focal chunk and downloads focal and adjacent chunks
 
-    input_dir = cn.forest_age_2015_dir
-    output_dir = output_dir_list[0]
+    ### Part 1: Downloads chunk.
+    ### No checks about whether the chunk has data because the way the chunk_list is constructed,
+    ### every chunk is relevant and should be processed, so they don't need to be checked.
 
-    # The buffer determines which chunks adjacent to the focal chunk are downloaded, so it doesn't matter exactly how
-    # big the buffer it as long as it's <1 deg.
-    # 10 pixels at 120 px/deg.
-    buffer_deg = 1 / 120 * 10
+    download_dict_with_data_types[f"{cn.forest_age_2010_pattern}"] = [f"{cn.forest_age_2010_dir}{tile_id}__{bounds_str}__{cn.forest_age_2010_pattern}.tif", 'Byte']
+    for key, value in download_dict_with_data_types.items():
+        if "CHUNK_SIZE" in value[0]:
+            value[0] = value[0].replace("CHUNK_SIZE", "4000")
 
-    # Bounding box of the focal tile with the buffer
-    buffered_bounds = (
-        bounds[0] - buffer_deg, # West - buffer
-        bounds[1] - buffer_deg, # South - buffer
-        bounds[2] + buffer_deg, # East + buffer
-        bounds[3] + buffer_deg, # North + buffer
-    )
+    # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
+    updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
 
-    # Determines which chunks intersect buffered bounds
-    all_tile_bounds = uu.get_adjacent_1x1_chunks(buffered_bounds)  # A list of chunk bounds to download: focal chunk and all 8 adjacent ones
+    # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
+    # Thus, this returns a complete set of inputs (missing chunks filled).
+    # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
+    # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
+    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
+    # print(futures)
 
-    # List of tuples of tile_ids and chunk bounds, e.g., [('50N_000E', (9, 47, 10, 48)), ('50N_000E', (9, 48, 10, 49)), ('50N_000E', (9, 49, 10, 50)),...]
-    tile_ids_and_bounds = [(uu.xy_to_tile_id(xmin, ymax), (xmin, ymin, xmax, ymax)) for (xmin, ymin, xmax, ymax) in all_tile_bounds]
-    lu.print_and_log(f" {len(tile_ids_and_bounds)} chunks to analyze for {bounds_str} (including the focal chunk): {tile_ids_and_bounds}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
-    fs = fsspec.filesystem("s3")
-    src_datasets = []
+    # Dictionary that stores the dataset name (key) and downloaded data and download status (values)
+    layers = {}
 
-    # Tries to load each chunk identified above (focal, plus 8 adjacent chunks)
-    for neighbor_tile_id, tile_bounds in tile_ids_and_bounds:
-        neighbor_bounds_str = uu.boundstr(tile_bounds)
-        tile_path = f"{input_dir}{neighbor_tile_id}__{neighbor_bounds_str}__{cn.forest_age_2015_pattern}.tif"
-        tile_path = tile_path.replace("CHUNK_SIZE", str(chunk_length_pixels))
+    # Ensures futures stores Future objects
+    # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages for chunks
+    for future in concurrent.futures.as_completed(futures):
+        layer = futures[future]  # Gets the corresponding key
+        data, status = future.result()  # Unpacks the tuple result
+        if 'success' not in status:  # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+            lu.print_and_log(f"{status}", is_final, logger_worker)
+        layers[layer] = data
 
-        try:
-            if fs.exists(tile_path):
-                f = fs.open(tile_path, "rb")
-                src = rasterio.open(f)
-                src_datasets.append(src)
-        except Exception as e:
-            # Logs when a chunk can't be opened. Doesn't fail when no chunks are found, because that chunk might not exist.
-            lu.print_and_log(f"Tile not found or error opening {tile_path}: {e}: {uu.timestr()}", False, logger_worker)
-
-    lu.print_and_log(f"{len(src_datasets)} chunks found for {bounds_str} (including the focal chunk): {uu.timestr()}", is_final, logger_worker)
-
-    if not src_datasets:
-        lu.print_and_log(f"Focal chunk {bounds_str} and adjacent chunks do not have data: {uu.timestr()}", is_final, logger_worker)
+    # # Test prints
+    # print(layers)
+    # print(layers[f"{cn.vegetation_height_pattern}_2000"].max())
+    # print(layers[f"{cn.vegetation_height_pattern}_2000"].dtype)
+    # print(layers[cn.forest_age_2010_pattern].max())
+    # print(layers[cn.forest_age_2010_pattern].dtype)
 
 
-    ### Part 2: Merges focal and adjacent age rasters, interpolates to fill in all missing pixels, and clips to focal chunk extent
-    ### NOTE: does not calculate chunk stats for input chunks because the individual focal chunks are never
-    ### isolated as inputs; they are merged with adjacent chunks. Thus, there is never really a chance
-    ### to calculate input chunk stats, and it's not worth revising the workflow to include that.
+    ### Part 2: Age calculation
 
-    uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
+    # Get the 2010 forest age layer
+    age_2010 = layers[cn.forest_age_2010_pattern].astype(np.uint8)
 
-    # Merges the focal and adjacent chunks into a mosaic
-    mosaic_data, mosaic_transform = rasterio.merge.merge(src_datasets, bounds=buffered_bounds)
-    mosaic_data = mosaic_data[0]  # Only one band
+    # Initialize a binary disturbance mask for 2000–2010
+    disturbance_mask = np.zeros_like(age_2010, dtype=bool)
 
-    # Creates window for focal chunk bounds within the mosaic
-    crop_window = from_bounds(*bounds, transform=mosaic_transform).round_offsets().round_lengths()
+    # Check all disturbance rasters from 2001 to 2010
+    for year in range(2001, 2011):
+        disturbance_key = f"{cn.forest_disturbance_layer_name}_{year}"
+        disturbance_mask |= layers[disturbance_key] > 0
 
-    # Interpolates over all 0 values (0 = NoData)
+    # Low vegetation height in 2000, 2005, or 2010
+    for year in [2000, 2005, 2010]:
+        veg_height_key = f"{cn.vegetation_height_pattern}_{year}"
+        disturbance_mask |= layers[veg_height_key] < 5  # Units assumed to be meters
 
-    # Mask of non-zero values
-    mask = mosaic_data != 0
+    # Initialize the 2000 forest age output
+    age_2000 = np.where(disturbance_mask, 255, age_2010 - 10)
 
-    # Separate processing routes for chunks that have no age values in them vs. those that do
-    # Mosaics with no age values-- entire mosaic (focal chunk + adjacent chunks) is filled with 0s
-    if not np.any(mask):
+    # Handle underflow: if age_2010 < 10, subtracting 10 could cause wraparound
+    age_2000 = np.where((~disturbance_mask) & (age_2010 < 10), 0, age_2000).astype(np.uint8)
 
-        lu.print_and_log(f"Focal chunk {bounds_str} and adjacent chunks do not have non-zero values. Filling with 0s: {uu.timestr()}", False, logger_worker)
-
-        # Fills focal chunk extent with 0s
-        filled_crop = np.zeros((int(crop_window.height), int(crop_window.width)), dtype=mosaic_data.dtype)
-
-    # Mosaics with age values
-    else:
-
-        lu.print_and_log(f"Focal chunk {bounds_str} or adjacent chunks have non-zero values. Interpolating ages: {uu.timestr()}", False, logger_worker)
-
-        distance, indices = distance_transform_edt(~mask, return_indices=True)
-        filled_data = mosaic_data[tuple(indices)]
-
-        # Crops the mosaic to the focal chunk extent
-        filled_crop = filled_data[
-                      int(crop_window.row_off):int(crop_window.row_off + crop_window.height),
-                      int(crop_window.col_off):int(crop_window.col_off + crop_window.width)
-                      ]
-
-
-    transform = rasterio.transform.from_origin(
-        west=bounds[0],
-        north=bounds[3],
-        xsize=mosaic_transform.a,
-        ysize=abs(mosaic_transform.e)
-    )
-
-    # Updates raster metadata
-    profile = src_datasets[0].profile
-    profile.update(
-        dtype="uint8",
-        height=int(crop_window.height),
-        width=int(crop_window.width),
-        transform=transform,
-        # nodata=0,  # I want the chunks without any age pixels to show 0s rather than NoData
-        compress='lzw'
-    )
+    numpy_end = time.time()
+    lu.print_and_log(f"Done calculating forest age in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Memory usage after age in 2000 creation for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", is_final, logger_worker)
+    lu.print_and_log(f"Calculated forest age in {bounds_str} in {tile_id} in {round(numpy_end-chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
 
     ### Part 3: Saves and uploads the output raster
+
+    output_dir = output_dir_list[0]
+
+    fs = fsspec.filesystem("s3")
+
+    forest_age_2010_path = updated_download_dict["forest_age_2010"][0]
+
+    with rasterio.open(forest_age_2010_path) as src:
+        profile = src.profile.copy()
+
+    # To save the raster as the correct type
+    profile.update({
+        "dtype": "uint8"
+    })
+
 
     lu.print_and_log(f" Saving and uploading {bounds_str}: {uu.timestr()}", is_final, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
 
     if is_final:
-        file_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2015_interpolated_pattern}.tif"
+        file_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2000_pattern}.tif"
     else:
-        file_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2015_interpolated_pattern}__{uu.timestr()}.tif"
+        file_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2000_pattern}__{uu.timestr()}.tif"
 
     # Saves filled in focal chunk locally
     if run_local and no_upload:
-        output_tmp_path = f"/mnt/c/GIS/AFOLU_flux_model/forest_age/filled_in/{file_name}"
+        output_tmp_path = f"/mnt/c/GIS/AFOLU_flux_model/forest_age/year_2000/{file_name}"
     else:
         output_tmp_path = f"/tmp/{file_name}"
 
     with rasterio.open(output_tmp_path, "w", **profile) as dst:
-        dst.write(filled_crop, 1)
+        dst.write(age_2000, 1)
 
     # Optional: Uploads to S3
     s3_path = f"{output_dir}{file_name}"
@@ -184,9 +167,9 @@ def create_starting_forest_age_2000(bounds, is_final, no_upload, output_dir_list
             with open(output_tmp_path, "rb") as f_in:
                 f_out.write(f_in.read())
 
-    return_message = f"Success creating filled forest age for {bounds_str}: {uu.timestr()}"
+    return_message = f"Success creating forest age 2000 for {bounds_str}: {uu.timestr()}"
 
-    chunk_stats.append(uu.calculate_stats(filled_crop, cn.forest_age_2015_interpolated_pattern, bounds_str, tile_id, 'output_layer'))
+    chunk_stats.append(uu.calculate_stats(age_2010, cn.forest_age_2000_pattern, bounds_str, tile_id, 'output_layer'))
 
     if not run_local:
         os.remove(output_tmp_path)
@@ -209,6 +192,10 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+
+    # Shapefile of chunk footprints to use if none is supplied on the command line
+    if not chunk_shapefile_uri:
+        chunk_shapefile_uri = cn.fishnet_1x1deg_uri
 
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
@@ -241,14 +228,29 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # (probably at the chunk level).
     sample_tile_id = "00N_000E"
 
-    # Dictionary of data to download (inputs to model)
+    # Dictionary of data to download (inputs to model). Forest age 2010 is added to the download dictionary at the chunk level
+    # since that is a 4000x4000-pixel input.
     download_dict = {}
 
     for year in range(2000, 2011, cn.five_year_interval_duration):
-        download_dict[f"{cn.land_cover_pattern}_{year}"] = f"{cn.land_cover_5_year_path}{year}/{sample_tile_id}.tif"
+        download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_5_year_path}{year}/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_{year}.tif"
 
     for year in range(2001, 2011):
         download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.forest_disturbance_annual_dir}{year}/{year}_{sample_tile_id}.tif"
+
+    # Returns the first tile in each input so that the datatype can be determined.
+    # This is done up front, once per tile set, rather than on each chunk, since
+    # all tiles have the same datatype for each input-- it only needs to be done once at the very beginning of the stage.
+    main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
+    first_tiles = uu.first_file_name_in_s3_folder(download_dict)
+
+    # Creates a download dictionary with the datatype of each input in the values.
+    # This is supplied to each chunk that is being analyzed.
+    # This also serves as a check of whether all inputs are being found (s3 paths correct)
+    main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
+    download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
+
+    # print(download_dict_with_data_types)
 
     # Creates list of output directories specific to the run
     output_dir_list = [cn.forest_age_2000_dir]
@@ -266,7 +268,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     uu.create_s3_task_files(stage, chunk_list)
 
     delayed_results_1x1_deg = [dask.delayed(create_starting_forest_age_2000)
-                       (chunk, is_final, no_upload, output_dir_list, stage)
+                       (chunk, download_dict_with_data_types, year, chunk_size_pixels, is_final, no_upload, output_dir_list, stage)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results

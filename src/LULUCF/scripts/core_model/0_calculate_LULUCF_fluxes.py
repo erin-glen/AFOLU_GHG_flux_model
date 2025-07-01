@@ -1583,10 +1583,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
-    import dask
-    # Followed https://docs.dask.org/en/latest/configuration.html#specify-configuration to set TTL timeout to 800 seconds
-    print("TTL from dask config:", dask.config.get("distributed.scheduler.worker-ttl"))
-
     # Shapefile of chunk footprints to use if none is supplied on the command line
     if not chunk_shapefile_uri:
         chunk_shapefile_uri = cn.fishnet_1x1deg_uri
