@@ -1273,97 +1273,111 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
 
 
 def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger):
-    """Aggregate per‑chunk statistics and upload them to S3."""
+    """Aggregate per-chunk statistics into structured categories and upload to S3."""
+
+    import boto3
+    import pandas as pd
+    import geopandas as gpd
+    from src.scripts.utilities.constants_and_names import (
+        local_chunk_stats_path,
+        short_bucket_prefix,
+        s3_chunk_stats_path,
+        full_bucket_prefix,
+        burned_area_final_pattern,
+        land_cover_pattern,
+    )
+    from src.scripts.utilities.universal_utilities import timestr
 
     s3_client = boto3.client("s3")
-    main_logger.info(f"Starting to aggregate and export tile stats: {timestr()}")
+    main_logger.info(f"Starting stats aggregation: {timestr()}")
 
-    df_all_1x1_stats = pd.DataFrame(all_1x1_stats)
-    df_all_1x1_stats["min_value"] = pd.to_numeric(df_all_1x1_stats["min_value"], errors="coerce")
-    df_all_1x1_stats["max_value"] = pd.to_numeric(df_all_1x1_stats["max_value"], errors="coerce")
+    # Create DataFrame from stats
+    df_stats = pd.DataFrame(all_1x1_stats)
+    df_stats["min_value"] = pd.to_numeric(df_stats["min_value"], errors="coerce")
+    df_stats["max_value"] = pd.to_numeric(df_stats["max_value"], errors="coerce")
 
-    main_logger.info(f"Sorting 1x1 tile stats by properties: {timestr()}")
-    sorted_1x1_stats = df_all_1x1_stats.sort_values(by=["in_out", "layer_name"]).reset_index(drop=True)
+    # Debugging: Inspect unique values
+    main_logger.info(f"Unique 'layer_name': {df_stats['layer_name'].unique().tolist()}")
+    main_logger.info(f"Unique 'in_out': {df_stats['in_out'].unique().tolist()}")
 
-    main_logger.info(f"Calculating min and max values across all 1x1 chunks: {timestr()}")
-    min_max_1x1_stats = (
-        df_all_1x1_stats.groupby("layer_name").agg(
-            min_value=("min_value", "min"), max_value=("max_value", "max"), count=("layer_name", "count")
-        ).reset_index()
-    )
+    # Read fishnet for ISO codes
+    gdf_chunks = gpd.read_file(chunk_shapefile_uri)[["chunk_id", "iso"]]
 
-    gdf = gpd.read_file(chunk_shapefile_uri)
-    fishnet_shapefile_df = gdf[["chunk_id", "iso"]]
+    # Merge ISO codes
+    df_stats = df_stats.merge(gdf_chunks, on="chunk_id", how="left")
+    df_stats["iso"] = df_stats["iso"].fillna("no iso assigned")
 
-    main_logger.info(f"Merging country code to 1x1 chunk stats table: {timestr()}")
-    merged_1x1_stats = sorted_1x1_stats.merge(fishnet_shapefile_df, on="chunk_id", how="left")
-    merged_1x1_stats["iso"] = merged_1x1_stats["iso"].fillna("no iso assigned")
+    # Separate input and output layers explicitly
+    input_layers = df_stats[df_stats["in_out"] == "input"]
+    output_layers = df_stats[df_stats["in_out"] == "output"]
 
-    main_logger.info(f"Separating 1x1 outputs into different tables: {timestr()}")
-    input_rows = merged_1x1_stats[merged_1x1_stats["in_out"] == "input_layer"]
-    output_rows = merged_1x1_stats[merged_1x1_stats["in_out"] == "output_layer"]
+    # Categorize outputs clearly aligned with the model structure
+    drainage_classification_layers = ["soil", "state", "emission_state"]
+    burned_classification_layers = ["burned_state", "burned_emission_state"]
 
-    timeseries_layers = f"{cn.burned_area_final_pattern}|{cn.land_cover_pattern}"
-    annual_inputs = input_rows[input_rows["layer_name"].str.contains(timeseries_layers, case=False, na=False)]
-    other_inputs = input_rows[~input_rows["layer_name"].str.contains(timeseries_layers, case=False, na=False)]
+    drainage_classification = output_layers[
+        output_layers["layer_name"].isin(drainage_classification_layers)
+    ]
+    drainage_emissions = output_layers[
+        output_layers["layer_name"].str.startswith("drained")
+    ]
+    burned_area_classification = output_layers[
+        output_layers["layer_name"].isin(burned_classification_layers)
+    ]
+    burned_area_emissions = output_layers[
+        output_layers["layer_name"].str.startswith("burned")
+    ]
 
-    gross_outputs = output_rows[output_rows["layer_name"].str.contains("gross", case=False, na=False)]
-    net_outputs = output_rows[output_rows["layer_name"].str.contains("net|flux", case=False, na=False)]
-    other_outputs = output_rows[~output_rows["layer_name"].str.contains("flux|gross|net", case=False, na=False)]
+    # Summarize min-max per layer
+    min_max_summary = df_stats.groupby("layer_name").agg(
+        min_value=("min_value", "min"),
+        max_value=("max_value", "max"),
+        count=("layer_name", "count"),
+    ).reset_index()
 
-    if "count_value" in output_rows.columns:
-        main_logger.info(
-            f"Calculating number of pixels in 1x1 chunk within each 10x10 chunk: {timestr()}"
+    # Pixel count aggregation (if applicable)
+    if "count_value" in output_layers.columns:
+        output_layers["count_value"] = pd.to_numeric(output_layers["count_value"], errors="coerce").fillna(0)
+        pixel_counts = (
+            output_layers.groupby(["tile_id", "layer_name"])["count_value"]
+            .sum()
+            .reset_index()
+            .rename(columns={"count_value": "total_pixel_count"})
         )
-        output_rows.loc[:, "count_value"] = pd.to_numeric(
-            output_rows["count_value"], errors="coerce"
-        ).fillna(0)
-        sum_1x1_to_10x10 = (
-            output_rows.groupby(["tile_id", "layer_name"]).agg(
-                total_count=("count_value", "sum")
-            ).reset_index()
-        )
-        sum_1x1_to_10x10["tile_name"] = (
-            sum_1x1_to_10x10["tile_id"] + "__" + sum_1x1_to_10x10["layer_name"] + ".tif"
-        )
-        sum_1x1_to_10x10 = sum_1x1_to_10x10[
-            ["tile_id", "layer_name", "tile_name", "total_count"]
-        ]
+        pixel_counts["tile_layer"] = pixel_counts["tile_id"] + "__" + pixel_counts["layer_name"] + ".tif"
     else:
-        main_logger.info("count_value column not found; pixel counts unavailable")
-        sum_1x1_to_10x10 = pd.DataFrame(
-            columns=["tile_id", "layer_name", "tile_name", "total_count"]
-        )
+        pixel_counts = pd.DataFrame(columns=["tile_id", "layer_name", "tile_layer", "total_pixel_count"])
 
+    # Excel spreadsheet creation
     out_spreadsheet = f"{stage}_1x1_chunk_statistics_{timestr()}.xlsx"
-    local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+    local_spreadsheet = f"{local_chunk_stats_path}{out_spreadsheet}"
 
-    main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
-    try:
-        with pd.ExcelWriter(local_spreadsheet) as writer:
-            main_logger.info(f"Writing inputs to spreadsheet: {timestr()}")
-            annual_inputs.to_excel(writer, sheet_name="annual_1x1_inputs", index=False)
-            other_inputs.to_excel(writer, sheet_name="other_1x1_inputs", index=False)
+    main_logger.info(f"Writing stats to Excel: {timestr()}")
+    with pd.ExcelWriter(local_spreadsheet) as writer:
+        # Inputs
+        input_layers.to_excel(writer, sheet_name="input_layers", index=False)
 
-            main_logger.info(f"Writing outputs to spreadsheet: {timestr()}")
-            gross_outputs.to_excel(writer, sheet_name="gross_outputs_1x1", index=False)
-            net_outputs.to_excel(writer, sheet_name="net_outputs_1x1", index=False)
-            other_outputs.to_excel(writer, sheet_name="other_outputs_1x1", index=False)
+        # Drainage-specific outputs
+        drainage_classification.to_excel(writer, sheet_name="drainage_classification", index=False)
+        drainage_emissions.to_excel(writer, sheet_name="drainage_emissions", index=False)
 
-            min_max_1x1_stats.to_excel(writer, sheet_name="min_max_for_layers_1x1", index=False)
-            sum_1x1_to_10x10.to_excel(writer, sheet_name="1x1_counts_in_10x10", index=False)
-        main_logger.info(merged_1x1_stats.head())
-        main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
-    except Exception as exc:  # pragma: no cover - network/file issues
-        main_logger.info(f"Can't print chunk stats: {exc}")
+        # Burned-area-specific outputs
+        burned_area_classification.to_excel(writer, sheet_name="burned_classification", index=False)
+        burned_area_emissions.to_excel(writer, sheet_name="burned_emissions", index=False)
 
+        # Summary stats
+        min_max_summary.to_excel(writer, sheet_name="min_max_summary", index=False)
+        pixel_counts.to_excel(writer, sheet_name="pixel_counts_summary", index=False)
+
+    main_logger.info(f"Excel file written: {local_spreadsheet} ({timestr()})")
+
+    # Upload to S3 if required
     if not no_upload:
-        main_logger.info(f"Uploading chunk stats spreadsheet to s3: {timestr()}")
         s3_client.upload_file(
             local_spreadsheet,
-            cn.short_bucket_prefix,
-            Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}",
+            short_bucket_prefix,
+            Key=f"{s3_chunk_stats_path}{out_spreadsheet}",
         )
         main_logger.info(
-            f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}"
+            f"Uploaded to {full_bucket_prefix}/{s3_chunk_stats_path}{out_spreadsheet}: {timestr()}"
         )

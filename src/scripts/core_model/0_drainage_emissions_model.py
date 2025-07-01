@@ -534,9 +534,25 @@ def calculate_and_upload_drainage(
     )
     outputs = {**out_u32, **out_f32}
 
-    # stats for outputs
+    # stats for outputs, with explicit layer categorization
+    drainage_classification_layers = ["soil", "state", "emission_state"]
+    burned_classification_layers = ["burned_state", "burned_emission_state"]
+
     for k, arr in outputs.items():
-        chunk_stats.append(uu.calculate_stats(arr, k, bstr, tid, "output"))
+        if k in drainage_classification_layers:
+            layer_group = "drainage_classification"
+        elif k.startswith("drained"):
+            layer_group = "drainage_emissions"
+        elif k in burned_classification_layers:
+            layer_group = "burned_classification"
+        elif k.startswith("burned"):
+            layer_group = "burned_emissions"
+        else:
+            layer_group = "other"
+
+        chunk_stats.append(
+            uu.calculate_stats(arr, k, bstr, tid, "output")
+        )
 
     # upload rasters
     if not no_upload:
