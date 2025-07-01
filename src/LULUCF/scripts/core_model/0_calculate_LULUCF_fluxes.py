@@ -1496,6 +1496,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
         out_no_data_val = 0  # NoData value for output raster (optional)
 
+        # print("output_folders:", output_folders)
+
         # Adds metadata used for uploading outputs to s3 to the dictionary
         for key, value in out_dict_all_dtypes.items():
             data_type = value.dtype.name

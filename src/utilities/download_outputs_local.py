@@ -2,10 +2,10 @@
 Downloads matching files in the specified LULUCF output folder in S3 locally.
 From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67f3f252-8624-800a-a4d8-b0e29d05104e
 
-Usage (run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/src/LULUCF):
+Usage (run from /mnt/c/GIS/git/AFOLU_GHG_flux_model):
 
-    python scripts/utilities/download_outputs_local.py <subfolder> [filename_filter]
-    python scripts/utilities/download_outputs_local.py v32_COD_exploration 23_-4_24_-3
+    python src/utilities/download_outputs_local.py <subfolder> [filename_filter]
+    python src/utilities/download_outputs_local.py v32_COD_exploration 23_-4_24_-3
 
 Arguments:
 1. <subfolder>: Local subfolder to save outputs to (inside /mnt/c/GIS/AFOLU_flux_model/test_data/output/v0_3_0/)

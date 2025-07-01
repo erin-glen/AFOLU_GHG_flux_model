@@ -667,10 +667,10 @@ model_type_placholder = "MODEL_TYPE"
 
 # List of output directories with placeholders for parts of the directory
 LULUCF_core_output_dirs = [
-    f"{outputs_path}{agc_raw_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{bgc_raw_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{deadwood_c_raw_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{litter_c_raw_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{agc_modeled_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{bgc_modeled_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{deadwood_c_modeled_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{litter_c_modeled_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{agc_gross_emis_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{bgc_gross_emis_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{deadwood_c_gross_emis_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
