@@ -773,7 +773,7 @@ def calculate_chunk_stats(all_stats, stage):
     df = pd.DataFrame(all_stats)
     df["min_value"] = pd.to_numeric(df["min_value"], errors="coerce")
     df["max_value"] = pd.to_numeric(df["max_value"], errors="coerce")
-    out_dir = cn.chunk_stats_path
+    out_dir = cn.local_chunk_stats_path
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{stage}_chunk_stats_{timestr()}.xlsx")
     with pd.ExcelWriter(path) as xls:
@@ -1311,15 +1311,29 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     net_outputs = output_rows[output_rows["layer_name"].str.contains("net|flux", case=False, na=False)]
     other_outputs = output_rows[~output_rows["layer_name"].str.contains("flux|gross|net", case=False, na=False)]
 
-    main_logger.info(
-        f"Calculating number of pixels in 1x1 chunk within each 10x10 chunk: {timestr()}"
-    )
-    output_rows.loc[:, "count_value"] = pd.to_numeric(output_rows["count_value"], errors="coerce").fillna(0)
-    sum_1x1_to_10x10 = (
-        output_rows.groupby(["tile_id", "layer_name"]).agg(total_count=("count_value", "sum")).reset_index()
-    )
-    sum_1x1_to_10x10["tile_name"] = sum_1x1_to_10x10["tile_id"] + "__" + sum_1x1_to_10x10["layer_name"] + ".tif"
-    sum_1x1_to_10x10 = sum_1x1_to_10x10[["tile_id", "layer_name", "tile_name", "total_count"]]
+    if "count_value" in output_rows.columns:
+        main_logger.info(
+            f"Calculating number of pixels in 1x1 chunk within each 10x10 chunk: {timestr()}"
+        )
+        output_rows.loc[:, "count_value"] = pd.to_numeric(
+            output_rows["count_value"], errors="coerce"
+        ).fillna(0)
+        sum_1x1_to_10x10 = (
+            output_rows.groupby(["tile_id", "layer_name"]).agg(
+                total_count=("count_value", "sum")
+            ).reset_index()
+        )
+        sum_1x1_to_10x10["tile_name"] = (
+            sum_1x1_to_10x10["tile_id"] + "__" + sum_1x1_to_10x10["layer_name"] + ".tif"
+        )
+        sum_1x1_to_10x10 = sum_1x1_to_10x10[
+            ["tile_id", "layer_name", "tile_name", "total_count"]
+        ]
+    else:
+        main_logger.info("count_value column not found; pixel counts unavailable")
+        sum_1x1_to_10x10 = pd.DataFrame(
+            columns=["tile_id", "layer_name", "tile_name", "total_count"]
+        )
 
     out_spreadsheet = f"{stage}_1x1_chunk_statistics_{timestr()}.xlsx"
     local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"

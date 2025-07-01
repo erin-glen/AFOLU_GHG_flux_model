@@ -64,7 +64,8 @@ old_small_chunk_pattern = r"_-?\d+_-?\d+_-?\d+_-?\d+_"
 sample_tile_id = '{tile_id}'
 
 full_raster_dims = 40000
-chunk_stats_path = posixpath.join(local_temp_dir, 'chunk_stats')
+local_chunk_stats_path = posixpath.join(local_temp_dir, 'chunk_stats')
+s3_chunk_stats_path = "climate/AFOLU_flux_model/organic_soils/chunk_stats/"
 
 # directory containing per-pixel area rasters (hectares)
 pixel_area_ha_dir = posixpath.join(
