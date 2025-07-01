@@ -5,7 +5,10 @@ import dask
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
 from src.scripts.preprocessing import preprocessing_constants as pcn
-from src.scripts.utilities.constants_and_names import today_date
+from src.scripts.utilities.constants_and_names import (
+    today_date,
+    full_bucket_prefix,
+)
 
 FIVE_YEAR_YEARS = [2000, 2005, 2010, 2015, 2020]
 ANNUAL_YEARS = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
@@ -17,6 +20,7 @@ def get_input_datasets(
 ) -> list:
     """Return list of S3 folders for IPCC land cover outputs."""
     base = posixpath.join(
+        full_bucket_prefix,
         pcn.datasets["land_cover_ipcc"]["s3_processed_base"],
         date,
     )
@@ -130,3 +134,7 @@ if __name__ == "__main__":
         args.pixel_resolution,
         args.date,
     )
+
+"""
+python -m src.scripts.preprocessing.landcover.1_aggregate_landcover -cn aggregate -d 20250630
+"""
