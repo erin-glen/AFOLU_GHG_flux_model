@@ -3,33 +3,25 @@
 
 This script converts the workflow developed in
 `LULUCF_output_zonal_stats_20250613__basic_working_zonal_stats.ipynb`
-into a command line utility.
+into a command line utility.  It can run locally or connect to a Coiled
+Dask cluster for distributed execution.
 """
 
 import argparse
 import re
-import time
-from datetime import datetime
 from io import BytesIO
 
 import fsspec
 import numpy as np
 import pandas as pd
-import pytz
 import requests
 import s3fs
 import xarray as xr
 from flox import xarray_reduce, ReindexArrayType, ReindexStrategy
-
-# Conversion of carbon to CO2
-C_to_CO2 = 44 / 12
-
-
-def timestr():
-    """Current US/Eastern time formatted for logs."""
-    eastern = pytz.timezone("US/Eastern")
-    eastern_time = datetime.now(eastern)
-    return eastern_time.strftime("%Y%m%d_%H_%M_%S")
+from dask.distributed import Client, LocalCluster
+from src.scripts.utilities import universal_utilities as uu
+from src.scripts.utilities.universal_utilities import timestr
+from src.scripts.utilities.lulucf_constants_and_names import C_to_CO2
 
 
 def create_state_node_df(state_node_lookup_table_local: str, state_node_lookup_table_s3: str, sheet_name: str) -> pd.DataFrame:
@@ -141,6 +133,17 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
 
 
 def main(args: argparse.Namespace) -> None:
+    cluster, client, run_local = uu.connect_to_cluster(
+        cluster_name=args.cluster_name,
+        run_local=args.run_local,
+    )
+    if run_local:
+        cluster = LocalCluster()
+        client = Client(cluster)
+        print("Running locally.")
+    else:
+        print(f"Using coiled cluster: {cluster.name}")
+
     # Paths derived from arguments
     output_path = f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/{args.model_version}/"
 
@@ -603,6 +606,11 @@ def main(args: argparse.Namespace) -> None:
     combined_df = combined_df.reset_index(drop=True)
     combined_df.to_csv(args.output_csv, index=False)
 
+    if client:
+        client.close()
+    if cluster:
+        cluster.close()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run LULUCF zonal statistics")
@@ -611,5 +619,15 @@ if __name__ == "__main__":
     parser.add_argument("--interval_end_years", nargs="+", type=int, required=True, help="Interval end years")
     parser.add_argument("--chunk_size", type=int, default=10000, help="Chunk size for reading rasters")
     parser.add_argument("--output_csv", required=True, help="Path of the output CSV")
+    parser.add_argument(
+        "--cluster_name",
+        default="zonal_stats",
+        help="Name of the Coiled cluster to attach to",
+    )
+    parser.add_argument(
+        "--run_local",
+        action="store_true",
+        help="Run locally without Dask/Coiled",
+    )
 
     main(parser.parse_args())
