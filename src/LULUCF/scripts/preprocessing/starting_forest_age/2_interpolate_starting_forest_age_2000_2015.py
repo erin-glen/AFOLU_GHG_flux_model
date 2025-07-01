@@ -10,18 +10,18 @@ Run from git/AFOLU_GHG_flux_model
 
 Local:
 Has age data (should not have any 0s):
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_interpolate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
 Does not have age data (should output a raster full of 0s):
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb -28 -60 -27 -59 -cs 1 --run_local
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_interpolate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts -bb -28 -60 -27 -59 -cs 1 --run_local
 
 Coiled test:
 python -m src.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 5
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_interpolate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_interpolate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 5
 
 Full run:
 python -m src.utilities.create_cluster -n 20 -t 19 -cn AFOLU_flux_model_scripts
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_interpolate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
 This goes very quickly, so -n 20 -t 19 is totally adequate. Could try -t 21 next time.
 Max memory: 8 GB. 12:30 to finish chunks; 12:51 with chunk stat aggregation; 23 Coiled credits; $0.83 AWS
 
@@ -220,14 +220,13 @@ def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list
     return return_message, chunk_stats
 
 
-def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_upload=False,
          chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     ### Step 1: Preparation
 
     # Model stage being run
-    age_years = [2015]  # Could also apply to age in 2000 once that is ready
-    stage = f'interpolate_forest_age_{age_years[0]}__1x1_deg'
+    stage = f'interpolate_forest_age_{year}__1x1_deg'
     model_type = 'standard'
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
@@ -239,7 +238,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Starting time for stage
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
-    main_logger.info(f"Years for age maps: {age_years}")
+    main_logger.info(f"Years for age maps: {year}")
 
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -258,6 +257,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         main_logger.info("Running as final model.")
 
     # Creates list of output directories specific to the run
+    #TODO need to apply to 2000 age also
     output_dir_list = [cn.forest_age_2015_interpolated_dir]
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
 
@@ -328,12 +328,13 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Create carbon pools in 2000.")
+    parser = argparse.ArgumentParser(description="Interpolate starting forest age in 2000 and 2015")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
+    parser.add_argument('--year', type=int, required=True, help='Year for starting forest ages')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
@@ -348,6 +349,7 @@ if __name__ == "__main__":
     chunk_size = args.chunk_size
     chunk_shapefile_uri = args.chunk_shapefile_uri
     first_chunks = args.first_chunks
+    year = args.year
     log_note = args.log_note
 
     run_local = args.run_local
@@ -355,6 +357,6 @@ if __name__ == "__main__":
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
+    main(cluster_name, year, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)

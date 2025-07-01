@@ -2,10 +2,10 @@
 Run from git/AFOLU_GHG_flux_model/
 
 python -m src.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts --first_10x10s_to_process 2 --run_local
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.3_aggregate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts --first_10x10s_to_process 2 --run_local
 
 python -m src.utilities.create_cluster -n 33 -t 7 -cn AFOLU_flux_model_scripts
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_aggregate_starting_forest_age -cn AFOLU_flux_model_scripts
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.3_aggregate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts
 
 Time: 2:02 through aggregation; 2:19 through tile stats; Credits: 9.3; Cost: $0.34
 -n 33 -t 7 worked fine.
@@ -132,7 +132,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Aggregate starting forest age to 10x10 deg geotifs.")
+    parser = argparse.ArgumentParser(description="Aggregate starting forest age to 10x10 deg geotifs")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-f', '--first_10x10s_to_process', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
