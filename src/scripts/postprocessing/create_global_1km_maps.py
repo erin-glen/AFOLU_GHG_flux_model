@@ -221,7 +221,9 @@ def main(
     logger = lu.setup_logging_main()
     is_final = not run_local
 
-    cluster, client = uu.connect_to_cluster(cluster_name, run_local)
+    cluster, client, run_local = uu.connect_to_cluster(
+        cluster_name, run_local=run_local
+    )
 
     download_upload_dictionary = build_download_upload_dict(pixel_resolution, out_res_deg)
 
