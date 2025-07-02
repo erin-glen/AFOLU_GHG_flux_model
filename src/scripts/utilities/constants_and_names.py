@@ -69,22 +69,9 @@ full_raster_dims = 40000
 local_chunk_stats_path = posixpath.join(local_temp_dir, 'chunk_stats')
 s3_chunk_stats_path = "climate/AFOLU_flux_model/organic_soils/chunk_stats/"
 
-# directory containing per-pixel area rasters (hectares)
-pixel_area_ha_dir = posixpath.join(
-    full_bucket_prefix,
-    processed_dir,
-    f'pixel_area_ha/{full_raster_dims}_pixels/20240101'
-)
+pixel_area_dir = f"{full_bucket_prefix}/analyses/area_28m/"
+pixel_area_pattern = "hanson_2013_area"
 
-# directory containing per-pixel area rasters (square meters)
-pixel_area_dir = posixpath.join(
-    full_bucket_prefix,
-    processed_dir,
-    f'pixel_area_m2/{full_raster_dims}_pixels/20240101'
-)
-
-# file pattern for pixel area rasters
-pixel_area_pattern = 'pixel_area'
 
 # conversion factor from square meters to hectares
 m2_to_ha = 1e-4

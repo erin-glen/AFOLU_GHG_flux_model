@@ -539,10 +539,27 @@ def calculate_and_upload_drainage(
     drainage_classification_layers = ["soil", "state", "emission_state"]
     burned_classification_layers = ["burned_state", "burned_emission_state"]
 
+    pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tid}.tif"
+    pixel_area_chunk = uu.get_tile_dataset_rio(
+        pixel_area_uri,
+        "Float32",
+        bounds,
+        chunk_px,
+        is_final,
+        logger,
+    )[0]
+
     for k, arr in outputs.items():
-        chunk_stats.append(
-            uu.calculate_stats(arr, k, bstr, tid, "output_layer")
-        )
+        if k in drainage_classification_layers or k in burned_classification_layers:
+            chunk_stats.append(
+                uu.calculate_stats(arr, k, bstr, tid, "output_layer")
+            )
+        else:
+            per_pixel = arr * pixel_area_chunk * cn.m2_to_ha
+            chunk_stats.append(
+                uu.calculate_stats(arr, k, bstr, tid, "output_layer", per_pixel)
+            )
+
 
     # upload rasters
     if not no_upload:
