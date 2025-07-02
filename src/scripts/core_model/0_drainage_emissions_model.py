@@ -552,12 +552,29 @@ def calculate_and_upload_drainage(
     for k, arr in outputs.items():
         if k in drainage_classification_layers or k in burned_classification_layers:
             chunk_stats.append(
-                uu.calculate_stats(arr, k, bstr, tid, "output_layer")
+                uu.calculate_stats(
+                    arr,
+                    k,
+                    bstr,
+                    tid,
+                    "output_layer",
+                    iv_start=iv_start,
+                    iv_end=iv_end,
+                )
             )
         else:
             per_pixel = arr * pixel_area_chunk * cn.m2_to_ha
             chunk_stats.append(
-                uu.calculate_stats(arr, k, bstr, tid, "output_layer", per_pixel)
+                uu.calculate_stats(
+                    arr,
+                    k,
+                    bstr,
+                    tid,
+                    "output_layer",
+                    per_pixel,
+                    iv_start,
+                    iv_end,
+                )
             )
 
 

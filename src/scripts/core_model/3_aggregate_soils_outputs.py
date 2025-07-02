@@ -33,8 +33,8 @@ INVENTORY_PERIODS = [
     "2020_2023",
 ]
 
-BASE_URL = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_3_9"
-OUTPUT_DATE = "20250611"
+BASE_URL = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_4_0"
+OUTPUT_DATE = "20250702"
 
 
 def get_input_datasets(pixel_resolution: str = "4000_pixels") -> list:
@@ -74,7 +74,9 @@ def main(
 
     is_final = False
 
-    cluster, client = uu.connect_to_cluster(cluster_name, run_local=run_local)
+    cluster, client, run_local = uu.connect_to_cluster(
+        cluster_name=cluster_name, run_local=run_local
+    )
 
     stage = f"LULUCF_flux_postprocessing__outputs_aggregated_to_10x10deg_{pixel_resolution}"
 
