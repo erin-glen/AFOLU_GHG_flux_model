@@ -1286,7 +1286,6 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
         burned_area_final_pattern,
         land_cover_pattern,
     )
-    from src.scripts.utilities.universal_utilities import timestr
 
     s3_client = boto3.client("s3")
     main_logger.info(f"Starting stats aggregation: {timestr()}")
@@ -1295,10 +1294,11 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     df_stats = pd.DataFrame(all_1x1_stats)
     df_stats["min_value"] = pd.to_numeric(df_stats["min_value"], errors="coerce")
     df_stats["max_value"] = pd.to_numeric(df_stats["max_value"], errors="coerce")
+    df_stats["mean_value"] = pd.to_numeric(df_stats["mean_value"], errors="coerce")
 
-    # Debugging: Inspect unique values
-    main_logger.info(f"Unique 'layer_name': {df_stats['layer_name'].unique().tolist()}")
-    main_logger.info(f"Unique 'in_out': {df_stats['in_out'].unique().tolist()}")
+    # Drop rows with no data to reduce Excel file size
+    df_stats.dropna(subset=["min_value", "max_value", "mean_value"], how="all", inplace=True)
+    df_stats = df_stats[~((df_stats["min_value"] == 0) & (df_stats["max_value"] == 0) & (df_stats["mean_value"] == 0))]
 
     # Read fishnet for ISO codes
     gdf_chunks = gpd.read_file(chunk_shapefile_uri)[["chunk_id", "iso"]]
@@ -1311,22 +1311,19 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     input_layers = df_stats[df_stats["in_out"] == "input"]
     output_layers = df_stats[df_stats["in_out"] == "output"]
 
-    # Categorize outputs clearly aligned with the model structure
+    # Explicitly handle annual timeseries inputs separately
+    timeseries_layers = f"{burned_area_final_pattern}|{land_cover_pattern}"
+    annual_inputs = input_layers[input_layers["layer_name"].str.contains(timeseries_layers, case=False, na=False)]
+    other_inputs = input_layers[~input_layers["layer_name"].str.contains(timeseries_layers, case=False, na=False)]
+
+    # Categorize outputs aligned with the model structure
     drainage_classification_layers = ["soil", "state", "emission_state"]
     burned_classification_layers = ["burned_state", "burned_emission_state"]
 
-    drainage_classification = output_layers[
-        output_layers["layer_name"].isin(drainage_classification_layers)
-    ]
-    drainage_emissions = output_layers[
-        output_layers["layer_name"].str.startswith("drained")
-    ]
-    burned_area_classification = output_layers[
-        output_layers["layer_name"].isin(burned_classification_layers)
-    ]
-    burned_area_emissions = output_layers[
-        output_layers["layer_name"].str.startswith("burned")
-    ]
+    drainage_classification = output_layers[output_layers["layer_name"].isin(drainage_classification_layers)]
+    drainage_emissions = output_layers[output_layers["layer_name"].str.startswith("drained")]
+    burned_area_classification = output_layers[output_layers["layer_name"].isin(burned_classification_layers)]
+    burned_area_emissions = output_layers[output_layers["layer_name"].str.startswith("burned")]
 
     # Summarize min-max per layer
     min_max_summary = df_stats.groupby("layer_name").agg(
@@ -1335,7 +1332,7 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
         count=("layer_name", "count"),
     ).reset_index()
 
-    # Pixel count aggregation (if applicable)
+    # Pixel count validation (aggregation from 1x1 to 10x10 tiles)
     if "count_value" in output_layers.columns:
         output_layers["count_value"] = pd.to_numeric(output_layers["count_value"], errors="coerce").fillna(0)
         pixel_counts = (
@@ -1355,7 +1352,8 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     main_logger.info(f"Writing stats to Excel: {timestr()}")
     with pd.ExcelWriter(local_spreadsheet) as writer:
         # Inputs
-        input_layers.to_excel(writer, sheet_name="input_layers", index=False)
+        annual_inputs.to_excel(writer, sheet_name="annual_1x1_inputs", index=False)
+        other_inputs.to_excel(writer, sheet_name="other_1x1_inputs", index=False)
 
         # Drainage-specific outputs
         drainage_classification.to_excel(writer, sheet_name="drainage_classification", index=False)
@@ -1381,3 +1379,5 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
         main_logger.info(
             f"Uploaded to {full_bucket_prefix}/{s3_chunk_stats_path}{out_spreadsheet}: {timestr()}"
         )
+
+
