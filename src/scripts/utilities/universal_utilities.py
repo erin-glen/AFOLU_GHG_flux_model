@@ -769,16 +769,17 @@ def calculate_stats(
     tid,
     in_out,
     array_per_pixel: np.ndarray | None = None,
+    iv_start: int | None = None,
+    iv_end: int | None = None,
 ):
-    """Return basic statistics for a chunk array.
+    """Return basic statistics for a chunk array, correctly handling static layers."""
+    out_pattern, extracted_year = strip_and_extract_years(name)
 
-    Parameters mirror the more feature rich function in
-    ``lulucf_universal_utilities`` so that per pixel counts can also be
-    recorded. ``array_per_pixel`` is optional and can be omitted when the
-    per‑pixel totals are not required.
-    """
-
-    out_pattern, year_range = strip_and_extract_years(name)
+    # Explicitly handle static (no year) layers
+    if extracted_year == "no year range":
+        year_range = f"{iv_start}_{iv_end}" if iv_start and iv_end else "static"
+    else:
+        year_range = extracted_year
 
     if arr is None or arr.size == 0 or not np.any(arr):
         return dict(
@@ -820,6 +821,7 @@ def calculate_stats(
         sum_value=sum_value,
         data_type=str(arr.dtype),
     )
+
 
 
 def calculate_chunk_stats(all_stats, stage):

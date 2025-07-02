@@ -505,7 +505,9 @@ def calculate_and_upload_drainage(
 
     # stats for inputs
     for k, arr in layers.items():
-        chunk_stats.append(uu.calculate_stats(arr, k, bstr, tid, "input_layer"))
+        chunk_stats.append(
+            uu.calculate_stats(arr, k, bstr, tid, "input_layer", iv_start=iv_start, iv_end=iv_end)
+        )
 
     combine_burned_area(layers, iv_start, iv_end)
 
