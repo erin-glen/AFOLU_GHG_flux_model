@@ -505,7 +505,7 @@ def calculate_and_upload_drainage(
 
     # stats for inputs
     for k, arr in layers.items():
-        chunk_stats.append(uu.calculate_stats(arr, k, bstr, tid, "input"))
+        chunk_stats.append(uu.calculate_stats(arr, k, bstr, tid, "input_layer"))
 
     combine_burned_area(layers, iv_start, iv_end)
 
@@ -539,19 +539,8 @@ def calculate_and_upload_drainage(
     burned_classification_layers = ["burned_state", "burned_emission_state"]
 
     for k, arr in outputs.items():
-        if k in drainage_classification_layers:
-            layer_group = "drainage_classification"
-        elif k.startswith("drained"):
-            layer_group = "drainage_emissions"
-        elif k in burned_classification_layers:
-            layer_group = "burned_classification"
-        elif k.startswith("burned"):
-            layer_group = "burned_emissions"
-        else:
-            layer_group = "other"
-
         chunk_stats.append(
-            uu.calculate_stats(arr, k, bstr, tid, "output")
+            uu.calculate_stats(arr, k, bstr, tid, "output_layer")
         )
 
     # upload rasters

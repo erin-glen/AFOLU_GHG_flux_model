@@ -1,5 +1,8 @@
 import argparse
 import dask
+import re
+
+from src.scripts.utilities import constants_and_names as cn
 
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
@@ -52,12 +55,12 @@ def robust_merge_small_tiles(s3_name_dict, is_final, no_upload, no_log, logger):
     folder, output_names = next(iter(s3_name_dict.items()))
     out_file = output_names[0]
     try:
-        uu.merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log)
+        msg, stats = uu.merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log)
         logger.info(f"Successfully merged: {out_file}")
-        return f"Success: {out_file}"
+        return msg, stats
     except Exception as e:
         logger.error(f"Error merging {out_file}: {e}")
-        return f"Failed: {out_file} - {e}"
+        return f"Failed: {out_file} - {e}", None
 
 
 def main(
@@ -92,6 +95,18 @@ def main(
     results = dask.compute(*delayed_results)
     lu.print_and_log(results, is_final, logger)
 
+    # extract tile ids for reporting
+    tile_ids = set()
+    for entry in list_of_s3_name_dicts_total:
+        out_name = list(entry.values())[0][0]
+        match = re.search(cn.tile_id_pattern, out_name)
+        if match:
+            tile_ids.add(match.group())
+
+    chunk_list = sorted(tile_ids)
+
+    success_count, all_stats = uu.count_successful_chunks(chunk_list, is_final, logger, results)
+
     output_folders = [path.replace(pixel_resolution, "40000_pixels") for path in input_datasets]
 
     for folder in output_folders:
@@ -99,6 +114,9 @@ def main(
         lu.print_and_log(
             f"Aggregated 10x10 deg outputs in {folder}: {file_count}", is_final, logger
         )
+
+    if success_count > 0:
+        uu.aggregate_10x10_chunk_stats(all_stats, stage, no_upload, logger)
 
     end_time = uu.timestr()
     lu.print_and_log(f"Stage {stage} ended at: {end_time}", is_final, logger)

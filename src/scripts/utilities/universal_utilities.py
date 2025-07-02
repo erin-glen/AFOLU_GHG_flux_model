@@ -546,15 +546,34 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
                 )
             except boto3.exceptions.S3UploadFailedError as exc:
                 lu.print_and_log(f"Error uploading to s3: {exc}", is_final, logger)
-                return f"upload failure for {s3_name_dict}"
+                return f"upload failure for {s3_name_dict}", None
     except subprocess.CalledProcessError as exc:
         lu.print_and_log(f"GDAL merge error: {exc.output.decode()}", is_final, logger)
-        return f"failure for {s3_name_dict}"
+        return f"failure for {s3_name_dict}", None
     finally:
         if os.path.exists(merged_file):
             os.remove(merged_file)
 
-    return f"success for {s3_name_dict}"
+    out_pattern, year_range = strip_and_extract_years(out_file_name)
+    chunk_stats = [
+        dict(
+            chunk_id="N/A",
+            tile_id=tile_id,
+            layer_name=out_file_name,
+            tile_name=out_file_name,
+            in_out="output_layer",
+            pattern=out_pattern,
+            years=year_range,
+            min_value="no data",
+            mean_value="no data",
+            max_value="no data",
+            count_value=merged_valid,
+            sum_value="no data",
+            data_type="no data",
+        )
+    ]
+
+    return f"Success merging {s3_name_dict}", chunk_stats
 
 
 def _count_valid_pixels(raster_path: str, nodata_value: float) -> int:
@@ -759,11 +778,17 @@ def calculate_stats(
     per‑pixel totals are not required.
     """
 
+    out_pattern, year_range = strip_and_extract_years(name)
+
     if arr is None or arr.size == 0 or not np.any(arr):
         return dict(
             chunk_id=bstr,
             tile_id=tid,
             layer_name=name,
+            pattern=out_pattern,
+            years=year_range,
+            chunk_name=f"{tid}__{bstr}__{out_pattern}_{year_range}.tif",
+            tile_name=f"{tid}__{out_pattern}_{year_range}.tif",
             in_out=in_out,
             min_value="no data",
             mean_value="no data",
@@ -775,7 +800,7 @@ def calculate_stats(
 
     sum_value = (
         float(np.sum(array_per_pixel))
-        if array_per_pixel is not None and in_out == "output"
+        if array_per_pixel is not None and in_out == "output_layer"
         else "N/A- input layer or no per-pixel array supplied"
     )
 
@@ -783,6 +808,10 @@ def calculate_stats(
         chunk_id=bstr,
         tile_id=tid,
         layer_name=name,
+        pattern=out_pattern,
+        years=year_range,
+        chunk_name=f"{tid}__{bstr}__{out_pattern}_{year_range}.tif",
+        tile_name=f"{tid}__{out_pattern}_{year_range}.tif",
         in_out=in_out,
         min_value=float(arr.min()),
         mean_value=float(arr.mean()),
@@ -1335,22 +1364,18 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     df_stats["iso"] = df_stats["iso"].fillna("no iso assigned")
 
     # Separate input and output layers explicitly
-    input_layers = df_stats[df_stats["in_out"] == "input"]
-    output_layers = df_stats[df_stats["in_out"] == "output"]
+    input_layers = df_stats[df_stats["in_out"] == "input_layer"].copy()
+    output_layers = df_stats[df_stats["in_out"] == "output_layer"].copy()
 
     # Explicitly handle annual timeseries inputs separately
     timeseries_layers = f"{burned_area_final_pattern}|{land_cover_pattern}"
     annual_inputs = input_layers[input_layers["layer_name"].str.contains(timeseries_layers, case=False, na=False)]
     other_inputs = input_layers[~input_layers["layer_name"].str.contains(timeseries_layers, case=False, na=False)]
 
-    # Categorize outputs aligned with the model structure
-    drainage_classification_layers = ["soil", "state", "emission_state"]
-    burned_classification_layers = ["burned_state", "burned_emission_state"]
-
-    drainage_classification = output_layers[output_layers["layer_name"].isin(drainage_classification_layers)]
-    drainage_emissions = output_layers[output_layers["layer_name"].str.startswith("drained")]
-    burned_area_classification = output_layers[output_layers["layer_name"].isin(burned_classification_layers)]
-    burned_area_emissions = output_layers[output_layers["layer_name"].str.startswith("burned")]
+    # Categorize outputs using naming conventions similar to the LULUCF model
+    gross_flux_outputs = output_layers[output_layers["layer_name"].str.contains("gross", case=False, na=False)]
+    net_flux_outputs = output_layers[output_layers["layer_name"].str.contains("net|flux", case=False, na=False)]
+    other_outputs = output_layers[~output_layers["layer_name"].str.contains("flux|gross|net", case=False, na=False)]
 
     # Summarize min-max per layer
     min_max_summary = df_stats.groupby("layer_name").agg(
@@ -1382,13 +1407,10 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
         annual_inputs.to_excel(writer, sheet_name="annual_1x1_inputs", index=False)
         other_inputs.to_excel(writer, sheet_name="other_1x1_inputs", index=False)
 
-        # Drainage-specific outputs
-        drainage_classification.to_excel(writer, sheet_name="drainage_classification", index=False)
-        drainage_emissions.to_excel(writer, sheet_name="drainage_emissions", index=False)
-
-        # Burned-area-specific outputs
-        burned_area_classification.to_excel(writer, sheet_name="burned_classification", index=False)
-        burned_area_emissions.to_excel(writer, sheet_name="burned_emissions", index=False)
+        # Outputs grouped like the LULUCF workflow
+        gross_flux_outputs.to_excel(writer, sheet_name="gross_outputs_1x1", index=False)
+        net_flux_outputs.to_excel(writer, sheet_name="net_outputs_1x1", index=False)
+        other_outputs.to_excel(writer, sheet_name="other_outputs_1x1", index=False)
 
         # Summary stats
         min_max_summary.to_excel(writer, sheet_name="min_max_summary", index=False)
@@ -1406,3 +1428,40 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
         main_logger.info(
             f"Uploaded to {full_bucket_prefix}/{s3_chunk_stats_path}{out_spreadsheet}: {timestr()}"
         )
+
+
+def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
+    """Write aggregated 10x10 pixel counts to an Excel spreadsheet."""
+
+    s3_client = boto3.client("s3")
+    main_logger.info(f"Starting to aggregate and export tile stats: {timestr()}")
+
+    df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
+
+    out_spreadsheet = f"{stage}_10x10_chunk_statistics_{timestr()}.xlsx"
+    local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+
+    main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
+    with pd.ExcelWriter(local_spreadsheet) as writer:
+        df_all_10x10_stats.to_excel(writer, sheet_name="pix_counts_compa_10x10_1x1", index=False)
+
+    main_logger.info(df_all_10x10_stats.head())
+
+    if not no_upload:
+        s3_client.upload_file(
+            local_spreadsheet,
+            cn.short_bucket_prefix,
+            Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}",
+        )
+        main_logger.info(
+            f"Uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}"
+        )
+
+
+def strip_and_extract_years(key: str) -> tuple:
+    """Return file pattern and year range extracted from *key*."""
+
+    pattern = re.sub(cn.date_date_range_pattern, "", key)
+    m = re.search(cn.date_date_range_pattern, key)
+    year_range = m.group()[1:] if m else "no year range"
+    return pattern, year_range

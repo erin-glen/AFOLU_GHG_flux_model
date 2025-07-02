@@ -26,6 +26,8 @@ project_dir = 'climate/AFOLU_flux_model/organic_soils'
 raw_dir = posixpath.join(project_dir, 'inputs/raw')
 processed_dir = posixpath.join(project_dir, 'inputs/processed')
 
+date_date_range_pattern = r'_\d{4}(_\d{4})?'
+
 # organic‑soils constants file
 outputs_path = posixpath.join(
     full_bucket_prefix,                      # "s3://gfw2-data"
