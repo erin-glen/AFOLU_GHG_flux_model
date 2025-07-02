@@ -16,21 +16,16 @@ from src.scripts.utilities import log_utilities as lu
 # ----------------------------------------------------------------------
 
 DATA_TYPES = [
-    "burned_ch4_Mg_CO2e_ha",
-    "burned_co2_Mg_CO2_ha",
-    "burned_co_Mg_CO2e_ha",
-    "burned_state",
-    "burned_emission_state",
+    # "burned_ch4_Mg_CO2e_ha",
+    # "burned_co2_Mg_CO2_ha",
+    # "burned_co_Mg_CO2e_ha",
     "burned_total_Mg_CO2e_ha",
-    "drained_ch4_ditch_Mg_CO2e_ha",
-    "drained_ch4_land_Mg_CO2e_ha",
-    "drained_co2_Mg_CO2_ha",
-    "drained_co2_offsite_Mg_CO2_ha",
-    "drained_n2o_Mg_CO2e_ha",
+    # "drained_ch4_ditch_Mg_CO2e_ha",
+    # "drained_ch4_land_Mg_CO2e_ha",
+    # "drained_co2_Mg_CO2_ha",
+    # "drained_co2_offsite_Mg_CO2_ha",
+    # "drained_n2o_Mg_CO2e_ha",
     "drained_total_Mg_CO2e_ha",
-    "emission_state",
-    "soil",
-    "state",
 ]
 
 INVENTORY_PERIODS = [
@@ -45,7 +40,7 @@ BASE_URL = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/"
     "outputs/version_0_3_9"
 )
-OUTPUT_DATE = "20250611"
+OUTPUT_DATE = "20250702"
 PIXEL_RES = "4000_pixels"
 
 INTEGER_DATASETS = {
