@@ -43,14 +43,6 @@ BASE_URL = (
 OUTPUT_DATE = "20250702"
 PIXEL_RES = "4000_pixels"
 
-INTEGER_DATASETS = {
-    "state",
-    "burned_state",
-    "emission_state",
-    "burned_emission_state",
-    "soil",
-}
-
 
 def get_input_folders(pixel_resolution: str = PIXEL_RES) -> list:
     paths = []
@@ -121,10 +113,8 @@ def create_per_pixel_soils_outputs(bounds, input_dirs, is_final, no_upload, stag
 
     for key, arr in layers.items():
         dtype, interval = key.rsplit("_", 1)
-        if dtype in INTEGER_DATASETS:
-            out_arr = arr.astype("float32")
-        else:
-            out_arr = arr * pixel_area_chunk * cn.m2_to_ha
+        out_arr = arr * pixel_area_chunk * cn.m2_to_ha
+
         out_dict[f"{dtype}_per_pixel_{interval}"] = [
             out_arr,
             out_arr.dtype.name,
