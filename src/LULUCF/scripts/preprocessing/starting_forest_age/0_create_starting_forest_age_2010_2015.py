@@ -1,5 +1,10 @@
 """
 Maps forest age in 2010 and 2015 in 1x1 deg geotifs using GAMI v2.1.
+Requires Python library zarr v2.x; can't use zarr v3.x, which is what my more recent conda environments are using (for zonal stats purposes).
+If I try running this with zarr3, I get errors about not being able to access the files.
+
+So, start with:
+conda activate coiled_20250203
 
 This preprocessing step doesn't scale quite like others, as far as I can tell.
 It starts by reading in the relevant ZARR pieces for the chunks being processed, but I don't know how that scales.
@@ -34,7 +39,7 @@ python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 4 -t 4 -m 4
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -bb 10 47 13 50 -cs 1
 
 Full run:
-python -m src.utilities.create_cluster -n 12 -t 9 -cn LULUCF_preprocessing
+python -m src.utilities.create_cluster -n 20 -t 9 -m 32 -cn LULUCF_preprocessing
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
 When I ran with -n 7 -t 9, it would process only about 3 batches of 300 chunks (900 chunks) before failing,
 sometimes because it ran out of memory. Increasing the cluster size to -n 12 -t 9 made it run through 1800 chunks before failing!

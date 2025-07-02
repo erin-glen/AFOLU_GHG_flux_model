@@ -428,7 +428,7 @@ continent_ecozone_pattern = "fao_ecozones_continents_processed"
 
 ## Forest age
 # Forest age for 2010 and 2015 (created together)
-forest_age_2010_2015_run_date = '20250325'
+forest_age_2010_2015_run_date = '20250702'
 forest_age_2010_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2010/standard/not_interpolated/CHUNK_SIZE_pixels/{forest_age_2010_2015_run_date}/"
 forest_age_2010_pattern = "forest_age_2010"
 
@@ -439,7 +439,7 @@ forest_age_2015_interpolated_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_mod
 forest_age_2015_interpolated_pattern = "forest_age_interpolated_2015"
 
 # Forest age for 2000
-forest_age_2000_run_date = '20250701'
+forest_age_2000_run_date = '20250702'
 forest_age_2000_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2000/standard/not_interpolated/CHUNK_SIZE_pixels/{forest_age_2000_run_date}/"
 forest_age_2000_pattern = "forest_age_2000"
 
