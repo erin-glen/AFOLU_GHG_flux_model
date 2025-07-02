@@ -1271,21 +1271,28 @@ def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_fin
         for key, value in download_dict.items():
             if len(value) == 1:
                 fut = ex.submit(
-                    get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, "Float32"
+                    get_tile_dataset_rio,
+                    value[0],
+                    "Float32",
+                    bounds,
+                    chunk_length_pixels,
+                    is_final,
+                    logger,
                 )
             elif len(value) == 2:
                 fut = ex.submit(
                     get_tile_dataset_rio,
                     value[0],
+                    value[1],
                     bounds,
                     chunk_length_pixels,
-                    value[1],
+                    is_final,
+                    logger,
                 )
             else:
                 sys.exit("Unexpected number of parameters in download dictionary")
             futures[fut] = key
     return futures
-
 
 def count_successful_chunks(chunk_list, is_final, main_logger, results):
     """Summarize success messages returned from chunk workers."""
