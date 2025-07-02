@@ -72,6 +72,17 @@ s3_chunk_stats_path = "climate/AFOLU_flux_model/organic_soils/chunk_stats/"
 pixel_area_dir = f"{full_bucket_prefix}/analyses/area_28m/"
 pixel_area_pattern = "hanson_2013_area"
 
+progress_tracking_path = "climate/AFOLU_flux_model/organic/soils/task_progress_txts/"
+
+possible_task_statuses = [
+    "pending_",
+    "loading_",
+    "preprocessing_",
+    "calculating_",
+    "uploading_",
+    "error_",
+]
+
 
 # conversion factor from square meters to hectares
 m2_to_ha = 1e-4

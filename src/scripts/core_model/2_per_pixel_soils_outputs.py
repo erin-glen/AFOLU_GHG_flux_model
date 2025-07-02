@@ -108,8 +108,9 @@ def create_per_pixel_soils_outputs(bounds, input_dirs, is_final, no_upload, stag
     out_dict = {}
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tid}.tif"
     pixel_area_chunk = uu.get_tile_dataset_rio(
-        pixel_area_uri, bounds, chunk_px, "Float32"
+        pixel_area_uri, "Float32", bounds, chunk_px, is_final, logger
     )[0]
+
 
     for key, arr in layers.items():
         dtype, interval = key.rsplit("_", 1)
@@ -190,7 +191,14 @@ def main(
         chunk_shapefile_uri = cn.fishnet_1x1deg_uri
 
     main_logger, main_log_local_path = lu.populate_main_log_header(
-        client, cluster, log_note, run_local, model_type, stage
+        bounding_box,
+        chunk_shapefile_uri if chunk_shapefile_uri else False,
+        client,
+        cluster,
+        log_note,
+        run_local,
+        model_type,
+        stage,
     )
 
     start_time = uu.timestr()
