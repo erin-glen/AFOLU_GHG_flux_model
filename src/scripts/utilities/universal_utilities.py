@@ -743,7 +743,22 @@ def check_for_tile(typed_dict, is_final, logger) -> bool:
 # ----------------------------------------------------------------------
 # stats helpers
 # ----------------------------------------------------------------------
-def calculate_stats(arr: np.ndarray | None, name, bstr, tid, in_out):
+def calculate_stats(
+    arr: np.ndarray | None,
+    name,
+    bstr,
+    tid,
+    in_out,
+    array_per_pixel: np.ndarray | None = None,
+):
+    """Return basic statistics for a chunk array.
+
+    Parameters mirror the more feature rich function in
+    ``lulucf_universal_utilities`` so that per pixel counts can also be
+    recorded. ``array_per_pixel`` is optional and can be omitted when the
+    per‑pixel totals are not required.
+    """
+
     if arr is None or arr.size == 0 or not np.any(arr):
         return dict(
             chunk_id=bstr,
@@ -753,8 +768,17 @@ def calculate_stats(arr: np.ndarray | None, name, bstr, tid, in_out):
             min_value="no data",
             mean_value="no data",
             max_value="no data",
+            count_value="no data",
+            sum_value="no data",
             data_type="no data",
         )
+
+    sum_value = (
+        float(np.sum(array_per_pixel))
+        if array_per_pixel is not None and in_out == "output"
+        else "N/A- input layer or no per-pixel array supplied"
+    )
+
     return dict(
         chunk_id=bstr,
         tile_id=tid,
@@ -763,6 +787,8 @@ def calculate_stats(arr: np.ndarray | None, name, bstr, tid, in_out):
         min_value=float(arr.min()),
         mean_value=float(arr.mean()),
         max_value=float(arr.max()),
+        count_value=int(np.count_nonzero(arr)),
+        sum_value=sum_value,
         data_type=str(arr.dtype),
     )
 
@@ -1286,6 +1312,7 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
         burned_area_final_pattern,
         land_cover_pattern,
     )
+    from src.scripts.utilities.universal_utilities import timestr
 
     s3_client = boto3.client("s3")
     main_logger.info(f"Starting stats aggregation: {timestr()}")
@@ -1379,5 +1406,3 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
         main_logger.info(
             f"Uploaded to {full_bucket_prefix}/{s3_chunk_stats_path}{out_spreadsheet}: {timestr()}"
         )
-
-
