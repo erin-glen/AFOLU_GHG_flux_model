@@ -1,10 +1,10 @@
 """
-
+Creates starting forest age from interpolated 2010 age map.
 
 Run from git/AFOLU_GHG_flux_model
 
 Local:
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_create_starting_forest_age_2000 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --run_local --no_upload --no_stats --no_log
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_create_starting_forest_age_2000 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --run_local --no_upload --no_stats --no_log
 
 Coiled test:
 python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 1
@@ -24,10 +24,6 @@ import dask
 import fsspec
 import psutil
 import time
-
-from rasterio.windows import from_bounds
-from scipy.ndimage import distance_transform_edt
-
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -58,6 +54,7 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     ### No checks about whether the chunk has data because the way the chunk_list is constructed,
     ### every chunk is relevant and should be processed, so they don't need to be checked.
 
+    # TODO Replace with reading interpolated 2010 10x10 deg age geotifs in main function
     download_dict_with_data_types[f"{cn.forest_age_2010_pattern}"] = [f"{cn.forest_age_2010_dir}{tile_id}__{bounds_str}__{cn.forest_age_2010_pattern}.tif", 'Byte']
     for key, value in download_dict_with_data_types.items():
         if "CHUNK_SIZE" in value[0]:
@@ -95,7 +92,7 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     # print(layers[cn.forest_age_2010_pattern].dtype)
 
 
-    ### Part 2: Age calculation
+    ### Part 2: Age calculation in 2000
 
     # Get the 2010 forest age layer
     age_2010 = layers[cn.forest_age_2010_pattern].astype(np.uint8)
@@ -103,21 +100,42 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     # Initialize a binary disturbance mask for 2000–2010
     disturbance_mask = np.zeros_like(age_2010, dtype=bool)
 
-    # Check all disturbance rasters from 2001 to 2010
-    for year in range(2001, 2011):
-        disturbance_key = f"{cn.forest_disturbance_layer_name}_{year}"
-        disturbance_mask |= layers[disturbance_key] > 0
+    # # Disturbance criteria 1: Check all annual disturbance rasters from 2001 to 2010
+    # for year in range(2001, 2011):
+    #     disturbance_key = f"{cn.forest_disturbance_layer_name}_{year}"
+    #     disturbance_mask |= layers[disturbance_key] > 0
 
-    # Low vegetation height in 2000, 2005, or 2010
-    for year in [2000, 2005, 2010]:
+    # Disturbance criteria 2: Low vegetation height (<5 m) in 2000, 2005, or 2010
+    for year in [2005, 2010]:
         veg_height_key = f"{cn.vegetation_height_pattern}_{year}"
-        disturbance_mask |= layers[veg_height_key] < 5  # Units assumed to be meters
+        disturbance_mask |= layers[veg_height_key] < 5
 
-    # Initialize the 2000 forest age output
-    age_2000 = np.where(disturbance_mask, 255, age_2010 - 10)
+    # # Disturbance criteria 3: Vegetation height drop >= 5 m from one time to another
+    # # Define year pairs to compare
+    # height_drop_pairs = [(2000, 2005), (2005, 2010), (2000, 2010)]
+    # for start_year, end_year in height_drop_pairs:
+    #     key_start = f"{cn.vegetation_height_pattern}_{start_year}"
+    #     key_end = f"{cn.vegetation_height_pattern}_{end_year}"
+    #     height_diff = layers[key_start].astype(np.int16) - layers[key_end].astype(np.int16)
+    #     disturbance_mask |= height_diff >= 5
 
-    # Handle underflow: if age_2010 < 10, subtracting 10 could cause wraparound
-    age_2000 = np.where((~disturbance_mask) & (age_2010 < 10), 0, age_2000).astype(np.uint8)
+    # Age=0 criterria: Low vegetation height (<5m) in 2000 → age = 0
+    veg_height_2000_key = f"{cn.vegetation_height_pattern}_2000"
+    low_height_2000_mask = layers[veg_height_2000_key] < 5
+
+    # Safe subtraction
+    safe_subtract = age_2010.astype(np.int16) - 10
+    safe_subtract = np.maximum(safe_subtract, 0)
+
+    # Final age_2000 with priorities:
+    # 1. Set to 0 where 2000 height < 5
+    # 2. Set to 255 where disturbance occurred
+    # 3. Else subtract 10 years
+    age_2000 = np.where(
+        low_height_2000_mask,
+        0,
+        np.where(disturbance_mask, 255, safe_subtract)
+    ).astype(np.uint8)
 
     numpy_end = time.time()
     lu.print_and_log(f"Done calculating forest age in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)

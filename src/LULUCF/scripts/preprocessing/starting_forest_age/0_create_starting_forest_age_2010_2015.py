@@ -172,12 +172,12 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         lu.print_and_log(f"Interpolating {bounds_str}: {uu.timestr()}", is_final, logger_worker)
         da_resampled = da_median.interp(latitude=new_lat, longitude=new_lon, method="nearest")
 
-        # Rounds from float to int and makes NoData = 0
-        da_2010 = da_resampled.round().fillna(0).astype("int8")
+        # Rounds from float to int, sets min as 0 and max as 200, and makes NoData = 0
+        da_2010 = da_resampled.round().clip(0, 200).fillna(0).astype("int8")
         arr_2010 = da_2010.values
 
-        # Creates the 2015 age map by adding 5 to the 2010 age map where it does not equal 0, then setting to max to 115
-        arr_2015 = np.where(arr_2010 != 0, arr_2010 + 5, 0).clip(0, 100).astype("int8")
+        # Creates the 2015 age map by adding 5 to the 2010 age map where it does not equal 0, then setting max to 205
+        arr_2015 = np.where(arr_2010 != 0, arr_2010 + 5, 0).clip(0, 205).astype("int8")
 
         transform = Affine.translation(lon_min, lat_max) * Affine.scale(cn.resolution, -cn.resolution)
         crs = "EPSG:4326"
@@ -281,8 +281,11 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
     chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
+    # chunk_list = chunk_list[601:]
+    # chunk_list = chunk_list[1201:]
+    chunk_list = chunk_list[3601:]
+
     # chunk_list = chunk_list[0:1501]
-    # chunk_list = chunk_list[1501:]
     # chunk_list = chunk_list[2101:]
     # chunk_list = chunk_list[2701:]
     # chunk_list = chunk_list[3601:]
