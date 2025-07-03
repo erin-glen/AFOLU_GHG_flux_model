@@ -93,10 +93,9 @@ def create_per_pixel_soils_outputs(bounds, input_dirs, is_final, no_upload, stag
     layers = {}
     for future in concurrent.futures.as_completed(futures):
         layer = futures[future]
-        data, status = future.result()  # status is a boolean
-        if not status:
-            # False indicates the layer was not found and zeros were returned
-            lu.print_and_log(str(status), is_final, logger)
+        data, status = future.result()
+        if "success" not in status:
+            lu.print_and_log(status, is_final, logger)
         layers[layer] = data
 
     lu.print_and_log(
@@ -106,7 +105,7 @@ def create_per_pixel_soils_outputs(bounds, input_dirs, is_final, no_upload, stag
     )
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger)
 
-    out_dict = {}
+    out_dict_by_interval = {}
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tid}.tif"
     pixel_area_chunk = uu.get_tile_dataset_rio(
         pixel_area_uri, "Float32", bounds, chunk_px, is_final, logger
@@ -115,12 +114,16 @@ def create_per_pixel_soils_outputs(bounds, input_dirs, is_final, no_upload, stag
 
     for key, arr in layers.items():
         dtype, interval = key.rsplit("_", 1)
+        dtype_pixel = dtype.replace("_ha", "_pixel")
         out_arr = arr * pixel_area_chunk * cn.m2_to_ha
 
-        out_dict[f"{dtype}_per_pixel_{interval}"] = [
+        if interval not in out_dict_by_interval:
+            out_dict_by_interval[interval] = {}
+
+        out_dict_by_interval[interval][dtype_pixel] = [
             out_arr,
             out_arr.dtype.name,
-            dtype,
+            dtype_pixel,
             interval,
         ]
         chunk_stats.append(
@@ -128,33 +131,34 @@ def create_per_pixel_soils_outputs(bounds, input_dirs, is_final, no_upload, stag
         )
 
     if not no_upload:
-        upload_tasks = uu.save_and_upload_small_raster_set(
-            bounds,
-            chunk_px,
-            tid,
-            bstr,
-            out_dict,
-            is_final,
-            logger,
-            interval_type=cn.intervals_five_year,
-            model_type="ogh_standard_model",
-            no_data_val=0,
-        )
+        for interval, interval_dict in out_dict_by_interval.items():
+            upload_tasks = uu.save_and_upload_small_raster_set(
+                bounds,
+                chunk_px,
+                tid,
+                bstr,
+                interval_dict,
+                is_final,
+                logger,
+                interval_type=cn.intervals_five_year,
+                model_type="ogh_standard_model",
+                no_data_val=0,
+            )
 
-        lu.print_and_log(
-            f"Upload tasks created for {bstr} in {tid}. Uploading now: {uu.timestr()}",
-            False,
-            logger,
-        )
+            lu.print_and_log(
+                f"Upload tasks created for {bstr} in {tid} for {interval}. Uploading now: {uu.timestr()}",
+                False,
+                logger,
+            )
 
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
-        lu.print_and_log(
-            f"Uploads completed for {bstr} in {tid} using {cn.outputs_path}: {uu.timestr()}",
-            is_final,
-            logger,
-        )
+            lu.print_and_log(
+                f"Uploads completed for {bstr} in {tid} for {interval} using {cn.outputs_path}: {uu.timestr()}",
+                is_final,
+                logger,
+            )
 
     end_time = time.time()
     lu.print_and_log(
@@ -244,13 +248,13 @@ def main(
     success_count, all_stats = uu.count_successful_chunks(
         chunk_list, is_final, main_logger, results
     )
-    uu.stage_duration(start_time, uu.timestr(), stage)
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
     if (not no_stats) and success_count > 0:
         uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
 
     if not no_upload:
-        output_dirs = [p.replace(PIXEL_RES, "per_pixel") for p in input_dirs]
+        output_dirs = [p.replace("_ha/", "_pixel/") for p in input_dirs]
         for folder in output_dirs:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(folder)
             main_logger.info(f"Output rasters in {folder}: {file_count}")

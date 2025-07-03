@@ -194,8 +194,9 @@ def build_download_upload_dict(pixel_resolution: str, out_res_deg: float) -> dic
         key = f"{dataset}__{interval}"
         mg_ha_yr_dir = path if path.endswith("/") else f"{path}/"
         mg_ha_yr_pattern = f"__{dataset}__{interval}.tif"
-        mg_per_pixel_dir = mg_ha_yr_dir.replace(pixel_resolution, "per_pixel")
-        mg_per_pixel_pattern = f"__{dataset}_per_pixel_{interval}.tif"
+        dataset_pixel = dataset.replace("_ha", "_pixel")
+        mg_per_pixel_dir = mg_ha_yr_dir.replace(dataset, dataset_pixel)
+        mg_per_pixel_pattern = f"__{dataset_pixel}__{interval}.tif"
         out_dir = (
             "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/"
             f"{res_tag}_output_aggregation/{dataset}/{interval}/"
