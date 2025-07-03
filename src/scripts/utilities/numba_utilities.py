@@ -16,17 +16,6 @@ def accrete_node(combo, new):
     return combo
 
 
-@jit(nopython=True)
-def join_codes(base, extra):
-    """Append all digits of ``extra`` to ``base``."""
-    factor = 1
-    temp = extra
-    while temp > 0:
-        factor *= 10
-        temp //= 10
-    return base * factor + extra
-
-
 def create_typed_dicts(layers):
     """
     Distribute arrays into typed dictionaries by dtype, so that we can pass them
@@ -154,4 +143,3 @@ def calculate_burned_area_emissions(
 
     total_burned_emissions_co2e = burn_co2 + burn_co + burn_ch4
     return burn_co2, burn_co, burn_ch4, total_burned_emissions_co2e
-
