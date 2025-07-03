@@ -38,9 +38,9 @@ INVENTORY_PERIODS = [
 
 BASE_URL = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/"
-    "outputs/version_0_3_9"
+    "outputs/version_0_4_1"
 )
-OUTPUT_DATE = "20250702"
+OUTPUT_DATE = "20250703"
 PIXEL_RES = "4000_pixels"
 
 
