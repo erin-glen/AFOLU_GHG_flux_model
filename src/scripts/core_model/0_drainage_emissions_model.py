@@ -437,14 +437,40 @@ def calculate_and_upload_drainage(
     no_upload,
     iv_start,
     iv_end,
+    closing_year,
     peat_dataset="ogh",
 ):
+    """Process a single chunk for a given interval.
+
+    Parameters
+    ----------
+    bounds : list[float]
+        Bounding box for the chunk.
+    typed_dict : dict
+        Dictionary of input raster paths keyed by layer name.
+    is_final : bool
+        Whether the run covers the full domain.
+    no_upload : bool
+        If ``True``, skip uploading outputs to S3.
+    iv_start, iv_end : int
+        Interval start and end years.
+    closing_year : int
+        Land cover composite year for this interval.
+    peat_dataset : str, optional
+        Peat mask dataset name.
+    """
 
     logger = lu.setup_logging_worker()
     bstr = uu.boundstr(bounds)
     tid = uu.xy_to_tile_id(bounds[0], bounds[3])
     chunk_px = uu.calc_chunk_length_pixels(bounds)
     chunk_stats = []
+
+    lu.print_and_log(
+        f"Processing {bstr} {iv_start}-{iv_end} using land cover {closing_year}",
+        is_final,
+        logger,
+    )
 
     # replace {tile_id} with actual
     import copy
@@ -463,6 +489,11 @@ def calculate_and_upload_drainage(
                 continue
             if yr < iv_start or yr > iv_end:
                 dwn.pop(k)
+    lu.print_and_log(
+        f"Using burned area years {[k for k in dwn if k.startswith(cn.burned_area_final_pattern)]}",
+        is_final,
+        logger,
+    )
 
     if not uu.check_for_tile(dwn, is_final, logger):
         return f"Skipped {bstr} (tile absent)", chunk_stats
@@ -742,20 +773,25 @@ def run_drainage_model(
         all_five_year_periods,
     )
 
-    # figure out data types from first chunk
-    sample_dict = cn.get_dynamic_download_dict(
-        sample_tid,
-        start_year,
-        end_year,
-        peat_dataset=peat_dataset,
-    )
-    typed_dict = uu.add_file_type_to_dict(sample_dict)
-
     # build task list & run with dask.bag
     bag_items = [(bds, iv[0], iv[1]) for iv in intervals for bds in chunks]
     bag = dask.bag.from_sequence(bag_items, npartitions=len(bag_items))
 
     def _wrap(t):
+        final_year = cn.five_year_inventory_periods[-1][1]
+        closing_year = t[2] + 1 if t[2] < final_year else t[2]
+        bstr = uu.boundstr(t[0])
+        main_logger.info(
+            f"{bstr} interval {t[1]}-{t[2]} uses land cover {closing_year}"
+        )
+        download_dict = cn.get_dynamic_download_dict(
+            sample_tid,
+            t[1],
+            closing_year,
+            peat_dataset=peat_dataset,
+        )
+        typed_dict = uu.add_file_type_to_dict(download_dict)
+
         return calculate_and_upload_drainage(
             t[0],
             typed_dict,
@@ -763,6 +799,7 @@ def run_drainage_model(
             no_upload,
             t[1],
             t[2],
+            closing_year,
             peat_dataset,
         )
 
@@ -941,6 +978,14 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --start_year 2000 \
   --end_year 2023 \
   --interval_type five_year
+  
+python -m src.scripts.core_model.0_drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --bounding_box 110 -10 120 0 \
+  --chunk_size 1 \
+  --start_year 2000 \
+  --end_year 2023 \
+  --all_five_year_periods
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
