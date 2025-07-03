@@ -94,8 +94,10 @@ def create_per_pixel_soils_outputs(bounds, input_dirs, is_final, no_upload, stag
     for future in concurrent.futures.as_completed(futures):
         layer = futures[future]
         data, status = future.result()
-        if "success" not in status:
-            lu.print_and_log(status, is_final, logger)
+        if not status:
+            lu.print_and_log(
+                f"Failed to fetch {layer}; using zeros", is_final, logger
+            )
         layers[layer] = data
 
     lu.print_and_log(
