@@ -93,9 +93,10 @@ def create_per_pixel_soils_outputs(bounds, input_dirs, is_final, no_upload, stag
     layers = {}
     for future in concurrent.futures.as_completed(futures):
         layer = futures[future]
-        data, status = future.result()
-        if "success" not in status:
-            lu.print_and_log(status, is_final, logger)
+        data, status = future.result()  # status is a boolean
+        if not status:
+            # False indicates the layer was not found and zeros were returned
+            lu.print_and_log(str(status), is_final, logger)
         layers[layer] = data
 
     lu.print_and_log(
@@ -295,3 +296,12 @@ if __name__ == "__main__":
         first_chunks=args.first_chunks,
         log_note=args.log_note,
     )
+
+    """
+    python -m src.scripts.core_model.2_per_pixel_soils_outputs \
+  --cluster_name per_pixel \
+  --bounding_box 110 -10 120 0 \
+  --chunk_size 1 \
+  --log_note "Testing per-pixel outputs" 
+    
+    """
