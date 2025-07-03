@@ -250,7 +250,7 @@ def main(
     success_count, all_stats = uu.count_successful_chunks(
         chunk_list, is_final, main_logger, results
     )
-    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+    uu.stage_duration(start_time, uu.timestr(), stage)
 
     if (not no_stats) and success_count > 0:
         uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
