@@ -274,24 +274,12 @@ def calculate_drainage_and_emissions(
                         key = "tropical_extraction"
 
                 vals = lookup_efs(key, drainage_table)
-
-                # explicitly handle missing drainage emission factors
-                if np.array_equal(vals, defac.ZERO_ARRAY):
-                    if ecozone == boreal_code:
-                        emission_node = nu.accrete_node(emission_node, 91)
-                    elif ecozone == temperate_code:
-                        emission_node = nu.accrete_node(emission_node, 92)
-                    elif ecozone == tropical_code:
-                        emission_node = nu.accrete_node(emission_node, 93)
-
-                    ef_co2 = ef_n2o = ef_ch4_land = ef_ch4_ditch = ef_co2_offsite = frac_ditch = np.float32(0.0)
-                else:
-                    ef_co2 = vals[0]
-                    ef_n2o = vals[1]
-                    ef_ch4_land = vals[2]
-                    ef_ch4_ditch = vals[3]
-                    ef_co2_offsite = vals[4]
-                    frac_ditch = vals[5]
+                ef_co2 = vals[0]
+                ef_n2o = vals[1]
+                ef_ch4_land = vals[2]
+                ef_ch4_ditch = vals[3]
+                ef_co2_offsite = vals[4]
+                frac_ditch = vals[5]
 
                 # calculate drainage emissions ---------------------------
                 (
@@ -372,24 +360,10 @@ def calculate_drainage_and_emissions(
                         burned_emission_node = nu.accrete_node(burned_emission_node, 4)
 
                     bvals = lookup_befs(bkey, burned_table)
-
-                    # explicitly handle missing burned-area emission factors
-                    if np.array_equal(bvals, baf.ZERO_ARRAY):
-                        if ecozone == boreal_code:
-                            burned_emission_node = nu.accrete_node(burned_emission_node, 94)
-                        elif ecozone == temperate_code:
-                            burned_emission_node = nu.accrete_node(burned_emission_node, 95)
-                        elif ecozone == tropical_code:
-                            burned_emission_node = nu.accrete_node(burned_emission_node, 96)
-                        else:
-                            burned_emission_node = nu.accrete_node(burned_emission_node, 97)
-
-                        gef_co2 = gef_co = gef_ch4 = mass_burnt = np.float32(0.0)
-                    else:
-                        gef_co2 = bvals[0]
-                        gef_co = bvals[1]
-                        gef_ch4 = bvals[2]
-                        mass_burnt = bvals[3]
+                    gef_co2 = bvals[0]
+                    gef_co = bvals[1]
+                    gef_ch4 = bvals[2]
+                    mass_burnt = bvals[3]
 
                     (
                         burn_co2,
