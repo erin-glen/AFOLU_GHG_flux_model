@@ -554,16 +554,14 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log):
         if os.path.exists(merged_file):
             os.remove(merged_file)
 
-    out_pattern, year_range = strip_and_extract_years(out_file_name)
+    _, year_range = strip_and_extract_years(out_file_name)
     chunk_stats = [
         dict(
             chunk_id="N/A",
             tile_id=tile_id,
             layer_name=out_file_name,
-            tile_name=out_file_name,
-            in_out="output_layer",
-            pattern=out_pattern,
             years=year_range,
+            in_out="output_layer",
             min_value="no data",
             mean_value="no data",
             max_value="no data",
@@ -772,8 +770,17 @@ def calculate_stats(
     iv_start: int | None = None,
     iv_end: int | None = None,
 ):
-    """Return basic statistics for a chunk array, correctly handling static layers."""
-    out_pattern, extracted_year = strip_and_extract_years(name)
+    """Return per-chunk statistics for ``arr``.
+
+    The returned dictionary contains ``chunk_id`` (``bstr``), ``tile_id``,
+    ``layer_name`` (``name``), the extracted ``years`` value, ``in_out`` and the
+    basic statistics (``min_value``, ``mean_value``, ``max_value``,
+    ``count_value``, ``sum_value`` and ``data_type``). ``years`` is derived from
+    :func:`strip_and_extract_years` with static layers reported as ``static`` or
+    an interval ``iv_start_iv_end`` when provided.
+    """
+
+    _, extracted_year = strip_and_extract_years(name)
 
     # Explicitly handle static (no year) layers
     if extracted_year == "no year range":
@@ -786,10 +793,7 @@ def calculate_stats(
             chunk_id=bstr,
             tile_id=tid,
             layer_name=name,
-            pattern=out_pattern,
             years=year_range,
-            chunk_name=f"{tid}__{bstr}__{out_pattern}_{year_range}.tif",
-            tile_name=f"{tid}__{out_pattern}_{year_range}.tif",
             in_out=in_out,
             min_value="no data",
             mean_value="no data",
@@ -809,10 +813,7 @@ def calculate_stats(
         chunk_id=bstr,
         tile_id=tid,
         layer_name=name,
-        pattern=out_pattern,
         years=year_range,
-        chunk_name=f"{tid}__{bstr}__{out_pattern}_{year_range}.tif",
-        tile_name=f"{tid}__{out_pattern}_{year_range}.tif",
         in_out=in_out,
         min_value=float(arr.min()),
         mean_value=float(arr.mean()),
