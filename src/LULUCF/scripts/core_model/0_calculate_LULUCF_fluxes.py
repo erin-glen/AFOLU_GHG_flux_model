@@ -1716,10 +1716,10 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Starting forest age
     if interval_type == cn.intervals_annual:
-        download_dict[f"{cn.forest_age_start_year_pattern}"] = f"{cn.forest_age_2015_interpolated_dir}{sample_tile_id}__{cn.forest_age_2015_interpolated_pattern}.tif"
+        download_dict[f"{cn.forest_age_start_year_pattern}"] = f"{cn.forest_age_2015_gap_filled_dir}{sample_tile_id}__{cn.forest_age_2015_gap_filled_pattern}.tif"
     # TODO: Need to make starting forest age for 2000
     else:
-        download_dict[f"{cn.forest_age_start_year_pattern}"] = f"{cn.forest_age_2015_interpolated_dir}{sample_tile_id}__{cn.forest_age_2015_interpolated_pattern}.tif"
+        download_dict[f"{cn.forest_age_start_year_pattern}"] = f"{cn.forest_age_2015_gap_filled_dir}{sample_tile_id}__{cn.forest_age_2015_gap_filled_pattern}.tif"
 
     # Replaces the placeholder parts of the input paths with relevant values
     download_dict = {

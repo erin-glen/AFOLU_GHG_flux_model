@@ -20,6 +20,7 @@ import numpy as np
 import os
 import rasterio
 import rasterio.merge
+from rasterio.windows import from_bounds
 import dask
 import fsspec
 import psutil
@@ -97,6 +98,18 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     # Get the 2010 forest age layer
     age_2010 = layers[cn.forest_age_2010_pattern].astype(np.uint8)
 
+    # Read the 1x1 deg global raster (once per chunk)
+    global_age_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/forest_age/age_pre_disturbance_Besnard_et_al/global_geotif/20250702/age_pre_disturbance_median_1deg_global__20250703.tif"
+
+    with rasterio.open(global_age_path) as src:
+        # Read the relevant window into memory at the resolution of the working chunk
+        window = from_bounds(*bounds, transform=src.transform)
+        global_resampled = src.read(1, window=window, out_shape=age_2010.shape,
+                                    resampling=rasterio.enums.Resampling.nearest)
+
+    # Convert global_resampled to int16 in case of nodata
+    global_resampled = global_resampled.astype(np.uint16)
+
     # Initialize a binary disturbance mask for 2000–2010
     disturbance_mask = np.zeros_like(age_2010, dtype=bool)
 
@@ -133,18 +146,45 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     veg_height_2000_key = f"{cn.vegetation_height_pattern}_2000"
     low_height_2000_mask = layers[veg_height_2000_key] < 5
 
-    # Safe subtraction
-    safe_subtract = age_2010.astype(np.int16) - 10
-    safe_subtract = np.maximum(safe_subtract, 0)
+    # Subtract without clamping yet
+    raw_subtract = age_2010.astype(np.int16) - 10
 
-    # Final age_2000 with priorities:
-    # 1. Set to 0 where 2000 height < 5
-    # 2. Set to 255 where disturbance occurred
-    # 3. Else subtract 10 years
+    # Mask where age would be <= 0
+    underflow_mask = (raw_subtract <= 0)
+
+    # Clamp for the fallback case
+    safe_subtract = np.maximum(raw_subtract, 0)
+
+    # Final logic: 0 (low veg in 2000) > 255 (disturbed later) > 254 (not yet forest in 2000) > age-10
     age_2000 = np.where(
         low_height_2000_mask,
         0,
-        np.where(disturbance_mask, 255, safe_subtract)
+        np.where(
+            disturbance_mask,
+            global_resampled,
+            np.where(
+                underflow_mask,
+                global_resampled,
+                safe_subtract
+            )
+        )
+    ).astype(np.uint8)
+
+    age_2000 = np.minimum(age_2000, 255).astype(np.uint8)
+
+    # Final logic: 0 (low veg in 2000) > 255 (disturbed later) > 254 (not yet forest in 2000) > age-10
+    age_2000_source_flag = np.where(
+        low_height_2000_mask,
+        1,  # 1=Not tall vegetation in 2000
+        np.where(
+            disturbance_mask,
+            2,  # 2=Not tall vegetation in 2005 or 2010 (i.e. disturbance)
+            np.where(
+                underflow_mask,
+                3,  # 3=Age <= 10 years in 2010 (assign Besnard age at disturbance map)
+                4   # 4=age_2000 = age_2010 - 10
+            )
+        )
     ).astype(np.uint8)
 
     numpy_end = time.time()
@@ -153,7 +193,7 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     lu.print_and_log(f"Calculated forest age in {bounds_str} in {tile_id} in {round(numpy_end-chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
 
-    ### Part 3: Saves and uploads the output raster
+    ### Part 3: Saves and uploads the output rasters
 
     output_dir = output_dir_list[0]
 
@@ -174,33 +214,46 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
 
     if is_final:
-        file_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2000_pattern}.tif"
+        age_2000_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2000_gap_filled_pattern}.tif"
+        age_2000_source_flag_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2000_gap_filled_source_flag_pattern}.tif"
     else:
-        file_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2000_pattern}__{uu.timestr()}.tif"
+        age_2000_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2000_gap_filled_pattern}__{uu.timestr()}.tif"
+        age_2000_source_flag_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2000_gap_filled_source_flag_pattern}__{uu.timestr()}.tif"
 
     # Saves filled in focal chunk locally
     if run_local and no_upload:
-        output_tmp_path = f"/mnt/c/GIS/AFOLU_flux_model/forest_age/year_2000/{file_name}"
+        age_2000_tmp_path = f"/mnt/c/GIS/AFOLU_flux_model/forest_age/year_2000/{age_2000_name}"
+        age_2000_source_flag_tmp_path = f"/mnt/c/GIS/AFOLU_flux_model/forest_age/year_2000/{age_2000_source_flag_name}"
     else:
-        output_tmp_path = f"/tmp/{file_name}"
+        age_2000_tmp_path = f"/tmp/{age_2000_name}"
+        age_2000_source_flag_tmp_path = f"/tmp/{age_2000_source_flag_name}"
 
-    with rasterio.open(output_tmp_path, "w", **profile) as dst:
+    with rasterio.open(age_2000_tmp_path, "w", **profile) as dst:
         dst.write(age_2000, 1)
 
+    with rasterio.open(age_2000_source_flag_tmp_path, "w", **profile) as dst:
+        dst.write(age_2000_source_flag, 1)
+
     # Optional: Uploads to S3
-    s3_path = f"{output_dir}{file_name}"
+    age_2000_s3_path = f"{output_dir}{age_2000_name}"
+    age_2000_source_flag_s3_path = f"{output_dir}{age_2000_source_flag_name}"
 
     if not no_upload:
-        with fs.open(s3_path, "wb") as f_out:
-            with open(output_tmp_path, "rb") as f_in:
+        with fs.open(age_2000_s3_path, "wb") as f_out:
+            with open(age_2000_tmp_path, "rb") as f_in:
+                f_out.write(f_in.read())
+        with fs.open(age_2000_source_flag_s3_path, "wb") as f_out:
+            with open(age_2000_source_flag_tmp_path, "rb") as f_in:
                 f_out.write(f_in.read())
 
     return_message = f"Success creating forest age 2000 for {bounds_str}: {uu.timestr()}"
 
-    chunk_stats.append(uu.calculate_stats(age_2010, cn.forest_age_2000_pattern, bounds_str, tile_id, 'output_layer'))
+    chunk_stats.append(uu.calculate_stats(age_2000, cn.forest_age_2000_gap_filled_pattern, bounds_str, tile_id, 'output_layer'))
+    chunk_stats.append(uu.calculate_stats(age_2000_source_flag, cn.forest_age_2000_gap_filled_pattern, bounds_str, tile_id, 'output_layer'))
 
     if not run_local:
-        os.remove(output_tmp_path)
+        os.remove(age_2000_tmp_path)
+        os.remove(age_2000_source_flag_tmp_path)
 
     # Removes task tracking file from S3 once task is successful
     uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
@@ -281,7 +334,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # print(download_dict_with_data_types)
 
     # Creates list of output directories specific to the run
-    output_dir_list = [cn.forest_age_2000_dir]
+    output_dir_list = [cn.forest_age_2000_gap_filled_dir]
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
 
 

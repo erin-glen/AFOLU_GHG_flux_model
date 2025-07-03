@@ -435,19 +435,20 @@ forest_age_2010_pattern = "forest_age_2010"
 forest_age_2015_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2015/standard/not_interpolated/CHUNK_SIZE_pixels/{forest_age_2010_2015_run_date}/"
 forest_age_2015_pattern = "forest_age_2015"
 
-forest_age_2015_interpolated_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2015/standard/interpolated/CHUNK_SIZE_pixels/20250331/"
-forest_age_2015_interpolated_pattern = "forest_age_interpolated_2015"
+forest_age_2015_gap_filled_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2015/standard/gap_filled/CHUNK_SIZE_pixels/20250331/"
+forest_age_2015_gap_filled_pattern = "forest_age_gap_filled_2015"
 
 # Forest age for 2000
-forest_age_2000_run_date = '20250702'
-forest_age_2000_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2000/standard/not_interpolated/CHUNK_SIZE_pixels/{forest_age_2000_run_date}/"
-forest_age_2000_pattern = "forest_age_2000"
+forest_age_2000_run_date = '20250703'
+forest_age_2000_gap_filled_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2000/standard/age__years/gap_filled/CHUNK_SIZE_pixels/{forest_age_2000_run_date}/"
+forest_age_2000_gap_filled_pattern = "forest_age_gap_filled_2000"
 
-forest_age_2000_interpolated_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2000/standard/interpolated/CHUNK_SIZE_pixels/{forest_age_2000_run_date}/"
-forest_age_2000_interpolated_pattern = "forest_age_interpolated_2000"
+forest_age_2000_gap_filled_source_flag_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2000/standard/age__source_flag/gap_filled/CHUNK_SIZE_pixels/{forest_age_2000_run_date}/"
+forest_age_2000_gap_filled_source_flag_pattern = "forest_age_gap_filled_2000__source_flag"
+
 
 # Forest age pattern for use in the LULUCF model. Applies to any starting year (2000 or 2015).
-forest_age_start_year_pattern = "forest_age_interpolated_start_year"
+forest_age_start_year_pattern = "forest_age_gap_filled_start_year"
 forest_age_output_pattern = "forest_age_at_end_of_interval"
 
 # GEE script that the global rasters are from is https://code.earthengine.google.com/805896f7a511c13eb873c4804a683abc (each file takes about 15 minutes to export to Google Drive).

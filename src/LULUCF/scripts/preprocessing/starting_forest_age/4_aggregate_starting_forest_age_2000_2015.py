@@ -46,7 +46,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     main_logger.info(f"Year for forest age map: {age_years}")
 
     # Creates list of output directories specific to the run
-    output_dir_list = [cn.forest_age_2015_interpolated_dir]
+    output_dir_list = [cn.forest_age_2015_gap_filled_dir]
     output_dir_list = [path.replace("CHUNK_SIZE", str(4000)) for path in output_dir_list]
     main_logger.info(f"Directories to aggregate: {output_dir_list}")
 

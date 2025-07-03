@@ -179,9 +179,9 @@ def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list
         uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
 
         if is_final:
-            file_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2015_interpolated_pattern}.tif"
+            file_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2015_gap_filled_pattern}.tif"
         else:
-            file_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2015_interpolated_pattern}__{uu.timestr()}.tif"
+            file_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2015_gap_filled_pattern}__{uu.timestr()}.tif"
 
         # Saves filled in focal chunk locally
         if run_local and no_upload:
@@ -202,7 +202,7 @@ def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list
 
         return_message = f"Success creating filled forest age for {bounds_str}: {uu.timestr()}"
 
-        chunk_stats.append(uu.calculate_stats(filled_crop, cn.forest_age_2015_interpolated_pattern, bounds_str, tile_id, 'output_layer'))
+        chunk_stats.append(uu.calculate_stats(filled_crop, cn.forest_age_2015_gap_filled_pattern, bounds_str, tile_id, 'output_layer'))
 
         if not run_local:
             os.remove(output_tmp_path)
@@ -258,7 +258,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Creates list of output directories specific to the run
     #TODO need to apply to 2000 age also
-    output_dir_list = [cn.forest_age_2015_interpolated_dir]
+    output_dir_list = [cn.forest_age_2015_gap_filled_dir]
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
 
 
