@@ -71,16 +71,16 @@ def create_per_pixel_soils_outputs(bounds, input_dirs, is_final, no_upload, stag
     tid = uu.xy_to_tile_id(bounds[0], bounds[3])
     chunk_px = uu.calc_chunk_length_pixels(bounds)
 
-    # build download dictionary
+    # build download dictionary and map each dataset key to its output folder
     download_dict = {}
+    outdirs = {}
     for folder in input_dirs:
         parts = folder.strip("/").split("/")
         dtype = parts[-6]
         interval = parts[-3]
         key = f"{dtype}_{interval}"
-        download_dict[key] = [
-            f"{folder}{tid}__{bstr}__{dtype}__{interval}.tif"
-        ]
+        download_dict[key] = [f"{folder}{tid}__{bstr}__{dtype}__{interval}.tif"]
+        outdirs[key] = folder.replace("_ha", "_pixel")
 
     futures = uu.prepare_to_download_chunk(bounds, download_dict, chunk_px, is_final, logger)
 
@@ -107,60 +107,51 @@ def create_per_pixel_soils_outputs(bounds, input_dirs, is_final, no_upload, stag
     )
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger)
 
-    out_dict_by_interval = {}
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tid}.tif"
     pixel_area_chunk = uu.get_tile_dataset_rio(
         pixel_area_uri, "Float32", bounds, chunk_px, is_final, logger
     )[0]
 
-
+    upload_tasks = []
     for key, arr in layers.items():
-        dtype, interval = key.rsplit("_", 1)
+        dtype, year_start, year_end = key.rsplit("_", 2)
+        interval = f"{year_start}_{year_end}"
         dtype_pixel = dtype.replace("_ha", "_pixel")
         out_arr = arr * pixel_area_chunk * cn.m2_to_ha
-
-        if interval not in out_dict_by_interval:
-            out_dict_by_interval[interval] = {}
-
-        out_dict_by_interval[interval][dtype_pixel] = [
-            out_arr,
-            out_arr.dtype.name,
-            dtype_pixel,
-            interval,
-        ]
         chunk_stats.append(
             uu.calculate_stats(arr, key, bstr, tid, "output_layer", out_arr)
         )
-
-    if not no_upload:
-        for interval, interval_dict in out_dict_by_interval.items():
-            upload_tasks = uu.save_and_upload_small_raster_set(
+        outdir = outdirs[key]
+        outfile = f"{tid}__{bstr}__{dtype_pixel}__{interval}.tif"
+        upload_tasks.append(
+            (
                 bounds,
                 chunk_px,
                 tid,
-                bstr,
-                interval_dict,
+                out_arr,
+                out_arr.dtype.name,
+                outfile,
+                outdir,
                 is_final,
                 logger,
-                interval_type=cn.intervals_five_year,
-                model_type="ogh_standard_model",
-                no_data_val=0,
+                0,
             )
+        )
 
-            lu.print_and_log(
-                f"Upload tasks created for {bstr} in {tid} for {interval}. Uploading now: {uu.timestr()}",
-                False,
-                logger,
-            )
+    if not no_upload:
+        lu.print_and_log(
+            f"Upload tasks created for {bstr} in {tid}. Uploading now: {uu.timestr()}",
+            False,
+            logger,
+        )
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            executor.map(lambda args: uu.save_and_upload_single_raster(*args), upload_tasks)
 
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
-
-            lu.print_and_log(
-                f"Uploads completed for {bstr} in {tid} for {interval} using {cn.outputs_path}: {uu.timestr()}",
-                is_final,
-                logger,
-            )
+        lu.print_and_log(
+            f"Uploads completed for {bstr} in {tid} using {cn.outputs_path}: {uu.timestr()}",
+            is_final,
+            logger,
+        )
 
     end_time = time.time()
     lu.print_and_log(
@@ -178,16 +169,16 @@ def create_per_pixel_soils_outputs(bounds, input_dirs, is_final, no_upload, stag
 # ----------------------------------------------------------------------
 
 def main(
-    cluster_name,
-    run_local=False,
-    no_stats=False,
-    no_log=False,
-    no_upload=False,
-    chunk_shapefile_uri=None,
-    bounding_box=None,
-    chunk_size=None,
-    first_chunks=None,
-    log_note=None,
+        cluster_name,
+        run_local=False,
+        no_stats=False,
+        no_log=False,
+        no_upload=False,
+        chunk_shapefile_uri=None,
+        bounding_box=None,
+        chunk_size=None,
+        first_chunks=None,
+        log_note=None,
 ):
     stage = "per_pixel_soils_outputs"
     model_type = "ogh_standard_model"
@@ -309,5 +300,5 @@ if __name__ == "__main__":
   --bounding_box 110 -10 120 0 \
   --chunk_size 1 \
   --log_note "Testing per-pixel outputs" 
-    
+
     """
