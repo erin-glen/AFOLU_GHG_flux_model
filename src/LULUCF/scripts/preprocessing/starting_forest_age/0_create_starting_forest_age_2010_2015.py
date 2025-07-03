@@ -283,7 +283,9 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # chunk_list = chunk_list[601:]
     # chunk_list = chunk_list[1201:]
-    chunk_list = chunk_list[3601:]
+    # chunk_list = chunk_list[3601:]
+    # chunk_list = chunk_list[4801:]
+    chunk_list = chunk_list[9901:]
 
     # chunk_list = chunk_list[0:1501]
     # chunk_list = chunk_list[2101:]
