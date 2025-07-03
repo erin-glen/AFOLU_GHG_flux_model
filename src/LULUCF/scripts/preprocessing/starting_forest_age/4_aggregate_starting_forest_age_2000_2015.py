@@ -1,5 +1,5 @@
 """
-Run from git/AFOLU_GHG_flux_model/
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
 
 python -m src.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.3_aggregate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts --first_10x10s_to_process 2 --run_local

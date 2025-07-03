@@ -1,5 +1,5 @@
 """
-Run from git/AFOLU_GHG_flux_model
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Coiled test area without land (i.e. no data):
 python -m src.utilities.create_cluster -cn AFOLU_preprocessing -n 1

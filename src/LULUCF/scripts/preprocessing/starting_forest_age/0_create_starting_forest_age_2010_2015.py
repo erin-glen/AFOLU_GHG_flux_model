@@ -25,7 +25,7 @@ Mini GEE app for age viewing from Simon Besnard (email 6/27/25):
 https://besnardsim.users.earthengine.app/view/globalforestage
 GEE asset: projects/ee-besnardsim/assets/GAMI_v2_0_mean_100m
 
-Run from git/AFOLU_GHG_flux_model
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local (won't run Dask locally because of usage of submit):
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -bb 10 49 11 50 -cs 1 --run_local --no_upload
@@ -285,7 +285,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # chunk_list = chunk_list[1201:]
     # chunk_list = chunk_list[3601:]
     # chunk_list = chunk_list[4801:]
-    chunk_list = chunk_list[9901:]
+    # chunk_list = chunk_list[9901:]
+    chunk_list = chunk_list[12600:]
 
     # chunk_list = chunk_list[0:1501]
     # chunk_list = chunk_list[2101:]

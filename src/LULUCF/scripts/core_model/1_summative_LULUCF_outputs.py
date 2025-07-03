@@ -1,5 +1,5 @@
 """
-Run from git/AFOLU_GHG_flux_model
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Can only run on 1x1 degree chunks that do not have the run timestamp in the file name.
 The way this builds the input file names, it can't handle filenames with the run timestamp.

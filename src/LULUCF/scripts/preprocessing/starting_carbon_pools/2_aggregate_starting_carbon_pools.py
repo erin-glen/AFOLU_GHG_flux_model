@@ -1,5 +1,5 @@
 """
-Run from git/AFOLU_GHG_flux_model/
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
 
 Currently only aggregates per-ha outputs to 10x10 deg, not per-pixel outputs.
 

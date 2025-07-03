@@ -1,6 +1,6 @@
 """
 
-Run from git/AFOLU_GHG_flux_model/
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
 python -m src.utilities.create_cluster -n 11 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.Potapov_file_system_to_s3_copy -cn AFOLU_flux_model_scripts
 

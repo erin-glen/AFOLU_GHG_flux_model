@@ -1,5 +1,5 @@
 """
-Run from git/AFOLU_GHG_flux_model
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 # 6 workers with 5 threads each should be able to process 39 outputs in one pass (3 workers * (12 threads/worker + 1 bonus thread that's always there)).
 # Making tile indexes takes basically no memory, so each worker can handle lots of tasks at the same time, it seems.

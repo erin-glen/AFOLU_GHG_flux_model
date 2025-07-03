@@ -1,5 +1,5 @@
 """
-Run from git/AFOLU_GHG_flux_model
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 python -m src.utilities.create_cluster -n 20 -m 32 -c 4 -t 1 -i 15 -cn global_4km_raster
 python -m scripts.postprocessing.create_global_4km_maps -cn global_4km_raster

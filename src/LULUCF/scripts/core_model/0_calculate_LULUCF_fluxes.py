@@ -1,5 +1,5 @@
 """
-Run from git/AFOLU_GHG_flux_model
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work):
 python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --no_upload -yr 2000 2023 --run_date YYYYMMDD

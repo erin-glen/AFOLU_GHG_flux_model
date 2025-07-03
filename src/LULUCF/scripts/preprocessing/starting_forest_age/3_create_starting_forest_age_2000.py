@@ -1,10 +1,10 @@
 """
 Creates starting forest age from interpolated 2010 age map.
 
-Run from git/AFOLU_GHG_flux_model
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local:
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_create_starting_forest_age_2000 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --run_local --no_upload --no_stats --no_log
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.3_create_starting_forest_age_2000 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --run_local --no_upload --no_stats --no_log
 
 Coiled test:
 python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 1
@@ -100,18 +100,18 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     # Initialize a binary disturbance mask for 2000–2010
     disturbance_mask = np.zeros_like(age_2010, dtype=bool)
 
-    # # Disturbance criteria 1: Check all annual disturbance rasters from 2001 to 2010
-    # for year in range(2001, 2011):
-    #     disturbance_key = f"{cn.forest_disturbance_layer_name}_{year}"
-    #     disturbance_mask |= layers[disturbance_key] > 0
-
-    # Disturbance criteria 2: Low vegetation height (<5 m) in 2000, 2005, or 2010
+    # Disturbance criteria 1: Low vegetation height (<5 m) in 2000, 2005, or 2010
     for year in [2005, 2010]:
         veg_height_key = f"{cn.vegetation_height_pattern}_{year}"
         disturbance_mask |= layers[veg_height_key] < 5
 
-    # # Disturbance criteria 3: Vegetation height drop >= 5 m from one time to another
-    # # Define year pairs to compare
+    # # Disturbance criteria 2: Vegetation height drop >= 5 m from one time to another.
+    # # Define year pairs to compare.
+    # # Not currently using as a reason to reset the age in 2000,
+    # # per https://app.asana.com/1/25496124013636/task/1209335072194767/comment/1210698775382719?focus=true
+    # # Essentially, although there has been a disturbance resulting in height decrease, this was tree cover
+    # # the entire time, so nothing has clearly interrupted the age progression from 2000 to 2010.
+    # # In other words, there has been no decision interruption in stand age just because of a height decrease.
     # height_drop_pairs = [(2000, 2005), (2005, 2010), (2000, 2010)]
     # for start_year, end_year in height_drop_pairs:
     #     key_start = f"{cn.vegetation_height_pattern}_{start_year}"
@@ -119,7 +119,17 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     #     height_diff = layers[key_start].astype(np.int16) - layers[key_end].astype(np.int16)
     #     disturbance_mask |= height_diff >= 5
 
-    # Age=0 criterria: Low vegetation height (<5m) in 2000 → age = 0
+    # # Disturbance criteria 3: Check all annual disturbance rasters from 2001 to 2010
+    # # Not currently using as a reason to reset the age in 2000,
+    # # per https://app.asana.com/1/25496124013636/task/1209335072194767/comment/1210698775382719?focus=true
+    # # Essentially, although there has been an annual disturbance flag, this was tree cover
+    # # the entire time, so nothing has clearly interrupted the age progression from 2000 to 2010.
+    # # In other words, there has been no decision interruption in stand age just because of a height decrease.
+    # for year in range(2001, 2011):
+    #     disturbance_key = f"{cn.forest_disturbance_layer_name}_{year}"
+    #     disturbance_mask |= layers[disturbance_key] > 0
+
+    # Age=0 criteria: Low vegetation height (<5m) in 2000 → age = 0
     veg_height_2000_key = f"{cn.vegetation_height_pattern}_2000"
     low_height_2000_mask = layers[veg_height_2000_key] < 5
 

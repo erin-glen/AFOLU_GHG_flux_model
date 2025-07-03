@@ -1,5 +1,5 @@
 """
-Run from git/AFOLU_GHG_flux_model
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 python -m src.utilities.create_cluster -n 1 -t 4
 python -m src.utilities.create_cluster -n 200 -t 4 #In practice, the tasks seem so short that it can't actually use that many threads at once

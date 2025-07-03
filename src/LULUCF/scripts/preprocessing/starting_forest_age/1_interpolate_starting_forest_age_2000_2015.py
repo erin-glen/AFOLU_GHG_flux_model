@@ -6,7 +6,7 @@ Interpolation uses the age in the focal chunk and all adjacent chunks that exist
 artifacts for age interpolation around the edges of chunks (or at least they are reduced because ages in surrounding
 chunks are considered).
 
-Run from git/AFOLU_GHG_flux_model
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local:
 Has age data (should not have any 0s):

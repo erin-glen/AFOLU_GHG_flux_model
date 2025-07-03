@@ -1,5 +1,5 @@
 """
-Run from git/AFOLU_GHG_flux_model/
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
 
 Local:
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.0_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY

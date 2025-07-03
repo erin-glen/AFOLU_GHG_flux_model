@@ -3,12 +3,18 @@ Script to convert Simon Besnard's age pre-disturbance 1deg zarr into a global ge
 Finished with assistance from ChatGPT: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68669be7-8698-800a-a2e9-f1bd7c83c037
 Simon sent the zarr on 2025-07-02/2025-07-03.
 It is currently accepted at Nature Ecology and Evolution.
+Simon's explanation of this map (email 2025-07-03):
+"So stand_replaced_diff is the age difference between 2020 and 2010 for forests disturbed between 2010 and 2020.
+Initially, it is negative because I do age 2020 - age 2010. One can have positive value if very young forests in 2010 (<10 years)
+where disturbed between 2010 and 2020. It is not directly age-pre disturbance but a very good approximation."
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/src/LULUCF/scripts/preprocessing/starting_forest_age
 python 2_map_age_pre_disturbance.py
 
 Input and output are local. Doesn't use s3.
 Inputs and outputs in s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/forest_age/age_pre_disturbance_Besnard_et_al/
+
+This only needs to be run once, unless Simon updates the age pre-disturbance map.
 
 """
 import xarray as xr

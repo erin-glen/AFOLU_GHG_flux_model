@@ -2,7 +2,7 @@
 Converts global geotifs into global COGs
 From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/685ee215-b624-800a-9ab7-06d1c27a1697
 
-Run from git/AFOLU_GHG_flux_model/
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
 
 python -m src.Agriculture.scripts.postprocessing.create_global_COGs
 """

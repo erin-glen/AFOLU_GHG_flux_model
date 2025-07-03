@@ -1,5 +1,5 @@
 """
-Run from git/AFOLU_GHG_flux_model
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 python -m src.utilities.create_cluster -n 40 -m 32 -t 1 -cn cropland_emissions_test
 python -m scripts.postprocessing.create_global_4km_maps -cn cropland_emissions_test
