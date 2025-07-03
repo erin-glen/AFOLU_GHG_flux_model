@@ -118,8 +118,7 @@ def calculate_drainage_and_emissions(
 
     # output arrays ----------------------------------------------------
     soil_block = np.zeros((rows, cols), dtype=np.uint32)
-    state_block = np.zeros((rows, cols), dtype=np.uint32)
-    emission_state_block = np.zeros((rows, cols), dtype=np.uint32)
+    drained_state_block = np.zeros((rows, cols), dtype=np.uint32)
 
     drained_co2_out = np.zeros((rows, cols), dtype=np.float32)
     drained_n2o_out = np.zeros((rows, cols), dtype=np.float32)
@@ -128,8 +127,7 @@ def calculate_drainage_and_emissions(
     drained_co2_offsite_out = np.zeros((rows, cols), dtype=np.float32)
     drained_total_co2e_out = np.zeros((rows, cols), dtype=np.float32)
 
-    burned_state_out = np.zeros((rows, cols), dtype=np.uint32)
-    burned_emission_state_block = np.zeros((rows, cols), dtype=np.uint32)
+    burned_state_block = np.zeros((rows, cols), dtype=np.uint32)
     burned_co2_out = np.zeros((rows, cols), dtype=np.float32)
     burned_co_out = np.zeros((rows, cols), dtype=np.float32)
     burned_ch4_out = np.zeros((rows, cols), dtype=np.float32)
@@ -197,7 +195,8 @@ def calculate_drainage_and_emissions(
                 node = nu.accrete_node(node, 2)
                 soil_block[row, col] = 0  # not peat
 
-            state_block[row, col] = node
+            # start building the unified drained state with the classification node
+            drained_node = node
 
             # B) Drainage emission factors --------------------------------
             if soil_block[row, col] == 2:  # only if drained
@@ -321,7 +320,18 @@ def calculate_drainage_and_emissions(
                 drained_co2_offsite_out[row, col] = co2_off
                 drained_total_co2e_out[row, col] = total_co2e
 
-            emission_state_block[row, col] = emission_node
+            if soil_block[row, col] == 2:
+                if np.array_equal(vals, defac.ZERO_ARRAY):
+                    if ecozone == boreal_code:
+                        drained_node = nu.accrete_node(drained_node, 91)
+                    elif ecozone == temperate_code:
+                        drained_node = nu.accrete_node(drained_node, 92)
+                    elif ecozone == tropical_code:
+                        drained_node = nu.accrete_node(drained_node, 93)
+                else:
+                    drained_node = nu.join_codes(drained_node, emission_node)
+
+            drained_state_block[row, col] = drained_node
 
             # C) Burned‑area emissions -------------------------------------
             burned_node = 0
@@ -375,15 +385,6 @@ def calculate_drainage_and_emissions(
 
                     # explicitly handle missing burned-area emission factors
                     if np.array_equal(bvals, baf.ZERO_ARRAY):
-                        if ecozone == boreal_code:
-                            burned_emission_node = nu.accrete_node(burned_emission_node, 94)
-                        elif ecozone == temperate_code:
-                            burned_emission_node = nu.accrete_node(burned_emission_node, 95)
-                        elif ecozone == tropical_code:
-                            burned_emission_node = nu.accrete_node(burned_emission_node, 96)
-                        else:
-                            burned_emission_node = nu.accrete_node(burned_emission_node, 97)
-
                         gef_co2 = gef_co = gef_ch4 = mass_burnt = np.float32(0.0)
                     else:
                         gef_co2 = bvals[0]
@@ -411,15 +412,24 @@ def calculate_drainage_and_emissions(
                     burned_ch4_out[row, col] = burn_ch4
                     burned_total_co2e_out[row, col] = burn_total_co2e
 
-            burned_state_out[row, col] = burned_node
-            burned_emission_state_block[row, col] = burned_emission_node
+            if np.array_equal(bvals, baf.ZERO_ARRAY):
+                if ecozone == boreal_code:
+                    burned_node = nu.accrete_node(burned_node, 94)
+                elif ecozone == temperate_code:
+                    burned_node = nu.accrete_node(burned_node, 95)
+                elif ecozone == tropical_code:
+                    burned_node = nu.accrete_node(burned_node, 96)
+                else:
+                    burned_node = nu.accrete_node(burned_node, 97)
+            else:
+                burned_node = nu.join_codes(burned_node, burned_emission_node)
+
+            burned_state_block[row, col] = burned_node
 
     # pack outputs ----------------------------------------------------------
     out_dict_uint32["soil"] = soil_block
-    out_dict_uint32["state"] = state_block
-    out_dict_uint32["emission_state"] = emission_state_block
-    out_dict_uint32["burned_state"] = burned_state_out
-    out_dict_uint32["burned_emission_state"] = burned_emission_state_block
+    out_dict_uint32["drained_state"] = drained_state_block
+    out_dict_uint32["burned_state"] = burned_state_block
 
     out_dict_float32["drained_co2_Mg_CO2_ha"] = drained_co2_out
     out_dict_float32["drained_n2o_Mg_CO2e_ha"] = drained_n2o_out
@@ -593,8 +603,8 @@ def calculate_and_upload_drainage(
     outputs = {**out_u32, **out_f32}
 
     # stats for outputs, with explicit layer categorization
-    drainage_classification_layers = ["soil", "state", "emission_state"]
-    burned_classification_layers = ["burned_state", "burned_emission_state"]
+    drainage_classification_layers = ["soil", "drained_state"]
+    burned_classification_layers = ["burned_state"]
 
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tid}.tif"
     pixel_area_chunk = uu.get_tile_dataset_rio(

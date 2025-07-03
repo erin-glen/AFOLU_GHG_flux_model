@@ -12,7 +12,6 @@ DATA_TYPES = [
     "burned_co2_Mg_CO2_ha",
     "burned_co_Mg_CO2e_ha",
     "burned_state",
-    "burned_emission_state",
     "burned_total_Mg_CO2e_ha",
     "drained_ch4_ditch_Mg_CO2e_ha",
     "drained_ch4_land_Mg_CO2e_ha",
@@ -20,9 +19,8 @@ DATA_TYPES = [
     "drained_co2_offsite_Mg_CO2_ha",
     "drained_n2o_Mg_CO2e_ha",
     "drained_total_Mg_CO2e_ha",
-    "emission_state",
+    "drained_state",
     "soil",
-    "state",
 ]
 
 INVENTORY_PERIODS = [
@@ -33,8 +31,8 @@ INVENTORY_PERIODS = [
     "2020_2023",
 ]
 
-BASE_URL = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_4_0"
-OUTPUT_DATE = "20250702"
+BASE_URL = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_4_2"
+OUTPUT_DATE = "20250703"
 
 
 def get_input_datasets(pixel_resolution: str = "4000_pixels") -> list:
