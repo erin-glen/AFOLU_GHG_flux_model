@@ -1,5 +1,12 @@
 """
-Creates starting forest age from interpolated 2010 age map.
+Creates starting forest age in 2000 from interpolated 2010 age map and associated classification of the age pixels.
+This matches a slide in the AFOLU model diagram deck.
+
+age_2000 source flag key:
+1 = Not tall vegetation in 2000 (age assigned 0)
+2 = Not tall vegetation in 2005 or 2010 (i.e. disturbance) (assign Besnard age at disturbance map)
+3 = Age <= 10 years in 2010 (assign Besnard age at disturbance map)
+4 = age_2000 = age_2010 - 10
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
@@ -55,11 +62,11 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     ### No checks about whether the chunk has data because the way the chunk_list is constructed,
     ### every chunk is relevant and should be processed, so they don't need to be checked.
 
-    # TODO Replace with reading interpolated 2010 10x10 deg age geotifs in main function
-    download_dict_with_data_types[f"{cn.forest_age_2010_pattern}"] = [f"{cn.forest_age_2010_dir}{tile_id}__{bounds_str}__{cn.forest_age_2010_pattern}.tif", 'Byte']
-    for key, value in download_dict_with_data_types.items():
-        if "CHUNK_SIZE" in value[0]:
-            value[0] = value[0].replace("CHUNK_SIZE", "4000")
+    # # TODO Replace with reading interpolated 2010 10x10 deg age geotifs in main function
+    # download_dict_with_data_types[f"{cn.forest_age_2010_pattern}"] = [f"{cn.forest_age_2010_dir}{tile_id}__{bounds_str}__{cn.forest_age_2010_pattern}.tif", 'Byte']
+    # for key, value in download_dict_with_data_types.items():
+    #     if "CHUNK_SIZE" in value[0]:
+    #         value[0] = value[0].replace("CHUNK_SIZE", "4000")
 
     # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
@@ -195,8 +202,6 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
 
     ### Part 3: Saves and uploads the output rasters
 
-    output_dir = output_dir_list[0]
-
     fs = fsspec.filesystem("s3")
 
     forest_age_2010_path = updated_download_dict["forest_age_2010"][0]
@@ -235,8 +240,8 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
         dst.write(age_2000_source_flag, 1)
 
     # Optional: Uploads to S3
-    age_2000_s3_path = f"{output_dir}{age_2000_name}"
-    age_2000_source_flag_s3_path = f"{output_dir}{age_2000_source_flag_name}"
+    age_2000_s3_path = f"{output_dir_list[0]}{age_2000_name}"
+    age_2000_source_flag_s3_path = f"{output_dir_list[1]}{age_2000_source_flag_name}"
 
     if not no_upload:
         with fs.open(age_2000_s3_path, "wb") as f_out:
@@ -249,7 +254,7 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     return_message = f"Success creating forest age 2000 for {bounds_str}: {uu.timestr()}"
 
     chunk_stats.append(uu.calculate_stats(age_2000, cn.forest_age_2000_gap_filled_pattern, bounds_str, tile_id, 'output_layer'))
-    chunk_stats.append(uu.calculate_stats(age_2000_source_flag, cn.forest_age_2000_gap_filled_pattern, bounds_str, tile_id, 'output_layer'))
+    chunk_stats.append(uu.calculate_stats(age_2000_source_flag, cn.forest_age_2000_gap_filled_source_flag_pattern, bounds_str, tile_id, 'output_layer'))
 
     if not run_local:
         os.remove(age_2000_tmp_path)
@@ -311,7 +316,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Dictionary of data to download (inputs to model). Forest age 2010 is added to the download dictionary at the chunk level
     # since that is a 4000x4000-pixel input.
-    download_dict = {}
+    download_dict = {cn.forest_age_2010_gap_filled_pattern: f"{cn.forest_age_2010_gap_filled_dir}{sample_tile_id}_{cn.forest_age_2010_gap_filled_pattern}.tif",}
 
     for year in range(2000, 2011, cn.five_year_interval_duration):
         download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_5_year_path}{year}/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_{year}.tif"
@@ -334,7 +339,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # print(download_dict_with_data_types)
 
     # Creates list of output directories specific to the run
-    output_dir_list = [cn.forest_age_2000_gap_filled_dir]
+    output_dir_list = [cn.forest_age_2000_gap_filled_dir, cn.forest_age_2000_gap_filled_source_flag_dir]
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
 
 
