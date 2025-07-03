@@ -38,9 +38,9 @@ INVENTORY_PERIODS = [
 
 BASE_URL = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/"
-    "outputs/version_0_4_1"
+    "outputs/version_0_4_0"
 )
-OUTPUT_DATE = "20250703"
+OUTPUT_DATE = "20250702"
 PIXEL_RES = "4000_pixels"
 
 
@@ -253,15 +253,8 @@ def main(
             main_logger.info(f"Output rasters in {folder}: {file_count}")
 
     if not run_local:
-        workers = client.scheduler_info()["workers"]
-        n_workers = len(workers)
-        if n_workers > 10:
-            main_logger.info("Resizing cluster to 1 worker")
-            uu.resize_cluster.resize_coiled_cluster(cluster_name, 1)
-
-    if not run_local:
         worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
-        uu.stage_duration(start_time, uu.timestr(), f"{stage} with log compilation", main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with log compilation")
         lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
         client.close()
 
