@@ -41,14 +41,15 @@ python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting
 Full run:
 python -m src.utilities.create_cluster -n 20 -t 9 -m 32 -cn LULUCF_preprocessing
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
-When I ran with -n 7 -t 9, it would process only about 3 batches of 300 chunks (900 chunks) before failing,
-sometimes because it ran out of memory. Increasing the cluster size to -n 12 -t 9 made it run through 1800 chunks before failing!
 I think that the cluster with 7 workers simply couldn't handle all the data it was downloading at a certain point.
+20 workers seemed to work better than 10. 32 GB workers seemed to work better than 16 GB workers.
+I didn't try lots of different configutations, like the number of threads/worker.
+More optimization is possible but I hope to never have to do this again.
 I also noticed that the batches took wildly different amounts of time depending on where they were.
 Some batches in the 60N band took 1 hour to run, while those around 50S took 20 minutes to run, and batches in 70N
 and 80N took just a few minutes to run. I suppose this makes sense, but is worth noting all the same.
 
-If I ever re-run this, be prepared for it to be a slog. Maybe try upping it to 20 workers or so and see if that leads
+If I ever re-run this, be prepared for it to be a slog. Maybe try upping it to 30 workers or so and see if that leads
 to getting through more batches before failure. I would definitely continue to use batches, though.
 chunk_list = chunk_list[1501:] is how I resumed the processing at the batch that failed.
 
@@ -286,20 +287,12 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # chunk_list = chunk_list[3601:]
     # chunk_list = chunk_list[4801:]
     # chunk_list = chunk_list[9901:]
-    chunk_list = chunk_list[12600:]
+    # chunk_list = chunk_list[12600:]
+    # chunk_list = chunk_list[14100:]
 
-    # chunk_list = chunk_list[0:1501]
-    # chunk_list = chunk_list[2101:]
-    # chunk_list = chunk_list[2701:]
-    # chunk_list = chunk_list[3601:]
-    # chunk_list = chunk_list[4501:]
-    # chunk_list = chunk_list[5101:]
-    # chunk_list = chunk_list[6301:]
-    # chunk_list = chunk_list[8101:]
-    # chunk_list = chunk_list[11401:]
-    # chunk_list = chunk_list[13201:]
-    # chunk_list = chunk_list[14401:]
-    # chunk_list = chunk_list[16501:]
+    # # Filling in gaps in processed chunks
+    # chunk_list = chunk_list[1200:1810]
+
 
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")

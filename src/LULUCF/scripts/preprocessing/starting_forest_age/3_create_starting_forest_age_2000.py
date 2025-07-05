@@ -323,6 +323,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     for year in range(2001, 2011):
         download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.forest_disturbance_annual_dir}{year}/{year}_{sample_tile_id}.tif"
+    main_logger.info(f"download_dict: {download_dict}")
 
     # Returns the first tile in each input so that the datatype can be determined.
     # This is done up front, once per tile set, rather than on each chunk, since
@@ -341,6 +342,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Creates list of output directories specific to the run
     output_dir_list = [cn.forest_age_2000_gap_filled_dir, cn.forest_age_2000_gap_filled_source_flag_dir]
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
+    main_logger.info(f"output_dir_list: {output_dir_list}")
 
 
     ### Step 2: Create 1x1 degree outputs

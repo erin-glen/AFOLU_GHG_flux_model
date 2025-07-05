@@ -1746,6 +1746,9 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
     # print(download_dict_with_data_types)
 
+    if is_final:
+        main_logger.info(f"download_dict: {download_dict}")
+
 
     # Creates a list of output directories (core and intermediates) for all outputs and intervals based on specifics of the model run
     output_dir_list_core_intermediate = cn.LULUCF_core_output_dirs + cn.LULUCF_intermediate_output_dirs

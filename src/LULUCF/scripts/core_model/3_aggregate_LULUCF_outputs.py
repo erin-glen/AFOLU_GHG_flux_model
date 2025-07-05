@@ -99,6 +99,7 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
 
     # Full list of folders to aggregate
     output_dir_list = output_dir_list_per_ha + output_dir_list_per_pixel + land_state_node_list
+    main_logger.info(f"Directories to aggregate: {output_dir_list}")
 
     # # For testing- first folder only, so contents of all folders don't need to be listed
     # output_dir_list = output_dir_list[0:1]

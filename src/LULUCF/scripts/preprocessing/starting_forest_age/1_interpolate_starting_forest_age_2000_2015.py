@@ -260,6 +260,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     #TODO need to apply to 2000 age also
     output_dir_list = [cn.forest_age_2015_gap_filled_dir]
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
+    main_logger.info(f"output_dir_list: {output_dir_list}")
 
 
     ### Step 2: Create 1x1 degree outputs
