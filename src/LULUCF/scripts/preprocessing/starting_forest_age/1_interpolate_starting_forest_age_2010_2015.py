@@ -1,7 +1,7 @@
 """
-Interpolates forest age in 2015 to assign an age to all pixels for which there is no age in GAMI v2.1.
-This way, every pixel has a starting age in 2015.
-Chunks that do not have any age pixels are returned as rasters with all 0s.
+Interpolates forest age in 2010 and 2015 to assign an age to all pixels for which there is no age in GAMI v2.1.
+This way, every pixel has a starting age in 2010 and 2015.
+1x1 deg chunks that do not have any age pixels are returned as rasters with all 0s.
 Interpolation uses the age in the focal chunk and all adjacent chunks that exist so that there are not
 artifacts for age interpolation around the edges of chunks (or at least they are reduced because ages in surrounding
 chunks are considered).
@@ -10,20 +10,38 @@ Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local:
 Has age data (should not have any 0s):
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2010_2015 --year 2010 -bb 10 49 11 50 -cs 1 --run_local --no_upload
 Does not have age data (should output a raster full of 0s):
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts -bb -28 -60 -27 -59 -cs 1 --run_local
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2010_2015 --year 2010 -bb -28 -60 -27 -59 -cs 1 --run_local
 
 Coiled test:
-python -m src.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 5
+python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 1
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 5
 
-Full run:
-python -m src.utilities.create_cluster -n 20 -t 19 -cn AFOLU_flux_model_scripts
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2000_2015 -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
+Full Coiled run (2010):
+python -m src.utilities.create_cluster -n 20 -t 19 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
 This goes very quickly, so -n 20 -t 19 is totally adequate. Could try -t 21 next time.
 Max memory: 8 GB. 12:30 to finish chunks; 12:51 with chunk stat aggregation; 23 Coiled credits; $0.83 AWS
+
+Peak memory per worker: ~2.8 GB
+Time until chunk stats: X 
+Time after chunk stats: Y
+Coiled credits: X (X/hr for X Y workers, according to dashboard)
+AWS cost: $X 
+
+Full Coiled run (2015):
+python -m src.utilities.create_cluster -n 20 -t 19 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2010_2015 --year 2015 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
+This goes very quickly, so -n 20 -t 19 is totally adequate. Could try -t 21 next time.
+Max memory: 8 GB. 12:30 to finish chunks; 12:51 with chunk stat aggregation; 23 Coiled credits; $0.83 AWS
+
+Peak memory per worker: ~2.8 GB
+Time until chunk stats: X 
+Time after chunk stats: Y
+Coiled credits: X (X/hr for X Y workers, according to dashboard)
+AWS cost: $X 
 
 https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67e69c53-bcd4-800a-8874-8cf4d1fb9c56
 https://chatgpt.com/share/e/67eaa8ea-b108-800a-b469-b813b970d61f
@@ -36,6 +54,8 @@ import rasterio
 import rasterio.merge
 import dask
 import fsspec
+import psutil
+import sys
 
 from rasterio.windows import from_bounds
 from scipy.ndimage import distance_transform_edt
@@ -48,11 +68,14 @@ from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
 
 
-def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
+def interpolate_starting_forest_age(bounds, input_dir, input_pattern, output_pattern,
+                                    is_final, no_upload, output_dir_list, stage):
 
     chunk_stats = []
 
     logger_worker = lu.setup_logging_worker()
+
+    process = psutil.Process(os.getpid())
 
     try:
 
@@ -64,8 +87,8 @@ def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list
 
         ### Part 1: Identifies chunks adjacent to focal chunk and downloads focal and adjacent chunks
 
-        input_dir = cn.forest_age_2015_dir
         output_dir = output_dir_list[0]
+
 
         # The buffer determines which chunks adjacent to the focal chunk are downloaded, so it doesn't matter exactly how
         # big the buffer it as long as it's <1 deg.
@@ -93,7 +116,7 @@ def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list
         # Tries to load each chunk identified above (focal, plus 8 adjacent chunks)
         for neighbor_tile_id, tile_bounds in tile_ids_and_bounds:
             neighbor_bounds_str = uu.boundstr(tile_bounds)
-            tile_path = f"{input_dir}{neighbor_tile_id}__{neighbor_bounds_str}__{cn.forest_age_2015_pattern}.tif"
+            tile_path = f"{input_dir}{neighbor_tile_id}__{neighbor_bounds_str}__{input_pattern}.tif"
             tile_path = tile_path.replace("CHUNK_SIZE", str(chunk_length_pixels))
 
             try:
@@ -172,6 +195,9 @@ def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list
             compress='lzw'
         )
 
+        lu.print_and_log(f"Done gap-filling starting age in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+        lu.print_and_log(f"Memory usage after gap-filling starting age for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",is_final, logger_worker)
+
 
         ### Part 3: Saves and uploads the output raster
 
@@ -179,13 +205,13 @@ def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list
         uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
 
         if is_final:
-            file_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2015_gap_filled_pattern}.tif"
+            file_name = f"{tile_id}__{bounds_str}__{output_pattern}.tif"
         else:
-            file_name = f"{tile_id}__{bounds_str}__{cn.forest_age_2015_gap_filled_pattern}__{uu.timestr()}.tif"
+            file_name = f"{tile_id}__{bounds_str}__{output_pattern}__{uu.timestr()}.tif"
 
         # Saves filled in focal chunk locally
         if run_local and no_upload:
-            output_tmp_path = f"/mnt/c/GIS/AFOLU_flux_model/forest_age/filled_in/{file_name}"
+            output_tmp_path = f"/mnt/c/GIS/AFOLU_flux_model/forest_age/gap_filled/{file_name}"
         else:
             output_tmp_path = f"/tmp/{file_name}"
 
@@ -202,7 +228,7 @@ def interpolate_starting_forest_age(bounds, is_final, no_upload, output_dir_list
 
         return_message = f"Success creating filled forest age for {bounds_str}: {uu.timestr()}"
 
-        chunk_stats.append(uu.calculate_stats(filled_crop, cn.forest_age_2015_gap_filled_pattern, bounds_str, tile_id, 'output_layer'))
+        chunk_stats.append(uu.calculate_stats(filled_crop, output_pattern, bounds_str, tile_id, 'output_layer'))
 
         if not run_local:
             os.remove(output_tmp_path)
@@ -232,6 +258,10 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
+    # Shapefile of chunk footprints to use if none is supplied on the command line
+    if not chunk_shapefile_uri:
+        chunk_shapefile_uri = cn.fishnet_1x1deg_uri
+
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
@@ -256,10 +286,24 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         is_final = True
         main_logger.info("Running as final model.")
 
+    # Sets inputs and outputs
+    if year == 2010:
+        input_dir = cn.forest_age_2010_dir
+        input_pattern = cn.forest_age_2010_pattern
+        output_dir_list = [cn.forest_age_2010_gap_filled_dir]
+        output_pattern = cn.forest_age_2010_gap_filled_pattern
+    elif year == 2015:
+        input_dir = cn.forest_age_2015_dir
+        input_pattern = cn.forest_age_2015_pattern
+        output_dir_list = [cn.forest_age_2015_gap_filled_dir]
+        output_pattern = cn.forest_age_2015_gap_filled_pattern
+    else:
+        sys.exit("Year not supported. Must be 2010 or 2015.")
+
     # Creates list of output directories specific to the run
-    #TODO need to apply to 2000 age also
-    output_dir_list = [cn.forest_age_2015_gap_filled_dir]
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
+
+    main_logger.info(f"input age directory to process: {input_dir}")
     main_logger.info(f"output_dir_list: {output_dir_list}")
 
 
@@ -274,7 +318,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     uu.create_s3_task_files(stage, chunk_list)
 
     delayed_results_1x1_deg = [dask.delayed(interpolate_starting_forest_age)
-                       (chunk, is_final, no_upload, output_dir_list, stage)
+                       (chunk, input_dir, input_pattern, output_pattern, is_final, no_upload, output_dir_list, stage)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results
@@ -303,7 +347,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 
-            resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
+            resize_cluster.resize_coiled_cluster("LULUCF_preprocessing", 1)
 
     # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
@@ -329,7 +373,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Interpolate starting forest age in 2000 and 2015")
+    parser = argparse.ArgumentParser(description="Interpolate starting forest age in 2010 and 2015")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')

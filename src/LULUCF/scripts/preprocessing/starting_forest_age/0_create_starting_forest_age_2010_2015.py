@@ -53,6 +53,8 @@ If I ever re-run this, be prepared for it to be a slog. Maybe try upping it to 3
 to getting through more batches before failure. I would definitely continue to use batches, though.
 chunk_list = chunk_list[1501:] is how I resumed the processing at the batch that failed.
 
+This uses approximately 1200 Coiled credits over all the clusters.
+
 https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=8f5974e7-3ece-11ef-967a-4ffbfe06208e
 https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/
 Metadata: https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/2023-006_Besnard-et-al_Data-Description-v2.1.pdf
