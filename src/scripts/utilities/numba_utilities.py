@@ -6,14 +6,56 @@ from numba.core import types
 # Project imports
 from . import constants_and_names as cn
 
-@jit(nopython=True)
-def accrete_node(combo, new):
+# ----------------------------------------------------------------------
+# UNAMBIGUOUS INTEGER ENCODERS
+# ----------------------------------------------------------------------
+from numba import njit
+
+@njit(inline='always')
+def _ndigits(val: int) -> int:
+    """Return number‑of‑decimal‑digits in *val* (val ≠ 0)."""
+    n = 1
+    while val >= 10:
+        val //= 10
+        n += 1
+    return n
+
+
+@njit(inline='always')
+def accrete_node(combo: int, new: int) -> int:
     """
-    Combine two integer codes, preserving digit order.
-    Example: node=1, new=3 => 13
+    Append the **full** decimal representation of *new* to *combo*.
+
+    This performs the equivalent of: int(f"{combo}{new}")
+    but stays in integer space for Numba speed and works
+    for any 0 ≤ new < 10 000 (enough for every branch in the model).
+
+    Examples
+    --------
+    >>> accrete_node(12, 3)    # 12 → 123
+    123
+    >>> accrete_node(12, 34)   # 12 → 1234   (no collision!)
+    1234
     """
-    combo = combo*10 + new
-    return combo
+    if new == 0:
+        return combo          # appending “0” is a no‑op
+    shift = 10 ** _ndigits(new)
+    return combo * shift + new
+
+
+@njit(inline='always')
+def pad_to_6_digits(value: int, max_digits: int = 6) -> int:
+    """
+    Right‑pad *value* with zeroes until it has exactly *max_digits* digits.
+    Raises if *value* already exceeds the allowed length.
+    """
+    if value == 0:
+        return 0
+    digits = _ndigits(value)
+    if digits > max_digits:
+        raise ValueError("Node exceeds maximum allowed length")
+    return value * (10 ** (max_digits - digits))
+
 
 
 def create_typed_dicts(layers):

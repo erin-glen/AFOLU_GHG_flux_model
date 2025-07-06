@@ -94,6 +94,9 @@ def calculate_drainage_and_emissions(
     out_dict_uint32 = Dict.empty(types.unicode_type, types.uint32[:, :])
     out_dict_float32 = Dict.empty(types.unicode_type, types.float32[:, :])
 
+    # The maximum allowed digits for classification nodes.
+    max_digits_state = 8
+
     # required inputs --------------------------------------------------
     peat_block = in_dict_uint8["peat"]
     land_cover_block = in_dict_uint8["land_cover"]
@@ -119,7 +122,6 @@ def calculate_drainage_and_emissions(
     # output arrays ----------------------------------------------------
     soil_block = np.zeros((rows, cols), dtype=np.uint32)
     state_block = np.zeros((rows, cols), dtype=np.uint32)
-    emission_state_block = np.zeros((rows, cols), dtype=np.uint32)
 
     drained_co2_out = np.zeros((rows, cols), dtype=np.float32)
     drained_n2o_out = np.zeros((rows, cols), dtype=np.float32)
@@ -129,7 +131,6 @@ def calculate_drainage_and_emissions(
     drained_total_co2e_out = np.zeros((rows, cols), dtype=np.float32)
 
     burned_state_out = np.zeros((rows, cols), dtype=np.uint32)
-    burned_emission_state_block = np.zeros((rows, cols), dtype=np.uint32)
     burned_co2_out = np.zeros((rows, cols), dtype=np.float32)
     burned_co_out = np.zeros((rows, cols), dtype=np.float32)
     burned_ch4_out = np.zeros((rows, cols), dtype=np.float32)
@@ -197,7 +198,6 @@ def calculate_drainage_and_emissions(
                 node = nu.accrete_node(node, 2)
                 soil_block[row, col] = 0  # not peat
 
-            state_block[row, col] = node
 
             # B) Drainage emission factors --------------------------------
             if soil_block[row, col] == 2:  # only if drained
@@ -309,7 +309,13 @@ def calculate_drainage_and_emissions(
                 drained_co2_offsite_out[row, col] = co2_off
                 drained_total_co2e_out[row, col] = total_co2e
 
-            emission_state_block[row, col] = emission_node
+            if emission_node > 0:
+                node = nu.accrete_node(node, emission_node)
+
+            if node > (10 ** max_digits_state) - 1:
+                raise ValueError("Maximum state digits exceeded")
+
+            state_block[row, col] = nu.pad_to_6_digits(node, max_digits_state)
 
             # C) Burned‑area emissions -------------------------------------
             burned_node = 0
@@ -385,15 +391,18 @@ def calculate_drainage_and_emissions(
                     burned_ch4_out[row, col] = burn_ch4
                     burned_total_co2e_out[row, col] = burn_total_co2e
 
-            burned_state_out[row, col] = burned_node
-            burned_emission_state_block[row, col] = burned_emission_node
+            if burned_emission_node > 0:
+                burned_node = nu.accrete_node(burned_node, burned_emission_node)
+
+            if burned_node > (10 ** max_digits_state) - 1:
+                raise ValueError("Maximum burned state digits exceeded")
+
+            burned_state_out[row, col] = nu.pad_to_6_digits(burned_node, max_digits_state)
 
     # pack outputs ----------------------------------------------------------
     out_dict_uint32["soil"] = soil_block
     out_dict_uint32["state"] = state_block
-    out_dict_uint32["emission_state"] = emission_state_block
     out_dict_uint32["burned_state"] = burned_state_out
-    out_dict_uint32["burned_emission_state"] = burned_emission_state_block
 
     out_dict_float32["drained_co2_Mg_CO2_ha"] = drained_co2_out
     out_dict_float32["drained_n2o_Mg_CO2e_ha"] = drained_n2o_out
@@ -567,8 +576,8 @@ def calculate_and_upload_drainage(
     outputs = {**out_u32, **out_f32}
 
     # stats for outputs, with explicit layer categorization
-    drainage_classification_layers = ["soil", "state", "emission_state"]
-    burned_classification_layers = ["burned_state", "burned_emission_state"]
+    drainage_classification_layers = ["soil", "state"]
+    burned_classification_layers = ["burned_state"]
 
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tid}.tif"
     pixel_area_chunk = uu.get_tile_dataset_rio(
