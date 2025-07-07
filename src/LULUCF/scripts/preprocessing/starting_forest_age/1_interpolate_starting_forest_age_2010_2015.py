@@ -20,28 +20,25 @@ python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_sta
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 5
 
 Full Coiled run (2010):
-python -m src.utilities.create_cluster -n 20 -t 19 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
-This goes very quickly, so -n 20 -t 19 is totally adequate. Could try -t 21 next time.
-Max memory: 8 GB. 12:30 to finish chunks; 12:51 with chunk stat aggregation; 23 Coiled credits; $0.83 AWS
+python -m src.utilities.create_cluster -n 40 -t 23 -m 16 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2010."
+Peak memory per worker: ~X GB
+Time until chunk stats: X
+Time after chunk stats: X
+Coiled credits: X (X/hr for 40 x2gd.medium workers, according to dashboard)
+AWS cost: $X ($X/hr, according to dashboard)
+https://cloud.coiled.io/clusters/1016544/account/wri-forest-research/information?organization=wri
 
-Peak memory per worker: ~2.8 GB
-Time until chunk stats: X 
-Time after chunk stats: Y
-Coiled credits: X (X/hr for X Y workers, according to dashboard)
-AWS cost: $X 
 
 Full Coiled run (2015):
-python -m src.utilities.create_cluster -n 20 -t 19 -cn LULUCF_preprocessing
+python -m src.utilities.create_cluster -n 40 -t 23 -m 16 -cn LULUCF_preprocessing
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_interpolate_starting_forest_age_2010_2015 --year 2015 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
-This goes very quickly, so -n 20 -t 19 is totally adequate. Could try -t 21 next time.
-Max memory: 8 GB. 12:30 to finish chunks; 12:51 with chunk stat aggregation; 23 Coiled credits; $0.83 AWS
+Peak memory per worker: ~X GB
+Time until chunk stats: X
+Time after chunk stats: X
+Coiled credits: X (X/hr for 40 x2gd.medium workers, according to dashboard)
+AWS cost: $X ($X/hr, according to dashboard)
 
-Peak memory per worker: ~2.8 GB
-Time until chunk stats: X 
-Time after chunk stats: Y
-Coiled credits: X (X/hr for X Y workers, according to dashboard)
-AWS cost: $X 
 
 https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67e69c53-bcd4-800a-8874-8cf4d1fb9c56
 https://chatgpt.com/share/e/67eaa8ea-b108-800a-b469-b813b970d61f
@@ -196,7 +193,7 @@ def interpolate_starting_forest_age(bounds, input_dir, input_pattern, output_pat
         )
 
         lu.print_and_log(f"Done gap-filling starting age in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-        lu.print_and_log(f"Memory usage after gap-filling starting age for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",is_final, logger_worker)
+        lu.print_and_log(f"Memory usage after gap-filling starting age for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", is_final, logger_worker)
 
 
         ### Part 3: Saves and uploads the output raster

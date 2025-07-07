@@ -428,21 +428,21 @@ continent_ecozone_pattern = "fao_ecozones_continents_processed"
 
 ## Forest age
 # Forest age in 2010 and 2015 (created together)
-forest_age_2010_2015_run_date = '20250702'
+forest_age_2010_2015_run_date = '20250705'
 forest_age_2010_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2010/standard/not_gap_filled/CHUNK_SIZE_pixels/{forest_age_2010_2015_run_date}/"
-forest_age_2010_pattern = "forest_age_2010"
+forest_age_2010_pattern = "forest_age_not_gap_filled_2010"
 
 forest_age_2015_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2015/standard/not_gap_filled/CHUNK_SIZE_pixels/{forest_age_2010_2015_run_date}/"
-forest_age_2015_pattern = "forest_age_2015"
+forest_age_2015_pattern = "forest_age_not_gap_filled_2015"
 
 forest_age_2010_gap_filled_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2010/standard/gap_filled/CHUNK_SIZE_pixels/{forest_age_2010_2015_run_date}/"
 forest_age_2010_gap_filled_pattern = "forest_age_gap_filled_2010"
 
-forest_age_2015_gap_filled_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2015/standard/gap_filled/CHUNK_SIZE_pixels/20250331/"
+forest_age_2015_gap_filled_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2015/standard/gap_filled/CHUNK_SIZE_pixels/{forest_age_2010_2015_run_date}/"
 forest_age_2015_gap_filled_pattern = "forest_age_gap_filled_2015"
 
 # Forest age in 2000 (age in 2000 is derived from gap-filled age in 2010, so there is no non-gap-filled age in 2000 data)
-forest_age_2000_run_date = '20250703'
+forest_age_2000_run_date = '20250707'
 forest_age_2000_gap_filled_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2000/standard/age__years/gap_filled/CHUNK_SIZE_pixels/{forest_age_2000_run_date}/"
 forest_age_2000_gap_filled_pattern = "forest_age_gap_filled_2000"
 

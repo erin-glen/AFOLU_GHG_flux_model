@@ -39,21 +39,29 @@ python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 4 -t 4 -m 4
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -bb 10 47 13 50 -cs 1
 
 Full run:
-python -m src.utilities.create_cluster -n 20 -t 9 -m 32 -cn LULUCF_preprocessing
+python -m src.utilities.create_cluster -n 40 -t 9 -m 32 -cn LULUCF_preprocessing
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
-I think that the cluster with 7 workers simply couldn't handle all the data it was downloading at a certain point.
-20 workers seemed to work better than 10. 32 GB workers seemed to work better than 16 GB workers.
-I didn't try lots of different configutations, like the number of threads/worker.
+
+In the three times I've run this, I've found that it gets through more and more batches the more workers I give it.
+-n 10 could only get through a few batches at a time in data-dense latitudes and took over a dozen restarts to get through all the batches.
+-n 20 did better and took about 7 restarts to get through all the batches.
+-n 40 did best yet and required only 2 restarts to get through all the batches.
+The first two tries eventually failed with "No disk space left of workers" errors
+(https://cloud.coiled.io/clusters/1014981/account/wri-forest-research/information?organization=wri&tab=Alerts).
+This used approximately 1600 Coiled credits and $80 in AWS charges over all three clusters.
+Part 1: https://cloud.coiled.io/clusters/1014981/account/wri-forest-research/information?organization=wri
+Part 2: https://cloud.coiled.io/clusters/1015660/account/wri-forest-research/information?organization=wri
+Part 3: https://cloud.coiled.io/clusters/1016516/account/wri-forest-research/information?organization=wri
+
+I didn't try lots of different configurations, like the number of threads/worker.
 More optimization is possible but I hope to never have to do this again.
+If I do run it again, try with -m 16.
+
 I also noticed that the batches took wildly different amounts of time depending on where they were.
 Some batches in the 60N band took 1 hour to run, while those around 50S took 20 minutes to run, and batches in 70N
 and 80N took just a few minutes to run. I suppose this makes sense, but is worth noting all the same.
 
-If I ever re-run this, be prepared for it to be a slog. Maybe try upping it to 30 workers or so and see if that leads
-to getting through more batches before failure. I would definitely continue to use batches, though.
 chunk_list = chunk_list[1501:] is how I resumed the processing at the batch that failed.
-
-This uses approximately 1200 Coiled credits over all the clusters.
 
 https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=8f5974e7-3ece-11ef-967a-4ffbfe06208e
 https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/
@@ -164,7 +172,8 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
         lu.print_and_log(f"Cleaning {bounds_str}: {uu.timestr()}", False, logger_worker) # Prints even during full run
-        da_cleaned = da_chunk.where(da_chunk != -9999, 0)
+        # da_cleaned = da_chunk.where(da_chunk != -9999, 0)
+        da_cleaned = da_chunk.where((da_chunk >= 0))
         da_median = da_cleaned.median(dim="members")  # Median of the 20 ESA AGB estimates upon which age is based
 
         # Target high-res lat/lon grid
@@ -175,12 +184,12 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         lu.print_and_log(f"Interpolating {bounds_str}: {uu.timestr()}", is_final, logger_worker)
         da_resampled = da_median.interp(latitude=new_lat, longitude=new_lon, method="nearest")
 
-        # Rounds from float to int, sets min as 0 and max as 200, and makes NoData = 0
-        da_2010 = da_resampled.round().clip(0, 200).fillna(0).astype("int8")
+        # Rounds from float to int and makes NoData = 0
+        da_2010 = da_resampled.round().fillna(0).astype("int16")
         arr_2010 = da_2010.values
 
-        # Creates the 2015 age map by adding 5 to the 2010 age map where it does not equal 0, then setting max to 205
-        arr_2015 = np.where(arr_2010 != 0, arr_2010 + 5, 0).clip(0, 205).astype("int8")
+        # Creates the 2015 age map by adding 5 to the 2010 age map where it does not equal 0
+        arr_2015 = np.where(arr_2010 != 0, arr_2010 + 5, 0).astype("int16")
 
         transform = Affine.translation(lon_min, lat_max) * Affine.scale(cn.resolution, -cn.resolution)
         crs = "EPSG:4326"
@@ -193,7 +202,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         lu.print_and_log(f"Saving 2010 raster {file_2010}: {uu.timestr()}", is_final, logger_worker)
         with rasterio.open(file_2010, 'w', driver='GTiff',
             height=arr_2010.shape[0], width=arr_2010.shape[1],
-            count=1, dtype="int8", crs=crs, transform=transform,
+            count=1, dtype="int16", crs=crs, transform=transform,
             compress="LZW", tiled=True, blockxsize=400, blockysize=400
         ) as dst:
             dst.write(arr_2010, 1)
@@ -202,7 +211,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         lu.print_and_log(f"Saving 2015 raster {file_2015}: {uu.timestr()}", is_final, logger_worker)
         with rasterio.open(file_2015, 'w', driver='GTiff',
             height=arr_2015.shape[0], width=arr_2015.shape[1],
-            count=1, dtype="int8", crs=crs, transform=transform,
+            count=1, dtype="int16", crs=crs, transform=transform,
             compress="LZW", tiled=True, blockxsize=400, blockysize=400
         ) as dst:
             dst.write(arr_2015, 1)
@@ -284,16 +293,9 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
     chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
-    # chunk_list = chunk_list[601:]
-    # chunk_list = chunk_list[1201:]
-    # chunk_list = chunk_list[3601:]
-    # chunk_list = chunk_list[4801:]
-    # chunk_list = chunk_list[9901:]
-    # chunk_list = chunk_list[12600:]
-    # chunk_list = chunk_list[14100:]
-
-    # # Filling in gaps in processed chunks
-    # chunk_list = chunk_list[1200:1810]
+    # # To restart part way through the chunk_list
+    # chunk_list = chunk_list[11400:]
+    # chunk_list = chunk_list[18000:]
 
 
 
