@@ -1,61 +1,21 @@
 import numpy as np
-from numba import jit
+from numba import jit, njit
 from numba.typed import Dict
 from numba.core import types
 
 # Project imports
 from . import constants_and_names as cn
+from . import drainage_emission_factors as defac
+from . import burned_area_emission_factors as baf
 
-# ----------------------------------------------------------------------
-# UNAMBIGUOUS INTEGER ENCODERS
-# ----------------------------------------------------------------------
-from numba import njit
-
-@njit(inline='always')
-def _ndigits(val: int) -> int:
-    """Return number‑of‑decimal‑digits in *val* (val ≠ 0)."""
-    n = 1
-    while val >= 10:
-        val //= 10
-        n += 1
-    return n
-
-
-@njit(inline='always')
-def accrete_node(combo: int, new: int) -> int:
+@jit(nopython=True)
+def accrete_node(combo, new):
     """
-    Append the **full** decimal representation of *new* to *combo*.
-
-    This performs the equivalent of: int(f"{combo}{new}")
-    but stays in integer space for Numba speed and works
-    for any 0 ≤ new < 10 000 (enough for every branch in the model).
-
-    Examples
-    --------
-    >>> accrete_node(12, 3)    # 12 → 123
-    123
-    >>> accrete_node(12, 34)   # 12 → 1234   (no collision!)
-    1234
+    Combine two integer codes, preserving digit order.
+    Example: node=1, new=3 => 13
     """
-    if new == 0:
-        return combo          # appending “0” is a no‑op
-    shift = 10 ** _ndigits(new)
-    return combo * shift + new
-
-
-@njit(inline='always')
-def pad_to_6_digits(value: int, max_digits: int = 6) -> int:
-    """
-    Right‑pad *value* with zeroes until it has exactly *max_digits* digits.
-    Raises if *value* already exceeds the allowed length.
-    """
-    if value == 0:
-        return 0
-    digits = _ndigits(value)
-    if digits > max_digits:
-        raise ValueError("Node exceeds maximum allowed length")
-    return value * (10 ** (max_digits - digits))
-
+    combo = combo*10 + new
+    return combo
 
 
 def create_typed_dicts(layers):
@@ -185,3 +145,25 @@ def calculate_burned_area_emissions(
 
     total_burned_emissions_co2e = burn_co2 + burn_co + burn_ch4
     return burn_co2, burn_co, burn_ch4, total_burned_emissions_co2e
+
+
+# ------------------------------------------------------------------
+# Look-ups that also report whether the key was missing. This lets
+# callers optionally append sentinel digits when emission factors
+# are absent from the tables.
+# ------------------------------------------------------------------
+
+@jit(nopython=True)
+def lookup_efs(key, table):
+    """Return (values, is_missing) for drainage emission factors."""
+    if key in table:
+        return table[key], False
+    return defac.ZERO_ARRAY, True
+
+
+@jit(nopython=True)
+def lookup_befs(key, table):
+    """Return (values, is_missing) for burned-area emission factors."""
+    if key in table:
+        return table[key], False
+    return baf.ZERO_ARRAY, True

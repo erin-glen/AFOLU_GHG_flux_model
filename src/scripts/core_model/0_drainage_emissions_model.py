@@ -59,20 +59,6 @@ long_rotation_code = cn.plantation_type_codes["long_rotation"]
 short_rotation_code = cn.plantation_type_codes["short_rotation"]
 oil_palm_code = cn.plantation_type_codes["oil_palm"]
 
-# helpers for numba dict lookups
-@jit(nopython=True)
-def lookup_efs(key, table):
-    if key in table:
-        return table[key]
-    return defac.ZERO_ARRAY
-
-
-@jit(nopython=True)
-def lookup_befs(key, table):
-    if key in table:
-        return table[key]
-    return baf.ZERO_ARRAY
-
 # ----------------------------------------------------------------------
 # full decision‑tree function (unchanged logic, ASCII comments only)
 # ----------------------------------------------------------------------
@@ -83,6 +69,7 @@ def calculate_drainage_and_emissions(
     in_dict_float32,
     drainage_table,
     burned_table,
+    mark_missing,
 ):
     """
     1) Drainage classification & state
@@ -93,9 +80,6 @@ def calculate_drainage_and_emissions(
 
     out_dict_uint32 = Dict.empty(types.unicode_type, types.uint32[:, :])
     out_dict_float32 = Dict.empty(types.unicode_type, types.float32[:, :])
-
-    # The maximum allowed digits for classification nodes.
-    max_digits_state = 8
 
     # required inputs --------------------------------------------------
     peat_block = in_dict_uint8["peat"]
@@ -122,6 +106,7 @@ def calculate_drainage_and_emissions(
     # output arrays ----------------------------------------------------
     soil_block = np.zeros((rows, cols), dtype=np.uint32)
     state_block = np.zeros((rows, cols), dtype=np.uint32)
+    emission_state_block = np.zeros((rows, cols), dtype=np.uint32)
 
     drained_co2_out = np.zeros((rows, cols), dtype=np.float32)
     drained_n2o_out = np.zeros((rows, cols), dtype=np.float32)
@@ -131,6 +116,7 @@ def calculate_drainage_and_emissions(
     drained_total_co2e_out = np.zeros((rows, cols), dtype=np.float32)
 
     burned_state_out = np.zeros((rows, cols), dtype=np.uint32)
+    burned_emission_state_block = np.zeros((rows, cols), dtype=np.uint32)
     burned_co2_out = np.zeros((rows, cols), dtype=np.float32)
     burned_co_out = np.zeros((rows, cols), dtype=np.float32)
     burned_ch4_out = np.zeros((rows, cols), dtype=np.float32)
@@ -198,6 +184,7 @@ def calculate_drainage_and_emissions(
                 node = nu.accrete_node(node, 2)
                 soil_block[row, col] = 0  # not peat
 
+            state_block[row, col] = node
 
             # B) Drainage emission factors --------------------------------
             if soil_block[row, col] == 2:  # only if drained
@@ -273,7 +260,7 @@ def calculate_drainage_and_emissions(
                         emission_node = nu.accrete_node(emission_node, 5)
                         key = "tropical_extraction"
 
-                vals = lookup_efs(key, drainage_table)
+                vals, missing = nu.lookup_efs(key, drainage_table)
                 ef_co2 = vals[0]
                 ef_n2o = vals[1]
                 ef_ch4_land = vals[2]
@@ -309,13 +296,20 @@ def calculate_drainage_and_emissions(
                 drained_co2_offsite_out[row, col] = co2_off
                 drained_total_co2e_out[row, col] = total_co2e
 
-            if emission_node > 0:
-                node = nu.accrete_node(node, emission_node)
+                # Optional sentinel digit when emission factors are missing
+                if missing and mark_missing:
+                    sentinel = 0
+                    if ecozone == boreal_code:
+                        sentinel = 91
+                    elif ecozone == temperate_code:
+                        sentinel = 92
+                    elif ecozone == tropical_code:
+                        sentinel = 93
+                    else:
+                        sentinel = 91
+                    emission_node = nu.accrete_node(emission_node, sentinel)
 
-            if node > (10 ** max_digits_state) - 1:
-                raise ValueError("Maximum state digits exceeded")
-
-            state_block[row, col] = nu.pad_to_6_digits(node, max_digits_state)
+            emission_state_block[row, col] = emission_node
 
             # C) Burned‑area emissions -------------------------------------
             burned_node = 0
@@ -365,7 +359,7 @@ def calculate_drainage_and_emissions(
                         bkey = "other"
                         burned_emission_node = nu.accrete_node(burned_emission_node, 4)
 
-                    bvals = lookup_befs(bkey, burned_table)
+                    bvals, bmissing = nu.lookup_befs(bkey, burned_table)
                     gef_co2 = bvals[0]
                     gef_co = bvals[1]
                     gef_ch4 = bvals[2]
@@ -391,18 +385,28 @@ def calculate_drainage_and_emissions(
                     burned_ch4_out[row, col] = burn_ch4
                     burned_total_co2e_out[row, col] = burn_total_co2e
 
-            if burned_emission_node > 0:
-                burned_node = nu.accrete_node(burned_node, burned_emission_node)
+                    if bmissing and mark_missing:
+                        if ecozone == boreal_code:
+                            sentinel = 94
+                        elif ecozone == temperate_code:
+                            sentinel = 95
+                        elif ecozone == tropical_code:
+                            sentinel = 96
+                        else:
+                            sentinel = 97
+                        burned_emission_node = nu.accrete_node(
+                            burned_emission_node, sentinel
+                        )
 
-            if burned_node > (10 ** max_digits_state) - 1:
-                raise ValueError("Maximum burned state digits exceeded")
-
-            burned_state_out[row, col] = nu.pad_to_6_digits(burned_node, max_digits_state)
+            burned_state_out[row, col] = burned_node
+            burned_emission_state_block[row, col] = burned_emission_node
 
     # pack outputs ----------------------------------------------------------
     out_dict_uint32["soil"] = soil_block
     out_dict_uint32["state"] = state_block
+    out_dict_uint32["emission_state"] = emission_state_block
     out_dict_uint32["burned_state"] = burned_state_out
+    out_dict_uint32["burned_emission_state"] = burned_emission_state_block
 
     out_dict_float32["drained_co2_Mg_CO2_ha"] = drained_co2_out
     out_dict_float32["drained_n2o_Mg_CO2e_ha"] = drained_n2o_out
@@ -448,6 +452,7 @@ def calculate_and_upload_drainage(
     iv_end,
     closing_year,
     peat_dataset="ogh",
+    mark_missing=False,
 ):
     """Process a single chunk for a given interval.
 
@@ -572,12 +577,13 @@ def calculate_and_upload_drainage(
         td32f,
         defac.DEFAULT_TABLE,
         baf.DEFAULT_TABLE,
+        mark_missing,
     )
     outputs = {**out_u32, **out_f32}
 
     # stats for outputs, with explicit layer categorization
-    drainage_classification_layers = ["soil", "state"]
-    burned_classification_layers = ["burned_state"]
+    drainage_classification_layers = ["soil", "state", "emission_state"]
+    burned_classification_layers = ["burned_state", "burned_emission_state"]
 
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tid}.tif"
     pixel_area_chunk = uu.get_tile_dataset_rio(
@@ -718,6 +724,7 @@ def run_drainage_model(
     interval_type="annual",
     tile_ids=None,
     peat_dataset="ogh",
+    mark_missing=False,
 ):
 
     stage = "drainage_model"
@@ -810,6 +817,7 @@ def run_drainage_model(
             t[2],
             closing_year,
             peat_dataset,
+            mark_missing,
         )
 
     results = bag.map(_wrap).compute()
@@ -863,6 +871,7 @@ def main(argv=None):
             interval_type=cn.intervals_five_year,
             all_five_year_periods=False,
             peat_dataset="ogh",
+            mark_missing=False,
         )
         return
 
@@ -923,6 +932,14 @@ def main(argv=None):
         choices=cn.peat_dataset_choices,
         help="Peat mask dataset to use",
     )
+    p.add_argument(
+        "--mark_missing_factors",
+        action="store_true",
+        help=(
+            "Append sentinel digits (91-97) to state codes when EF look-ups "
+            "are missing; emissions remain zero."
+        ),
+    )
     args = p.parse_args(argv)
 
     tile_ids = []
@@ -948,6 +965,7 @@ def main(argv=None):
         all_five_year_periods=args.all_five_year_periods,
         tile_ids=tile_ids,
         peat_dataset=args.peat_dataset,
+        mark_missing=args.mark_missing_factors,
     )
 
 
@@ -986,6 +1004,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2000 \
   --end_year 2023 \
+  --mark_missing_factors \
   --interval_type five_year
   
 python -m src.scripts.core_model.0_drainage_emissions_model \
