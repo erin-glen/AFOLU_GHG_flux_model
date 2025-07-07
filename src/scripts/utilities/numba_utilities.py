@@ -1,5 +1,5 @@
 import numpy as np
-from numba import jit
+from numba import jit, njit
 from numba.typed import Dict
 from numba.core import types
 
@@ -9,8 +9,6 @@ from . import constants_and_names as cn
 # ----------------------------------------------------------------------
 # UNAMBIGUOUS INTEGER ENCODERS
 # ----------------------------------------------------------------------
-from numba import njit
-
 @njit(inline='always')
 def _ndigits(val: int) -> int:
     """Return number‑of‑decimal‑digits in *val* (val ≠ 0)."""

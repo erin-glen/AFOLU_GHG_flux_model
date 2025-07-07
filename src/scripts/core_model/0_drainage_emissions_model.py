@@ -62,16 +62,18 @@ oil_palm_code = cn.plantation_type_codes["oil_palm"]
 # helpers for numba dict lookups
 @jit(nopython=True)
 def lookup_efs(key, table):
+    """Return (values, is_missing) from drainage factor table."""
     if key in table:
-        return table[key]
-    return defac.ZERO_ARRAY
+        return table[key], False
+    return defac.ZERO_ARRAY, True
 
 
 @jit(nopython=True)
 def lookup_befs(key, table):
+    """Return (values, is_missing) from burned-area factor table."""
     if key in table:
-        return table[key]
-    return baf.ZERO_ARRAY
+        return table[key], False
+    return baf.ZERO_ARRAY, True
 
 # ----------------------------------------------------------------------
 # full decision‑tree function (unchanged logic, ASCII comments only)
@@ -83,6 +85,7 @@ def calculate_drainage_and_emissions(
     in_dict_float32,
     drainage_table,
     burned_table,
+    mark_missing,
 ):
     """
     1) Drainage classification & state
@@ -273,7 +276,7 @@ def calculate_drainage_and_emissions(
                         emission_node = nu.accrete_node(emission_node, 5)
                         key = "tropical_extraction"
 
-                vals = lookup_efs(key, drainage_table)
+                vals, missing = lookup_efs(key, drainage_table)
                 ef_co2 = vals[0]
                 ef_n2o = vals[1]
                 ef_ch4_land = vals[2]
@@ -308,6 +311,13 @@ def calculate_drainage_and_emissions(
                 drained_ch4_ditch_out[row, col] = ch4_ditch_co2e
                 drained_co2_offsite_out[row, col] = co2_off
                 drained_total_co2e_out[row, col] = total_co2e
+
+                # Optional sentinel for missing drainage EF
+                if missing and mark_missing:
+                    sentinel = 90 + int(ecozone)
+                    emission_node = nu.accrete_node(
+                        emission_node, sentinel
+                    )
 
             if emission_node > 0:
                 node = nu.accrete_node(node, emission_node)
@@ -365,7 +375,7 @@ def calculate_drainage_and_emissions(
                         bkey = "other"
                         burned_emission_node = nu.accrete_node(burned_emission_node, 4)
 
-                    bvals = lookup_befs(bkey, burned_table)
+                    bvals, bmissing = lookup_befs(bkey, burned_table)
                     gef_co2 = bvals[0]
                     gef_co = bvals[1]
                     gef_ch4 = bvals[2]
@@ -390,6 +400,20 @@ def calculate_drainage_and_emissions(
                     burned_co_out[row, col] = burn_co
                     burned_ch4_out[row, col] = burn_ch4
                     burned_total_co2e_out[row, col] = burn_total_co2e
+
+                    # Optional sentinel for missing burned EFs
+                    if bmissing and mark_missing:
+                        if ecozone == boreal_code:
+                            sentinel = 94
+                        elif ecozone == temperate_code:
+                            sentinel = 95
+                        elif ecozone == tropical_code:
+                            sentinel = 96
+                        else:
+                            sentinel = 97
+                        burned_emission_node = nu.accrete_node(
+                            burned_emission_node, sentinel
+                        )
 
             if burned_emission_node > 0:
                 burned_node = nu.accrete_node(burned_node, burned_emission_node)
@@ -448,6 +472,7 @@ def calculate_and_upload_drainage(
     iv_end,
     closing_year,
     peat_dataset="ogh",
+    mark_missing=False,
 ):
     """Process a single chunk for a given interval.
 
@@ -467,6 +492,8 @@ def calculate_and_upload_drainage(
         Land cover composite year for this interval.
     peat_dataset : str, optional
         Peat mask dataset name.
+    mark_missing : bool, optional
+        Append sentinel digits for missing emission factors if ``True``.
     """
 
     logger = lu.setup_logging_worker()
@@ -572,6 +599,7 @@ def calculate_and_upload_drainage(
         td32f,
         defac.DEFAULT_TABLE,
         baf.DEFAULT_TABLE,
+        mark_missing,
     )
     outputs = {**out_u32, **out_f32}
 
@@ -718,6 +746,7 @@ def run_drainage_model(
     interval_type="annual",
     tile_ids=None,
     peat_dataset="ogh",
+    mark_missing=False,
 ):
 
     stage = "drainage_model"
@@ -810,6 +839,7 @@ def run_drainage_model(
             t[2],
             closing_year,
             peat_dataset,
+            mark_missing,
         )
 
     results = bag.map(_wrap).compute()
@@ -863,6 +893,7 @@ def main(argv=None):
             interval_type=cn.intervals_five_year,
             all_five_year_periods=False,
             peat_dataset="ogh",
+            mark_missing=False,
         )
         return
 
@@ -923,6 +954,14 @@ def main(argv=None):
         choices=cn.peat_dataset_choices,
         help="Peat mask dataset to use",
     )
+    p.add_argument(
+        "--mark_missing_factors",
+        action="store_true",
+        help=(
+            "Append sentinel digits (91-97) to state codes when EF "
+            "look-ups are missing; emissions remain zero."
+        ),
+    )
     args = p.parse_args(argv)
 
     tile_ids = []
@@ -948,6 +987,7 @@ def main(argv=None):
         all_five_year_periods=args.all_five_year_periods,
         tile_ids=tile_ids,
         peat_dataset=args.peat_dataset,
+        mark_missing=args.mark_missing_factors,
     )
 
 
@@ -986,7 +1026,8 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2000 \
   --end_year 2023 \
-  --interval_type five_year
+  --interval_type five_year \
+  --mark_missing_factors
   
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
