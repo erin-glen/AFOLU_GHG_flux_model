@@ -1,4 +1,15 @@
 This document describes the steps for creating starting forest age geotifs for the LULUCF model.
+Inputs:
+1. GAMI v2.1 global age zarr for 2010
+2. Forest age pre-disturbance global zarr
+3. Vegetation height in 5-year intervals for 2000, 2005, and 2010
+Outputs:
+1. 1x1 deg geotif sets of age in 2010 and 2015 (not gap filled, from 1_create_starting_forest_age_2010_2015.py)
+2. 1x1 deg geotif sets of gap-filled age in 2010 and 2015 (from 2_gap_fill_starting_forest_age_2010_2015.py)
+3. A global geotif of an approximation of the age of forest pre-disturbance (from 3_map_age_pre_disturbance.py)
+4. 1x1 deg geotif sets of gap-filled age in 2000 (from 4_create_starting_forest_age_2000.py)
+5. 10x10 deg geotif sets of gap-filled age in 2000, 2010, adn 2015 (from 5_aggregate_forest_age.py)
+
 There are several steps for creating starting forest age geotifs, identified by the order of the scripts in this folder.
 
 --- 1_create_starting_forest_age_2010_2015.py:

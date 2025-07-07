@@ -17,10 +17,10 @@ python -m src.LULUCF.scripts.preprocessing.starting_forest_age.5_aggregate_fores
 Cluster: https://cloud.coiled.io/clusters/1018902/account/wri-forest-research/information?organization=wri
 Peak memory per worker: ~X-Y MB
 Time for total processing for each task: average of X seconds, min of X seconds and max of X seconds (based on extraction from log)
-Time until chunk stats: X for 2000, X for 2010, X for 2015
-Time after chunk stats: X for 2000, X for 2010, X for 2015
-Coiled credits: X (X/hr for X Y workers, according to dashboard)
-AWS cost: $X (X/hr for X Y workers, according to dashboard)
+Time until chunk stats: 27:48 for 2000, 15:13 for 2010, 13:05 for 2015
+Time after chunk stats: 27:49 for 2000, 15:14 for 2010, 13:05 for 2015
+Coiled credits: 15.51 for 2000, 8.2 for 2010, 8.5 for 2015 (31/hr for 30 m8g.medium workers, according to dashboard)
+AWS cost: $0.37 for 2000, $0.18 for 2010, $0.20 for 2015 ($0.72/hr for 30 m8g.medium workers, according to dashboard)
 
 Cluster configuration experimentation at https://cloud.coiled.io/clusters/1018902/account/wri-forest-research/information?organization=wri.
 It indicated that using 4 threads/worker and 4 GB workers was best if I'm not in a rush because it used
