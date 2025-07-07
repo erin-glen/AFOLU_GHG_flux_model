@@ -6,10 +6,18 @@ If I try running this with zarr3, I get errors about not being able to access th
 So, start with:
 conda activate coiled_20250203
 
+https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=8f5974e7-3ece-11ef-967a-4ffbfe06208e
+https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/
+Metadata: https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/2023-006_Besnard-et-al_Data-Description-v2.1.pdf
+Also needs zarr package
+
+Mini GEE app for age viewing from Simon Besnard (email 6/27/25):
+https://besnardsim.users.earthengine.app/view/globalforestage
+GEE asset: projects/ee-besnardsim/assets/GAMI_v2_0_mean_100m
+
 This preprocessing step doesn't scale quite like others, as far as I can tell.
 It starts by reading in the relevant ZARR pieces for the chunks being processed, but I don't know how that scales.
 Reading the ZARR chunks involves dozens of tasks and takes much longer than all the subsequent processing.
-That's why I am trying the full/global run with -n 6 -t 8; I don't know how helpful it is to have lots of workers for this.
 When I was developing this script, I was able to quickly get something that worked on a single 1x1 chunk but then
 slowed down in proportion to the number of chunks, even when there was an ample number of workers.
 Obviously, that's not how it should go with Dask.
@@ -20,10 +28,6 @@ The original approach was to have everything occur lazily and only compute at th
 but that simply did not scale.
 Note that I also tried processing 10x10 degree chunks but the problem there was that the processing of the chunks
 once downloaded took too much memory and would've required really large workers.
-
-Mini GEE app for age viewing from Simon Besnard (email 6/27/25):
-https://besnardsim.users.earthengine.app/view/globalforestage
-GEE asset: projects/ee-besnardsim/assets/GAMI_v2_0_mean_100m
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
@@ -46,9 +50,9 @@ In the three times I've run this, I've found that it gets through more and more 
 -n 10 could only get through a few batches at a time in data-dense latitudes and took over a dozen restarts to get through all the batches.
 -n 20 did better and took about 7 restarts to get through all the batches.
 -n 40 did best yet and required only 2 restarts to get through all the batches.
-The first two tries eventually failed with "No disk space left of workers" errors
+The first two starts with -n 40 eventually failed with "No disk space left of workers" errors
 (https://cloud.coiled.io/clusters/1014981/account/wri-forest-research/information?organization=wri&tab=Alerts).
-This used approximately 1600 Coiled credits and $80 in AWS charges over all three clusters.
+-n 40 used approximately 1600 Coiled credits and $80 in AWS charges over all three clusters. It took nearly 20 hours to run.
 Part 1: https://cloud.coiled.io/clusters/1014981/account/wri-forest-research/information?organization=wri
 Part 2: https://cloud.coiled.io/clusters/1015660/account/wri-forest-research/information?organization=wri
 Part 3: https://cloud.coiled.io/clusters/1016516/account/wri-forest-research/information?organization=wri
@@ -62,11 +66,6 @@ Some batches in the 60N band took 1 hour to run, while those around 50S took 20 
 and 80N took just a few minutes to run. I suppose this makes sense, but is worth noting all the same.
 
 chunk_list = chunk_list[1501:] is how I resumed the processing at the batch that failed.
-
-https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=8f5974e7-3ece-11ef-967a-4ffbfe06208e
-https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/
-Metadata: https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/2023-006_Besnard-et-al_Data-Description-v2.1.pdf
-Also needs zarr package
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67dcb99b-edb8-800a-abd8-f718de76043c
 https://chatgpt.com/share/e/67e1b7f6-c0d4-800a-a945-3133de9bf3a0

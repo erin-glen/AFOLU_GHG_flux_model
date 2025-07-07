@@ -281,7 +281,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Model stage being run
     year = 2000
-    stage = f'create_starting_forest_age_for_{year}__1x1_deg'
+    stage = f'create_starting_forest_age_{year}__1x1_deg'
     model_type = 'standard'
 
     # Connects to Coiled cluster if not running locally and the named cluster exists

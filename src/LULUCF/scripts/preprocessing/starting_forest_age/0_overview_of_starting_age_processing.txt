@@ -1,0 +1,31 @@
+This document describes the steps for creating starting forest age geotifs for the LULUCF model.
+There are several steps for creating starting forest age geotifs, identified by the order of the scripts in this folder.
+
+--- 1_create_starting_forest_age_2010_2015:
+Creates 1x1 deg forest age geotifs for 2010 and 2015 at the same time.
+2010 is the year of GAMI v2.1 (Simon Besnard et al.
+https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=8f5974e7-3ece-11ef-967a-4ffbfe06208e).
+It converts the 2010 zarr to 1x1 deg geotifs.
+2015 is one of the possible start dates for the LULUCF model (first year of annual data).
+Reading the zarr and converting it to geotifs is long and slow. It takes about 20 hours to run!
+Age in 2015 is calculated from age in 2010 and output during the processing; 2015 is not run separately.
+
+--- 2_gap_fill_starting_forest_age_2010_2015:
+Creates 1x1 deg gap-filled forest age geotifs for 2010 and 2015 separately.
+That is, 2010 and 2015 need to each be run on their own. (I never took the time to be able to run them together.)
+Gap filling means that any pixels that don't have age in 2010/2015 get ages assigned to them based on the nearest
+2010/2015 ages.
+This way, every pixel in the LULUCF model has an age in 2015 associated with it.
+Remember, this step needs to be run twice if you want to re-create gap-filled 1x1 deg age geotifs for 2010 and 2015.
+
+--- 3_map_age_pre_disturbance:
+Creates a global 1x1 deg resolution geotif that approximates the average age of forest pre-disturbance in 1x1 deg cells.
+This
+
+
+
+--- 4
+1 = Not tall vegetation in 2000 (age assigned 0)
+2 = Not tall vegetation in 2005 or 2010 (i.e. disturbance) (assign Besnard age at disturbance map)
+3 = Age <= 10 years in 2010 (assign Besnard age at disturbance map)
+4 = age_2000 = age_2010 - 10
