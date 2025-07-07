@@ -12,9 +12,9 @@ python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 1 -t 1 -m 4
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.5_aggregate_forest_age -cn LULUCF_preprocessing --years 2000 2010 2015 --first_10x10s_to_process 2
 
 Full Coiled run
-python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 33 -t 7
+python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 30 -t 4 -m 4
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.5_aggregate_forest_age -cn LULUCF_preprocessing --years 2000 2010 2015
-
+Cluster: https://cloud.coiled.io/clusters/1018902/account/wri-forest-research/information?organization=wri
 Peak memory per worker: ~X-Y MB
 Time for total processing for each task: average of X seconds, min of X seconds and max of X seconds (based on extraction from log)
 Time until chunk stats: X for 2000, X for 2010, X for 2015
@@ -22,12 +22,10 @@ Time after chunk stats: X for 2000, X for 2010, X for 2015
 Coiled credits: X (X/hr for X Y workers, according to dashboard)
 AWS cost: $X (X/hr for X Y workers, according to dashboard)
 
+Cluster configuration experimentation at https://cloud.coiled.io/clusters/1018902/account/wri-forest-research/information?organization=wri.
+It indicated that using 4 threads/worker and 4 GB workers was best if I'm not in a rush because it used
+the least Coiled credits.
 
-Time: 2:02 through aggregation; 2:19 through tile stats; Credits: 9.3; Cost: $0.34
--n 33 -t 7 worked fine.
-I noted that each worker started by processing 11 tasks instead of the t+1 tasks I expected. Don't know why.
-So, maybe the number of threads doesn't matter. Given that each worker starts on 11 tasks at the beginning and there are
-only 356 tasks, 33 workers ought to be sufficient to cover all the tasks in one pass (though that's not necessary).
 """
 
 import argparse
@@ -88,7 +86,6 @@ def main(cluster_name, years_to_aggregate, run_local=False, no_stats=False, no_l
         if first_10x10s_to_process:
             list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:first_10x10s_to_process]
         # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[338:339]  # To limit it to a specific 10x10 deg tile
-        list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[356:358]  # To limit it to a specific 10x10 deg tile
 
         # Extracts and lists unique tile_ids, the target for aggregation
         tile_ids = set()

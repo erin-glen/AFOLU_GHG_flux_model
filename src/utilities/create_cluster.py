@@ -9,6 +9,8 @@ Table of spot pricing: https://aws.amazon.com/ec2/spot/pricing/
 These are the cheapest worker types and they have fewer vCPUs than usual for the memory.
 This makes them less costly on AWS and use fewer Coiled credits.
 
+List available worker types for Coiled clusters with: coiled.list_instance_types() in the Python shell
+
 Using more than 1 thread/worker slows down processing a lot when there are more tasks than workers for the core LULUCF model,
 which is the situation for large analyses, obviously.
 """
@@ -52,6 +54,7 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         scheduler_vm_type = "m8g.medium"
         worker_vm_type = "m8g.medium"
 
+    # t2.small not available with Coiled. t3.small has 2 vCPUs, so it's not actually Coiled credit-effective.
     elif worker_memory == 2:
         idle_timeout = 25
         scheduler_vm_type = "t3.small"

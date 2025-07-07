@@ -6,7 +6,7 @@ age_2000 source flag key:
 1 = Not tall vegetation in 2000 (age assigned 0)
 2 = Not tall vegetation in 2005 or 2010 (i.e. disturbance) (assign Besnard age at disturbance map)
 3 = Age <= 10 years in 2010 (assign Besnard age at disturbance map)
-4 = age_2000 = age_2010 - 10
+4 = Forest between 2000 and 2010 and age >10 in 2010 -> age_2000 = age_2010 - 10
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
@@ -119,11 +119,11 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     with rasterio.open(cn.global_age_at_disturbance_file) as src:
         # Read the relevant window into memory at the resolution of the working chunk
         window = from_bounds(*bounds, transform=src.transform)
-        global_resampled = src.read(1, window=window, out_shape=age_2010.shape,
+        global_age_at_disturbance_resampled = src.read(1, window=window, out_shape=age_2010.shape,
                                     resampling=rasterio.enums.Resampling.nearest)
 
-    # Convert global_resampled to int16 in case of nodata
-    global_resampled = global_resampled.astype(np.uint16)
+    # Convert global_age_at_disturbance_resampled to int16 in case of nodata
+    global_age_at_disturbance_resampled = global_age_at_disturbance_resampled.astype(np.uint16)
 
     # Initialize a binary disturbance mask for 2000–2010
     disturbance_mask = np.zeros_like(age_2010, dtype=bool)
@@ -170,32 +170,32 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     # Clamp for the fallback case
     safe_subtract = np.maximum(raw_subtract, 0)
 
-    # Final logic: 0 (low veg in 2000) > 255 (disturbed later) > 254 (not yet forest in 2000) > age-10
+    # Final logic for calculating age
     age_2000 = np.where(
         low_height_2000_mask,
-        0,
+        0,  # 1 = Not tall vegetation in 2000 -> age assigned 0
         np.where(
             disturbance_mask,
-            global_resampled,
+            global_age_at_disturbance_resampled,  # 2 = Not tall vegetation in 2005 or 2010 (i.e. disturbance) -> assign Besnard age at disturbance map
             np.where(
                 underflow_mask,
-                global_resampled,
-                safe_subtract
+                global_age_at_disturbance_resampled,  # 3 = Age <= 10 years in 2010 -> assign Besnard age at disturbance map
+                safe_subtract  # 4 = Forest between 2000 and 2010 and age >10 in 2010 -> age_2000 = age_2010 - 10
             )
         )
     ).astype(np.uint16)
 
-    # Final logic: 0 (low veg in 2000) > 255 (disturbed later) > 254 (not yet forest in 2000) > age-10
+    # Final logic for assigning the source_flag
     age_2000_source_flag = np.where(
         low_height_2000_mask,
-        1,  # 1=Not tall vegetation in 2000
+        1,  # 1 = Not tall vegetation in 2000 -> age assigned 0
         np.where(
             disturbance_mask,
-            2,  # 2=Not tall vegetation in 2005 or 2010 (i.e. disturbance)
+            2,  # 2 = Not tall vegetation in 2005 or 2010 (i.e. disturbance) -> assign Besnard age at disturbance map
             np.where(
                 underflow_mask,
-                3,  # 3=Age <= 10 years in 2010 (assign Besnard age at disturbance map)
-                4   # 4=age_2000 = age_2010 - 10
+                3,  # 3 = Age <= 10 years in 2010 -> assign Besnard age at disturbance map
+                4   # 4 = Forest between 2000 and 2010 and age >10 in 2010 -> age_2000 = age_2010 - 10
             )
         )
     ).astype(np.uint8)
