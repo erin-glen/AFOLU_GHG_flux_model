@@ -19,8 +19,8 @@ DATA_TYPES = [
     "drained_co2_offsite_Mg_CO2_ha",
     "drained_n2o_Mg_CO2e_ha",
     "drained_total_Mg_CO2e_ha",
-    "soil",
-    "state",
+    "drained_soil",
+    "drained_state",
 ]
 
 INVENTORY_PERIODS = [

@@ -424,8 +424,8 @@ def calculate_drainage_and_emissions(
             burned_state_out[row, col] = nu.pad_to_6_digits(burned_node, max_digits_state)
 
     # pack outputs ----------------------------------------------------------
-    out_dict_uint32["soil"] = soil_block
-    out_dict_uint32["state"] = state_block
+    out_dict_uint32["drained_soil"] = soil_block
+    out_dict_uint32["drained_state"] = state_block
     out_dict_uint32["burned_state"] = burned_state_out
 
     out_dict_float32["drained_co2_Mg_CO2_ha"] = drained_co2_out
@@ -604,7 +604,7 @@ def calculate_and_upload_drainage(
     outputs = {**out_u32, **out_f32}
 
     # stats for outputs, with explicit layer categorization
-    drainage_classification_layers = ["soil", "state"]
+    drainage_classification_layers = ["drained_soil", "drained_state"]
     burned_classification_layers = ["burned_state"]
 
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tid}.tif"
