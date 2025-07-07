@@ -4,15 +4,15 @@ Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
 Currently only aggregates per-ha outputs to 10x10 deg, not per-pixel outputs.
 
 Local test:
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools --year 2015 --first_10x10s_to_process 2
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools --year 2015 --first_10x10s_to_process 2
 
 Coiled test:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 2 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 --first_10x10s_to_process 2
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 --first_10x10s_to_process 2
 
 Full run 2000:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 2 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000
 Peak memory per worker: ~350-400 MB
 Time for total processing for each task: average of 303 seconds, min of 87 seconds and max of 1327 seconds (based on extraction from log)
 Time until chunk stats: 1:43:55
@@ -22,7 +22,7 @@ AWS cost: $3.86 ($2.10/hr for 200 t3.small workers, according to dashboard)
 
 Full run 2015:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 2 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2015
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2015
 Peak memory per worker: ~350-400 MB
 Time for total processing for each task: average of 231 seconds, min of 86 seconds and max of 690 seconds (based on extraction from log)
 Time until chunk stats: 1:17:04

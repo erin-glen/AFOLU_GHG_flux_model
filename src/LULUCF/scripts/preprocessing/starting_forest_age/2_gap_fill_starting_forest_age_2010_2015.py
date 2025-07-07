@@ -10,18 +10,18 @@ Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local:
 Has age data (should not have any 0s):
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_gap_fill_starting_forest_age_2010_2015 --year 2010 -bb 10 49 11 50 -cs 1 --run_local --no_upload
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_gap_fill_starting_forest_age_2010_2015 --year 2010 -bb 10 49 11 50 -cs 1 --run_local --no_upload
 Does not have age data (should output a raster full of 0s):
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_gap_fill_starting_forest_age_2010_2015 --year 2010 -bb -28 -60 -27 -59 -cs 1 --run_local
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_gap_fill_starting_forest_age_2010_2015 --year 2010 -bb -28 -60 -27 -59 -cs 1 --run_local
 
 Coiled test:
-python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 1
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_gap_fill_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_gap_fill_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 5
+python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 1 -t 1 -m 2
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_gap_fill_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_gap_fill_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 5
 
 Full Coiled run (2010):
 python -m src.utilities.create_cluster -n 40 -t 23 -m 16 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_gap_fill_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2010."
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_gap_fill_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2010."
 Peak memory per worker: ~8 GB
 Time until chunk stats: 38:43
 Time after chunk stats: 39:11
@@ -32,7 +32,7 @@ https://cloud.coiled.io/clusters/1016544/account/wri-forest-research/information
 
 Full Coiled run (2015):
 python -m src.utilities.create_cluster -n 40 -t 29 -m 16 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_gap_fill_starting_forest_age_2010_2015 --year 2015 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_gap_fill_starting_forest_age_2010_2015 --year 2015 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
 Peak memory per worker: ~8.5 GB
 Time until chunk stats: 38.47
 Time after chunk stats: 39.12

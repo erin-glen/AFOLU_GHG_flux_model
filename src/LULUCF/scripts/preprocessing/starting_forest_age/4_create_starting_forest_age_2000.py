@@ -11,13 +11,24 @@ age_2000 source flag key:
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local:
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.3_create_starting_forest_age_2000 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --run_local --no_upload --no_stats --no_log
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.4_create_starting_forest_age_2000 -bb 10 49 11 50 -cs 1 --run_local --no_upload --no_stats --no_log
 
 Coiled test:
-python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 1
+python -m src.utilities.create_cluster -n 1 -t 1 -m 2 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.4_create_starting_forest_age_2000 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1
 
-Full run:
-python -m src.utilities.create_cluster -n 20 -t 19 -cn LULUCF_preprocessing
+Full Coiled run:
+python -m src.utilities.create_cluster -n 100 -t 2 -m 4 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.4_create_starting_forest_age_2000 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age in 2000 run."
+https://cloud.coiled.io/clusters/1018509/account/wri-forest-research/information?organization=wri
+Peak memory per worker: ~X GB
+Time for total processing for each task: X-X seconds (based on scanning the console)
+Time until chunk stats: X
+Time after chunk stats: X
+Coiled credits: X (101/hr for 200 m8g.medium workers, according to dashboard)
+AWS cost: $X (2.28/hr for 200 m8g.medium workers, according to dashboard)
+-t 2 is based on testing different threads/worker combinations:
+https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210731476254597?focus=true
 
 """
 
@@ -62,14 +73,13 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     ### No checks about whether the chunk has data because the way the chunk_list is constructed,
     ### every chunk is relevant and should be processed, so they don't need to be checked.
 
-    # # TODO Replace with reading interpolated 2010 10x10 deg age geotifs in main function
-    # download_dict_with_data_types[f"{cn.forest_age_2010_pattern}"] = [f"{cn.forest_age_2010_dir}{tile_id}__{bounds_str}__{cn.forest_age_2010_pattern}.tif", 'Byte']
-    # for key, value in download_dict_with_data_types.items():
-    #     if "CHUNK_SIZE" in value[0]:
-    #         value[0] = value[0].replace("CHUNK_SIZE", "4000")
+    download_dict_with_data_types[cn.forest_age_2010_gap_filled_pattern] = [f"{cn.forest_age_2010_gap_filled_dir}{tile_id}__{bounds_str}__{cn.forest_age_2010_gap_filled_pattern}.tif", 'Byte']
+    for key, value in download_dict_with_data_types.items():
+        value[0] = value[0].replace("CHUNK_SIZE", "4000")
 
     # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
+    print(updated_download_dict)
 
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
     # Thus, this returns a complete set of inputs (missing chunks filled).
@@ -103,12 +113,10 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     ### Part 2: Age calculation in 2000
 
     # Get the 2010 forest age layer
-    age_2010 = layers[cn.forest_age_2010_pattern].astype(np.uint8)
+    age_2010 = layers[cn.forest_age_2010_gap_filled_pattern].astype(np.uint16)
 
     # Read the 1x1 deg global raster (once per chunk)
-    global_age_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/forest_age/age_pre_disturbance_Besnard_et_al/global_geotif/20250702/age_pre_disturbance_median_1deg_global__20250703.tif"
-
-    with rasterio.open(global_age_path) as src:
+    with rasterio.open(cn.global_age_at_disturbance_file) as src:
         # Read the relevant window into memory at the resolution of the working chunk
         window = from_bounds(*bounds, transform=src.transform)
         global_resampled = src.read(1, window=window, out_shape=age_2010.shape,
@@ -175,9 +183,7 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
                 safe_subtract
             )
         )
-    ).astype(np.uint8)
-
-    age_2000 = np.minimum(age_2000, 255).astype(np.uint8)
+    ).astype(np.uint16)
 
     # Final logic: 0 (low veg in 2000) > 255 (disturbed later) > 254 (not yet forest in 2000) > age-10
     age_2000_source_flag = np.where(
@@ -196,7 +202,7 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
 
     numpy_end = time.time()
     lu.print_and_log(f"Done calculating forest age in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-    lu.print_and_log(f"Memory usage after age in 2000 creation for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", is_final, logger_worker)
+    lu.print_and_log(f"Memory usage after age in 2000 creation for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
     lu.print_and_log(f"Calculated forest age in {bounds_str} in {tile_id} in {round(numpy_end-chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
 
@@ -204,16 +210,10 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
 
     fs = fsspec.filesystem("s3")
 
-    forest_age_2010_path = updated_download_dict["forest_age_2010"][0]
+    forest_age_2010_path = updated_download_dict[cn.forest_age_2010_gap_filled_pattern][0]
 
     with rasterio.open(forest_age_2010_path) as src:
         profile = src.profile.copy()
-
-    # To save the raster as the correct type
-    profile.update({
-        "dtype": "uint8"
-    })
-
 
     lu.print_and_log(f" Saving and uploading {bounds_str}: {uu.timestr()}", is_final, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
@@ -233,9 +233,17 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
         age_2000_tmp_path = f"/tmp/{age_2000_name}"
         age_2000_source_flag_tmp_path = f"/tmp/{age_2000_source_flag_name}"
 
+    # The age_2000 raster continues to be uint16
+    profile.update({
+        "dtype": "uint16"
+    })
     with rasterio.open(age_2000_tmp_path, "w", **profile) as dst:
         dst.write(age_2000, 1)
 
+    # The source flag raster is uint8
+    profile.update({
+        "dtype": "uint8"
+    })
     with rasterio.open(age_2000_source_flag_tmp_path, "w", **profile) as dst:
         dst.write(age_2000_source_flag, 1)
 
@@ -316,14 +324,15 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Dictionary of data to download (inputs to model). Forest age 2010 is added to the download dictionary at the chunk level
     # since that is a 4000x4000-pixel input.
-    download_dict = {cn.forest_age_2010_gap_filled_pattern: f"{cn.forest_age_2010_gap_filled_dir}{sample_tile_id}_{cn.forest_age_2010_gap_filled_pattern}.tif",}
+    download_dict = {}
 
     for year in range(2000, 2011, cn.five_year_interval_duration):
         download_dict[f"{cn.vegetation_height_pattern}_{year}"] = f"{cn.vegetation_height_5_year_path}{year}/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_{year}.tif"
 
-    for year in range(2001, 2011):
-        download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.forest_disturbance_annual_dir}{year}/{year}_{sample_tile_id}.tif"
-    main_logger.info(f"download_dict: {download_dict}")
+    # # Not currently using annual disturbance rasters for age_2000 creation, but keeping here just in case we change that
+    # for year in range(2001, 2011):
+    #     download_dict[f"{cn.forest_disturbance_layer_name}_{year}"] = f"{cn.forest_disturbance_annual_dir}{year}/{year}_{sample_tile_id}.tif"
+    main_logger.info(f"download_dict without age_2010 input: {download_dict}")
 
     # Returns the first tile in each input so that the datatype can be determined.
     # This is done up front, once per tile set, rather than on each chunk, since
@@ -385,7 +394,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
 
-            resize_cluster.resize_coiled_cluster("AFOLU_flux_model_scripts", 1)
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
     # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs

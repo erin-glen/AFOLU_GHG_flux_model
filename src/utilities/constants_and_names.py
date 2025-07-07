@@ -449,6 +449,8 @@ forest_age_2000_gap_filled_pattern = "forest_age_gap_filled_2000"
 forest_age_2000_gap_filled_source_flag_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/forest_age/GAMI_v2_1/2000/standard/age__source_flag/gap_filled/CHUNK_SIZE_pixels/{forest_age_2000_run_date}/"
 forest_age_2000_gap_filled_source_flag_pattern = "forest_age_gap_filled_2000__source_flag"
 
+# Age at disturbance (1x1 deg resolution) from forthcoming Besnard et al. paper
+global_age_at_disturbance_file = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/forest_age/age_pre_disturbance_Besnard_et_al/global_geotif/20250702/age_pre_disturbance_median_1deg_global__20250703.tif"
 
 # Forest age pattern for use in the LULUCF model. Applies to any starting year (2000 or 2015).
 forest_age_start_year_pattern = "forest_age_gap_filled_start_year"

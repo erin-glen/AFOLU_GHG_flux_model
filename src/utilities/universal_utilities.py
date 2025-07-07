@@ -1005,8 +1005,6 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     # I also tried various gdal_translate, build_vrt, and numpy padding approaches, none of which worked in all cases.
     merged_file = f"/tmp/merged_non_COG_{out_file_name}"
 
-    #TODO Add -of COG to make it a COG, per https://gdal.org/en/stable/drivers/raster/cog.html?
-    # https://gfw.atlassian.net/wiki/spaces/LCL/pages/1918238725/STAC-API+pre-flight+checklist
     merge_command = [
         'gdal_merge.py',
         '-o', merged_file,
@@ -1037,6 +1035,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     ### Part 2: Converts geotifs to COGs
 
     # Convert to Cloud Optimized GeoTIFF
+    # https://gfw.atlassian.net/wiki/spaces/LCL/pages/1918238725/STAC-API+pre-flight+checklist
     merged_cog_file = f"/tmp/merged_cog_{out_file_name}"
     translate_command = [
         'gdal_translate',

@@ -28,19 +28,19 @@ GEE asset: projects/ee-besnardsim/assets/GAMI_v2_0_mean_100m
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local (won't run Dask locally because of usage of submit):
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -bb 10 49 11 50 -cs 1 --run_local --no_upload
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_create_starting_forest_age_2010_2015 -bb 10 49 11 50 -cs 1 --run_local --no_upload
 
 Coiled tiny test:
 python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 1 -t 1 -m 2
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1
 
 Coiled larger test (because this doesn't always scale beyond 1 chunk well):
 python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 4 -t 4 -m 4
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -bb 10 47 13 50 -cs 1
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -bb 10 47 13 50 -cs 1
 
 Full run:
 python -m src.utilities.create_cluster -n 40 -t 9 -m 32 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_forest_age.0_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
 
 In the three times I've run this, I've found that it gets through more and more batches the more workers I give it.
 -n 10 could only get through a few batches at a time in data-dense latitudes and took over a dozen restarts to get through all the batches.

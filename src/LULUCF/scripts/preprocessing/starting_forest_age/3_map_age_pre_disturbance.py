@@ -9,7 +9,7 @@ Initially, it is negative because I do age 2020 - age 2010. One can have positiv
 where disturbed between 2010 and 2020. It is not directly age-pre disturbance but a very good approximation."
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/src/LULUCF/scripts/preprocessing/starting_forest_age
-python 2_map_age_pre_disturbance.py
+python _map_age_pre_disturbance.py
 
 Input and output are local. Doesn't use s3.
 Inputs and outputs in s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/forest_age/age_pre_disturbance_Besnard_et_al/
