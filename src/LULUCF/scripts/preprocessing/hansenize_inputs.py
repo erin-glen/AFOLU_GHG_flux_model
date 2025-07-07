@@ -6,8 +6,8 @@ python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 1
 python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -p secondary_natural_forest -bb -120 30 -110 40 -cs 10
 
 Coiled test area with data:
-python -m scripts.utilities.create_cluster -cn hansenize_mangroves_test -n 2 -t 2 -m 16
-python -m scripts.preprocessing.hansenize_inputs -cn hansenize_mangroves_test -p mangroves -bb 100 -10 110 10 -cs 10
+python -m scripts.utilities.create_cluster -cn Robinson_test -n 2 -t 2 -m 16
+python -m scripts.preprocessing.hansenize_inputs -cn Robinson_test -p secondary_natural_forest_growth_rates -bb 100 -10 110 10 -cs 10
 
 Coiled full run:
 python -m scripts.utilities.create_cluster -cn hansenize_mangroves -n 20 -t 12 -m 8
@@ -58,77 +58,69 @@ def main(cluster_name, process, bounding_box, chunk_size, run_local, no_upload):
 
     # Add Robinson et al. secondary natural forest growth rates
     if 'secondary_natural_forest_growth_rates' in process:
-    #     for year_range in cn.natural_forest_growth_curve_intervals:
-    #         download_upload_dictionary[f"secondary_natural_forest_{year_range}"] = {
-    #             'raw_dir': cn.secondary_natural_forest_raw_dir,
-    #             'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
-    #             'vrt': f"/tmp/secondary_natural_forest_0_5.vrt",
-    #             'processed_dir': cn.secondary_natural_forest_0_5_processed_dir,
-    #             'processed_pattern': cn.secondary_natural_forest_0_5_pattern
-    #         }
         download_upload_dictionary[f"secondary_natural_forest_0_5"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
+            'raw_dir': cn.secondary_natural_forest_5_year_raw_dir,
             'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
             'vrt': f"/tmp/secondary_natural_forest_0_5.vrt",
-            'processed_dir': cn.secondary_natural_forest_0_5_processed_dir,
+            'processed_dir': cn.secondary_natural_forest_0_5_path,
             'processed_pattern': cn.secondary_natural_forest_0_5_pattern
         }
-        download_upload_dictionary["secondary_natural_forest_6_10"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_6_10_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_6_10.vrt",
-            'processed_dir': cn.secondary_natural_forest_6_10_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_6_10_pattern
-        }
-        download_upload_dictionary["secondary_natural_forest_11_15"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_11_15_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_11_15.vrt",
-            'processed_dir': cn.secondary_natural_forest_11_15_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_11_15_pattern
-        }
-        download_upload_dictionary["secondary_natural_forest_16_20"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_16_20_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_16_20.vrt",
-            'processed_dir': cn.secondary_natural_forest_16_20_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_16_20_pattern
-        }
-        download_upload_dictionary["secondary_natural_forest_21_100"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_21_100_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_21_100.vrt",
-            'processed_dir': cn.secondary_natural_forest_21_100_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_21_100_pattern
-        }
-        download_upload_dictionary["secondary_natural_forest_21_40"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_21_40_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_21_40.vrt",
-            'processed_dir': cn.secondary_natural_forest_21_40_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_21_40_pattern
-        }
-        download_upload_dictionary["secondary_natural_forest_41_60"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_41_60_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_41_60.vrt",
-            'processed_dir': cn.secondary_natural_forest_41_60_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_41_60_pattern
-        }
-        download_upload_dictionary["secondary_natural_forest_61_80"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_61_80_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_61_80.vrt",
-            'processed_dir': cn.secondary_natural_forest_61_80_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_61_80_pattern
-        }
-        download_upload_dictionary["secondary_natural_forest_81_100"] = {
-            'raw_dir': cn.secondary_natural_forest_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_81_100_pattern,
-            'vrt': f"/tmp/secondary_natural_forest_81_100.vrt",
-            'processed_dir': cn.secondary_natural_forest_81_100_processed_dir,
-            'processed_pattern': cn.secondary_natural_forest_81_100_pattern
-        }
+        # download_upload_dictionary["secondary_natural_forest_6_10"] = {
+        #     'raw_dir': cn.secondary_natural_forest_5_year_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_6_10_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_6_10.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_6_10_path,
+        #     'processed_pattern': cn.secondary_natural_forest_6_10_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_11_15"] = {
+        #     'raw_dir': cn.secondary_natural_forest_5_year_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_11_15_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_11_15.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_11_15_path,
+        #     'processed_pattern': cn.secondary_natural_forest_11_15_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_16_20"] = {
+        #     'raw_dir': cn.secondary_natural_forest_5_year_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_16_20_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_16_20.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_16_20_path,
+        #     'processed_pattern': cn.secondary_natural_forest_16_20_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_21_100"] = {
+        #     'raw_dir': cn.secondary_natural_forest_20_year_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_21_100_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_21_100.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_21_100_path,
+        #     'processed_pattern': cn.secondary_natural_forest_21_100_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_21_40"] = {
+        #     'raw_dir': cn.secondary_natural_forest_20_year_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_21_40_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_21_40.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_21_40_path,
+        #     'processed_pattern': cn.secondary_natural_forest_21_40_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_41_60"] = {
+        #     'raw_dir': cn.secondary_natural_forest_20_year_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_41_60_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_41_60.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_41_60_path,
+        #     'processed_pattern': cn.secondary_natural_forest_41_60_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_61_80"] = {
+        #     'raw_dir': cn.secondary_natural_forest_20_year_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_61_80_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_61_80.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_61_80_path,
+        #     'processed_pattern': cn.secondary_natural_forest_61_80_pattern
+        # }
+        # download_upload_dictionary["secondary_natural_forest_81_100"] = {
+        #     'raw_dir': cn.secondary_natural_forest_20_year_raw_dir,
+        #     'raw_pattern': cn.secondary_natural_forest_81_100_pattern,
+        #     'vrt': f"/tmp/secondary_natural_forest_81_100.vrt",
+        #     'processed_dir': cn.secondary_natural_forest_81_100_path,
+        #     'processed_pattern': cn.secondary_natural_forest_81_100_pattern
+        # }
 
     if 'AGB2015' in process:
         download_upload_dictionary["AGB2015"] = {
