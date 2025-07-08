@@ -56,4 +56,7 @@ it doesn't need to be run separately for each of them, unlike 2_gap_fill_startin
 It uses the output of 4_create_starting_forest_age_2000.py for 2000 and the outputs of
 2_gap_fill_starting_forest_age_2010_2015.py for 2010 and 2015.
 
+To create forest age in 2015 from the beginning, run steps 1, 2, and 5.
+TO create forest age in 2000 from the beginning, run steps 1, 2, 3, 4, and 5.
+
 That is the end of the starting forest age preprocessing.

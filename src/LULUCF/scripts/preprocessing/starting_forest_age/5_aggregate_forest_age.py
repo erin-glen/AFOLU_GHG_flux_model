@@ -15,12 +15,22 @@ Full Coiled run
 python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 30 -t 4 -m 4
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.5_aggregate_forest_age -cn LULUCF_preprocessing --years 2000 2010 2015
 Cluster: https://cloud.coiled.io/clusters/1018902/account/wri-forest-research/information?organization=wri
-Peak memory per worker: ~X-Y MB
-Time for total processing for each task: average of X seconds, min of X seconds and max of X seconds (based on extraction from log)
+Peak memory per worker: ~2 GB
 Time until chunk stats: 27:48 for 2000, 15:13 for 2010, 13:05 for 2015
 Time after chunk stats: 27:49 for 2000, 15:14 for 2010, 13:05 for 2015
 Coiled credits: 15.51 for 2000, 8.2 for 2010, 8.5 for 2015 (31/hr for 30 m8g.medium workers, according to dashboard)
 AWS cost: $0.37 for 2000, $0.18 for 2010, $0.20 for 2015 ($0.72/hr for 30 m8g.medium workers, according to dashboard)
+
+python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 50 -t 4 -m 4
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.5_aggregate_forest_age -cn LULUCF_preprocessing --years 2010 2015
+2010 and 2015 redone at https://cloud.coiled.io/clusters/1019308/account/wri-forest-research/information?organization=wri
+Peak memory per worker: ~2 GB
+Time until chunk stats: 14:26 for 2010, 12:20 for 2015
+Time after chunk stats: 14:26 for 2010, 12:21 for 2015
+Coiled credits: 14.9 for 2010, 10 for 2015 (51/hr for 50 m8g.medium workers, according to dashboard)
+AWS cost: $0.35 for 2010, $0.25 for 2015 ($1.16/hr for 50 m8g.medium workers, according to dashboard)
+Using 50 workers used more credits than 30 workers but didn't save much time, presumably because a few
+tasks take a long time and are stragglers, making all the workers wait around and incurring charges.
 
 Cluster configuration experimentation at https://cloud.coiled.io/clusters/1018902/account/wri-forest-research/information?organization=wri.
 It indicated that using 4 threads/worker and 4 GB workers was best if I'm not in a rush because it used

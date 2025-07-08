@@ -20,8 +20,17 @@ python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_gap_fill_starti
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_gap_fill_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 5
 
 Full Coiled run (2010):
-python -m src.utilities.create_cluster -n 40 -t 23 -m 16 -cn LULUCF_preprocessing
+python -m src.utilities.create_cluster -n 80 -t 23 -m 16 -cn LULUCF_preprocessing
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_gap_fill_starting_forest_age_2010_2015 --year 2010 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2010."
+With 80 workers:
+Peak memory per worker: ~8 GB
+Time until chunk stats: 18:06
+Time after chunk stats: 18:31
+Coiled credits: 29.33 (81/hr for 80 x2gd.medium workers, according to dashboard)
+AWS cost: $1.25 ($3.43/hr, according to dashboard)
+https://cloud.coiled.io/clusters/1019231/account/wri-forest-research/information?organization=wri
+
+With 40 workers:
 Peak memory per worker: ~8 GB
 Time until chunk stats: 38:43
 Time after chunk stats: 39:11
@@ -33,6 +42,15 @@ https://cloud.coiled.io/clusters/1016544/account/wri-forest-research/information
 Full Coiled run (2015):
 python -m src.utilities.create_cluster -n 40 -t 29 -m 16 -cn LULUCF_preprocessing
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.2_gap_fill_starting_forest_age_2010_2015 --year 2015 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive interpolated forest age for 2015."
+With 80 workers:
+Peak memory per worker: ~8 GB
+Time until chunk stats: 15:03
+Time after chunk stats: 15:25
+Coiled credits: 24.26 (81/hr for 80 x2gd.medium workers, according to dashboard)
+AWS cost: $1.04 ($3.43/hr, according to dashboard)
+https://cloud.coiled.io/clusters/1019287/account/wri-forest-research/information?organization=wri
+
+With 40 workers:
 Peak memory per worker: ~8.5 GB
 Time until chunk stats: 38.47
 Time after chunk stats: 39.12
@@ -186,7 +204,7 @@ def gap_fill_starting_forest_age(bounds, input_dir, input_pattern, output_patter
         # Updates raster metadata
         profile = src_datasets[0].profile
         profile.update(
-            dtype="uint8",
+            dtype="uint16",
             height=int(crop_window.height),
             width=int(crop_window.width),
             transform=transform,
