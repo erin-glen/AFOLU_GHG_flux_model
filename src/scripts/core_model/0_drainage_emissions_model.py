@@ -1043,5 +1043,6 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2000 \
   --end_year 2023 \
-  --all_five_year_periods
+  --all_five_year_periods \
+  --mark_missing_factors
 """
