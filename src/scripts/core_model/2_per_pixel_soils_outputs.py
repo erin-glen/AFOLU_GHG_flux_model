@@ -38,9 +38,9 @@ INVENTORY_PERIODS = [
 
 BASE_URL = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/"
-    "outputs/version_0_4_0"
+    "outputs/version_0_4_3"
 )
-OUTPUT_DATE = "20250702"
+OUTPUT_DATE = "20250707"
 PIXEL_RES = "4000_pixels"
 
 
@@ -296,8 +296,7 @@ python -m src.scripts.core_model.2_per_pixel_soils_outputs \
   
 python -m src.scripts.core_model.2_per_pixel_soils_outputs \
   --cluster_name per_pixel \
-  --chunk_size 1 \
-  --log_note "Testing per-pixel outputs" 
+  --chunk_size 1 
 
 
     """
