@@ -7,32 +7,102 @@ into a command line utility.  It can run locally or connect to a Coiled
 Dask cluster for distributed execution.
 """
 
-import argparse
-import re
+import argparse, logging, re
 from io import BytesIO
 
-import fsspec
-import numpy as np
-import pandas as pd
-import requests
-import s3fs
-import xarray as xr
+import fsspec, s3fs, requests
+import numpy as np, pandas as pd, xarray as xr
+import dask.array as da
 from flox import xarray_reduce, ReindexArrayType, ReindexStrategy
-from dask.distributed import Client, LocalCluster
+
+# LocalCluster not needed; uu.connect_to_cluster already handles local fallback.
+from dask.distributed import Client
+
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.utilities.lulucf_constants_and_names import C_to_CO2
 
+# ╭────────────────────────────────────────────────────────────────────────────╮
+# │  LULUCF ZONAL-STATISTICS – PATH MANIFEST (single source of truth)         │
+# ╰────────────────────────────────────────────────────────────────────────────╯
+S3_BUCKET = "gfw2-data"
+ROOT = f"s3://{S3_BUCKET}/climate/AFOLU_flux_model/LULUCF/outputs"
 
-def create_state_node_df(state_node_lookup_table_local: str, state_node_lookup_table_s3: str, sheet_name: str) -> pd.DataFrame:
+#  The three CLI flags --model_version, --run_date, and the per-loop
+#  interval string "{interval}" are interpolated later with .format().
+
+OUTPUT_BASE = f"{ROOT}" + "/{model_version}/"
+
+GROSS_EMIS_CO2 = (
+    OUTPUT_BASE + "gross_emissions__all_C_pools__CO2_only__MgCO2/"
+    "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
+)
+GROSS_EMIS_ALL_GHG = (
+    OUTPUT_BASE + "gross_emissions__all_C_pools_all_gases__MgCO2e/"
+    "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
+)
+GROSS_REMV_ALL_POOLS = (
+    OUTPUT_BASE + "gross_removals__all_C_pools__MgCO2/"
+    "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
+)
+NET_FLUX_CO2 = (
+    OUTPUT_BASE + "net_flux__all_C_pools__CO2_only__MgCO2/"
+    "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
+)
+STATE_NODE_RASTERS = (
+    OUTPUT_BASE
+    + "land_state_node/standard_model/annual_intervals/{interval}/40000_pixels/{run_date}/"
+)
+
+# Zarr cache folders (one per interval)
+ZARR_CACHE_PREFIX = OUTPUT_BASE + "zarr/{run_date}/{interval}/"
+
+ZARR_PATHS = {
+    "gross_emis_CO2": ZARR_CACHE_PREFIX
+    + "gross_emissions__all_C_pools__CO2_only__MgCO2_{interval}.zarr",
+    "gross_emis_ALL_GHG": ZARR_CACHE_PREFIX
+    + "gross_emissions__all_C_pools__all_gases__MgCO2e_pixel_yr_{interval}.zarr",
+    "gross_remv_all": ZARR_CACHE_PREFIX
+    + "gross_removals__all_C_pools__MgCO2_pixel_yr_{interval}.zarr",
+    "net_flux_CO2": ZARR_CACHE_PREFIX
+    + "net_flux__all_C_pools__CO2_only__MgCO2_pixel_yr_{interval}.zarr",
+    "state_nodes": ZARR_CACHE_PREFIX + "land_state_node_{interval}.zarr",
+}
+
+# Contextual layers (static)
+ADM0_GTIFF_FOLDER = "s3://gfw2-data/gadm_administrative_boundaries/v4.1/v4.1.64_from_gfw-data-lake/raster/epsg-4326/10/40000/adm0/gdal-geotiff/"
+ADM0_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/GADM4_1_adm0_global/20250604/global_GADM41_adm0_20250604.zarr"
+PIXEL_AREA_GTIFF_FOLDER = "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
+PIXEL_AREA_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/pixel_area/20250604/global_pixel_area_20250604.zarr"
+IFL_PRIMARY_GTIFF_FOLDER = (
+    "s3://gfw2-data/climate/carbon_model/ifl_primary_merged/processed/20200724/"
+)
+IFL_PRIMARY_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/IFL2000_tropical_primary_forest_2001/20250609/ifl_primary_forest_merged.zarr"
+
+# Lookup table
+STATE_NODE_XLSX_LOCAL = "./src/LULUCF/LULUCF_state_node_lookup_table.xlsx"
+STATE_NODE_XLSX_S3 = "https://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_model/LULUCF/state_node_lookup_tables/LULUCF_state_node_lookup_table.xlsx"
+# ===  END PATH MANIFEST  ======================================================
+
+
+def create_state_node_df(
+    state_node_lookup_table_local: str, state_node_lookup_table_s3: str, sheet_name: str
+) -> pd.DataFrame:
     """Load the state node lookup table from S3 falling back to a local file."""
     try:
         response = requests.get(state_node_lookup_table_s3, timeout=10)
         response.raise_for_status()
         state_node_df = pd.read_excel(BytesIO(response.content), sheet_name=sheet_name)
-    except (requests.exceptions.RequestException, Exception) as e:  # pragma: no cover - network access not available
-        print(f"Failed to download file from S3. Falling back to local file. Error: {e}")
-        state_node_df = pd.read_excel(state_node_lookup_table_local, sheet_name=sheet_name)
+    except (
+        requests.exceptions.RequestException,
+        Exception,
+    ) as e:  # pragma: no cover - network access not available
+        print(
+            f"Failed to download file from S3. Falling back to local file. Error: {e}"
+        )
+        state_node_df = pd.read_excel(
+            state_node_lookup_table_local, sheet_name=sheet_name
+        )
     return state_node_df
 
 
@@ -54,24 +124,29 @@ def parse_pattern_from_uri(uri_series: pd.Series) -> str | None:
 
 def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
     """Open multiple GeoTIFFs into a chunked Xarray dataset."""
-    return (
-        xr.open_mfdataset(tile_uris.values.tolist(), parallel=True, chunks={"x": chunk_size, "y": chunk_size}).squeeze()
-    )
+    return xr.open_mfdataset(
+        tile_uris.values.tolist(),
+        parallel=True,
+        chunks={"x": chunk_size, "y": chunk_size},
+    ).squeeze()
 
 
 def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
-    """Crop one dataset to another's extent."""
-    return ds.sel(x=ref.x, y=ref.y, method="nearest")
+    """Crop one dataset to another's extent **without** shifting a pixel."""
+    return ds.sel(x=ref.x, y=ref.y)  # exact index match
 
 
 def convert_to_coord_dict(flux_results: xr.Dataset, interval: str) -> dict:
     """Convert flox results to a coordinate dictionary."""
     print(f"   Postprocessing {interval}: {timestr()}")
-    sparse_data = flux_results.data
+    sparse = flux_results.data  # sparse COO array
     dim_names = flux_results.dims
-    indices = sparse_data.coords
-    values = sparse_data.data
-    coord_dict = {dim: flux_results.coords[dim].values[indices[i]] for i, dim in enumerate(dim_names)}
+    indices = sparse.coords
+    values = sparse.data
+    coord_dict = {
+        dim: flux_results.coords[dim].values[indices[i]]
+        for i, dim in enumerate(dim_names)
+    }
     coord_dict["value"] = values
     return coord_dict
 
@@ -81,7 +156,12 @@ def classify_node(state_node: int) -> str:
     node_str = str(state_node)
     first_digit = int(node_str[0])
     one_digit_map = {1: "forest_gain", 2: "forest_loss", 4: "cropland", 5: "grassland"}
-    three_digit_map = {311: "forest_loss", 312: "forest_loss", 321: "disturbed_forest", 322: "stable_forest"}
+    three_digit_map = {
+        311: "forest_loss",
+        312: "forest_loss",
+        321: "disturbed_forest",
+        322: "stable_forest",
+    }
     if first_digit == 3:
         prefix = int(node_str[:3])
         return three_digit_map.get(prefix, "unknown_3x")
@@ -99,12 +179,16 @@ def create_interval_df(
     df["flux_type"] = df["flux_type"].replace(flux_type_dict)
     df["node_grp"] = df["state_nodes"].apply(classify_node)
     df["interval_end"] = interval_end_year
-    df = df.merge(state_node_df[["state_nodes", "meaning"]], on="state_nodes", how="left")
+    df = df.merge(
+        state_node_df[["state_nodes", "meaning"]], on="state_nodes", how="left"
+    )
     df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000
     return df
 
 
-def calculate_interval_flux_densities(df: pd.DataFrame, contextual_layer_names: list[str]) -> pd.DataFrame:
+def calculate_interval_flux_densities(
+    df: pd.DataFrame, contextual_layer_names: list[str]
+) -> pd.DataFrame:
     """Calculate per-hectare flux densities."""
     area_df = df[df["flux_type"] == "area__ha"].copy()
     flux_df = df[df["flux_type"] != "area__ha"].copy()
@@ -115,11 +199,15 @@ def calculate_interval_flux_densities(df: pd.DataFrame, contextual_layer_names: 
         how="left",
         suffixes=("", "_area"),
     )
-    merged["value_per_ha"] = merged["value"] / merged["value_area"] / C_to_CO2
+    merged["value_per_ha"] = (
+        merged["value"] / merged["value_area"]
+    )  # Mg\u202fCO2\u202fha-1
     new_rows = merged.copy()
-    new_rows["flux_type"] = new_rows["flux_type"] + "__C_per_ha"
+    new_rows["flux_type"] = new_rows["flux_type"] + "__CO2_per_ha"
     new_rows["value"] = new_rows["value_per_ha"]
-    new_rows = new_rows.drop(columns=["value_area", "interval_end_area", "value_per_ha"])
+    new_rows = new_rows.drop(
+        columns=["value_area", "interval_end_area", "value_per_ha"]
+    )
     return pd.concat([df, new_rows], ignore_index=True)
 
 
@@ -133,59 +221,51 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
 
 
 def main(args: argparse.Namespace) -> None:
-    cluster, client, run_local = uu.connect_to_cluster(
+    logging.basicConfig(
+        level=logging.INFO if not args.debug else logging.DEBUG,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    cluster, client, _ = uu.connect_to_cluster(
         cluster_name=args.cluster_name,
         run_local=args.run_local,
     )
-    if run_local:
-        cluster = LocalCluster()
-        client = Client(cluster)
-        print("Running locally.")
-    else:
-        print(f"Using coiled cluster: {cluster.name}")
 
-    # Paths derived from arguments
-    output_path = f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/{args.model_version}/"
-
-    gross_emis_CO2_folder = (
-        f"{output_path}gross_emissions__all_C_pools__CO2_only__MgCO2/standard_model/annual_intervals/INTERVAL/_pixel_yr/40000_pixels/{args.run_date}/"
-    )
-    gross_emis_all_gases_folder = (
-        f"{output_path}gross_emissions__all_C_pools_all_gases__MgCO2e/standard_model/annual_intervals/INTERVAL/_pixel_yr/40000_pixels/{args.run_date}/"
-    )
-    gross_remv_all_pools_folder = (
-        f"{output_path}gross_removals__all_C_pools__MgCO2/standard_model/annual_intervals/INTERVAL/_pixel_yr/40000_pixels/{args.run_date}/"
-    )
-    net_flux_all_pools_CO2_folder = (
-        f"{output_path}net_flux__all_C_pools__CO2_only__MgCO2/standard_model/annual_intervals/INTERVAL/_pixel_yr/40000_pixels/{args.run_date}/"
-    )
-    node_folder = f"{output_path}land_state_node/standard_model/annual_intervals/INTERVAL/40000_pixels/{args.run_date}/"
-
-    zarr_s3_path = f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/{args.model_version}/zarr/{args.run_date}/"
-
-    adm0_folder = "s3://gfw2-data/gadm_administrative_boundaries/v4.1/v4.1.64_from_gfw-data-lake/raster/epsg-4326/10/40000/adm0/gdal-geotiff/"
-    adm0_zarr_name = (
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/GADM4_1_adm0_global/20250604/global_GADM41_adm0_20250604.zarr"
-    )
-    pixel_area_folder = "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
-    pixel_area_zarr_name = (
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/pixel_area/20250604/global_pixel_area_20250604.zarr"
-    )
-    primary_forest_IFL_folder = "s3://gfw2-data/climate/carbon_model/ifl_primary_merged/processed/20200724/"
-    primary_forest_IFL_zarr_name = (
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/IFL2000_tropical_primary_forest_2001/20250609/ifl_primary_forest_merged.zarr"
+    logging.info(
+        "Connected to cluster %s", cluster.name if cluster else "local-threaded"
     )
 
-    state_node_lookup_table_local = "./src/LULUCF/LULUCF_state_node_lookup_table.xlsx"
-    state_node_lookup_table_s3 = "http://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_model/LULUCF/state_node_lookup_tables/LULUCF_state_node_lookup_table.xlsx"
+    # Resolve manifest placeholders ------------------------------------------------
+    OUTPUT_KW = dict(model_version=args.model_version, run_date=args.run_date)
+
+    adm0_folder, adm0_zarr_name = ADM0_GTIFF_FOLDER, ADM0_ZARR
+    pixel_area_folder, pixel_area_zarr_name = PIXEL_AREA_GTIFF_FOLDER, PIXEL_AREA_ZARR
+    primary_forest_IFL_folder, primary_forest_IFL_zarr_name = (
+        IFL_PRIMARY_GTIFF_FOLDER,
+        IFL_PRIMARY_ZARR,
+    )
+
+    state_node_lookup_table_local, state_node_lookup_table_s3 = (
+        STATE_NODE_XLSX_LOCAL,
+        STATE_NODE_XLSX_S3,
+    )
     sheet = "v030_20250430"
 
-    state_node_df = create_state_node_df(state_node_lookup_table_local, state_node_lookup_table_s3, sheet)
+    state_node_df = create_state_node_df(
+        state_node_lookup_table_local, state_node_lookup_table_s3, sheet
+    )
 
     # Ensure contextual zarrs exist
     ensure_zarr_exists(list_folder_uris(adm0_folder), adm0_zarr_name, args.chunk_size)
-    ensure_zarr_exists(list_folder_uris(pixel_area_folder), pixel_area_zarr_name, args.chunk_size)
-    ensure_zarr_exists(list_folder_uris(primary_forest_IFL_folder), primary_forest_IFL_zarr_name, args.chunk_size)
+    ensure_zarr_exists(
+        list_folder_uris(pixel_area_folder), pixel_area_zarr_name, args.chunk_size
+    )
+    ensure_zarr_exists(
+        list_folder_uris(primary_forest_IFL_folder),
+        primary_forest_IFL_zarr_name,
+        args.chunk_size,
+    )
 
     adm0 = xr.open_zarr(adm0_zarr_name).band_data
     pixel_area = xr.open_zarr(pixel_area_zarr_name).band_data
@@ -535,16 +615,28 @@ def main(args: argparse.Namespace) -> None:
         interval = f"{interval_end_year - 1}_{interval_end_year}"
         print(f"Processing {interval}: {timestr()}")
 
-        gross_emis_CO2_zarr_name = f"{zarr_s3_path}{interval}/gross_emissions__all_C_pools__CO2_only__MgCO2_{interval}.zarr"
-        gross_emis_all_gases_zarr_name = f"{zarr_s3_path}{interval}/gross_emissions__all_C_pools__all_gases__MgCO2e_pixel_yr_{interval}.zarr"
-        gross_remv_all_pools_zarr_name = f"{zarr_s3_path}{interval}/gross_removals__all_C_pools__MgCO2_pixel_yr_{interval}.zarr"
-        net_flux_all_pools_CO2_zarr_name = f"{zarr_s3_path}{interval}/net_flux__all_C_pools__CO2_only__MgCO2_pixel_yr_{interval}.zarr"
-        node_zarr_name = f"{zarr_s3_path}{interval}/land_state_node_{interval}.zarr"
+        gross_emis_CO2_zarr_name = ZARR_PATHS["gross_emis_CO2"].format(
+            interval=interval, **OUTPUT_KW
+        )
+        gross_emis_all_gases_zarr_name = ZARR_PATHS["gross_emis_ALL_GHG"].format(
+            interval=interval, **OUTPUT_KW
+        )
+        gross_remv_all_pools_zarr_name = ZARR_PATHS["gross_remv_all"].format(
+            interval=interval, **OUTPUT_KW
+        )
+        net_flux_all_pools_CO2_zarr_name = ZARR_PATHS["net_flux_CO2"].format(
+            interval=interval, **OUTPUT_KW
+        )
+        node_zarr_name = ZARR_PATHS["state_nodes"].format(
+            interval=interval, **OUTPUT_KW
+        )
 
         gross_emis_CO2 = xr.open_zarr(gross_emis_CO2_zarr_name).band_data
         gross_emis_all_gases = xr.open_zarr(gross_emis_all_gases_zarr_name).band_data
         gross_remv_all_pools = xr.open_zarr(gross_remv_all_pools_zarr_name).band_data
-        net_flux_all_pools_CO2 = xr.open_zarr(net_flux_all_pools_CO2_zarr_name).band_data
+        net_flux_all_pools_CO2 = xr.open_zarr(
+            net_flux_all_pools_CO2_zarr_name
+        ).band_data
         state_nodes = xr.open_zarr(node_zarr_name).band_data
 
         reference = state_nodes
@@ -556,16 +648,29 @@ def main(args: argparse.Namespace) -> None:
         gross_remv_all_pools_aligned = safe_crop(gross_remv_all_pools, reference)
         net_flux_all_pools_CO2_aligned = safe_crop(net_flux_all_pools_CO2, reference)
 
+        # Grab one URI from each folder to label flux_type
         flux_type_dict = {
-            0: parse_pattern_from_uri(list_folder_uris(gross_emis_CO2_folder.replace("INTERVAL", interval))),
-            1: parse_pattern_from_uri(list_folder_uris(gross_emis_all_gases_folder.replace("INTERVAL", interval))),
-            2: parse_pattern_from_uri(list_folder_uris(gross_remv_all_pools_folder.replace("INTERVAL", interval))),
-            3: parse_pattern_from_uri(list_folder_uris(net_flux_all_pools_CO2_folder.replace("INTERVAL", interval))),
+            0: parse_pattern_from_uri(
+                list_folder_uris(GROSS_EMIS_CO2.format(interval=interval, **OUTPUT_KW))
+            ),
+            1: parse_pattern_from_uri(
+                list_folder_uris(
+                    GROSS_EMIS_ALL_GHG.format(interval=interval, **OUTPUT_KW)
+                )
+            ),
+            2: parse_pattern_from_uri(
+                list_folder_uris(
+                    GROSS_REMV_ALL_POOLS.format(interval=interval, **OUTPUT_KW)
+                )
+            ),
+            3: parse_pattern_from_uri(
+                list_folder_uris(NET_FLUX_CO2.format(interval=interval, **OUTPUT_KW))
+            ),
             4: "area__ha",
         }
 
         flux_cube = xr.DataArray(
-            xr.dask.array.stack(
+            da.stack(
                 [
                     gross_emis_CO2_aligned,
                     gross_emis_all_gases_aligned,
@@ -589,22 +694,35 @@ def main(args: argparse.Namespace) -> None:
         primary_forest_IFL_aligned.name = "primary_forest_IFL"
         state_nodes.name = "state_nodes"
 
+        flux_type_ids = np.arange(5, dtype=np.uint8)
         flux_results = xarray_reduce(
             flux_cube,
             *(adm0_aligned, state_nodes, primary_forest_IFL_aligned),
             func="sum",
-            expected_groups=(gadm_adm0_ids, node_codes, primary_forest_IFL_codes),
-            reindex=ReindexStrategy(blockwise=False, array_type=ReindexArrayType.SPARSE_COO),
-            fill_value=0,
+            expected_groups=(
+                flux_type_ids,
+                gadm_adm0_ids,
+                node_codes,
+                primary_forest_IFL_codes,
+            ),
+            reindex=ReindexStrategy(
+                blockwise=False, array_type=ReindexArrayType.SPARSE_COO
+            ),
+            fill_value=np.nan,
         ).compute()
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
-        df = create_interval_df(coord_dict, state_node_df, flux_type_dict, interval_end_year)
+        df = create_interval_df(
+            coord_dict, state_node_df, flux_type_dict, interval_end_year
+        )
         df = calculate_interval_flux_densities(df, contextual_layer_names)
         combined_df = pd.concat([combined_df, df])
 
     combined_df = combined_df.reset_index(drop=True)
-    combined_df.to_csv(args.output_csv, index=False)
+    logging.info("Writing Parquet output to %s", args.output_parquet)
+    combined_df.to_parquet(
+        args.output_parquet, index=False, partition_cols=["interval_end"]
+    )
 
     if client:
         client.close()
@@ -616,9 +734,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run LULUCF zonal statistics")
     parser.add_argument("--model_version", required=True, help="Model version string")
     parser.add_argument("--run_date", required=True, help="Model run date")
-    parser.add_argument("--interval_end_years", nargs="+", type=int, required=True, help="Interval end years")
-    parser.add_argument("--chunk_size", type=int, default=10000, help="Chunk size for reading rasters")
-    parser.add_argument("--output_csv", required=True, help="Path of the output CSV")
+    parser.add_argument(
+        "--interval_end_years",
+        nargs="+",
+        type=int,
+        required=True,
+        help="Interval end years",
+    )
+    parser.add_argument(
+        "--chunk_size", type=int, default=10000, help="Chunk size for reading rasters"
+    )
+    parser.add_argument("--output_parquet", required=True, help="Output Parquet folder")
+    parser.add_argument("--debug", action="store_true", help="Verbose logging")
     parser.add_argument(
         "--cluster_name",
         default="zonal_stats",
@@ -629,5 +756,4 @@ if __name__ == "__main__":
         action="store_true",
         help="Run locally without Dask/Coiled",
     )
-
     main(parser.parse_args())
