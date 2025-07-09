@@ -480,6 +480,7 @@ secondary_natural_forest_81_100_pattern =  "natural_forest_mean_growth_rate__Mg_
 secondary_natural_forest_21_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_100_years__nibble_20250516"
 
 Robinson_processed_date = '20250516'
+# Robinson_processed_date = '20250616'  #TODO change to this more recent date
 secondary_natural_forest_0_5_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_0_5/"
 secondary_natural_forest_6_10_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_6_10/"
 secondary_natural_forest_11_15_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_11_15/"

@@ -530,7 +530,7 @@ def calc_NT_T(interval_length, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litt
 # Applies to 5-year intervals and annual intervals. Main difference is that the calculation of gain before loss
 # only applies to the former.
 @jit(nopython=True)
-def calc_T_NT(node, interval_length, burned_in_prev_interval, RF_AGC_in, RF_BGC_in, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
+def calc_T_NT(node, interval_length, burned_in_curr_interval, RF_AGC_in, RF_BGC_in, c_pools_fire_CO2, c_pools_fire_non_CO2, c_pools_no_fire,
               forest_dist_last, interval_end_year, c_dens_in,
               post_dist_regrowth, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4, Gef_n2o,
               deadwood_c_ratio, litter_c_ratio):
@@ -541,7 +541,7 @@ def calc_T_NT(node, interval_length, burned_in_prev_interval, RF_AGC_in, RF_BGC_
     # Establishes which carbon pools are emitted depending on whether fire was detected during the interval.
     # For T->NT, emission factors are binary (1 means full emissions, 0 means no emissions).
     # Carbon pools that are emitted as CO2 if fire was detected.
-    if burned_in_prev_interval:
+    if burned_in_curr_interval:
         agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = unpack_emission_factors(c_pools_fire_CO2)
     else:
         # Carbon pools that are emitted as CO2 if fire was not detected.
@@ -680,7 +680,7 @@ def calc_T_NT(node, interval_length, burned_in_prev_interval, RF_AGC_in, RF_BGC_
     n2o_flux_out = 0
 
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
-    if burned_in_prev_interval:
+    if burned_in_curr_interval:
 
         state_out = accrete_node(node, 1)
 
@@ -870,6 +870,9 @@ def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_curr_interval, 
         bgc_gross_emis_out = ((bgc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * bgc_ef_CO2
         deadwood_c_gross_emis_out = ((deadwood_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * deadwood_c_ef_CO2
         litter_c_gross_emis_out = ((litter_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * litter_c_ef_CO2
+
+        # Emission factor for burned forest is the combustion factor for forrest
+        agc_ef_CO2 = Cf_forest
 
         # # For testing CO2 fire emissions
         # print("c_dens_in:", c_dens_in)
@@ -1069,6 +1072,9 @@ def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, first
         deadwood_c_gross_emis_out = ((deadwood_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * deadwood_c_ef_CO2
         litter_c_gross_emis_out = ((litter_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * litter_c_ef_CO2
 
+        # Emission factor for burned forest is the combustion factor for forrest
+        agc_ef_CO2 = Cf_forest
+
         # # For testing CO2 fire emissions
         # print("c_dens_in:", c_dens_in)
         # print("agc_rf:", agc_rf)
@@ -1079,13 +1085,14 @@ def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, first
         # print("agc_gross_emis_out:", agc_gross_emis_out)
         # os.quit()
 
-    # No emissions if no fire detected
+    # No emissions or emission factor if no fire detected
     else:
 
         agc_gross_emis_out = 0
         bgc_gross_emis_out = 0
         deadwood_c_gross_emis_out = 0
         litter_c_gross_emis_out = 0
+        agc_ef_CO2 = 0
 
     # Gross emissions as an array
     c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')

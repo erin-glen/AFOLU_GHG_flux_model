@@ -53,7 +53,7 @@ from src.utilities import resize_cluster
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-# @jit(nopython=True)
+@jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, in_dict_float32,
                   primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                   model_start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_final):
@@ -175,7 +175,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     # Iterates through model intervals
     for i, interval_end_year in enumerate(interval_end_years):
 
-        print(f"Now at interval ending in {interval_end_year}:")
+        # print(f"Now at interval ending in {interval_end_year}:")
 
         # Length of the interval and difference between the start and end years (years)
         interval_length = interval_length_list[i]
@@ -246,7 +246,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
             # print("burned_area_blocks_all_intervals_so_far max:", np.max(burned_area_blocks_all_intervals_so_far))
 
         else:
-            sys.exit('interval_length not found')
+            raise ValueError("interval_length not valid: must be 1 or 5")
 
         # print("burned_area_blocks_all_intervals_so_far")
         # print(burned_area_blocks_all_intervals_so_far)
@@ -476,27 +476,26 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 elif interval_length == 1:
                     burned_area_t = burned_area_blocks_all_intervals_so_far[-1][row, col]
                     # The first year with burned area during the interval (but for annual interval, the only year)
-                    first_year_burned_during_interval = [burned_area_t]
+                    first_year_burned_during_interval = burned_area_t
                     burned_in_curr_interval = (burned_area_t > 0)
-                    times_burned_in_interval = np.count_nonzero(burned_in_curr_interval)
+                    times_burned_in_interval = 1 if burned_area_t > 0 else 0
 
-                    first_year_annual_dist_during_interval = 0   # Annual Potapov forest disturbance raster not used for annual model
+                    # Annual Potapov forest disturbance raster not used for annual model
+                    times_annual_dist_in_interval = 0
+                    annual_dist_in_interval = False
+                    first_year_annual_dist_during_interval = 0
 
-                    if interval_end_year == 2016:
-                        print("burned_area_t:", burned_area_t)
-                        print("first_year_burned_during_interval:", first_year_burned_during_interval)
-                        print("times_burned_in_interval:", times_burned_in_interval)
-                        print("burned_in_curr_interval:", burned_in_curr_interval)
-                        print("times_burned_in_interval:", times_burned_in_interval)
-
-                        if times_burned_in_interval == 1:  # To force it to terminate
-                            sys.quit()
+                    # if interval_end_year == 2017:
+                    #     print("burned_area_t:", burned_area_t)
+                    #     print("first_year_burned_during_interval:", first_year_burned_during_interval)
+                    #     print("burned_in_curr_interval:", burned_in_curr_interval)
+                    #     print("times_burned_in_interval:", times_burned_in_interval)
+                    #
+                    #     if times_burned_in_interval == 1:  # To force it to terminate
+                    #         sys.quit()
 
                 else:
                     raise ValueError("interval_length not valid: must be 1 or 5")
-
-                # if first_year_annual_dist_during_interval > 0:
-                #     print(first_year_annual_dist_during_interval)
 
 
                 # Records the first year of forest disturbance in the pixel, to indicate whether disturbance was reported at all
@@ -654,11 +653,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # However, I'm not forcing sig_height_gain_prev_curr_abs = 0 when using annual intervals in order to try to catch strange cases.
                 sig_height_gain_prev_curr_abs = (height_change_prev_curr <= cn.sig_height_gain_threshold_abs)
 
-                # Whether tall vegetation was partially disturbed in the last interval
-                part_or_full_dist_in_prev_interval = (first_year_annual_dist_during_interval > 0) or (sig_height_loss_prev_curr_abs) or (first_time_sig_loss_from_max_height == 1)
+                # Whether tall vegetation was partially disturbed in the current interval
+                part_or_full_dist_in_curr_interval = (first_year_annual_dist_during_interval > 0) or (sig_height_loss_prev_curr_abs) or (first_time_sig_loss_from_max_height == 1)
 
-                # Resets age to 0 if there was a partial disturbance in the last interval
-                if part_or_full_dist_in_prev_interval:
+                # Resets age to 0 if there was a partial disturbance in the current interval
+                if part_or_full_dist_in_curr_interval:
                     forest_age_annual_cell = 0
 
                 # Assigns pixel to "primary forest proxy".
@@ -1001,7 +1000,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                             Gef_n2o_forest, deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
                     else:  # Trees remaining trees- no conversion to oil palm (42)
                         node = nu.accrete_node(node, 2)
-                        if part_or_full_dist_in_prev_interval:  # Trees partially disturbed in the last interval (421)
+                        if part_or_full_dist_in_curr_interval:  # Trees partially disturbed in the last interval (421)
                             node = nu.accrete_node(node, 1)
                             if all_planted_trees:   # Planted trees partially disturbed in the last interval (4211)
                                 node = nu.accrete_node(node, 1)
@@ -1201,7 +1200,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             deadwood_c_ratio=deadwood_c_ratio_non_mang, litter_c_ratio=litter_c_ratio_non_mang)
                                     else:  # Natural forest undisturbed since model start (422212)
                                         node = nu.accrete_node(node, 2)
-                                        if primary_forest_proxy:  # Primary forest (4222121->42221211/42221212)
+                                        if primary_forest_proxy:  # Primary forest undisturbed since model start (4222121->42221211/42221212)
                                             node = nu.accrete_node(node, 1)
                                             RF_AGC_final = primary_forest_AGC_RF
                                             RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang
@@ -1214,7 +1213,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                                 interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                                 Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                                 deadwood_c_ratio=deadwood_c_ratio_non_mang, litter_c_ratio=litter_c_ratio_non_mang)
-                                        else: # Old secondary forest (4222122->42221221/42221222)
+                                        else: # Old secondary forest undisturbed since model start (4222122->42221221/42221222)
                                             node = nu.accrete_node(node, 2)
                                             RF_AGC_final = natrl_forest_age_dependent_agc_rf
                                             RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang
@@ -1239,7 +1238,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                         RF_AGC_final, RF_BGC_final, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
                                         interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                         Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                #
+
                 # ### Non-cropland/non-tree to cropland (without tall vegetation)
                 # elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
                 #     node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
@@ -1323,6 +1322,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     # If no decision tree branches apply, carbon densities set to 0 Mg C/ha
                     c_dens_out = np.array([0, 0, 0, 0]).astype('float32')
 
+
+                # Forces output carbon densities that are slightly negative (due to rounding errors) to 0 for simplicity
+                for i, c_pool_out in enumerate(c_dens_out):
+                    if (c_pool_out < 0) and (c_pool_out > -0.0001):
+                        c_dens_out[i] = 0
+
+
                 ### Populates the output arrays with the calculated fluxes and densities
 
                 # Stops model if state_out is more digits than the expected maximum (currently 6).
@@ -1366,7 +1372,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 most_recent_year_not_tall_veg_block[row, col] = most_recent_year_not_tall_veg
                 max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
                 first_time_sig_loss_from_max_height_block[row, col] = first_time_sig_loss_from_max_height
-                part_or_full_dist_in_prev_interval_block[row, col] = part_or_full_dist_in_prev_interval
+                part_or_full_dist_in_prev_interval_block[row, col] = part_or_full_dist_in_curr_interval
                 burned_in_curr_interval_block[row, col] = burned_in_curr_interval
                 agc_ef_out_block[row, col] = agc_ef_out_cell
 
@@ -1751,7 +1757,8 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Burned area rasters (every year)-- same code for annual, 5-year model, or hybrid.
     # Each burned area year needs to be in its own folder.
-    for year in range(start_year, end_year + 1):  # Annual burned area maps start in 2000
+    # Burned area from the start year of the first interval is never used, hence iteration starts with start_year+1.
+    for year in range(start_year+1, end_year + 1):  # Annual burned area maps start in 2000
         download_dict[f"{cn.burned_area_final_pattern}_{year}"] = f"{cn.full_bucket_prefix}/{cn.burned_area_final_dir}{year}/{sample_tile_id}_{cn.burned_area_final_pattern}_{year}.tif"
 
     # Starting carbon pools depend on the starting year of the model
