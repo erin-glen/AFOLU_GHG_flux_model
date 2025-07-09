@@ -959,7 +959,7 @@ def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_curr_interval, 
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 # Applies to 5-year intervals and annual intervals.
 @jit(nopython=True)
-def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, most_recent_year_burned_during_interval, RF_AGC, RF_BGC,
+def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, first_year_burned_during_interval, RF_AGC, RF_BGC,
                          c_pools_fire_CO2, c_pools_fire_non_CO2, interval_end_year, c_dens_in,
                          most_recent_year_not_tall_veg, Cf_forest, Gef_co2, Gef_ch4, Gef_n2o,
                          deadwood_c_ratio, litter_c_ratio):
@@ -976,8 +976,9 @@ def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, most_
     # until the fire (i.e. carbon densities at the year of fire).
     # Annual model has no gain in the year of disturbance (including fire),
     # so gain_year_count_pre_dist = 0 when there is fire and = 1 when there is no fire.
+    # If there were multiple years of fires during the interval, the first one is used.
     if interval_length == 5:
-        if most_recent_year_burned_during_interval > 0:
+        if first_year_burned_during_interval > 0:
             # If a forest disturbance was detected, the gain_year_count_pre_dist are the number of years until detection of the last disturbance.
             # There is no growth in the year of disturbance or the years after.
             # The - 1 at the excludes the disturbance year from the gain_year_count_pre_dist since we decided there are no removals in the disturbance year.
@@ -989,13 +990,13 @@ def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, most_
             # 2 years         13               - ((2015              - 2000)                - 5) - 1   (year t-2)
             # 3 years         14               - ((2015              - 2000)                - 5) - 1   (year t-1)
             # 4 years         15               - ((2015              - 2000)                - 5) - 1   (year t)
-            gain_year_count_pre_dist = most_recent_year_burned_during_interval - ((interval_end_year - cn.first_model_year_5_years) - cn.five_year_interval_duration) - 1
+            gain_year_count_pre_dist = first_year_burned_during_interval - ((interval_end_year - cn.first_model_year_5_years) - cn.five_year_interval_duration) - 1
         else:
             # If no fire was detected, removals occurred every year
             gain_year_count_pre_dist = cn.five_year_interval_duration
 
     elif interval_length == 1:
-        if most_recent_year_burned_during_interval > 0:
+        if first_year_burned_during_interval > 0:
             gain_year_count_pre_dist = 0  # No removals in a disturbance/fire year, so no removals during annual interval with fire
         else:
             gain_year_count_pre_dist = 1  # One year of gain when there is no fire
@@ -1059,7 +1060,7 @@ def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, most_
     # if a Gef for CO2 is supplied AND if there was fire during the interval.
     # This is used for non-stand replacing forest disturbances (as opposed to entire C pools being combusted).
     # From IPCC 2019 Eqn. 2.27
-    if most_recent_year_burned_during_interval > 0:
+    if first_year_burned_during_interval > 0:
 
         # Equations divide by C_to_CO2 to put the emissions back in Mg C/ha. They are later converted back to Mg CO2/ha,
         # but we need CO2 fire emissions in Mg C/ha here for consistency with all other outputs.
@@ -1094,7 +1095,7 @@ def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, most_
     # gain year count is the number of years between the disturbance and the end of the interval.
     # This uses the same RFs before and after the fire.
     # Only applies to 5-year interval data.
-    if (most_recent_year_burned_during_interval > 0) and (interval_length == 5):
+    if (first_year_burned_during_interval > 0) and (interval_length == 5):
 
         post_dist_RF = np.array([RF_AGC, RF_BGC, RF_AGC * deadwood_c_ratio, RF_AGC * litter_c_ratio]).astype('float32')
         gain_year_count_post_dist = cn.five_year_interval_duration - gain_year_count_pre_dist - 1
@@ -1122,7 +1123,7 @@ def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, most_
     n2o_flux_out = 0
 
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
-    if most_recent_year_burned_during_interval > 0:
+    if first_year_burned_during_interval > 0:
 
         state_out = accrete_node(node, 1)
 
@@ -1202,6 +1203,7 @@ def calc_NT_cropland_gain(c_pools_no_fire, c_dens_in, RF_array):
 
 # Gross fluxes and ending carbon stocks for cropland converted to non-cropland (without tall vegetation).
 # No CO2 emissions or removals but there are non-CO2 emissions if there is fire (crop residue burning).
+#TODO Allow cropland to have multiple fire emissions instances during a 5-year interval
 @jit(nopython=True)
 def calc_cropland_non_cropland(node, c_dens_in, c_pools_no_fire, most_recent_year_burned_during_interval):
 

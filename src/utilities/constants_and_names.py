@@ -617,6 +617,9 @@ global_cropland_total_amount_all_crops_nonpeat_2019_raw_pattern = "Global_grid_a
 global_cropland_total_amount_all_crops_nonpeat_2019_processed_dir = f"{global_cropland_emissions_processed_dir}/total_amount/non_peatland/2019/"
 global_cropland_total_amount_all_crops_nonpeat_2019_processed_pattern = f"all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif"
 
+### Soil carbon timeseries
+OGH_soil_carbon_timeseries_spreadsheet = 'https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv'
+
 
 ##### Outputs
 
