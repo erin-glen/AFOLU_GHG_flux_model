@@ -1983,6 +1983,7 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
 
     # Open the VRT
     source_vrt_path = source_vrt_path.replace("s3://", "/vsis3/")
+    print(f"in hansen function, vrt path is {source_vrt_path}")
     dataset = gdal.Open(str(Path(source_vrt_path)))
 
     #Code to run gdal warp using Python API
@@ -2015,7 +2016,7 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
             )
 
         gdal.Warp(str(Path(filename)), str(Path(source_vrt_path)), options=options)
-        lu.print_and_log(f"{filename} created: {timestr('time')}", False, logger_worker)
+        lu.print_and_log(f"{filename} created: {timestr('time')}", True, logger_worker)
 
         #Fixing greyscale colormap in GMWv3 data
         if "mangrove" in source_vrt_path:
@@ -2030,9 +2031,9 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
                 ds = None
 
         #Checking if tile contains any data
-        lu.print_and_log(f"Checking if {filename} contains data: {timestr('time')}", False, logger_worker)
+        lu.print_and_log(f"Checking if {filename} contains data: {timestr('time')}", True, logger_worker)
         if check_geotiff_has_data(filename):
-            lu.print_and_log(f"{filename} contains data. Uploading to s3: {timestr('time')}", False, logger_worker)
+            lu.print_and_log(f"{filename} contains data. Uploading to s3: {timestr('time')}", True, logger_worker)
 
             # Uploads tile to s3
             upload_s3_file(output_raster_s3_path_and_name, filename)
