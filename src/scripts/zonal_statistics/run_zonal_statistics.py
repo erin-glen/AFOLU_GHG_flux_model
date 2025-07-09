@@ -16,11 +16,12 @@ import dask.array as da
 from flox import xarray_reduce, ReindexArrayType, ReindexStrategy
 
 # LocalCluster not needed; uu.connect_to_cluster already handles local fallback.
-from dask.distributed import Client
+# `Client` import is unused (uu.connect_to_cluster returns an
+# initialized client).  Remove to silence lint warnings.
 
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
-from src.scripts.utilities.lulucf_constants_and_names import C_to_CO2
+# constant no longer referenced after previous unit-alignment patch
 
 # ╭────────────────────────────────────────────────────────────────────────────╮
 # │  LULUCF ZONAL-STATISTICS – PATH MANIFEST (single source of truth)         │
@@ -97,8 +98,9 @@ def create_state_node_df(
         requests.exceptions.RequestException,
         Exception,
     ) as e:  # pragma: no cover - network access not available
-        print(
-            f"Failed to download file from S3. Falling back to local file. Error: {e}"
+        logging.warning(
+            "Failed to download state-node lookup from S3 – using local fallback. %s",
+            e,
         )
         state_node_df = pd.read_excel(
             state_node_lookup_table_local, sheet_name=sheet_name
@@ -111,12 +113,14 @@ def list_folder_uris(base_uri: str) -> pd.Series:
     fs = s3fs.S3FileSystem(anon=False)
     all_files = fs.ls(base_uri)
     tif_files = [f"s3://{f}" for f in all_files if f.endswith(".tif")]
-    return pd.Series(tif_files)
+    return pd.Series(tif_files, dtype="string")
 
 
-def parse_pattern_from_uri(uri_series: pd.Series) -> str | None:
+def parse_pattern_from_uri(uri_series: pd.Series) -> str:
     """Extract the file name pattern from a URI."""
-    uri = uri_series.values.tolist()[0]
+    if uri_series.empty:
+        raise ValueError("No GeoTIFFs found – cannot derive flux-type pattern")
+    uri = uri_series.iloc[0]
     pattern = r"__([a-zA-Z0-9_]+(?:__?[a-zA-Z0-9_]+)*)_pixel_yr_\d{4}_\d{4}\.tif$"
     match = re.search(pattern, uri)
     return match.group(1) if match else None
@@ -136,9 +140,9 @@ def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
     return ds.sel(x=ref.x, y=ref.y)  # exact index match
 
 
-def convert_to_coord_dict(flux_results: xr.Dataset, interval: str) -> dict:
+def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
     """Convert flox results to a coordinate dictionary."""
-    print(f"   Postprocessing {interval}: {timestr()}")
+    logging.info("   Post-processing %s : %s", interval, timestr())
     sparse = flux_results.data  # sparse COO array
     dim_names = flux_results.dims
     indices = sparse.coords
@@ -199,9 +203,10 @@ def calculate_interval_flux_densities(
         how="left",
         suffixes=("", "_area"),
     )
-    merged["value_per_ha"] = (
-        merged["value"] / merged["value_area"]
-    )  # Mg\u202fCO2\u202fha-1
+    # Guard against divide-by-zero for degenerate zones
+    with np.errstate(divide="ignore", invalid="ignore"):
+        merged["value_per_ha"] = merged["value"] / merged["value_area"]
+    merged.loc[merged["value_area"] == 0, "value_per_ha"] = np.nan
     new_rows = merged.copy()
     new_rows["flux_type"] = new_rows["flux_type"] + "__CO2_per_ha"
     new_rows["value"] = new_rows["value_per_ha"]
@@ -613,7 +618,7 @@ def main(args: argparse.Namespace) -> None:
 
     for interval_end_year in args.interval_end_years:
         interval = f"{interval_end_year - 1}_{interval_end_year}"
-        print(f"Processing {interval}: {timestr()}")
+        logging.info("Processing interval %s : %s", interval, timestr())
 
         gross_emis_CO2_zarr_name = ZARR_PATHS["gross_emis_CO2"].format(
             interval=interval, **OUTPUT_KW
@@ -723,6 +728,7 @@ def main(args: argparse.Namespace) -> None:
     combined_df.to_parquet(
         args.output_parquet, index=False, partition_cols=["interval_end"]
     )
+    logging.info("Parquet write complete – %d rows", len(combined_df))
 
     if client:
         client.close()
@@ -757,3 +763,7 @@ if __name__ == "__main__":
         help="Run locally without Dask/Coiled",
     )
     main(parser.parse_args())
+
+# TODO (2025-07-09): node_codes / gadm_adm0_ids lists should eventually
+# move to a shared constants module or be generated dynamically from
+# the rasters, so that ontology updates propagate automatically.
