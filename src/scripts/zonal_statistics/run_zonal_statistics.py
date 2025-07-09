@@ -26,13 +26,12 @@ from src.scripts.utilities.universal_utilities import timestr
 # ╭────────────────────────────────────────────────────────────────────────────╮
 # │  LULUCF ZONAL-STATISTICS – PATH MANIFEST (single source of truth)         │
 # ╰────────────────────────────────────────────────────────────────────────────╯
-S3_BUCKET = "gfw2-data"
-ROOT = f"s3://{S3_BUCKET}/climate/AFOLU_flux_model/LULUCF/outputs"
+ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 
 #  The three CLI flags --model_version, --run_date, and the per-loop
 #  interval string "{interval}" are interpolated later with .format().
 
-OUTPUT_BASE = f"{ROOT}" + "/{model_version}/"
+OUTPUT_BASE = f"{ROOT}/version_{model_version}/"
 
 GROSS_EMIS_CO2 = (
     OUTPUT_BASE + "gross_emissions__all_C_pools__CO2_only__MgCO2/"
@@ -50,9 +49,22 @@ NET_FLUX_CO2 = (
     OUTPUT_BASE + "net_flux__all_C_pools__CO2_only__MgCO2/"
     "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
 )
-STATE_NODE_RASTERS = (
-    OUTPUT_BASE
-    + "land_state_node/standard_model/annual_intervals/{interval}/40000_pixels/{run_date}/"
+
+DRAINED_TOTAL_MG_CO2E_PIXEL = (
+    OUTPUT_BASE + "drained_total_Mg_CO2e_pixel/"
+    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+)
+BURNED_TOTAL_MG_CO2E_PIXEL = (
+    OUTPUT_BASE + "burned_total_Mg_CO2e_pixel/"
+    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+)
+DRAINED_STATE = (
+    OUTPUT_BASE + "drained_state/"
+    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+)
+BURNED_STATE = (
+    OUTPUT_BASE + "burned_state/"
+    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
 )
 
 # Zarr cache folders (one per interval)
@@ -68,6 +80,12 @@ ZARR_PATHS = {
     "net_flux_CO2": ZARR_CACHE_PREFIX
     + "net_flux__all_C_pools__CO2_only__MgCO2_pixel_yr_{interval}.zarr",
     "state_nodes": ZARR_CACHE_PREFIX + "land_state_node_{interval}.zarr",
+    "drained_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
+    + "drained_total_Mg_CO2e_pixel_{interval}.zarr",
+    "burned_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
+    + "burned_total_Mg_CO2e_pixel_{interval}.zarr",
+    "drained_state": ZARR_CACHE_PREFIX + "drained_state_{interval}.zarr",
+    "burned_state": ZARR_CACHE_PREFIX + "burned_state_{interval}.zarr",
 }
 
 # Contextual layers (static)
@@ -117,11 +135,16 @@ def list_folder_uris(base_uri: str) -> pd.Series:
 
 
 def parse_pattern_from_uri(uri_series: pd.Series) -> str:
-    """Extract the file name pattern from a URI."""
+    """Extract the dataset name from the first URI in ``uri_series``.
+
+    The filenames are expected to end with ``_<start>_<end>.tif`` where
+    ``start`` and ``end`` are four digit years.  Examples include organic soils
+    outputs such as ``drained_total_Mg_CO2e_ha`` and ``burned_total_Mg_CO2e_ha``.
+    """
     if uri_series.empty:
         raise ValueError("No GeoTIFFs found – cannot derive flux-type pattern")
     uri = uri_series.iloc[0]
-    pattern = r"__([a-zA-Z0-9_]+(?:__?[a-zA-Z0-9_]+)*)_pixel_yr_\d{4}_\d{4}\.tif$"
+    pattern = r"__([a-zA-Z0-9_]+)_\d{4}_\d{4}\.tif$"
     match = re.search(pattern, uri)
     return match.group(1) if match else None
 
@@ -174,18 +197,13 @@ def classify_node(state_node: int) -> str:
 
 def create_interval_df(
     coord_dict: dict,
-    state_node_df: pd.DataFrame,
     flux_type_dict: dict,
     interval_end_year: int,
 ) -> pd.DataFrame:
     """Convert flox output to a processed dataframe."""
     df = pd.DataFrame(coord_dict)
     df["flux_type"] = df["flux_type"].replace(flux_type_dict)
-    df["node_grp"] = df["state_nodes"].apply(classify_node)
     df["interval_end"] = interval_end_year
-    df = df.merge(
-        state_node_df[["state_nodes", "meaning"]], on="state_nodes", how="left"
-    )
     df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000
     return df
 
@@ -717,9 +735,7 @@ def main(args: argparse.Namespace) -> None:
         ).compute()
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
-        df = create_interval_df(
-            coord_dict, state_node_df, flux_type_dict, interval_end_year
-        )
+        df = create_interval_df(coord_dict, flux_type_dict, interval_end_year)
         df = calculate_interval_flux_densities(df, contextual_layer_names)
         combined_df = pd.concat([combined_df, df])
 
