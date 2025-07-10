@@ -8,9 +8,8 @@ Dask cluster for distributed execution.
 """
 
 import argparse, logging, re
-from io import BytesIO
 
-import fsspec, s3fs, requests
+import fsspec, s3fs
 import numpy as np, pandas as pd, xarray as xr
 import dask.array as da
 from flox import xarray_reduce, ReindexArrayType, ReindexStrategy
@@ -19,8 +18,10 @@ from flox import xarray_reduce, ReindexArrayType, ReindexStrategy
 # `Client` import is unused (uu.connect_to_cluster returns an
 # initialized client).  Remove to silence lint warnings.
 
+# Runtime utilities
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
+from . import zonal_constants as zc
 # constant no longer referenced after previous unit-alignment patch
 
 # ╭────────────────────────────────────────────────────────────────────────────╮
@@ -31,41 +32,46 @@ ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 #  The three CLI flags --model_version, --run_date, and the per-loop
 #  interval string "{interval}" are interpolated later with .format().
 
-OUTPUT_BASE = f"{ROOT}/version_{model_version}/"
+OUTPUT_BASE = "{root}/version_{model_version}/"
 
 GROSS_EMIS_CO2 = (
-    OUTPUT_BASE + "gross_emissions__all_C_pools__CO2_only__MgCO2/"
+    OUTPUT_BASE
+    + "gross_emissions__all_C_pools__CO2_only__MgCO2/"
     "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
 )
 GROSS_EMIS_ALL_GHG = (
-    OUTPUT_BASE + "gross_emissions__all_C_pools_all_gases__MgCO2e/"
+    OUTPUT_BASE
+    + "gross_emissions__all_C_pools_all_gases__MgCO2e/"
     "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
 )
 GROSS_REMV_ALL_POOLS = (
-    OUTPUT_BASE + "gross_removals__all_C_pools__MgCO2/"
+    OUTPUT_BASE
+    + "gross_removals__all_C_pools__MgCO2/"
     "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
 )
 NET_FLUX_CO2 = (
-    OUTPUT_BASE + "net_flux__all_C_pools__CO2_only__MgCO2/"
+    OUTPUT_BASE
+    + "net_flux__all_C_pools__CO2_only__MgCO2/"
     "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
 )
 
-DRAINED_TOTAL_MG_CO2E_PIXEL = (
-    OUTPUT_BASE + "drained_total_Mg_CO2e_pixel/"
-    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
-)
-BURNED_TOTAL_MG_CO2E_PIXEL = (
-    OUTPUT_BASE + "burned_total_Mg_CO2e_pixel/"
-    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
-)
-DRAINED_STATE = (
-    OUTPUT_BASE + "drained_state/"
-    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
-)
-BURNED_STATE = (
-    OUTPUT_BASE + "burned_state/"
-    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
-)
+# TODO: Peat emissions paths under development
+# DRAINED_TOTAL_MG_CO2E_PIXEL = (
+#     OUTPUT_BASE + "drained_total_Mg_CO2e_pixel/"
+#     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+# )
+# BURNED_TOTAL_MG_CO2E_PIXEL = (
+#     OUTPUT_BASE + "burned_total_Mg_CO2e_pixel/"
+#     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+# )
+# DRAINED_STATE = (
+#     OUTPUT_BASE + "drained_state/"
+#     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+# )
+# BURNED_STATE = (
+#     OUTPUT_BASE + "burned_state/"
+#     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+# )
 
 # Zarr cache folders (one per interval)
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "zarr/{run_date}/{interval}/"
@@ -80,12 +86,12 @@ ZARR_PATHS = {
     "net_flux_CO2": ZARR_CACHE_PREFIX
     + "net_flux__all_C_pools__CO2_only__MgCO2_pixel_yr_{interval}.zarr",
     "state_nodes": ZARR_CACHE_PREFIX + "land_state_node_{interval}.zarr",
-    "drained_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
-    + "drained_total_Mg_CO2e_pixel_{interval}.zarr",
-    "burned_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
-    + "burned_total_Mg_CO2e_pixel_{interval}.zarr",
-    "drained_state": ZARR_CACHE_PREFIX + "drained_state_{interval}.zarr",
-    "burned_state": ZARR_CACHE_PREFIX + "burned_state_{interval}.zarr",
+    # "drained_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
+    # + "drained_total_Mg_CO2e_pixel_{interval}.zarr",
+    # "burned_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
+    # + "burned_total_Mg_CO2e_pixel_{interval}.zarr",
+    # "drained_state": ZARR_CACHE_PREFIX + "drained_state_{interval}.zarr",
+    # "burned_state": ZARR_CACHE_PREFIX + "burned_state_{interval}.zarr",
 }
 
 # Contextual layers (static)
@@ -104,26 +110,13 @@ STATE_NODE_XLSX_S3 = "https://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_mode
 # ===  END PATH MANIFEST  ======================================================
 
 
+"""
 def create_state_node_df(
     state_node_lookup_table_local: str, state_node_lookup_table_s3: str, sheet_name: str
 ) -> pd.DataFrame:
-    """Load the state node lookup table from S3 falling back to a local file."""
-    try:
-        response = requests.get(state_node_lookup_table_s3, timeout=10)
-        response.raise_for_status()
-        state_node_df = pd.read_excel(BytesIO(response.content), sheet_name=sheet_name)
-    except (
-        requests.exceptions.RequestException,
-        Exception,
-    ) as e:  # pragma: no cover - network access not available
-        logging.warning(
-            "Failed to download state-node lookup from S3 – using local fallback. %s",
-            e,
-        )
-        state_node_df = pd.read_excel(
-            state_node_lookup_table_local, sheet_name=sheet_name
-        )
-    return state_node_df
+    ""Load the state node lookup table from S3 falling back to a local file.""
+    pass  # Deprecated – retained for reference
+"""
 
 
 def list_folder_uris(base_uri: str) -> pd.Series:
@@ -144,9 +137,15 @@ def parse_pattern_from_uri(uri_series: pd.Series) -> str:
     if uri_series.empty:
         raise ValueError("No GeoTIFFs found – cannot derive flux-type pattern")
     uri = uri_series.iloc[0]
-    pattern = r"__([a-zA-Z0-9_]+)_\d{4}_\d{4}\.tif$"
-    match = re.search(pattern, uri)
-    return match.group(1) if match else None
+    patterns = [
+        r"__([A-Za-z0-9_]+)_\d{4}_\d{4}\.tif$",
+        r"__([A-Za-z0-9_]+)_pixel_yr_\d{4}_\d{4}\.tif$",
+    ]
+    for p in patterns:
+        m = re.search(p, uri)
+        if m:
+            return m.group(1)
+    raise ValueError(f"Cannot parse flux-type from {uri}")
 
 
 def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
@@ -178,21 +177,7 @@ def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
     return coord_dict
 
 
-def classify_node(state_node: int) -> str:
-    """Classify a state node code into a broader category."""
-    node_str = str(state_node)
-    first_digit = int(node_str[0])
-    one_digit_map = {1: "forest_gain", 2: "forest_loss", 4: "cropland", 5: "grassland"}
-    three_digit_map = {
-        311: "forest_loss",
-        312: "forest_loss",
-        321: "disturbed_forest",
-        322: "stable_forest",
-    }
-    if first_digit == 3:
-        prefix = int(node_str[:3])
-        return three_digit_map.get(prefix, "unknown_3x")
-    return one_digit_map.get(first_digit, "unknown")
+
 
 
 def create_interval_df(
@@ -260,7 +245,11 @@ def main(args: argparse.Namespace) -> None:
     )
 
     # Resolve manifest placeholders ------------------------------------------------
-    OUTPUT_KW = dict(model_version=args.model_version, run_date=args.run_date)
+    OUTPUT_KW = dict(
+        root=ROOT,
+        model_version=args.model_version,
+        run_date=args.run_date,
+    )
 
     adm0_folder, adm0_zarr_name = ADM0_GTIFF_FOLDER, ADM0_ZARR
     pixel_area_folder, pixel_area_zarr_name = PIXEL_AREA_GTIFF_FOLDER, PIXEL_AREA_ZARR
@@ -269,15 +258,12 @@ def main(args: argparse.Namespace) -> None:
         IFL_PRIMARY_ZARR,
     )
 
-    state_node_lookup_table_local, state_node_lookup_table_s3 = (
-        STATE_NODE_XLSX_LOCAL,
-        STATE_NODE_XLSX_S3,
-    )
-    sheet = "v030_20250430"
-
-    state_node_df = create_state_node_df(
-        state_node_lookup_table_local, state_node_lookup_table_s3, sheet
-    )
+    # Reserved for future use
+    # state_node_lookup_table_local, state_node_lookup_table_s3 = (
+    #     STATE_NODE_XLSX_LOCAL,
+    #     STATE_NODE_XLSX_S3,
+    # )
+    # sheet = "v030_20250430"
 
     # Ensure contextual zarrs exist
     ensure_zarr_exists(list_folder_uris(adm0_folder), adm0_zarr_name, args.chunk_size)
@@ -296,341 +282,9 @@ def main(args: argparse.Namespace) -> None:
 
     contextual_layer_names = ["state_nodes", "gadm_adm0", "primary_forest_IFL"]
 
-    node_codes = np.array(
-        [
-            1110000,
-            1120000,
-            1210000,
-            1220000,
-            2111000,
-            2112000,
-            2121100,
-            2121200,
-            2122100,
-            2122200,
-            2123100,
-            2123200,
-            2124100,
-            2124200,
-            2125100,
-            2125200,
-            2211100,
-            2211200,
-            2212110,
-            2212120,
-            2212210,
-            2212220,
-            2213110,
-            2213120,
-            2213210,
-            2213220,
-            2214100,
-            2214200,
-            2215100,
-            2215200,
-            2221100,
-            2221200,
-            2222100,
-            2222200,
-            2223100,
-            2223200,
-            3110000,
-            3120000,
-            3211111,
-            3211112,
-            3211121,
-            3211122,
-            3211211,
-            3211212,
-            3211221,
-            3211222,
-            3212111,
-            3212112,
-            3212121,
-            3212122,
-            3212211,
-            3212212,
-            3212221,
-            3212222,
-            3221110,
-            3221120,
-            3221210,
-            3221220,
-            3222111,
-            3222112,
-            3222121,
-            3222122,
-            3222210,
-            3222220,
-            4100000,
-            4210000,
-            4220000,
-            4310000,
-            4320000,
-            5100000,
-            5210000,
-            5220000,
-            5310000,
-            5320000,
-        ],
-        dtype=np.uint32,
-    )
-
-    gadm_adm0_ids = np.array(
-        [
-            0.0,
-            4.0,
-            8.0,
-            10.0,
-            12.0,
-            16.0,
-            20.0,
-            24.0,
-            28.0,
-            31.0,
-            32.0,
-            36.0,
-            40.0,
-            44.0,
-            48.0,
-            50.0,
-            51.0,
-            52.0,
-            56.0,
-            60.0,
-            64.0,
-            68.0,
-            70.0,
-            72.0,
-            74.0,
-            76.0,
-            84.0,
-            86.0,
-            90.0,
-            92.0,
-            96.0,
-            100.0,
-            104.0,
-            108.0,
-            112.0,
-            116.0,
-            120.0,
-            124.0,
-            132.0,
-            136.0,
-            140.0,
-            144.0,
-            148.0,
-            152.0,
-            156.0,
-            158.0,
-            162.0,
-            166.0,
-            170.0,
-            174.0,
-            175.0,
-            178.0,
-            180.0,
-            184.0,
-            188.0,
-            191.0,
-            192.0,
-            196.0,
-            203.0,
-            204.0,
-            208.0,
-            212.0,
-            214.0,
-            218.0,
-            222.0,
-            226.0,
-            231.0,
-            232.0,
-            233.0,
-            234.0,
-            238.0,
-            239.0,
-            242.0,
-            246.0,
-            248.0,
-            250.0,
-            254.0,
-            258.0,
-            260.0,
-            262.0,
-            266.0,
-            268.0,
-            270.0,
-            275.0,
-            276.0,
-            288.0,
-            292.0,
-            296.0,
-            300.0,
-            304.0,
-            308.0,
-            312.0,
-            316.0,
-            320.0,
-            324.0,
-            328.0,
-            332.0,
-            334.0,
-            336.0,
-            340.0,
-            348.0,
-            352.0,
-            356.0,
-            360.0,
-            364.0,
-            368.0,
-            372.0,
-            376.0,
-            380.0,
-            384.0,
-            388.0,
-            392.0,
-            398.0,
-            400.0,
-            404.0,
-            408.0,
-            410.0,
-            414.0,
-            417.0,
-            418.0,
-            422.0,
-            426.0,
-            428.0,
-            430.0,
-            434.0,
-            438.0,
-            440.0,
-            442.0,
-            450.0,
-            454.0,
-            458.0,
-            462.0,
-            466.0,
-            470.0,
-            474.0,
-            478.0,
-            480.0,
-            484.0,
-            492.0,
-            496.0,
-            498.0,
-            499.0,
-            500.0,
-            504.0,
-            508.0,
-            512.0,
-            516.0,
-            520.0,
-            524.0,
-            528.0,
-            531.0,
-            533.0,
-            534.0,
-            535.0,
-            540.0,
-            548.0,
-            554.0,
-            558.0,
-            562.0,
-            566.0,
-            70.0,
-            574.0,
-            578.0,
-            580.0,
-            581.0,
-            583.0,
-            584.0,
-            585.0,
-            586.0,
-            591.0,
-            598.0,
-            600.0,
-            604.0,
-            608.0,
-            612.0,
-            616.0,
-            620.0,
-            624.0,
-            626.0,
-            630.0,
-            634.0,
-            638.0,
-            642.0,
-            643.0,
-            646.0,
-            652.0,
-            654.0,
-            659.0,
-            660.0,
-            662.0,
-            663.0,
-            666.0,
-            670.0,
-            674.0,
-            678.0,
-            682.0,
-            686.0,
-            688.0,
-            690.0,
-            694.0,
-            702.0,
-            703.0,
-            704.0,
-            705.0,
-            706.0,
-            710.0,
-            716.0,
-            724.0,
-            728.0,
-            729.0,
-            732.0,
-            740.0,
-            744.0,
-            748.0,
-            752.0,
-            756.0,
-            760.0,
-            762.0,
-            764.0,
-            768.0,
-            772.0,
-            776.0,
-            780.0,
-            784.0,
-            788.0,
-            792.0,
-            795.0,
-            796.0,
-            798.0,
-            800.0,
-            804.0,
-            807.0,
-            818.0,
-            826.0,
-            831.0,
-            832.0,
-            833.0,
-            834.0,
-            840.0,
-            850.0,
-            854.0,
-            858.0,
-            860.0,
-            862.0,
-            876.0,
-            882.0,
-            887.0,
-            894.0,
-        ],
-        dtype=np.uint16,
-    )
-
-    primary_forest_IFL_codes = np.array([0, 1], dtype=np.uint8)
+    node_codes = zc.NODE_CODES
+    gadm_adm0_ids = zc.GADM_ADM0_IDS
+    primary_forest_IFL_codes = zc.PRIMARY_FOREST_IFL_CODES
 
     combined_df = pd.DataFrame()
 
