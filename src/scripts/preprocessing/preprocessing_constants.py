@@ -57,8 +57,18 @@ datasets = {
         }
     },
     "glclu_composite": {
-        "s3_raw": (
-            "climate/AFOLU_flux_model/LULUCF/landcover/composite/{interval}/v1/raw/{year}/{tile_id}.tif")
+        "s3_raw": pp.join(
+            "climate",
+            "AFOLU_flux_model",
+            "LULUCF",
+            "landcover",
+            "composite",
+            "{interval}",
+            "v1",
+            "raw",
+            "{year}",
+            "{tile_id}.tif",
+        )
     },
     'grip': {
         'roads': {

@@ -113,16 +113,24 @@ def reclassify_chunk(
     interval: str,
     year: int,
     pixel_resolution: str,
+    date: str,
     run_mode: str,
 ) -> str | None:
     """Read one bounding box from the source raster, reclassify, upload."""
     chunk_str = uutil.boundstr(bbox)
     fname = f"{tile_id}__{chunk_str}__lc_ipcc.tif"
-    s3_key = posixpath.join(
-        pcn.datasets["land_cover_ipcc"]["s3_processed"],
+    land_cover_ipcc_dir = posixpath.join(
+        cn.full_bucket_prefix,
+        cn.processed_dir,
+        "land_cover_ipcc",
+        date,
         interval,
         str(year),
         pixel_resolution,
+    )
+
+    s3_key = posixpath.join(
+        land_cover_ipcc_dir.replace(f"{cn.full_bucket_prefix}/", ""),
         fname,
     )
 
@@ -172,18 +180,17 @@ def process_tile(
     year: int,
     pixel_resolution: str,
     chunk_size: float,
+    date: str,
     run_mode: str,
 ) -> list:
     """Return a list of Dask‑delayed tasks for one tile."""
-    # Land‑cover rasters are now organized under the glclu_composite dataset
-    lc_s3_path = pcn.datasets["glclu_composite"]["s3_raw"].format(
-        interval=interval,
-        year=year,
-        tile_id=tile_id,
+    lc_s3_path = posixpath.join(
+        cn.dirs["land_cover"].format(interval_type=interval),
+        str(year),
+        f"{tile_id}.tif",
     )
-    lc_s3_path = f"s3://gfw2-data/{lc_s3_path}"
 
-    s3_key = lc_s3_path.replace("s3://", "")
+    s3_key = lc_s3_path.replace(f"{cn.full_bucket_prefix}/", "")
     if not uutil.s3_file_exists(cn.s3_bucket_name, s3_key):
         logging.warning(f"Source raster {lc_s3_path} not found → skipping tile.")
         return []
@@ -201,6 +208,7 @@ def process_tile(
             interval,
             year,
             pixel_resolution,
+            date,
             run_mode,
         )
         for b in chunks
@@ -219,6 +227,7 @@ def main(
     cluster_name: str = "reclassify_ipcc",
     run_local: bool = False,
     run_mode: str = "default",
+    date: str = cn.today_date,
     interval_choice: str = "both",
 ) -> None:
     logging.basicConfig(
@@ -266,6 +275,7 @@ def main(
                         year,
                         pixel_resolution,
                         chunk_size,
+                        date,
                         run_mode,
                     )
 
@@ -297,6 +307,11 @@ if __name__ == "__main__":
         help="'default' skips chunks already on S3; 'test' overwrites"
     )
     parser.add_argument(
+        "--date",
+        default=cn.today_date,
+        help="Date (YYYYMMDD) for output directory",
+    )
+    parser.add_argument(
         "--interval",
         default="both",
         choices=["five_year", "annual", "both"],
@@ -311,6 +326,7 @@ if __name__ == "__main__":
         cluster_name=args.cluster_name,
         run_local=args.run_local,
         run_mode=args.run_mode,
+        date=args.date,
         interval_choice=args.interval,
     )
 
