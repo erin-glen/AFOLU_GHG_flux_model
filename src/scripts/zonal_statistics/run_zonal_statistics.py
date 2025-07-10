@@ -374,7 +374,6 @@ def main(args: argparse.Namespace) -> None:
             *(adm0_aligned, state_nodes, primary_forest_IFL_aligned),
             func="sum",
             expected_groups=(
-                flux_type_ids,
                 gadm_adm0_ids,
                 node_codes,
                 primary_forest_IFL_codes,
