@@ -150,10 +150,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     # Forest age for each output year of the model
     forest_age_end_of_interval_block = forest_age_start_year_block
 
-    # Year in which forest loss occurs/is assigned during an interval (0 if no loss)
-    ### TODO Never actually used. What did I intend to do with this?
-    year_of_forest_loss_block = np.zeros(agc_dens_block.shape).astype('uint16')
-
     # Maximum height of vegetation since the last interval in which there was not forest
     max_height_since_last_time_not_tall_veg_block = np.zeros(agc_dens_block.shape).astype('uint8')
 
@@ -1006,7 +1002,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                             if all_planted_trees:   # Planted trees partially disturbed in the current interval (4211)
                                 node = nu.accrete_node(node, 1)
                                 if sig_height_gain_prev_curr_abs:  # Oil palm/planted trees partially disturbed in the current interval with signif. height increase after (42111)
-                                    # NOTE: This should only occur with 5-year interval data, not annual data.  #TODO Confirm with 5-year data
+                                    # NOTE: This should only occur with 5-year interval data, not annual data.
                                     node = nu.accrete_node(node, 1)
                                     # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
                                     if all_oil_palm:  # Oil palm partially disturbed in the current interval with signif. height increase after (421111->4211111/4211112)
@@ -1419,7 +1415,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
             out_dict_uint16[f"{cn.forest_age_output_pattern}_{interval_end_year}"] = forest_age_end_of_interval_block.copy()
             out_dict_uint8[f"{cn.gain_year_count_pattern}_{year_range}"] = gain_year_count_out_block.copy()
             out_dict_uint16[f"{cn.most_recent_year_not_tall_veg}_{model_start_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
-            out_dict_uint16[f"{cn.year_of_forest_loss}_{year_range}"] = year_of_forest_loss_block.copy()
             out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
             out_dict_uint8[f"{cn.first_time_sig_loss_from_max_height}_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()
             out_dict_uint8[f"{cn.part_or_full_dist_in_earlier_intervals}_{year_range}"] = part_or_full_dist_in_earlier_intervals_block.copy()
