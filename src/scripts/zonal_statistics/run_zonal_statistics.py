@@ -9,7 +9,8 @@ Dask cluster for distributed execution.
 
 import argparse, logging, re
 
-import fsspec, s3fs
+import fsspec
+import s3fs
 import numpy as np, pandas as pd, xarray as xr
 import dask.array as da
 from flox import xarray_reduce, ReindexArrayType, ReindexStrategy
@@ -21,7 +22,8 @@ from flox import xarray_reduce, ReindexArrayType, ReindexStrategy
 # Runtime utilities
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
-from . import zonal_constants as zc
+# Absolute import so the script can run as `python run_zonal_statistics.py`
+import zonal_constants as zc
 # constant no longer referenced after previous unit-alignment patch
 
 # ╭────────────────────────────────────────────────────────────────────────────╮
@@ -32,6 +34,7 @@ ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 #  The three CLI flags --model_version, --run_date, and the per-loop
 #  interval string "{interval}" are interpolated later with .format().
 
+# Literal template – evaluated later with .format(...)
 OUTPUT_BASE = "{root}/version_{model_version}/"
 
 GROSS_EMIS_CO2 = (
@@ -57,14 +60,14 @@ NET_FLUX_CO2 = (
 
 # --- TODO paths disabled until implemented ---
 """
-# DRAINED_TOTAL_MG_CO2E_PIXEL = (
-#     OUTPUT_BASE + "drained_total_Mg_CO2e_pixel/"
-#     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
-# )
-# BURNED_TOTAL_MG_CO2E_PIXEL = (
-#     OUTPUT_BASE + "burned_total_Mg_CO2e_pixel/"
-#     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
-# )
+DRAINED_TOTAL_MG_CO2E_PIXEL = (
+    OUTPUT_BASE + "drained_total_Mg_CO2e_pixel/"
+    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+)
+BURNED_TOTAL_MG_CO2E_PIXEL = (
+    OUTPUT_BASE + "burned_total_Mg_CO2e_pixel/"
+    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+)
 """
 
 # Zarr cache folders (one per interval)
