@@ -175,8 +175,13 @@ def process_tile(
     run_mode: str,
 ) -> list:
     """Return a list of Dask‑delayed tasks for one tile."""
-    lc_dict = cn.get_dynamic_download_dict(tile_id, year)
-    lc_s3_path = lc_dict["land_cover"]
+    # Land‑cover rasters are now organized under the glclu_composite dataset
+    lc_s3_path = pcn.datasets["glclu_composite"]["s3_raw"].format(
+        interval=interval,
+        year=year,
+        tile_id=tile_id,
+    )
+    lc_s3_path = f"s3://gfw2-data/{lc_s3_path}"
 
     s3_key = lc_s3_path.replace("s3://", "")
     if not uutil.s3_file_exists(cn.s3_bucket_name, s3_key):

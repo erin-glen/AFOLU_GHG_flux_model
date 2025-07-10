@@ -56,12 +56,15 @@ datasets = {
             's3_projected': pp.join(raw_dir, 'roads', 'osm_roads', 'canals_by_tile_3395')
         }
     },
+    "glclu_composite": {
+        "s3_raw": (
+            "climate/AFOLU_flux_model/LULUCF/landcover/composite/{interval}/v1/raw/{year}/{tile_id}.tif")
+    },
     'grip': {
         'roads': {
             's3_raw': pp.join(raw_dir, 'roads', 'grip_roads', 'roads_by_tile'),
             's3_processed_base': pp.join(processed_dir, 'grip_density'),
-            's3_processed_small': pp.join(processed_dir, 'grip_density',
-                                          '4000_pixels', today_date),
+            's3_processed_small': pp.join(processed_dir, 'grip_density','4000_pixels', today_date),
             's3_processed': pp.join(processed_dir, 'grip_density', today_date),
             'local_processed': pp.join(local_temp_dir, 'grip_density', today_date),
             's3_projected': pp.join(raw_dir, 'roads', 'grip_roads', 'roads_by_tile_3395')
