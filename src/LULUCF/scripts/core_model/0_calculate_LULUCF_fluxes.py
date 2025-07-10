@@ -725,31 +725,31 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # Mangroves will have top-level node=1
 
                 ### Tree gain
-                if tree_gain:  # Non-tree converted to tree (2)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                if tree_gain:  # Terrestrial non-trees converted to trees (2)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
                     node = nu.accrete_node(node, 2)
-                    if all_planted_trees:  # New planted trees (21)
+                    if all_planted_trees:  # Gain of planted trees (21)
                         node = nu.accrete_node(node, 1)
-                        if all_oil_palm:  # New oil palm (incl. SDPT) (211)
+                        if all_oil_palm:  # Gain of oil palm (incl. SDPT oil palm) (211)
                             state_out = nu.accrete_node(node, 1)
                             RF_AGC_final = cn.oil_palm_agc_rf
                             RF_BGC_final = cn.oil_palm_bgc_rf
                             (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
                                 nu.calc_NT_T(interval_length, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio=0, litter_c_ratio=0))
-                        else: # New non-oil palm planted trees (212)
+                        else: # Gain of non-oil palm planted trees (212)
                             state_out = nu.accrete_node(node, 2)
                             RF_AGC_final = planted_forest_AGC_RF_cell
                             RF_BGC_final = planted_forest_BGC_RF_cell
                             (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
                                 nu.calc_NT_T(interval_length, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio=0, litter_c_ratio=0))
-                    else:  # New non-planted trees (22)
+                    else:  # Gain of non-planted trees (22)
                         node = nu.accrete_node(node, 2)
-                        if tall_veg_LC_curr:  # New terrestrial natural forest (221)
+                        if tall_veg_LC_curr:  # Gain of terrestrial natural forest (221)
                             state_out = nu.accrete_node(node, 1)
                             RF_AGC_final = natrl_forest_curve_0_5_AGC_RF   # Forces new forest to use the first interval of the age curve
                             RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang
                             (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
                                 nu.calc_NT_T(interval_length, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio=deadwood_c_ratio_non_mang, litter_c_ratio=litter_c_ratio_non_mang))
-                        else:  # New trees outside forests (222)
+                        else:  # Gain of trees outside forests (222)
                             state_out = nu.accrete_node(node, 2)
                             RF_AGC_final = cn.trees_outside_forests_agc_rf_max
                             RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang
@@ -757,7 +757,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                 nu.calc_NT_T(interval_length, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio=0, litter_c_ratio=0))
 
                 ### Tree loss
-                elif tree_loss:  # Tree converted to non-tree (3)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                elif tree_loss:  # Trees converted to non-trees (3)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
                     node = nu.accrete_node(node, 3)
                     if all_planted_trees:  # Full loss of planted trees (31)
                         node = nu.accrete_node(node, 1)
@@ -765,9 +765,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                             node = nu.accrete_node(node, 1)
                             agc_rf_in = cn.oil_palm_agc_rf  # 5-year intervals only
                             bgc_rf_in = cn.oil_palm_bgc_rf  # 5-year intervals only
-                            c_pools_EF_fire_CO2 = cn.agc_emissions_only
-                            c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
-                            c_pools_EF_no_fire = cn.all_non_soil_pools
+                            c_pools_EF_fire_CO2 = cn.biomass_emissions_only
+                            c_pools_EF_fire_non_CO2 = cn.biomass_emissions_only
+                            c_pools_EF_no_fire = cn.biomass_emissions_only
                             rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
                             (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                              RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
@@ -777,62 +777,126 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                 deadwood_c_ratio=0, litter_c_ratio=0)
                         else:  # Full loss of non-oil palm planted trees (312)
                             node = nu.accrete_node(node, 2)
-                            if LC_curr == cn.cropland:  # Plantation harvested as cropland (3121->31211/31212)
+                            if LC_curr == cn.cropland:  # Full loss of non-oil palm planted trees as cropland (3121)
                                 node = nu.accrete_node(node, 1)
-                                agc_rf_in = planted_forest_AGC_RF_cell  # 5-year intervals only
-                                bgc_rf_in = planted_forest_BGC_RF_cell  # 5-year intervals only
-                                c_pools_EF_fire_CO2 = cn.biomass_emissions_only
-                                c_pools_EF_fire_non_CO2 = cn.all_non_soil_pools
-                                c_pools_EF_no_fire = cn.all_non_soil_pools
-                                rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
-                                (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                 RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
-                                    node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
-                                    c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
-                                    rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
-                                    deadwood_c_ratio=0, litter_c_ratio=0)
-                            elif short_veg_LC_curr:  # Plantation harvested as short vegetation (3122->31221/31222)
+                                if planted_forest_tree_crop_cell == 2:  # Full loss of non-oil palm tree crops as cropland (31211->312111/312112)
+                                    node = nu.accrete_node(node, 1)
+                                    agc_rf_in = planted_forest_AGC_RF_cell  # 5-year intervals only
+                                    bgc_rf_in = planted_forest_BGC_RF_cell  # 5-year intervals only
+                                    c_pools_EF_fire_CO2 = TBD_fill_in
+                                    c_pools_EF_fire_non_CO2 = TBD_fill_in
+                                    c_pools_EF_no_fire = TBD_fill_in
+                                    rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
+                                    (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                     RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
+                                        node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
+                                        rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                        deadwood_c_ratio=0, litter_c_ratio=0)
+                                else:  # Full loss of non-oil palm planted forest as cropland (31212->312121/312122)
+                                    node = nu.accrete_node(node, 2)
+                                    agc_rf_in = planted_forest_AGC_RF_cell  # 5-year intervals only
+                                    bgc_rf_in = planted_forest_BGC_RF_cell  # 5-year intervals only
+                                    c_pools_EF_fire_CO2 = TBD_fill_in
+                                    c_pools_EF_fire_non_CO2 = TBD_fill_in
+                                    c_pools_EF_no_fire = TBD_fill_in
+                                    rf_post_dist = np.array([cn.cropland_rf, 0, 0, 0]).astype('float32')
+                                    (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                     RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
+                                        node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
+                                        rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                        deadwood_c_ratio=0, litter_c_ratio=0)
+                            elif short_veg_LC_curr:  # Full loss of non-oil palm planted trees as short vegetation (3122)
                                 node = nu.accrete_node(node, 2)
-                                agc_rf_in = planted_forest_AGC_RF_cell  # 5-year intervals only
-                                bgc_rf_in = planted_forest_BGC_RF_cell  # 5-year intervals only
-                                c_pools_EF_fire_CO2 = cn.agc_emissions_only
-                                c_pools_EF_fire_non_CO2 = cn.all_but_bgc_emissions
-                                c_pools_EF_no_fire = cn.biomass_emissions_only
-                                rf_post_dist = np.array([short_veg_AGC_RF, short_veg_BGC_RF, 0, 0]).astype('float32')
-                                (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                 RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
-                                    node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
-                                    c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
-                                    rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
-                                    deadwood_c_ratio=0, litter_c_ratio=0)
-                            elif LC_curr == cn.builtup:  # Plantation converted to settlement (3123->31231/31232)
+                                if planted_forest_tree_crop_cell == 2:  # Full loss of non-oil palm tree crops as short vegetation (31221->312211/312212)
+                                    node = nu.accrete_node(node, 1)
+                                    agc_rf_in = planted_forest_AGC_RF_cell  # 5-year intervals only
+                                    bgc_rf_in = planted_forest_BGC_RF_cell  # 5-year intervals only
+                                    c_pools_EF_fire_CO2 = TBD_fill_in
+                                    c_pools_EF_fire_non_CO2 = TBD_fill_in
+                                    c_pools_EF_no_fire = TBD_fill_in
+                                    rf_post_dist = np.array([short_veg_AGC_RF, short_veg_BGC_RF, 0, 0]).astype('float32')
+                                    (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                     RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
+                                        node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
+                                        rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                        deadwood_c_ratio=0, litter_c_ratio=0)
+                                else:  # Full loss of non-oil palm planted forest as short vegetation (31222->312221/312222)
+                                    node = nu.accrete_node(node, 2)
+                                    agc_rf_in = planted_forest_AGC_RF_cell  # 5-year intervals only
+                                    bgc_rf_in = planted_forest_BGC_RF_cell  # 5-year intervals only
+                                    c_pools_EF_fire_CO2 = TBD_fill_in
+                                    c_pools_EF_fire_non_CO2 = TBD_fill_in
+                                    c_pools_EF_no_fire = TBD_fill_in
+                                    rf_post_dist = np.array([short_veg_AGC_RF, short_veg_BGC_RF, 0, 0]).astype('float32')
+                                    (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                     RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
+                                        node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
+                                        rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                        deadwood_c_ratio=0, litter_c_ratio=0)
+                            elif LC_curr == cn.builtup:  # Full loss of non-oil palm planted trees to settlement (3123)
+                                node = nu.accrete_node(node, 3)
+                                if planted_forest_tree_crop_cell == 2:  # Full loss of non-oil palm tree crops to settlement (31231->312311/312312)
+                                    node = nu.accrete_node(node, 1)
+                                    agc_rf_in = planted_forest_AGC_RF_cell  # 5-year intervals only
+                                    bgc_rf_in = planted_forest_BGC_RF_cell  # 5-year intervals only
+                                    c_pools_EF_fire_CO2 = TBD_fill_in
+                                    c_pools_EF_fire_non_CO2 = TBD_fill_in
+                                    c_pools_EF_no_fire = TBD_fill_in
+                                    rf_post_dist = np.array([short_veg_AGC_RF, short_veg_BGC_RF, 0, 0]).astype('float32')
+                                    (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                     RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
+                                        node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
+                                        rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                        deadwood_c_ratio=0, litter_c_ratio=0)
+                                else:  # Full loss of non-oil palm planted forests to settlement (31232->312321/312322)
+                                    node = nu.accrete_node(node, 2)
+                                    agc_rf_in = planted_forest_AGC_RF_cell  # 5-year intervals only
+                                    bgc_rf_in = planted_forest_BGC_RF_cell  # 5-year intervals only
+                                    c_pools_EF_fire_CO2 = TBD_fill_in
+                                    c_pools_EF_fire_non_CO2 = TBD_fill_in
+                                    c_pools_EF_no_fire = TBD_fill_in
+                                    rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
+                                    (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                     RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
+                                        node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
+                                        rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                        deadwood_c_ratio=0, litter_c_ratio=0)
+                            else:  # Full loss of non-oil palm planted trees to anything else (3124)
                                 node = nu.accrete_node(node, 4)
-                                agc_rf_in = planted_forest_AGC_RF_cell  # 5-year intervals only
-                                bgc_rf_in = planted_forest_BGC_RF_cell  # 5-year intervals only
-                                c_pools_EF_fire_CO2 = cn.biomass_emissions_only
-                                c_pools_EF_fire_non_CO2 = cn.all_non_soil_pools
-                                c_pools_EF_no_fire = cn.all_non_soil_pools
-                                rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                 RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
-                                    node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
-                                    c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
-                                    rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
-                                    deadwood_c_ratio=0, litter_c_ratio=0)
-                            else:  # Plantation converted to anything else (3124->31241/31242)
-                                node = nu.accrete_node(node, 5)
-                                agc_rf_in = planted_forest_AGC_RF_cell  # 5-year intervals only
-                                bgc_rf_in = planted_forest_BGC_RF_cell  # 5-year intervals only
-                                c_pools_EF_fire_CO2 = cn.agc_emissions_only
-                                c_pools_EF_fire_non_CO2 = cn.all_but_bgc_emissions
-                                c_pools_EF_no_fire = cn.biomass_emissions_only
-                                rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
-                                (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
-                                 RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
-                                    node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
-                                    c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
-                                    rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
-                                    deadwood_c_ratio=0, litter_c_ratio=0)
+                                if planted_forest_tree_crop_cell == 2:  # Full loss of non-oil palm tree crops to anything else (31241->312411/312412)
+                                    node = nu.accrete_node(node, 1)
+                                    agc_rf_in = planted_forest_AGC_RF_cell  # 5-year intervals only
+                                    bgc_rf_in = planted_forest_BGC_RF_cell  # 5-year intervals only
+                                    c_pools_EF_fire_CO2 = TBD_fill_in
+                                    c_pools_EF_fire_non_CO2 = TBD_fill_in
+                                    c_pools_EF_no_fire = TBD_fill_in
+                                    rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
+                                    (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                     RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
+                                        node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
+                                        rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                        deadwood_c_ratio=0, litter_c_ratio=0)
+                                else:  # Full loss of non-oil palm planted forest to anything else (31242->312421/312422)
+                                    node = nu.accrete_node(node, 2)
+                                    agc_rf_in = planted_forest_AGC_RF_cell  # 5-year intervals only
+                                    bgc_rf_in = planted_forest_BGC_RF_cell  # 5-year intervals only
+                                    c_pools_EF_fire_CO2 = TBD_fill_in
+                                    c_pools_EF_fire_non_CO2 = TBD_fill_in
+                                    c_pools_EF_no_fire = TBD_fill_in
+                                    rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
+                                    (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
+                                     RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
+                                        node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
+                                        c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
+                                        rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
+                                        deadwood_c_ratio=0, litter_c_ratio=0)
                     else:  # Full loss of non-planted trees (32)
                         node = nu.accrete_node(node, 2)
                         if tall_veg_LC_prev:  # Full loss of natural forest (321)
