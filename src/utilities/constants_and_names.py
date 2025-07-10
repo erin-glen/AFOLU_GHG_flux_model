@@ -35,7 +35,7 @@ last_model_year_5_years = 2020   # Last year of 5-year interval data
 five_year_interval_duration = 5
 interval_end_years_5_years = list(range(first_model_year_5_years, last_model_year_5_years + 1, five_year_interval_duration))[1:]  # 2005, 2010, 2015, 2020
 
-# Number of years of removals in a tree cover gain pixel
+# Number of years of removals in a tree cover gain pixel (3 years in a 5-year interval)
 NT_T_gain_year_count_default = math.ceil(five_year_interval_duration / 2)
 
 ### Model years in annual series
