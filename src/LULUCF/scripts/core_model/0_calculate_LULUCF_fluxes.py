@@ -171,7 +171,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     # which does not count as a partial disturbance in this model if height does not decrease significantly with it).
     # Updated for every interval based on the current interval disturbance status.
     # This is primarily used to determine what age the forest is (which matters for assigning removal factors).
-    part_or_full_dist_in_prev_intervals_block = np.zeros(agc_dens_block.shape).astype('uint8')
+    part_or_full_dist_in_earlier_intervals_block = np.zeros(agc_dens_block.shape).astype('uint8')
 
     # Tracks whether a partial disturbance occurs in the current interval due to any cause (not including just fire,
     # which does not count as a partial disturbance in this model if height does not decrease significantly with it).
@@ -366,12 +366,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 r_s_ratio_non_mang = r_s_ratio_non_mang_block[row, col]
 
                 # Forest age starts with the previous interval's ending age and is adjusted during the interval
-                forest_age_end_of_interval = forest_age_end_of_interval_block[row, col]
+                forest_age_start_of_interval = forest_age_end_of_interval_block[row, col]
 
                 # Tracks whether there was a partial/full disturbance (non-fire) during the current interval
                 # or any previous interval
                 part_or_full_dist_in_curr_interval = part_or_full_dist_in_curr_interval_block[row, col]
-                part_or_full_dist_in_prev_intervals = part_or_full_dist_in_prev_intervals_block[row, col]
+                part_or_full_dist_in_earlier_intervals = part_or_full_dist_in_earlier_intervals_block[row, col]
 
                 # Input carbon densities for the pools using the end of the previous interval (Mg C/ha)
                 agc_dens_in = agc_dens_block[row, col]
@@ -422,22 +422,24 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 c_dens_in_NT_T = [np.float32(0), np.float32(0), deadwood_c_dens_in, litter_c_dens_in]
 
                 # Aboveground removal factors based on stand age at the start of the interval (as opposed to the end) (Mg C/ha/yr).
-                # Adds 1 to forest_age_end_of_interval to downward adjust the age for the beginning of the interval.
-                if 0 <= forest_age_end_of_interval + 1 <= 5:
+                # So, for a five-year interval, if the starting age is 39 years, it will use the 20-40 year RF for the entire interval
+                # rather than using 20-40 for the first 2 years then 41-60 for the rest of the interval. A fine simplification.
+                # Adds 1 to forest_age_start_of_interval to downward adjust the age for the beginning of the interval.
+                if 0 <= forest_age_start_of_interval + 1 <= 5:
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_0_5_AGC_RF
-                elif 6 <= forest_age_end_of_interval + 1 <= 10:
+                elif 6 <= forest_age_start_of_interval + 1 <= 10:
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_6_10_AGC_RF
-                elif 11 <= forest_age_end_of_interval + 1 <= 15:
+                elif 11 <= forest_age_start_of_interval + 1 <= 15:
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_11_15_AGC_RF
-                elif 16 <= forest_age_end_of_interval + 1 <= 20:
+                elif 16 <= forest_age_start_of_interval + 1 <= 20:
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_16_20_AGC_RF
-                elif 21 <= forest_age_end_of_interval + 1 <= 40:
+                elif 21 <= forest_age_start_of_interval + 1 <= 40:
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_21_40_AGC_RF
-                elif 41 <= forest_age_end_of_interval + 1 <= 60:
+                elif 41 <= forest_age_start_of_interval + 1 <= 60:
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_41_60_AGC_RF
-                elif 61 <= forest_age_end_of_interval + 1 <= 80:
+                elif 61 <= forest_age_start_of_interval + 1 <= 80:
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_61_80_AGC_RF
-                elif 81 <= forest_age_end_of_interval + 1 < 100:
+                elif 81 <= forest_age_start_of_interval + 1 < 100:
                     natrl_forest_age_dependent_agc_rf = natrl_forest_curve_81_100_AGC_RF
                 else:  # Use the primary forest/IFL RF for forest >100 years old
                     natrl_forest_age_dependent_agc_rf = primary_forest_AGC_RF
@@ -445,19 +447,19 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # Assigns pixel to primary_forest_proxy.
                 # Its definition depends on model starting year.
                 if model_start_year == 2000:  # For model starting in 2000, primary forest proxy uses primary forest/IFL map and age (>=100 years)
-                    if (forest_age_end_of_interval >= 100) or (ifl_primary_cell == 1):
+                    if (forest_age_start_of_interval >= 100) or (ifl_primary_cell == 1):
                         primary_forest_proxy = 1
                     else:
                         primary_forest_proxy = 0
                 elif model_start_year == 2015:  # For model starting in 2015, primary forest proxy is just age (>= 100 years)
-                    if forest_age_end_of_interval >= 100:
+                    if forest_age_start_of_interval >= 100:
                         primary_forest_proxy = 1
                     else:
                         primary_forest_proxy = 0
                 else:
                     raise ValueError("invalid start year: must be 2000 or 2015")
 
-                # Gef for fire emissions for different gases for forests specifically (g respective gas/kg dry matter)
+                # Gef for fire emissions for different gases for forests specifically (grams respective gas/kg dry matter)
                 Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest = nu.calc_Gef_forest(climate_domain_cell)
 
                 # Cf for fire emissions for all gases for forests specifically (unitless).
@@ -626,7 +628,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     raise ValueError("interval_length not valid: must be 1 or 5")
 
                 # Updates whether there was a partial or full disturbance (not including fire) in any previous interval.
-                part_or_full_dist_in_prev_intervals = max(part_or_full_dist_in_prev_intervals, part_or_full_dist_in_curr_interval)
+                part_or_full_dist_in_earlier_intervals = max(part_or_full_dist_in_earlier_intervals, part_or_full_dist_in_curr_interval)
 
                 ## The most recent year of non-tall vegetation composite land cover in the cell before this interval
                 most_recent_year_not_tall_veg = most_recent_year_not_tall_veg_block[row, col]
@@ -700,13 +702,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # 2. Partial dist: A significant (>=5 m) height reduction during the current interval
                 # 3. Partial dist: A significant (>=5 m) height reduction over several intervals, with the threshold being reached during the current interval
                 # 4. Full dist: Full loss of tall vegetation during the interval (height went from >=5 m to < 5 m)
-                part_or_full_dist_in_curr_interval = annual_dist_in_interval or sig_height_loss_prev_curr_abs or (first_time_sig_loss_from_max_height == 1) or tree_loss
-
-                # Resets age to 0 if there was a partial or full disturbance in the current interval.
-                # This has to occur after the age_dependent_removal_factor is assigned.
-                # This is also sometimes adjusted in the decision tree (e.g., if there is tree cover gain).
-                if part_or_full_dist_in_curr_interval:
-                    forest_age_end_of_interval = 0
+                part_or_full_dist_in_curr_interval = sig_height_loss_prev_curr_abs or (first_time_sig_loss_from_max_height == 1) or annual_dist_in_interval or tree_loss
 
 
                 ### Starting output pixel values
@@ -1005,15 +1001,15 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                             Gef_n2o_forest, deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
                     else:  # Trees remaining trees- no conversion to oil palm (42)
                         node = nu.accrete_node(node, 2)
-                        if part_or_full_dist_in_curr_interval:  # Trees partially disturbed in the last interval (421)
+                        if part_or_full_dist_in_curr_interval:  # Trees partially disturbed in the current interval (421)
                             node = nu.accrete_node(node, 1)
-                            if all_planted_trees:   # Planted trees partially disturbed in the last interval (4211)
+                            if all_planted_trees:   # Planted trees partially disturbed in the current interval (4211)
                                 node = nu.accrete_node(node, 1)
-                                if sig_height_gain_prev_curr_abs:  # Oil palm/planted trees partially disturbed in the last interval with signif. height increase after (42111)
+                                if sig_height_gain_prev_curr_abs:  # Oil palm/planted trees partially disturbed in the current interval with signif. height increase after (42111)
                                     # NOTE: This should only occur with 5-year interval data, not annual data.  #TODO Confirm with 5-year data
                                     node = nu.accrete_node(node, 1)
                                     # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
-                                    if all_oil_palm:  # Oil palm partially disturbed in the last interval with signif. height increase after (421111->4211111/4211112)
+                                    if all_oil_palm:  # Oil palm partially disturbed in the current interval with signif. height increase after (421111->4211111/4211112)
                                         node = nu.accrete_node(node, 1)
                                         agc_rf_in = cn.oil_palm_agc_rf
                                         bgc_rf_in = cn.oil_palm_bgc_rf
@@ -1028,7 +1024,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
                                             rf_post_dist, most_recent_year_not_tall_veg,
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                                    else: # Planted trees partially disturbed in the last interval with signif. height increase after (421112->4211121/4211122)
+                                    else: # Planted trees partially disturbed in the current interval with signif. height increase after (421112->4211121/4211122)
                                         node = nu.accrete_node(node, 2)
                                         agc_rf_in = planted_forest_AGC_RF_cell
                                         bgc_rf_in = planted_forest_BGC_RF_cell
@@ -1043,11 +1039,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
                                             rf_post_dist, most_recent_year_not_tall_veg,
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                                else:  # Oil palm/planted trees partially disturbed in the last interval without signif. height increase after (42112)
+                                else:  # Oil palm/planted trees partially disturbed in the current interval without signif. height increase after (42112)
                                     # NOTE: All annual interval data is expected to use this branch.
                                     node = nu.accrete_node(node, 2)
                                     # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
-                                    if all_oil_palm: # Oil palm partially disturbed in the last interval without signif. height increase after (421121->4211211/4211212)
+                                    if all_oil_palm: # Oil palm partially disturbed in the current interval without signif. height increase after (421121->4211211/4211212)
                                         node = nu.accrete_node(node, 1)
                                         agc_rf_in = cn.oil_palm_agc_rf
                                         bgc_rf_in = cn.oil_palm_bgc_rf
@@ -1062,7 +1058,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
                                             rf_post_dist, most_recent_year_not_tall_veg,
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                                    else: # Planted trees partially disturbed in the last interval without signif. height increase after (421122->4211221/4211222)
+                                    else: # Planted trees partially disturbed in the current interval without signif. height increase after (421122->4211221/4211222)
                                         node = nu.accrete_node(node, 2)
                                         agc_rf_in = planted_forest_AGC_RF_cell
                                         bgc_rf_in = planted_forest_BGC_RF_cell
@@ -1077,11 +1073,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
                                             rf_post_dist, most_recent_year_not_tall_veg,
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                            else:  # Non-planted trees partially disturbed in the last interval (4212)
+                            else:  # Non-planted trees partially disturbed in the current interval (4212)
                                 node = nu.accrete_node(node, 2)
-                                if tall_veg_LC_curr:  # Forest partially disturbed in the last interval (42121)
+                                if tall_veg_LC_curr:  # Forest partially disturbed in the current interval (42121)
                                     node = nu.accrete_node(node, 1)
-                                    if sig_height_gain_prev_curr_abs:  # Forest partially disturbed in the last interval with signif. height increase after (421211->4212111/4212112)
+                                    if sig_height_gain_prev_curr_abs:  # Forest partially disturbed in the current interval with signif. height increase after (421211->4212111/4212112)
                                         # NOTE: This should only occur with 5-year interval data, not annual data.
                                         node = nu.accrete_node(node, 1)
                                         # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
@@ -1100,7 +1096,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             rf_post_dist, most_recent_year_not_tall_veg,
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                             deadwood_c_ratio=deadwood_c_ratio_non_mang, litter_c_ratio=litter_c_ratio_non_mang)
-                                    else:  # Forest partially disturbed in the last interval without signif. height increase after (421212->4212121/4212122)
+                                    else:  # Forest partially disturbed in the current interval without signif. height increase after (421212->4212121/4212122)
                                         # NOTE: All annual interval data is expected to use this branch.
                                         node = nu.accrete_node(node, 2)
                                         # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
@@ -1117,9 +1113,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             rf_post_dist, most_recent_year_not_tall_veg,
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                             deadwood_c_ratio=deadwood_c_ratio_non_mang, litter_c_ratio=litter_c_ratio_non_mang)
-                                else:  # Trees outside forests partially disturbed in the last interval (42122)
+                                else:  # Trees outside forests partially disturbed in the current interval (42122)
                                     node = nu.accrete_node(node, 2)
-                                    if sig_height_gain_prev_curr_abs:  # Trees outside forests partially disturbed in the last interval with signif. height increase after (421221->4212211/4212212)
+                                    if sig_height_gain_prev_curr_abs:  # Trees outside forests partially disturbed in the current interval with signif. height increase after (421221->4212211/4212212)
                                         # NOTE: This should only occur with 5-year interval data, not annual data.
                                         node = nu.accrete_node(node, 1)
                                         # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
@@ -1138,7 +1134,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             rf_post_dist, most_recent_year_not_tall_veg,
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                             deadwood_c_ratio=0, litter_c_ratio=0)
-                                    else:  # Trees outside forests partially disturbed in the last interval without signif. height increase after (421222->4212221/4212222)
+                                    else:  # Trees outside forests partially disturbed in the current interval without signif. height increase after (421222->4212221/4212222)
                                         # NOTE: All annual interval data is expected to use this branch.
                                         node = nu.accrete_node(node, 2)
                                         # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
@@ -1155,12 +1151,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             rf_post_dist, most_recent_year_not_tall_veg,
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                             deadwood_c_ratio=0, litter_c_ratio=0)
-                        else:  # Trees not disturbed in the last interval (422)
+                        else:  # Trees not disturbed in the current interval (422)
                             node = nu.accrete_node(node, 2)
-                            if all_planted_trees:  # Oil palm/planted trees not disturbed in the last interval (4221)
+                            if all_planted_trees:  # Oil palm/planted trees not disturbed in the current interval (4221)
                                 node = nu.accrete_node(node, 1)
                                 # Calculation function only uses the RFs for 5-year intervals but assigning them regardless of interval type for consistency
-                                if all_oil_palm:  # Oil palm not disturbed in the last interval (42211->422111/422112)
+                                if all_oil_palm:  # Oil palm not disturbed in the current interval (42211->422111/422112)
                                     node = nu.accrete_node(node, 1)
                                     RF_AGC_final = cn.oil_palm_agc_rf
                                     RF_BGC_final = cn.oil_palm_bgc_rf
@@ -1168,12 +1164,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                     c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                     (state_out, c_gross_emis_out, c_gross_removals_out, agc_ef_out_cell,
                                      non_co2_flux_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = nu.calc_T_T_no_disturbs(
-                                        node, interval_length, forest_age_end_of_interval,
+                                        node, interval_length, forest_age_start_of_interval,
                                         first_year_burned_during_interval,
                                         RF_AGC_final, RF_BGC_final, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
                                         interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                         Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
-                                else: # Planted trees not disturbed in the last interval (42212->422121/422122)
+                                else: # Planted trees not disturbed in the current interval (42212->422121/422122)
                                     node = nu.accrete_node(node, 2)
                                     RF_AGC_final = planted_forest_AGC_RF_cell
                                     RF_BGC_final = planted_forest_BGC_RF_cell
@@ -1181,7 +1177,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                     c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                     (state_out, c_gross_emis_out, c_gross_removals_out, agc_ef_out_cell,
                                      non_co2_flux_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = nu.calc_T_T_no_disturbs(
-                                        node, interval_length, forest_age_end_of_interval,
+                                        node, interval_length, forest_age_start_of_interval,
                                         first_year_burned_during_interval,
                                         RF_AGC_final, RF_BGC_final, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
                                         interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
@@ -1190,7 +1186,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                 node = nu.accrete_node(node, 2)
                                 if tall_veg_LC_curr:  # Natural forest not disturbed in last interval (42221)
                                     node = nu.accrete_node(node, 1)
-                                    if (most_recent_year_not_tall_veg > 0) or (part_or_full_dist_in_prev_intervals > 0):  # Young secondary natural forest (422211->4222111/4222112)
+                                    if (most_recent_year_not_tall_veg > 0) or (part_or_full_dist_in_earlier_intervals > 0):  # Young secondary natural forest (422211->4222111/4222112)
                                         node = nu.accrete_node(node, 1)
                                         RF_AGC_final = natrl_forest_age_dependent_agc_rf
                                         RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang
@@ -1198,7 +1194,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                         c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                         (state_out, c_gross_emis_out, c_gross_removals_out, agc_ef_out_cell,
                                          non_co2_flux_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = nu.calc_T_T_no_disturbs(
-                                            node, interval_length, forest_age_end_of_interval, first_year_burned_during_interval,
+                                            node, interval_length, forest_age_start_of_interval, first_year_burned_during_interval,
                                             RF_AGC_final, RF_BGC_final, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
                                             interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
@@ -1213,7 +1209,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                             (state_out, c_gross_emis_out, c_gross_removals_out, agc_ef_out_cell,
                                              non_co2_flux_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = nu.calc_T_T_no_disturbs(
-                                                node, interval_length, forest_age_end_of_interval, first_year_burned_during_interval,
+                                                node, interval_length, forest_age_start_of_interval, first_year_burned_during_interval,
                                                 RF_AGC_final, RF_BGC_final, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
                                                 interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                                 Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
@@ -1226,12 +1222,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                             (state_out, c_gross_emis_out, c_gross_removals_out, agc_ef_out_cell,
                                              non_co2_flux_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = nu.calc_T_T_no_disturbs(
-                                                node, interval_length, forest_age_end_of_interval, first_year_burned_during_interval,
+                                                node, interval_length, forest_age_start_of_interval, first_year_burned_during_interval,
                                                 RF_AGC_final, RF_BGC_final, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
                                                 interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                                 Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                                 deadwood_c_ratio=deadwood_c_ratio_non_mang, litter_c_ratio=litter_c_ratio_non_mang)
-                                else:  # Trees outside forests not disturbed in the last interval (42222->422221/422222)
+                                else:  # Trees outside forests not disturbed in the current interval (42222->422221/422222)
                                     node = nu.accrete_node(node, 2)
                                     RF_AGC_final = cn.trees_outside_forests_agc_rf_max
                                     RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang
@@ -1239,7 +1235,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                     c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                     (state_out, c_gross_emis_out, c_gross_removals_out, agc_ef_out_cell,
                                      non_co2_flux_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = nu.calc_T_T_no_disturbs(
-                                        node, interval_length, forest_age_end_of_interval, first_year_burned_during_interval,
+                                        node, interval_length, forest_age_start_of_interval, first_year_burned_during_interval,
                                         RF_AGC_final, RF_BGC_final, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
                                         interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                         Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
@@ -1377,7 +1373,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 most_recent_year_not_tall_veg_block[row, col] = most_recent_year_not_tall_veg
                 max_height_since_last_time_not_tall_veg_block[row, col] = max_height_since_last_time_not_tall_veg
                 first_time_sig_loss_from_max_height_block[row, col] = first_time_sig_loss_from_max_height
-                part_or_full_dist_in_prev_intervals_block[row, col] = part_or_full_dist_in_prev_intervals
+                part_or_full_dist_in_earlier_intervals_block[row, col] = part_or_full_dist_in_earlier_intervals
                 part_or_full_dist_in_curr_interval_block[row, col] = part_or_full_dist_in_curr_interval
                 burned_in_curr_interval_block[row, col] = burned_in_curr_interval
                 agc_ef_out_block[row, col] = agc_ef_out_cell
@@ -1426,7 +1422,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
             out_dict_uint16[f"{cn.year_of_forest_loss}_{year_range}"] = year_of_forest_loss_block.copy()
             out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
             out_dict_uint8[f"{cn.first_time_sig_loss_from_max_height}_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()
-            out_dict_uint8[f"{cn.part_or_full_dist_in_prev_intervals}_{year_range}"] = part_or_full_dist_in_prev_intervals_block.copy()
+            out_dict_uint8[f"{cn.part_or_full_dist_in_earlier_intervals}_{year_range}"] = part_or_full_dist_in_earlier_intervals_block.copy()
             out_dict_uint8[f"{cn.part_or_full_dist_in_curr_interval}_{year_range}"] = part_or_full_dist_in_curr_interval_block.copy()
             out_dict_uint8[f"{cn.burned_in_curr_interval}_{year_range}"] = burned_in_curr_interval_block.copy()
             out_dict_float32[f"{cn.agc_emission_factor}_{year_range}"] = agc_ef_out_block.copy()
