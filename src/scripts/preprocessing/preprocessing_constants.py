@@ -11,7 +11,6 @@ from src.scripts.utilities.constants_and_names import (
     local_root,
     local_temp_dir,
     today_date,
-    pixel_area_ha_dir,
     pixel_area_dir,
     pixel_area_pattern,
     m2_to_ha,
