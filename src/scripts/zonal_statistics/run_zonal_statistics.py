@@ -55,7 +55,8 @@ NET_FLUX_CO2 = (
     "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
 )
 
-# TODO: Peat emissions paths under development
+# --- TODO paths disabled until implemented ---
+"""
 # DRAINED_TOTAL_MG_CO2E_PIXEL = (
 #     OUTPUT_BASE + "drained_total_Mg_CO2e_pixel/"
 #     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
@@ -64,14 +65,7 @@ NET_FLUX_CO2 = (
 #     OUTPUT_BASE + "burned_total_Mg_CO2e_pixel/"
 #     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
 # )
-# DRAINED_STATE = (
-#     OUTPUT_BASE + "drained_state/"
-#     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
-# )
-# BURNED_STATE = (
-#     OUTPUT_BASE + "burned_state/"
-#     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
-# )
+"""
 
 # Zarr cache folders (one per interval)
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "zarr/{run_date}/{interval}/"
