@@ -12,13 +12,16 @@ import argparse, logging, re
 import fsspec, s3fs
 import numpy as np, pandas as pd, xarray as xr
 import dask.array as da
-from flox import xarray_reduce, ReindexArrayType, ReindexStrategy
+from flox import ReindexArrayType, ReindexStrategy
+from flox.xarray import xarray_reduce
+
 
 # LocalCluster not needed; uu.connect_to_cluster already handles local fallback.
 # `Client` import is unused (uu.connect_to_cluster returns an
 # initialized client).  Remove to silence lint warnings.
 
 from src.scripts.utilities import universal_utilities as uu
+from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.zonal_statistics.zonal_constants import (
     NODE_CODES,
@@ -35,7 +38,7 @@ ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 #  The three CLI flags --model_version, --run_date, and the per-loop
 #  interval string "{interval}" are interpolated later with .format().
 
-OUTPUT_BASE = f"{ROOT}/version_{model_version}/"
+OUTPUT_BASE = f"{ROOT}/version_{cn.model_version}/"
 
 GROSS_EMIS_CO2 = (
     OUTPUT_BASE + "gross_emissions__all_C_pools__CO2_only__MgCO2/"
