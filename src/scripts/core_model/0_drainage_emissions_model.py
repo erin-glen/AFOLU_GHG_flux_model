@@ -652,8 +652,7 @@ def calculate_and_upload_drainage(
             year_tag = f"{iv_start}"
         else:
             # Paths reflect the land cover year closing the period.
-            final_year = cn.five_year_inventory_periods[-1][1]
-            end_for_path = iv_end + 1 if iv_end < final_year else iv_end
+            end_for_path = iv_end
             year_tag = f"{iv_start}_{end_for_path}"
         interval_tag = (
             cn.intervals_annual
