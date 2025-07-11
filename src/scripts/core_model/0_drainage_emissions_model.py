@@ -651,7 +651,7 @@ def calculate_and_upload_drainage(
         if iv_start == iv_end:
             year_tag = f"{iv_start}"
         else:
-            # Paths reflect the year after the interval.
+            # Paths reflect the land cover year closing the period.
             final_year = cn.five_year_inventory_periods[-1][1]
             end_for_path = iv_end + 1 if iv_end < final_year else iv_end
             year_tag = f"{iv_start}_{end_for_path}"
@@ -718,7 +718,7 @@ def compute_intervals(start_year, end_year, interval_type, all_five_year_periods
             end_year = start_year
 
     if interval_type == cn.intervals_five_year:
-        # Snap a 2019 start year to the final inventory period (2020–2023)
+        # Snap a 2019 start year to the final interval (2020–2023)
         if start_year == 2019 and end_year >= 2023:
             start_year = 2020
         intervals = [
@@ -816,7 +816,8 @@ def run_drainage_model(
     bag = dask.bag.from_sequence(bag_items, npartitions=len(bag_items))
 
     def _wrap(t):
-        closing_year = t[2]
+        final_year = cn.five_year_inventory_periods[-1][1]
+        closing_year = t[2] + 1 if t[2] < final_year else t[2]
         bstr = uu.boundstr(t[0])
         main_logger.info(
             f"{bstr} interval {t[1]}-{t[2]} uses land cover {closing_year}"
@@ -888,7 +889,7 @@ def main(argv=None):
             no_log=False,
             no_upload=False,
             start_year=2015,
-            end_year=2019,
+            end_year=2020,
             interval_type=cn.intervals_five_year,
             all_five_year_periods=False,
             peat_dataset="ogh",
@@ -943,7 +944,7 @@ def main(argv=None):
         "--all_five_year_periods",
         action="store_true",
         help=(
-            "Process all available five year inventory periods "
+            "Process all available five year intervals "
             "(sets interval_type to five_year)"
         ),
     )
@@ -999,7 +1000,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --bounding_box 110 -10 120 0 \
   --chunk_size 1 \
   --start_year 2015 \
-  --end_year 2019 \
+  --end_year 2020 \
   --interval_type five_year
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
@@ -1007,7 +1008,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --chunk_shapefile_uri s3://path/to/fishnet.shp \
   --first_chunks 10 \
   --start_year 2015 \
-  --end_year 2019 \
+  --end_year 2020 \
   --interval_type five_year
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
@@ -1015,7 +1016,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --tile_ids 00N_110E,00N_120E \
   --chunk_size 1 \
   --start_year 2015 \
-  --end_year 2019 \
+  --end_year 2020 \
   --interval_type five_year \
   --peat_dataset peatmap
 
