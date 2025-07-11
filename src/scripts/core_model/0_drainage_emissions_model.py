@@ -651,7 +651,7 @@ def calculate_and_upload_drainage(
         if iv_start == iv_end:
             year_tag = f"{iv_start}"
         else:
-            # Paths reflect the land cover year closing the period.
+            # Paths reflect the year after the interval.
             final_year = cn.five_year_inventory_periods[-1][1]
             end_for_path = iv_end + 1 if iv_end < final_year else iv_end
             year_tag = f"{iv_start}_{end_for_path}"
@@ -718,15 +718,11 @@ def compute_intervals(start_year, end_year, interval_type, all_five_year_periods
             end_year = start_year
 
     if interval_type == cn.intervals_five_year:
-        final_start, final_end = cn.five_year_inventory_periods[-1]
-        # Snap a 2019 start year to the final inventory period (2021–2023)
-        if start_year == 2019 and end_year >= final_end:
-            start_year = final_start + 1
-
+        # Snap a 2019 start year to the final inventory period (2020–2023)
+        if start_year == 2019 and end_year >= 2023:
+            start_year = 2020
         intervals = [
-            iv
-            for iv in cn.five_year_inventory_periods
-            if iv[0] >= start_year and iv[1] <= end_year
+            (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
         ]
     else:
         intervals = [(y, y) for y in range(start_year, end_year + 1)]
@@ -820,8 +816,7 @@ def run_drainage_model(
     bag = dask.bag.from_sequence(bag_items, npartitions=len(bag_items))
 
     def _wrap(t):
-        final_year = cn.five_year_inventory_periods[-1][1]
-        closing_year = t[2] + 1 if t[2] < final_year else t[2]
+        closing_year = t[2]
         bstr = uu.boundstr(t[0])
         main_logger.info(
             f"{bstr} interval {t[1]}-{t[2]} uses land cover {closing_year}"
