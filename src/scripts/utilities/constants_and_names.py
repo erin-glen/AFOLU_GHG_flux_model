@@ -208,10 +208,9 @@ intervals_hybrid = "hybrid"
 annual_land_cover_start_year = 2015
 
 # End years that correspond to available five year land cover composites
-five_year_land_cover_years = [2000, 2005, 2010, 2015, 2020, 2023]
+five_year_land_cover_years = [2005, 2010, 2015, 2020, 2023]
 
-# Convenience list of five year inventory periods.  The final period uses the
-# 2023 land cover composite and spans 2020‑2023.
+# Convenience list of five year inventory periods. The first period now uses the 2005 land cover composite (2000–2004). The final period still uses the 2023 land cover composite and spans 2020–2023.
 five_year_inventory_periods = [
     (2000, 2004),
     (2005, 2009),
