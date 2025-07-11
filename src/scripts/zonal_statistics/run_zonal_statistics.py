@@ -61,7 +61,7 @@ NET_FLUX_CO2 = (
 # --- TODO paths disabled until implemented ---
 """
 DRAINED_TOTAL_MG_CO2E_PIXEL = (
-    OUTPUT_BASE + "drained_total_Mg_CO2e_pixel/"
+    OUTPUT_BASE + "drained_total_Mg_CO2e_pixel_yr/"
     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
 )
 BURNED_TOTAL_MG_CO2E_PIXEL = (

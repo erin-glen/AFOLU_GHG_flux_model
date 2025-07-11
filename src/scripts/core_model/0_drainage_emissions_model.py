@@ -429,11 +429,11 @@ def calculate_drainage_and_emissions(
     out_dict_uint32["burned_state"] = burned_state_out
 
     out_dict_float32["drained_co2_Mg_CO2_ha"] = drained_co2_out
-    out_dict_float32["drained_n2o_Mg_CO2e_ha"] = drained_n2o_out
-    out_dict_float32["drained_ch4_land_Mg_CO2e_ha"] = drained_ch4_land_out
-    out_dict_float32["drained_ch4_ditch_Mg_CO2e_ha"] = drained_ch4_ditch_out
+    out_dict_float32["drained_n2o_Mg_CO2e_ha_yr"] = drained_n2o_out
+    out_dict_float32["drained_ch4_land_Mg_CO2e_ha_yr"] = drained_ch4_land_out
+    out_dict_float32["drained_ch4_ditch_Mg_CO2e_ha_yr"] = drained_ch4_ditch_out
     out_dict_float32["drained_co2_offsite_Mg_CO2_ha"] = drained_co2_offsite_out
-    out_dict_float32["drained_total_Mg_CO2e_ha"] = drained_total_co2e_out
+    out_dict_float32["drained_total_Mg_CO2e_ha_yr"] = drained_total_co2e_out
     out_dict_float32["burned_co2_Mg_CO2_ha"] = burned_co2_out
     out_dict_float32["burned_co_Mg_CO2e_ha"] = burned_co_out
     out_dict_float32["burned_ch4_Mg_CO2e_ha"] = burned_ch4_out

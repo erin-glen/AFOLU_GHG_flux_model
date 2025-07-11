@@ -20,12 +20,12 @@ DATA_TYPES = [
     # "burned_co2_Mg_CO2_ha",
     # "burned_co_Mg_CO2e_ha",
     "burned_total_Mg_CO2e_ha",
-    # "drained_ch4_ditch_Mg_CO2e_ha",
-    # "drained_ch4_land_Mg_CO2e_ha",
-    # "drained_co2_Mg_CO2_ha",
-    # "drained_co2_offsite_Mg_CO2_ha",
-    # "drained_n2o_Mg_CO2e_ha",
-    "drained_total_Mg_CO2e_ha",
+    # "drained_ch4_ditch_Mg_CO2e_ha_yr",
+    # "drained_ch4_land_Mg_CO2e_ha_yr",
+    # "drained_co2_Mg_CO2_ha_yr",
+    # "drained_co2_offsite_Mg_CO2_ha_yr",
+    # "drained_n2o_Mg_CO2e_ha_yr",
+    "drained_total_Mg_CO2e_ha_yr",
 ]
 
 INVENTORY_PERIODS = [
