@@ -38,6 +38,7 @@
 -bb 10.75 41.75 11 42 -cs 0.25      # 0.25x0.25 deg, 1 chunk (entirely GLCLU code=255 for ocean, so no actual data-- nothing should be be output)
 -bb -10 21.75 -9.75 22 -cs 0.25     # 0.25x0.25 deg, 1 chunk (has data but entirely desert (fully GLCLU code=0))
 -bb 114.5 -4 115 -3.5 -cs 0.5       # 0.5x0.5 deg (00N_110E), 1 chunk (has mangroves without WHRC AGB 2000)
+-bb 11 46 11.5 46.5 -cs 0.5         # 0.5x0.5 deg (50N_010E), 1 chunk (has planted forests and tree crops)
 -bb 158 6 159 7 -cs 1               # 1x1 deg (10N_150E), 1 chunk (no WHRC AGB, only mangroves)
 -bb -161 22 -160 23 -cs 1           # 1x1 deg (30N_170W), 1 chunk (no R:S tile)
 -bb -42.0 64.0 -41.0 65.0 -cs 1     # 1x1 deg (70N_050W), 1 chunk (no continent-ecozone, should default to cont_eco=2020)

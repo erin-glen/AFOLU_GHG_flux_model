@@ -194,11 +194,11 @@ g_to_kg = 10 ** -3
 # Need to specify numpy datatype because they're used in the Numba functions, which need explicit datatypes.
 # Based on LULUCF model framework slides: https://onewri-my.sharepoint.com/:p:/g/personal/david_gibbs_wri_org/EWwyxRfgdeVJi4ezwX7LrfcBT4k1CY-vHRtVDjJIAsgsJg?e=6nDCkA
 # 1 means full emissions, 0 means no emissions.
-agc_emissions_only = np.array([1, 0, 0, 0]).astype('uint8')
-biomass_emissions_only = np.array([1, 1, 0, 0]).astype('uint8')
-all_but_bgc_emissions = np.array([1, 0, 1, 1]).astype('uint8')
-deadwood_litter_emissions = np.array([0, 0, 1, 1]).astype('uint8')
-all_non_soil_pools = np.array([1, 1, 1, 1]).astype('uint8')
+agc_emissions_only = np.array([1, 0, 0, 0]).astype('uint8')  # AGC only
+biomass_emissions_only = np.array([1, 1, 0, 0]).astype('uint8')  # AGC and BGC
+all_but_bgc_emissions = np.array([1, 0, 1, 1]).astype('uint8')  # AGC, deadwood C, and litter C
+deadwood_litter_emissions = np.array([0, 0, 1, 1]).astype('uint8')  # deadwood C and litter C
+all_non_soil_pools = np.array([1, 1, 1, 1]).astype('uint8')  # AGC, BGC, deadwood C, and litter C
 
 # SDPT v2.0 planted forest type codes
 SDPT_oil_palm_code = 1
