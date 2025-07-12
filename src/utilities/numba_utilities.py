@@ -3,6 +3,7 @@ import numpy as np
 from numba import jit
 from numba.typed import Dict
 from numba.core import types
+import sys
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -1211,9 +1212,8 @@ def calc_NT_cropland_gain(c_pools_no_fire, c_dens_in, RF_array):
 
 # Gross fluxes and ending carbon stocks for cropland converted to non-cropland (without tall vegetation).
 # No CO2 emissions or removals but there are non-CO2 emissions if there is fire (crop residue burning).
-#TODO Allow cropland to have multiple fire emissions instances during a 5-year interval
 @jit(nopython=True)
-def calc_cropland_non_cropland(node, c_dens_in, c_pools_no_fire, most_recent_year_burned_during_interval):
+def calc_cropland_non_cropland(node, c_dens_in, c_pools_no_fire, times_burned_in_interval):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
@@ -1243,26 +1243,29 @@ def calc_cropland_non_cropland(node, c_dens_in, c_pools_no_fire, most_recent_yea
     n2o_flux_out = 0
 
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
-    if most_recent_year_burned_during_interval > 0:
+    if times_burned_in_interval > 0:
 
         state_out = accrete_node(node, 1)
 
         # Residue carbon in cropland is aboveground carbon only. Shouldn't be carbon in any other pools.
         residue_carbon = c_dens_in[0] * cn.cropland_residue_harvest_ratio
 
-        # Calculates non-CO2 fire emissions using aboveground carbon (only cropland pool)
+        # Calculates non-CO2 fire emissions using aboveground carbon (only cropland pool) for a single year of burning
         ch4_flux_out, n2o_flux_out = non_CO2_fire_equations(residue_carbon, cn.Cf_crop_residue,
                                                                      cn.Gef_CH4_crop_residue, cn.Gef_N2O_crop_residue)
 
-        # # For testing non-CO2 emissions
-        # print("c_dens_in:", c_dens_in)
-        # print("c_pre_disturb:", c_pre_disturb)
-        # print(f"Cf: {cn.Cf_crop_residue}; Gef_ch4: {cn.Gef_CH4_crop_residue}; GWP CH4: {cn.gwp_ch4}")
-        # print(f"Cf: {cn.Cf_crop_residue}; Gef_n2o: {cn.Gef_N2O_crop_residue}; GWP N2O: {cn.gwp_n2o}")
-        # print("c_pools_for_fire_non_CO2:", c_pools_for_fire_non_CO2)
-        # print("c_pools_for_fire_total:", c_pools_for_fire_total)
-        # print(f"ch4_flux_out: {ch4_flux_out}; n2o_flux_out: {n2o_flux_out};")
-        # os.quit()
+        # Multiplies the per-burn emissions by the number of times burned to get total emissions during the interval
+        ch4_flux_out = ch4_flux_out * times_burned_in_interval
+        n2o_flux_out = n2o_flux_out * times_burned_in_interval
+
+        # For testing non-CO2 emissions
+        print("c_dens_in:", c_dens_in)
+        print("residue_carbon:", residue_carbon)
+        print("times_burned_in_interval:", np.float32(times_burned_in_interval))
+        print(f"Cf: {cn.Cf_crop_residue}; Gef_ch4: {cn.Gef_CH4_crop_residue}; GWP CH4: {cn.gwp_ch4}")
+        print(f"Cf: {cn.Cf_crop_residue}; Gef_n2o: {cn.Gef_N2O_crop_residue}; GWP N2O: {cn.gwp_n2o}")
+        print(f"ch4_flux_out: {ch4_flux_out}; n2o_flux_out: {n2o_flux_out};")
+        # sys.quit()
 
     # Node code if no fire in the last interval. No CH4 and N2O emissions calculated.
     else:
@@ -1279,7 +1282,7 @@ def calc_cropland_non_cropland(node, c_dens_in, c_pools_no_fire, most_recent_yea
 # No CO2 emissions or removals but there are non-CO2 emissions if there is fire (crop residue burning).
 #TODO Allow cropland to have multiple fire emissions instances during a 5-year interval
 @jit(nopython=True)
-def calc_cropland_cropland(node, c_dens_in, most_recent_year_burned_during_interval):
+def calc_cropland_cropland(node, c_dens_in, times_burned_in_interval):
 
     # Step 1: Calculates carbon densities, carbon gross emissions and carbon gross removals (no changes to any)
     c_dens_out = np.array(c_dens_in).astype('float32')
@@ -1293,26 +1296,30 @@ def calc_cropland_cropland(node, c_dens_in, most_recent_year_burned_during_inter
     n2o_flux_out = 0
 
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
-    if most_recent_year_burned_during_interval > 0:
+    if times_burned_in_interval > 0:
 
         state_out = accrete_node(node, 1)
 
         # Residue carbon in cropland is aboveground carbon only. Shouldn't be carbon in any other pools.
         residue_carbon = c_dens_in[0] * cn.cropland_residue_harvest_ratio
 
-        # Calculates non-CO2 fire emissions using aboveground carbon (only cropland pool)
+        # Calculates non-CO2 fire emissions using aboveground carbon (only cropland pool) for a single year of burning
         ch4_flux_out, n2o_flux_out = non_CO2_fire_equations(residue_carbon, cn.Cf_crop_residue,
                                                                      cn.Gef_CH4_crop_residue, cn.Gef_N2O_crop_residue)
 
-        # # For testing non-CO2 emissions
-        # print("c_dens_in:", c_dens_in)
-        # print("c_pre_disturb:", c_pre_disturb)
-        # print(f"Cf: {cn.Cf_crop_residue}; Gef_ch4: {cn.Gef_CH4_crop_residue}; GWP CH4: {cn.gwp_ch4}")
-        # print(f"Cf: {cn.Cf_crop_residue}; Gef_n2o: {cn.Gef_N2O_crop_residue}; GWP N2O: {cn.gwp_n2o}")
-        # print("c_pools_for_fire_non_CO2:", c_pools_for_fire_non_CO2)
-        # print("c_pools_for_fire_total:", c_pools_for_fire_total)
-        # print(f"ch4_flux_out: {ch4_flux_out}; n2o_flux_out: {n2o_flux_out};")
-        # os.quit()
+        # Multiplies the per-burn emissions by the number of times burned to get total emissions during the interval
+        ch4_flux_out = ch4_flux_out * times_burned_in_interval
+        n2o_flux_out = n2o_flux_out * times_burned_in_interval
+
+        # For testing non-CO2 emissions
+        if times_burned_in_interval > 1:
+            print("c_dens_in:", c_dens_in)
+            print("times_burned_in_interval:", np.float32(times_burned_in_interval))
+            print(f"Cf: {cn.Cf_crop_residue}; Gef_ch4: {cn.Gef_CH4_crop_residue}; GWP CH4: {cn.gwp_ch4}")
+            print(f"Cf: {cn.Cf_crop_residue}; Gef_n2o: {cn.Gef_N2O_crop_residue}; GWP N2O: {cn.gwp_n2o}")
+            print(f"ch4_flux_out: {ch4_flux_out}; n2o_flux_out: {n2o_flux_out};")
+            sys.quit()
+
 
     # Node code if no fire in the last interval. No CH4 and N2O emissions calculated.
     else:

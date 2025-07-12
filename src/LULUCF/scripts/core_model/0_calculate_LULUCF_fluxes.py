@@ -53,7 +53,7 @@ from src.utilities import resize_cluster
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-@jit(nopython=True)
+# @jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, in_dict_float32,
                   primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                   model_start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_final):
@@ -1317,38 +1317,41 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                         interval_end_year, c_dens_in_ToF, most_recent_year_not_tall_veg,
                                         Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
 
-                # ### Non-cropland/non-tree to cropland (without tall vegetation)
-                # elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                #     node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
-                #     state_out = nu.accrete_node(node, 1)  # Cropland gain (51)
-                #     c_pools_EF_no_fire = cn.all_non_soil_pools  # Fire not considered in years of cropland gain
-                #     RF_AGC_final = cn.cropland_rf
-                #     agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
-                #     rf_array = np.array([RF_AGC_final, 0, 0, 0]).astype('float32')
-                #     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
-                #     c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(c_pools_EF_no_fire, c_dens_in, rf_array)
-                #
-                # ### Cropland converted to non-cropland (without tall vegetation)
-                # elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                #     node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
-                #     node = nu.accrete_node(node, 2)  # Cropland loss (52->521/522)
-                #     c_pools_EF_no_fire = cn.agc_emissions_only  # There should only be AGC in cropland anyway
-                #     c_dens_in = [cn.cropland_agc_dens, 0, 0 ,0]  # Forces input AGC to cropland default; other pools forced to 0, regardless of existing value.
-                #     agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
-                #     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
-                #     (state_out, c_gross_emis_out, c_gross_removals_out,
-                #      c_dens_out, non_co2_flux_out) = nu.calc_cropland_non_cropland(node, c_dens_in, c_pools_EF_no_fire, first_year_burned_during_interval)
-                #
-                # ### Cropland remaining cropland (without tall vegetation)
-                # # TODO Allow cropland to have multiple fire emissions instances during a 5-year interval
-                # elif (LC_prev == cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                #     node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
-                #     node = nu.accrete_node(node, 3)  # Cropland->cropland (53->531/532)
-                #     c_dens_in = [cn.cropland_agc_dens, 0, 0 ,0]  # Forces input AGC to cropland default; other pools forced to 0, regardless of existing value. Same values output.
-                #     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
-                #     (state_out, c_gross_emis_out, c_gross_removals_out,
-                #      c_dens_out, non_co2_flux_out) = nu.calc_cropland_cropland(node, c_dens_in, first_year_burned_during_interval)
-                #
+                ### Non-cropland/non-tree to cropland (without trees)
+                elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                    node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
+                    state_out = nu.accrete_node(node, 1)  # Cropland gain (51)
+                    c_pools_EF_no_fire = cn.all_non_soil_pools  # Fire not considered in intervals with cropland gain, so no fire option
+                    RF_AGC_final = cn.cropland_rf
+                    agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
+                    rf_array = np.array([RF_AGC_final, 0, 0, 0]).astype('float32')
+                    forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
+                    c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(c_pools_EF_no_fire, c_dens_in, rf_array)
+
+                ### Cropland converted to non-cropland (without trees)
+                elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                    node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
+                    node = nu.accrete_node(node, 2)  # Cropland loss (52->521/522)
+                    c_pools_EF_no_fire = cn.agc_emissions_only  # There should only be AGC in cropland anyway
+                    c_dens_in = [cn.cropland_agc_dens, 0.0, 0.0, 0.0]  # Forces input AGC to cropland default; there shouldn't be any other C pools at this point anyhow.
+                    agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
+                    forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
+                    (state_out, c_gross_emis_out, c_gross_removals_out,
+                     c_dens_out, non_co2_flux_out) = nu.calc_cropland_non_cropland(node, c_dens_in, c_pools_EF_no_fire, times_burned_in_interval)
+
+                ### Cropland remaining cropland (without trees)
+                elif (LC_prev == cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                    node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
+                    node = nu.accrete_node(node, 3)  # Cropland->cropland (53->531/532)
+                    c_dens_in = [cn.cropland_agc_dens, 0.0, 0.0, 0.0]  # Forces input AGC to cropland default; there shouldn't be any other C pools at this point anyhow. Same values output.
+                    forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
+                    (state_out, c_gross_emis_out, c_gross_removals_out,
+                     c_dens_out, non_co2_flux_out) = calc_cropland_cropland(node, c_dens_in, times_burned_in_interval)
+                    if times_burned_in_interval > 1:
+                        print(times_burned_in_interval)
+                        print(non_co2_flux_out)
+                        # sys.quit()
+
                 # ### Non-tree/cropland/short vegetation converted to short vegetation
                 # # TODO revisit constants used here. Never really resolved issues about starting carbon or what to do with residual carbon.
                 # # TODO Confirm that short veg default values are used correctly, i.e. starting C densities -> short veg
@@ -1403,20 +1406,19 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     c_dens_out = np.array([0, 0, deadwood_c_dens_in, litter_c_dens_in]).astype('float32')
 
 
+                ### Populates the output arrays with the calculated fluxes and densities
+
                 # Forces output carbon densities that are very slightly negative or positive (due to rounding errors) to 0 for simplicity
                 for i, c_pool_out in enumerate(c_dens_out):
                     if (c_pool_out > -0.0001) and (c_pool_out < 0.0001):
                         c_dens_out[i] = 0
-
-
-                ### Populates the output arrays with the calculated fluxes and densities
 
                 # Stops model if state_out is more digits than the expected maximum (currently 6).
                 # This means that the tree is deeper than expected and max_digits_state_out needs to be increased.
                 if state_out > (10 ** max_digits_state_out)-1:
                     raise ValueError("Maximum state_out is greater than the expected number of digits")
 
-                # Converts the state to 6 digits (trailing 0s) for consistency across all nodes
+                # Converts the state to 8 digits (trailing 0s) for consistency across all nodes
                 state_out = nu.pad_to_6_digits(state_out, max_digits_state_out)
 
                 state_out_block[row, col] = state_out
@@ -1433,6 +1435,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # Non-CO2 emissions for the interval (Mg CO2e/ha/interval)
                 ch4_gross_emis_out_block[row, col] = non_co2_flux_out[0]
                 n2o_gross_emis_out_block[row, col] = non_co2_flux_out[1]
+
+                if times_burned_in_interval > 1 and state_out == 53100000:
+                    print(times_burned_in_interval)
+                    print(ch4_gross_emis_out_block[row, col])
+                    sys.quit()
 
                 # Gross removals for each C pool for the interval before conversion to CO2 (Mg C/ha/interval)
                 agc_gross_removals_out_block[row, col] = c_gross_removals_out[0]
@@ -1457,7 +1464,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 burned_in_curr_interval_block[row, col] = burned_in_curr_interval
                 agc_ef_out_block[row, col] = agc_ef_out_cell
 
-        # os.quit()   # For testing the first interval
+        os.quit()   # For testing the first interval
 
         ### End of one iteration calculations and outputs
 
@@ -1506,6 +1513,55 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
 
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
+# @jit(nopython=True)
+def calc_cropland_cropland(node, c_dens_in, times_burned_in_interval):
+
+    # Step 1: Calculates carbon densities, carbon gross emissions and carbon gross removals (no changes to any)
+    c_dens_out = np.array(c_dens_in).astype('float32')
+    c_gross_emissions_out = np.array([0, 0, 0, 0]).astype('float32')  # Specified for completeness
+    c_gross_removals_out = np.array([0, 0, 0, 0]).astype('float32')  # Specified for completeness
+
+
+    # Step 2: Calculates non-CO2 emissions (if relevant) (Mg CO2e/ha/interval)
+    # Default non-CO2 emissions values
+    ch4_flux_out = 0
+    n2o_flux_out = 0
+
+    # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
+    if times_burned_in_interval > 0:
+
+        state_out = nu.accrete_node(node, 1)
+
+        # Residue carbon in cropland is aboveground carbon only. Shouldn't be carbon in any other pools.
+        residue_carbon = c_dens_in[0] * cn.cropland_residue_harvest_ratio
+
+        # Calculates non-CO2 fire emissions using aboveground carbon (only cropland pool) for a single year of burning
+        ch4_flux_out_single, n2o_flux_out_single = nu.non_CO2_fire_equations(residue_carbon, cn.Cf_crop_residue,
+                                                                     cn.Gef_CH4_crop_residue, cn.Gef_N2O_crop_residue)
+
+        # Multiplies the per-burn emissions by the number of times burned to get total emissions during the interval
+        ch4_flux_out = ch4_flux_out_single * times_burned_in_interval
+        n2o_flux_out = n2o_flux_out_single * times_burned_in_interval
+
+        # For testing non-CO2 emissions
+        if times_burned_in_interval > 1:
+            print("c_dens_in:", c_dens_in)
+            print("times_burned_in_interval:", np.float32(times_burned_in_interval))
+            print(f"Cf: {cn.Cf_crop_residue}; Gef_ch4: {cn.Gef_CH4_crop_residue}; GWP CH4: {cn.gwp_ch4}")
+            print(f"Cf: {cn.Cf_crop_residue}; Gef_n2o: {cn.Gef_N2O_crop_residue}; GWP N2O: {cn.gwp_n2o}")
+            print(f"ch4_flux_out_single: {ch4_flux_out_single}; n2o_flux_out_single: {n2o_flux_out_single};")
+            print(f"ch4_flux_out: {ch4_flux_out}; n2o_flux_out: {n2o_flux_out};")
+            # sys.quit()
+
+
+    # Node code if no fire in the last interval. No CH4 and N2O emissions calculated.
+    else:
+
+        state_out = nu.accrete_node(node, 2)
+
+    non_co2_fluxes_out = np.array([ch4_flux_out, n2o_flux_out]).astype('float32')
+
+    return state_out, c_gross_emissions_out, c_gross_removals_out, c_dens_out, non_co2_fluxes_out
 
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
