@@ -1227,8 +1227,8 @@ def calc_cropland_non_cropland(node, c_dens_in, c_pools_no_fire, times_burned_in
     litter_c_gross_emis_out = litter_c_dens_in * litter_c_ef_CO2
     c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')
 
-    # Step 2: Calculates carbon gross removals (Mg C/ha/interval) (only if converted to short vegetation)
-    c_gross_removals_out = RF_post_dist  # Would be short vegetation removals (only for AGC and BGC)
+    # Step 2: Calculates carbon gross removals (Mg C/ha/interval) (only if converted to short vegetation). Gross removals are negative.
+    c_gross_removals_out = RF_post_dist * -1  # Would be short vegetation removals (only for AGC and BGC)
 
     # Step 3: Calculates ending carbon densities (Mg C/ha)
     c_dens_out = np.array(c_dens_in).astype('float32') - c_gross_removals_out - c_gross_emissions_out
