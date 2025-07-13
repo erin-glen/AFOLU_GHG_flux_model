@@ -496,6 +496,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 short_veg_LC_prev, tall_veg_LC_prev = nu.classify_veg_height(LC_prev)
                 short_veg_LC_curr, tall_veg_LC_curr = nu.classify_veg_height(LC_curr)
 
+                water_LC_curr = (LC_curr >= cn.water_min_code) and (LC_curr <= cn.water_max_code)
+
                 SDPT_planted_trees = (planted_forest_type_cell > 0)  # All SDPT planted trees
                 SDPT_oil_palm = (planted_forest_type_cell == cn.SDPT_oil_palm_code)  # Oil palm in SDPT planted trees
                 oil_palm_pre_2000 = (oil_palm_2000_extent_cell == 1) # Oil palm that existed in the year 2000, according to that specific map/input
@@ -1330,7 +1332,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     rf_array = np.array([RF_AGC_final, 0, 0, 0]).astype('float32')
                     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                     c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(c_pools_EF_no_fire, c_dens_in, rf_array)
-
                 ### Cropland converted to non-cropland (without trees)
                 elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
                     node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
@@ -1344,8 +1345,18 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                         forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                         (state_out, c_gross_emis_out, c_gross_removals_out,
                          c_dens_out, non_co2_flux_out) = nu.calc_cropland_non_cropland(node, c_dens_in, c_pools_EF_no_fire, times_burned_in_interval, rf_post_dist)
+                    elif water_LC_curr:
+                        node = nu.accrete_node(node, 2)  # Annual cropland converted to water (522->5222) (no fire option)
+                        c_pools_EF_no_fire = cn.agc_emissions_only  # There should only be AGC in cropland anyway
+                        c_dens_in = [cn.cropland_agc_dens, 0.0, 0.0, 0.0]  # Forces input AGC to cropland default; there shouldn't be any other C pools at this point anyhow.
+                        agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
+                        rf_post_dist = short_veg_AGC_BGC_RF  # Post conversion removals to short veg
+                        forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
+                        # No fire emissions when cropland is converted to water. Simplest way is to just overwrite the burned count.
+                        (state_out, c_gross_emis_out, c_gross_removals_out,
+                         c_dens_out, non_co2_flux_out) = nu.calc_cropland_non_cropland(node, c_dens_in, c_pools_EF_no_fire, 0, rf_post_dist)
                     else:
-                        node = nu.accrete_node(node, 2)  # Annual cropland converted to non-tall/short vegetation (522->5221/5222)
+                        node = nu.accrete_node(node, 3)  # Annual cropland converted to anything else (522->5231/5232)
                         c_pools_EF_no_fire = cn.agc_emissions_only  # There should only be AGC in cropland anyway
                         c_dens_in = [cn.cropland_agc_dens, 0.0, 0.0, 0.0]  # Forces input AGC to cropland default; there shouldn't be any other C pools at this point anyhow.
                         agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
@@ -1353,7 +1364,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                         forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                         (state_out, c_gross_emis_out, c_gross_removals_out,
                          c_dens_out, non_co2_flux_out) = nu.calc_cropland_non_cropland(node, c_dens_in, c_pools_EF_no_fire, times_burned_in_interval, rf_post_dist)
-
                 ### Cropland remaining cropland (without trees)
                 elif (LC_prev == cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
                     node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
@@ -1363,50 +1373,47 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     (state_out, c_gross_emis_out, c_gross_removals_out,
                      c_dens_out, non_co2_flux_out) = nu.calc_cropland_cropland(node, c_dens_in, times_burned_in_interval)
 
-                # ### Non-tree/cropland/short vegetation converted to short vegetation
-                # # TODO revisit constants used here. Never really resolved issues about starting carbon or what to do with residual carbon.
-                # # TODO Confirm that short veg default values are used correctly, i.e. starting C densities -> short veg
-                # # TODO include bare ground getting set to 0 AGC
-                # elif (not short_veg_LC_prev) and (short_veg_LC_curr): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                #     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
-                #     state_out = nu.accrete_node(node, 1)  # Short vegetation gain (61)
-                #     RF_AGC_final = short_veg_AGC_RF
-                #     RF_BGC_final = short_veg_BGC_RF
-                #     rf_array = np.array([RF_AGC_final, RF_BGC_final, 0, 0]).astype('float32')
-                #     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
-                #     c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_short_veg_gain(rf_array)
-                #
-                # ### Short vegetation converted to non-short vegetation, non-forest or non-cropland
-                # # TODO revisit this. Never really resolved issues about starting carbon or what to do with residual carbon.
-                # # TODO confirm that fire emissions are correct. Didn't check that.
-                # elif (short_veg_LC_prev) and (not short_veg_LC_curr): ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                #     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
-                #     node = nu.accrete_node(node, 2)  # Short vegetation loss (62->621/622)
-                #     c_dens_in = [short_veg_AGC_RF, short_veg_BGC_RF, 0 ,0]  # Forces input carbon densities to short veg default; other pools forced to 0, regardless of existing value.
-                #     c_pools_EF_no_fire = cn.biomass_emissions_only
-                #     agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
-                #     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
-                #     (state_out, c_gross_emis_out, c_gross_removals_out,
-                #      c_dens_out, non_co2_flux_out) = nu.calc_short_veg_loss(node, c_dens_in, c_pools_EF_no_fire, first_year_burned_during_interval)
-                #
-                # ### Short vegetation remaining short vegetation
-                # # TODO revisit this. Never really resolved issues about starting carbon or what to do with residual carbon.
-                # # TODO confirm that fire emissions are correct. Didn't check that.
-                # # TODO Allow short veg to have multiple fire emissions instances during a 5-year interval
-                # elif short_veg_LC_prev and short_veg_LC_curr: ##TODO: @Mel If mangrove branch at top, no exception needed here?
-                #     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
-                #     node = nu.accrete_node(node, 3)  # Short vegetation->Short vegetation (63->631/632)
-                #     c_dens_in = [short_veg_AGC_RF, short_veg_BGC_RF, 0 ,0]  # Forces input carbon densities to short veg default; other pools forced to 0, regardless of existing value.
-                #     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
-                #     (state_out, c_gross_emis_out, c_gross_removals_out,
-                #      c_dens_out, non_co2_flux_out) = nu.calc_short_veg_short_veg(node, c_dens_in, first_year_burned_during_interval)
+                ### Non-tree/cropland converted to short vegetation
+                elif (not short_veg_LC_prev) and (short_veg_LC_curr): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                    node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
+                    state_out = nu.accrete_node(node, 1)  # Short vegetation gain (61)
+                    rf_array = short_veg_AGC_BGC_RF
+                    forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
+                    c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_short_veg_gain(rf_array)
+                ### Short vegetation converted to non-short vegetation, non-forest or non-cropland
+                elif (short_veg_LC_prev) and (not short_veg_LC_curr): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                    node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
+                    node = nu.accrete_node(node, 2)  # Short vegetation loss (62)
+                    if water_LC_curr:
+                        node = nu.accrete_node(node, 1)  # Short vegetation loss converted to water (621->6212) (no fire option)
+                        c_dens_in = [short_veg_AGC_RF, short_veg_BGC_RF, 0.0, 0.0]  # Forces input carbon densities to short veg default; other pools forced to 0, regardless of existing value.
+                        c_pools_EF_no_fire = cn.biomass_emissions_only
+                        agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
+                        forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
+                        # No fire emissions when cropland is converted to water. Simplest way is to just overwrite the burned count.
+                        (state_out, c_gross_emis_out, c_gross_removals_out,
+                         c_dens_out, non_co2_flux_out) = nu.calc_short_veg_loss(node, c_dens_in, c_pools_EF_no_fire, 0)
+                    else:
+                        node = nu.accrete_node(node, 2)  # Short vegetation loss converted to non-water (622->6221/6222)
+                        c_dens_in = [short_veg_AGC_RF, short_veg_BGC_RF, 0.0, 0.0]  # Forces input carbon densities to short veg default; other pools forced to 0, regardless of existing value.
+                        c_pools_EF_no_fire = cn.biomass_emissions_only
+                        agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
+                        forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
+                        (state_out, c_gross_emis_out, c_gross_removals_out,
+                         c_dens_out, non_co2_flux_out) = nu.calc_short_veg_loss(node, c_dens_in, c_pools_EF_no_fire, times_burned_in_interval)
+                ### Short vegetation remaining short vegetation
+                elif short_veg_LC_prev and short_veg_LC_curr: ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                    node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
+                    node = nu.accrete_node(node, 3)  # Short vegetation->Short vegetation (63->631/632)
+                    c_dens_in = [short_veg_AGC_RF, short_veg_BGC_RF, 0.0, 0.0]  # Forces input carbon densities to short veg default; other pools forced to 0, regardless of existing value.
+                    forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
+                    (state_out, c_gross_emis_out, c_gross_removals_out,
+                     c_dens_out, non_co2_flux_out) = nu.calc_short_veg_short_veg(node, c_dens_in, times_burned_in_interval)
 
-                #TODO Do I need to add a non-veg state node (with carbon density of 0)?
-
-                # When decision trees above do not apply
+                # When decision trees above do not apply (generally, carbon-less, non-vegetated land covers)
                 else:
 
-                    state_out = 2000000
+                    state_out = cn.other_landcover_node
 
                     # If no decision tree branches apply, forest age set to 0 years
                     forest_age_end_of_interval = 0

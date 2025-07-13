@@ -156,6 +156,8 @@ Gef_N2O_grassland = 0.21
 # Combustion factor for savanna and grassland burning (IPCC 2019, V4, Ch. 2, Table 2.6-- all savanna grasslands (mid/late dry season burns)
 Cf_grassland = 0.77
 
+other_landcover_node = 7
+
 
 ### GLCLU cover codes
 ### Classifications proposed by Elise Mazur 2025-06-05 by email. Agreed on 2025-06-09
@@ -170,6 +172,9 @@ tall_veg_dry_min_code = 27
 tall_veg_dry_max_code = 48
 tall_veg_wet_min_code = 127
 tall_veg_wet_max_code = 148
+
+water_min_code = 200
+water_max_code = 208
 
 cropland = 244
 builtup = 250
@@ -682,7 +687,7 @@ first_time_sig_loss_from_max_height = "first_time_sig_loss_from_max_height"
 part_or_full_dist_in_earlier_intervals = "partial_or_full_dist_in_earlier_intervals"
 part_or_full_dist_in_curr_interval = "partial_or_full_dist_in_current_interval"
 times_burned_in_interval = "times_burned_in_current_interval"
-agc_emission_factor = "AGC_emission_factor__fraction"
+agc_emission_factor = "AGC_emission_factor_CO2_only__fraction"
 
 model_type_placholder = "MODEL_TYPE"
 
