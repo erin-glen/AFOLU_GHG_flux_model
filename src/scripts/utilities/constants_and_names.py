@@ -212,11 +212,11 @@ five_year_land_cover_years = [2005, 2010, 2015, 2020, 2023]
 
 # Convenience list of five year inventory periods. The first period now uses the 2005 land cover composite (2000–2004). The final period still uses the 2023 land cover composite and spans 2020–2023.
 five_year_inventory_periods = [
-    '2001_2005',
-    '2006_2010',
-    '2011_2015',
-    '2016_2020',
-    '2021_2023'
+    (2001, 2005),
+    (2006, 2010),
+    (2011, 2015),
+    (2016, 2020),
+    (2021, 2023),
 ]
 
 # -------------------------------------------------------------------
