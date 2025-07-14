@@ -816,7 +816,7 @@ def run_drainage_model(
 
     def _wrap(t):
         final_year = cn.five_year_inventory_periods[-1][1]
-        closing_year = t[2] + 1 if t[2] < final_year else t[2]
+        closing_year = t[2]
         bstr = uu.boundstr(t[0])
         main_logger.info(
             f"{bstr} interval {t[1]}-{t[2]} uses land cover {closing_year}"
@@ -1023,7 +1023,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --tile_ids 00N_110E,10N_020E,20N_020W,60N_010W,60N_110W \
   --chunk_size 1 \
-  --start_year 2000 \
+  --start_year 2001 \
   --end_year 2023 \
   --interval_type five_year \
   --mark_missing_factors
@@ -1032,7 +1032,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --bounding_box 110 -10 120 0 \
   --chunk_size 1 \
-  --start_year 2000 \
+  --start_year 2001 \
   --end_year 2023 \
   --all_five_year_periods
 
@@ -1040,7 +1040,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --full_model \
   --chunk_size 1 \
-  --start_year 2000 \
+  --start_year 2001 \
   --end_year 2023 \
   --all_five_year_periods \
   --mark_missing_factors
