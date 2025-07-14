@@ -711,7 +711,20 @@ LULUCF_core_output_dirs = [
     f"{outputs_path}{agc_rf_pre_dist_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
-# Summative outputs
+# Intermediate outputs from core model
+LULUCF_intermediate_output_dirs = [
+    f"{outputs_path}{forest_age_output_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{gain_year_count_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{most_recent_year_not_tall_veg}/{model_type_placholder}/RUNSTART_END/CHUNK_SIZE_pixels/RUN_DATE/", # Years represent from model start to current interval end
+    f"{outputs_path}{max_height_since_last_time_not_tall_veg}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{first_time_sig_loss_from_max_height}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{part_or_full_dist_in_earlier_intervals}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{part_or_full_dist_in_curr_interval}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{times_burned_in_interval}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{agc_emission_factor}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/"
+]
+
+# Summative outputs from core model
 LULUCF_summative_output_dirs = [
     # Outputs per interval
     f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
@@ -724,34 +737,20 @@ LULUCF_summative_output_dirs = [
     f"{outputs_path}{net_flux_litter_c_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{non_soil_c_LC_masked_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",  # Only per interval
+    f"{outputs_path}{non_soil_c_modeled_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",  # Only per interval
 
     # Outputs that cover the entire model (start year to end of model).
     # These also need to be specifically specified in the summative outputs script.
     f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{gross_emis_all_C_pools_non_CO2_only_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{gross_emis_all_C_pools_non_CO2_only_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{gross_removals_all_C_pools_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{net_flux_agc_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{net_flux_bgc_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{net_flux_deadwood_c_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{net_flux_litter_c_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{net_flux_agc_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{net_flux_bgc_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{net_flux_deadwood_c_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{net_flux_litter_c_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
-
-]
-
-# Intermediate outputs
-LULUCF_intermediate_output_dirs = [
-    f"{outputs_path}{forest_age_output_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{gain_year_count_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{most_recent_year_not_tall_veg}/{model_type_placholder}/RUNSTART_END/CHUNK_SIZE_pixels/RUN_DATE/", # Years represent from model start to current interval end
-    f"{outputs_path}{max_height_since_last_time_not_tall_veg}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{first_time_sig_loss_from_max_height}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{part_or_full_dist_in_earlier_intervals}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{part_or_full_dist_in_curr_interval}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{times_burned_in_interval}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{agc_emission_factor}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
 # TODO @Mel We shouldn't need this eventually.

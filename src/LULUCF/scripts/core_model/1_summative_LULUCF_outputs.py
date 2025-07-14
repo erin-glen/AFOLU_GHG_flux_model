@@ -6,21 +6,22 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 20 -1 21 0 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs a 32GB worker):
-python -m src.utilities.create_cluster -n 1 -m 32 -c 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2015 2023 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
 
-Coiled large shapefile test:
+Coiled large shapefile test (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 50 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2023 --input_date YYYYMMDD
 Consistently uses 27 GB per worker, so close to the maximum with 2 simultaneous tasks/worker.
 
 Full run:
 python -m src.utilities.create_cluster -n 100 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2015 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
 
 NOTE: I experimented with including the per-pixel output creation in this script, making a combined summative/per-pixel
 post-processing step. However, the per-pixel output creation seemed to require about 4GB of memory, which meant that
@@ -49,7 +50,7 @@ from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
 
 
-def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type, interval_year_diff, interval_length,
+def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type, interval_year_diff_list, interval_length,
                                     interval_end_years, is_final, no_upload,
                                     summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list,
                                     stage):
@@ -136,9 +137,10 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     # because that has the list of basic output directories which are customized for this run
     out_dict = {}
 
-    # Summative outputs for outputs with year ranges in their name (i.e. fluxes).
-    for interval_end_year in interval_end_years:
+    # Summative outputs for outputs with year ranges in their name (i.e. fluxes)
+    for i, interval_end_year in enumerate(interval_end_years):
 
+        interval_year_diff = interval_year_diff_list[i]
         interval_year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
 
         # Gross emissions across all carbon pools
@@ -183,11 +185,11 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
                 + out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"])
 
         # Summative outputs for outputs with specific years in their name (i.e. carbon densities)
-        out_dict[f"{cn.c_dens_raw_non_soil_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = (
-                layers[f"{cn.agc_raw_dens_pattern}_{interval_end_year}"]
-                + layers[f"{cn.bgc_raw_dens_pattern}_{interval_end_year}"]
-                + layers[f"{cn.deadwood_c_raw_dens_pattern}_{interval_end_year}"]
-                + layers[f"{cn.litter_c_raw_dens_pattern}_{interval_end_year}"])
+        out_dict[f"{cn.non_soil_c_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = (
+                layers[f"{cn.agc_modeled_dens_pattern}_{interval_end_year}"]
+                + layers[f"{cn.bgc_modeled_dens_pattern}_{interval_end_year}"]
+                + layers[f"{cn.deadwood_c_modeled_dens_pattern}_{interval_end_year}"]
+                + layers[f"{cn.litter_c_modeled_dens_pattern}_{interval_end_year}"])
 
     # print(out_dict)
 
@@ -202,7 +204,9 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     total_gross_removals = None
     total_net_flux = None
 
-    for interval_end_year in interval_end_years:
+    for i, interval_end_year in enumerate(interval_end_years):
+
+        interval_year_diff = interval_year_diff_list[i]
         interval_year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
 
         # All of these must be in cn.LULUCF_summative_output_dirs
@@ -302,30 +306,30 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         # Adds metadata used for uploading outputs to s3 to the dictionary
         for key, value in out_dict.items():
             data_type = value.dtype.name
-            # print("key:", key)
+            print("key:", key)
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
             out_pattern, interval_year_range = uu.strip_and_extract_years(key)
-            # print("out_pattern:", out_pattern)
-            # print("year_range:", year_range)
+            print("out_pattern:", out_pattern)
+            print("year_range:", year_range)
 
             # Gets the core filename pattern and pixel meaning
             out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_pixel_meaning(out_pattern)
-            # print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
+            print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
 
             # Retrieves the relevant output s3 path for this specific output (list of one element).
             # First, finds the output folders for all intervals with the relevant patterns
             matched_output_s3_folders = [item for item in summative_outputs_by_interval_dir_list if out_pattern_without_pixel_meaning in item]
-            # print("matched_output_s3_folders:", matched_output_s3_folders)
+            print("matched_output_s3_folders:", matched_output_s3_folders)
 
             # Second, finds the output folder with the right interval for that pattern
             matched_output_s3_folder_list = [item for item in matched_output_s3_folders if interval_year_range in item]
-            # print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
+            print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
 
             # Output paths without bucket (s3://gfw2-data).
             # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
             s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
-            # print("s3_path_without_bucket:", s3_path_without_bucket)
+            print("s3_path_without_bucket:", s3_path_without_bucket)
 
             # Dictionary with metadata for each array
             out_dict[key] = [value, data_type, out_pattern, interval_year_range, s3_path_without_bucket]
@@ -395,7 +399,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     # Calculates the interval type, difference between start and end years of intervals,
     # and the model output years for the model run
-    interval_type, interval_year_diff, interval_length, interval_end_years = uu.get_interval_info(end_year, main_logger, start_year)
+    interval_type, interval_year_diff_list, interval_length_list, interval_end_years_list = uu.get_interval_info(end_year, main_logger, start_year)
 
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -426,16 +430,16 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # just once on the scheduler, as is more efficient for scripts that use numba.
     # Creates a list of input directories used in summative output creation based on specifics of the model run
     summative_inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_core_output_dirs, interval_type, start_year,
-                                                                           chunk_size_pixels, model_type, interval_end_years,
-                                                                           interval_year_diff, input_date, "per_ha")
+                                                                           chunk_size_pixels, model_type, interval_end_years_list,
+                                                                           interval_year_diff_list, input_date, "per_ha")
     # print(summative_inputs_by_interval_dir_list)
     if is_final:
         main_logger.info(f"summative_inputs_by_interval_dir_list: {summative_inputs_by_interval_dir_list}")
 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
     summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
-                                                                            chunk_size_pixels, model_type, interval_end_years,
-                                                                            interval_year_diff, input_date, "per_ha")
+                                                                            chunk_size_pixels, model_type, interval_end_years_list,
+                                                                            interval_year_diff_list, input_date, "per_ha")
     # print(summative_outputs_by_interval_dir_list)
     if is_final:
         main_logger.info(f"summative_outputs_by_interval_dir_list: {summative_outputs_by_interval_dir_list}")
@@ -448,7 +452,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     ### Step 2: Create 1x1 degree outputs
 
     summative_output_delayed_results = [dask.delayed(create_summative_LULUCF_outputs)
-                       (chunk, start_year, end_year, interval_type, interval_year_diff, interval_length, interval_end_years,
+                       (chunk, start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years_list,
                         is_final, no_upload,
                         summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list, stage)
                        for chunk in chunk_list]
