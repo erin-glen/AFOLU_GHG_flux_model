@@ -1330,6 +1330,19 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'data_type': array_per_ha.dtype.name
         }
 
+# Makes sure that all columns in output chunk stats Pandas dataframe are indeed numeric
+# From https://chatgpt.com/c/68751cbe-6888-800a-bf9d-3657b048a810
+def sanitize_numeric_columns(df, numeric_cols):
+    df = df.copy()  # Prevents SettingWithCopyWarning
+    for col in numeric_cols:
+        if col not in df.columns:
+            continue
+
+        # Safely coerces non-numeric to numeric
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    return df
+
 
 # Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet.
 # Calculates the min and max value for each input and output across all chunks.
@@ -1421,73 +1434,106 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     sum_1x1_to_10x10 = sum_1x1_to_10x10[['tile_id', 'layer_name', 'tile_name', 'total_count']]
 
 
-    ### Part 3: Organizes pixel counts for aggregated 10x10 outputs (if created).
-    ### Calculates the difference between the pixel counts. Difference should be 0 for every 10x10 output.
+    ### Part 3: Saves dataframes to Excel spreadsheet if other_1x1_outputs is <900,000 rows; otherwise, saves to parquet format
+    # other_1x1_outputs is the output table that has the most rows, so it's the best way to judge what's output is too large for Excel.
+    # Excel's row limit is more like 1.5 million, but that'd be a really unwieldy spreadsheet.
+    if len(other_1x1_outputs) > 900000:
+        main_logger.info(f"Row count {len(other_1x1_outputs)} greater than 900,000. Writing all outputs to Parquet.")
 
-    # # Gets pixel counts in 10x10 deg chunks and joins the 1x1 pixel counts summed to 10x10 to their table
-    # if all_10x10_stats:
-    #
-    #     # Converts accumulated 1x1 chunk statistics to a DataFrame
-    #     df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
-    #
-    #     # Merges totals_10x10 with df_all_10x10_stats on tile_name
-    #     merged_1x1_10x10_counts = sum_1x1_to_10x10.merge(df_all_10x10_stats[['tile_name', 'count_value']], on='tile_name', how='left')
-    #
-    #     # Computes the difference between the pixel counts in the summed 1x1s and the corresponding 10x10
-    #     merged_1x1_10x10_counts['count_difference'] = merged_1x1_10x10_counts['total_count'] - merged_1x1_10x10_counts['count_value']
-    #     merged_1x1_10x10_counts = merged_1x1_10x10_counts.rename(columns={'total_count': 'pixel_count_1x1_summed', 'count_value': 'pixel_count_10x10'})
-    #
-    #     sum_difference = merged_1x1_10x10_counts['count_difference'].sum()
-    #     if sum_difference == 0:
-    #         main_logger.info(f"Difference between pixel counts in 1x1s vs. their respective 10x10s: {sum_difference} pixels: {timestr()}")
-    #     else:
-    #         main_logger.warning(f"WARNING: Difference between pixel counts in 1x1s vs. their respective 10x10s: {sum_difference} pixels: {timestr()}")
+        # Saves each output DataFrame as Parquet
+        out_base = f"{stage}_{timestr()}"
+        output_dir = cn.local_chunk_stats_path
 
+        # Makes sure that numeric columns are indeed numeric before saving them to parquet.
+        # Parquet is picky about this.
+        # From https://chatgpt.com/c/68751cbe-6888-800a-bf9d-3657b048a810
+        main_logger.info(f"Cleaning non-numeric outputs for saving to Parquet: {timestr()}")
 
-    ### Part 4: Saves dataframes to Excel spreadsheet
+        # Numeric columns that need cleaning
+        numeric_columns = ['min_value', 'mean_value', 'max_value', 'count_value', 'sum_value']
 
-    # Writes the data to a single Excel file with separate sheets.
-    # Should continue with model post-processing even if chunk stats don't work for some reason
-    # (e.g., more many rows output than rows in an Excel spreadsheet)
-    out_spreadsheet = f'{stage}_1x1_chunk_statistics_{timestr()}.xlsx'
-    local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+        (
+            annual_1x1_inputs, other_1x1_inputs, gross_flux_1x1_outputs, net_flux_1x1_outputs,
+            other_1x1_outputs, min_max_1x1_stats, sum_1x1_to_10x10,
+        ) = [
+            sanitize_numeric_columns(df, numeric_columns)
+            for df in [
+                annual_1x1_inputs, other_1x1_inputs, gross_flux_1x1_outputs, net_flux_1x1_outputs,
+                other_1x1_outputs, min_max_1x1_stats, sum_1x1_to_10x10,
+            ]
+        ]
 
-    main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
-    try:
-        with pd.ExcelWriter(local_spreadsheet) as writer:
+        # Saves to Parquet
+        # Groups output files from model run into a timestamped folder
+        timestamp = timestr()
+        parquet_folder = Path(f"{output_dir}parquet_{timestamp}/")
+        parquet_folder.mkdir(parents=True, exist_ok=True)
 
-            # Writes input rows to one sheet
-            main_logger.info(f"Writing inputs to spreadsheet: {timestr()}")
-            annual_1x1_inputs.to_excel(writer, sheet_name='annual_1x1_inputs', index=False)
-            other_1x1_inputs.to_excel(writer, sheet_name='other_1x1_inputs', index=False)
+        annual_1x1_inputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__annual_1x1_inputs.parquet", index=False)
+        other_1x1_inputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__other_1x1_inputs.parquet", index=False)
+        gross_flux_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__gross_outputs_1x1.parquet", index=False)
+        net_flux_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__net_outputs_1x1.parquet", index=False)
+        other_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__other_outputs_1x1.parquet", index=False)
+        min_max_1x1_stats.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__min_max_for_layers_1x1.parquet", index=False)
+        sum_1x1_to_10x10.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__1x1_counts_in_10x10.parquet", index=False)
 
-            # Writes output rows based on layer_name conditions to separate sheets
-            main_logger.info(f"Writing outputs to spreadsheet: {timestr()}")
-            gross_flux_1x1_outputs.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
-            net_flux_1x1_outputs.to_excel(writer, sheet_name='net_outputs_1x1', index=False)
-            other_1x1_outputs.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
+        # Uploads to S3 if needed
+        if not no_upload:
+            for filename in [
+                f"{out_base}__v{cn.model_version_underscore}__annual_1x1_inputs.parquet",
+                f"{out_base}__v{cn.model_version_underscore}__other_1x1_inputs.parquet",
+                f"{out_base}__v{cn.model_version_underscore}__gross_outputs_1x1.parquet",
+                f"{out_base}__v{cn.model_version_underscore}__net_outputs_1x1.parquet",
+                f"{out_base}__v{cn.model_version_underscore}__other_outputs_1x1.parquet",
+                f"{out_base}__v{cn.model_version_underscore}__min_max_for_layers_1x1.parquet",
+                f"{out_base}__v{cn.model_version_underscore}__1x1_counts_in_10x10.parquet",
+            ]:
+                full_path = f"{parquet_folder}/{filename}"
+                s3_key = f"{cn.s3_chunk_stats_path}parquet_{timestamp}/{filename}"
+                main_logger.info(f"Uploading {filename} to S3: {timestr()}")
+                s3_client.upload_file(full_path, cn.short_bucket_prefix, Key=s3_key)
 
-            # Writes the min and max statistics to the second sheet
-            min_max_1x1_stats.to_excel(writer, sheet_name='min_max_for_layers_1x1', index=False)
+    # Saves chunk stats to Excel
+    else:
 
-            # Writes the 1x1s summed to 10x10, if available
-            sum_1x1_to_10x10.to_excel(writer, sheet_name='1x1_counts_in_10x10', index=False)
+        # Writes the data to a single Excel file with separate sheets.
+        # Should continue with model post-processing even if chunk stats don't work for some reason
+        # (e.g., more many rows output than rows in an Excel spreadsheet)
+        out_spreadsheet = f'{stage}_1x1_chunk_statistics_{timestr()}.xlsx'
+        local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
 
-            # # Writes the 10x10 pixel counts, if calculated
-            # if all_10x10_stats:
-            #     merged_1x1_10x10_counts.to_excel(writer, sheet_name='pix_counts_compa_10x10_1x1', index=False)
+        main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
+        try:
+            with pd.ExcelWriter(local_spreadsheet) as writer:
 
-        main_logger.info(merged_1x1_stats.head())  # Show first few rows of the stats DataFrame for inspection
+                # Writes input rows to one sheet
+                main_logger.info(f"Writing inputs to spreadsheet: {timestr()}")
+                annual_1x1_inputs.to_excel(writer, sheet_name='annual_1x1_inputs', index=False)
+                other_1x1_inputs.to_excel(writer, sheet_name='other_1x1_inputs', index=False)
 
-        main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
+                # Writes output rows based on layer_name conditions to separate sheets
+                main_logger.info(f"Writing outputs to spreadsheet: {timestr()}")
+                gross_flux_1x1_outputs.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
+                net_flux_1x1_outputs.to_excel(writer, sheet_name='net_outputs_1x1', index=False)
+                other_1x1_outputs.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
 
-    except Exception as e:
-        main_logger.info(f"Can't print chunk stats: {e}")
+                # Writes the min and max statistics to the second sheet
+                min_max_1x1_stats.to_excel(writer, sheet_name='min_max_for_layers_1x1', index=False)
 
-    if not no_upload:
-        main_logger.info(f"Uploading chunk stats spreadsheet to s3: {timestr()}")
-        s3_client.upload_file(local_spreadsheet, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
-        main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}")
+                # Writes the 1x1s summed to 10x10, if available
+                sum_1x1_to_10x10.to_excel(writer, sheet_name='1x1_counts_in_10x10', index=False)
+
+            main_logger.info(merged_1x1_stats.head())  # Show first few rows of the stats DataFrame for inspection
+
+            main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
+
+        except Exception as e:
+            main_logger.info(f"Can't save chunk stats to Excel: {e}")
+
+        if not no_upload:
+            main_logger.info(f"Uploading chunk stats spreadsheet to s3: {timestr()}")
+            s3_client.upload_file(local_spreadsheet, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
+            main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}")
 
 
 def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
