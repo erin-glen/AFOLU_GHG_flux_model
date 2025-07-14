@@ -1,3 +1,4 @@
+# Arguments for bounding box processing
 -bb W S E N -cs deg
 
 # Scaling tests based on bounding boxes

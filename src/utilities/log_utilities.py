@@ -1,12 +1,15 @@
 import boto3
 import logging
+import re
 import os
+import statistics
 import sys
 import time
 
 from dask.distributed import print
 
-from src.utilities import constants_and_names as cn, universal_utilities as uu
+from src.utilities import constants_and_names as cn
+from src.utilities import universal_utilities as uu
 
 
 # Log for main function
@@ -142,7 +145,41 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
                 with open(worker_log, "r") as infile2:
                     outfile.write(infile2.read())
 
-        print(f"Combined log saved as {combined_local_log}")  # Does not go in the log because it's closed
+        # Calculates average and standard deviation chunk processing times
+        with open(combined_local_log, "r") as logfile:
+            log_content = logfile.read()
+
+        # Processing times for numba code and entire chunks
+        numba_proc_times__sec = [int(m) for m in re.findall(r'in (\d+) seconds', log_content)]
+        total_chunk_proc_times__sec = [int(m) for m in re.findall(r'took (\d+) seconds', log_content)]
+
+        # Averages
+        avg_numba_proc_times__sec = sum(numba_proc_times__sec) / len(numba_proc_times__sec) if numba_proc_times__sec else 0
+        avg_total_chunk_proc_times__sec = sum(total_chunk_proc_times__sec) / len(total_chunk_proc_times__sec) if total_chunk_proc_times__sec else 0
+
+        # Standard deviations
+        stdev_numba_proc_times__sec = statistics.stdev(numba_proc_times__sec) if len(numba_proc_times__sec) > 1 else 0
+        stdev_total_chunk_proc_times__sec = statistics.stdev(total_chunk_proc_times__sec) if len(total_chunk_proc_times__sec) > 1 else 0
+
+        min_numba_proc_times__sec = min(numba_proc_times__sec) if numba_proc_times__sec else 0
+        max_numba_proc_times__sec = max(numba_proc_times__sec) if numba_proc_times__sec else 0
+
+        min_total_chunk_proc_times__sec = min(total_chunk_proc_times__sec) if total_chunk_proc_times__sec else 0
+        max_total_chunk_proc_times__sec = max(total_chunk_proc_times__sec) if total_chunk_proc_times__sec else 0
+
+        # Step 3: Append results to the log file
+        with open(combined_local_log, "a") as outfile:
+            outfile.write("\n")
+            outfile.write("=== Chunk-level processing times (approximate because worker log may be missing end) ===\n")
+            outfile.write(f"Processing stats for numba code:\n")
+            outfile.write(f"  Average and stdev: {avg_numba_proc_times__sec:.0f} seconds (stdev: {stdev_numba_proc_times__sec:.0f})\n")
+            outfile.write(f"  Min and max: {min_numba_proc_times__sec:.0f} - {max_numba_proc_times__sec:.0f}\n")
+            outfile.write(f"Processing stats for entire chunks:\n")
+            outfile.write(f"  Average and stdev: {avg_total_chunk_proc_times__sec:.0f} seconds (stdev: {stdev_total_chunk_proc_times__sec:.0f})\n")
+            outfile.write(f"  Min and max: {min_total_chunk_proc_times__sec:.0f} - {max_total_chunk_proc_times__sec:.0f}\n")
+            outfile.write("--- End of log---\n")
+
+            print(f"Combined log saved as {combined_local_log}")  # Does not go in the log because it's closed
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
     s3_client.upload_file(combined_local_log, "gfw2-data", Key=f"{cn.s3_log_path}{combined_log_name}")
