@@ -37,6 +37,11 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         scheduler_vm_type = "x2gd.medium"
         worker_vm_type = "x2gd.medium"
 
+    elif worker_memory == 128:
+        idle_timeout = 15
+        scheduler_vm_type = "x2gd.2xlarge"
+        worker_vm_type = "x2gd.2xlarge"
+
     else:
         sys.exit('Memory argument not 16, 32, or 64 GB')
 

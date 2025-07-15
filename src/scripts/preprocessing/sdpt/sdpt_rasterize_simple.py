@@ -360,7 +360,11 @@ def process_all_tiles(chunk_size=2.0, run_mode="default"):
 
 
 def main(
-    tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="default", client="local"
+    tile_id=None,
+    chunk_size=2.0,
+    chunk_bounds=None,
+    run_mode="default",
+    client="local",
 ):
     """
     If chunk_bounds is provided => only process that bounding box.
@@ -369,18 +373,20 @@ def main(
     logging.info(
         f"SDPT chunk-based script => base S3 path {cn.datasets['sdpt']['s3_processed_base']}"
     )
-    if client == "coiled":
-        cluster, client = uutil.connect_to_cluster(
-            cluster_name="sdpt_rasterization",
-            n_workers=25,
-            region="us-east-1",
-            worker_memory="128GiB",
-        )
-        logging.info(f"Coiled cluster => {cluster.name}")
-    else:
+    run_local_flag = client == "local"
+    cluster, dask_client, run_local_flag = uutil.connect_to_cluster(
+        cluster_name="sdpt_rasterization",
+        n_workers=25,
+        region="us-east-1",
+        run_local=run_local_flag,
+        worker_memory="128GiB",
+    )
+    if run_local_flag:
         cluster = LocalCluster()
-        client = Client(cluster)
-        logging.info("Local Dask client started.")
+        dask_client = Client(cluster)
+        logging.info("Running on a local Dask cluster.")
+    else:
+        logging.info(f"Coiled cluster => {cluster.name}")
 
     tasks = []
 
@@ -403,9 +409,10 @@ def main(
             process_all_tiles(chunk_size, run_mode)
 
     finally:
-        client.close()
-        logging.info("Dask client closed.")
-        if client == "coiled":
+        if dask_client:
+            dask_client.close()
+            logging.info("Dask client closed.")
+        if cluster:
             cluster.close()
             logging.info("Coiled cluster closed.")
 
