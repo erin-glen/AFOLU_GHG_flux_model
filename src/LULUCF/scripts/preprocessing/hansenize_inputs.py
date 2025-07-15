@@ -58,13 +58,13 @@ def main(cluster_name, process, bounding_box, chunk_size, run_local, no_upload):
 
     # Add Robinson et al. secondary natural forest growth rates
     if 'secondary_natural_forest_growth_rates' in process:
-        # download_upload_dictionary[f"secondary_natural_forest_0_5"] = {
-        #     'raw_dir': cn.secondary_natural_forest_5_year_raw_dir,
-        #     'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
-        #     'vrt': f"/tmp/secondary_natural_forest_0_5.vrt",
-        #     'processed_dir': cn.secondary_natural_forest_0_5_path,
-        #     'processed_pattern': cn.secondary_natural_forest_0_5_pattern
-        # }
+        download_upload_dictionary[f"secondary_natural_forest_0_5"] = {
+            'raw_dir': cn.secondary_natural_forest_5_year_raw_dir,
+            'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
+            'vrt': f"/tmp/secondary_natural_forest_0_5.vrt",
+            'processed_dir': cn.secondary_natural_forest_0_5_path,
+            'processed_pattern': cn.secondary_natural_forest_0_5_pattern
+        }
         download_upload_dictionary["secondary_natural_forest_6_10"] = {
             'raw_dir': cn.secondary_natural_forest_5_year_raw_dir,
             'raw_pattern': cn.secondary_natural_forest_6_10_pattern,

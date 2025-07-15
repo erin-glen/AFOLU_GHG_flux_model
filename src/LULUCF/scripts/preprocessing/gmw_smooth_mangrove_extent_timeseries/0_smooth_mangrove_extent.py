@@ -1,165 +1,322 @@
+"""
+Run from src/LULUCF/
+
+Local:
+python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent.py -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload
+
+todo:
+- see if it can scale from 1 degree to 10 degrees after testing 
+
+"""
 import argparse
+import sys
 import numpy as np
 from numba import jit
 import dask
+from dask.distributed import print
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
-# ---- Utility imports ----
-import luigi_utils as lu
-import universal_utils as uu
-import numba_utils as nu
-import constants as cn
-import resize_cluster
+# Project imports
+from ...utilities import constants_and_names as cn
+from ...utilities import universal_utilities as uu
+from ...utilities import log_utilities as lu
+from ...utilities import numba_utilities as nu
+from ...utilities import resize_cluster
 
-
+#Function to smooth the mangrove data:
+    # fills in 0 data if there is mangrove extent (1) in the previous year and the following year
+    # then removes false positives (1) if there is no mangrove extent (0) in the previous year and the following year
 @jit(nopython=True)
 def smooth_mangrove_data(in_dict_uint8):
+    # Dictionary for output numpy arrays
     out_dict_uint8 = {}
 
-    m96 = in_dict_uint8["mangrove_extent_1996"]
-    m07 = in_dict_uint8["mangrove_extent_2007"]
-    m08 = in_dict_uint8["mangrove_extent_2008"]
-    m09 = in_dict_uint8["mangrove_extent_2009"]
-    m10 = in_dict_uint8["mangrove_extent_2010"]
-    m15 = in_dict_uint8["mangrove_extent_2015"]
-    m16 = in_dict_uint8["mangrove_extent_2016"]
-    m17 = in_dict_uint8["mangrove_extent_2017"]
-    m18 = in_dict_uint8["mangrove_extent_2018"]
-    m19 = in_dict_uint8["mangrove_extent_2019"]
-    m20 = in_dict_uint8["mangrove_extent_2020"]
+    #Input data blocks: hansenized mangrove extent
+    mangrove_extent_1996_block = in_dict_uint8["mangrove_extent_1996"]  #TODO fill in pattern from cn
+    mangrove_extent_2007_block = in_dict_uint8["mangrove_extent_2007"]
+    mangrove_extent_2008_block = in_dict_uint8["mangrove_extent_2008"]
+    mangrove_extent_2009_block = in_dict_uint8["mangrove_extent_2009"]
+    mangrove_extent_2010_block = in_dict_uint8["mangrove_extent_2010"]
+    mangrove_extent_2015_block = in_dict_uint8["mangrove_extent_2015"]
+    mangrove_extent_2016_block = in_dict_uint8["mangrove_extent_2016"]
+    mangrove_extent_2017_block = in_dict_uint8["mangrove_extent_2017"]
+    mangrove_extent_2018_block = in_dict_uint8["mangrove_extent_2018"]
+    mangrove_extent_2019_block = in_dict_uint8["mangrove_extent_2019"]
+    mangrove_extent_2020_block = in_dict_uint8["mangrove_extent_2020"]
 
-    m07_out = np.zeros_like(m07)
-    m08_out = np.zeros_like(m08)
-    m09_out = np.zeros_like(m09)
-    m10_out = np.zeros_like(m10)
-    m15_out = np.zeros_like(m15)
-    m16_out = np.zeros_like(m16)
-    m17_out = np.zeros_like(m17)
-    m18_out = np.zeros_like(m18)
-    m19_out = np.zeros_like(m19)
-    m20_out = np.zeros_like(m20)
+    # Output data blocks: smoothed mangrove extent (empty blocks)
+    # Initial and final year of consecutive years are not modified, only the years in between.
+    # So smoothed data for those years will be identical to raw data and copied directly from input blocls
+    mangrove_extent_2008_out_block = np.zeros(in_dict_uint8["mangrove_extent_2008"].shape).astype('uint8') #TODO fix pattern with cn
+    mangrove_extent_2009_out_block = np.zeros(in_dict_uint8["mangrove_extent_2009"].shape).astype('uint8')
+    mangrove_extent_2016_out_block = np.zeros(in_dict_uint8["mangrove_extent_2016"].shape).astype('uint8')
+    mangrove_extent_2017_out_block = np.zeros(in_dict_uint8["mangrove_extent_2017"].shape).astype('uint8')
+    mangrove_extent_2018_out_block = np.zeros(in_dict_uint8["mangrove_extent_2018"].shape).astype('uint8')
+    mangrove_extent_2019_out_block = np.zeros(in_dict_uint8["mangrove_extent_2019"].shape).astype('uint8')
 
-    for row in range(m07.shape[0]):
-        for col in range(m07.shape[1]):
-            m07_out[row, col] = 1 if m07[row, col] == 1 else 0
-            m08_out[row, col] = 1 if m08[row, col] == 1 or (m07[row, col] == 1 and m09[row, col] == 1) else 0
-            m09_out[row, col] = 1 if m09[row, col] == 1 or (m08_out[row, col] == 1 and m10[row, col] == 1) else 0
-            m10_out[row, col] = 1 if m10[row, col] == 1 else m09_out[row, col]
-            #TODO add removing the false positives
+    # STEP 1: Fill in missing mangrove extent years (i.e. "false negatives") using raw data
+    # Iterates through all pixels in the chunk
+    for row in range(mangrove_extent_2007_block.shape[0]):
+        for col in range(mangrove_extent_2007_block.shape[1]):
 
-            m15_out[row, col] = 1 if m15[row, col] == 1 else 0
-            m16_out[row, col] = 1 if m16[row, col] == 1 or (m15[row, col] == 1 and m17[row, col] == 1) else 0
-            m17_out[row, col] = 1 if m17[row, col] == 1 or (m16_out[row, col] == 1 and m18[row, col] == 1) else 0
-            m18_out[row, col] = 1 if m18[row, col] == 1 or (m17_out[row, col] == 1 and m19[row, col] == 1) else 0
-            m19_out[row, col] = 1 if m19[row, col] == 1 or (m18_out[row, col] == 1 and m20[row, col] == 1) else 0
-            m20_out[row, col] = 1 if m20[row, col] == 1 else 0
+            # Input values for specific cell
+            mangrove_extent_2007 = mangrove_extent_2007_block[row, col]
+            mangrove_extent_2008 = mangrove_extent_2008_block[row, col]
+            mangrove_extent_2009 = mangrove_extent_2009_block[row, col]
+            mangrove_extent_2010 = mangrove_extent_2010_block[row, col]
+            mangrove_extent_2015 = mangrove_extent_2015_block[row, col]
+            mangrove_extent_2016 = mangrove_extent_2016_block[row, col]
+            mangrove_extent_2017 = mangrove_extent_2017_block[row, col]
+            mangrove_extent_2018 = mangrove_extent_2018_block[row, col]
+            mangrove_extent_2019 = mangrove_extent_2019_block[row, col]
+            mangrove_extent_2020 = mangrove_extent_2020_block[row, col]
 
-    out_dict_uint8["mangrove_extent_1996_processed"] = m96.copy()
-    out_dict_uint8["mangrove_extent_2007_processed"] = m07_out
-    out_dict_uint8["mangrove_extent_2008_processed"] = m08_out
-    out_dict_uint8["mangrove_extent_2009_processed"] = m09_out
-    out_dict_uint8["mangrove_extent_2010_processed"] = m10_out
-    out_dict_uint8["mangrove_extent_2015_processed"] = m15_out
-    out_dict_uint8["mangrove_extent_2016_processed"] = m16_out
-    out_dict_uint8["mangrove_extent_2017_processed"] = m17_out
-    out_dict_uint8["mangrove_extent_2018_processed"] = m18_out
-    out_dict_uint8["mangrove_extent_2019_processed"] = m19_out
-    out_dict_uint8["mangrove_extent_2020_processed"] = m20_out
+            # Not modifying 2007 since it is the start of the consecutive time period (2007 - 2010)
+            # Adding in mangrove extent in 2008 if there is mangrove extent in 2007 and 2009
+            if mangrove_extent_2008 == 1:
+                mangrove_extent_2008_out_block[row, col] = 1
+            elif (mangrove_extent_2007 == 1 and mangrove_extent_2009 == 1):
+                mangrove_extent_2008_out_block[row, col] = 1
+            else:
+                mangrove_extent_2008_out_block[row, col] = 0
+            # TODO: raise error if neither 0 nor 1 throughout
+
+            # Adding in mangrove extent in 2009 if there is mangrove extent in 2008 and 2010
+            if mangrove_extent_2009 == 1:
+                mangrove_extent_2009_out_block[row, col] = 1
+            elif (mangrove_extent_2008 == 1 and mangrove_extent_2010 == 1):
+                mangrove_extent_2009_out_block[row, col] = 1
+            else:
+                mangrove_extent_2009_out_block[row, col] = 0
+
+            # Not modifying 2010 since it is the end of the consecutive time period (2007 - 2010)
+            # Not modifying 2015 since it is the start of the consecutive time period (2015 - 2020)
+            # Adding in mangrove extent in 2016 if there is mangrove extent in 2015 and 2017
+            if mangrove_extent_2016 == 1:
+                mangrove_extent_2016_out_block[row, col] = 1
+            elif (mangrove_extent_2015 == 1 and mangrove_extent_2017 == 1):
+                mangrove_extent_2016_out_block[row, col] = 1
+            else:
+                mangrove_extent_2016_out_block[row, col] = 0
+
+            # Adding in mangrove extent in 2017 if there is mangrove extent in 2016 and 2018
+            if mangrove_extent_2017 == 1:
+                mangrove_extent_2017_out_block[row, col] = 1
+            elif (mangrove_extent_2016 == 1 and mangrove_extent_2018 == 1):
+                mangrove_extent_2017_out_block[row, col] = 1
+            else:
+                mangrove_extent_2017_out_block[row, col] = 0
+
+            # Adding in mangrove extent in 2018 if there is mangrove extent in 2017 and 2019
+            if mangrove_extent_2018 == 1:
+                mangrove_extent_2018_out_block[row, col] = 1
+            elif (mangrove_extent_2017 == 1 and mangrove_extent_2019 == 1):
+                mangrove_extent_2018_out_block[row, col] = 1
+            else:
+                mangrove_extent_2018_out_block[row, col] = 0
+
+            # Adding in mangrove extent in 2019 if there is mangrove extent in 2018 and 2020
+            if mangrove_extent_2019 == 1:
+                mangrove_extent_2019_out_block[row, col] = 1
+            elif (mangrove_extent_2018 == 1 and mangrove_extent_2020 == 1):
+                mangrove_extent_2019_out_block[row, col] = 1
+            else:
+                mangrove_extent_2019_out_block[row, col] = 0
+            # Not modifying 2020 since it is the end of the consecutive time period (2015 - 2020)
+
+    # TODO: Check that this is writing over out_block correctly
+    # STEP 2: Remove "false positive" in mangrove extent years using processed out_block data
+    # Iterates through all pixels in the chunk
+    for row in range(mangrove_extent_2007_block.shape[0]):
+        for col in range(mangrove_extent_2007_block.shape[1]):
+
+            # Input values for specific cell (use smoothed data)
+            mangrove_extent_2007 = mangrove_extent_2007_block[row, col]
+            mangrove_extent_2008 = mangrove_extent_2008_out_block[row, col]
+            mangrove_extent_2009 = mangrove_extent_2009_out_block[row, col]
+            mangrove_extent_2010 = mangrove_extent_2010[row, col]
+            mangrove_extent_2015 = mangrove_extent_2015[row, col]
+            mangrove_extent_2016 = mangrove_extent_2016_out_block[row, col]
+            mangrove_extent_2017 = mangrove_extent_2017_out_block[row, col]
+            mangrove_extent_2018 = mangrove_extent_2018_out_block[row, col]
+            mangrove_extent_2019 = mangrove_extent_2019_out_block[row, col]
+            mangrove_extent_2020 = mangrove_extent_2020[row, col]
+
+            # Removing mangrove extent in 2008 if there is no mangrove extent in 2007 and 2009
+            if (mangrove_extent_2008 == 1 and mangrove_extent_2007 == 0 and mangrove_extent_2009 == 0):
+                mangrove_extent_2008_out_block[row, col] = 0
+
+            # Removing mangrove extent in 2009 if there is no mangrove extent in 2008 and 2010
+            if (mangrove_extent_2009 == 1 and mangrove_extent_2008 == 0 and mangrove_extent_2010 == 0):
+                mangrove_extent_2009_out_block[row, col] = 0
+
+            # Removing mangrove extent in 2016 if there is no mangrove extent in 2015 and 2017
+            if (mangrove_extent_2016 == 1 and mangrove_extent_2015 == 0 and mangrove_extent_2017 == 0):
+                mangrove_extent_2016_out_block[row, col] = 0
+
+            # Removing mangrove extent in 2017 if there is no mangrove extent in 2016 and 2018
+            if (mangrove_extent_2017 == 1 and mangrove_extent_2016 == 0 and mangrove_extent_2018 == 0):
+                mangrove_extent_2017_out_block[row, col] = 0
+
+            # Removing mangrove extent in 2018 if there is no mangrove extent in 2017 and 2019
+            if (mangrove_extent_2018_ == 1 and mangrove_extent_2017 == 0 and mangrove_extent_2019 == 0):
+                mangrove_extent_2018_out_block[row, col] = 0
+
+            # Removing mangrove extent in 2019 if there is no mangrove extent in 2018 and 2020
+            if (mangrove_extent_2019 == 1 and mangrove_extent_2018 == 0 and mangrove_extent_2020 == 0):
+                mangrove_extent_2019_out_block[row, col] = 0
+
+    # Adds the output arrays to the output data dictionary  #TODO use cn pattern
+    out_dict_uint8["mangrove_extent_1996_smoothed"] = mangrove_extent_1996_block.copy()     #same as raw data
+    out_dict_uint8["mangrove_extent_2007_smoothed"] = mangrove_extent_2007_block.copy()     #same as raw data
+    out_dict_uint8["mangrove_extent_2008_smoothed"] = mangrove_extent_2008_out_block.copy()
+    out_dict_uint8["mangrove_extent_2009_smoothed"] = mangrove_extent_2009_out_block.copy()
+    out_dict_uint8["mangrove_extent_2010_smoothed"] = mangrove_extent_2010_block.copy()     #same as raw data
+    out_dict_uint8["mangrove_extent_2015_smoothed"] = mangrove_extent_2015_block.copy()     #same as raw data
+    out_dict_uint8["mangrove_extent_2016_smoothed"] = mangrove_extent_2016_out_block.copy()
+    out_dict_uint8["mangrove_extent_2017_smoothed"] = mangrove_extent_2017_out_block.copy()
+    out_dict_uint8["mangrove_extent_2018_smoothed"] = mangrove_extent_2018_out_block.copy()
+    out_dict_uint8["mangrove_extent_2019_smoothed"] = mangrove_extent_2019_out_block.copy()
+    out_dict_uint8["mangrove_extent_2020_smoothed"] = mangrove_extent_2020_block.copy()     #same as raw data
 
     return out_dict_uint8
 
+# All steps for creating smoothed mangrove data: download chunks, smooth data, upload to s3
+def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data_types, is_final, no_upload, output_folders, stage):
 
-def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         chunk_shapefile_uri=None, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
+    # Stores the min, mean, and max chunks for inputs and outputs for the chunk
+    chunk_stats = []
 
-    stage = 'starting_mangroves_1x1_deg'
-    model_type = 'standard'
-    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
-    chunk_shapefile_uri = chunk_shapefile_uri or cn.fishnet_1x1deg_uri
-    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
-    start_time = uu.timestr()
-    main_logger.info(f"Stage {stage} started at: {start_time}")
+    logger_worker = lu.setup_logging_worker()
 
-    fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
-    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+    uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
 
-    sample_tile_id = "00N_000E"
-    download_dict = {
-        cn.mangrove_extent_1996_pattern: f"{cn.mangrove_extent_1996}{sample_tile_id}_{cn.mangrove_extent_1996_pattern}.tif",
-        cn.mangrove_extent_2007_pattern: f"{cn.mangrove_extent_2007}{sample_tile_id}_{cn.mangrove_extent_2007_pattern}.tif",
-        cn.mangrove_extent_2008_pattern: f"{cn.mangrove_extent_2008}{sample_tile_id}_{cn.mangrove_extent_2008_pattern}.tif",
-        cn.mangrove_extent_2009_pattern: f"{cn.mangrove_extent_2009}{sample_tile_id}_{cn.mangrove_extent_2009_pattern}.tif",
-        cn.mangrove_extent_2010_pattern: f"{cn.mangrove_extent_2010}{sample_tile_id}_{cn.mangrove_extent_2010_pattern}.tif",
-        cn.mangrove_extent_2015_pattern: f"{cn.mangrove_extent_2015}{sample_tile_id}_{cn.mangrove_extent_2015_pattern}.tif",
-        cn.mangrove_extent_2016_pattern: f"{cn.mangrove_extent_2016}{sample_tile_id}_{cn.mangrove_extent_2016_pattern}.tif",
-        cn.mangrove_extent_2017_pattern: f"{cn.mangrove_extent_2017}{sample_tile_id}_{cn.mangrove_extent_2017_pattern}.tif",
-        cn.mangrove_extent_2018_pattern: f"{cn.mangrove_extent_2018}{sample_tile_id}_{cn.mangrove_extent_2018_pattern}.tif",
-        cn.mangrove_extent_2019_pattern: f"{cn.mangrove_extent_2019}{sample_tile_id}_{cn.mangrove_extent_2019_pattern}.tif",
-        cn.mangrove_extent_2020_pattern: f"{cn.mangrove_extent_2020}{sample_tile_id}_{cn.mangrove_extent_2020_pattern}.tif",
-    }
+    bounds_str = uu.boundstr(bounds)  # String form of chunk bounds
+    tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
+    chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
 
-    output_dir_list = [
-        cn.mangrove_1996_processed_dir, cn.mangrove_2007_processed_dir, cn.mangrove_2008_processed_dir,
-        cn.mangrove_2009_processed_dir, cn.mangrove_2010_processed_dir, cn.mangrove_2015_processed_dir,
-        cn.mangrove_2016_processed_dir, cn.mangrove_2017_processed_dir, cn.mangrove_2018_processed_dir,
-        cn.mangrove_2019_processed_dir, cn.mangrove_2020_processed_dir
-    ]
-    output_dir_list = [p.replace("CHUNK_SIZE", str(chunk_size_pixels)).replace("PER_HA_OR_PIXEL", cn.mangrove_pixel_meaning) for p in output_dir_list]
 
-    first_tiles = uu.first_file_name_in_s3_folder(download_dict)
-    download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
-    uu.create_s3_task_files(stage, chunk_list)
+    ### Part 1: Downloads chunk.
 
-    mangrove_results = [dask.delayed(uu.preprocess_and_upload_mangrove_extents)(
-        chunk, download_dict_with_data_types, len(chunk_list) > 20, no_upload, output_dir_list, stage)
-        for chunk in chunk_list]
+    # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
+    updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
 
-    mangrove_1x1_deg_results = dask.compute(*mangrove_results)
-    success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, len(chunk_list) > 20, main_logger, mangrove_1x1_deg_results)
+    # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
+    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
+    print(futures)
 
+    lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+
+    # Dictionary that stores the dataset name (key) and downloaded data and download status (values)
+    layers = {}
+
+    # Ensures futures stores Future objects
+    for future in concurrent.futures.as_completed(futures):
+        layer = futures[future]
+        data, status = future.result()
+        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+            lu.print_and_log(f"{status}", is_final, logger_worker)
+        layers[layer] = data
+
+    # Test prints
+    print(layers)
+    # print(layers[''].max())
+    # print(layers[''].dtype)
+
+
+    ### Part 2: Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type
+
+    lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+
+    # Creates the typed dictionaries for all input layers (including those that originally had no data)
+    typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
+    print("uint8_typed_list:", typed_dict_uint8)
+    #TODO: Create only uint8 or delete other types
+
+
+    ### Part 3: Creates mangrove extent rasters
+
+    lu.print_and_log(f"Creating preprocessed mangrove data in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker) # Prints during full runs
+    uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
+
+    # Create smoothed mangrove data
+    out_dict_uint8 = smooth_mangrove_data(in_dict_uint8)
+
+    # Fresh non-Numba-constrained dictionary that stores all output numpy arrays of all datatypes.
+    # The dictionaries by datatype that are returned from the numba function have limitations on them,
+    # e.g., they can't be combined with other datatypes. This prevents the addition of attributes needed for uploading to s3.
+    # So the trick here is to copy the numba-exported arrays into normal Python arrays to which we can do anything in Python.
+    out_dict_all_dtypes = {}
+
+    # Transfers the dictionaries of numpy arrays for each data type to a new, Pythonic array
+    out_dicts = [out_dict_uint8]
+
+    # Loop through each dictionary and update out_dict_all_dtypes
+    for out_dict in out_dicts:
+        for key, value in out_dict.items():
+            out_dict_all_dtypes[key] = value
+
+        # Clear memory of unneeded arrays
+        del out_dict
+
+    ##TODO calculate extent of mangrove for each year and min and max value for each chunk
+
+
+    ### Part 4: Saves numpy arrays as rasters and uploads to s3
+
+    uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
+
+    # Only saves arrays to geotifs and uploads them to s3 if enabled
     if not no_upload:
-        for output_folder in output_dir_list:
-            _, count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-            main_logger.info(f"Output rasters in {output_folder}: {count}")
 
-    if not no_stats and success_count_1x1 > 0:
-        uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+        out_no_data_val = 0  # NoData value for output raster (optional)
 
-    if not run_local:
-        workers = client.scheduler_info()["workers"]
-        if len(workers) > 10:
-            resize_cluster.resize_coiled_cluster(cluster_name, 1)
+        # Adds metadata used for uploading outputs to s3 to the dictionary
+        for key, value in out_dict_all_dtypes.items():
 
-        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
-        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
-        client.close()
+            data_type = value.dtype.name
+            # print("key:", key)
 
+            # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
+            out_pattern, year_range = uu.strip_and_extract_years(key)
+            # print("out_pattern:", out_pattern)
+            # print("year_range:", year_range)
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Smooth mangrove extent rasters")
-    parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
-    parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('-cshp', '--chunk_shapefile_uri', help='S3 location of chunk shapefile')
-    parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process')
-    parser.add_argument('-ln', '--log_note', help='Note for log')
+            # Gets the core filename pattern and pixel meaning
+            out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_pixel_meaning(out_pattern)
+            # print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
 
-    parser.add_argument('--run_local', action='store_true')
-    parser.add_argument('--no_stats', action='store_true')
-    parser.add_argument('--no_log', action='store_true')
-    parser.add_argument('--no_upload', action='store_true')
-    args = parser.parse_args()
+            # Retrieves the relevant output s3 path for this specific output  (list of one element)
+            matched_output_s3_folder = [item for item in output_folders if out_pattern_without_pixel_meaning in item][0]
+            # print("matched_output_s3_folder:", matched_output_s3_folder)
 
-    main(
-        cluster_name=args.cluster_name,
-        run_local=args.run_local,
-        no_stats=args.no_stats,
-        no_log=args.no_log,
-        no_upload=args.no_upload,
-        chunk_shapefile_uri=args.chunk_shapefile_uri,
-        bounding_box=args.bounding_box,
-        chunk_size=args.chunk_size,
-        first_chunks=args.first_chunks,
-        log_note=args.log_note
-    )
+            # Output paths without bucket (s3://gfw2-data)
+            s3_path_without_bucket = f"{matched_output_s3_folder[cn.full_bucket_prefix_length:]}"
+
+            # Dictionary with metadata for each array
+            out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
+
+        # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
+        upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
+                                                           out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
+
+        # Only prints if not a final run
+        lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", is_final, logger_worker)
+
+        # Executes uploads in parallel
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
+
+        # Only prints if not a final run
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+
+    # Clears memory of unneeded arrays
+    del out_dict_all_dtypes
+
+    return_message = f"Success creating smoothed mangrove extent raster for {bounds_str}: {uu.timestr()}"
+
+    # Removes task tracking file from S3 once task is successful
+    uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
+
+    return return_message, chunk_stats  # Return both the success message and the statistics
