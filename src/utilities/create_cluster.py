@@ -26,10 +26,12 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
     worker_memory_str = f"{worker_memory}GiB"
     scheduler_memory_str = f"{worker_memory}GiB"
 
-    # TODO Consider using x2iedn.xlarge for large runs. They have a 32:1 RAM:vCPU. Would require running multiple tasks per worker simultaneously.
-    # Uses the larger workers if requested or if more workers are requested.
-    # Assumes that if using more workers, you want bigger workers. 12 is a semi-arbitrary cutoff.
-    if worker_memory == 64:
+    if worker_memory == 128:
+        idle_timeout = 10
+        scheduler_vm_type = "x2iedn.xlarge"
+        worker_vm_type = "x2iedn.xlarge"
+
+    elif worker_memory == 64:
         idle_timeout = 15
         scheduler_vm_type = "x2gd.xlarge"
         worker_vm_type = "x2gd.xlarge"
@@ -67,7 +69,7 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
     #     worker_vm_type = "t3a.micro"
 
     else:
-        sys.exit('Memory argument not 2, 4, 8, 16, 32, or 64 GB')
+        sys.exit('Memory argument not 2, 4, 8, 16, 32, 64, or 128 GB')
 
     idle_timeout = f"{idle_timeout} minutes"
 

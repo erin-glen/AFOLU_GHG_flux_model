@@ -11,16 +11,16 @@ python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 20 -1 21 
 
 Coiled small tests (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 -yr 2000 2023 --input_date YYYYMMDD
 
 Coiled large shapefile test (1x1 deg chunk needs a 32GB worker):
-python -m src.utilities.create_cluster -n 50 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2023 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2023 --input_date YYYYMMDD -ln "Summative outputs for 1884-feature shapefile for model v0.4.0."
 Consistently uses 27 GB per worker, so close to the maximum with 2 simultaneous tasks/worker.
 
 Full run:
-python -m src.utilities.create_cluster -n 100 -cn LULUCF_postprocessing
+python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
 
 NOTE: I experimented with including the per-pixel output creation in this script, making a combined summative/per-pixel
@@ -306,30 +306,30 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         # Adds metadata used for uploading outputs to s3 to the dictionary
         for key, value in out_dict.items():
             data_type = value.dtype.name
-            print("key:", key)
+            # print("key:", key)
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
             out_pattern, interval_year_range = uu.strip_and_extract_years(key)
-            print("out_pattern:", out_pattern)
-            print("year_range:", year_range)
+            # print("out_pattern:", out_pattern)
+            # print("year_range:", year_range)
 
             # Gets the core filename pattern and pixel meaning
             out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_pixel_meaning(out_pattern)
-            print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
+            # print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
 
             # Retrieves the relevant output s3 path for this specific output (list of one element).
             # First, finds the output folders for all intervals with the relevant patterns
             matched_output_s3_folders = [item for item in summative_outputs_by_interval_dir_list if out_pattern_without_pixel_meaning in item]
-            print("matched_output_s3_folders:", matched_output_s3_folders)
+            # print("matched_output_s3_folders:", matched_output_s3_folders)
 
             # Second, finds the output folder with the right interval for that pattern
             matched_output_s3_folder_list = [item for item in matched_output_s3_folders if interval_year_range in item]
-            print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
+            # print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
 
             # Output paths without bucket (s3://gfw2-data).
             # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
             s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
-            print("s3_path_without_bucket:", s3_path_without_bucket)
+            # print("s3_path_without_bucket:", s3_path_without_bucket)
 
             # Dictionary with metadata for each array
             out_dict[key] = [value, data_type, out_pattern, interval_year_range, s3_path_without_bucket]
@@ -480,7 +480,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-    if not no_upload:
+    if not no_upload and is_final:
         for output_folder in summative_outputs_by_interval_dir_list:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output rasters in {output_folder}: {file_count}")
