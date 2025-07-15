@@ -465,3 +465,19 @@ if __name__ == "__main__":
             run_mode=args.run_mode,
             client=args.client,
         )
+
+"""
+python -m src.scripts.preprocessing.sdpt.sdpt_rasterize_attributes_simple \
+  --tile_id 00N_110E \
+  --chunk_bounds "112,-4,114,-2" \
+  --run_mode test \
+  --client local
+
+wsl python -m src.scripts.preprocessing.sdpt.sdpt_rasterize_attributes_simple \
+  --tile_id 00N_110E \
+  --chunk_size 2 \
+  --client coiled
+
+wsl python -m src.scripts.preprocessing.sdpt.sdpt_rasterize_attributes_simple \
+  --client local
+"""
