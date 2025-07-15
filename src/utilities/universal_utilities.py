@@ -1434,10 +1434,10 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     sum_1x1_to_10x10 = sum_1x1_to_10x10[['tile_id', 'layer_name', 'tile_name', 'total_count']]
 
 
-    ### Part 3: Saves dataframes to Excel spreadsheet if other_1x1_outputs is <900,000 rows; otherwise, saves to parquet format
+    ### Part 3: Saves dataframes to Excel spreadsheet if three of the main output tabs are <900,000 rows; otherwise, saves to parquet format
     # other_1x1_outputs is the output table that has the most rows, so it's the best way to judge what's output is too large for Excel.
     # Excel's row limit is more like 1.5 million, but that'd be a really unwieldy spreadsheet.
-    if len(other_1x1_outputs) > 900000:
+    if (len(other_1x1_outputs) > 900000) or (len(net_flux_1x1_outputs) > 900000) or (len(gross_flux_1x1_outputs) > 900000):
         main_logger.info(f"Row count {len(other_1x1_outputs)} greater than 900,000. Writing all outputs to Parquet.")
 
         # Saves each output DataFrame as Parquet
@@ -1532,8 +1532,12 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
 
         if not no_upload:
             main_logger.info(f"Uploading chunk stats spreadsheet to s3: {timestr()}")
-            s3_client.upload_file(local_spreadsheet, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
-            main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}")
+            try:
+                s3_client.upload_file(local_spreadsheet, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
+                main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}")
+            except Exception as e:
+                main_logger.warning(f"Chunk stats upload to S3 failed: {e}. Continuing without halting.")
+
 
 
 def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
