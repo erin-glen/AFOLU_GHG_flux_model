@@ -17,9 +17,8 @@ python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_po
 Coiled large shapefile test (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2023 --input_date YYYYMMDD -ln "Summative outputs for 1884-feature shapefile for model v0.4.0."
-Consistently uses 27 GB per worker, so close to the maximum with 2 simultaneous tasks/worker.
 
-Full run:
+Full run (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
 
@@ -193,13 +192,11 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
 
     # print(out_dict)
 
-    # TODO The calculations seem to work but I haven't actually seen any rasters because
-    #I haven't been able to get these to upload. They aren't part of summative_inputs_by_interval_dir_list
-    #and I haven't figured out the best way to set that up.
-    # https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/681244d9-83dc-800a-b397-0706e79391c0
     # Sum key output variables across all intervals.
-    # All of these must be in cn.LULUCF_summative_output_dirs
+    # All of these must be in cn.LULUCF_summative_output_dirs.
+    # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/681244d9-83dc-800a-b397-0706e79391c0
     total_gross_emis_CO2_only = None
+    total_gross_emis_non_CO2_only = None
     total_gross_emis_all_gases = None
     total_gross_removals = None
     total_net_flux = None
@@ -211,6 +208,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
 
         # All of these must be in cn.LULUCF_summative_output_dirs
         gross_emis_CO2_only_key = f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
+        gross_emis_non_CO2_only_key = f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
         gross_emis_all_gases_key = f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
         gross_removals_key = f"{cn.gross_removals_all_C_pools_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
         net_flux_key = f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
@@ -223,6 +221,12 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
             total_gross_emis_CO2_only = out_dict[gross_emis_CO2_only_key].copy()
         else:
             total_gross_emis_CO2_only += out_dict[gross_emis_CO2_only_key]
+
+        # Accumulates gross emissions (non-CO2 only) across intervals
+        if total_gross_emis_non_CO2_only is None:
+            total_gross_emis_non_CO2_only = out_dict[gross_emis_non_CO2_only_key].copy()
+        else:
+            total_gross_emis_non_CO2_only += out_dict[gross_emis_non_CO2_only_key]
 
         # Accumulates gross emissions (all gases) across intervals
         if total_gross_emis_all_gases is None:
@@ -248,11 +252,13 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     # Store the full model summed outputs in out_dict with appropriate suffixes
     full_period_label = f"{start_year}_{end_year}"
     out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_emis_CO2_only
+    out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_emis_non_CO2_only
     out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_emis_all_gases
     out_dict[f"{cn.gross_removals_all_C_pools_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_removals
     out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux
 
     # print(out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
+    # print(out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
     # print(out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
     # print(out_dict[f"{cn.gross_removals_all_C_pools_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
     # print(out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])

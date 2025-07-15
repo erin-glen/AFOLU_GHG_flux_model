@@ -6,21 +6,22 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -bb 20 -1 21 0 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
 
-Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2015 2023 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2015 2023 --input_date YYYYMMDD
+Coiled small tests (1x1 deg chunk needs a 32GB worker):
+python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2000 2023 --input_date YYYYMMDD
 
-Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 50 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2015 2023 --input_date YYYYMMDD
-Consistently uses 22 GB per worker, so not enough room for another simultaneous task on 32 GB workers.
+Coiled large shapefile test (1x1 deg chunk needs a 32GB worker):
+python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2023 --input_date YYYYMMDD -ln "Per-pixel outputs for 1884-feature shapefile for model v0.4.0."
 
-Full run:
-python -m src.utilities.create_cluster -n 100 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2015 2023 --input_date YYYYMMDD
+Full run (1x1 deg chunk needs a 32GB worker):
+python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --input_date YYYYMMDD -ln "This is intended to be the definitive global run."
 """
 
 import argparse
@@ -344,7 +345,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-    if not no_upload:
+    if not no_upload and is_final:
         for output_folder in summative_outputs_by_interval_dir_list:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output rasters in {output_folder}: {file_count}")
