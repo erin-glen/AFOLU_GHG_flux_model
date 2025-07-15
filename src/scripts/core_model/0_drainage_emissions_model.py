@@ -227,6 +227,15 @@ def calculate_drainage_and_emissions(
                     elif extraction > 0:
                         emission_node = nu.accrete_node(emission_node, 4)
                         key = "boreal_extraction"
+                    elif land_cover == settlement_code:
+                        emission_node = nu.accrete_node(emission_node, 5)
+                        key = "boreal_settlement"
+                    elif land_cover == wetland_code:
+                        emission_node = nu.accrete_node(emission_node, 6)
+                        key = "boreal_wetland"
+                    else:
+                        emission_node = nu.accrete_node(emission_node, 7)
+                        key = "boreal_otherland"
 
                 # TEMPERATE -----------------------------------------------
                 elif ecozone == temperate_code:
@@ -248,6 +257,15 @@ def calculate_drainage_and_emissions(
                     elif extraction > 0:
                         emission_node = nu.accrete_node(emission_node, 4)
                         key = "temperate_extraction"
+                    elif land_cover == settlement_code:
+                        emission_node = nu.accrete_node(emission_node, 5)
+                        key = "temperate_settlement"
+                    elif land_cover == wetland_code:
+                        emission_node = nu.accrete_node(emission_node, 6)
+                        key = "temperate_wetland"
+                    else:
+                        emission_node = nu.accrete_node(emission_node, 7)
+                        key = "temperate_otherland"
 
                 # TROPICAL -------------------------------------------------
                 elif ecozone == tropical_code:
@@ -275,6 +293,15 @@ def calculate_drainage_and_emissions(
                     elif extraction > 0:
                         emission_node = nu.accrete_node(emission_node, 5)
                         key = "tropical_extraction"
+                    elif land_cover == settlement_code:
+                        emission_node = nu.accrete_node(emission_node, 8)
+                        key = "tropical_settlement"
+                    elif land_cover == wetland_code:
+                        emission_node = nu.accrete_node(emission_node, 9)
+                        key = "tropical_wetland"
+                    else:
+                        emission_node = nu.accrete_node(emission_node, 0)
+                        key = "tropical_otherland"
 
                 vals, missing = lookup_efs(key, drainage_table)
                 ef_co2 = vals[0]

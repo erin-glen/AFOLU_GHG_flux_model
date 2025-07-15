@@ -48,3 +48,21 @@ def _to_typed(table: dict) -> Dict:
 DEFAULT_TABLE = _to_typed(DEFAULT)
 LOW_TABLE = _to_typed(LOW)
 HIGH_TABLE = _to_typed(HIGH)
+
+ZERO = np.float32(0.0)
+ZERO_ARRAY = np.array([ZERO, ZERO, ZERO, ZERO, ZERO, ZERO], dtype=np.float32)
+
+DEFAULT_TABLE.update({
+    # Boreal
+    "boreal_settlement": ZERO_ARRAY,
+    "boreal_wetland": ZERO_ARRAY,
+    "boreal_otherland": ZERO_ARRAY,
+    # Temperate
+    "temperate_settlement": ZERO_ARRAY,
+    "temperate_wetland": ZERO_ARRAY,
+    "temperate_otherland": ZERO_ARRAY,
+    # Tropical
+    "tropical_settlement": ZERO_ARRAY,
+    "tropical_wetland": ZERO_ARRAY,
+    "tropical_otherland": ZERO_ARRAY,
+})
