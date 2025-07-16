@@ -120,3 +120,7 @@ if __name__ == "__main__":
         args.pixel_resolution,
         args.date,
     )
+
+"""
+python -m src.scripts.preprocessing.sdpt.aggregate_sdpt -d 20250716 -cn sdpt_rasterize
+"""
