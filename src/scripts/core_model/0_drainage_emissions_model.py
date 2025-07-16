@@ -1069,7 +1069,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --chunk_shapefile_uri s3://path/to/fishnet.shp \
   --first_chunks 10 \
-  --start_year 2015 \
+  --start_year 2016 \
   --end_year 2020 \
   --interval_type five_year
 
@@ -1077,7 +1077,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --tile_ids 00N_110E,00N_120E \
   --chunk_size 1 \
-  --start_year 2015 \
+  --start_year 2016 \
   --end_year 2020 \
   --interval_type five_year \
   --peat_dataset peatmap
