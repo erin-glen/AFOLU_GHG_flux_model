@@ -30,7 +30,7 @@ INVENTORY_PERIODS = [
     "2006_2010",
     "2011_2015",
     "2016_2020",
-    "2021_2023",
+    "2021_2024",
 ]
 
 BASE_URL = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_4_4"

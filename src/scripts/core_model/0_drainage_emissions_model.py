@@ -744,8 +744,8 @@ def compute_intervals(start_year, end_year, interval_type, all_five_year_periods
             end_year = start_year
 
     if interval_type == cn.intervals_five_year:
-        # Snap a 2019 start year to the final interval (2020–2023)
-        if start_year == 2019 and end_year >= 2023:
+        # Snap a 2019 start year to the final interval (2020–2024)
+        if start_year == 2019 and end_year >= 2024:
             start_year = 2020
         intervals = [
             (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
@@ -1051,7 +1051,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --tile_ids 00N_110E,10N_020E,20N_020W,60N_010W,60N_110W \
   --chunk_size 1 \
   --start_year 2001 \
-  --end_year 2023 \
+  --end_year 2024 \
   --interval_type five_year \
   --mark_missing_factors
   
@@ -1060,7 +1060,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --bounding_box 110 -10 120 0 \
   --chunk_size 1 \
   --start_year 2001 \
-  --end_year 2023 \
+  --end_year 2024 \
   --all_five_year_periods
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
@@ -1068,7 +1068,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --full_model \
   --chunk_size 1 \
   --start_year 2001 \
-  --end_year 2023 \
+  --end_year 2024 \
   --all_five_year_periods \
   --mark_missing_factors
 """
