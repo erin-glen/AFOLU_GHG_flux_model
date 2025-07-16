@@ -86,11 +86,14 @@ def calculate_drainage_and_emissions(
     drainage_table,
     burned_table,
     mark_missing,
+    count_burned_years,
 ):
     """
     1) Drainage classification & state
     2) Drainage‑based emissions (CO2, N2O, CH4, off‑site CO2, total CO2e)
-    3) Burned‑area emissions (CO2, CO, CH4, total CO2e) if burned layer present
+    3) Burned‑area emissions (CO2, CO, CH4, total CO2e) if burned layer present.
+       When ``count_burned_years`` is ``True``, burned emissions are multiplied
+       by the number of burned years for each pixel within the interval.
     Returns two numba typed dicts: uint32 layers, float32 layers
     """
 
@@ -408,13 +411,14 @@ def calculate_drainage_and_emissions(
                     gef_ch4 = bvals[2]
                     mass_burnt = bvals[3]
 
+                    multiplier = burned_val if count_burned_years else 1
                     (
                         burn_co2,
                         burn_co,
                         burn_ch4,
                         burn_total_co2e,
                     ) = nu.calculate_burned_area_emissions(
-                        np.float32(mass_burnt),
+                        np.float32(mass_burnt) * np.float32(multiplier),
                         combustion_factor,
                         np.float32(gef_co2),
                         np.float32(gef_co),
@@ -471,7 +475,24 @@ def calculate_drainage_and_emissions(
 # ----------------------------------------------------------------------
 # helper: combine burned layers across interval
 # ----------------------------------------------------------------------
-def combine_burned_area(layers: dict, iv_start: int, iv_end: int):
+def combine_burned_area(
+    layers: dict,
+    iv_start: int,
+    iv_end: int,
+    count_burned_years: bool = False,
+):
+    """Combine annual burned area layers over an interval.
+
+    Parameters
+    ----------
+    layers : dict
+        Dictionary of layer arrays.
+    iv_start, iv_end : int
+        Interval start and end years.
+    count_burned_years : bool, optional
+        If ``True``, return the number of burned years per pixel. Otherwise a
+        binary mask is returned.
+    """
     shape = None
     combined = None
     for yr in range(iv_start, iv_end + 1):
@@ -483,7 +504,8 @@ def combine_burned_area(layers: dict, iv_start: int, iv_end: int):
                 combined = np.zeros(shape, dtype=np.uint8)
             combined += (arr > 0).astype(np.uint8)
     if combined is not None:
-        combined[combined > 0] = 1
+        if not count_burned_years:
+            combined[combined > 0] = 1
         layers[f"burned_area_combined_{iv_start}_{iv_end}"] = combined
 
 
@@ -500,6 +522,7 @@ def calculate_and_upload_drainage(
     closing_year,
     peat_dataset="ogh",
     mark_missing=False,
+    count_burned_years=False,
 ):
     """Process a single chunk for a given interval.
 
@@ -521,6 +544,9 @@ def calculate_and_upload_drainage(
         Peat mask dataset name.
     mark_missing : bool, optional
         Append sentinel digits for missing emission factors if ``True``.
+    count_burned_years : bool, optional
+        If ``True``, count the number of burned years within the interval and
+        multiply burned emissions accordingly.
     """
 
     logger = lu.setup_logging_worker()
@@ -602,7 +628,7 @@ def calculate_and_upload_drainage(
             uu.calculate_stats(arr, k, bstr, tid, "input_layer", iv_start=iv_start, iv_end=iv_end)
         )
 
-    combine_burned_area(layers, iv_start, iv_end)
+    combine_burned_area(layers, iv_start, iv_end, count_burned_years)
 
     # Remap FAO ecozone values to simplified climate domain codes
     if "climate_domain" in layers:
@@ -627,6 +653,7 @@ def calculate_and_upload_drainage(
         defac.DEFAULT_TABLE,
         baf.DEFAULT_TABLE,
         mark_missing,
+        count_burned_years,
     )
     outputs = {**out_u32, **out_f32}
 
@@ -773,6 +800,7 @@ def run_drainage_model(
     tile_ids=None,
     peat_dataset="ogh",
     mark_missing=False,
+    count_burned_years=False,
 ):
 
     stage = "drainage_model"
@@ -866,6 +894,7 @@ def run_drainage_model(
             closing_year,
             peat_dataset,
             mark_missing,
+            count_burned_years,
         )
 
     results = bag.map(_wrap).compute()
@@ -920,6 +949,7 @@ def main(argv=None):
             all_five_year_periods=False,
             peat_dataset="ogh",
             mark_missing=False,
+            count_burned_years=False,
         )
         return
 
@@ -988,6 +1018,11 @@ def main(argv=None):
             "look-ups are missing; emissions remain zero."
         ),
     )
+    p.add_argument(
+        "--count_burned_years",
+        action="store_true",
+        help="Multiply burned emissions by the number of burned years in each interval",
+    )
     args = p.parse_args(argv)
 
     tile_ids = []
@@ -1014,6 +1049,7 @@ def main(argv=None):
         tile_ids=tile_ids,
         peat_dataset=args.peat_dataset,
         mark_missing=args.mark_missing_factors,
+        count_burned_years=args.count_burned_years,
     )
 
 
@@ -1070,5 +1106,6 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --start_year 2001 \
   --end_year 2024 \
   --all_five_year_periods \
-  --mark_missing_factors
+  --mark_missing_factors \
+  --count_burned_years
 """
