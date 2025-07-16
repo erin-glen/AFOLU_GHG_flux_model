@@ -55,7 +55,7 @@ if ipcc_codes != EXPECTED_IPCC:
 
 # Time slices
 FIVE_YEAR_YEARS = [2000, 2005, 2010, 2015, 2020]
-ANNUAL_YEARS    = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+ANNUAL_YEARS    = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
 
 # ---------------------------------------------------------------------------
 # ─── GLCLU → IPCC LOOK‑UP TABLE ------------------------------------------------
@@ -331,5 +331,7 @@ if __name__ == "__main__":
     )
 
 """
-python -m src.scripts.preprocessing.landcover.0_reclassify_ipcc_coiled --interval five_year --tile_id 00N_110E
+python -m src.scripts.preprocessing.landcover.1_reclassify_ipcc_coiled --interval five_year --tile_id 00N_110E
 """
+
+#TODO better system for v1 and v2 data inputs. Right now it's all referencing v2.

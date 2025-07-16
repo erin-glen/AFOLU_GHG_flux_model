@@ -64,7 +64,7 @@ datasets = {
             "landcover",
             "composite",
             "{interval}",
-            "v1",
+            "v2",
             "raw",
             "{year}",
             "{tile_id}.tif",

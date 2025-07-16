@@ -11,7 +11,7 @@ from src.scripts.utilities.constants_and_names import (
 )
 
 FIVE_YEAR_YEARS = [2000, 2005, 2010, 2015, 2020]
-ANNUAL_YEARS = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+ANNUAL_YEARS = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
 
 
 def get_input_datasets(
@@ -136,5 +136,5 @@ if __name__ == "__main__":
     )
 
 """
-python -m src.scripts.preprocessing.landcover.1_aggregate_landcover -cn aggregate -d 20250630
+python -m src.scripts.preprocessing.landcover.2_aggregate_landcover -cn aggregate -d 20250630
 """
