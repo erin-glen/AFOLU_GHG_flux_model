@@ -185,7 +185,10 @@ def process_tile(
 ) -> list:
     """Return a list of Dask‑delayed tasks for one tile."""
     lc_s3_path = posixpath.join(
-        cn.dirs["land_cover"].format(interval_type=interval),
+        cn.dirs["land_cover"].format(
+            interval_type=interval,
+            land_cover_version=cn.land_cover_version_map[interval]
+        ),
         str(year),
         f"{tile_id}.tif",
     )

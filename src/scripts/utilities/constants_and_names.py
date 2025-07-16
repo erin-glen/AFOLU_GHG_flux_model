@@ -114,7 +114,12 @@ patterns = {
 # ---------------------------------------------------
 
 dirs = {
-    'land_cover': posixpath.join(full_bucket_prefix, 'climate/AFOLU_flux_model/LULUCF/landcover/composite/{interval_type}/v1/raw'),
+    'land_cover': posixpath.join(
+        full_bucket_prefix,
+        'climate/AFOLU_flux_model/LULUCF/landcover/composite/{interval_type}',
+        '{land_cover_version}',
+        'raw'
+    ),
     'peat': posixpath.join(full_bucket_prefix, raw_dir, 'soils/GFW_Global_Peatlands'),
     'dadap': posixpath.join(full_bucket_prefix, processed_dir, 'dadap_density/30m/20240925'),
     'engert': posixpath.join(full_bucket_prefix, processed_dir, 'engert_density/30m/20240925'),
@@ -206,6 +211,12 @@ intervals_five_year = "five_year"
 intervals_hybrid = "hybrid"
 
 annual_land_cover_start_year = 2015
+
+# Version mapping for land cover composites
+land_cover_version_map = {
+    intervals_annual: "v2",
+    intervals_five_year: "v1",
+}
 
 # End years that correspond to available five year land cover composites
 five_year_land_cover_years = [2005, 2010, 2015, 2020, 2023]
