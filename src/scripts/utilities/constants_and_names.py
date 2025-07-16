@@ -218,6 +218,12 @@ land_cover_version_map = {
     intervals_five_year: "v1",
 }
 
+# Date sub-folders for IPCC land cover composites by interval type
+land_cover_ipcc_dates = {
+    intervals_annual: "20250715",
+    intervals_five_year: "20250715",
+}
+
 # End years that correspond to available five year land cover composites
 five_year_land_cover_years = [2005, 2010, 2015, 2020, 2024]
 
@@ -310,7 +316,7 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
         full_bucket_prefix,
         processed_dir,
         'land_cover_ipcc',
-        '20250715',
+        land_cover_ipcc_dates[interval_type],
         interval_type,
         str(lc_year),
         pixel_resolution,
