@@ -227,7 +227,7 @@ def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
         transform=transform,
         fill=RASTER_NODATA,
         dtype=RASTER_DTYPE,
-        all_touched=True,
+        all_touched=False,
     )
 
     meta = {
@@ -375,7 +375,7 @@ def main(
     )
     run_local_flag = client == "local"
     cluster, dask_client, run_local_flag = uutil.connect_to_cluster(
-        cluster_name="sdpt_rasterization",
+        cluster_name="sdpt_rasterize",
         n_workers=25,
         region="us-east-1",
         run_local=run_local_flag,
