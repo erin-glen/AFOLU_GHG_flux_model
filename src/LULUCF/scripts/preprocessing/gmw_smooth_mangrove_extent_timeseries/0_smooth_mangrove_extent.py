@@ -33,27 +33,27 @@ def smooth_mangrove_data(in_dict_uint8):
     out_dict_uint8 = {}
 
     #Input data blocks: hansenized mangrove extent
-    mangrove_extent_1996_block = in_dict_uint8["mangrove_extent_1996"]  #TODO fill in pattern from cn
-    mangrove_extent_2007_block = in_dict_uint8["mangrove_extent_2007"]
-    mangrove_extent_2008_block = in_dict_uint8["mangrove_extent_2008"]
-    mangrove_extent_2009_block = in_dict_uint8["mangrove_extent_2009"]
-    mangrove_extent_2010_block = in_dict_uint8["mangrove_extent_2010"]
-    mangrove_extent_2015_block = in_dict_uint8["mangrove_extent_2015"]
-    mangrove_extent_2016_block = in_dict_uint8["mangrove_extent_2016"]
-    mangrove_extent_2017_block = in_dict_uint8["mangrove_extent_2017"]
-    mangrove_extent_2018_block = in_dict_uint8["mangrove_extent_2018"]
-    mangrove_extent_2019_block = in_dict_uint8["mangrove_extent_2019"]
-    mangrove_extent_2020_block = in_dict_uint8["mangrove_extent_2020"]
+    mangrove_extent_1996_block = in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_1996"]
+    mangrove_extent_2007_block = in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2007"]
+    mangrove_extent_2008_block = in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2008"]
+    mangrove_extent_2009_block = in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2009"]
+    mangrove_extent_2010_block = in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2010"]
+    mangrove_extent_2015_block = in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2015"]
+    mangrove_extent_2016_block = in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2016"]
+    mangrove_extent_2017_block = in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2017"]
+    mangrove_extent_2018_block = in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2018"]
+    mangrove_extent_2019_block = in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2019"]
+    mangrove_extent_2020_block = in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2020"]
 
     # Output data blocks: smoothed mangrove extent (empty blocks)
     # Initial and final year of consecutive years are not modified, only the years in between.
     # So smoothed data for those years will be identical to raw data and copied directly from input blocls
-    mangrove_extent_2008_out_block = np.zeros(in_dict_uint8["mangrove_extent_2008"].shape).astype('uint8') #TODO fix pattern with cn
-    mangrove_extent_2009_out_block = np.zeros(in_dict_uint8["mangrove_extent_2009"].shape).astype('uint8')
-    mangrove_extent_2016_out_block = np.zeros(in_dict_uint8["mangrove_extent_2016"].shape).astype('uint8')
-    mangrove_extent_2017_out_block = np.zeros(in_dict_uint8["mangrove_extent_2017"].shape).astype('uint8')
-    mangrove_extent_2018_out_block = np.zeros(in_dict_uint8["mangrove_extent_2018"].shape).astype('uint8')
-    mangrove_extent_2019_out_block = np.zeros(in_dict_uint8["mangrove_extent_2019"].shape).astype('uint8')
+    mangrove_extent_2008_out_block = np.zeros(in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2008"].shape).astype('uint8')
+    mangrove_extent_2009_out_block = np.zeros(in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2009"].shape).astype('uint8')
+    mangrove_extent_2016_out_block = np.zeros(in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2016"].shape).astype('uint8')
+    mangrove_extent_2017_out_block = np.zeros(in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2017"].shape).astype('uint8')
+    mangrove_extent_2018_out_block = np.zeros(in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2018"].shape).astype('uint8')
+    mangrove_extent_2019_out_block = np.zeros(in_dict_uint8[f"{cn.mangrove_extent_hansenized_pattern}_2019"].shape).astype('uint8')
 
     # STEP 1: Fill in missing mangrove extent years (i.e. "false negatives") using raw data
     # Iterates through all pixels in the chunk
@@ -167,18 +167,18 @@ def smooth_mangrove_data(in_dict_uint8):
             if (mangrove_extent_2019 == 1 and mangrove_extent_2018 == 0 and mangrove_extent_2020 == 0):
                 mangrove_extent_2019_out_block[row, col] = 0
 
-    # Adds the output arrays to the output data dictionary  #TODO use cn pattern
-    out_dict_uint8["mangrove_extent_1996_smoothed"] = mangrove_extent_1996_block.copy()     #same as raw data
-    out_dict_uint8["mangrove_extent_2007_smoothed"] = mangrove_extent_2007_block.copy()     #same as raw data
-    out_dict_uint8["mangrove_extent_2008_smoothed"] = mangrove_extent_2008_out_block.copy()
-    out_dict_uint8["mangrove_extent_2009_smoothed"] = mangrove_extent_2009_out_block.copy()
-    out_dict_uint8["mangrove_extent_2010_smoothed"] = mangrove_extent_2010_block.copy()     #same as raw data
-    out_dict_uint8["mangrove_extent_2015_smoothed"] = mangrove_extent_2015_block.copy()     #same as raw data
-    out_dict_uint8["mangrove_extent_2016_smoothed"] = mangrove_extent_2016_out_block.copy()
-    out_dict_uint8["mangrove_extent_2017_smoothed"] = mangrove_extent_2017_out_block.copy()
-    out_dict_uint8["mangrove_extent_2018_smoothed"] = mangrove_extent_2018_out_block.copy()
-    out_dict_uint8["mangrove_extent_2019_smoothed"] = mangrove_extent_2019_out_block.copy()
-    out_dict_uint8["mangrove_extent_2020_smoothed"] = mangrove_extent_2020_block.copy()     #same as raw data
+    # Adds the output arrays to the output data dictionary
+    out_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_1996"] = mangrove_extent_1996_block.copy()     #same as raw data
+    out_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2007"] = mangrove_extent_2007_block.copy()     #same as raw data
+    out_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2008"] = mangrove_extent_2008_out_block.copy()
+    out_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2009"] = mangrove_extent_2009_out_block.copy()
+    out_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2010"] = mangrove_extent_2010_block.copy()     #same as raw data
+    out_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2015"] = mangrove_extent_2015_block.copy()     #same as raw data
+    out_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2016"] = mangrove_extent_2016_out_block.copy()
+    out_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2017"] = mangrove_extent_2017_out_block.copy()
+    out_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2018"] = mangrove_extent_2018_out_block.copy()
+    out_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2019"] = mangrove_extent_2019_out_block.copy()
+    out_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2020"] = mangrove_extent_2020_block.copy()     #same as raw data
 
     return out_dict_uint8
 
