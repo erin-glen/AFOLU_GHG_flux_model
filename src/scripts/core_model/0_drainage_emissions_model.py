@@ -1061,7 +1061,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --bounding_box 110 -10 120 0 \
   --chunk_size 1 \
-  --start_year 2015 \
+  --start_year 2016 \
   --end_year 2020 \
   --interval_type five_year
 
