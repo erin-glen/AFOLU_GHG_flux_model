@@ -20,6 +20,7 @@ import concurrent.futures
 from botocore.config import Config
 from dask.distributed import print
 from dask.distributed import Client, LocalCluster
+from dask import delayed
 from datetime import datetime
 from io import BytesIO
 from numba import jit

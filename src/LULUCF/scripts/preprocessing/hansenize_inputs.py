@@ -146,8 +146,8 @@ def main(cluster_name, process, bounding_box, chunk_size, run_local, no_upload):
                 'raw_dir': f"{cn.mangrove_extent_raw_dir}{year}/",
                 'raw_pattern': cn.mangrove_extent_raw_pattern,
                 'vrt': f"/tmp/mangrove_extent_{year}_{cn.GMW_version}.vrt",
-                'processed_dir': f"{cn.mangrove_extent_processed_dir}{year}/",
-                'processed_pattern': f"{cn.mangrove_extent_processed_pattern}_{year}"
+                'processed_dir': f"{cn.mangrove_extent_hansenized_dir}{year}/",
+                'processed_pattern': f"{cn.mangrove_extent_hansenized_pattern}_{year}"
             }
 
     if 'cropland_fertilizer' in process:
