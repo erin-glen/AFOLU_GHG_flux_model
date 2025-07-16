@@ -221,7 +221,7 @@ land_cover_version_map = {
 # Date sub-folders for IPCC land cover composites by interval type
 land_cover_ipcc_dates = {
     intervals_annual: "20250715",
-    intervals_five_year: "20250715",
+    intervals_five_year: "20250710",
 }
 
 # End years that correspond to available five year land cover composites
