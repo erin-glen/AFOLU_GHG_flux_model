@@ -2,12 +2,13 @@
 """
 pp_roads_canals_chunks_fishnet.py
 
-Restored workflow using Dask GeoDataFrames to:
-  1) Read 1km union peat mask from S3 (EPSG:3395).
-  2) Create fishnet cells from the mask (where data == 1).
-  3) Read reprojected roads/canals from S3 as a Dask GeoDataFrame (EPSG:3395).
-  4) Intersect and assign partial line length to fishnet cells.
-  5) Convert fishnet to a raster, write locally, and upload to S3.
+Process global road and canal datasets using Dask. Two modes are supported:
+  1) **1 km density** – uses the 1 km union peat mask in EPSG:3395 and
+     computes line density via a fishnet grid.
+  2) **30 m binary** – uses the 30 m union peat mask and simply rasterises
+     whether a road/canal is present in each pixel.
+
+In both cases the output is warped to the Hansen grid after processing.
 
 Chunk-based approach:
   - We might chunk each 10×10 tile into sub-bounds (2° × 2°, etc.),
@@ -39,10 +40,6 @@ from src.scripts.preprocessing.hansenize.hansenize_coiled import (
     warp_to_hansen_coiled,
 )
 
-from src.scripts.preprocessing.hansenize.hansenize_coiled import (
-    warp_to_hansen_coiled,
-)
-
 from src.scripts.utilities import universal_utilities as uutil
 import src.scripts.preprocessing.preprocessing_constants as cn
 import src.scripts.preprocessing.utilities as uu
@@ -50,8 +47,9 @@ import src.scripts.preprocessing.utilities as uu
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # If you store the 1 km union mask in "peat.union_mask.1km_3395",
-# define a pattern:
+# define a pattern. 30 m union tiles use "_union_mask.tif".
 PEAT_1KM_PATTERN = "_union_mask_1km.tif"
+PEAT_30M_PATTERN = "_union_mask.tif"
 
 def build_chunk_bounds(tile_bounds, chunk_size=2):
     """
@@ -150,7 +148,7 @@ def read_reprojected_lines_dask(tile_id, feature_type):
         return dgpd.from_geopandas(gpd.GeoDataFrame(columns=["geometry"], crs="EPSG:3395"), npartitions=1)
 
 @dask.delayed
-def process_chunk(bounds, tile_id, feature_type):
+def process_chunk_density(bounds, tile_id, feature_type):
     """
     1) Open the 1 km union mask in EPSG:3395
     2) Clip to chunk
@@ -357,7 +355,143 @@ def process_chunk(bounds, tile_id, feature_type):
 
     return f"[{tile_id}|{chunk_str}] done"
 
-def process_tile(tile_id, feature_type, chunk_size=2, chunk_bounds=None):
+
+@dask.delayed
+def process_chunk_binary(bounds, tile_id, feature_type):
+    """Rasterize lines to a binary presence grid using the 30 m union mask."""
+    chunk_str = "_".join(map(str, bounds))
+    group, sub = feature_type.split('_', 1)
+    local_dir = cn.datasets[group][sub]['local_processed']
+    chunk_px = uutil.calc_chunk_length_pixels(bounds)
+    s3_dir = posixpath.join(
+        cn.datasets[group][sub]['s3_processed_base'],
+        f"{chunk_px}_pixels",
+        cn.today_date,
+    )
+
+    chunk_name = f"{tile_id}__{chunk_str}__{feature_type}_presence.tif"
+    local_out = os.path.join(local_dir, chunk_name)
+    s3_out_key = f"{s3_dir}/{chunk_name}"
+
+    logging.info(f"[{tile_id}|{chunk_str}] Starting binary chunk processing")
+
+    prefix_30m = cn.datasets["peat"]["union_mask"]["30m"]
+    raster_path = f"/vsis3/{cn.s3_bucket_name}/{prefix_30m}{tile_id}{PEAT_30M_PATTERN}"
+
+    try:
+        da = rxr.open_rasterio(raster_path, masked=True)
+    except Exception as e:
+        logging.error(f"[{tile_id}|{chunk_str}] Could not open union mask: {e}")
+        return
+
+    bounds_wgs84 = bounds
+    minx, miny, maxx, maxy = bounds
+    try:
+        minx, miny, maxx, maxy = transform_bounds(
+            "EPSG:4326", da.rio.crs, minx, miny, maxx, maxy, densify_pts=21
+        )
+        chunked_da = da.rio.clip_box(minx=minx, miny=miny, maxx=maxx, maxy=maxy)
+        if chunked_da.isnull().all():
+            logging.info(f"[{tile_id}|{chunk_str}] No data in this chunk's raster. Skipping.")
+            return
+    except Exception as e:
+        logging.error(f"[{tile_id}|{chunk_str}] clip_box error: {e}")
+        return
+
+    mask_data = (chunked_da[0].data == 1)
+    if np.all(mask_data == 0):
+        logging.info(f"[{tile_id}|{chunk_str}] chunk mask is all zeros => skip")
+        return
+
+    lines_dgdf = read_reprojected_lines_dask(tile_id, feature_type)
+    group, sub = feature_type.split('_', 1)
+    s3_proj_prefix = cn.datasets[group][sub]["s3_projected"]
+    base_name = "roads" if "roads" in feature_type else "canals" if "canals" in feature_type else "roads"
+    shp_name = f"{base_name}_{tile_id}.shp"
+    s3_path = os.path.join(s3_proj_prefix, shp_name).replace("\\", "/")
+    vsis3_path = f"/vsis3/{cn.s3_bucket_name}/{s3_path}"
+
+    if dask_gdf_is_empty(lines_dgdf, data_path=vsis3_path):
+        logging.info(f"[{tile_id}|{chunk_str}] lines are empty => skip")
+        return
+
+    chunk_poly = box(minx, miny, maxx, maxy)
+    lines_clip = dgpd.clip(lines_dgdf.to_crs(da.rio.crs), chunk_poly)
+    if dask_gdf_is_empty(lines_clip, data_path=vsis3_path):
+        logging.info(f"[{tile_id}|{chunk_str}] lines do not intersect chunk => skip")
+        return
+
+    try:
+        lines_gdf = lines_clip.compute()
+    except FeatureError as exc:
+        logging.error(f"FeatureError while reading {vsis3_path}: {exc}")
+        return
+
+    transform = chunked_da.rio.transform()
+    out_shape = chunked_da.shape[1:]
+    shapes = ((geom, 1) for geom in lines_gdf.geometry)
+    burned = rasterize(
+        shapes,
+        out_shape=out_shape,
+        transform=transform,
+        fill=0,
+        dtype=np.uint8,
+        all_touched=True,
+    )
+
+    binary = ((burned > 0) & mask_data).astype(np.uint8)
+
+    if np.all(binary == 0):
+        logging.info(f"[{tile_id}|{chunk_str}] binary raster all zeros => skip")
+        return
+
+    xr_ras = xr.DataArray(binary, dims=("y", "x"), coords={"y": chunked_da.y, "x": chunked_da.x})
+    xr_ras = xr_ras.rio.write_crs(da.rio.crs, inplace=True)
+    xr_ras = xr_ras.rio.write_transform(transform, inplace=True)
+    local_dir_path = os.path.dirname(local_out)
+    os.makedirs(local_dir_path, exist_ok=True)
+
+    xr_ras.rio.to_raster(local_out, compress="lzw")
+
+    hansen_filename = os.path.basename(local_out)
+    warp_to_hansen_coiled(
+        source_vrt_path=local_out,
+        filename=hansen_filename,
+        output_raster_s3_path_and_name=None,
+        xmin=bounds_wgs84[0],
+        ymin=bounds_wgs84[1],
+        xmax=bounds_wgs84[2],
+        ymax=bounds_wgs84[3],
+        dt=uutil.string_to_gdal_dtype_mapping["Byte"],
+        no_data=0,
+        tiled=True,
+        x_pixel_window=400,
+        y_pixel_window=400,
+    )
+    hansen_local = os.path.join(tempfile.gettempdir(), hansen_filename)
+
+    s3_client = boto3.client("s3")
+    s3_client.upload_file(hansen_local, cn.s3_bucket_name, s3_out_key)
+    logging.info(
+        f"[{tile_id}|{chunk_str}] uploaded => s3://{cn.s3_bucket_name}/{s3_out_key}"
+    )
+    os.remove(local_out)
+    if os.path.exists(hansen_local):
+        os.remove(hansen_local)
+
+    del chunked_da, lines_dgdf
+    gc.collect()
+
+    return f"[{tile_id}|{chunk_str}] done"
+
+def process_chunk(bounds, tile_id, feature_type, resolution="1km"):
+    """Select density or binary processing based on resolution."""
+    if resolution == "30m":
+        return process_chunk_binary(bounds, tile_id, feature_type)
+    else:
+        return process_chunk_density(bounds, tile_id, feature_type)
+
+def process_tile(tile_id, feature_type, chunk_size=2, chunk_bounds=None, resolution="1km"):
     """
     Build tasks to process each sub-chunk of a tile in EPSG:3395.
 
@@ -374,34 +508,38 @@ def process_tile(tile_id, feature_type, chunk_size=2, chunk_bounds=None):
 
     tasks = []
     for b in chunks:
-        tasks.append(process_chunk(b, tile_id, feature_type))
+        tasks.append(process_chunk(b, tile_id, feature_type, resolution=resolution))
     return tasks
 
-def process_all_tiles(feature_type, chunk_size=2):
+def process_all_tiles(feature_type, chunk_size=2, resolution="1km"):
     """
     Iterate over the S3 prefix with 1km union mask in EPSG:3395, build tasks for each tile.
     """
-    prefix_1km_3395 = cn.datasets["peat"]["union_mask"]["1km_3395"]
-    # We'll list objects that end with PEAT_1KM_PATTERN
+    if resolution == "30m":
+        prefix = cn.datasets["peat"]["union_mask"]["30m"]
+        pattern = PEAT_30M_PATTERN
+    else:
+        prefix = cn.datasets["peat"]["union_mask"]["1km_3395"]
+        pattern = PEAT_1KM_PATTERN
+    # We'll list objects that end with the pattern
     import boto3
     s3 = boto3.client("s3")
 
     tasks = []
     paginator = s3.get_paginator("list_objects_v2")
-    pages = paginator.paginate(Bucket=cn.s3_bucket_name, Prefix=prefix_1km_3395)
+    pages = paginator.paginate(Bucket=cn.s3_bucket_name, Prefix=prefix)
     for page in pages:
         if "Contents" in page:
             for obj in page["Contents"]:
                 key = obj["Key"]
-                if key.endswith(PEAT_1KM_PATTERN):
-                    # e.g. "00N_110E_union_mask_1km.tif"
+                if key.endswith(pattern):
                     base_name = os.path.basename(key)
-                    tile_id = base_name.replace(PEAT_1KM_PATTERN, "")
-                    tasks.extend(process_tile(tile_id, feature_type, chunk_size=chunk_size))
+                    tile_id = base_name.replace(pattern, "")
+                    tasks.extend(process_tile(tile_id, feature_type, chunk_size=chunk_size, resolution=resolution))
 
     return tasks
 
-def main(tile_id=None, feature_type="osm_roads", chunk_bounds=None, chunk_size=2, client="local"):
+def main(tile_id=None, feature_type="osm_roads", chunk_bounds=None, chunk_size=2, client="local", resolution="1km"):
     if client == "coiled":
         cluster, dclient = uutil.connect_to_cluster(
             cluster_name="roads_canals",
@@ -417,10 +555,10 @@ def main(tile_id=None, feature_type="osm_roads", chunk_bounds=None, chunk_size=2
     try:
         if tile_id:
             tasks = process_tile(
-                tile_id, feature_type, chunk_size=chunk_size, chunk_bounds=chunk_bounds
+                tile_id, feature_type, chunk_size=chunk_size, chunk_bounds=chunk_bounds, resolution=resolution
             )
         else:
-            tasks = process_all_tiles(feature_type, chunk_size=chunk_size)
+            tasks = process_all_tiles(feature_type, chunk_size=chunk_size, resolution=resolution)
 
         if not tasks:
             logging.warning("No tasks generated; nothing to compute.")
@@ -445,6 +583,7 @@ if __name__ == "__main__":
                         help="Optional single chunk: 'minx,miny,maxx,maxy'")
     parser.add_argument("--chunk_size", type=float, default=2, help="Chunk size in degrees e.g. 2 => 2x2 sub-chunks")
     parser.add_argument("--client", default="local", choices=["local","coiled"])
+    parser.add_argument("--resolution", default="1km", choices=["1km","30m"], help="Use 1km density or 30m binary presence")
     args = parser.parse_args()
 
     cb = None
@@ -452,4 +591,4 @@ if __name__ == "__main__":
         cb = [float(x) for x in args.chunk_bounds.split(",")]
 
     main(tile_id=args.tile_id, feature_type=args.feature_type,
-         chunk_bounds=cb, chunk_size=args.chunk_size, client=args.client)
+         chunk_bounds=cb, chunk_size=args.chunk_size, client=args.client, resolution=args.resolution)
