@@ -2,7 +2,7 @@
 Run from src/LULUCF/
 
 Local:
-python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent.py -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload
+python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent.py -bb 116 -3 117 -2 -cs 1 --run_local --no_stats --no_upload
 
 todo:
 - see if it can scale from 1 degree to 10 degrees after testing 
@@ -25,7 +25,7 @@ from ...utilities import numba_utilities as nu
 from ...utilities import resize_cluster
 
 #Function to smooth the mangrove data:
-    # fills in 0 data if there is mangrove extent (1) in the previous year and the following year
+    # fills in pixels where there is no mangrove extent (0) one year, but there is mangrove extent (1) in the previous year and the following year
     # then removes false positives (1) if there is no mangrove extent (0) in the previous year and the following year
 @jit(nopython=True)
 def smooth_mangrove_data(in_dict_uint8):
@@ -198,6 +198,8 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
 
 
     ### Part 1: Downloads chunk.
+    ### No checks about whether the chunk has data because the way the chunk_list is constructed
+    #todo: add step to check whether any of the years has data, if not skip
 
     # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
@@ -224,18 +226,30 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
     # print(layers[''].max())
     # print(layers[''].dtype)
 
+    ### Part 2: Calculates min, mean, and max for each input chunk.
+    ### Useful for QC to see if there are any egregiously incorrect or unexpected values.
+    #todo: create or modify calculate_stats for mangrove data. add mangrove extent area stat?
 
-    ### Part 2: Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type
+    # Calculates stats for the input layers
+    print ('Part 2')
+    for key, array in layers.items():
+        #chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer'))
+        print(f'key: {key}')
+        print(f'array: {array}')
+    #print(chunk_stats)
+
+
+    ### Part 3: Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type
+    # TODO: Create only uint8 typed dictionary or delete other types
 
     lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
     # Creates the typed dictionaries for all input layers (including those that originally had no data)
     typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
     print("uint8_typed_list:", typed_dict_uint8)
-    #TODO: Create only uint8 or delete other types
 
 
-    ### Part 3: Creates mangrove extent rasters
+    ### Part 4: Creates mangrove extent rasters
 
     lu.print_and_log(f"Creating preprocessed mangrove data in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker) # Prints during full runs
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
@@ -248,6 +262,7 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
     # e.g., they can't be combined with other datatypes. This prevents the addition of attributes needed for uploading to s3.
     # So the trick here is to copy the numba-exported arrays into normal Python arrays to which we can do anything in Python.
     out_dict_all_dtypes = {}
+    print('Part 4')
 
     # Transfers the dictionaries of numpy arrays for each data type to a new, Pythonic array
     out_dicts = [out_dict_uint8]
@@ -256,14 +271,16 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
     for out_dict in out_dicts:
         for key, value in out_dict.items():
             out_dict_all_dtypes[key] = value
+            print(f'key: {key}')
+            print(f'value: {value}')
 
         # Clear memory of unneeded arrays
         del out_dict
 
-    ##TODO calculate extent of mangrove for each year and min and max value for each chunk
+    ##TODO calculate extent of mangrove for each year after smoothing
 
 
-    ### Part 4: Saves numpy arrays as rasters and uploads to s3
+    ### Part 5: Saves numpy arrays as rasters and uploads to s3
 
     uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
 
@@ -276,20 +293,19 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
         for key, value in out_dict_all_dtypes.items():
 
             data_type = value.dtype.name
-            # print("key:", key)
+            print("key:", key)
+            print("data_type:", data_type)
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
             out_pattern, year_range = uu.strip_and_extract_years(key)
-            # print("out_pattern:", out_pattern)
-            # print("year_range:", year_range)
+            print("out_pattern:", out_pattern)
+            print("year_range:", year_range)
 
-            # Gets the core filename pattern and pixel meaning
-            out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_pixel_meaning(out_pattern)
-            # print("out_pattern_without_pixel_meaning:", out_pattern_without_pixel_meaning)
+            out_pattern = cn.mangrove_extent_processed_pattern
 
             # Retrieves the relevant output s3 path for this specific output  (list of one element)
-            matched_output_s3_folder = [item for item in output_folders if out_pattern_without_pixel_meaning in item][0]
-            # print("matched_output_s3_folder:", matched_output_s3_folder)
+            matched_output_s3_folder = [item for item in output_folders if out_pattern in item][0]
+            print("matched_output_s3_folder:", matched_output_s3_folder)
 
             # Output paths without bucket (s3://gfw2-data)
             s3_path_without_bucket = f"{matched_output_s3_folder[cn.full_bucket_prefix_length:]}"
@@ -320,3 +336,174 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
     uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
 
     return return_message, chunk_stats  # Return both the success message and the statistics
+
+def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload= False,
+         chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
+
+    ### Step 1: Preparation
+
+    # Model stage being run
+    stage = f'starting_mangroves_1x1_deg'
+    model_type = 'standard'
+
+    # Connects to Coiled cluster if not running locally and the named cluster exists
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+
+    # Shapefile of chunk footprints to use if none is supplied on the command line
+    if not chunk_shapefile_uri:
+        chunk_shapefile_uri = cn.fishnet_1x1deg_uri
+
+    # Creates the log for the main function and populates it with basic run information
+    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
+
+    # Starting time for stage
+    start_time = uu.timestr()
+    main_logger.info(f"Stage {stage} started at: {start_time}")
+
+    # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
+    # chunk_ids for making chunk list if shapefile is supplied in command line.
+    # chunk_ids and iso code used for chunk stats.
+    fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
+
+    # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
+    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+
+    main_logger.info(f"Chunks to process: {len(chunk_list)}")
+
+    # Determines if the output file names for final versions of outputs should be used
+    is_final = False
+    # is_final = True  # For simulating a large run
+    if len(chunk_list) > 20:
+        is_final = True
+        main_logger.info("Running as final model.")
+
+    # This is just a placeholder tile_id that is used to obtain the datatype of each tile set.
+    # It is overwritten when chunks are assigned and analyzed.
+    sample_tile_id = "00N_000E"
+
+    # Dictionary of data to download
+    for year in cn.mangrove_extent_years:
+        download_dict = {
+            f"{cn.mangrove_extent_hansenized_pattern}_{year}": f"{cn.mangrove_extent_hansenized_dir}{year}/{sample_tile_id}_{cn.mangrove_extent_hansenized_pattern}_{year}.tif",
+        }
+    print(f"download_dict: {download_dict}")
+
+    # List of output directories for smoothed data
+    output_dir_list = []
+
+    for year in cn.mangrove_extent_years:
+        output_dir_list.append(f"{cn.mangrove_extent_processed_dir}{year}/")
+
+    # Creates list of output directories specific to the run
+    output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
+    output_dir_list = [path.replace("PER_HA_OR_PIXEL", "") for path in output_dir_list]
+    print(output_dir_list)
+
+    # Returns the first tile in each input so that the datatype can be determined.
+    main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
+    first_tiles = uu.first_file_name_in_s3_folder(download_dict)
+    print(first_tiles)
+
+    # Creates a download dictionary with the datatype of each input in the values.
+    # This is supplied to each chunk that is being analyzed.
+    # This also serves as a check of whether all inputs are being found (s3 paths correct)
+    main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
+    download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
+    print(download_dict_with_data_types)
+
+    # Makes a txt for each task in the list. These are deleted as tasks are completed.
+    main_logger.info("Creating task txts in s3...")
+    uu.create_s3_task_files(stage, chunk_list)
+
+    ### Step 2: Create 1x1 degree outputs
+
+    # Creates list of tasks to run (1 task = 1 chunk)
+    main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
+    main_logger.info("Workers' logs to be appended after main function log" + "\n")
+
+    mangrove_1x1_deg_delayed_results = [dask.delayed(preprocess_and_upload_smoothed_mangrove_data)
+                (chunk, download_dict_with_data_types, is_final, no_upload,output_dir_list, stage)
+                for chunk in chunk_list]
+
+    # Runs analysis and gathers results
+    mangrove_1x1_deg_results = dask.compute(*mangrove_1x1_deg_delayed_results)
+
+    success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, mangrove_1x1_deg_results)
+
+    # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
+    if not no_upload:
+        for output_folder in output_dir_list:
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+            print(geotiff_files)
+
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+
+
+    ### Step 3: Chunk stats for 1x1 degree outputs, aggregates logs
+    # todo: get chunk stats to work
+    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    # cluster, not all the workers.
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
+
+        # Reduces number of workers in the cluster down to 1 if there is more than 10
+        if n_workers > 10:
+            main_logger.info("Resizing cluster to 1 worker")
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
+
+    # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
+    # and min and max values across all chunks for all inputs and outputs
+    # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
+    if (not no_stats) and (success_count_1x1 > 0):
+        uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+
+    # Sets it so that no worker logs are created if doing a local run
+    if not run_local:
+
+        # Creates combined log from all workers if not deactivated
+        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats, and worker log compilation", main_logger)
+
+        # Adds the workers' logs to the main log and uploads to s3
+        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
+
+    # Closes the Dask client if not running locally
+    if not run_local:
+        client.close()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="smooth mangrove data")
+    parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
+    parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
+    parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
+    parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
+    parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
+    parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
+
+    parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
+    parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
+    parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
+    parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
+
+    args = parser.parse_args()
+
+    cluster_name = args.cluster_name
+    bounding_box = args.bounding_box
+    chunk_size = args.chunk_size
+    chunk_shapefile_uri = args.chunk_shapefile_uri
+    first_chunks = args.first_chunks
+    log_note = args.log_note
+
+    run_local = args.run_local
+    no_stats = args.no_stats
+    no_log = args.no_log
+    no_upload = args.no_upload
+
+    main(cluster_name, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
+         bounding_box=bounding_box, chunk_size=chunk_size,
+         first_chunks=first_chunks, log_note=log_note)
+

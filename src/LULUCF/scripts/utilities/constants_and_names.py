@@ -219,7 +219,7 @@ combined_log = "AFOLU"
 local_chunk_stats_path = "chunk_stats/"
 s3_chunk_stats_path = "climate/AFOLU_flux_model/LULUCF/chunk_stats/"
 
-# 1x1 deg fishnet between 80N and 60N, 180W and 180E that intersects GADM3.6 and has GADM iso joined to it
+# 1x1 deg fishnet between 80N and 60N, 180W and 180E that intersects GADM4.1 and has GADM iso joined to it
 fishnet_1x1deg_s3_dir = f"{AFOLU_path}fishnet_1x1deg/20250429/"
 
 fishnet_1x1deg_all_land_name = "fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp"
@@ -487,8 +487,10 @@ GMW_version = "v3"
 mangrove_extent_years = [1996, 2007, 2008, 2009, 2010, 2015, 2016, 2017, 2018, 2019, 2020]
 mangrove_extent_raw_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/raw/raster/"
 mangrove_extent_raw_pattern = r"GMW_[NS][0-9]{2}[EW][0-9]{3}_[0-9]{4}_v3.tif"       # e.g "GMW_N00E008_1996_v3.tif" in regex form
-mangrove_extent_processed_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/hansenized/raster/"
-mangrove_extent_processed_pattern = f"GMW{GMW_version}_mangrove_extent"
+mangrove_extent_hansenized_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/hansenized/raster/"
+mangrove_extent_hansenized_pattern = f"GMW{GMW_version}_mangrove_extent"
+mangrove_extent_processed_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/processed/raster/"
+mangrove_extent_processed_pattern = f"GMW{GMW_version}_smoothed_mangrove_extent"
 
 #cropland emissions
 cropland_emis_run_date =  '20241204'
