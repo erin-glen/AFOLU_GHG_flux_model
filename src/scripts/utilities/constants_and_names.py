@@ -12,7 +12,7 @@ from src.scripts.utilities.lulucf_constants_and_names import (
 # ---------------------------------------------------
 
 # ── version helpers ──────────────────────────────────────────────
-model_version = "0.4.4"              # dotted string
+model_version = "0.4.5"              # dotted string
 model_version_underscore = model_version.replace(".", "_")   # "0_3_0"
 
 s3_bucket_name = 'gfw2-data'
@@ -219,7 +219,7 @@ land_cover_version_map = {
 }
 
 # End years that correspond to available five year land cover composites
-five_year_land_cover_years = [2005, 2010, 2015, 2020, 2023]
+five_year_land_cover_years = [2005, 2010, 2015, 2020, 2024]
 
 # Convenience list of five year inventory periods. The first period now uses the 2005 land cover composite (2000–2004). The final period still uses the 2023 land cover composite and spans 2020–2023.
 five_year_inventory_periods = [
@@ -227,7 +227,7 @@ five_year_inventory_periods = [
     (2006, 2010),
     (2011, 2015),
     (2016, 2020),
-    (2021, 2023),
+    (2021, 2024),
 ]
 
 # -------------------------------------------------------------------
@@ -296,7 +296,7 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
         interval_end_year = interval_start_year
 
     lc_year = interval_end_year
-    if lc_year == 2023:
+    if lc_year == 2024:
         # 2023 land cover composite is stored in the annual directory
         interval_type = intervals_annual
     elif lc_year in five_year_land_cover_years:
