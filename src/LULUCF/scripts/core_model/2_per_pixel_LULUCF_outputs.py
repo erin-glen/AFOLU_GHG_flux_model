@@ -22,6 +22,8 @@ python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_po
 Full run (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --input_date YYYYMMDD -ln "This is intended to be the definitive global run."
+
+Optimization notes: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210788116876880?focus=true
 """
 
 import argparse

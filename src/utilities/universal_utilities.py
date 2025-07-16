@@ -903,34 +903,39 @@ def create_list_for_aggregation(s3_in_folders, main_logger):
     # Iterates through all the input s3 folders
     for s3_in_folder in s3_in_folders:
 
-        main_logger.info(f"Listing files in {s3_in_folder}")
+        try:
+            main_logger.info(f"Listing files in {s3_in_folder}")
 
-        simple_output_file_names = []  # List of output aggregated output 10x10 rasters
+            simple_output_file_names = []  # List of output aggregated output 10x10 rasters
 
-        # Raw filenames in an input folder, e.g., ['00N_000E__6_-2_8_0__IPCC_classes_2020.tif', '00N_000E__6_-4_8_-2__IPCC_classes_2020.tif',...]
-        filenames = list_raster_names_in_s3_folder(s3_in_folder)
+            # Raw filenames in an input folder, e.g., ['00N_000E__6_-2_8_0__IPCC_classes_2020.tif', '00N_000E__6_-4_8_-2__IPCC_classes_2020.tif',...]
+            filenames = list_raster_names_in_s3_folder(s3_in_folder)
 
-        # Iterates through all the files in a folder and converts them to the output names.
-        # Essentially [tile_id]__[pattern].tif. Drops the chunk bounds from the middle.
-        for filename in filenames:
-            result = re.sub(cn.small_chunk_pattern, '__', filename)
-            simple_output_file_names.append(result)  # New list of simplified file names used for 10x10 degree outputs
+            # Iterates through all the files in a folder and converts them to the output names.
+            # Essentially [tile_id]__[pattern].tif. Drops the chunk bounds from the middle.
+            for filename in filenames:
+                result = re.sub(cn.small_chunk_pattern, '__', filename)
+                simple_output_file_names.append(result)  # New list of simplified file names used for 10x10 degree outputs
 
-        # Removes duplicate simplified file names.
-        # There are duplicates because each 10x10 output raster has many constituent chunks, each of which have the same aggregated, final name
-        # e.g., ['00N_000E__IPCC_classes_2020.tif', '00N_010E__IPCC_classes_2020.tif', ...]
-        simple_output_file_names = np.unique(simple_output_file_names).tolist()
+            # Removes duplicate simplified file names.
+            # There are duplicates because each 10x10 output raster has many constituent chunks, each of which have the same aggregated, final name
+            # e.g., ['00N_000E__IPCC_classes_2020.tif', '00N_010E__IPCC_classes_2020.tif', ...]
+            simple_output_file_names = np.unique(simple_output_file_names).tolist()
 
-        # Makes nested lists of the file names. Nested for next step.
-        # e.g., [['00N_110E__AGC_density_MgC_ha_2000.tif']]
-        simple_output_file_names = [[item] for item in simple_output_file_names]
+            # Makes nested lists of the file names. Nested for next step.
+            # e.g., [['00N_110E__AGC_density_MgC_ha_2000.tif']]
+            simple_output_file_names = [[item] for item in simple_output_file_names]
 
-        # Makes a list of dictionaries, where the key is the input s3 path and the value is the output aggregated name
-        # e.g., [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif']}]
-        list_of_s3_name_dicts = [{key: value} for value in simple_output_file_names for key in [s3_in_folder]]
+            # Makes a list of dictionaries, where the key is the input s3 path and the value is the output aggregated name
+            # e.g., [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif']}]
+            list_of_s3_name_dicts = [{key: value} for value in simple_output_file_names for key in [s3_in_folder]]
 
-        # Adds the dictionary of s3 paths and output names for this folder to the list for all folders
-        list_of_s3_names_total.append(list_of_s3_name_dicts)
+            # Adds the dictionary of s3 paths and output names for this folder to the list for all folders
+            list_of_s3_names_total.append(list_of_s3_name_dicts)
+
+        except Exception as e:
+            main_logger.error(f"Failed processing folder {s3_in_folder} due to error: {e}")
+            continue
 
     # Combines all the lists from individual output folders into a single list
     # Now it's:

@@ -6,19 +6,19 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -yr 2015 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -yr 2000 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
 
 Coiled small test:
-python -m src.utilities.create_cluster -n 1 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t X -m X -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 50 -t 5 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 50 -t X -m X -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --input_date YYYYMMDD
 
 Full Coiled run:
-python -m src.utilities.create_cluster -n 50 -t 5 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 50 -t X -m -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --input_date YYYYMMDD -ln "This is intended to be the definitive global run."
 
 From before:
 Took about 30 minutes to do the aggregated gross and net flux outputs. A few 10x10 tiles from many of the folders
@@ -118,7 +118,7 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
     if first_10x10s_to_process:
         list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:first_10x10s_to_process]
 
-    # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[338:339]  # To limit it to a specific tile
+    # # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[338:339]  # To limit it to a specific tile
     # print(list_of_s3_name_dicts_total)
 
     # Extracts and lists unique tile_ids, the target for aggregation
@@ -142,6 +142,18 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
         main_logger.info("Running as final model.")
 
     main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
+
+    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    # cluster, not all the workers.
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
+
+        # Reduces number of workers in the cluster down to 1 if there is more than 10
+        if n_workers == 0:
+            main_logger.info("Resizing cluster to 1 worker")
+
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
 
     # Each task is a single 10x10 deg aggregated geotif

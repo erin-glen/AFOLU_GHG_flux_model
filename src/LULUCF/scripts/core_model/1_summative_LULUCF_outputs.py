@@ -22,13 +22,7 @@ Full run (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
 
-NOTE: I experimented with including the per-pixel output creation in this script, making a combined summative/per-pixel
-post-processing step. However, the per-pixel output creation seemed to require about 4GB of memory, which meant that
-I could process only one chunk at a time on a 32GB worker instead of two chunks at a time.
-Overall, even though creating the per-pixel outputs doesn't seem to take a lot of memory on its own,
-it seems more efficient to do it in its own script where I could process several chunks simultaneously.
-Also, if we ever want to create the summative outputs but not the per-pixel outputs, we can do that using
-the separate scripts.
+Optimization notes: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210788116876878?focus=true
 """
 
 import argparse
