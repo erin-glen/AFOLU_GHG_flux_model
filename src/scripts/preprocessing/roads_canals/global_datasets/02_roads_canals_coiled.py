@@ -595,4 +595,6 @@ if __name__ == "__main__":
 
 """
 python -m src.scripts.preprocessing.roads_canals.global_datasets.02_roads_canals_coiled --tile_id 00N_110E --feature_type osm_roads --client coiled --resolution 30m
+
+30 meter workflow is currently in development!
 """
