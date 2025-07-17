@@ -284,8 +284,8 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
-    # is_final = False
-    is_final = True  # For simulating a large run
+    is_final = False
+    # is_final = True  # For simulating a large run
     if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model.")

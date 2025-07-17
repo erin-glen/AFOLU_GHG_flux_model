@@ -36,6 +36,12 @@ Cluster configuration experimentation at https://cloud.coiled.io/clusters/101890
 It indicated that using 4 threads/worker and 4 GB workers was best if I'm not in a rush because it used
 the least Coiled credits.
 
+But subsequent experimenting with LULUCF aggregation (https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210803828525318?focus=true)
+suggested otherwise:
+Tests of LULUCF output aggregation show that 1 thread/worker with 4GB workers is low in Coiled credit usage
+and runs quickly compared to other configurations.
+So, if I run this again, consider changing the workers to -t 1 -m 4.
+
 """
 
 import argparse

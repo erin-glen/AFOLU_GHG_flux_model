@@ -32,6 +32,11 @@ AWS cost: $2.93 ($2.10/hr for 200 t3.small workers, according to dashboard)
 I don't know why the 2015 was 30 minutes faster and used almost 200 fewer Coiled credits than the 2000 one. Maybe just luck of the cluster?
 
 There are 3560 10x10s across 10 folders (356/folder), so 200 workers seems appropriate.
+
+Notes on optimizing threads/worker: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210803828525318?focus=true
+Tests of LULUCF output aggregation show that 1 thread/worker with 4GB workers is low in Coiled credit usage
+and runs quickly compared to other configurations.
+So, if I run this again, consider changing the worker to -t 1 -m 4.
 """
 
 import argparse

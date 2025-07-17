@@ -6,31 +6,31 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -yr 2000 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -yr 2000 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
 
 Coiled small test:
-python -m src.utilities.create_cluster -n 1 -t X -m X -cn LULUCF_postprocessing
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 50 -t X -m X -cn LULUCF_postprocessing
+python -m src.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --input_date YYYYMMDD
 
 Full Coiled run:
-python -m src.utilities.create_cluster -n 50 -t X -m -cn LULUCF_postprocessing
+python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --input_date YYYYMMDD -ln "This is intended to be the definitive global run."
 
-From before:
-Took about 30 minutes to do the aggregated gross and net flux outputs. A few 10x10 tiles from many of the folders
-weren't output, and I got various GDAL errors throughout. Not investigating further now.
-Log to explore is https://cloud.coiled.io/clusters/676603/account/wri-forest-research/information?workspace=WRI-forest-research&tab=Logs&filterPattern=&showLifecycle=0
-It has some potentially useful errors.
+Notes on optimizing threads/worker: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210803828525318?focus=true
+Tests of this aggregation and other aggregations show that 1 thread/worker with 4GB workers is low in Coiled credit usage
+and runs quickly compared to other configurations.
 """
 
 import argparse
+import coiled
 import dask
 import re
 import sys
+from dask.distributed import Client
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -39,7 +39,7 @@ from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
 
 
-def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, year_range, input_date, number_of_workers, run_local=False, no_stats=False, no_log=False, no_upload=False,
          first_10x10s_to_process=None, log_note=None):
 
 
@@ -137,23 +137,30 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
-    if len(chunk_list) > 20:
+    if len(chunk_list) > 30:
         is_final = True
         main_logger.info("Running as final model.")
 
     main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
 
-    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
-    # cluster, not all the workers.
+    # Resizes cluster up to more workers now that all the local enumerating is done.
+    # This way, it doesn't run a large cluster while all the local preprocessing is done.
     if not run_local:
+
         workers = client.scheduler_info()["workers"]
         n_workers = len(workers)
 
-        # Reduces number of workers in the cluster down to 1 if there is more than 10
-        if n_workers == 0:
-            main_logger.info("Resizing cluster to 1 worker")
+        # Adds more workers if less than 9 were originally specified. 9 is an arbitrary number above which I'm not likely to be doing testing.
+        # Otherwise, just keeps the number of workers already there (if number not specified for this script).
+        if (n_workers < 9) and (number_of_workers):
 
-            resize_cluster.resize_coiled_cluster(cluster_name, 1)
+            main_logger.info(f"Resizing cluster to specified number of workers: {number_of_workers}")
+            resize_cluster.resize_coiled_cluster(cluster_name, number_of_workers)
+        elif is_final:
+            main_logger.info(f"Resizing cluster to large run number of workers: 100")
+            resize_cluster.resize_coiled_cluster(cluster_name, 100)
+        else:
+            main_logger.info("Not resizing cluster")
 
 
     # Each task is a single 10x10 deg aggregated geotif
@@ -205,10 +212,11 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Aggregate 1x1 degree outputs from LULUCF model to 10x10 degree geotifs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-rd', '--input_date', help='Date of run, in YYYYMMDD')
+    parser.add_argument('-rd', '--input_date', help='Date of core model run, in YYYYMMDD')
     parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
     parser.add_argument('-f', '--first_10x10s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
+    parser.add_argument('-nw', '--number_of_workers', help='Number of workers to rescale to after local input list processing is done. Optonal')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
@@ -222,10 +230,11 @@ if __name__ == "__main__":
     year_range = args.year_range
     first_10x10s_to_process = args.first_10x10s_to_process
     log_note = args.log_note
+    number_of_workers = args.number_of_workers
 
     run_local = args.run_local
     no_stats = args.no_stats
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, year_range, input_date, run_local, no_stats, no_log, no_upload, first_10x10s_to_process=first_10x10s_to_process, log_note=log_note)
+    main(cluster_name, year_range, input_date, run_local, no_stats, no_log, no_upload, number_of_workers, first_10x10s_to_process=first_10x10s_to_process, log_note=log_note)
