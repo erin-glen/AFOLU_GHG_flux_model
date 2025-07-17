@@ -94,7 +94,10 @@ def calculate_drainage_and_emissions(
     3) Burned‑area emissions (CO2, CO, CH4, total CO2e) if burned layer present.
        When ``count_burned_years`` is ``True``, burned emissions are multiplied
        by the number of burned years for each pixel within the interval.
-    Returns two numba typed dicts: uint32 layers, float32 layers
+    Returns two numba typed dicts:
+    - uint32 layers: categorical classification (drained_soil, drained_state,
+      burned_state, burned_years_count)
+    - float32 layers: emissions totals
     """
 
     out_dict_uint32 = Dict.empty(types.unicode_type, types.uint32[:, :])
@@ -141,6 +144,7 @@ def calculate_drainage_and_emissions(
     burned_co_out = np.zeros((rows, cols), dtype=np.float32)
     burned_ch4_out = np.zeros((rows, cols), dtype=np.float32)
     burned_total_co2e_out = np.zeros((rows, cols), dtype=np.float32)
+    burned_years_count_out = np.zeros((rows, cols), dtype=np.uint32)
 
     # main pixel loop --------------------------------------------------
     for row in range(rows):
@@ -362,6 +366,10 @@ def calculate_drainage_and_emissions(
             burned_emission_node = 0
             if burned_block is not None:
                 burned_val = burned_block[row, col]
+                burned_years_count = (
+                    burned_val if count_burned_years else (1 if burned_val > 0 else 0)
+                )
+                burned_years_count_out[row, col] = burned_years_count
                 if burned_val > 0 and soil_block[row, col] in (1, 2):
 
                     if ecozone == boreal_code:
@@ -411,7 +419,7 @@ def calculate_drainage_and_emissions(
                     gef_ch4 = bvals[2]
                     mass_burnt = bvals[3]
 
-                    multiplier = burned_val if count_burned_years else 1
+                    multiplier = burned_years_count
                     (
                         burn_co2,
                         burn_co,
@@ -458,6 +466,7 @@ def calculate_drainage_and_emissions(
     out_dict_uint32["drained_soil"] = soil_block
     out_dict_uint32["drained_state"] = state_block
     out_dict_uint32["burned_state"] = burned_state_out
+    out_dict_uint32["burned_years_count"] = burned_years_count_out
 
     out_dict_float32["drained_co2_Mg_CO2_ha_yr"] = drained_co2_out
     out_dict_float32["drained_n2o_Mg_CO2e_ha_yr"] = drained_n2o_out
@@ -660,6 +669,7 @@ def calculate_and_upload_drainage(
     # stats for outputs, with explicit layer categorization
     drainage_classification_layers = ["drained_soil", "drained_state"]
     burned_classification_layers = ["burned_state"]
+    numeric_layers = ["burned_years_count"]
 
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tid}.tif"
     pixel_area_chunk = uu.get_tile_dataset_rio(
@@ -680,6 +690,18 @@ def calculate_and_upload_drainage(
                     bstr,
                     tid,
                     "output_layer",
+                    iv_start=iv_start,
+                    iv_end=iv_end,
+                )
+            )
+        elif k in numeric_layers:
+            chunk_stats.append(
+                uu.calculate_stats(
+                    arr,
+                    k,
+                    bstr,
+                    tid,
+                    "output_layer_numeric",
                     iv_start=iv_start,
                     iv_end=iv_end,
                 )
@@ -1097,7 +1119,8 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2001 \
   --end_year 2024 \
-  --all_five_year_periods
+  --all_five_year_periods \
+  --count_burned_years
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
