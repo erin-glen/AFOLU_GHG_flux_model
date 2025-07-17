@@ -33,8 +33,9 @@ INVENTORY_PERIODS = [
     "2021_2024",
 ]
 
-BASE_URL = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_4_5"
-OUTPUT_DATE = "20250716"
+version = cn.model_version_underscore
+BASE_URL = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_{version}"
+OUTPUT_DATE = "20250717"
 
 
 def get_input_datasets(pixel_resolution: str = "4000_pixels") -> list:
@@ -158,5 +159,5 @@ if __name__ == "__main__":
     )
 
 """
- python -m src.scripts.core_model.3_aggregate_soils_outputs -cn aggregate
+python -m src.scripts.core_model.3_aggregate_soils_outputs -cn aggregate
 """
