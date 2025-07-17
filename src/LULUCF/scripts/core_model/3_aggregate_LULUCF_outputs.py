@@ -55,8 +55,8 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
 
     # Runs chunks in batches of specified size.
     # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
-    batch_size = 3000
-    # batch_size = 5  # For testing batch processing
+    # batch_size = 3000
+    batch_size = 5  # For testing batch processing
     # batch_size = 1  # For testing batch processing
 
     # Determines if arguments for start and end year are valid
@@ -114,7 +114,7 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
     main_logger.info(f"Directories to aggregate: {output_dir_list}")
 
     # # For testing- first folder only, so contents of all folders don't need to be listed
-    # output_dir_list = output_dir_list[0:1]
+    output_dir_list = output_dir_list[0:1]
     # output_dir_list = output_dir_list[0:3]
     main_logger.info("output_dir_list:", output_dir_list)
 
@@ -168,7 +168,6 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
         # Adds more workers if less than 9 were originally specified. 9 is an arbitrary number above which I'm not likely to be doing testing.
         # Otherwise, just keeps the number of workers already there (if number not specified for this script).
         if (n_workers < 9) and (number_of_workers):
-
             main_logger.info(f"Resizing cluster to specified number of workers: {number_of_workers}")
             resize_cluster.resize_coiled_cluster(cluster_name, number_of_workers)
         elif is_final:
@@ -253,7 +252,7 @@ if __name__ == "__main__":
     parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
     parser.add_argument('-f', '--first_10x10s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
-    parser.add_argument('-nw', '--number_of_workers', help='Number of workers to rescale to after local input list processing is done. Optonal')
+    parser.add_argument('-nw', '--number_of_workers', type=int, help='Number of workers to rescale to after local input list processing is done. Optonal')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')

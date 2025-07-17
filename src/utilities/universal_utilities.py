@@ -904,7 +904,7 @@ def create_list_for_aggregation(s3_in_folders, main_logger):
     for i, s3_in_folder in enumerate(s3_in_folders):
 
         try:
-            main_logger.info(f"Listing files in folder {i}: {s3_in_folder}")
+            main_logger.info(f"Listing files in folder {i} out of {len(s3_in_folders)}: {s3_in_folder}")
 
             simple_output_file_names = []  # List of output aggregated output 10x10 rasters
 
@@ -1240,8 +1240,11 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
     # Processes the chunk stats and returned messages
     # Results are the messages from the chunks and chunk stats
     for result in results:
-
-        return_message, chunk_stats = result
+        try:
+            return_message, chunk_stats = result
+        except Exception as e:
+            main_logger.error(f"Malformed result: {result} | Error: {e}")
+            continue
 
         if "Success" in return_message:
             success_count += 1
