@@ -901,10 +901,10 @@ def create_list_for_aggregation(s3_in_folders, main_logger):
     list_of_s3_names_total = []  # Final list of dictionaries of input s3 paths and output aggregated 10x10 raster names
 
     # Iterates through all the input s3 folders
-    for s3_in_folder in s3_in_folders:
+    for i, s3_in_folder in enumerate(s3_in_folders):
 
         try:
-            main_logger.info(f"Listing files in {s3_in_folder}")
+            main_logger.info(f"Listing files in folder {i}: {s3_in_folder}")
 
             simple_output_file_names = []  # List of output aggregated output 10x10 rasters
 
@@ -1129,7 +1129,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
     lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}: {timestr()}", is_final, logger_worker)
 
-    if not no_upload:
+    if no_upload:
 
         #Because boto3 does multipart uploading for files >100MB, this only adds multipart uploading for files
         # between part_size and 100MB.

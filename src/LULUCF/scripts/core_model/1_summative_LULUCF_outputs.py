@@ -197,6 +197,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     total_net_flux_BGC_all_gases = None
     total_net_flux_deadwood_c_all_gases = None
     total_net_flux_litter_c_all_gases = None
+    total_net_flux_all_pools_CO2_only = None
     total_net_flux_all_pools_all_gases = None
 
     # Iterates through intervals to sum the values from each interval
@@ -214,6 +215,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         net_flux_BGC_all_gases_key = f"{cn.net_flux_bgc_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
         net_flux_deadwood_c_all_gases_key = f"{cn.net_flux_deadwood_c_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
         net_flux_litter_c_all_gases_key = f"{cn.net_flux_litter_c_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
+        net_flux_all_pools_CO2_only_key = f"{cn.net_flux_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
         net_flux_all_pools_all_gases_key = f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
 
         # Full-model outputs need to be summed as float64 so there aren't rounding errors.
@@ -267,6 +269,12 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         else:
             total_net_flux_litter_c_all_gases += out_dict[net_flux_litter_c_all_gases_key]
 
+        # Accumulates net flux (all pools, CO2 only) across intervals
+        if total_net_flux_all_pools_CO2_only is None:
+            total_net_flux_all_pools_CO2_only = out_dict[net_flux_all_pools_CO2_only_key].copy()
+        else:
+            total_net_flux_all_pools_CO2_only += out_dict[net_flux_all_pools_CO2_only_key]
+
         # Accumulates net flux (all pools, all gases) across intervals
         if total_net_flux_all_pools_all_gases is None:
             total_net_flux_all_pools_all_gases = out_dict[net_flux_all_pools_all_gases_key].copy()
@@ -286,6 +294,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     out_dict[f"{cn.net_flux_bgc_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_BGC_all_gases
     out_dict[f"{cn.net_flux_deadwood_c_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_deadwood_c_all_gases
     out_dict[f"{cn.net_flux_litter_c_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_litter_c_all_gases
+    out_dict[f"{cn.net_flux_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_all_pools_CO2_only
     out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_all_pools_all_gases
 
     # print(out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])

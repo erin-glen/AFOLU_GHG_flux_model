@@ -36,6 +36,7 @@ import os
 import psutil
 import time
 import sys
+import pandas as pd
 import numpy as np
 
 from concurrent.futures import ThreadPoolExecutor
@@ -2018,6 +2019,16 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
         success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_final, main_logger, batch_flux_results)
         all_1x1_stats.extend(batch_stats)
+
+        # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
+        # That way there are some basic chunk stats (not sorted or anything) to fall back on.
+        if len(chunk_batches) > 1:
+            main_logger.info(f"Writing batch stats to spreadsheet: {uu.timestr()}")
+            df_batch_stats = pd.DataFrame(batch_stats)
+            out_spreadsheet = f'TEMP_{stage}__batch_{i}_{uu.timestr()}.xlsx'
+            local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+            with pd.ExcelWriter(local_spreadsheet) as writer:
+                df_batch_stats.to_excel(writer, sheet_name=f'stats__batch_{i}', index=False)
 
         del futures
         del batch_flux_results

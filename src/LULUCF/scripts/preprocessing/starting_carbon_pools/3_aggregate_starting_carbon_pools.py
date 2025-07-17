@@ -88,6 +88,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # Creates list of output directories specific to the run
     output_dir_list = [path.replace("CHUNK_SIZE", str(4000)) for path in output_dir_list]
     output_dir_list = [path.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning) for path in output_dir_list]
+    output_dir_list.sort()  # Sorts in-place
     main_logger.info(f"Directories to aggregate: {output_dir_list}")
 
 
@@ -114,8 +115,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Converts set of tile_ids to sorted list of tile_ids
     chunk_list = sorted(tile_ids)
-    main_logger.info(f"tile_ids to process: {chunk_list}")
-    main_logger.info(f"Number of tile_ids to process: {len(chunk_list)}")
+    main_logger.info(f"tile_ids to aggregate within: {chunk_list} ({len(chunk_list)}) tile_ids")
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
