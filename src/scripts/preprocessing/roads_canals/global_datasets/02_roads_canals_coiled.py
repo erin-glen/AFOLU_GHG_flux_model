@@ -592,3 +592,7 @@ if __name__ == "__main__":
 
     main(tile_id=args.tile_id, feature_type=args.feature_type,
          chunk_bounds=cb, chunk_size=args.chunk_size, client=args.client, resolution=args.resolution)
+
+"""
+python -m src.scripts.preprocessing.roads_canals.global_datasets.02_roads_canals_coiled --tile_id 00N_110E --feature_type osm_roads --client coiled --resolution 30m
+"""
