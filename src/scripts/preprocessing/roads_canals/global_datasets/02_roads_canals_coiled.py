@@ -32,7 +32,7 @@ import rioxarray as rxr
 from pyogrio.errors import FeatureError
 from rasterio.features import rasterize
 from shapely.geometry import box
-from dask.distributed import Client, LocalCluster
+
 from rasterio.warp import transform_bounds
 import tempfile
 
@@ -539,18 +539,25 @@ def process_all_tiles(feature_type, chunk_size=2, resolution="1km"):
 
     return tasks
 
-def main(tile_id=None, feature_type="osm_roads", chunk_bounds=None, chunk_size=2, client="local", resolution="1km"):
-    if client == "coiled":
-        cluster, dclient = uutil.connect_to_cluster(
-            cluster_name="roads_canals",
-            n_workers=20,
-            region="us-east-1",
-        )
-        logging.info(f"Using coiled cluster: {cluster.name}")
+def main(
+    tile_id=None,
+    feature_type="osm_roads",
+    chunk_bounds=None,
+    chunk_size=2,
+    client="local",
+    resolution="1km",
+):
+    run_local = client == "local"
+    cluster, dclient, run_local = uutil.connect_to_cluster(
+        cluster_name="roads_canals",
+        n_workers=20,
+        region="us-east-1",
+        run_local=run_local,
+    )
+    if run_local:
+        logging.info("Running locally without Dask/Coiled.")
     else:
-        cluster = LocalCluster()
-        dclient = Client(cluster)
-        logging.info("Using local cluster")
+        logging.info(f"Using coiled cluster: {cluster.name}")
 
     try:
         if tile_id:
@@ -567,8 +574,8 @@ def main(tile_id=None, feature_type="osm_roads", chunk_bounds=None, chunk_size=2
         dask.compute(*tasks)
     finally:
         # Cleanup resources after processing tasks or early exit
-        dclient.close()
-        if client == "coiled":
+        if not run_local:
+            dclient.close()
             cluster.close()
         logging.info("Completed processing")
 
@@ -592,7 +599,6 @@ if __name__ == "__main__":
 
     main(tile_id=args.tile_id, feature_type=args.feature_type,
          chunk_bounds=cb, chunk_size=args.chunk_size, client=args.client, resolution=args.resolution)
-
 """
 python -m src.scripts.preprocessing.roads_canals.global_datasets.02_roads_canals_coiled --tile_id 00N_110E --feature_type osm_roads --client coiled --resolution 30m
 
