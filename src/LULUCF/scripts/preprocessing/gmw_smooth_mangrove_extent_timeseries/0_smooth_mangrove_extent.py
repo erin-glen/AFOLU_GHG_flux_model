@@ -2,7 +2,7 @@
 Run from src/LULUCF/
 
 Local:
-python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent.py -bb 116 -3 117 -2 -cs 1 --run_local --no_stats --no_upload
+python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent -bb 116 -3 117 -2 -cs 1 --run_local --no_stats --no_upload
 
 todo:
 - see if it can scale from 1 degree to 10 degrees after testing 
@@ -160,7 +160,7 @@ def smooth_mangrove_data(in_dict_uint8):
                 mangrove_extent_2017_out_block[row, col] = 0
 
             # Removing mangrove extent in 2018 if there is no mangrove extent in 2017 and 2019
-            if (mangrove_extent_2018_ == 1 and mangrove_extent_2017 == 0 and mangrove_extent_2019 == 0):
+            if (mangrove_extent_2018 == 1 and mangrove_extent_2017 == 0 and mangrove_extent_2019 == 0):
                 mangrove_extent_2018_out_block[row, col] = 0
 
             # Removing mangrove extent in 2019 if there is no mangrove extent in 2018 and 2020
@@ -255,7 +255,7 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
     # Create smoothed mangrove data
-    out_dict_uint8 = smooth_mangrove_data(in_dict_uint8)
+    out_dict_uint8 = smooth_mangrove_data(typed_dict_uint8)
 
     # Fresh non-Numba-constrained dictionary that stores all output numpy arrays of all datatypes.
     # The dictionaries by datatype that are returned from the numba function have limitations on them,
