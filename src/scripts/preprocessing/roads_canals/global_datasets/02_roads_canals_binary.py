@@ -1,10 +1,10 @@
 #!/usr/bin/env python
-"""Binary road and canal presence using the 30 m union peat mask.
+"""Binary road and canal presence using the 30m union peat mask.
 
 This script reads raw road/canal shapefiles (EPSG:4326) at tile level,
 clips them to sub-chunks of the union mask grid, rasterises presence at
-30 m, and warps the result to the Hansen grid.  Use this script for the
-30 m workflow.  The 1 km density workflow remains in ``02_roads_canals_coiled.py``.
+30m, and warps the result to the Hansen grid.  Use this script for the
+30m workflow.  The 1km density workflow remains in ``02_roads_canals_coiled.py``.
 """
 
 import os
@@ -309,3 +309,6 @@ if __name__ == "__main__":
         client=args.client,
     )
 
+"""
+python -m src.scripts.preprocessing.roads_canals.global_datasets.02_roads_canals_binary --tile_id 00N_110E --feature_type osm_roads --client coiled 
+"""
