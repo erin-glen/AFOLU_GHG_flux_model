@@ -38,7 +38,7 @@ resolution = 0.000025
 datasets = {
     'osm': {
         'roads': {
-            's3_raw': pp.join(project_dir, raw_dir, 'roads', 'osm_roads', 'roads_by_tile'),
+            's3_raw': pp.join(raw_dir, 'roads', 'osm_roads', 'roads_by_tile'),
             's3_processed_base': pp.join(processed_dir, 'osm_roads_density'),
             's3_processed_small': pp.join(processed_dir, 'osm_roads_density',
                                           '4000_pixels', today_date),
