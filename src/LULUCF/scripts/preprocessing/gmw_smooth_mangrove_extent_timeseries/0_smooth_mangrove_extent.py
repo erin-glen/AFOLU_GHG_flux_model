@@ -256,6 +256,11 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
     lu.print_and_log(f"Creating preprocessed mangrove data in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker) # Prints during full runs
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
+    #Print kets
+    print("Keys in typed_dict_uint8:")
+    for k in typed_dict_uint8.keys():
+        print(repr(k))
+
     # Create smoothed mangrove data
     out_dict_uint8 = smooth_mangrove_data(typed_dict_uint8)
 
@@ -384,10 +389,9 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     sample_tile_id = "00N_000E"
 
     # Dictionary of data to download
+    download_dict = {}
     for year in cn.mangrove_extent_years:
-        download_dict = {
-            f"{cn.mangrove_extent_hansenized_pattern}_{year}": f"{cn.mangrove_extent_hansenized_dir}{year}/{sample_tile_id}_{cn.mangrove_extent_hansenized_pattern}_{year}.tif",
-        }
+        download_dict[f"{cn.mangrove_extent_hansenized_pattern}_{year}"] = f"{cn.mangrove_extent_hansenized_dir}{year}/{sample_tile_id}_{cn.mangrove_extent_hansenized_pattern}_{year}.tif"
     print(f"download_dict: {download_dict}")
 
     # List of output directories for smoothed data
@@ -397,8 +401,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         output_dir_list.append(f"{cn.mangrove_extent_processed_dir}{year}/")
 
     # Creates list of output directories specific to the run
-    output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
-    output_dir_list = [path.replace("PER_HA_OR_PIXEL", "") for path in output_dir_list]
+    # output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
+    # output_dir_list = [path.replace("PER_HA_OR_PIXEL", "") for path in output_dir_list]
     print(output_dir_list)
 
     # Returns the first tile in each input so that the datatype can be determined.
