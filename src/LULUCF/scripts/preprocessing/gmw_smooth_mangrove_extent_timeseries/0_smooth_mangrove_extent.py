@@ -2,7 +2,7 @@
 Run from src/LULUCF/
 
 Local:
-python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent -bb 116 -3 117 -2 -cs 1 --run_local --no_stats --no_upload
+python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent -bb 110 -10 120 0 -cs 10 --run_local --no_stats --no_upload
 
 todo:
 - see if it can scale from 1 degree to 10 degrees after testing 
@@ -256,11 +256,6 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
     lu.print_and_log(f"Creating preprocessed mangrove data in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker) # Prints during full runs
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
-    #Print kets
-    print("Keys in typed_dict_uint8:")
-    for k in typed_dict_uint8.keys():
-        print(repr(k))
-
     # Create smoothed mangrove data
     out_dict_uint8 = smooth_mangrove_data(typed_dict_uint8)
 
@@ -308,10 +303,10 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
             print("out_pattern:", out_pattern)
             print("year_range:", year_range)
 
-            out_pattern = cn.mangrove_extent_processed_pattern
+            print(f"output_folders: {output_folders}")
 
             # Retrieves the relevant output s3 path for this specific output  (list of one element)
-            matched_output_s3_folder = [item for item in output_folders if out_pattern in item][0]
+            matched_output_s3_folder = [item for item in output_folders if year_range in item][0]
             print("matched_output_s3_folder:", matched_output_s3_folder)
 
             # Output paths without bucket (s3://gfw2-data)
@@ -323,6 +318,7 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
         # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
         upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
                                                            out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
+        #TODO change to save_and_upload_raster_10x10
 
         # Only prints if not a final run
         lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", is_final, logger_worker)
@@ -401,8 +397,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         output_dir_list.append(f"{cn.mangrove_extent_processed_dir}{year}/")
 
     # Creates list of output directories specific to the run
-    # output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
-    # output_dir_list = [path.replace("PER_HA_OR_PIXEL", "") for path in output_dir_list]
+    #output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
+    #output_dir_list = [path.replace("PER_HA_OR_PIXEL", "") for path in output_dir_list]
     print(output_dir_list)
 
     # Returns the first tile in each input so that the datatype can be determined.
