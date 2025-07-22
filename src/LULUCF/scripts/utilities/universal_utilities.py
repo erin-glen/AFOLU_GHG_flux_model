@@ -275,26 +275,56 @@ def upload_shp(in_folder, shp):
     lu.print_and_log(f"Uploaded to {in_folder}{shp}: {timestr('time')}", True, logger_worker)
 
 # Saves a data array locally as a raster and then uploads it to s3
-def save_and_upload_raster_10x10(**kwargs):
+def save_and_upload_raster_10x10(bounds, chunk_length_pixels, tile_id,
+                                 bounds_str, output_dict, is_final, logger_worker,
+                                 no_data_val=None):
 
-    s3_client = boto3.client("s3") # Needs to be in the same function as the upload_file call
+    #TODO: add check that they are 10 x 10 degree bounds
 
-    data_array = kwargs['data']   # The data being saved
-    out_file_name = kwargs['out_file_name']   # The output file name
-    out_folder = kwargs['out_folder']   # The output folder
+    upload_tasks = []
 
-    print(f"flm: Saving {out_file_name} locally")
+    transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
 
-    profile_kwargs = {'compress': 'lzw'}   # Adds attribute to compress the output raster
-    # data_array.rio.to_raster(f"{out_file_name}", **profile_kwargs)
-    data_array.rio.to_raster(f"/tmp/{out_file_name}", **profile_kwargs)
+    lu.print_and_log(f"Saving outputs locally for {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
 
-    print(f"flm: Saving {out_file_name} to {out_folder[10:]}{out_file_name}")
+    # For every output file, saves from array to local raster, then to s3.
+    # Can't save directly to s3, unfortunately, so need to save locally first.
+    for key, value in output_dict.items():
 
-    s3_client.upload_file(f"/tmp/{out_file_name}", "gfw2-data", Key=f"{out_folder[10:]}{out_file_name}")
+        data_array = value[0]
+        data_type = value[1]
+        full_s3_path = value[4]
 
-    # Deletes the local raster
-    os.remove(f"/tmp/{out_file_name}")
+        if is_final:
+            file_name = f"{tile_id}_{key}.tif"
+        else:
+            file_name = f"{tile_id}_{key}__{timestr()}.tif"
+
+        # # Only prints if not a final run
+        # # Disabled this because it prints sooooo many lines that it's annoying to scroll through
+        # if not is_final:
+        #     lu.print_and_log(f"Saving {key} for {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger_worker)
+
+        # Includes NoData value in output raster
+        if no_data_val is not None:
+            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                               height=chunk_length_pixels, count=1,
+                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                               tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
+                dst.write(data_array, 1)
+
+        # No NoData value in output raster
+        else:
+            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
+                               height=chunk_length_pixels, count=1,
+                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                               tiled=True, blockxsize=400, blockysize=400) as dst:
+                dst.write(data_array, 1)
+
+        upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
+
+    return upload_tasks
+
 
 # Gets the name of the first file in a dictionary of dataset names and folders in s3.
 # Returns dictionary of dataset names with the full path of the first file in the s3 folder.
@@ -449,7 +479,6 @@ def map_to_numpy_dtype(data_type):
         # Add more mappings as needed
     }
     return dtype_map.get(data_type, 'float32')  # Defaults to 'float32' if argument not found
-
 
 # Gets the W, S, E, N bounds of a 10x10 degree tile
 def get_10x10_tile_bounds(tile_id):
