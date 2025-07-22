@@ -1,10 +1,10 @@
-"""
-A memory-optimized variant of ``sdpt_rasterize_attributes``.
+"""Simplified SDPT rasterisation script.
 
-This script demonstrates loading SDPT shapefiles in small chunks by using
-GDAL/OGR to clip geometries directly before constructing ``GeoDataFrames``.
-The overall rasterisation workflow mirrors the original implementation but
-avoids loading full tiles into memory.
+This variant only rasterises the ``simpleType`` attribute of the SDPT
+shapefiles.  ``Planted forest`` features are encoded as ``1`` and
+``Tree crops`` as ``2``.  The general workflow mirrors
+``sdpt_rasterize_attributes`` but skips the advanced species
+reclassification step.
 """
 
 import os
@@ -16,21 +16,14 @@ import posixpath
 import gc
 
 import dask
+import dask_geopandas as dgpd
 from dask.distributed import Client, LocalCluster
-import geopandas as gpd
 import numpy as np
 import rasterio
 from rasterio.features import rasterize
 from rasterio.transform import from_origin
-from osgeo import ogr
-
-# Temporary hardcoded output date to avoid duplicate work
-OUTPUT_DATE = "20250531"  # Set this to the date your original outputs began
-
-# ---------------------------------------------------------------------------
-import json
-from shapely.geometry import shape
-
+# NEW: fast spatial-filter reader
+from pyogrio import read_dataframe as _read_df
 
 # Our universal constants & utilities
 import src.scripts.preprocessing.preprocessing_constants as cn
@@ -41,21 +34,40 @@ warnings.filterwarnings("ignore", "Geometry is in a geographic CRS.", UserWarnin
 
 # ---------------------------------------------------------------------------
 # Logging config
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-# Reclassification CSV in S3
-ADVANCED_REMAP_S3 = (
-    "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/remapping_tables/advanced_remapping_2.csv"
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-# Rasterisation settings
+
+# Rasterization settings
 RASTER_RES = 0.00025
 RASTER_NODATA = 0
+# Using a numpy dtype avoids ``rasterio`` ``TypeError`` when rasterising
+# attributes directly in memory.
 RASTER_DTYPE = np.uint8
 
+# ────────────────────────────────────────────────────────────────
+# Helper utilities for Solution #1
+def _tile_shp_path(tile_id: str) -> str:
+    """Return the /vsis3/ path to a tile_<id>.shp on S3."""
+    return (
+        f"/vsis3/{cn.s3_bucket_name}/"
+        f"{cn.datasets['sdpt']['s3_raw']}/tile_{tile_id}.shp"
+    )
 
-# ---------------------------------------------------------------------------
-# Utility helpers
+
+def _read_tile_bbox(tile_path: str, bbox):
+    """Stream only the features intersecting *bbox*.
+
+    ``pyogrio.read_dataframe`` requires the bounding box as a tuple, so any
+    list inputs are normalised here before being passed through.
+    """
+    return _read_df(
+        tile_path,
+        columns=["geometry", "simpleType"],
+        bbox=tuple(bbox),
+    )
+# ────────────────────────────────────────────────────────────────
 
 
 def list_sdpt_shapefiles():
@@ -68,142 +80,135 @@ def list_sdpt_shapefiles():
     ]
 
 
-def load_species_reclassification():
-    """Return a mapping of vernacular names to numeric rotation codes."""
-    import pandas as pd
 
-    local_csv = os.path.join(cn.local_temp_dir, os.path.basename(ADVANCED_REMAP_S3))
+def classify_simple_type(row):
+    """Map ``simpleType`` to numeric codes.
 
-    if not os.path.exists(local_csv):
-        try:
-            uutil.download_file_from_s3(ADVANCED_REMAP_S3, local_csv, cn.s3_bucket_name)
-            logging.info(f"Downloaded CSV => {local_csv}")
-        except Exception as exc:  # pragma: no cover - network errors
-            logging.warning(f"Failed to download CSV from S3: {exc}")
-    else:
-        logging.info(f"Local CSV already exists => {local_csv}, skipping download.")
+    Parameters
+    ----------
+    row : pandas.Series
+        Feature attributes with a ``simpleType`` field.
 
-    if not os.path.exists(local_csv):
-        logging.warning("Advanced remapping CSV not found; falling back to classification logic.")
-        return {}
+    Returns
+    -------
+    int or None
+        ``1`` for planted forest, ``2`` for tree crops or ``None`` to ignore.
+    """
 
-    df = pd.read_csv(local_csv)
-    try:
-        mapping = dict(zip(df["vernacName"].str.strip(), df["rotation_code"]))
-    except KeyError:
-        logging.warning("advanced_remapping.csv missing expected columns")
-        mapping = {}
-
-    logging.info(f"Loaded {len(mapping)} species from advanced remapping CSV.")
-    return mapping
-
-
-from .create_remapping import classify as fallback_classify
-from .create_remapping import ROTATION_CLASS_CODES
-
-
-
-def load_and_clip_shapefile(vsis3_shp_path, bbox, simplify_tolerance=0.0001):
-    """Load, clip, validate, and simplify geometries using GDAL/OGR and GeoPandas."""
-
-    minx, miny, maxx, maxy = bbox
-    bbox_geom = ogr.CreateGeometryFromWkt(
-        f"POLYGON(({minx} {miny}, {maxx} {miny}, {maxx} {maxy}, {minx} {maxy}, {minx} {miny}))"
-    )
-
-    shp_ds = ogr.Open(vsis3_shp_path)
-    if shp_ds is None:
-        raise RuntimeError(f"Failed to open {vsis3_shp_path}")
-
-    layer = shp_ds.GetLayer()
-    layer.SetSpatialFilter(bbox_geom)
-
-    clipped_features = []
-    for feature in layer:
-        json_feature = json.loads(feature.ExportToJson())
-        geom = shape(json_feature["geometry"])
-
-        # Validate geometry; fix invalid geometries using buffer(0)
-        if not geom.is_valid:
-            geom = geom.buffer(0)
-
-        # Simplify geometry to reduce memory footprint
-        geom = geom.simplify(simplify_tolerance, preserve_topology=True)
-
-        # Skip empty geometries after simplification
-        if geom.is_empty:
-            continue
-
-        properties = json_feature.get("properties", {})
-        clipped_features.append({
-            "type": "Feature",
-            "geometry": geom,
-            "properties": properties
-        })
-
-    del layer, shp_ds
-    gc.collect()
-
-    if not clipped_features:
-        return gpd.GeoDataFrame(columns=["geometry"], crs="EPSG:4326")
-
-    gdf = gpd.GeoDataFrame.from_features(clipped_features, crs="EPSG:4326")
-
-    del clipped_features
-    gc.collect()
-
-    return gdf
-
-
-
-@dask.delayed
-def load_tile_bbox(tile_id, bbox):
-    """Load and clip ``tile_id`` shapefile to ``bbox`` using ``GDAL/OGR``."""
-    vsis3_tile_shp = f"/vsis3/{cn.s3_bucket_name}/{cn.datasets['sdpt']['s3_raw']}/tile_{tile_id}.shp"
-    logging.info(f"Reading {vsis3_tile_shp} for bbox {bbox}")
-    try:
-        gdf = load_and_clip_shapefile(vsis3_tile_shp, bbox)
-    except Exception as exc:
-        logging.error(f"Error reading tile_{tile_id}.shp => {exc}")
-        return gpd.GeoDataFrame(columns=["geometry"])
-    return gdf
-
-
-# ---------------------------------------------------------------------------
-# Classification and rasterisation helpers
-
-
-def classify_plantation(row, species_map):
-    """Return the numeric rotation code for ``row``."""
-    simple_type = str(row.get("simpleType", "")).strip().lower()
-    simple_name = str(row.get("simpleName", "")).strip().lower()
-    vernac_name = str(row.get("vernacName", "")).strip()
-
-    code = species_map.get(vernac_name)
-    if code is not None:
-        return code
-
-    if simple_type == "tree crops":
-        return ROTATION_CLASS_CODES.get("oil_palm") if "oil palm" in simple_name else None
-
-    if simple_type == "planted forest":
-        cls = fallback_classify(row)
-        return ROTATION_CLASS_CODES.get(cls)
-
+    val = str(row.get("simpleType", "")).strip().lower()
+    if val == "planted forest":
+        return 1
+    if val == "tree crops":
+        return 2
     return None
 
 
-@dask.delayed
-def classify_features(sub_gdf, species_map):
-    if hasattr(species_map, "result"):
-        species_map = species_map.result()
-    sub_gdf["raster_val"] = sub_gdf.apply(lambda r: classify_plantation(r, species_map), axis=1)
-    sub_gdf.dropna(subset=["raster_val"], inplace=True)
-    return sub_gdf[["geometry", "raster_val"]]
+def rasterize_chunk_shp(shp_path, bbox, tile_id, run_mode):
+    """
+    1) gdal_rasterize the shapefile chunk => partial TIF
+    2) If run_mode='default', upload partial TIF => s3_processed_base/<px>/YYYYMMDD
+    3) If run_mode='test', keep partial TIF local
+    """
+    import subprocess
+
+    chunk_str = uutil.boundstr(bbox)
+    chunk_px = uutil.calc_chunk_length_pixels(bbox)
+    chunk_name = f"{tile_id}__{chunk_str}__sdpt.tif"
+    local_dir = cn.datasets["sdpt"]["local_processed"]
+    uu.create_directory_if_not_exists(local_dir)
+    out_tif = os.path.join(local_dir, chunk_name)
+
+    # Build the final S3 key for partial TIF
+    s3_chunk = posixpath.join(
+        cn.datasets["sdpt"]["s3_processed_base"],
+        f"{chunk_px}_pixels",
+        cn.today_date,
+        chunk_name,
+    )
+
+    # 1) If run_mode='default', skip if partial TIF already on S3
+    #    If run_mode='test', skip if partial TIF local
+    if run_mode == "default":
+        if uutil.s3_file_exists(cn.s3_bucket_name, s3_chunk):
+            logging.info(
+                f"Partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk} exists => skipping."
+            )
+            # remove shapefile pieces
+            for ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
+                chunk_file = shp_path.replace(".shp", ext)
+                if os.path.exists(chunk_file):
+                    os.remove(chunk_file)
+            return
+    else:  # run_mode='test'
+        if os.path.exists(out_tif):
+            logging.info(f"Partial TIF => {out_tif} exists locally => skipping.")
+            for ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
+                chunk_file = shp_path.replace(".shp", ext)
+                if os.path.exists(chunk_file):
+                    os.remove(chunk_file)
+            return
+
+    # 2) gdal_rasterize
+    minx, miny, maxx, maxy = bbox
+    gdal_cmd = [
+        "gdal_rasterize",
+        "-a",
+        "raster_val",
+        "-te",
+        str(minx),
+        str(miny),
+        str(maxx),
+        str(maxy),
+        "-tr",
+        str(RASTER_RES),
+        str(RASTER_RES),
+        "-a_nodata",
+        str(RASTER_NODATA),
+        "-init",
+        str(RASTER_NODATA),
+        "-ot",
+        "Byte" if RASTER_DTYPE == np.uint8 else str(RASTER_DTYPE),
+        "-co",
+        "COMPRESS=DEFLATE",
+        "-co",
+        "TILED=YES",
+        shp_path,
+        out_tif,
+    ]
+    logging.info(f"Rasterizing chunk => tile {tile_id} => {bbox}")
+    subprocess.run(gdal_cmd, check=True)
+
+    if not os.path.exists(out_tif):
+        logging.error(f"Failed to produce partial TIF => {out_tif}")
+        return
+
+    # 3) If run_mode='default', upload partial TIF to S3
+    if run_mode == "default":
+        logging.info(f"Uploading partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk}")
+        uutil.upload_file_to_s3(out_tif, cn.s3_bucket_name, s3_chunk)
+        os.remove(out_tif)
+    else:
+        logging.info(f"Test mode => partial TIF => {out_tif} retained locally.")
+
+    # remove chunk shapefile
+    for ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
+        chunk_file = shp_path.replace(".shp", ext)
+        if os.path.exists(chunk_file):
+            os.remove(chunk_file)
+
+    # free memory used for rasterization
+    del gdal_cmd, out_tif
+    gc.collect()
 
 
 def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
-    """Rasterise a GeoDataFrame subset directly in memory."""
+    """Rasterize a GeoDataFrame subset directly in memory.
+
+    This avoids writing temporary shapefiles and uses ``rasterio`` to create
+    the partial raster.  The behaviour mirrors :func:`rasterize_chunk_shp` but
+    operates on an in-memory dataframe.
+    """
+
     chunk_str = uutil.boundstr(bbox)
     chunk_px = uutil.calc_chunk_length_pixels(bbox)
     chunk_name = f"{tile_id}__{chunk_str}__sdpt.tif"
@@ -214,20 +219,24 @@ def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
     s3_chunk = posixpath.join(
         cn.datasets["sdpt"]["s3_processed_base"],
         f"{chunk_px}_pixels",
-        OUTPUT_DATE,
+        cn.today_date,
         chunk_name,
     )
 
     if run_mode == "default":
         if uutil.s3_file_exists(cn.s3_bucket_name, s3_chunk):
-            logging.info(f"Partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk} exists => skipping.")
+            logging.info(
+                f"Partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk} exists => skipping."
+            )
             return
     else:
         if os.path.exists(out_tif):
             logging.info(f"Partial TIF => {out_tif} exists locally => skipping.")
             return
 
-    shapes = [(geom, val) for geom, val in zip(subset_gdf.geometry, subset_gdf["raster_val"])]
+    shapes = [
+        (geom, val) for geom, val in zip(subset_gdf.geometry, subset_gdf["raster_val"])
+    ]
     if not shapes:
         logging.info(f"No shapes to rasterize in {bbox}, skipping.")
         return
@@ -243,7 +252,7 @@ def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
         transform=transform,
         fill=RASTER_NODATA,
         dtype=RASTER_DTYPE,
-        all_touched=True,
+        all_touched=False,
     )
 
     meta = {
@@ -272,244 +281,128 @@ def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
     gc.collect()
 
 
-# ---------------------------------------------------------------------------
-# Tile processing
+# NEW: single self-contained task
+@dask.delayed
+def rasterize_bbox_task(tile_id: str, bbox: tuple, run_mode: str):
+    tile_path = _tile_shp_path(tile_id)
+    gdf = _read_tile_bbox(tile_path, bbox)
+
+    if gdf.empty:
+        logging.info(f"No geometries in {bbox} for tile {tile_id} – skipped.")
+        return
+
+    gdf["raster_val"] = gdf.apply(classify_simple_type, axis=1)
+    gdf.dropna(subset=["raster_val"], inplace=True)
+    if gdf.empty:
+        logging.info(f"All geometries mapped to None in {bbox} – skipped.")
+        return
+
+    rasterize_chunk_df(gdf, bbox, tile_id, run_mode)
 
 
-def process_tile(tile_id, species_map, chunk_size=2.0, run_mode="default"):
-    logging.info(f"Processing entire tile => {tile_id} in ~{chunk_size} deg sub-chunks")
+def _load_tile_gdf(tile_id):
+    """Return the GeoDataFrame for ``tile_id`` or ``None`` on failure."""
 
+    vsis3_tile_shp = (
+        f"/vsis3/{cn.s3_bucket_name}/{cn.datasets['sdpt']['s3_raw']}/tile_{tile_id}.shp"
+    )
+    logging.info(f"Reading tile shapefile => {vsis3_tile_shp}")
+
+    try:
+        ddf = dgpd.read_file(vsis3_tile_shp, npartitions=1)
+        tile_gdf = ddf.compute()
+    except Exception as e:
+        logging.error(f"Error reading tile_{tile_id}.shp => {e}")
+        return None
+
+    if tile_gdf.empty:
+        logging.info(f"No features found => tile {tile_id}")
+        return None
+
+    return tile_gdf
+
+
+def process_tile(tile_id, chunk_size=2.0, run_mode="default"):
+    logging.info(f"Processing tile {tile_id} in ~{chunk_size}° chunks")
     minx, miny, maxx, maxy = uutil.get_10x10_tile_bounds(tile_id)
     chunk_bboxes = uutil.get_chunk_bounds([minx, miny, maxx, maxy], chunk_size)
-
-    tasks = []
-    for bbox in chunk_bboxes:
-        # Construct output paths FIRST
-        chunk_str = uutil.boundstr(bbox)
-        chunk_px = uutil.calc_chunk_length_pixels(bbox)
-        chunk_name = f"{tile_id}__{chunk_str}__sdpt.tif"
-        local_dir = cn.datasets["sdpt"]["local_processed"]
-        uu.create_directory_if_not_exists(local_dir)
-        out_tif = os.path.join(local_dir, chunk_name)
-
-        s3_chunk = posixpath.join(
-            cn.datasets["sdpt"]["s3_processed_base"],
-            f"{chunk_px}_pixels",
-            OUTPUT_DATE,
-            chunk_name,
-        )
-
-        # Early check BEFORE creating any delayed objects
-        exists_in_s3 = (
-            uutil.s3_file_exists(cn.s3_bucket_name, s3_chunk)
-            if run_mode == "default"
-            else os.path.exists(out_tif)
-        )
-
-        if exists_in_s3:
-            logging.info(f"(Early Skip) Partial TIF exists => skipping bbox {bbox}.")
-            continue
-
-        # Only now create delayed tasks
-        task = dask.delayed(process_chunk)(
-            tile_id, bbox, species_map, run_mode
-        )
-        tasks.append(task)
-
-    return tasks
-
-def process_chunk(tile_id, bbox, species_map, run_mode):
-    """Process individual chunk including clipping, classification, and rasterization."""
-    clipped_gdf = load_and_clip_shapefile(
-        f"/vsis3/{cn.s3_bucket_name}/{cn.datasets['sdpt']['s3_raw']}/tile_{tile_id}.shp",
-        bbox
-    )
-
-    classified_gdf = classify_features_sync(clipped_gdf, species_map)
-
-    rasterize_chunk_df_sync(classified_gdf, bbox, tile_id, run_mode)
-
-def classify_features_sync(gdf, species_map):
-    """Synchronous classification."""
-    gdf["raster_val"] = gdf.apply(lambda r: classify_plantation(r, species_map), axis=1)
-    gdf.dropna(subset=["raster_val"], inplace=True)
-    return gdf[["geometry", "raster_val"]]
-
-def rasterize_chunk_df_sync(subset_gdf, bbox, tile_id, run_mode):
-    """Synchronous rasterization (no Dask delay here)."""
-    chunk_str = uutil.boundstr(bbox)
-    chunk_px = uutil.calc_chunk_length_pixels(bbox)
-    chunk_name = f"{tile_id}__{chunk_str}__sdpt.tif"
-    local_dir = cn.datasets["sdpt"]["local_processed"]
-    uu.create_directory_if_not_exists(local_dir)
-    out_tif = os.path.join(local_dir, chunk_name)
-
-    s3_chunk = posixpath.join(
-        cn.datasets["sdpt"]["s3_processed_base"],
-        f"{chunk_px}_pixels",
-        OUTPUT_DATE,
-        chunk_name,
-    )
-
-    shapes = [(geom, val) for geom, val in zip(subset_gdf.geometry, subset_gdf["raster_val"])]
-    if not shapes:
-        logging.info(f"No shapes to rasterize in {bbox}, skipping.")
-        return
-
-    minx, miny, maxx, maxy = bbox
-    width = int(round((maxx - minx) / RASTER_RES))
-    height = int(round((maxy - miny) / RASTER_RES))
-    transform = from_origin(minx, maxy, RASTER_RES, RASTER_RES)
-
-    burned = rasterize(
-        shapes,
-        out_shape=(height, width),
-        transform=transform,
-        fill=RASTER_NODATA,
-        dtype=RASTER_DTYPE,
-        all_touched=True,
-    )
-
-    meta = {
-        "driver": "GTiff",
-        "height": height,
-        "width": width,
-        "count": 1,
-        "dtype": RASTER_DTYPE,
-        "crs": "EPSG:4326",
-        "transform": transform,
-        "tiled": True,
-        "compress": "DEFLATE",
-        "nodata": RASTER_NODATA,
-    }
-    with rasterio.open(out_tif, "w", **meta) as dst:
-        dst.write(burned, 1)
-
-    if run_mode == "default":
-        logging.info(f"Uploading partial TIF => s3://{cn.s3_bucket_name}/{s3_chunk}")
-        uutil.upload_file_to_s3(out_tif, cn.s3_bucket_name, s3_chunk)
-        os.remove(out_tif)
-    else:
-        logging.info(f"Test mode => partial TIF => {out_tif} retained locally.")
-
-    del burned
-    gc.collect()
+    return [rasterize_bbox_task(tile_id, tuple(bb), run_mode) for bb in chunk_bboxes]
 
 
-def process_tile_with_bounds(tile_id, chunk_bounds, species_map, run_mode="default"):
-    """Process a single bounding box for ``tile_id``."""
-    logging.info(f"Processing single bounding box => {chunk_bounds} for tile => {tile_id}")
 
+def process_tile_with_bounds(tile_id, chunk_bounds, run_mode="default"):
     if isinstance(chunk_bounds, str):
-        minx, miny, maxx, maxy = map(float, chunk_bounds.split(","))
-        chunk_bounds = (minx, miny, maxx, maxy)
-
-    clipped = load_tile_bbox(tile_id, chunk_bounds)
-    classified = classify_features(clipped, species_map)
-
-    return [dask.delayed(rasterize_chunk_df)(classified, chunk_bounds, tile_id, run_mode)]
+        chunk_bounds = tuple(map(float, chunk_bounds.split(',')))
+    return [rasterize_bbox_task(tile_id, chunk_bounds, run_mode)]
 
 
-# Updated process_all_tiles
-def process_all_tiles(species_map, chunk_size=2.0, run_mode="default", batch_size=25, start_batch=1):
-    all_shp_keys = list_sdpt_shapefiles()
-    total_tiles = len(all_shp_keys)
-    logging.info(f"Total tiles to process: {total_tiles}, batch size: {batch_size}")
+def process_all_tiles(chunk_size=2.0, run_mode="default"):
+    """Process every SDPT tile sequentially to avoid memory blowout."""
 
-    for i in range((start_batch - 1) * batch_size, total_tiles, batch_size):
-        batch_shp_keys = all_shp_keys[i:i + batch_size]
-        batch_tasks = []
-        batch_tile_ids = [os.path.basename(shp_key)[len("tile_"): -4] for shp_key in batch_shp_keys]
-
-        logging.info(f"Processing batch {i // batch_size + 1} with tiles: {batch_tile_ids}")
-
-        for tile_id in batch_tile_ids:
-            minx, miny, maxx, maxy = uutil.get_10x10_tile_bounds(tile_id)
-            chunk_bboxes = uutil.get_chunk_bounds([minx, miny, maxx, maxy], chunk_size)
-
-            tile_tasks = []
-            for bbox in chunk_bboxes:
-                chunk_str = uutil.boundstr(bbox)
-                chunk_px = uutil.calc_chunk_length_pixels(bbox)
-                chunk_name = f"{tile_id}__{chunk_str}__sdpt.tif"
-                local_dir = cn.datasets["sdpt"]["local_processed"]
-                uu.create_directory_if_not_exists(local_dir)
-                out_tif = os.path.join(local_dir, chunk_name)
-
-                s3_chunk = posixpath.join(
-                    cn.datasets["sdpt"]["s3_processed_base"],
-                    f"{chunk_px}_pixels",
-                    OUTPUT_DATE,
-                    chunk_name,
-                )
-
-                exists_in_s3 = (
-                    uutil.s3_file_exists(cn.s3_bucket_name, s3_chunk)
-                    if run_mode == "default"
-                    else os.path.exists(out_tif)
-                )
-
-                if exists_in_s3:
-                    logging.info(f"(Early Skip) Partial TIF exists => skipping bbox {bbox}.")
-                    continue
-
-                task = dask.delayed(process_chunk)(tile_id, bbox, species_map, run_mode)
-                tile_tasks.append(task)
-
-            batch_tasks.extend(tile_tasks)
-
-        if batch_tasks:
-            logging.info(f"Computing {len(batch_tasks)} chunk tasks for batch {i // batch_size + 1}...")
-            dask.compute(*batch_tasks)
-            gc.collect()
-        else:
-            logging.info(f"All chunks in batch {i // batch_size + 1} already processed, skipping.")
-
-    logging.info("Completed processing all tile batches.")
+    for shp_key in list_sdpt_shapefiles():
+        tile_id = os.path.basename(shp_key)[len("tile_") : -4]
+        tasks = process_tile(tile_id, chunk_size, run_mode)
+        if tasks:
+            logging.info(
+                f"Computing {len(tasks)} chunk tasks for tile => {tile_id} ..."
+            )
+            dask.compute(*tasks)
 
 
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-
-
-def main(tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="default", client="local"):
-    """Entry point for the testing script."""
+def main(
+    tile_id=None,
+    chunk_size=2.0,
+    chunk_bounds=None,
+    run_mode="default",
+    client="local",
+):
+    """
+    If chunk_bounds is provided => only process that bounding box.
+    Otherwise => chunk the entire 10x10 tile in N sub-chunks.
+    """
     logging.info(
-        f"SDPT testing script => base S3 path {cn.datasets['sdpt']['s3_processed_base']}"
+        f"SDPT chunk-based script => base S3 path {cn.datasets['sdpt']['s3_processed_base']}"
     )
-
-    if client == "coiled":
-        cluster, client = uutil.connect_to_cluster(
-            cluster_name="sdpt_rasterization", n_workers=60, region="us-east-1", worker_memory="64GiB"
-        )
-        logging.info(f"Coiled cluster => {cluster.name}")
-    else:
+    run_local_flag = client == "local"
+    cluster, dask_client, run_local_flag = uutil.connect_to_cluster(
+        cluster_name="sdpt_rasterize",
+        n_workers=25,
+        region="us-east-1",
+        run_local=run_local_flag,
+        worker_memory="128GiB",
+    )
+    if run_local_flag:
         cluster = LocalCluster()
-        client = Client(cluster)
-        logging.info("Local Dask client started.")
-
-    mapping = load_species_reclassification()
-    species_map = client.scatter(mapping, broadcast=True)
+        dask_client = Client(cluster)
+        logging.info("Running on a local Dask cluster.")
+    else:
+        logging.info(f"Coiled cluster => {cluster.name}")
 
     tasks = []
 
     try:
         if tile_id:
             if chunk_bounds:
-                tasks = process_tile_with_bounds(tile_id, chunk_bounds, species_map, run_mode)
+                logging.info(
+                    f"Processing tile => {tile_id}, chunk bounds => {chunk_bounds}"
+                )
+                tasks = process_tile_with_bounds(
+                    tile_id, chunk_bounds, run_mode
+                )
             else:
-                tasks = process_tile(tile_id, species_map, chunk_size, run_mode)
+                tasks = process_tile(tile_id, chunk_size, run_mode)
+
             logging.info(f"Computing {len(tasks)} chunk tasks ...")
             dask.compute(*tasks)
         else:
             logging.info("No tile_id provided => processing all tiles.")
-            process_all_tiles(species_map, chunk_size, run_mode, batch_size=25, start_batch=1)
+            process_all_tiles(chunk_size, run_mode)
+
     finally:
-        client.close()
-        logging.info("Dask client closed.")
-        if client == "coiled":
+        if dask_client:
+            dask_client.close()
+            logging.info("Dask client closed.")
+        if cluster:
             cluster.close()
             logging.info("Coiled cluster closed.")
 
@@ -518,10 +411,16 @@ def main(tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="default", cl
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="SDPT testing script => partial TIFs stored under s3_processed_base/<px>/YYYYMMDD."
+        description="SDPT chunk-based script => partial TIFs stored under s3_processed_base/<px>/YYYYMMDD."
     )
-    parser.add_argument("--tile_id", type=str, help="Tile ID (e.g. 00N_110E). Omit to process all tiles.")
-    parser.add_argument("--chunk_size", type=float, default=2.0, help="Chunk size (deg).")
+    parser.add_argument(
+        "--tile_id",
+        type=str,
+        help="Tile ID (e.g. 00N_110E). Omit to process all tiles.",
+    )
+    parser.add_argument(
+        "--chunk_size", type=float, default=2.0, help="Chunk size (deg)."
+    )
     parser.add_argument(
         "--chunk_bounds",
         type=str,
@@ -535,14 +434,26 @@ if __name__ == "__main__":
         help="default => partial TIF => S3, test => local partial TIFs.",
     )
     parser.add_argument(
-        "--client", type=str, choices=["local", "coiled"], default="local", help="Dask client type"
+        "--client",
+        type=str,
+        choices=["local", "coiled"],
+        default="local",
+        help="Dask client type (local or coiled).",
     )
 
     args = parser.parse_args()
 
     if not any(sys.argv[1:]):
-        logging.info("No CLI => processing all tiles locally in test mode for demonstration.")
-        main(tile_id=None, chunk_size=2.0, chunk_bounds=None, run_mode="test", client="local")
+        logging.info(
+            "No CLI => processing all tiles locally in test mode for demonstration."
+        )
+        main(
+            tile_id=None,
+            chunk_size=2.0,
+            chunk_bounds=None,
+            run_mode="test",
+            client="local",
+        )
     else:
         main(
             tile_id=args.tile_id,
@@ -551,3 +462,19 @@ if __name__ == "__main__":
             run_mode=args.run_mode,
             client=args.client,
         )
+
+"""
+python -m src.scripts.preprocessing.sdpt.sdpt_rasterize_testing \
+  --tile_id 00N_110E \
+  --chunk_bounds "112,-4,114,-2" \
+  --run_mode test \
+  --client local
+
+python -m src.scripts.preprocessing.sdpt.sdpt_rasterize_testing \
+  --tile_id 00N_110E \
+  --chunk_size 2 \
+  --client coiled
+
+python -m src.scripts.preprocessing.sdpt.sdpt_rasterize_testing \
+  --client local
+"""
