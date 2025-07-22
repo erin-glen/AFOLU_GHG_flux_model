@@ -2,10 +2,16 @@
 Run from src/LULUCF/
 
 Local:
-python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent -bb 110 -10 120 0 -cs 10 --run_local --no_stats --no_upload
+python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_10x10_degree -bb 110 -10 120 0 -cs 10 --run_local --no_stats --no_upload
+
+Coiled test run:
+python -m scripts.utilities.create_cluster -n 4 -t 2 -m 32 -cn mangrove_smoothing_10x10deg
+python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_10x10_degree -bb 110 -10 120 0 -cs 10 --no_stats
+
 
 todo:
-- see if it can scale from 1 degree to 10 degrees after testing 
+- see if it can scale from 1 degree to 10 degrees after testing
+- fix chunk stats
 
 """
 import argparse
@@ -82,7 +88,6 @@ def smooth_mangrove_data(in_dict_uint8):
                 mangrove_extent_2008_out_block[row, col] = 1
             else:
                 mangrove_extent_2008_out_block[row, col] = 0
-            # TODO: raise error if neither 0 nor 1 throughout
 
             # Adding in mangrove extent in 2009 if there is mangrove extent in 2008 and 2010
             if mangrove_extent_2009 == 1:
@@ -127,7 +132,6 @@ def smooth_mangrove_data(in_dict_uint8):
                 mangrove_extent_2019_out_block[row, col] = 0
             # Not modifying 2020 since it is the end of the consecutive time period (2015 - 2020)
 
-    # TODO: Check that this is writing over out_block correctly
     # STEP 2: Remove "false positive" in mangrove extent years using processed out_block data
     # Iterates through all pixels in the chunk
     for row in range(mangrove_extent_2007_block.shape[0]):
@@ -316,7 +320,7 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
             out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
 
         # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
-        upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
+        upload_tasks = uu.save_and_upload_raster_10x10(bounds, chunk_length_pixels, tile_id, bounds_str,
                                                            out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
         #TODO change to save_and_upload_raster_10x10
 
@@ -338,7 +342,8 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
     # Removes task tracking file from S3 once task is successful
     uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
 
-    return return_message, chunk_stats  # Return both the success message and the statistics
+    return return_message
+    #return return_message, chunk_stats  # Return both the success message and the statistics
 
 def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload= False,
          chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
@@ -346,15 +351,15 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = f'starting_mangroves_1x1_deg'
+    stage = f'starting_mangroves_10x10_deg'
     model_type = 'standard'
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
-    # Shapefile of chunk footprints to use if none is supplied on the command line
-    if not chunk_shapefile_uri:
-        chunk_shapefile_uri = cn.fishnet_1x1deg_uri
+    # # Shapefile of chunk footprints to use if none is supplied on the command line
+    # if not chunk_shapefile_uri:
+    #     chunk_shapefile_uri = cn.fishnet_1x1deg_uri #TODO change to 10 x 10 degree
 
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
@@ -366,10 +371,10 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
-    fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
+    #fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri) TODO: change to 10 x 10 degree
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
+    chunk_list = uu.get_chunk_bounds_from_bounding_box(bounding_box, chunk_size)
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
@@ -417,20 +422,20 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
 
-    ### Step 2: Create 1x1 degree outputs
+    ### Step 2: Create 10x10 degree outputs
 
     # Creates list of tasks to run (1 task = 1 chunk)
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
     main_logger.info("Workers' logs to be appended after main function log" + "\n")
 
-    mangrove_1x1_deg_delayed_results = [dask.delayed(preprocess_and_upload_smoothed_mangrove_data)
+    mangrove_10x10_deg_delayed_results = [dask.delayed(preprocess_and_upload_smoothed_mangrove_data)
                 (chunk, download_dict_with_data_types, is_final, no_upload,output_dir_list, stage)
                 for chunk in chunk_list]
 
     # Runs analysis and gathers results
-    mangrove_1x1_deg_results = dask.compute(*mangrove_1x1_deg_delayed_results)
+    mangrove_10x10_deg_results = dask.compute(*mangrove_10x10_deg_delayed_results)
 
-    success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, mangrove_1x1_deg_results)
+    success_count_10x10, all_10x10_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, mangrove_10x10_deg_results)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
     if not no_upload:
@@ -442,7 +447,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
-    ### Step 3: Chunk stats for 1x1 degree outputs, aggregates logs
+    ### Step 3: Chunk stats for 10x10 degree outputs, aggregates logs
     # todo: get chunk stats to work
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
@@ -455,12 +460,12 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
             main_logger.info("Resizing cluster to 1 worker")
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
-    # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
+    # Prepares 10x10 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
-    if (not no_stats) and (success_count_1x1 > 0):
-        uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+    # if (not no_stats) and (success_count_10x10 > 0):
+    #     uu.compile_10x10_chunk_stats(all_10x10_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+    # uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger) #TODO change to 10 x 10 deg
 
     # Sets it so that no worker logs are created if doing a local run
     if not run_local:
@@ -482,7 +487,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
-    parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
+    parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 10x10 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
