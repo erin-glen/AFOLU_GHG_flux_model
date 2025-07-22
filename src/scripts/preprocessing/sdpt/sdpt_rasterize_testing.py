@@ -47,6 +47,14 @@ RASTER_NODATA = 0
 RASTER_DTYPE = np.uint8
 
 # ────────────────────────────────────────────────────────────────
+# Vectorised mapping for Solution #2
+_MAP_SIMPLETYPE = {
+    "planted forest": 1,
+    "tree crops": 2,
+}
+# ────────────────────────────────────────────────────────────────
+
+# ────────────────────────────────────────────────────────────────
 # Helper utilities for Solution #1
 def _tile_shp_path(tile_id: str) -> str:
     """Return the /vsis3/ path to a tile_<id>.shp on S3."""
@@ -101,6 +109,7 @@ def classify_simple_type(row):
     if val == "tree crops":
         return 2
     return None
+# NOTE: kept only for backward-compat. Not used after Solution #2.
 
 
 def rasterize_chunk_shp(shp_path, bbox, tile_id, run_mode):
@@ -291,11 +300,21 @@ def rasterize_bbox_task(tile_id: str, bbox: tuple, run_mode: str):
         logging.info(f"No geometries in {bbox} for tile {tile_id} – skipped.")
         return
 
-    gdf["raster_val"] = gdf.apply(classify_simple_type, axis=1)
-    gdf.dropna(subset=["raster_val"], inplace=True)
+    # ── Solution #2: vectorised classification ────────────────────
+    mapped = (
+        gdf["simpleType"]
+          .str.strip()              # remove leading / trailing blanks
+          .str.lower()              # normalise case
+          .map(_MAP_SIMPLETYPE)     # fast dict lookup
+    )
+    gdf = gdf.assign(raster_val=mapped).dropna(subset=["raster_val"])
     if gdf.empty:
         logging.info(f"All geometries mapped to None in {bbox} – skipped.")
         return
+
+    # Ensure uint8 dtype for consistency with RASTER_DTYPE
+    gdf["raster_val"] = gdf["raster_val"].astype("uint8", copy=False)
+    # ──────────────────────────────────────────────────────────────
 
     rasterize_chunk_df(gdf, bbox, tile_id, run_mode)
 
