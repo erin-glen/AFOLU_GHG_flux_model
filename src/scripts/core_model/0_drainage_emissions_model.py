@@ -1124,6 +1124,16 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
+  --tile_ids 00N_080W,00N_070W,00N_110E,10N_110E,10N_010E,10N_020E,20N_020W,60N_010W,60N_110W,70N_050E \
+  --chunk_size 1 \
+  --start_year 2001 \
+  --end_year 2024 \
+  --all_five_year_periods \
+  --mark_missing_factors \
+  --count_burned_years
+
+python -m src.scripts.core_model.0_drainage_emissions_model \
+  --cluster_name drainage_cluster \
   --full_model \
   --chunk_size 1 \
   --start_year 2001 \
