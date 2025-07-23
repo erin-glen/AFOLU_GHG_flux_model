@@ -36,11 +36,9 @@ INVENTORY_PERIODS = [
     "2021_2024",
 ]
 
-BASE_URL = (
-    "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/"
-    "outputs/version_0_4_3"
-)
-OUTPUT_DATE = "20250707"
+version = cn.model_version_underscore
+BASE_URL = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_{version}"
+OUTPUT_DATE = "20250723"
 PIXEL_RES = "4000_pixels"
 
 
