@@ -357,3 +357,11 @@ if __name__ == "__main__":
     resume = args.resume
 
     main(cluster_name, run_local, source_root, dest_root, task_file, resume)
+
+"""
+python -m src.scripts.preprocessing.landcover.0_GCS_to_s3_copy \
+--source_root gs://earthenginepartners-hansen/LCLU_2015_2024_v01/2024/ \
+--dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/composite/annual/v2/raw/2024 \
+--task_file my_tasks.json \
+-cn download_hansen
+"""
