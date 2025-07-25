@@ -1310,48 +1310,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'mean_value': 'no data',
             'max_value': 'no data',
             'count_value': 'no data',
-            'sum_value': 'no data',
-            'data_type': 'no data'
-        }
-    else:    # Only calculates stats if there is data in the array
-        return {
-            'chunk_id': bounds_str,
-            'tile_id': tile_id,
-            'layer_name': name,
-            'pattern': out_pattern,
-            'years': year_range,
-            'chunk_name': f'{tile_id}__{bounds_str}__{out_pattern}_{year_range}.tif',
-            'tile_name': f'{tile_id}__{out_pattern}_{year_range}.tif',
-            'in_out': in_out,
-            'min_value': np.min(array_per_ha),
-            'mean_value': np.mean(array_per_ha),
-            'max_value': np.max(array_per_ha),
-            'count_value': np.count_nonzero(array_per_ha),
             'sum_value': sum_value,
-            'data_type': array_per_ha.dtype.name
-        }
-
-#todo: modify other chunk stats function?
-def calculate_mangrove_stats(extent_array, name, bounds_str, tile_id, in_out):
-
-    # Gets the output file pattern and year/year_range
-    out_pattern, year_range = strip_and_extract_years(name)
-
-    if array_per_ha is None or not np.any(array_per_ha):  # Checks if the array is None or empty
-        return {
-            'chunk_id': bounds_str,
-            'tile_id': tile_id,
-            'layer_name': name,
-            'pattern': out_pattern,
-            'years': year_range,
-            'chunk_name': f'{tile_id}__{bounds_str}__{out_pattern}_{year_range}.tif',
-            'tile_name': f'{tile_id}__{out_pattern}_{year_range}.tif',
-            'in_out': in_out,
-            'min_value': 'no data',
-            'mean_value': 'no data',
-            'max_value': 'no data',
-            'count_value': 'no data',
-            'sum_value': 'no data',
             'data_type': 'no data'
         }
     else:    # Only calculates stats if there is data in the array
