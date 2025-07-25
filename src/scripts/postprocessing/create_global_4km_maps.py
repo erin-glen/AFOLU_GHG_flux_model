@@ -1,9 +1,9 @@
-"""Aggregate 10x10° raster outputs into global ~4 km maps.
+"""Aggregate 10x10° raster outputs into global ~4km maps.
 
     The script converts per‑hectare drainage emission outputs to per‑pixel values
-    using pixel area rasters and then aggregates them to approximately 4 km
+    using pixel area rasters and then aggregates them to approximately 4km
     resolution.  Passing ``--skip_pixel_area`` will bypass the conversion step and
-    simply average the per‑hectare values when creating the 4 km products.  When
+    simply average the per‑hectare values when creating the 4km products.  When
     pixel area rasters are skipped the output filenames omit the ``per_pixel``
     suffix used in the default workflow.
 """
@@ -16,8 +16,8 @@ import posixpath
 # ---------------------------------------------------------------------------
 # Spatial-resolution constants (degrees)
 # ---------------------------------------------------------------------------
-NATIVE_DEG = 0.00025   # native grid  (≈30 m equiv.)
-TARGET_DEG = 0.04      # aggregated   (≈4 km equiv.)
+NATIVE_DEG = 0.00025   # native grid  (≈30m equiv.)
+TARGET_DEG = 0.04      # aggregated   (≈4km equiv.)
 
 from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
@@ -25,28 +25,18 @@ from ..utilities import log_utilities as lu
 
 DATA_TYPES = [
     # "burned_ch4_Mg_CO2e_ha",
-    # "burned_co2_Mg_CO2_ha"
+    # "burned_co2_Mg_CO2_ha",
     # "burned_co_Mg_CO2e_ha",
-    # "burned_state",
-    # "burned_emission_state",
-    # "burned_total_Mg_CO2e_ha",
-    # "drained_ch4_ditch_Mg_CO2e_ha",
-    # "drained_ch4_land_Mg_CO2e_ha",
-    # "drained_co2_Mg_CO2_ha",
-    # "drained_co2_offsite_Mg_CO2_ha",
-    # "drained_n2o_Mg_CO2e_ha",
-    "drained_total_Mg_CO2e_ha",
-    "emission_state",
-    "soil",
-    "state",
+    "burned_total_Mg_CO2e_ha",
+    # "drained_ch4_ditch_Mg_CO2e_ha_yr",
+    # "drained_ch4_land_Mg_CO2e_ha_yr",
+    # "drained_co2_Mg_CO2_ha_yr",
+    # "drained_co2_offsite_Mg_CO2_ha_yr",
+    # "drained_n2o_Mg_CO2e_ha_yr",
+    "drained_total_Mg_CO2e_ha_yr",
 ]
 
 INTEGER_DATASETS = {
-    "state",
-    "burned_state",
-    "emission_state",
-    "burned_emission_state",
-    "soil",
 }
 
 INVENTORY_PERIODS = [
@@ -59,9 +49,9 @@ INVENTORY_PERIODS = [
 
 BASE_URL = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/"
-    "outputs/version_0_3_9"
+    "outputs/version_0_5_0"
 )
-OUTPUT_DATE = "20250610"
+OUTPUT_DATE = "20250724"
 
 
 def get_input_datasets(
@@ -355,3 +345,7 @@ if __name__ == "__main__":
         args.run_local,
         not args.skip_pixel_area,
     )
+
+"""
+python -m src.scripts.postprocessing.create_global_4km_maps -cm create_maps
+"""
