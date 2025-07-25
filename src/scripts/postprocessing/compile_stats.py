@@ -1,16 +1,22 @@
 """
 Compare organic‑soil emissions from your model with FAOSTAT.
 
-Requires:
-    • iso_lookup.py  (same directory) – provides ISO_LOOKUP dict
-    • pandas ≥ 2.1
-    • openpyxl       (for reading the Excel model output)
+Requires
+--------
+• iso_lookup.py  (same directory) – provides ISO_LOOKUP dict
+• pandas ≥ 2.1
+• openpyxl       (to read the Excel model output)
 
-Outputs tidy & wide CSVs in ./comparison_outputs
+Outputs
+-------
+comparison_outputs/
+    model_vs_faostat_long.csv
+    model_vs_faostat_wide.csv
 """
+
 from pathlib import Path
 import pandas as pd
-from iso_lookup import ISO_LOOKUP   # <-- externalised mapping
+from iso_lookup import ISO_LOOKUP
 
 # ---------------------------------------------------------------------
 MODEL_EXCEL = r"C:\tmp\0724_stats\drainage_model_1x1_chunk_statistics_20250724_20_14_28.xlsx"
@@ -34,7 +40,9 @@ def year_to_period(year: int) -> str | None:
     return None
 
 
-# -------------------- model loader -----------------------------------
+# ---------------------------------------------------------------------
+#  MODEL OUTPUT
+# ---------------------------------------------------------------------
 def load_model_outputs(path: str | Path) -> pd.DataFrame:
     df = pd.read_excel(
         path,
@@ -44,60 +52,78 @@ def load_model_outputs(path: str | Path) -> pd.DataFrame:
 
     keep_layers = {
         "drained_total_Mg_CO2e_ha_yr": "drained",
-        "burned_total_Mg_CO2e_ha": "burned",
+        "burned_total_Mg_CO2e_ha":     "burned",
     }
     df = df[df["layer_name"].isin(keep_layers)]
     df["emission_type"] = df["layer_name"].map(keep_layers)
 
+    # burned rows are totals for the whole period → convert to annual
     df["period_len"] = df["years"].map(PERIOD_LEN)
     burned = df["emission_type"] == "burned"
     df.loc[burned, "sum_value"] = (
         df.loc[burned, "sum_value"] / df.loc[burned, "period_len"]
     )
 
-    df = (
+    return (
         df.rename(columns={"years": "period", "sum_value": "annual_Mg_CO2e"})
-        .assign(source="model")
-        .loc[:, ["iso", "period", "emission_type", "annual_Mg_CO2e", "source"]]
-        .sort_values(["iso", "period", "emission_type"])
+          .assign(source="model")
+          .loc[:, ["iso", "period", "emission_type", "annual_Mg_CO2e", "source"]]
+          .sort_values(["iso", "period", "emission_type"])
     )
-    return df
 
 
-# -------------------- FAOSTAT loader ---------------------------------
+# ---------------------------------------------------------------------
+#  FAOSTAT  (with Element filter for fires)
+# ---------------------------------------------------------------------
 def load_faostat(path: str | Path) -> pd.DataFrame:
     item_map = {
         "Drained organic soils": "drained",
         "Fires in organic soils": "burned",
     }
 
-    df = pd.read_csv(path, usecols=["Area", "Item", "Year", "Value"])
+    df = pd.read_csv(
+        path,
+        usecols=["Area", "Item", "Element", "Year", "Value"]
+    )
 
+    # map Area → ISO‑3 and drop aggregates
     df["iso"] = df["Area"].map(ISO_LOOKUP)
-    df = df[df["iso"].notna()]  # drop aggregates
+    df = df[df["iso"].notna()]
+
+    # keep only the two items we care about
+    df = df[df["Item"].isin(item_map)]
+
+    # ── Element filter: for fires keep only AR5 CO₂‑eq ─────────────
+    mask_burned = df["Item"] == "Fires in organic soils"
+    df = df[~mask_burned | (df["Element"] == "Emissions (CO2eq) (AR5)")]
+    # ----------------------------------------------------------------
 
     df["emission_type"] = df["Item"].map(item_map)
-    df = df[df["emission_type"].notna()]
 
+    # kt → Mg
     df["annual_Mg_CO2e"] = df["Value"] * 1_000
+
+    # calendar year → 5‑year model period
     df["period"] = df["Year"].apply(year_to_period)
     df = df.dropna(subset=["period"])
 
-    df = (
+    # average annual values inside each 5‑year block
+    return (
         df.groupby(["iso", "period", "emission_type"], as_index=False)
-        ["annual_Mg_CO2e"]
-        .mean()
-        .assign(source="FAOSTAT")
+          ["annual_Mg_CO2e"].mean()
+          .assign(source="FAOSTAT")
     )
-    return df
 
 
-# -------------------- main driver ------------------------------------
+# ---------------------------------------------------------------------
+#  MAIN
+# ---------------------------------------------------------------------
 def main() -> None:
     model_df = load_model_outputs(MODEL_EXCEL)
     fao_df   = load_faostat(FAO_CSV)
 
     combined_long = pd.concat([model_df, fao_df], ignore_index=True)
+
     combined_wide = (
         combined_long.pivot_table(
             index=["iso", "period", "emission_type"],
@@ -109,10 +135,13 @@ def main() -> None:
 
     out_dir = Path("comparison_outputs")
     out_dir.mkdir(exist_ok=True)
+
     combined_long.to_csv(out_dir / "model_vs_faostat_long.csv", index=False)
     combined_wide.to_csv(out_dir / "model_vs_faostat_wide.csv", index=False)
+
     print("✓ comparison tables written to", out_dir.resolve())
 
 
+# ---------------------------------------------------------------------
 if __name__ == "__main__":
     main()
