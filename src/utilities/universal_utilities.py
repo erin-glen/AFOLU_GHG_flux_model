@@ -1364,7 +1364,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'mean_value': 'no data',
             'max_value': 'no data',
             'count_value': 'no data',
-            'sum_value': 'no data',
+            'sum_value': sum_value,
             'data_type': 'no data'
         }
     else:    # Only calculates stats if there is data in the array
@@ -1382,6 +1382,8 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'max_value': np.max(array_per_ha),
             'count_value': np.count_nonzero(array_per_ha),
             'sum_value': sum_value,
+            'data_type': array_per_ha.dtype.name
+        }
             'data_type': array_per_ha.dtype.name
         }
 

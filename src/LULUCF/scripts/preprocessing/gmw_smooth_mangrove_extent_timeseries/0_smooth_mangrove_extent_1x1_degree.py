@@ -14,6 +14,7 @@ todo:
 """
 import argparse
 import sys
+import gc
 import numpy as np
 from numba import jit
 import dask
@@ -37,7 +38,7 @@ def smooth_mangrove_data(in_dict_uint8):
     out_dict_uint8 = {}
 
     #Input data blocks: hansenized mangrove extent
-    # NOTE: You can't use f strings in a numba funciton to put together the key from cn constants.
+    # NOTE: You can't use f strings in a numba funciton to put together the dictionary key from cn constants.
     # These dictionary keys will need to be updated when we switch to GMWv4
     mangrove_extent_1996_block = in_dict_uint8["GMWv3_mangrove_extent_1996"]
     mangrove_extent_2007_block = in_dict_uint8["GMWv3_mangrove_extent_2007"]
@@ -53,7 +54,7 @@ def smooth_mangrove_data(in_dict_uint8):
 
     # Output data blocks: smoothed mangrove extent (empty blocks)
     # Initial and final year of consecutive years are not modified, only the years in between.
-    # So smoothed data for those years will be identical to raw data and copied directly from input blocls
+    # So smoothed data for those years will be identical to raw data and copied directly from input blocks
     mangrove_extent_2008_out_block = np.zeros(in_dict_uint8["GMWv3_mangrove_extent_2008"].shape).astype('uint8')
     mangrove_extent_2009_out_block = np.zeros(in_dict_uint8["GMWv3_mangrove_extent_2009"].shape).astype('uint8')
     mangrove_extent_2016_out_block = np.zeros(in_dict_uint8["GMWv3_mangrove_extent_2016"].shape).astype('uint8')
@@ -86,7 +87,6 @@ def smooth_mangrove_data(in_dict_uint8):
                 mangrove_extent_2008_out_block[row, col] = 1
             else:
                 mangrove_extent_2008_out_block[row, col] = 0
-            # TODO: raise error if neither 0 nor 1 throughout
 
             # Adding in mangrove extent in 2009 if there is mangrove extent in 2008 and 2010
             if mangrove_extent_2009 == 1:
@@ -131,13 +131,12 @@ def smooth_mangrove_data(in_dict_uint8):
                 mangrove_extent_2019_out_block[row, col] = 0
             # Not modifying 2020 since it is the end of the consecutive time period (2015 - 2020)
 
-    # TODO: Check that this is writing over out_block correctly
     # STEP 2: Remove "false positive" in mangrove extent years using processed out_block data
     # Iterates through all pixels in the chunk
     for row in range(mangrove_extent_2007_block.shape[0]):
         for col in range(mangrove_extent_2007_block.shape[1]):
 
-            # Input values for specific cell (use smoothed data)
+            # Input values for specific cell (overwrite smoothed data)
             mangrove_extent_2007 = mangrove_extent_2007_block[row, col]
             mangrove_extent_2008 = mangrove_extent_2008_out_block[row, col]
             mangrove_extent_2009 = mangrove_extent_2009_out_block[row, col]
@@ -174,22 +173,22 @@ def smooth_mangrove_data(in_dict_uint8):
                 mangrove_extent_2019_out_block[row, col] = 0
 
     # Adds the output arrays to the output data dictionary
-    out_dict_uint8["GMWv3_smoothed_mangrove_extent_1996"] = mangrove_extent_1996_block.copy()     #same as raw data
-    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2007"] = mangrove_extent_2007_block.copy()     #same as raw data
-    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2008"] = mangrove_extent_2008_out_block.copy()
-    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2009"] = mangrove_extent_2009_out_block.copy()
-    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2010"] = mangrove_extent_2010_block.copy()     #same as raw data
-    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2015"] = mangrove_extent_2015_block.copy()     #same as raw data
-    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2016"] = mangrove_extent_2016_out_block.copy()
-    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2017"] = mangrove_extent_2017_out_block.copy()
-    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2018"] = mangrove_extent_2018_out_block.copy()
-    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2019"] = mangrove_extent_2019_out_block.copy()
-    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2020"] = mangrove_extent_2020_block.copy()     #same as raw data
+    out_dict_uint8["GMWv3_smoothed_mangrove_extent_1996"] = mangrove_extent_1996_block     #same as raw data
+    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2007"] = mangrove_extent_2007_block     #same as raw data
+    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2008"] = mangrove_extent_2008_out_block
+    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2009"] = mangrove_extent_2009_out_block
+    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2010"] = mangrove_extent_2010_block     #same as raw data
+    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2015"] = mangrove_extent_2015_block     #same as raw data
+    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2016"] = mangrove_extent_2016_out_block
+    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2017"] = mangrove_extent_2017_out_block
+    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2018"] = mangrove_extent_2018_out_block
+    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2019"] = mangrove_extent_2019_out_block
+    out_dict_uint8["GMWv3_smoothed_mangrove_extent_2020"] = mangrove_extent_2020_block     #same as raw data
 
     return out_dict_uint8
 
 # All steps for creating smoothed mangrove data: download chunks, smooth data, upload to s3
-def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data_types, is_final, no_upload, output_folders, stage):
+def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data_types, area_dict_with_data_types, is_final, no_upload, output_folders, stage):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -203,16 +202,16 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
 
 
-    ### Part 1: Downloads chunk.
+    ### Part 1: Downloads data chunk.
     ### No checks about whether the chunk has data because the way the chunk_list is constructed
-    #todo: add step to check whether any of the years has data, if not skip
+    #todo: add step to check whether any of the years has data before downloading
 
-    # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
+    # Replaces the placeholder tile_id in the data dictionaries from main with the tile_id for this chunk
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
 
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
     futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
-    print(futures)
+    #print(f"futures: {futures}")
 
     lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
@@ -226,49 +225,117 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
         if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
             lu.print_and_log(f"{status}", is_final, logger_worker)
         layers[layer] = data
+    #print(f"layers: {layers}")
 
-    # Test prints
-    print(layers)
-    # print(layers[''].max())
-    # print(layers[''].dtype)
-
-    ### Part 2: Calculates min, mean, and max for each input chunk.
-    ### Useful for QC to see if there are any egregiously incorrect or unexpected values.
-    #todo: create or modify calculate_stats for mangrove data. add mangrove extent area stat?
-
-    # Calculates stats for the input layers
-    print ('Part 2')
+    # Array of maximum values for all years
+    max_list = []
     for key, array in layers.items():
-        #chunk_stats.append(uu.calculate_stats(array, key, bounds_str, tile_id, 'input_layer'))
-        print(f'key: {key}')
-        print(f'array: {array}')
-    #print(chunk_stats)
+        max_list.append(layers[key].max())
+        #print(f"layer: {key}, maximum value: {max_value}")
+
+    max_value_all_years = max(max_list)
+    #print(f"max_value_all_years: {max_value_all_years}")
+    #todo if 0 skip downloading pixel_area + smoothing step and if >1 or <0 throw error
 
 
-    ### Part 3: Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type
-    # TODO: Create only uint8 typed dictionary or delete other types
+    ### Part 2: Downloads pixel area chunk if there is mangrove extent in one of the years to calculate total extent.
 
+    # Download pixel area (m2) if chunk has mangrove extent to calculate mangrove extent in chunk stats
+    if max_value_all_years == np.uint8(1):
+        # Replaces the placeholder tile_id in the data dictionaries from main with the tile_id for this chunk
+        updated_area_dict = uu.replace_tile_id_in_dict(area_dict_with_data_types, tile_id)
+
+        # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
+        area_futures = uu.prepare_to_download_chunk(bounds, updated_area_dict, chunk_length_pixels, is_final, logger_worker)
+        # print(f"area_futures: {area_futures}")
+
+        lu.print_and_log(f"Waiting for requests for pixel area in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final,
+                         logger_worker)
+
+        # Dictionary that stores the dataset name (key) and downloaded data and download status (values)
+        area_layers = {}
+
+        # Ensures futures stores Future objects
+        for area_future in concurrent.futures.as_completed(area_futures):
+            area_layer = area_futures[area_future]
+            data, status = area_future.result()
+            if 'success' not in status:  # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+                lu.print_and_log(f"{status}", is_final, logger_worker)
+            area_layers[area_layer] = data
+        #print(f"area_layers: {area_layers}")
+        #print(f"maximum pixel area: {area_layers['pixel_area_m2'].max()}")
+
+    elif max_value_all_years == np.uint8(0):
+        lu.print_and_log(f"No mangrove extent in chunk {bounds_str} in {tile_id}. Skip downloading pixel area data: {uu.timestr()}",
+                         is_final, logger_worker)
+    else:
+        raise ValueError(f"Maximum value of mangrove extent is not 0 or 1 in chunk {bounds_str} in {tile_id}")
+
+
+    ### Part 3: Calculates mangrove extent in raw mangrove data if mangrove extent exists
+    print('Part 3')
+    if max_value_all_years == np.uint8(1):
+        # Calculates total mangrove extent in chunk by multiplying binary extent by per-pixel area
+        for key, array in layers.items():
+            mangrove_extent_area_m2 = array * area_layers['pixel_area_m2']
+            chunk_stats.append(uu.calculate_stats(None, key, bounds_str, tile_id, 'output_layer', mangrove_extent_area_m2))
+        #print(chunk_stats)
+
+    elif max_value_all_years == np.uint8(0):
+        lu.print_and_log(f"No mangrove extent in chunk {bounds_str} in {tile_id}. Skip calculating chunk stats for raw data: {uu.timestr()}",
+                         is_final, logger_worker)
+    else:
+        raise ValueError(f"Maximum value of mangrove extent is not 0 or 1 in chunk {bounds_str} in {tile_id}")
+
+
+    ### Part 4: Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type
+    print('Part 4')
     lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
     # Creates the typed dictionaries for all input layers (including those that originally had no data)
     typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
-    print("uint8_typed_list:", typed_dict_uint8)
+
+    if max_value_all_years == np.uint8(1):
+
+        ### Part 5: Creates smoothed mangrove extent rasters
+        print('Part 5')
+        lu.print_and_log(f"Creating smoothed mangrove data in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker) # Prints during full runs
+        uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
+
+        # Create smoothed mangrove data
+        out_dict_uint8 = smooth_mangrove_data(typed_dict_uint8)
+        del typed_dict_uint8 # Delete raw data arrays from typed_dict_uint8 that have been smoothed to save memory
 
 
-    ### Part 4: Creates mangrove extent rasters
+        ### Part 6: Calculates mangrove extent in raw mangrove data if mangrove extent exists
 
-    lu.print_and_log(f"Creating preprocessed mangrove data in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker) # Prints during full runs
-    uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
+        # Calculates total smoothed mangrove extent in chunk by multiplying binary extent by per-pixel area
+        for key, array in out_dict_uint8.items():
+            mangrove_extent_area_m2 = array * area_layers['pixel_area_m2']
+            chunk_stats.append(
+                uu.calculate_stats(None, key, bounds_str, tile_id, 'output_layer', mangrove_extent_area_m2))
+        #print(chunk_stats)
 
-    # Create smoothed mangrove data
-    out_dict_uint8 = smooth_mangrove_data(typed_dict_uint8)
+    elif max_value_all_years == np.uint8(0):
 
-    # Fresh non-Numba-constrained dictionary that stores all output numpy arrays of all datatypes.
-    # The dictionaries by datatype that are returned from the numba function have limitations on them,
-    # e.g., they can't be combined with other datatypes. This prevents the addition of attributes needed for uploading to s3.
-    # So the trick here is to copy the numba-exported arrays into normal Python arrays to which we can do anything in Python.
+        ### Part 5: Creates smoothed mangrove extent rasters
+        print('Part 5')
+        lu.print_and_log(f"No mangrove extent. Not calculating smoothed mangrove data in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+
+        # Use raw data as output data
+        out_dict_uint8 = typed_dict_uint8
+        del typed_dict_uint8
+
+    # Clear memory
+    del futures
+    del area_futures
+    del layers
+    del area_layers
+    gc.collect()  # Collect garbage once, after all deletions
+
+    ## Part 7: Convert Numba-constrained dictionary into normal Python arrays to which we can do anything in Python.
+
     out_dict_all_dtypes = {}
-    print('Part 4')
 
     # Transfers the dictionaries of numpy arrays for each data type to a new, Pythonic array
     out_dicts = [out_dict_uint8]
@@ -277,16 +344,14 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
     for out_dict in out_dicts:
         for key, value in out_dict.items():
             out_dict_all_dtypes[key] = value
-            print(f'key: {key}')
-            print(f'value: {value}')
 
-        # Clear memory of unneeded arrays
-        del out_dict
-
-    ##TODO calculate extent of mangrove for each year after smoothing
+    # Clear memory of unneeded arrays
+    del out_dicts
+    del out_dict_uint8
+    gc.collect()  # Collect garbage once, after all deletions
 
 
-    ### Part 5: Saves numpy arrays as rasters and uploads to s3
+    ### Part 8: Saves numpy arrays as rasters and uploads to s3
 
     uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
 
@@ -307,7 +372,7 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
             print("out_pattern:", out_pattern)
             print("year_range:", year_range)
 
-            print(f"output_folders: {output_folders}")
+            #print(f"output_folders: {output_folders}")
 
             # Retrieves the relevant output s3 path for this specific output  (list of one element)
             matched_output_s3_folder = [item for item in output_folders if year_range in item][0]
@@ -336,6 +401,7 @@ def preprocess_and_upload_smoothed_mangrove_data(bounds, download_dict_with_data
 
     # Clears memory of unneeded arrays
     del out_dict_all_dtypes
+    gc.collect()
 
     return_message = f"Success creating smoothed mangrove extent raster for {bounds_str}: {uu.timestr()}"
 
@@ -368,8 +434,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     main_logger.info(f"Stage {stage} started at: {start_time}")
 
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
-    # chunk_ids for making chunk list if shapefile is supplied in command line.
-    # chunk_ids and iso code used for chunk stats.
     fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
@@ -379,7 +443,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
-    # is_final = True  # For simulating a large run
     if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model.")
@@ -392,43 +455,45 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     download_dict = {}
     for year in cn.mangrove_extent_years:
         download_dict[f"{cn.mangrove_extent_hansenized_pattern}_{year}"] = f"{cn.mangrove_extent_hansenized_dir}{year}/{sample_tile_id}_{cn.mangrove_extent_hansenized_pattern}_{year}.tif"
-    print(f"download_dict: {download_dict}")
+    #print(f"download_dict: {download_dict}")
 
-    # List of output directories for smoothed data
+    # Dictionary for pixel area array to calculate pre- and post-smoothing mangrove extent chunk stats
+    area_dict = {}
+    area_dict["pixel_area_m2"] = f"{cn.pixel_area_dir}/{cn.pixel_area_pattern}_{sample_tile_id}.tif"
+    #print(f"area_dict: {area_dict}")
+
+    # List of output directories for smoothed mangrove extent data
     output_dir_list = []
-
     for year in cn.mangrove_extent_years:
         output_dir_list.append(f"{cn.mangrove_extent_processed_dir}{year}/")
-
-    # Creates list of output directories specific to the run
-    #output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
-    #output_dir_list = [path.replace("PER_HA_OR_PIXEL", "") for path in output_dir_list]
-    print(output_dir_list)
+    #print(f"output_dir_list: {output_dir_list}")
 
     # Returns the first tile in each input so that the datatype can be determined.
     main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
     first_tiles = uu.first_file_name_in_s3_folder(download_dict)
-    print(first_tiles)
+    first_area_tiles = uu.first_file_name_in_s3_folder(area_dict)
 
-    # Creates a download dictionary with the datatype of each input in the values.
-    # This is supplied to each chunk that is being analyzed.
-    # This also serves as a check of whether all inputs are being found (s3 paths correct)
+    # Creates a download dictionary with the datatype of each input which is supplied to each chunk being analyzed.
     main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
-    print(download_dict_with_data_types)
+    area_dict_with_data_types = uu.add_file_type_to_dict(first_area_tiles)
+    #print(f"download_dict_with_data_types: {download_dict_with_data_types}")
+    #print(f"area_dict_with_data_types: {area_dict_with_data_types}")
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
 
+
     ### Step 2: Create 1x1 degree outputs
+    #todo: aggregate 1 x 1 degree chunks then combine into 10x10 degree chunks and upload
 
     # Creates list of tasks to run (1 task = 1 chunk)
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
     main_logger.info("Workers' logs to be appended after main function log" + "\n")
 
     mangrove_1x1_deg_delayed_results = [dask.delayed(preprocess_and_upload_smoothed_mangrove_data)
-                (chunk, download_dict_with_data_types, is_final, no_upload,output_dir_list, stage)
+                (chunk, download_dict_with_data_types, area_dict_with_data_types, is_final, no_upload,output_dir_list, stage)
                 for chunk in chunk_list]
 
     # Runs analysis and gathers results
@@ -447,7 +512,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
 
     ### Step 3: Chunk stats for 1x1 degree outputs, aggregates logs
-    # todo: get chunk stats to work
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
     if not run_local:
