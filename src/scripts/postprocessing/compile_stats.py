@@ -13,8 +13,8 @@ import pandas as pd
 from iso_lookup import ISO_LOOKUP   # <-- externalised mapping
 
 # ---------------------------------------------------------------------
-MODEL_EXCEL = r"/path/to/organic_soils/other_outputs.xlsx"
-FAO_CSV     = r"/path/to/faostat/FAOSTAT_organic_soils.csv"
+MODEL_EXCEL = r"C:\tmp\0724_stats\drainage_model_1x1_chunk_statistics_20250724_20_14_28.xlsx"
+FAO_CSV     = r"C:\tmp\0724_stats\FAOSTAT_data_en_7-25-2025.csv"
 # ---------------------------------------------------------------------
 
 PERIODS = {
