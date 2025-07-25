@@ -13,6 +13,12 @@ import dask
 import numpy as np
 import posixpath
 
+# ---------------------------------------------------------------------------
+# Spatial-resolution constants (degrees)
+# ---------------------------------------------------------------------------
+NATIVE_DEG = 0.00025   # native grid  (≈30 m equiv.)
+TARGET_DEG = 0.04      # aggregated   (≈4 km equiv.)
+
 from ..utilities import constants_and_names as cn
 from ..utilities import universal_utilities as uu
 from ..utilities import log_utilities as lu
@@ -29,7 +35,7 @@ DATA_TYPES = [
     # "drained_co2_Mg_CO2_ha",
     # "drained_co2_offsite_Mg_CO2_ha",
     # "drained_n2o_Mg_CO2e_ha",
-    "drained_total_Mg_CO2e_ha"
+    "drained_total_Mg_CO2e_ha",
     "emission_state",
     "soil",
     "state",
@@ -134,14 +140,18 @@ def agg_4x4(
         )
 
         return uu.reaggregate_resolution(
-            mg_per_pixel_tile_chunk, 0.00025, 0.04
+            mg_per_pixel_tile_chunk, NATIVE_DEG, TARGET_DEG
         )
     if is_integer:
-        return uu.reaggregate_mode(mg_ha_yr_tile_chunk, 0.00025, 0.04)
+        return uu.reaggregate_mode(
+            mg_ha_yr_tile_chunk, NATIVE_DEG, TARGET_DEG
+        )
 
     # When pixel area is not used, aggregate the per-hectare array by averaging
-    summed = uu.reaggregate_resolution(mg_ha_yr_tile_chunk, 0.00025, 0.04)
-    factor = int(round(0.04 / 0.00025))
+    summed = uu.reaggregate_resolution(
+        mg_ha_yr_tile_chunk, NATIVE_DEG, TARGET_DEG
+    )
+    factor = int(round(TARGET_DEG / NATIVE_DEG))
     return summed / float(factor * factor)
 
 
@@ -150,8 +160,9 @@ def combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, globa
     is_final = False
     logger = lu.setup_logging()
 
+    # use NaN so true "no-data" remains distinguishable from zero
     global_shape = (int(180 / 0.04), int(360 / 0.04))
-    global_raster = np.zeros(global_shape, dtype=np.float32)
+    global_raster = np.full(global_shape, np.nan, dtype=np.float32)
 
     for tile, bounds in zip(tiles, bounds_list):
         min_x, min_y, max_x, max_y = bounds
@@ -164,7 +175,12 @@ def combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, globa
         assert (y_end - y_start) == tile_height
         assert (x_end - x_start) == tile_width
 
-        global_raster[y_start:y_end, x_start:x_end] += tile
+        # copy values where tile is finite; avoids double-counting nodata
+        np.copyto(
+            global_raster[y_start:y_end, x_start:x_end],
+            tile,
+            where=~np.isnan(tile),
+        )
 
     global_bounds = (-180, -90, 180, 90)
     uu.save_and_upload_single_raster(
@@ -192,7 +208,12 @@ def build_download_upload_dict(pixel_resolution: str) -> dict:
         key = f"{dataset}__{interval}"
         mg_ha_yr_dir = path if path.endswith("/") else f"{path}/"
         mg_ha_yr_pattern = f"__{dataset}__{interval}.tif"
-        dataset_pixel = dataset.replace("_ha", "_pixel")
+        # Add "_pixel" only for continuous datasets that end with "_ha"
+        dataset_pixel = (
+            dataset.replace("_ha", "_pixel")
+            if dataset.endswith("_ha")
+            else f"{dataset}_pixel"
+        )
         mg_per_pixel_dir = mg_ha_yr_dir.replace(dataset, dataset_pixel)
         mg_per_pixel_pattern = f"__{dataset_pixel}__{interval}.tif"
         out_dir = (
@@ -247,7 +268,11 @@ def main(
                 is_final,
                 logger,
             )
-            if use_pixel_area:
+            # per-pixel outputs written only for continuous layers
+            dataset_name = key.split("__")[0]
+            is_integer = dataset_name in INTEGER_DATASETS
+
+            if use_pixel_area and not is_integer:
                 per_pixel_tile_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
                 per_pixel_output_path = items["mg_per_pixel_dir"]
             else:
@@ -280,7 +305,7 @@ def main(
         tiles = dask.compute(*delayed_results)
 
         tile_id = "0_04deg_global"
-        if use_pixel_area:
+        if use_pixel_area and not is_integer:
             global_4km_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
         else:
             global_4km_outfile = items["4km_pattern"]
