@@ -69,7 +69,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
     # These are the basis for the aggregation tasks.
-    list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
+    list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger) #TODO this is different
 
     # For testing. Limits the number of output rasters to that given in the command line
     if first_10x10s_to_process:
