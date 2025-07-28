@@ -456,5 +456,5 @@ if __name__ == "__main__":
 
 
 """
-python -m src.scripts.zonal_statistics.run_zonal_statistics --interval_end_years 2024 -cn zonal_stats --tile_ids 00N_110E
+python -m src.scripts.zonal_statistics.run_zonal_statistics --interval_end_years 2024 --cluster_name zonal_stats --tile_ids 00N_110E --run_date 20250724
 """
