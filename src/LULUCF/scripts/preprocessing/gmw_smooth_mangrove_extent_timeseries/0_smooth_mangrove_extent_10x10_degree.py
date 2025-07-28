@@ -17,11 +17,20 @@ python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_m
 python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_10x10_degree -bb 60 -11 61 -10 -cs 1 --run_local
 
 Coiled test run:
-python -m scripts.utilities.create_cluster -n 1 -t 2 -m 8 -cn mangrove_smoothing_1x1deg
-python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_10x10_degree -bb 110 -10 120 0 -cs 1
+python -m scripts.utilities.create_cluster -n 4 -t 2 -m 64 -cn mangrove_smoothing_10x10deg
+python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_10x10_degree -cn mangrove_smoothing_10x10deg -bb 110 -10 120 0 -cs 1
 
 todo:
 - see if it can scale from 1 degree to 10 degrees after testing
+- Go year by year instead of smoothing all years at once?
+
+flm: Processing 10x10 tile 00N_110E with 100 1x1 deg chunks
+/home/melrose94/miniforge3/envs/afolu/lib/python3.13/site-packages/distributed/client.py:3370: UserWarning: Sending large graph of size 16.39 GiB.
+This may cause some slowdown.
+Consider loading the data with Dask directly
+ or using futures or delayed objects to embed the data into the graph without repetition.
+See also https://docs.dask.org/en/stable/best-practices.html#load-data-with-dask for more information.
+  warnings.warn(
 
 """
 import argparse
@@ -204,9 +213,7 @@ def process_smoothed_mangrove_data(bounds, download_dict_with_data_types, area_d
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
-
     logger_worker = lu.setup_logging_worker()
-
     uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
 
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds
@@ -247,15 +254,16 @@ def process_smoothed_mangrove_data(bounds, download_dict_with_data_types, area_d
     max_value_all_years = max(max_list)
     #print(f"max_value_all_years: {max_value_all_years}")
 
-    # Stops running if mangrove extent data is not binary  #todo: delete no data chunks here
+    # Stops running if mangrove extent data is not binary
     if max_value_all_years != np.uint8(1) and max_value_all_years != np.uint8(0):
         raise ValueError(f"Maximum value of mangrove extent is not 0 or 1 in chunk {bounds_str} in {tile_id}")
+    # todo: delete no data (0) chunks here?
 
-    ### Part 2: Downloads pixel area chunk if there is mangrove extent in one of the years to calculate total extent.
+
+    ### Part 2: Downloads pixel area chunk if there is mangrove extent in one of the raw years to calculate raw extent.
 
     # Download pixel area (m2) if chunk has mangrove extent to calculate mangrove extent in chunk stats
     if max_value_all_years == np.uint8(1):
-
         # Replaces the placeholder tile_id in the data dictionaries from main with the tile_id for this chunk
         updated_area_dict = uu.replace_tile_id_in_dict(area_dict_with_data_types, tile_id)
 
@@ -279,14 +287,12 @@ def process_smoothed_mangrove_data(bounds, download_dict_with_data_types, area_d
         #print(f"maximum pixel area: {area_layers['pixel_area_m2'].max()}")
 
     elif max_value_all_years == np.uint8(0):
-        lu.print_and_log(f"No mangrove extent in chunk {bounds_str} in {tile_id}. Skipping pixel area data download: {uu.timestr()}",
-                         is_final, logger_worker)
+        lu.print_and_log(f"No mangrove extent in chunk {bounds_str} in {tile_id}. Skipping pixel area data download: {uu.timestr()}", is_final, logger_worker)
 
 
     ### Part 3: Calculates mangrove extent in raw mangrove data if mangrove extent exists
 
     if max_value_all_years == np.uint8(1):
-
         lu.print_and_log(f"Calculating chunk stats for raw data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
         # Calculates total mangrove extent in raw chunk by multiplying binary extent by per-pixel area (m2)
@@ -309,10 +315,10 @@ def process_smoothed_mangrove_data(bounds, download_dict_with_data_types, area_d
     del futures
     del layers
 
+
     ### Part 5: Creates smoothed mangrove extent rasters
 
     if max_value_all_years == np.uint8(1):
-
         lu.print_and_log(f"Creating smoothed mangrove data in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker) # Prints during full runs
         uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
@@ -334,15 +340,30 @@ def process_smoothed_mangrove_data(bounds, download_dict_with_data_types, area_d
         del area_layers
 
     elif max_value_all_years == np.uint8(0):
-
         lu.print_and_log(f"No mangrove extent in chunk {bounds_str} in {tile_id}. Skipping smoothing step: {uu.timestr()}", False, logger_worker)
         lu.print_and_log(f"No mangrove extent in chunk {bounds_str} in {tile_id}. Skipping chunk stat calculation for smoothed data: {uu.timestr()}",False, logger_worker)
 
     del typed_dict_uint8
 
-    ### Part 6: Add smoothed data to 10 x 10 degree rasters if there is mangrove extent
+
+    ### Part 7: Convert Numba-constrained dictionary into normal Python arrays to which we can do anything in Python.
 
     if max_value_all_years == np.uint8(1):
+        out_dict_all_dtypes = {}
+
+        # Transfers the dictionaries of numpy arrays for each data type to a new, Pythonic array
+        out_dicts = [out_dict_uint8]
+
+        # Loop through each dictionary and update out_dict_all_dtypes
+        for out_dict in out_dicts:
+            for key, value in out_dict.items():
+                out_dict_all_dtypes[key] = value
+
+        del out_dicts
+        del out_dict_uint8
+
+
+        ### Part 8: Add smoothed data to 10 x 10 degree rasters if there is mangrove extent
 
         # calculate pixel offset in tile_arrays
         min_x_tile, min_y_tile, max_x_tile, max_y_tile = bounds_10x10
@@ -353,21 +374,23 @@ def process_smoothed_mangrove_data(bounds, download_dict_with_data_types, area_d
         row_start = y_offset * chunk_length_pixels
         col_start = x_offset * chunk_length_pixels
 
-        for key, array in out_dict_uint8.items():
+        for key, array in out_dict_all_dtypes.items():
             tile_outdata_dict_10x10[key][row_start:row_start + chunk_length_pixels, col_start:col_start + chunk_length_pixels] = array
 
-        del out_dict_uint8
+        del out_dict_all_dtypes
 
-    ### Part 8: Collect garbage after all deletions
+    ### Part 9: Collect garbage after all deletions
     gc.collect()
 
+    ### Part 10: Return the success message and chunk stats
     return_message = f"Success creating smoothed mangrove extent raster for {bounds_str}: {uu.timestr()}"
-    #todo print out how many tasks left
+    #todo: print out how many tasks left
 
     # Removes task tracking file from S3 once task is successful
-    uu.delete_s3_task_file(stage, bounds, is_final, logger_worker) #TODO: Should this be inside main for 10 x 10 degree tile?
+    uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
+    #todo: should this be added inside main for 10 x 10 degree tile completion?
 
-    return return_message, chunk_stats  # Return the success message and chunk stats
+    return return_message, chunk_stats
 
 def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload= False,
          chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
@@ -404,9 +427,9 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     if len(chunk_list) >= 100:
         is_final = True
         main_logger.info("Running as final model.")
+    #todo: move this to tile for loop?
 
-    # This is just a placeholder tile_id that is used to obtain the datatype of each tile set.
-    # It is overwritten when chunks are assigned and analyzed.
+    # This is just a placeholder tile_id to obtain the datatype. It is overwritten when chunks are assigned and analyzed.
     sample_tile_id = "00N_000E"
 
     # Dictionary of data to download
@@ -444,7 +467,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
 
     ### Step 2: Create 1x1 degree outputs and merges into 10x10 degree output tiles
-    #todo: aggregate 1 x 1 degree chunks then combine into 10x10 degree chunks and upload
 
     # Creates list of tasks to run (1 task = 1 1x1 degree chunk)
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
@@ -455,14 +477,14 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     for chunk in chunk_list:
         tile_10x10 = uu.xy_to_tile_id(chunk[0], chunk[3])
         chunk_dict_by_10x10_tile[tile_10x10].append(chunk)
-    print(f"chunk_dict_by_10x10_tile: {chunk_dict_by_10x10_tile}")
+    #print(f"chunk_dict_by_10x10_tile: {chunk_dict_by_10x10_tile}")
+    #todo: if length of chunk list is not 100 and is_final is True, throw error that not all 1x1 degree chunks are present
 
-    # Begin processing by 10x10 tile
+    # Begins processing 1x1 chunks according to 10x10 tile
     for tile, chunk_list in chunk_dict_by_10x10_tile.items():
         main_logger.info(f"Processing 10x10 tile {tile} with {len(chunk_list)} 1x1 deg chunks")
 
         bounds_10x10 = uu.get_10x10_tile_bounds(tile)
-        min_x, min_y, max_x, max_y = bounds_10x10
         chunk_length_pixels_10x10 = uu.calc_chunk_length_pixels(bounds_10x10)
         bounds_str_10x10 = uu.boundstr(bounds_10x10)
 
@@ -471,6 +493,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         for year in cn.mangrove_extent_years:
             pattern = f"{cn.mangrove_extent_processed_pattern}_{year}"
             tile_outdata_dict[pattern] = np.zeros((cn.full_raster_dims, cn.full_raster_dims), dtype=np.uint8)
+        #print(f"tile_outdata_dict: {tile_outdata_dict}")
+        #todo this may not work in the numba function because these are numpy arrays. check
 
         mangrove_1x1_deg_delayed_results = [dask.delayed(process_smoothed_mangrove_data)
                     (chunk, download_dict_with_data_types, area_dict_with_data_types, tile_outdata_dict, bounds_10x10, is_final, stage)
@@ -478,78 +502,20 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
         # Runs analysis and gathers results
         mangrove_1x1_deg_results = dask.compute(*mangrove_1x1_deg_delayed_results)
-
-        # Seperates message/ chunk stats results from data array results
-        # message_and_chunk_stat_results = [(result[0], result[1]) for result in mangrove_1x1_deg_delayed_results]
-        # print(f"message_and_chunk_stat_results: {message_and_chunk_stat_results}")
-        # data_results = [(result[2]) for result in mangrove_1x1_deg_delayed_results]
-        # print(f"data_results: {data_results}")
-
-        success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, mangrove_1x1_deg_delayed_results)
-
-        #todo combine all 1x1 degree numba data arrays into 10 x 10 degree numba array and delete 1 x 1 degree data arrays
-        for i, out_dict_uint8 in enumerate(data_results):
-            for key, array in out_dict_uint8.items():
-                if key not in tile_out_dict_all_dtypes:
-                    tile_out_dict_all_dtypes[key] = []
-                tile_out_dict_all_dtypes[key].append(array)
-
-            # Optionally clear memory
-            del out_dict_uint8
-        del data_results
-        gc.collect()
-
-         # Merge each list of arrays into a single 10x10 array
-        final_out_dict = {}
-        for key, array_list in tile_out_dict_all_dtypes.items():
-            chunk_bounds_list = [chunk for chunk in chunk_list]  # assuming chunk = (minx, miny, maxx, maxy)
-            final_out_dict[key] = uu.merge_arrays_to_tile(array_list, chunk_bounds_list)
-
-        # ### Part 3: Convert Numba-constrained dictionary into normal Python arrays to which we can do anything in Python.
-        #
-        # out_dict_all_dtypes = {}
-        #
-        # # Transfers the dictionaries of numpy arrays for each data type to a new, Pythonic array
-        # out_dicts = [out_dict_uint8]
-        #
-        # # Loop through each dictionary and update out_dict_all_dtypes
-        # for out_dict in out_dicts:
-        #     for key, value in out_dict.items():
-        #         out_dict_all_dtypes[key] = value
-        #
-        # # Clear memory of unneeded arrays
-        # del out_dicts
-        # del out_dict_uint8
-        # gc.collect()  # Collect garbage once, after all deletions
-
-
-        ### Part 4: Saves numpy arrays as rasters and uploads to s3
+        success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, mangrove_1x1_deg_results)
 
         # Only saves arrays to geotifs and uploads them to s3 if enabled
         if not no_upload:
 
             main_logger.info(f"Uploading smoothed mangrove data for {tile}: {uu.timestr()}")
-
             out_no_data_val = 0  # NoData value for output raster (optional)
+            tile_out_dict_all_dtypes = {}
 
             # Adds metadata used for uploading outputs to s3 to the dictionary
-            for key, value in tile_out_dict_all_dtypes.items():
-
+            for key, value in tile_outdata_dict.items():
                 data_type = value.dtype.name
-                print("key:", key)
-                print("data_type:", data_type)
-
-                # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
                 out_pattern, year_range = uu.strip_and_extract_years(key)
-                print("out_pattern:", out_pattern)
-                print("year_range:", year_range)
-                print(f"output_folders: {output_dir_list}")
-
-                # Retrieves the relevant output s3 path for this specific output (list of one element)
                 matched_output_s3_folder = [item for item in output_dir_list if year_range in item][0]
-                print("matched_output_s3_folder:", matched_output_s3_folder)
-
-                # Output paths without bucket (s3://gfw2-data)
                 s3_path_without_bucket = f"{matched_output_s3_folder[cn.full_bucket_prefix_length:]}"
 
                 # Dictionary with metadata for each array
@@ -557,8 +523,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
             # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
             upload_tasks = uu.save_and_upload_raster_10x10(bounds_10x10, chunk_length_pixels_10x10, tile, bounds_str_10x10,
-                                                               tile_out_dict_all_dtypes, is_final, main_logger, out_no_data_val)
-            #TODO change to save_and_upload_raster_10x10, or modify save_and_upload small raster set
+                                                           tile_out_dict_all_dtypes, is_final, main_logger, out_no_data_val)
 
             # Only prints if not a final run
             lu.print_and_log(f"Upload tasks created for {bounds_str_10x10} in {tile}. Uploading now: {uu.timestr()}", is_final, main_logger)
@@ -570,9 +535,9 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
             # Only prints if not a final run
             lu.print_and_log(f"Uploads completed for {bounds_str_10x10} in {tile}: {uu.timestr()}", is_final, main_logger)
 
-        # Clears memory of unneeded arrays
-        del tile_out_dict_all_dtypes
-        gc.collect()
+            # Clears memory of unneeded arrays
+            del tile_out_dict_all_dtypes
+            gc.collect()
 
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
@@ -584,7 +549,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
-
+    #TODO: start cleaning the code from here
     ### Step 3: Chunk stats for 1x1 degree outputs, aggregates logs
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
