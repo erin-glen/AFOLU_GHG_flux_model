@@ -15,14 +15,26 @@ import s3fs
 import numpy as np, pandas as pd, xarray as xr
 import dask.array as da
 
-# ── flox compatibility ────────────────────────────────────────────────────
+# ── flox compatibility  (works for flox 0.5 → 0.10+) ──────────────────────
 try:
-    # future‑proof: if flox ever re‑exports from its root
-    from flox import xarray_reduce, ReindexArrayType, ReindexStrategy  # type: ignore
+    # If a future flox version re-exports from its package root:
+    from flox import (
+        xarray_reduce,
+        ReindexArrayType,
+        ReindexStrategy,
+    )  # type: ignore
 except ImportError:
+    # Current layout: xarray sub-module is always present
     from flox.xarray import xarray_reduce  # noqa: F401
-    from flox.reindex import ReindexArrayType, ReindexStrategy          # noqa: F401
-# ──────────────────────────────────────────────────────────────────────────
+
+    # Reindex helpers moved around between versions
+    try:
+        # flox 0.6 → 0.9
+        from flox.reindex import ReindexArrayType, ReindexStrategy  # noqa: F401
+    except ImportError:
+        # flox 0.10 (renamed to _reindex)
+        from flox._reindex import ReindexArrayType, ReindexStrategy  # type: ignore
+# ───────────────────────────────────────────────────────────────────────────
 
 
 # LocalCluster not needed; uu.connect_to_cluster already handles local fallback.
