@@ -14,7 +14,16 @@ import fsspec
 import s3fs
 import numpy as np, pandas as pd, xarray as xr
 import dask.array as da
-from flox import xarray_reduce, ReindexArrayType, ReindexStrategy
+
+# ── flox compatibility ────────────────────────────────────────────────────
+try:
+    # future‑proof: if flox ever re‑exports from its root
+    from flox import xarray_reduce, ReindexArrayType, ReindexStrategy  # type: ignore
+except ImportError:
+    from flox.xarray import xarray_reduce  # noqa: F401
+    from flox.reindex import ReindexArrayType, ReindexStrategy          # noqa: F401
+# ──────────────────────────────────────────────────────────────────────────
+
 
 # LocalCluster not needed; uu.connect_to_cluster already handles local fallback.
 # `Client` import is unused (uu.connect_to_cluster returns an
@@ -444,3 +453,8 @@ if __name__ == "__main__":
 # TODO (2025-07-09): node_codes / gadm_adm0_ids lists should eventually
 # move to a shared constants module or be generated dynamically from
 # the rasters, so that ontology updates propagate automatically.
+
+
+"""
+python -m src.scripts.zonal_statistics.run_zonal_statistics --interval_end_years 2024 -cn zonal_stats --tile_ids 00N_110E
+"""
