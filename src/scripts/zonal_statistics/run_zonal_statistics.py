@@ -23,10 +23,8 @@ from flox import xarray_reduce, ReindexArrayType, ReindexStrategy
 # Runtime utilities
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
-
 # Absolute import so the script can run as `python run_zonal_statistics.py`
 import zonal_constants as zc
-
 # constant no longer referenced after previous unit-alignment patch
 
 # ╭────────────────────────────────────────────────────────────────────────────╮
@@ -76,26 +74,13 @@ STATE_NODE_XLSX_S3 = "https://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_mode
 # ===  END PATH MANIFEST  ======================================================
 
 
+"""
 def create_state_node_df(
     state_node_lookup_table_local: str, state_node_lookup_table_s3: str, sheet_name: str
 ) -> pd.DataFrame:
-    """Load the state node lookup table.
-
-    The function first attempts to read the file from the ``state_node_lookup_table_s3``
-    URL.  If that fails, it falls back to ``state_node_lookup_table_local``.  Any
-    ``pandas`` supported URL or file path is accepted.
-    """
-    try:
-        logging.info("Reading state-node lookup from %s", state_node_lookup_table_s3)
-        return pd.read_excel(state_node_lookup_table_s3, sheet_name=sheet_name)
-    except Exception as exc:  # pragma: no cover - network/IO errors
-        logging.warning(
-            "Failed to load %s: %s – using local file %s",
-            state_node_lookup_table_s3,
-            exc,
-            state_node_lookup_table_local,
-        )
-        return pd.read_excel(state_node_lookup_table_local, sheet_name=sheet_name)
+    ""Load the state node lookup table from S3 falling back to a local file.""
+    pass  # Deprecated – retained for reference
+"""
 
 
 def list_folder_uris(base_uri: str) -> pd.Series:
@@ -156,45 +141,18 @@ def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
     return coord_dict
 
 
-def classify_node(state_node: int) -> str:
-    """Group state node codes into broad categories."""
-    node_str = str(state_node)
-    first_digit = int(node_str[0])
 
-    one_digit_map = {
-        1: "forest_gain",
-        2: "forest_loss",
-        4: "cropland",
-        5: "grassland",
-    }
-
-    three_digit_map = {
-        311: "forest_loss",
-        312: "forest_loss",
-        321: "disturbed_forest",
-        322: "stable_forest",
-    }
-
-    if first_digit == 3:
-        prefix = int(node_str[:3])
-        return three_digit_map.get(prefix, "unknown_3x")
-    return one_digit_map.get(first_digit, "unknown")
 
 
 def create_interval_df(
     coord_dict: dict,
     flux_type_dict: dict,
     interval_end_year: int,
-    state_node_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """Convert flox output to a processed dataframe."""
     df = pd.DataFrame(coord_dict)
     df["flux_type"] = df["flux_type"].replace(flux_type_dict)
-    df["node_grp"] = df["state_nodes"].apply(classify_node)
     df["interval_end"] = interval_end_year
-    df = df.merge(
-        state_node_df[["state_nodes", "meaning"]], on="state_nodes", how="left"
-    )
     df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000
     return df
 
@@ -285,11 +243,6 @@ def main(args: argparse.Namespace) -> None:
     adm0 = xr.open_zarr(adm0_zarr_name).band_data
     pixel_area = xr.open_zarr(pixel_area_zarr_name).band_data
     primary_forest_IFL = xr.open_zarr(primary_forest_IFL_zarr_name).band_data
-    state_node_df = create_state_node_df(
-        args.state_node_xlsx_local,
-        args.state_node_xlsx_s3,
-        args.state_node_sheet,
-    )
 
     contextual_layer_names = ["state_nodes", "gadm_adm0", "primary_forest_IFL"]
 
@@ -327,9 +280,7 @@ def main(args: argparse.Namespace) -> None:
         # Grab one URI from each folder to label flux_type
         flux_type_dict = {
             0: parse_pattern_from_uri(
-                list_folder_uris(
-                    DRAINED_TOTAL_MG_CO2E_PIXEL.format(interval=interval, **OUTPUT_KW)
-                )
+                list_folder_uris(DRAINED_TOTAL_MG_CO2E_PIXEL.format(interval=interval, **OUTPUT_KW))
             ),
             1: parse_pattern_from_uri(
                 list_folder_uris(
@@ -379,12 +330,7 @@ def main(args: argparse.Namespace) -> None:
         ).compute()
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
-        df = create_interval_df(
-            coord_dict,
-            flux_type_dict,
-            interval_end_year,
-            state_node_df,
-        )
+        df = create_interval_df(coord_dict, flux_type_dict, interval_end_year)
         df = calculate_interval_flux_densities(df, contextual_layer_names)
         combined_df = pd.concat([combined_df, df])
 
@@ -426,21 +372,6 @@ if __name__ == "__main__":
         "--run_local",
         action="store_true",
         help="Run locally without Dask/Coiled",
-    )
-    parser.add_argument(
-        "--state_node_xlsx_local",
-        default=STATE_NODE_XLSX_LOCAL,
-        help="Local path to state-node lookup table",
-    )
-    parser.add_argument(
-        "--state_node_xlsx_s3",
-        default=STATE_NODE_XLSX_S3,
-        help="S3 URL for state-node lookup table",
-    )
-    parser.add_argument(
-        "--state_node_sheet",
-        default="v030_20250430",
-        help="Sheet name within the lookup table",
     )
     main(parser.parse_args())
 
