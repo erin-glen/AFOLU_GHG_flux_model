@@ -487,9 +487,13 @@ GMW_version = "v3"
 mangrove_extent_years = [1996, 2007, 2008, 2009, 2010, 2015, 2016, 2017, 2018, 2019, 2020]
 mangrove_extent_raw_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/raw/raster/"
 mangrove_extent_raw_pattern = r"GMW_[NS][0-9]{2}[EW][0-9]{3}_[0-9]{4}_v3.tif"       # e.g "GMW_N00E008_1996_v3.tif" in regex form
+
 mangrove_extent_hansenized_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/hansenized/raster/"
 mangrove_extent_hansenized_pattern = f"GMW{GMW_version}_mangrove_extent"
-mangrove_extent_processed_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/processed/raster/"
+
+mangrove_1x1deg_smoothed_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/smoothed_1x1deg/raster/"
+
+mangrove_extent_processed_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/smoothed/raster/"
 mangrove_extent_processed_pattern = f"GMW{GMW_version}_smoothed_mangrove_extent"
 
 #cropland emissions

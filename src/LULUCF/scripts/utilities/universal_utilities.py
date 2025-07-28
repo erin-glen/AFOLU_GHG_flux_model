@@ -275,53 +275,60 @@ def upload_shp(in_folder, shp):
     lu.print_and_log(f"Uploaded to {in_folder}{shp}: {timestr('time')}", True, logger_worker)
 
 # Saves a data array locally as a raster and then uploads it to s3
-def save_and_upload_raster_10x10(bounds, chunk_length_pixels, tile_id,
+def save_and_upload_raster_10x10(bounds, tile_length_pixels, tile_id,
                                  bounds_str, output_dict, is_final, logger_worker,
                                  no_data_val=None):
 
-    #TODO: add check that they are 10 x 10 degree bounds
-
     upload_tasks = []
 
-    transform = rasterio.transform.from_bounds(*bounds, width=chunk_length_pixels, height=chunk_length_pixels)
+    transform = rasterio.transform.from_bounds(*bounds, width=tile_length_pixels, height=tile_length_pixels)
 
-    lu.print_and_log(f"Saving outputs locally for {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"Saving outputs locally for {tile_id}: {timestr()}", is_final, logger_worker)
 
     # For every output file, saves from array to local raster, then to s3.
     # Can't save directly to s3, unfortunately, so need to save locally first.
     for key, value in output_dict.items():
+        try:
+            data_array = value[0]
+            data_type = value[1]
+            full_s3_path = value[4]
 
-        data_array = value[0]
-        data_type = value[1]
-        full_s3_path = value[4]
+            #Does not upload the the raster if the array dimensions are not 40000x40000
+            if data_array.shape != (cn.full_raster_dims, cn.full_raster_dims):
+                lu.print_and_log( f"ERROR: Array shape {data_array.shape} for {key} does not match expected 40000x40000. Skipping.",is_final, logger_worker)
+                continue
 
-        if is_final:
-            file_name = f"{tile_id}_{key}.tif"
-        else:
-            file_name = f"{tile_id}_{key}__{timestr()}.tif"
+            if is_final:
+                file_name = f"{tile_id}_{key}.tif"
+            else:
+                file_name = f"{tile_id}_{key}__{timestr()}.tif"
 
-        # # Only prints if not a final run
-        # # Disabled this because it prints sooooo many lines that it's annoying to scroll through
-        # if not is_final:
-        #     lu.print_and_log(f"Saving {key} for {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger_worker)
+            # # Only prints if not a final run
+            # # Disabled this because it prints sooooo many lines that it's annoying to scroll through
+            # if not is_final:
+            #     lu.print_and_log(f"Saving {key} for {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger_worker)
 
-        # Includes NoData value in output raster
-        if no_data_val is not None:
-            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                               height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                               tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
-                dst.write(data_array, 1)
+            # Includes NoData value in output raster
+            if no_data_val is not None:
+                with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=tile_length_pixels,
+                                   height=tile_length_pixels, count=1,
+                                   dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                                   tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
+                    dst.write(data_array, 1)
 
-        # No NoData value in output raster
-        else:
-            with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
-                               height=chunk_length_pixels, count=1,
-                               dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                               tiled=True, blockxsize=400, blockysize=400) as dst:
-                dst.write(data_array, 1)
+            # No NoData value in output raster
+            else:
+                with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=tile_length_pixels,
+                                   height=tile_length_pixels, count=1,
+                                   dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                                   tiled=True, blockxsize=400, blockysize=400) as dst:
+                    dst.write(data_array, 1)
 
-        upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
+            upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
+
+        except Exception as e:
+            lu.print_and_log(f"ERROR saving {key}: {str(e)}", is_final, logger_worker)
+            continue
 
     return upload_tasks
 
