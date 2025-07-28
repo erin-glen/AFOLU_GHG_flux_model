@@ -39,7 +39,7 @@ from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
 
 # Absolute import so the script can run as `python run_zonal_statistics.py`
-import zonal_constants as zc
+import src.scripts.zonal_statistics.zonal_constants as zc
 
 # constant no longer referenced after previous unit-alignment patch
 
