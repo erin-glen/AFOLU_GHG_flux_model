@@ -8,7 +8,7 @@ Dask cluster for distributed execution.  The paths and flux layers have
 been updated for the organic soils model.
 """
 
-import argparse, logging, re
+import argparse, logging, re, sys
 
 import fsspec
 import s3fs
@@ -23,8 +23,10 @@ from flox import xarray_reduce, ReindexArrayType, ReindexStrategy
 # Runtime utilities
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
+
 # Absolute import so the script can run as `python run_zonal_statistics.py`
 import zonal_constants as zc
+
 # constant no longer referenced after previous unit-alignment patch
 
 # ╭────────────────────────────────────────────────────────────────────────────╮
@@ -126,6 +128,14 @@ def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
     return ds.sel(x=ref.x, y=ref.y)  # exact index match
 
 
+def crop_to_bbox(ds: xr.DataArray, bbox: list[float]) -> xr.DataArray:
+    """Slice ``ds`` to ``bbox`` handling coordinate order."""
+    west, south, east, north = bbox
+    x_slice = slice(west, east) if ds.x[0] < ds.x[-1] else slice(east, west)
+    y_slice = slice(south, north) if ds.y[0] < ds.y[-1] else slice(north, south)
+    return ds.sel(x=x_slice, y=y_slice)
+
+
 def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
     """Convert flox results to a coordinate dictionary."""
     logging.info("   Post-processing %s : %s", interval, timestr())
@@ -139,9 +149,6 @@ def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
     }
     coord_dict["value"] = values
     return coord_dict
-
-
-
 
 
 def create_interval_df(
@@ -192,7 +199,7 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
     ds.to_zarr(zarr_path, mode="w")
 
 
-def main(args: argparse.Namespace) -> None:
+def run(args: argparse.Namespace) -> None:
     logging.basicConfig(
         level=logging.INFO if not args.debug else logging.DEBUG,
         format="%(asctime)s | %(levelname)s | %(message)s",
@@ -207,6 +214,21 @@ def main(args: argparse.Namespace) -> None:
     logging.info(
         "Connected to cluster %s", cluster.name if cluster else "local-threaded"
     )
+
+    bbox = None
+    if args.bounding_box:
+        bbox = [float(x) for x in args.bounding_box]
+    elif args.tile_ids:
+        tiles: list[str] = []
+        for item in args.tile_ids:
+            tiles.extend(t.strip() for t in item.split(",") if t.strip())
+        if tiles:
+            bounds = [uu.get_10x10_tile_bounds(t) for t in tiles]
+            west = min(b[0] for b in bounds)
+            south = min(b[1] for b in bounds)
+            east = max(b[2] for b in bounds)
+            north = max(b[3] for b in bounds)
+            bbox = [west, south, east, north]
 
     # Resolve manifest placeholders ------------------------------------------------
     OUTPUT_KW = dict(
@@ -243,6 +265,10 @@ def main(args: argparse.Namespace) -> None:
     adm0 = xr.open_zarr(adm0_zarr_name).band_data
     pixel_area = xr.open_zarr(pixel_area_zarr_name).band_data
     primary_forest_IFL = xr.open_zarr(primary_forest_IFL_zarr_name).band_data
+    if bbox:
+        adm0 = crop_to_bbox(adm0, bbox)
+        pixel_area = crop_to_bbox(pixel_area, bbox)
+        primary_forest_IFL = crop_to_bbox(primary_forest_IFL, bbox)
 
     contextual_layer_names = ["state_nodes", "gadm_adm0", "primary_forest_IFL"]
 
@@ -269,6 +295,10 @@ def main(args: argparse.Namespace) -> None:
         drained_total = xr.open_zarr(drained_total_zarr_name).band_data
         burned_total = xr.open_zarr(burned_total_zarr_name).band_data
         state_nodes = xr.open_zarr(node_zarr_name).band_data
+        if bbox:
+            drained_total = crop_to_bbox(drained_total, bbox)
+            burned_total = crop_to_bbox(burned_total, bbox)
+            state_nodes = crop_to_bbox(state_nodes, bbox)
 
         reference = state_nodes
         adm0_aligned = safe_crop(adm0, reference)
@@ -280,7 +310,9 @@ def main(args: argparse.Namespace) -> None:
         # Grab one URI from each folder to label flux_type
         flux_type_dict = {
             0: parse_pattern_from_uri(
-                list_folder_uris(DRAINED_TOTAL_MG_CO2E_PIXEL.format(interval=interval, **OUTPUT_KW))
+                list_folder_uris(
+                    DRAINED_TOTAL_MG_CO2E_PIXEL.format(interval=interval, **OUTPUT_KW)
+                )
             ),
             1: parse_pattern_from_uri(
                 list_folder_uris(
@@ -347,7 +379,33 @@ def main(args: argparse.Namespace) -> None:
         cluster.close()
 
 
-if __name__ == "__main__":
+def main(argv=None):
+    """Parse CLI args and dispatch to :func:`run`.
+
+    When ``argv`` is empty the function runs a small local smoke test
+    over a 1×1‑degree tile using default S3 paths.
+    """
+
+    argv = sys.argv[1:] if argv is None else argv
+    if not argv:
+        print("No CLI args: running 1×1‑degree local smoke test")
+        argv = [
+            "--model_version",
+            "test",
+            "--run_date",
+            "20250101",
+            "--interval_end_years",
+            "2020",
+            "--output_parquet",
+            "zonal_stats_test.parquet",
+            "--run_local",
+            "--bounding_box",
+            "112",
+            "-2",
+            "113",
+            "-1",
+        ]
+
     parser = argparse.ArgumentParser(description="Run organic‑soils zonal statistics")
     parser.add_argument("--model_version", required=True, help="Model version string")
     parser.add_argument("--run_date", required=True, help="Model run date")
@@ -373,7 +431,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Run locally without Dask/Coiled",
     )
-    main(parser.parse_args())
+    parser.add_argument("-bb", "--bounding_box", nargs=4, type=float, help="W S E N")
+    parser.add_argument("--tile_ids", action="append", help="Comma separated tile IDs")
+
+    args = parser.parse_args(argv)
+    run(args)
+
+
+if __name__ == "__main__":
+    main()
 
 # TODO (2025-07-09): node_codes / gadm_adm0_ids lists should eventually
 # move to a shared constants module or be generated dynamically from
