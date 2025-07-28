@@ -381,7 +381,7 @@ def main(args: argparse.Namespace) -> None:
             reindex=ReindexStrategy(
                 blockwise=False, array_type=ReindexArrayType.SPARSE_COO
             ),
-            fill_value=np.nan,
+            fill_value=0,
         ).compute()
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
