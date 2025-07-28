@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Run LULUCF zonal statistics.
+"""Run organic‑soils zonal statistics.
 
 This script converts the workflow developed in
-`LULUCF_output_zonal_stats_20250613__basic_working_zonal_stats.ipynb`
+``LULUCF_output_zonal_stats_20250613__basic_working_zonal_stats.ipynb``
 into a command line utility.  It can run locally or connect to a Coiled
-Dask cluster for distributed execution.
+Dask cluster for distributed execution.  The paths and flux layers have
+been updated for the organic soils model.
 """
 
 import argparse, logging, re
@@ -27,7 +28,7 @@ import zonal_constants as zc
 # constant no longer referenced after previous unit-alignment patch
 
 # ╭────────────────────────────────────────────────────────────────────────────╮
-# │  LULUCF ZONAL-STATISTICS – PATH MANIFEST (single source of truth)         │
+# │  ORGANIC SOILS ZONAL‑STATISTICS – PATH MANIFEST (single source of truth)  │
 # ╰────────────────────────────────────────────────────────────────────────────╯
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 
@@ -37,29 +38,6 @@ ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 # Literal template – evaluated later with .format(...)
 OUTPUT_BASE = "{root}/version_{model_version}/"
 
-GROSS_EMIS_CO2 = (
-    OUTPUT_BASE
-    + "gross_emissions__all_C_pools__CO2_only__MgCO2/"
-    "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
-)
-GROSS_EMIS_ALL_GHG = (
-    OUTPUT_BASE
-    + "gross_emissions__all_C_pools_all_gases__MgCO2e/"
-    "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
-)
-GROSS_REMV_ALL_POOLS = (
-    OUTPUT_BASE
-    + "gross_removals__all_C_pools__MgCO2/"
-    "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
-)
-NET_FLUX_CO2 = (
-    OUTPUT_BASE
-    + "net_flux__all_C_pools__CO2_only__MgCO2/"
-    "standard_model/annual_intervals/{interval}/_pixel_yr/40000_pixels/{run_date}/"
-)
-
-# --- TODO paths disabled until implemented ---
-"""
 DRAINED_TOTAL_MG_CO2E_PIXEL = (
     OUTPUT_BASE + "drained_total_Mg_CO2e_pixel_yr/"
     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
@@ -68,27 +46,16 @@ BURNED_TOTAL_MG_CO2E_PIXEL = (
     OUTPUT_BASE + "burned_total_Mg_CO2e_pixel/"
     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
 )
-"""
 
 # Zarr cache folders (one per interval)
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "zarr/{run_date}/{interval}/"
 
 ZARR_PATHS = {
-    "gross_emis_CO2": ZARR_CACHE_PREFIX
-    + "gross_emissions__all_C_pools__CO2_only__MgCO2_{interval}.zarr",
-    "gross_emis_ALL_GHG": ZARR_CACHE_PREFIX
-    + "gross_emissions__all_C_pools__all_gases__MgCO2e_pixel_yr_{interval}.zarr",
-    "gross_remv_all": ZARR_CACHE_PREFIX
-    + "gross_removals__all_C_pools__MgCO2_pixel_yr_{interval}.zarr",
-    "net_flux_CO2": ZARR_CACHE_PREFIX
-    + "net_flux__all_C_pools__CO2_only__MgCO2_pixel_yr_{interval}.zarr",
+    "drained_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
+    + "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
+    "burned_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
+    + "burned_total_Mg_CO2e_pixel_{interval}.zarr",
     "state_nodes": ZARR_CACHE_PREFIX + "land_state_node_{interval}.zarr",
-    # "drained_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
-    # + "drained_total_Mg_CO2e_pixel_{interval}.zarr",
-    # "burned_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
-    # + "burned_total_Mg_CO2e_pixel_{interval}.zarr",
-    # "drained_state": ZARR_CACHE_PREFIX + "drained_state_{interval}.zarr",
-    # "burned_state": ZARR_CACHE_PREFIX + "burned_state_{interval}.zarr",
 }
 
 # Contextual layers (static)
@@ -289,67 +256,45 @@ def main(args: argparse.Namespace) -> None:
         interval = f"{interval_end_year - 1}_{interval_end_year}"
         logging.info("Processing interval %s : %s", interval, timestr())
 
-        gross_emis_CO2_zarr_name = ZARR_PATHS["gross_emis_CO2"].format(
+        drained_total_zarr_name = ZARR_PATHS["drained_total_Mg_CO2e_pixel"].format(
             interval=interval, **OUTPUT_KW
         )
-        gross_emis_all_gases_zarr_name = ZARR_PATHS["gross_emis_ALL_GHG"].format(
-            interval=interval, **OUTPUT_KW
-        )
-        gross_remv_all_pools_zarr_name = ZARR_PATHS["gross_remv_all"].format(
-            interval=interval, **OUTPUT_KW
-        )
-        net_flux_all_pools_CO2_zarr_name = ZARR_PATHS["net_flux_CO2"].format(
+        burned_total_zarr_name = ZARR_PATHS["burned_total_Mg_CO2e_pixel"].format(
             interval=interval, **OUTPUT_KW
         )
         node_zarr_name = ZARR_PATHS["state_nodes"].format(
             interval=interval, **OUTPUT_KW
         )
 
-        gross_emis_CO2 = xr.open_zarr(gross_emis_CO2_zarr_name).band_data
-        gross_emis_all_gases = xr.open_zarr(gross_emis_all_gases_zarr_name).band_data
-        gross_remv_all_pools = xr.open_zarr(gross_remv_all_pools_zarr_name).band_data
-        net_flux_all_pools_CO2 = xr.open_zarr(
-            net_flux_all_pools_CO2_zarr_name
-        ).band_data
+        drained_total = xr.open_zarr(drained_total_zarr_name).band_data
+        burned_total = xr.open_zarr(burned_total_zarr_name).band_data
         state_nodes = xr.open_zarr(node_zarr_name).band_data
 
         reference = state_nodes
         adm0_aligned = safe_crop(adm0, reference)
         primary_forest_IFL_aligned = safe_crop(primary_forest_IFL, reference)
         pixel_area_aligned = safe_crop(pixel_area, reference)
-        gross_emis_CO2_aligned = safe_crop(gross_emis_CO2, reference)
-        gross_emis_all_gases_aligned = safe_crop(gross_emis_all_gases, reference)
-        gross_remv_all_pools_aligned = safe_crop(gross_remv_all_pools, reference)
-        net_flux_all_pools_CO2_aligned = safe_crop(net_flux_all_pools_CO2, reference)
+        drained_total_aligned = safe_crop(drained_total, reference)
+        burned_total_aligned = safe_crop(burned_total, reference)
 
         # Grab one URI from each folder to label flux_type
         flux_type_dict = {
             0: parse_pattern_from_uri(
-                list_folder_uris(GROSS_EMIS_CO2.format(interval=interval, **OUTPUT_KW))
+                list_folder_uris(DRAINED_TOTAL_MG_CO2E_PIXEL.format(interval=interval, **OUTPUT_KW))
             ),
             1: parse_pattern_from_uri(
                 list_folder_uris(
-                    GROSS_EMIS_ALL_GHG.format(interval=interval, **OUTPUT_KW)
+                    BURNED_TOTAL_MG_CO2E_PIXEL.format(interval=interval, **OUTPUT_KW)
                 )
             ),
-            2: parse_pattern_from_uri(
-                list_folder_uris(
-                    GROSS_REMV_ALL_POOLS.format(interval=interval, **OUTPUT_KW)
-                )
-            ),
-            3: parse_pattern_from_uri(
-                list_folder_uris(NET_FLUX_CO2.format(interval=interval, **OUTPUT_KW))
-            ),
-            4: "area__ha",
+            2: "area__ha",
         }
 
         flux_cube = xr.DataArray(
             da.stack(
                 [
-                    gross_emis_CO2_aligned,
-                    gross_emis_all_gases_aligned,
-                    gross_remv_all_pools_aligned,
-                    net_flux_all_pools_CO2_aligned,
+                    drained_total_aligned,
+                    burned_total_aligned,
                     pixel_area_aligned,
                 ]
             ),
@@ -368,7 +313,7 @@ def main(args: argparse.Namespace) -> None:
         primary_forest_IFL_aligned.name = "primary_forest_IFL"
         state_nodes.name = "state_nodes"
 
-        flux_type_ids = np.arange(5, dtype=np.uint8)
+        flux_type_ids = np.arange(3, dtype=np.uint8)
         flux_results = xarray_reduce(
             flux_cube,
             *(adm0_aligned, state_nodes, primary_forest_IFL_aligned),
@@ -381,7 +326,7 @@ def main(args: argparse.Namespace) -> None:
             reindex=ReindexStrategy(
                 blockwise=False, array_type=ReindexArrayType.SPARSE_COO
             ),
-            fill_value=0,
+            fill_value=np.nan,
         ).compute()
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
@@ -403,7 +348,7 @@ def main(args: argparse.Namespace) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run LULUCF zonal statistics")
+    parser = argparse.ArgumentParser(description="Run organic‑soils zonal statistics")
     parser.add_argument("--model_version", required=True, help="Model version string")
     parser.add_argument("--run_date", required=True, help="Model run date")
     parser.add_argument(
