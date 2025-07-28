@@ -15,26 +15,19 @@ import s3fs
 import numpy as np, pandas as pd, xarray as xr
 import dask.array as da
 
-# ── flox compatibility  (works for flox 0.5 → 0.10+) ──────────────────────
+# ── flox compatibility (works for flox 0.5  →  ≥0.10) ─────────────────────
 try:
-    # If a future flox version re-exports from its package root:
-    from flox import (
-        xarray_reduce,
-        ReindexArrayType,
-        ReindexStrategy,
-    )  # type: ignore
+    # future‑proof in case flox later re‑exports from its root
+    from flox import xarray_reduce, ReindexArrayType, ReindexStrategy  # type: ignore
 except ImportError:
-    # Current layout: xarray sub-module is always present
-    from flox.xarray import xarray_reduce  # noqa: F401
-
-    # Reindex helpers moved around between versions
+    from flox.xarray import xarray_reduce                              # noqa: F401
     try:
-        # flox 0.6 → 0.9
-        from flox.reindex import ReindexArrayType, ReindexStrategy  # noqa: F401
+        from flox.reindex import ReindexArrayType, ReindexStrategy     # noqa: F401
     except ImportError:
-        # flox 0.10 (renamed to _reindex)
-        from flox._reindex import ReindexArrayType, ReindexStrategy  # type: ignore
-# ───────────────────────────────────────────────────────────────────────────
+        # flox ≤0.8 – no sparse‑reindex API; fall back to defaults
+        ReindexArrayType = None
+        ReindexStrategy = None
+# ──────────────────────────────────────────────────────────────────────────
 
 
 # LocalCluster not needed; uu.connect_to_cluster already handles local fallback.
@@ -122,17 +115,21 @@ def parse_pattern_from_uri(uri_series: pd.Series) -> str:
     outputs such as ``drained_total_Mg_CO2e_ha`` and ``burned_total_Mg_CO2e_ha``.
     """
     if uri_series.empty:
-        raise ValueError("No GeoTIFFs found – cannot derive flux-type pattern")
-    uri = uri_series.iloc[0]
+        raise ValueError("No GeoTIFFs found – cannot derive flux‑type pattern")
+
     patterns = [
         r"__([A-Za-z0-9_]+)_\d{4}_\d{4}\.tif$",
         r"__([A-Za-z0-9_]+)_pixel_yr_\d{4}_\d{4}\.tif$",
     ]
-    for p in patterns:
-        m = re.search(p, uri)
-        if m:
-            return m.group(1)
-    raise ValueError(f"Cannot parse flux-type from {uri}")
+    matches = {
+        re.search(pat, u).group(1)
+        for u in uri_series
+        for pat in patterns
+        if re.search(pat, u)
+    }
+    if len(matches) != 1:
+        raise ValueError(f"Mixed or unparseable flux‑type patterns: {matches}")
+    return matches.pop()
 
 
 def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
@@ -145,8 +142,11 @@ def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
 
 
 def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
-    """Crop one dataset to another's extent **without** shifting a pixel."""
-    return ds.sel(x=ref.x, y=ref.y)  # exact index match
+    """Crop one dataset to another's extent **without** shifting a pixel.
+       Abort if grids are not identical (guard against silent mis‑alignment)."""
+    if not (ds.x.equals(ref.x) and ds.y.equals(ref.y)):
+        raise ValueError("Raster grid mis‑aligned with reference; aborting.")
+    return ds.sel(x=ref.x, y=ref.y)
 
 
 def crop_to_bbox(ds: xr.DataArray, bbox: list[float]) -> xr.DataArray:
@@ -283,9 +283,21 @@ def run(args: argparse.Namespace) -> None:
         args.chunk_size,
     )
 
-    adm0 = xr.open_zarr(adm0_zarr_name).band_data
-    pixel_area = xr.open_zarr(pixel_area_zarr_name).band_data
-    primary_forest_IFL = xr.open_zarr(primary_forest_IFL_zarr_name).band_data
+    adm0 = (
+        xr.open_zarr(adm0_zarr_name)
+        .band_data
+        .chunk({"x": args.chunk_size, "y": args.chunk_size})
+    )
+    pixel_area = (
+        xr.open_zarr(pixel_area_zarr_name)
+        .band_data
+        .chunk({"x": args.chunk_size, "y": args.chunk_size})
+    )
+    primary_forest_IFL = (
+        xr.open_zarr(primary_forest_IFL_zarr_name)
+        .band_data
+        .chunk({"x": args.chunk_size, "y": args.chunk_size})
+    )
     if bbox:
         adm0 = crop_to_bbox(adm0, bbox)
         pixel_area = crop_to_bbox(pixel_area, bbox)
@@ -297,7 +309,7 @@ def run(args: argparse.Namespace) -> None:
     gadm_adm0_ids = zc.GADM_ADM0_IDS
     primary_forest_IFL_codes = zc.PRIMARY_FOREST_IFL_CODES
 
-    combined_df = pd.DataFrame()
+    first_write = True   # incremental Parquet write flag
 
     for interval_end_year in args.interval_end_years:
         interval = f"{interval_end_year - 1}_{interval_end_year}"
@@ -313,9 +325,21 @@ def run(args: argparse.Namespace) -> None:
             interval=interval, **OUTPUT_KW
         )
 
-        drained_total = xr.open_zarr(drained_total_zarr_name).band_data
-        burned_total = xr.open_zarr(burned_total_zarr_name).band_data
-        state_nodes = xr.open_zarr(node_zarr_name).band_data
+        drained_total = (
+            xr.open_zarr(drained_total_zarr_name)
+            .band_data
+            .chunk({"x": args.chunk_size, "y": args.chunk_size})
+        )
+        burned_total = (
+            xr.open_zarr(burned_total_zarr_name)
+            .band_data
+            .chunk({"x": args.chunk_size, "y": args.chunk_size})
+        )
+        state_nodes = (
+            xr.open_zarr(node_zarr_name)
+            .band_data
+            .chunk({"x": args.chunk_size, "y": args.chunk_size})
+        )
         if bbox:
             drained_total = crop_to_bbox(drained_total, bbox)
             burned_total = crop_to_bbox(burned_total, bbox)
@@ -366,6 +390,13 @@ def run(args: argparse.Namespace) -> None:
         primary_forest_IFL_aligned.name = "primary_forest_IFL"
         state_nodes.name = "state_nodes"
 
+        # Build reduction kwargs based on flox version
+        _xr_kwargs = {}
+        if ReindexStrategy is not None:
+            _xr_kwargs["reindex"] = ReindexStrategy(
+                blockwise=False, array_type=ReindexArrayType.SPARSE_COO
+            )
+
         flux_type_ids = np.arange(3, dtype=np.uint8)
         flux_results = xarray_reduce(
             flux_cube,
@@ -376,23 +407,25 @@ def run(args: argparse.Namespace) -> None:
                 node_codes,
                 primary_forest_IFL_codes,
             ),
-            reindex=ReindexStrategy(
-                blockwise=False, array_type=ReindexArrayType.SPARSE_COO
-            ),
             fill_value=np.nan,
+            **_xr_kwargs,
         ).compute()
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
         df = create_interval_df(coord_dict, flux_type_dict, interval_end_year)
         df = calculate_interval_flux_densities(df, contextual_layer_names)
-        combined_df = pd.concat([combined_df, df])
+        df.to_parquet(
+            args.output_parquet,
+            partition_cols=["interval_end"],
+            append=not first_write,
+            index=False,
+            compression="zstd",
+            engine="pyarrow",
+        )
+        first_write = False
+        del df
 
-    combined_df = combined_df.reset_index(drop=True)
-    logging.info("Writing Parquet output to %s", args.output_parquet)
-    combined_df.to_parquet(
-        args.output_parquet, index=False, partition_cols=["interval_end"]
-    )
-    logging.info("Parquet write complete – %d rows", len(combined_df))
+    logging.info("Parquet write complete – partitions written to %s", args.output_parquet)
 
     if client:
         client.close()
@@ -442,15 +475,16 @@ def main(argv=None):
     )
     parser.add_argument("--output_parquet", required=True, help="Output Parquet folder")
     parser.add_argument("--debug", action="store_true", help="Verbose logging")
-    parser.add_argument(
-        "--cluster_name",
-        default="zonal_stats",
-        help="Name of the Coiled cluster to attach to",
-    )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--run_local",
         action="store_true",
         help="Run locally without Dask/Coiled",
+    )
+    mode.add_argument(
+        "--cluster_name",
+        default="zonal_stats",
+        help="Name of the Coiled cluster to attach to",
     )
     parser.add_argument("-bb", "--bounding_box", nargs=4, type=float, help="W S E N")
     parser.add_argument("--tile_ids", action="append", help="Comma separated tile IDs")
@@ -468,5 +502,5 @@ if __name__ == "__main__":
 
 
 """
-python -m src.scripts.zonal_statistics.run_zonal_statistics --interval_end_years 2024 --cluster_name zonal_stats --tile_ids 00N_110E --run_date 20250724
+python -m src.scripts.zonal_statistics.run_zonal_statistics --interval_end_years 2024 -cn zonal_stats --tile_ids 00N_110E
 """
