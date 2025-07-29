@@ -14,6 +14,7 @@ import fsspec
 import s3fs
 import numpy as np, pandas as pd, xarray as xr
 import dask.array as da
+import zarr
 
 # ── flox compatibility (works for flox 0.5  →  ≥0.10) ─────────────────────
 try:
@@ -212,12 +213,23 @@ def calculate_interval_flux_densities(
 
 
 def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> None:
-    """Create a zarr from URIs if it does not already exist."""
+    """Create a zarr from URIs if it does not already exist.
+
+    If the store exists but lacks consolidated metadata, create ``.zmetadata``.
+    """
     fs, path = fsspec.core.url_to_fs(zarr_path)
-    if fs.exists(path):
+    group_exists = fs.exists(f"{path}/.zgroup")
+    metadata_exists = fs.exists(f"{path}/.zmetadata")
+
+    if group_exists and metadata_exists:
         return
-    ds = make_xarray_chunks(uri_list, chunk_size)
-    ds.to_zarr(zarr_path, mode="w")
+
+    if not group_exists:
+        ds = make_xarray_chunks(uri_list, chunk_size)
+        ds.to_zarr(zarr_path, mode="w")
+
+    if not metadata_exists:
+        zarr.convenience.consolidate_metadata(fs.get_mapper(path))
 
 
 def run(args: argparse.Namespace) -> None:
