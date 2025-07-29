@@ -164,32 +164,41 @@ def crop_to_bbox(ds: xr.DataArray, bbox: list[float]) -> xr.DataArray:
 # ───────────────────────────────────────────────────────────────────────────
 # New helper – read only the AOI region *before* chunking
 # ───────────────────────────────────────────────────────────────────────────
-def open_zarr_region(
-    path: str,
-    bbox: list[float] | None,
-    chunk_size: int,
-) -> xr.DataArray:
-    """Open a Zarr store and optionally crop to ``bbox``.
+def open_zarr_region(path: str, bbox: list[float] | None, chunk_size: int) -> xr.DataArray:
+    """Open a Zarr store and return a 2‑D ``DataArray``.
 
-    ``xr.open_zarr`` is called without the ``region`` argument so the code works
-    across xarray versions.  When ``bbox`` is provided, the returned DataArray is
-    sliced with ``.sel`` to restrict the area of interest.
+    The helper tries to be tolerant of input variations:
+    - the first variable containing both ``x`` and ``y`` dims is selected
+    - a leading ``band`` dimension is dropped when present
+    - when ``bbox`` is supplied and ``x``/``y`` exist the data are cropped
+    - chunking is applied only to existing ``x``/``y`` dims
     """
 
-    logging.debug("Opening Zarr %s", path)
     mapper = fsspec.get_mapper(path, anon=False, check=False)
+    ds = xr.open_zarr(mapper)
 
-    da_band = xr.open_zarr(mapper).band_data
+    # pick variable
+    if isinstance(ds, xr.DataArray):
+        da = ds
+    else:
+        vars_xy = [v for v in ds.data_vars.values() if {"x", "y"}.issubset(v.dims)]
+        da = vars_xy[0] if vars_xy else next(iter(ds.data_vars.values()))
 
-    if bbox is not None:
+    # drop band if needed
+    if "band" in da.dims:
+        da = da.isel(band=0, drop=True)
+
+    # optional crop
+    if bbox is not None and {"x", "y"}.issubset(da.dims):
         west, south, east, north = bbox
         x_slice = slice(west, east) if west < east else slice(east, west)
         y_slice = slice(south, north) if south < north else slice(north, south)
-        # Using ``.sel`` avoids the ``region`` incompatibility across xarray releases
-        logging.debug("Cropping Zarr %s to bbox %s", path, bbox)
-        da_band = da_band.sel(x=x_slice, y=y_slice)
+        da = da.sel(x=x_slice, y=y_slice)
+    elif bbox is not None:
+        logging.warning("Skipping spatial crop for %s – x/y dims not present.", path)
 
-    return da_band.chunk({"x": chunk_size, "y": chunk_size})
+    chunk_dict = {d: chunk_size for d in ("x", "y") if d in da.dims}
+    return da.chunk(chunk_dict)
 
 
 def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
@@ -374,6 +383,17 @@ def run(args: argparse.Namespace) -> None:
             interval=interval, **OUTPUT_KW
         )
 
+        # --- build flux‑layer caches if missing ----------------------------
+        drained_folder = DRAINED_TOTAL_MG_CO2E_PIXEL.format(interval=interval, **OUTPUT_KW)
+        burned_folder  = BURNED_TOTAL_MG_CO2E_PIXEL.format(interval=interval, **OUTPUT_KW)
+        ensure_zarr_exists(
+            list_folder_uris(drained_folder), drained_total_zarr_name, args.chunk_size
+        )
+        ensure_zarr_exists(
+            list_folder_uris(burned_folder), burned_total_zarr_name, args.chunk_size
+        )
+        # -------------------------------------------------------------------
+
         drained_total = open_zarr_region(
             drained_total_zarr_name, bbox, args.chunk_size
         )
@@ -556,6 +576,11 @@ if __name__ == "__main__":
 
 
 """
-python -m src.scripts.zonal_statistics.run_zonal_statistics --interval_end_years 2024 --cluster_name zonal_stats --run_date 20250724 --tile_ids 00N_110E --model_version "0_5_0" --output_parquet "zonal_stats_test.parquet"
-
+python -m src.scripts.zonal_statistics.run_zonal_statistics \
+       --interval_end_years 2024 \
+       --cluster_name zonal_stats \
+       --run_date 20250724 \
+       --tile_ids 00N_110E \
+       --model_version 0_5_0 \
+       --output_parquet zonal_stats_test.parquet
 """
