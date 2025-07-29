@@ -146,12 +146,12 @@ def parse_pattern_from_uri(uri_series: pd.Series) -> str:
 
 
 def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
-    """Open multiple GeoTIFFs into a chunked Xarray dataset."""
-    return xr.open_mfdataset(
+    """Open multiple GeoTIFFs and rechunk after loading."""
+    ds = xr.open_mfdataset(
         tile_uris.values.tolist(),
         parallel=True,
-        chunks={"x": chunk_size, "y": chunk_size},
     ).squeeze()
+    return ds.chunk({"x": chunk_size, "y": chunk_size})
 
 
 def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
