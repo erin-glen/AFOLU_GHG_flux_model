@@ -169,21 +169,23 @@ def open_zarr_region(
     bbox: list[float] | None,
     chunk_size: int,
 ) -> xr.DataArray:
+    """Open a Zarr store and optionally crop to ``bbox``.
+
+    ``xr.open_zarr`` is called without the ``region`` argument so the code works
+    across xarray versions.  When ``bbox`` is provided, the returned DataArray is
+    sliced with ``.sel`` to restrict the area of interest.
     """
-    Open a Zarr store; if ``bbox`` supplied, read only the required x/y slice
-    via the ``region=`` argument so we never materialise the full global array.
-    """
+
     mapper = fsspec.get_mapper(path, anon=False, check=False)
 
-    if bbox is None:
-        da_band = xr.open_zarr(mapper).band_data
-    else:
+    da_band = xr.open_zarr(mapper).band_data
+
+    if bbox is not None:
         west, south, east, north = bbox
-        x_sel = slice(west, east) if west < east else slice(east, west)
-        y_sel = slice(south, north) if south < north else slice(north, south)
-        da_band = xr.open_zarr(
-            mapper, region={"x": x_sel, "y": y_sel}
-        ).band_data
+        x_slice = slice(west, east) if west < east else slice(east, west)
+        y_slice = slice(south, north) if south < north else slice(north, south)
+        # Using ``.sel`` avoids the ``region`` incompatibility across xarray releases
+        da_band = da_band.sel(x=x_slice, y=y_slice)
 
     return da_band.chunk({"x": chunk_size, "y": chunk_size})
 
