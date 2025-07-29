@@ -176,6 +176,7 @@ def open_zarr_region(
     sliced with ``.sel`` to restrict the area of interest.
     """
 
+    logging.debug("Opening Zarr %s", path)
     mapper = fsspec.get_mapper(path, anon=False, check=False)
 
     da_band = xr.open_zarr(mapper).band_data
@@ -185,6 +186,7 @@ def open_zarr_region(
         x_slice = slice(west, east) if west < east else slice(east, west)
         y_slice = slice(south, north) if south < north else slice(north, south)
         # Using ``.sel`` avoids the ``region`` incompatibility across xarray releases
+        logging.debug("Cropping Zarr %s to bbox %s", path, bbox)
         da_band = da_band.sel(x=x_slice, y=y_slice)
 
     return da_band.chunk({"x": chunk_size, "y": chunk_size})
@@ -249,6 +251,7 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
 
     If the store exists but lacks consolidated metadata, create ``.zmetadata``.
     """
+    logging.debug("Ensuring Zarr store %s", zarr_path)
     fs, path = fsspec.core.url_to_fs(zarr_path)
     group_exists = fs.exists(f"{path}/.zgroup")
     metadata_exists = fs.exists(f"{path}/.zmetadata")
@@ -260,12 +263,14 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
         raise FileNotFoundError(f"No GeoTIFFs found for {zarr_path}")
 
     if not group_exists:
+        logging.debug("Creating new Zarr store %s", zarr_path)
         ds = make_xarray_chunks(uri_list, chunk_size)
         # Rechunk to ensure uniform chunk sizes for the Zarr output
         ds = ds.chunk({"x": chunk_size, "y": chunk_size})
         ds.to_zarr(zarr_path, mode="w")
 
     if not metadata_exists:
+        logging.debug("Consolidating metadata for %s", zarr_path)
         zarr.convenience.consolidate_metadata(fs.get_mapper(path))
 
 
@@ -275,19 +280,22 @@ def run(args: argparse.Namespace) -> None:
         format="%(asctime)s | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    logging.debug("Starting run with args: %s", args)
 
     cluster, client, _ = uu.connect_to_cluster(
         cluster_name=args.cluster_name,
         run_local=args.run_local,
     )
-
     logging.info(
         "Connected to cluster %s", cluster.name if cluster else "local-threaded"
     )
+    if client:
+        logging.debug("Dask client info: %s", client)
 
     bbox = None
     if args.bounding_box:
         bbox = [float(x) for x in args.bounding_box]
+        logging.debug("Using bounding box: %s", bbox)
     elif args.tile_ids:
         tiles: list[str] = []
         for item in args.tile_ids:
@@ -299,6 +307,7 @@ def run(args: argparse.Namespace) -> None:
             east = max(b[2] for b in bounds)
             north = max(b[3] for b in bounds)
             bbox = [west, south, east, north]
+            logging.debug("Calculated bounding box from tiles %s: %s", tiles, bbox)
 
     # Resolve manifest placeholders ------------------------------------------------
     OUTPUT_KW = dict(
@@ -322,16 +331,20 @@ def run(args: argparse.Namespace) -> None:
     # sheet = "v030_20250430"
 
     # Ensure contextual zarrs exist
+    logging.debug("Checking contextual layer adm0")
     ensure_zarr_exists(list_folder_uris(adm0_folder), adm0_zarr_name, args.chunk_size)
+    logging.debug("Checking contextual layer pixel_area")
     ensure_zarr_exists(
         list_folder_uris(pixel_area_folder), pixel_area_zarr_name, args.chunk_size
     )
+    logging.debug("Checking contextual layer primary_forest_IFL")
     ensure_zarr_exists(
         list_folder_uris(primary_forest_IFL_folder),
         primary_forest_IFL_zarr_name,
         args.chunk_size,
     )
 
+    logging.debug("Opening contextual layers")
     adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size)
     pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size)
     primary_forest_IFL = open_zarr_region(
@@ -349,6 +362,7 @@ def run(args: argparse.Namespace) -> None:
     for interval_end_year in args.interval_end_years:
         interval = f"{interval_end_year - 1}_{interval_end_year}"
         logging.info("Processing interval %s : %s", interval, timestr())
+        logging.debug("Opening flux zarrs for interval %s", interval)
 
         drained_total_zarr_name = ZARR_PATHS["drained_total_Mg_CO2e_pixel"].format(
             interval=interval, **OUTPUT_KW
@@ -367,6 +381,7 @@ def run(args: argparse.Namespace) -> None:
             burned_total_zarr_name, bbox, args.chunk_size
         )
         state_nodes = open_zarr_region(node_zarr_name, bbox, args.chunk_size)
+        logging.debug("Flux layers opened for interval %s", interval)
 
         reference = state_nodes
         adm0_aligned = safe_crop(adm0, reference)
@@ -374,6 +389,7 @@ def run(args: argparse.Namespace) -> None:
         pixel_area_aligned = safe_crop(pixel_area, reference)
         drained_total_aligned = safe_crop(drained_total, reference)
         burned_total_aligned = safe_crop(burned_total, reference)
+        logging.debug("Datasets aligned for interval %s", interval)
 
         # Grab one URI from each folder to label flux_type
         flux_type_dict = {
@@ -400,6 +416,7 @@ def run(args: argparse.Namespace) -> None:
             ),
             dims=("flux_type", "y", "x"),
         )
+        logging.debug("Flux cube stacked for interval %s", interval)
 
         flux_cube, adm0_aligned, state_nodes, primary_forest_IFL_aligned = xr.align(
             flux_cube,
@@ -408,6 +425,7 @@ def run(args: argparse.Namespace) -> None:
             primary_forest_IFL_aligned,
             join="override",
         )
+        logging.debug("Arrays aligned for reduction for interval %s", interval)
 
         adm0_aligned.name = "gadm_adm0"
         primary_forest_IFL_aligned.name = "primary_forest_IFL"
@@ -426,6 +444,7 @@ def run(args: argparse.Namespace) -> None:
             )
 
         flux_type_ids = np.arange(3, dtype=np.uint8)
+        logging.debug("Running flox reduce for interval %s", interval)
         flux_results = xarray_reduce(
             flux_cube,
             *(adm0_aligned, state_nodes, primary_forest_IFL_aligned),
@@ -438,6 +457,7 @@ def run(args: argparse.Namespace) -> None:
             fill_value=np.nan,
             **_xr_kwargs,
         ).compute()
+        logging.debug("Flox reduce complete for interval %s", interval)
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
         df = create_interval_df(coord_dict, flux_type_dict, interval_end_year)
@@ -450,14 +470,17 @@ def run(args: argparse.Namespace) -> None:
             compression="zstd",
             engine="pyarrow",
         )
+        logging.info("Wrote results for interval %s", interval)
         first_write = False
         del df
 
     logging.info("Parquet write complete – partitions written to %s", args.output_parquet)
 
     if client:
+        logging.debug("Closing Dask client")
         client.close()
     if cluster:
+        logging.debug("Closing cluster")
         cluster.close()
 
 
