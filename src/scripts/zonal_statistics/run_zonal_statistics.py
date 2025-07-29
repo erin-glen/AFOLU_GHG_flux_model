@@ -101,10 +101,14 @@ def create_state_node_df(
 
 
 def list_folder_uris(base_uri: str) -> pd.Series:
-    """List GeoTIFF files in an s3 folder and return them as a Series."""
+    """Return GeoTIFF URIs within ``base_uri`` (recursively)."""
     fs = s3fs.S3FileSystem(anon=False)
-    all_files = fs.ls(base_uri)
-    tif_files = [f"s3://{f}" for f in all_files if f.endswith(".tif")]
+    pattern = base_uri.rstrip("/") + "/**/*.tif"
+    tif_files = [
+        (f if f.startswith("s3://") else f"s3://{f}") for f in fs.glob(pattern)
+    ]
+    if not tif_files:
+        raise FileNotFoundError(f"No GeoTIFFs found in {base_uri}")
     return pd.Series(tif_files, dtype="string")
 
 
@@ -224,12 +228,40 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
     if group_exists and metadata_exists:
         return
 
+    if uri_list.empty:
+        raise FileNotFoundError(f"No GeoTIFFs found for {zarr_path}")
+
     if not group_exists:
         ds = make_xarray_chunks(uri_list, chunk_size)
         ds.to_zarr(zarr_path, mode="w")
 
     if not metadata_exists:
         zarr.convenience.consolidate_metadata(fs.get_mapper(path))
+
+
+def run(args: argparse.Namespace) -> None:
+    logging.basicConfig(
+        level=logging.INFO if not args.debug else logging.DEBUG,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    cluster, client, _ = uu.connect_to_cluster(
+        cluster_name=args.cluster_name,
+        run_local=args.run_local,
+    )
+
+    logging.info(
+        "Connected to cluster %s", cluster.name if cluster else "local-threaded"
+    )
+
+    bbox = None
+    if args.bounding_box:
+        bbox = [float(x) for x in args.bounding_box]
+    elif args.tile_ids:
+        tiles: list[str] = []
+        for item in args.tile_ids:
+            tiles.extend(t.strip() for t in item.split(",") if t.strip())
 
 
 def run(args: argparse.Namespace) -> None:
