@@ -8,22 +8,29 @@ Dask cluster for distributed execution.  The paths and flux layers have
 been updated for the organic soils model.
 """
 
-import argparse, logging, re, sys
+import argparse
+import logging
+import re
+import sys
 
-import fsspec
-import s3fs
-import numpy as np, pandas as pd, xarray as xr
 import dask.array as da
+import fsspec
+import numpy as np
+import pandas as pd
+import s3fs
+import xarray as xr
 import zarr
 
 # ── flox compatibility (works for flox 0.5  →  ≥0.10) ─────────────────────
 try:
     # future‑proof in case flox later re‑exports from its root
-    from flox import xarray_reduce, ReindexArrayType, ReindexStrategy  # type: ignore
+    from flox import ReindexArrayType, ReindexStrategy, xarray_reduce  # type: ignore
 except ImportError:
-    from flox.xarray import xarray_reduce                              # noqa: F401
+    from flox.xarray import xarray_reduce  # noqa: F401
+
     try:
-        from flox.reindex import ReindexArrayType, ReindexStrategy     # noqa: F401
+        from flox.reindex import ReindexArrayType  # noqa: F401
+        from flox.reindex import ReindexStrategy
     except ImportError:
         # flox ≤0.8 – no sparse‑reindex API; fall back to defaults
         ReindexArrayType = None
@@ -35,12 +42,13 @@ except ImportError:
 # `Client` import is unused (uu.connect_to_cluster returns an
 # initialized client).  Remove to silence lint warnings.
 
-# Runtime utilities
-from src.scripts.utilities import universal_utilities as uu
-from src.scripts.utilities.universal_utilities import timestr
-
 # Absolute import so the script can run as `python run_zonal_statistics.py`
 import src.scripts.zonal_statistics.zonal_constants as zc
+
+# Runtime utilities
+from src.scripts.utilities import constants_and_names as cn
+from src.scripts.utilities import universal_utilities as uu
+from src.scripts.utilities.universal_utilities import timestr
 
 # constant no longer referenced after previous unit-alignment patch
 
@@ -148,7 +156,7 @@ def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
 
 def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
     """Crop one dataset to another's extent **without** shifting a pixel.
-       Abort if grids are not identical (guard against silent mis‑alignment)."""
+    Abort if grids are not identical (guard against silent mis‑alignment)."""
     if not (ds.x.equals(ref.x) and ds.y.equals(ref.y)):
         raise ValueError("Raster grid mis‑aligned with reference; aborting.")
     return ds.sel(x=ref.x, y=ref.y)
@@ -161,10 +169,13 @@ def crop_to_bbox(ds: xr.DataArray, bbox: list[float]) -> xr.DataArray:
     y_slice = slice(south, north) if ds.y[0] < ds.y[-1] else slice(north, south)
     return ds.sel(x=x_slice, y=y_slice)
 
+
 # ───────────────────────────────────────────────────────────────────────────
 # New helper – read only the AOI region *before* chunking
 # ───────────────────────────────────────────────────────────────────────────
-def open_zarr_region(path: str, bbox: list[float] | None, chunk_size: int) -> xr.DataArray:
+def open_zarr_region(
+    path: str, bbox: list[float] | None, chunk_size: int
+) -> xr.DataArray:
     """Open a Zarr store and return a 2‑D ``DataArray``.
 
     The helper tries to be tolerant of input variations:
@@ -214,6 +225,20 @@ def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
     }
     coord_dict["value"] = values
     return coord_dict
+
+
+def build_interval_pairs(end_years: list[int]) -> list[tuple[int, int]]:
+    """Translate interval end years to (start, end) tuples."""
+    mapping = {end: (start, end) for start, end in cn.five_year_inventory_periods}
+    pairs = []
+    for year in end_years:
+        if year not in mapping:
+            raise ValueError(
+                f"Interval end year {year} not supported."
+                f" Valid options: {sorted(mapping)}"
+            )
+        pairs.append(mapping[year])
+    return pairs
 
 
 def create_interval_df(
@@ -366,10 +391,11 @@ def run(args: argparse.Namespace) -> None:
     gadm_adm0_ids = zc.GADM_ADM0_IDS
     primary_forest_IFL_codes = zc.PRIMARY_FOREST_IFL_CODES
 
-    first_write = True   # incremental Parquet write flag
+    first_write = True  # incremental Parquet write flag
 
-    for interval_end_year in args.interval_end_years:
-        interval = f"{interval_end_year - 1}_{interval_end_year}"
+    interval_pairs = build_interval_pairs(args.interval_end_years)
+    for interval_start_year, interval_end_year in interval_pairs:
+        interval = f"{interval_start_year}_{interval_end_year}"
         logging.info("Processing interval %s : %s", interval, timestr())
         logging.debug("Opening flux zarrs for interval %s", interval)
 
@@ -384,8 +410,12 @@ def run(args: argparse.Namespace) -> None:
         )
 
         # --- build flux‑layer caches if missing ----------------------------
-        drained_folder = DRAINED_TOTAL_MG_CO2E_PIXEL.format(interval=interval, **OUTPUT_KW)
-        burned_folder  = BURNED_TOTAL_MG_CO2E_PIXEL.format(interval=interval, **OUTPUT_KW)
+        drained_folder = DRAINED_TOTAL_MG_CO2E_PIXEL.format(
+            interval=interval, **OUTPUT_KW
+        )
+        burned_folder = BURNED_TOTAL_MG_CO2E_PIXEL.format(
+            interval=interval, **OUTPUT_KW
+        )
         ensure_zarr_exists(
             list_folder_uris(drained_folder), drained_total_zarr_name, args.chunk_size
         )
@@ -394,12 +424,8 @@ def run(args: argparse.Namespace) -> None:
         )
         # -------------------------------------------------------------------
 
-        drained_total = open_zarr_region(
-            drained_total_zarr_name, bbox, args.chunk_size
-        )
-        burned_total = open_zarr_region(
-            burned_total_zarr_name, bbox, args.chunk_size
-        )
+        drained_total = open_zarr_region(drained_total_zarr_name, bbox, args.chunk_size)
+        burned_total = open_zarr_region(burned_total_zarr_name, bbox, args.chunk_size)
         state_nodes = open_zarr_region(node_zarr_name, bbox, args.chunk_size)
         logging.debug("Flux layers opened for interval %s", interval)
 
@@ -494,7 +520,9 @@ def run(args: argparse.Namespace) -> None:
         first_write = False
         del df
 
-    logging.info("Parquet write complete – partitions written to %s", args.output_parquet)
+    logging.info(
+        "Parquet write complete – partitions written to %s", args.output_parquet
+    )
 
     if client:
         logging.debug("Closing Dask client")
