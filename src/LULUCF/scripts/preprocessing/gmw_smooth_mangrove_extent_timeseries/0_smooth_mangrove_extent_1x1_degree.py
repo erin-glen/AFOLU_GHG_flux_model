@@ -2,17 +2,22 @@
 Run from src/LULUCF/
 
 Local:
-Data chunk:
+1x1 deg data chunk:
 python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_1x1_degree -bb 116 -3 117 -2 -cs 1 --run_local
 
-No data chunk:
+1x1 deg no data chunk:
 python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_1x1_degree -bb 60 -11 61 -10 -cs 1 --run_local
 
 Coiled test run:
-python -m scripts.utilities.create_cluster -n 4 -t 2 -m 16 -cn mangrove_smoothing_1x1deg
-python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_1x1_degree -bb 110 -10 120 0 -cs 1
-Note: Took 17 minutes to smooth all 11 mangrove extent years in 00N_110E (100 1x1 deg chunks: 54 data chunks, 46 skipped chunks)
-with 4 workers, 2 thread per worker and 16 GB per worker.
+python -m scripts.utilities.create_cluster -n 2 -t 2 -m 8 -cn mangrove_smoothing_1x1deg
+python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_1x1_degree -cn mangrove_smoothing_1x1deg  -bb 110 -10 120 0 -cs 1
+Note: Took 8 minutes to smooth all 11 mangrove extent years in 00N_110E (100 1x1 deg chunks: 54 data chunks, 46 skipped chunks) with 2 workers, 2 thread per worker and 8 GB per worker (vs 17 min locally).
+
+Coiled full run:
+python -m scripts.utilities.create_cluster -n 20 -t 8 -m 16 -cn mangrove_smoothing_1x1deg_full_run
+python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_1x1_degree -cn mangrove_smoothing_1x1deg_full_run -ln "This is intended to be the definitive global run for mangrove extent smoothing using GADM v4.1."
+Note: Took 40 minutes (13 coiled credits) to smooth all 11 mangrove extent years globally (1,519 data chunks, 17,313 skipped chunks) with 20 workers, 8 thread per worker and 16 GB per worker.
+
 
 todo:
 - see if it can scale from 1 degree to 10 degrees
@@ -246,6 +251,11 @@ def preprocess_and_upload_1x1_deg_smoothed_mangrove_data(bounds, download_dict_w
     # Delete downloaded data and return if there is no mangrove extent in any of the years
     elif max_value_all_years == np.uint8(0):
 
+        # Returns empty chunk stats in no data chunks
+        for key, array in layers.items():
+            chunk_stats.append(uu.calculate_stats(None, key, bounds_str, tile_id, 'input_layer', None))
+        # print(chunk_stats)
+
         del futures
         del layers
         gc.collect()
@@ -255,7 +265,7 @@ def preprocess_and_upload_1x1_deg_smoothed_mangrove_data(bounds, download_dict_w
         # Removes task tracking file from S3 once task is finished
         uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
 
-        return return_message, None  # Return both the success message and the statistics
+        return return_message, chunk_stats  # Return both the success message and the statistics
 
     # Proceed with the rest of the script if there is mangrove extent in any of the years
     elif max_value_all_years == np.uint8(1):
@@ -484,7 +494,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Runs analysis and gathers results
     mangrove_1x1_deg_results = dask.compute(*mangrove_1x1_deg_delayed_results)
     success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, mangrove_1x1_deg_results)
-    print(f"all_1x1_stats: {all_1x1_stats}")
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
     if not no_upload:
