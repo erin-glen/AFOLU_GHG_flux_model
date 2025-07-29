@@ -161,6 +161,32 @@ def crop_to_bbox(ds: xr.DataArray, bbox: list[float]) -> xr.DataArray:
     y_slice = slice(south, north) if ds.y[0] < ds.y[-1] else slice(north, south)
     return ds.sel(x=x_slice, y=y_slice)
 
+# ───────────────────────────────────────────────────────────────────────────
+# New helper – read only the AOI region *before* chunking
+# ───────────────────────────────────────────────────────────────────────────
+def open_zarr_region(
+    path: str,
+    bbox: list[float] | None,
+    chunk_size: int,
+) -> xr.DataArray:
+    """
+    Open a Zarr store; if ``bbox`` supplied, read only the required x/y slice
+    via the ``region=`` argument so we never materialise the full global array.
+    """
+    mapper = fsspec.get_mapper(path, anon=False, check=False)
+
+    if bbox is None:
+        da_band = xr.open_zarr(mapper).band_data
+    else:
+        west, south, east, north = bbox
+        x_sel = slice(west, east) if west < east else slice(east, west)
+        y_sel = slice(south, north) if south < north else slice(north, south)
+        da_band = xr.open_zarr(
+            mapper, region={"x": x_sel, "y": y_sel}
+        ).band_data
+
+    return da_band.chunk({"x": chunk_size, "y": chunk_size})
+
 
 def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
     """Convert flox results to a coordinate dictionary."""
@@ -327,25 +353,11 @@ def run(args: argparse.Namespace) -> None:
         args.chunk_size,
     )
 
-    adm0 = (
-        xr.open_zarr(adm0_zarr_name)
-        .band_data
-        .chunk({"x": args.chunk_size, "y": args.chunk_size})
+    adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size)
+    pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size)
+    primary_forest_IFL = open_zarr_region(
+        primary_forest_IFL_zarr_name, bbox, args.chunk_size
     )
-    pixel_area = (
-        xr.open_zarr(pixel_area_zarr_name)
-        .band_data
-        .chunk({"x": args.chunk_size, "y": args.chunk_size})
-    )
-    primary_forest_IFL = (
-        xr.open_zarr(primary_forest_IFL_zarr_name)
-        .band_data
-        .chunk({"x": args.chunk_size, "y": args.chunk_size})
-    )
-    if bbox:
-        adm0 = crop_to_bbox(adm0, bbox)
-        pixel_area = crop_to_bbox(pixel_area, bbox)
-        primary_forest_IFL = crop_to_bbox(primary_forest_IFL, bbox)
 
     contextual_layer_names = ["state_nodes", "gadm_adm0", "primary_forest_IFL"]
 
@@ -369,25 +381,13 @@ def run(args: argparse.Namespace) -> None:
             interval=interval, **OUTPUT_KW
         )
 
-        drained_total = (
-            xr.open_zarr(drained_total_zarr_name)
-            .band_data
-            .chunk({"x": args.chunk_size, "y": args.chunk_size})
+        drained_total = open_zarr_region(
+            drained_total_zarr_name, bbox, args.chunk_size
         )
-        burned_total = (
-            xr.open_zarr(burned_total_zarr_name)
-            .band_data
-            .chunk({"x": args.chunk_size, "y": args.chunk_size})
+        burned_total = open_zarr_region(
+            burned_total_zarr_name, bbox, args.chunk_size
         )
-        state_nodes = (
-            xr.open_zarr(node_zarr_name)
-            .band_data
-            .chunk({"x": args.chunk_size, "y": args.chunk_size})
-        )
-        if bbox:
-            drained_total = crop_to_bbox(drained_total, bbox)
-            burned_total = crop_to_bbox(burned_total, bbox)
-            state_nodes = crop_to_bbox(state_nodes, bbox)
+        state_nodes = open_zarr_region(node_zarr_name, bbox, args.chunk_size)
 
         reference = state_nodes
         adm0_aligned = safe_crop(adm0, reference)
@@ -439,6 +439,11 @@ def run(args: argparse.Namespace) -> None:
         if ReindexStrategy is not None:
             _xr_kwargs["reindex"] = ReindexStrategy(
                 blockwise=False, array_type=ReindexArrayType.SPARSE_COO
+            )
+        else:
+            logging.warning(
+                "Sparse re-index helpers missing – using dense aggregation; "
+                "memory use will be higher. Consider installing flox >= 0.10."
             )
 
         flux_type_ids = np.arange(3, dtype=np.uint8)
@@ -515,7 +520,10 @@ def main(argv=None):
         help="Interval end years",
     )
     parser.add_argument(
-        "--chunk_size", type=int, default=10000, help="Chunk size for reading rasters"
+        "--chunk_size",
+        type=int,
+        default=4096,
+        help="Tile chunk in pixels (lower -> less per-task memory)",
     )
     parser.add_argument("--output_parquet", required=True, help="Output Parquet folder")
     parser.add_argument("--debug", action="store_true", help="Verbose logging")
