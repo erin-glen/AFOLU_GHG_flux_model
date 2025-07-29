@@ -259,35 +259,12 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
 
     if not group_exists:
         ds = make_xarray_chunks(uri_list, chunk_size)
+        # Rechunk to ensure uniform chunk sizes for the Zarr output
+        ds = ds.chunk({"x": chunk_size, "y": chunk_size})
         ds.to_zarr(zarr_path, mode="w")
 
     if not metadata_exists:
         zarr.convenience.consolidate_metadata(fs.get_mapper(path))
-
-
-def run(args: argparse.Namespace) -> None:
-    logging.basicConfig(
-        level=logging.INFO if not args.debug else logging.DEBUG,
-        format="%(asctime)s | %(levelname)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-    cluster, client, _ = uu.connect_to_cluster(
-        cluster_name=args.cluster_name,
-        run_local=args.run_local,
-    )
-
-    logging.info(
-        "Connected to cluster %s", cluster.name if cluster else "local-threaded"
-    )
-
-    bbox = None
-    if args.bounding_box:
-        bbox = [float(x) for x in args.bounding_box]
-    elif args.tile_ids:
-        tiles: list[str] = []
-        for item in args.tile_ids:
-            tiles.extend(t.strip() for t in item.split(",") if t.strip())
 
 
 def run(args: argparse.Namespace) -> None:
@@ -555,4 +532,5 @@ if __name__ == "__main__":
 
 """
 python -m src.scripts.zonal_statistics.run_zonal_statistics --interval_end_years 2024 --cluster_name zonal_stats --run_date 20250724 --tile_ids 00N_110E --model_version "0_5_0" --output_parquet "zonal_stats_test.parquet"
+
 """
