@@ -614,7 +614,7 @@ def main(argv=None):
     parser.add_argument(
         "--chunk_size",
         type=int,
-        default=4096,
+        default=4000,
         help="Tile chunk in pixels (lower -> less per-task memory)",
     )
     parser.add_argument("--output_parquet", required=True, help="Output Parquet folder")
