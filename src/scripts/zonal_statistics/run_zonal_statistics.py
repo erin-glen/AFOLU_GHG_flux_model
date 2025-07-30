@@ -63,6 +63,10 @@ ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 # Literal template – evaluated later with .format(...)
 OUTPUT_BASE = "{root}/version_{model_version}/"
 
+DRAINED_STATE_NODES = (
+    OUTPUT_BASE + "drained_state/"
+    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+)
 DRAINED_TOTAL_MG_CO2E_PIXEL = (
     OUTPUT_BASE + "drained_total_Mg_CO2e_pixel_yr/"
     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
@@ -80,7 +84,7 @@ ZARR_PATHS = {
     + "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
     "burned_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
     + "burned_total_Mg_CO2e_pixel_{interval}.zarr",
-    "state_nodes": ZARR_CACHE_PREFIX + "state_node_{interval}.zarr",
+    "drained_state_nodes": ZARR_CACHE_PREFIX + "drained_state_node_{interval}.zarr",
 }
 
 # Contextual layers (static)
@@ -198,10 +202,6 @@ def crop_to_bbox(ds: xr.DataArray, bbox: list[float]) -> xr.DataArray:
     y_slice = slice(south, north) if ds.y[0] < ds.y[-1] else slice(north, south)
     return ds.sel(x=x_slice, y=y_slice)
 
-
-# ───────────────────────────────────────────────────────────────────────────
-# New helper – read only the AOI region *before* chunking
-# ───────────────────────────────────────────────────────────────────────────
 # ───────────────────────────────────────────────────────────────────────────
 # Helper – open a Zarr store, drop “band”, optional crop, apply chunking
 # ───────────────────────────────────────────────────────────────────────────
@@ -414,7 +414,7 @@ def run(args: argparse.Namespace) -> None:
     adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size)
     pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size)
 
-    contextual_layer_names = ["state_nodes", "gadm_adm0"]
+    contextual_layer_names = ["drained_state_nodes", "gadm_adm0"]
 
     node_codes = zc.NODE_CODES
     gadm_adm0_ids = zc.GADM_ADM0_IDS
@@ -433,7 +433,7 @@ def run(args: argparse.Namespace) -> None:
         burned_total_zarr_name = ZARR_PATHS["burned_total_Mg_CO2e_pixel"].format(
             interval=interval, **OUTPUT_KW
         )
-        node_zarr_name = ZARR_PATHS["state_nodes"].format(
+        node_zarr_name = ZARR_PATHS["drained_state_nodes"].format(
             interval=interval, **OUTPUT_KW
         )
 
@@ -454,10 +454,10 @@ def run(args: argparse.Namespace) -> None:
 
         drained_total = open_zarr_region(drained_total_zarr_name, bbox, args.chunk_size)
         burned_total = open_zarr_region(burned_total_zarr_name, bbox, args.chunk_size)
-        state_nodes = open_zarr_region(node_zarr_name, bbox, args.chunk_size)
+        drained_state_nodes = open_zarr_region(node_zarr_name, bbox, args.chunk_size)
         logging.debug("Flux layers opened for interval %s", interval)
 
-        reference = state_nodes
+        reference = drained_state_nodes
         adm0_aligned = safe_crop(adm0, reference)
         pixel_area_aligned = safe_crop(pixel_area, reference)
         drained_total_aligned = safe_crop(drained_total, reference)
@@ -491,7 +491,7 @@ def run(args: argparse.Namespace) -> None:
         )
         logging.debug("Flux cube stacked for interval %s", interval)
 
-        flux_cube, adm0_aligned, state_nodes = xr.align(
+        flux_cube, adm0_aligned, drained_state_nodes = xr.align(
             flux_cube,
             adm0_aligned,
             state_nodes,
@@ -500,7 +500,7 @@ def run(args: argparse.Namespace) -> None:
         logging.debug("Arrays aligned for reduction for interval %s", interval)
 
         adm0_aligned.name = "gadm_adm0"
-        state_nodes.name = "state_nodes"
+        drained_state_nodes.name = "drained_state_nodes"
 
         # Build reduction kwargs based on flox version
         _xr_kwargs = {}
@@ -518,7 +518,7 @@ def run(args: argparse.Namespace) -> None:
         logging.debug("Running flox reduce for interval %s", interval)
         flux_results = xarray_reduce(
             flux_cube,
-            *(adm0_aligned, state_nodes),
+            *(adm0_aligned, drained_state_nodes),
             func="sum",
             expected_groups=(
                 gadm_adm0_ids,
