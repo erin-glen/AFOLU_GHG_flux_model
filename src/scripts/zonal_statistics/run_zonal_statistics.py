@@ -20,6 +20,7 @@ import pandas as pd
 import s3fs
 import xarray as xr
 import zarr
+from typing import Callable
 
 # ── flox compatibility (works for flox 0.5  →  ≥0.10) ─────────────────────
 try:
@@ -69,6 +70,18 @@ DRAINED_TOTAL_MG_CO2E_PIXEL = (
 )
 BURNED_TOTAL_MG_CO2E_PIXEL = (
     OUTPUT_BASE + "burned_total_Mg_CO2e_pixel/"
+    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+)
+
+# state raster folders used to build the land_state_node zarr
+DRAINED_STATE = (
+    OUTPUT_BASE
+    + "drained_state/"
+    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+)
+BURNED_STATE = (
+    OUTPUT_BASE
+    + "burned_state/"
     "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
 )
 
@@ -280,26 +293,64 @@ def calculate_interval_flux_densities(
     return pd.concat([df, new_rows], ignore_index=True)
 
 
-def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> None:
-    """Create a zarr from URIs if it does not already exist.
+def open_geotiffs(uris: pd.Series) -> xr.DataArray:
+    """Open one or more GeoTIFF URIs."""
+    if uris.empty:
+        raise FileNotFoundError("No GeoTIFFs found")
+    ds = xr.open_mfdataset(uris.values.tolist(), engine="rasterio").squeeze()
+    if "band" in ds.dims:
+        ds = ds.isel(band=0, drop=True)
+    return ds
 
-    If the store exists but lacks consolidated metadata, create ``.zmetadata``.
+
+def combine_states(drained: xr.DataArray, burned: xr.DataArray) -> xr.DataArray:
+    """Combine drained and burned state codes into a single value."""
+    drained = drained.astype("uint64")
+    burned = burned.astype("uint64")
+    return (drained * 100 + burned).astype("uint64")
+
+
+def build_state_node_dataset(uri_lists: list[pd.Series], chunk_size: int) -> xr.Dataset:
+    """Return a dataset with the combined state-node layer."""
+    drained_da = open_geotiffs(uri_lists[0])
+    burned_da = open_geotiffs(uri_lists[1])
+    drained_da, burned_da = xr.align(drained_da, burned_da, join="override")
+    combined = combine_states(drained_da, burned_da)
+    return xr.Dataset({"state_nodes": combined})
+
+
+
+
+def ensure_zarr_exists(
+    uri_lists: pd.Series | list[pd.Series],
+    zarr_path: str,
+    chunk_size: int,
+    build_dataset: Callable[[list[pd.Series], int], xr.Dataset] | None = None,
+) -> None:
+    """Create a zarr from one or more URI lists if it does not exist.
+
+    ``build_dataset`` allows custom dataset creation when multiple sources are
+    provided (e.g., combining drained and burned states).  When omitted, the
+    first URI list is opened via :func:`make_xarray_chunks`.
     """
     logging.debug("Ensuring Zarr store %s", zarr_path)
+
+    if isinstance(uri_lists, pd.Series):
+        uri_lists = [uri_lists]
+
+    if any(u.empty for u in uri_lists):
+        raise FileNotFoundError(f"No GeoTIFFs found for {zarr_path}")
+
     fs, path = fsspec.core.url_to_fs(zarr_path)
     group_exists = fs.exists(f"{path}/.zgroup")
     metadata_exists = fs.exists(f"{path}/.zmetadata")
 
-    if group_exists and metadata_exists:
-        return
-
-    if uri_list.empty:
-        raise FileNotFoundError(f"No GeoTIFFs found for {zarr_path}")
-
     if not group_exists:
         logging.debug("Creating new Zarr store %s", zarr_path)
-        ds = make_xarray_chunks(uri_list, chunk_size)
-        # Rechunk to ensure uniform chunk sizes for the Zarr output
+        if build_dataset is not None:
+            ds = build_dataset(uri_lists, chunk_size)
+        else:
+            ds = make_xarray_chunks(uri_lists[0], chunk_size)
         ds = ds.chunk({"x": chunk_size, "y": chunk_size})
         ds.to_zarr(zarr_path, mode="w")
 
@@ -421,6 +472,18 @@ def run(args: argparse.Namespace) -> None:
         )
         ensure_zarr_exists(
             list_folder_uris(burned_folder), burned_total_zarr_name, args.chunk_size
+        )
+        drained_state_folder = DRAINED_STATE.format(
+            interval=interval, **OUTPUT_KW
+        )
+        burned_state_folder = BURNED_STATE.format(
+            interval=interval, **OUTPUT_KW
+        )
+        ensure_zarr_exists(
+            [list_folder_uris(drained_state_folder), list_folder_uris(burned_state_folder)],
+            node_zarr_name,
+            args.chunk_size,
+            build_state_node_dataset,
         )
         # -------------------------------------------------------------------
 
