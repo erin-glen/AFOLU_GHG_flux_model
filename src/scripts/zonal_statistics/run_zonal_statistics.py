@@ -88,10 +88,6 @@ ADM0_GTIFF_FOLDER = "s3://gfw2-data/gadm_administrative_boundaries/v4.1/v4.1.64_
 ADM0_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/GADM4_1_adm0_global/20250604/global_GADM41_adm0_20250604.zarr"
 PIXEL_AREA_GTIFF_FOLDER = "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
 PIXEL_AREA_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/pixel_area/20250604/global_pixel_area_20250604.zarr"
-IFL_PRIMARY_GTIFF_FOLDER = (
-    "s3://gfw2-data/climate/carbon_model/ifl_primary_merged/processed/20200724/"
-)
-IFL_PRIMARY_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/IFL2000_tropical_primary_forest_2001/20250609/ifl_primary_forest_merged.zarr"
 
 # Lookup table
 STATE_NODE_XLSX_LOCAL = "./src/LULUCF/LULUCF_state_node_lookup_table.xlsx"
@@ -162,6 +158,14 @@ def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
       index‑based reindex (no interpolation).
     Raises ValueError when resolution or shape really differ.
     """
+
+    if not {"x", "y"}.issubset(ds.dims):
+        logging.debug("safe_crop: skipping – dataset missing x/y dims")
+        return ds
+    if not {"x", "y"}.issubset(ref.dims):
+        logging.debug("safe_crop: skipping – reference missing x/y dims")
+        return ds
+
     # exact match
     if ds.x.equals(ref.x) and ds.y.equals(ref.y):
         return ds
@@ -389,10 +393,7 @@ def run(args: argparse.Namespace) -> None:
 
     adm0_folder, adm0_zarr_name = ADM0_GTIFF_FOLDER, ADM0_ZARR
     pixel_area_folder, pixel_area_zarr_name = PIXEL_AREA_GTIFF_FOLDER, PIXEL_AREA_ZARR
-    primary_forest_IFL_folder, primary_forest_IFL_zarr_name = (
-        IFL_PRIMARY_GTIFF_FOLDER,
-        IFL_PRIMARY_ZARR,
-    )
+
 
     # Reserved for future use
     # state_node_lookup_table_local, state_node_lookup_table_s3 = (
@@ -408,19 +409,10 @@ def run(args: argparse.Namespace) -> None:
     ensure_zarr_exists(
         list_folder_uris(pixel_area_folder), pixel_area_zarr_name, args.chunk_size
     )
-    logging.debug("Checking contextual layer primary_forest_IFL")
-    ensure_zarr_exists(
-        list_folder_uris(primary_forest_IFL_folder),
-        primary_forest_IFL_zarr_name,
-        args.chunk_size,
-    )
 
     logging.debug("Opening contextual layers")
     adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size)
     pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size)
-    primary_forest_IFL = open_zarr_region(
-        primary_forest_IFL_zarr_name, bbox, args.chunk_size
-    )
 
     contextual_layer_names = ["state_nodes", "gadm_adm0", "primary_forest_IFL"]
 
