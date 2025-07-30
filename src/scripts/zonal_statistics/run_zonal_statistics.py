@@ -322,29 +322,41 @@ def calculate_interval_flux_densities(
 
 
 def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> None:
-    """Create a zarr from URIs if it does not already exist.
+    """Ensure a Zarr store with consolidated metadata and valid coordinates.
 
-    If the store exists but lacks consolidated metadata, create ``.zmetadata``.
+    The store is created from the provided URIs when missing, and ``.zmetadata``
+    is generated if absent.  Existing stores are opened to verify that ``x`` and
+    ``y`` coordinates are present; if not, the store is rebuilt.
     """
     logging.debug("Ensuring Zarr store %s", zarr_path)
     fs, path = fsspec.core.url_to_fs(zarr_path)
     group_exists = fs.exists(f"{path}/.zgroup")
     metadata_exists = fs.exists(f"{path}/.zmetadata")
 
-    if group_exists and metadata_exists:
+    has_xy = False
+    if group_exists:
+        logging.debug("Opening existing Zarr store %s", zarr_path)
+        ds = xr.open_zarr(fs.get_mapper(path), consolidated=metadata_exists)
+        has_xy = {"x", "y"}.issubset(ds.dims)
+
+    if group_exists and metadata_exists and has_xy:
         return
 
     if uri_list.empty:
         raise FileNotFoundError(f"No GeoTIFFs found for {zarr_path}")
 
-    if not group_exists:
-        logging.debug("Creating new Zarr store %s", zarr_path)
+    if not group_exists or not has_xy:
+        if group_exists and not has_xy:
+            logging.debug(
+                "Rebuilding Zarr store %s due to missing x/y coordinates", zarr_path
+            )
+        else:
+            logging.debug("Creating new Zarr store %s", zarr_path)
         ds = make_xarray_chunks(uri_list, chunk_size)
-        # Rechunk to ensure uniform chunk sizes for the Zarr output
         ds = ds.chunk({"x": chunk_size, "y": chunk_size})
         ds.to_zarr(zarr_path, mode="w")
 
-    if not metadata_exists:
+    if not metadata_exists or not has_xy:
         logging.debug("Consolidating metadata for %s", zarr_path)
         zarr.convenience.consolidate_metadata(fs.get_mapper(path))
 
@@ -444,11 +456,17 @@ def run(args: argparse.Namespace) -> None:
         burned_folder = BURNED_TOTAL_MG_CO2E_PIXEL.format(
             interval=interval, **OUTPUT_KW
         )
+        node_folder = DRAINED_STATE_NODES.format(
+            interval=interval, **OUTPUT_KW
+        )
         ensure_zarr_exists(
             list_folder_uris(drained_folder), drained_total_zarr_name, args.chunk_size
         )
         ensure_zarr_exists(
             list_folder_uris(burned_folder), burned_total_zarr_name, args.chunk_size
+        )
+        ensure_zarr_exists(
+            list_folder_uris(node_folder), node_zarr_name, args.chunk_size
         )
         # -------------------------------------------------------------------
 
@@ -494,7 +512,7 @@ def run(args: argparse.Namespace) -> None:
         flux_cube, adm0_aligned, drained_state_nodes = xr.align(
             flux_cube,
             adm0_aligned,
-            state_nodes,
+            drained_state_nodes,
             join="override",
         )
         logging.debug("Arrays aligned for reduction for interval %s", interval)
