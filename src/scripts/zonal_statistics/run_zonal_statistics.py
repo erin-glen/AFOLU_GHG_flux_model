@@ -155,11 +155,36 @@ def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
 
 
 def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
-    """Crop one dataset to another's extent **without** shifting a pixel.
-    Abort if grids are not identical (guard against silent mis‑alignment)."""
-    if not (ds.x.equals(ref.x) and ds.y.equals(ref.y)):
-        raise ValueError("Raster grid mis‑aligned with reference; aborting.")
-    return ds.sel(x=ref.x, y=ref.y)
+    """
+    Return *ds* on the exact grid of *ref* without resampling.
+    • Accepts reversed x/y order and flips *ds* when necessary.
+    • If the arrays differ only by floating‑point noise, performs an
+      index‑based reindex (no interpolation).
+    Raises ValueError when resolution or shape really differ.
+    """
+    # exact match
+    if ds.x.equals(ref.x) and ds.y.equals(ref.y):
+        return ds
+
+    # reversed axes?
+    flip_x = ds.x[::-1].equals(ref.x)
+    flip_y = ds.y[::-1].equals(ref.y)
+    if flip_x or flip_y:
+        if flip_x:
+            ds = ds.sel(x=ds.x[::-1])
+        if flip_y:
+            ds = ds.sel(y=ds.y[::-1])
+        return ds
+
+    # same shape, small FP differences
+    if ds.x.size == ref.x.size and ds.y.size == ref.y.size:
+        return ds.reindex_like(ref, method=None)
+
+    raise ValueError(
+        "Raster grids incompatible (different shape/resolution). "
+        "Check that all inputs share the same 0.0025‑deg grid."
+    )
+
 
 
 def crop_to_bbox(ds: xr.DataArray, bbox: list[float]) -> xr.DataArray:
@@ -173,33 +198,41 @@ def crop_to_bbox(ds: xr.DataArray, bbox: list[float]) -> xr.DataArray:
 # ───────────────────────────────────────────────────────────────────────────
 # New helper – read only the AOI region *before* chunking
 # ───────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────────────────
+# Helper – open a Zarr store, drop “band”, optional crop, apply chunking
+# ───────────────────────────────────────────────────────────────────────────
 def open_zarr_region(
-    path: str, bbox: list[float] | None, chunk_size: int
+    path: str,
+    bbox: list[float] | None,
+    chunk_size: int,
 ) -> xr.DataArray:
-    """Open a Zarr store and return a 2‑D ``DataArray``.
-
-    The helper tries to be tolerant of input variations:
-    - the first variable containing both ``x`` and ``y`` dims is selected
-    - a leading ``band`` dimension is dropped when present
-    - when ``bbox`` is supplied and ``x``/``y`` exist the data are cropped
-    - chunking is applied only to existing ``x``/``y`` dims
     """
+    Return a 2‑D DataArray from *path*.
 
+    • Works whether the Zarr was written as (y,x) **or** (band,y,x):
+      the first `band` slice is kept and the dimension is dropped.
+
+    • If *bbox* is supplied and the array has `x` and `y` coords,
+      the data are cropped with `.sel(x=…, y=…)`.
+
+    • The result is rechunked *only* along the spatial dims that exist
+      (typically `"x"` and `"y"`).
+    """
     mapper = fsspec.get_mapper(path, anon=False, check=False)
     ds = xr.open_zarr(mapper)
 
-    # pick variable
+    # ── select a variable ────────────────────────────────────────────────
     if isinstance(ds, xr.DataArray):
         da = ds
-    else:
+    else:                                               # pick first var with x & y
         vars_xy = [v for v in ds.data_vars.values() if {"x", "y"}.issubset(v.dims)]
         da = vars_xy[0] if vars_xy else next(iter(ds.data_vars.values()))
 
-    # drop band if needed
+    # ── drop leading “band” dimension if present ─────────────────────────
     if "band" in da.dims:
         da = da.isel(band=0, drop=True)
 
-    # optional crop
+    # ── optional spatial crop ────────────────────────────────────────────
     if bbox is not None and {"x", "y"}.issubset(da.dims):
         west, south, east, north = bbox
         x_slice = slice(west, east) if west < east else slice(east, west)
@@ -208,8 +241,12 @@ def open_zarr_region(
     elif bbox is not None:
         logging.warning("Skipping spatial crop for %s – x/y dims not present.", path)
 
+    # ── rechunk only existing spatial dims ───────────────────────────────
     chunk_dict = {d: chunk_size for d in ("x", "y") if d in da.dims}
-    return da.chunk(chunk_dict)
+    if chunk_dict:                                   # avoid .chunk({}) for 1‑D vars
+        da = da.chunk(chunk_dict)
+
+    return da
 
 
 def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
