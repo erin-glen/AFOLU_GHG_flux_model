@@ -414,11 +414,10 @@ def run(args: argparse.Namespace) -> None:
     adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size)
     pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size)
 
-    contextual_layer_names = ["state_nodes", "gadm_adm0", "primary_forest_IFL"]
+    contextual_layer_names = ["state_nodes", "gadm_adm0"]
 
     node_codes = zc.NODE_CODES
     gadm_adm0_ids = zc.GADM_ADM0_IDS
-    primary_forest_IFL_codes = zc.PRIMARY_FOREST_IFL_CODES
 
     first_write = True  # incremental Parquet write flag
 
@@ -460,7 +459,6 @@ def run(args: argparse.Namespace) -> None:
 
         reference = state_nodes
         adm0_aligned = safe_crop(adm0, reference)
-        primary_forest_IFL_aligned = safe_crop(primary_forest_IFL, reference)
         pixel_area_aligned = safe_crop(pixel_area, reference)
         drained_total_aligned = safe_crop(drained_total, reference)
         burned_total_aligned = safe_crop(burned_total, reference)
@@ -493,17 +491,15 @@ def run(args: argparse.Namespace) -> None:
         )
         logging.debug("Flux cube stacked for interval %s", interval)
 
-        flux_cube, adm0_aligned, state_nodes, primary_forest_IFL_aligned = xr.align(
+        flux_cube, adm0_aligned, state_nodes = xr.align(
             flux_cube,
             adm0_aligned,
             state_nodes,
-            primary_forest_IFL_aligned,
             join="override",
         )
         logging.debug("Arrays aligned for reduction for interval %s", interval)
 
         adm0_aligned.name = "gadm_adm0"
-        primary_forest_IFL_aligned.name = "primary_forest_IFL"
         state_nodes.name = "state_nodes"
 
         # Build reduction kwargs based on flox version
@@ -522,12 +518,11 @@ def run(args: argparse.Namespace) -> None:
         logging.debug("Running flox reduce for interval %s", interval)
         flux_results = xarray_reduce(
             flux_cube,
-            *(adm0_aligned, state_nodes, primary_forest_IFL_aligned),
+            *(adm0_aligned, state_nodes),
             func="sum",
             expected_groups=(
                 gadm_adm0_ids,
                 node_codes,
-                primary_forest_IFL_codes,
             ),
             fill_value=np.nan,
             **_xr_kwargs,
