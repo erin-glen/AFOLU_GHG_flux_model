@@ -80,7 +80,7 @@ ZARR_PATHS = {
     + "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
     "burned_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
     + "burned_total_Mg_CO2e_pixel_{interval}.zarr",
-    "state_nodes": ZARR_CACHE_PREFIX + "land_state_node_{interval}.zarr",
+    "state_nodes": ZARR_CACHE_PREFIX + "state_node_{interval}.zarr",
 }
 
 # Contextual layers (static)
