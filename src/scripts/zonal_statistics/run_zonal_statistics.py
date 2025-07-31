@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import dask.array as da
+import dask
 import fsspec
 import numpy as np
 import pandas as pd
@@ -294,34 +295,38 @@ def open_zarr_region(
       (typically `"x"` and `"y"`).
     """
     mapper = fsspec.get_mapper(path, anon=False, check=False)
-    ds = xr.open_zarr(mapper)
+    with dask.annotate(label=f"open:{Path(path).stem}"):
+        ds = xr.open_zarr(mapper)
 
     # ── select a variable ────────────────────────────────────────────────
     if isinstance(ds, xr.DataArray):
-        da = ds
+        data_arr = ds
     else:                                               # pick first var with x & y
         vars_xy = [v for v in ds.data_vars.values() if {"x", "y"}.issubset(v.dims)]
-        da = vars_xy[0] if vars_xy else next(iter(ds.data_vars.values()))
+        data_arr = vars_xy[0] if vars_xy else next(iter(ds.data_vars.values()))
 
     # ── drop leading “band” dimension if present ─────────────────────────
-    if "band" in da.dims:
-        da = da.isel(band=0, drop=True)
+    if "band" in data_arr.dims:
+        data_arr = data_arr.isel(band=0, drop=True)
 
     # ── optional spatial crop ────────────────────────────────────────────
-    if bbox is not None and {"x", "y"}.issubset(da.dims):
+    if bbox is not None and {"x", "y"}.issubset(data_arr.dims):
         west, south, east, north = bbox
         x_slice = slice(west, east) if west < east else slice(east, west)
         y_slice = slice(south, north) if south < north else slice(north, south)
-        da = da.sel(x=x_slice, y=y_slice)
+        data_arr = data_arr.sel(x=x_slice, y=y_slice)
     elif bbox is not None:
         logging.warning("Skipping spatial crop for %s – x/y dims not present.", path)
 
     # ── rechunk only existing spatial dims ───────────────────────────────
-    chunk_dict = {d: chunk_size for d in ("x", "y") if d in da.dims}
+    chunk_dict = {d: chunk_size for d in ("x", "y") if d in data_arr.dims}
     if chunk_dict:                                   # avoid .chunk({}) for 1‑D vars
-        da = da.chunk(chunk_dict)
+        data_arr = data_arr.chunk(chunk_dict)
 
-    return da
+    if isinstance(data_arr.data, da.core.Array):
+        data_arr.data = data_arr.data.map_blocks(lambda x: x, name=f"{Path(path).stem}")
+
+    return data_arr
 
 
 def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
@@ -646,17 +651,18 @@ def run(args: argparse.Namespace) -> None:
 
         flux_type_ids = np.arange(3, dtype=np.uint8)
         logger.debug("Running flox reduce for interval %s", interval)
-        flux_results = xarray_reduce(
-            flux_cube,
-            *(adm0_aligned, drained_state_nodes),
-            func="sum",
-            expected_groups=(
-                gadm_adm0_ids,
-                node_codes,
-            ),
-            fill_value=np.nan,
-            **_xr_kwargs,
-        ).compute()
+        with dask.annotate(label=f"reduce:{interval}"):
+            flux_results = xarray_reduce(
+                flux_cube,
+                *(adm0_aligned, drained_state_nodes),
+                func="sum",
+                expected_groups=(
+                    gadm_adm0_ids,
+                    node_codes,
+                ),
+                fill_value=np.nan,
+                **_xr_kwargs,
+            ).compute()
         logger.debug("Flox reduce complete for interval %s", interval)
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
