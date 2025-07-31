@@ -994,7 +994,7 @@ def flatten_list(nested_list):
 
 # Merges rasters that are <10x10 degrees into 10x10 degree rasters in the standard grid.
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
-def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
+def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, stat_type=None):
 
     ### Part 1: Merges 1x1 deg rasters to 10x10 deg
 
@@ -1024,8 +1024,14 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     if is_final:   # Prints to console if it is a final run
         print(f"Merging small rasters in {tile_id} in {vsis3_in_folder}")
 
-    # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
-    out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
+    # Determine the output folder
+    if output_dir is not None:
+        out_folder = output_dir
+        if not out_folder.endswith("/"):
+            out_folder += "/"
+    else:
+        # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
+        out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
 
     min_x, min_y, max_x, max_y = get_10x10_tile_bounds(tile_id)
 
@@ -1071,67 +1077,138 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         lu.print_and_log(f"Error merging rasters: {e}: {timestr()}", False, logger_worker)
         return f"failure merging {s3_name_dict}"
 
-    ### Part 2: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters)
 
-    # Computes valid pixel count in the output 10x10 raster for comparison with the sum of the constituent 1x1s
-    lu.print_and_log(f"Counting pixels in {tile_id} for {out_file_name}: {timestr()}", is_final, logger_worker)
+    ### Part 2: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters) if no stat_type is specified
 
-    # Computes count of valid pixels by reading raster in chunks (can't read full 10x10 into memory all at once
-    try:
-        ds = gdal.Open(merged_file)
-        if ds is not None:
+    if stat_type is None:
+        # Computes valid pixel count in the output 10x10 raster for comparison with the sum of the constituent 1x1s
+        lu.print_and_log(f"Counting pixels in {tile_id} for {out_file_name}: {timestr()}", is_final, logger_worker)
+
+        # Computes count of valid pixels by reading raster in chunks (can't read full 10x10 into memory all at once
+        try:
+            ds = gdal.Open(merged_file)
+            if ds is not None:
+                band = ds.GetRasterBand(1)
+                valid_pixel_count = 0
+
+                # Gets raster dimensions
+                x_size = band.XSize
+                y_size = band.YSize
+
+                # Reads in chunks to avoid high memory usage
+                block_size_x, block_size_y = band.GetBlockSize()
+
+                for y in range(0, y_size, block_size_y):
+                    rows_to_read = min(block_size_y, y_size - y)
+                    for x in range(0, x_size, block_size_x):
+                        cols_to_read = min(block_size_x, x_size - x)
+
+                        # Reads only a portion of the raster at a time
+                        block = band.ReadAsArray(x, y, cols_to_read, rows_to_read)
+
+                        if block is not None:
+                            valid_pixel_count += np.count_nonzero(block != raster_nodata_value)
+
+                ds = None  # Closes dataset
+            else:
+                valid_pixel_count = -1  # Failed to open file
+        except Exception as e:
+            lu.print_and_log(f"Error counting pixels for {merged_file}: {e}", is_final, logger_worker)
+            print(f"Error counting pixels for {merged_file}: {e}")
+            return f"failure counting pixels for {s3_name_dict}"
+
+        # Gets the output file pattern and year/year_range
+        out_pattern, year_range = strip_and_extract_years(out_file_name)
+
+        # Most stats for the 10x10 aren't calculated.
+        # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
+        # Dictionary is in a list because it's necessary for chunk stats processing later.
+        chunk_stats = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': out_file_name,
+            'tile_name': out_file_name,
+            'in_out': 'output_layer',
+            'pattern': out_pattern,
+            'years': year_range,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': valid_pixel_count,
+            'sum_value': 'no data',
+            'data_type': 'no data'
+        }]
+
+    ### Part 3: Sums extent for binary data in a 10x10 raster (for comparison with summed 1x1 rasters) if stat_type is 'extent'
+    elif stat_type == 'extent':
+
+        # Computes valid extent in the output 10x10 raster for comparison with the sum of the constituent 1x1s
+        lu.print_and_log(f"Summing extent in {tile_id} for {out_file_name}: {timestr()}", is_final, logger_worker)
+
+        try:
+            # Open merged raster
+            ds = gdal.Open(merged_file)
+            if ds is None:
+                raise RuntimeError(f"Failed to open merged raster: {merged_file}")
+
+            # Build the path to the pixel area raster
+            pixel_area_vsis3_path = f"/vsis3/{cn.pixel_area_dir[5:]}{cn.pixel_area_pattern}_{tile_id}.tif"
+            area_ds = gdal.Open(pixel_area_vsis3_path)
+            if area_ds is None:
+                raise RuntimeError(f"Failed to open pixel area raster: {pixel_area_vsis3_path}")
+
+            # Get bands and dimensions
             band = ds.GetRasterBand(1)
-            valid_pixel_count = 0
-
-            # Gets raster dimensions
+            area_band = area_ds.GetRasterBand(1)
             x_size = band.XSize
             y_size = band.YSize
-
-            # Reads in chunks to avoid high memory usage
             block_size_x, block_size_y = band.GetBlockSize()
 
+            total_extent = 0.0
             for y in range(0, y_size, block_size_y):
                 rows_to_read = min(block_size_y, y_size - y)
                 for x in range(0, x_size, block_size_x):
                     cols_to_read = min(block_size_x, x_size - x)
 
-                    # Reads only a portion of the raster at a time
-                    block = band.ReadAsArray(x, y, cols_to_read, rows_to_read)
+                    mangrove_block = band.ReadAsArray(x, y, cols_to_read, rows_to_read)
+                    area_block = area_band.ReadAsArray(x, y, cols_to_read, rows_to_read)
 
-                    if block is not None:
-                        valid_pixel_count += np.count_nonzero(block != raster_nodata_value)
+                    if mangrove_block is None or area_block is None:
+                        continue
 
-            ds = None  # Closes dataset
-        else:
-            valid_pixel_count = -1  # Failed to open file
-    except Exception as e:
-        lu.print_and_log(f"Error counting pixels for {merged_file}: {e}", is_final, logger_worker)
-        print(f"Error counting pixels for {merged_file}: {e}")
-        return f"failure counting pixels for {s3_name_dict}"
+                    valid_mask = mangrove_block != raster_nodata_value
+                    total_extent += np.sum(area_block[valid_mask])
 
-    # Gets the output file pattern and year/year_range
-    out_pattern, year_range = strip_and_extract_years(out_file_name)
+            ds = None
+            area_ds = None
 
-    # Most stats for the 10x10 aren't calculated.
-    # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
-    # Dictionary is in a list because it's necessary for chunk stats processing later.
-    chunk_stats = [{
-        'chunk_id': 'N/A',
-        'tile_id': tile_id,
-        'layer_name': out_file_name,
-        'tile_name': out_file_name,
-        'in_out': 'output_layer',
-        'pattern': out_pattern,
-        'years': year_range,
-        'min_value': 'no data',
-        'mean_value': 'no data',
-        'max_value': 'no data',
-        'count_value': valid_pixel_count,
-        'sum_value': 'no data',
-        'data_type': 'no data'
-    }]
+        except Exception as e:
+            lu.print_and_log(f"Error calculating extent for {merged_file}: {e}", is_final, logger_worker)
+            return f"failure calculating extent for {s3_name_dict}"
 
-    ### Part 3: Uploads 10x10 to s3 using multipart uploading
+        # Gets the output file pattern and year/year_range
+        out_pattern, year_range = strip_and_extract_years(out_file_name)
+
+        # Dictionary is in a list because it's necessary for chunk stats processing later.
+        chunk_stats = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': out_file_name,
+            'tile_name': out_file_name,
+            'in_out': 'output_layer',
+            'pattern': out_pattern,
+            'years': year_range,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': 'no data',
+            'sum_value': total_extent,
+            'data_type': 'no data'
+        }]
+
+
+
+    ### Part 4: Uploads 10x10 to s3 using multipart uploading
     ### https://chatgpt.com/share/e/67d848cf-8b08-800a-b0e8-79a72c9eb49a.
 
     lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}: {timestr()}", is_final, logger_worker)

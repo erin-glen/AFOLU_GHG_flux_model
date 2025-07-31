@@ -504,7 +504,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
-    #todo: start cleaning the code from here
+
     ### Step 3: Chunk stats for 1x1 degree outputs, aggregates logs
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
