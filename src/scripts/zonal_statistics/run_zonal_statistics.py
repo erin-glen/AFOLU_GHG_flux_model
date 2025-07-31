@@ -200,7 +200,7 @@ def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
 
     msg = (
         "Raster grids incompatible (ds: shape {} res {}; ref: shape {} res {}). "
-        "Check that all inputs share the same 0.0025‑deg grid.".format(
+        "Check that all inputs share the same 0.00025‑deg grid.".format(
             ds_shape, ds_res, ref_shape, ref_res
         )
     )
@@ -470,8 +470,6 @@ def run(args: argparse.Namespace) -> None:
 
     node_codes = zc.NODE_CODES
     gadm_adm0_ids = zc.GADM_ADM0_IDS
-
-    first_write = True  # incremental Parquet write flag
 
     interval_pairs = build_interval_pairs(args.interval_end_years)
     for interval_start_year, interval_end_year in interval_pairs:
