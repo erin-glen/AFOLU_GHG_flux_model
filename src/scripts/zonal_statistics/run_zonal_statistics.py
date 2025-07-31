@@ -680,10 +680,6 @@ def main(argv=None):
 if __name__ == "__main__":
     main()
 
-# TODO (2025-07-09): node_codes / gadm_adm0_ids lists should eventually
-# move to a shared constants module or be generated dynamically from
-# the rasters, so that ontology updates propagate automatically.
-
 
 """
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
@@ -692,5 +688,11 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --run_date 20250724 \
        --tile_ids 00N_110E \
        --model_version 0_5_0 \
-       --output_parquet zonal_stats_test.parquet
 """
+
+# TODO interval looping
+# TODO burned state nodes
+# TODO node meanings
+# TODO test updated environment (flox >= 0.10)
+# TODO test improved safe crop (eventually)
+# TODO post processing for output parquet
