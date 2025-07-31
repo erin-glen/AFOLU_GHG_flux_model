@@ -155,33 +155,41 @@ def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
     ).squeeze()
 
 
-def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
+def safe_crop(ds: xr.DataArray, ref: xr.DataArray, tol: float = 1e-12) -> xr.DataArray:
     """
-    Return *ds* on the exact grid of *ref* without resampling.
-    • Accepts reversed x/y order and flips *ds* when necessary.
-    • If the arrays differ only by floating‑point noise, performs an
-      index‑based reindex (no interpolation).
-    Raises ValueError when resolution or shape really differ.
+    Return *ds* on the exact grid of *ref* **without resampling**.
+
+    ── Behaviour ──────────────────────────────────────────────────────────
+    1. If the two grids already match, return immediately.
+    2. Accept reversed x or y orientation and flip in‑place.
+    3. If shapes are equal and coordinates differ only by ≤*tol* degrees
+       (rounding noise), snap to *ref* with ``reindex_like``.
+    4. If *ds* is larger than *ref* but has the same resolution, crop the
+       spatial extent (handles global contextual layers vs. peat‑zone data).
+    5. Otherwise raise ``ValueError`` with a detailed message.
+
+    Parameters
+    ----------
+    ds, ref : xr.DataArray
+        DataArrays that *must* contain ``"x"`` and ``"y"`` coordinates.
+    tol : float, default 1e‑12
+        Tolerance (in degrees) for the “almost‑equal” test.
+
+    Returns
+    -------
+    xr.DataArray
+        *ds* aligned to *ref*.
     """
-
-    if not {"x", "y"}.issubset(ds.dims):
-        logging.debug("safe_crop: skipping – dataset missing x/y dims")
-        return ds
-    if not {"x", "y"}.issubset(ref.dims):
-        logging.debug("safe_crop: skipping – reference missing x/y dims")
+    # ── guard: x/y dims must exist ───────────────────────────────────────
+    if not {"x", "y"}.issubset(ds.dims) or not {"x", "y"}.issubset(ref.dims):
+        logging.debug("safe_crop: skipping – x/y dims missing")
         return ds
 
-    # exact match
+    # ── 1. exact match ───────────────────────────────────────────────────
     if ds.x.equals(ref.x) and ds.y.equals(ref.y):
         return ds
 
-    # ── Fix 2 ───────────────────────────────────────────────────────────
-    # Accept grids that differ only by ≤1×10‑12° (floating‑point noise).
-    if np.allclose(ds.x, ref.x) and np.allclose(ds.y, ref.y):
-        return ds
-    # -------------------------------------------------------------------
-
-    # reversed axes?
+    # ── 2. reversed orientation? ────────────────────────────────────────
     flip_x = ds.x[::-1].equals(ref.x)
     flip_y = ds.y[::-1].equals(ref.y)
     if flip_x or flip_y:
@@ -189,49 +197,39 @@ def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
             ds = ds.sel(x=ds.x[::-1])
         if flip_y:
             ds = ds.sel(y=ds.y[::-1])
-        return ds
+        return ds  # now identical to ref
 
-    # same shape, small FP differences
-    if ds.x.size == ref.x.size and ds.y.size == ref.y.size:
+    # ── 3. same shape + near‑identical coords (≤ tol) ────────────────────
+    same_len = ds.x.size == ref.x.size and ds.y.size == ref.y.size
+    if same_len and np.allclose(ds.x, ref.x, atol=tol) and np.allclose(ds.y, ref.y, atol=tol):
+        # re‑index (no interpolation) forces coordinate equality
         return ds.reindex_like(ref, method=None)
 
-    # ----- new logic: crop larger arrays to the reference grid ---------
+    # ── 4. crop larger grid to smaller reference ─────────────────────────
+    # Check resolution equality first
     try:
-        ds_res = (float(ds.x[1] - ds.x[0]), float(ds.y[1] - ds.y[0]))
+        ds_res  = (float(ds.x[1] - ds.x[0]),  float(ds.y[1] - ds.y[0]))
         ref_res = (float(ref.x[1] - ref.x[0]), float(ref.y[1] - ref.y[0]))
-    except Exception:
-        ds_res = (float("nan"), float("nan"))
-        ref_res = (float("nan"), float("nan"))
+    except Exception:  # degenerate one‑pixel axis
+        ds_res = ref_res = (np.nan, np.nan)
 
-    res_match = (
-        np.isclose(ds_res[0], ref_res[0]) and np.isclose(ds_res[1], ref_res[1])
-    )
-    if res_match:
-        ds_xmin = float(ds.x.min())
-        ds_xmax = float(ds.x.max())
-        ds_ymin = float(ds.y.min())
-        ds_ymax = float(ds.y.max())
-        ref_xmin = float(ref.x.min())
-        ref_xmax = float(ref.x.max())
-        ref_ymin = float(ref.y.min())
-        ref_ymax = float(ref.y.max())
+    if np.isclose(ds_res[0], ref_res[0]) and np.isclose(ds_res[1], ref_res[1]):
+        ds_extent  = (float(ds.x.min()),  float(ds.y.min()),
+                      float(ds.x.max()),  float(ds.y.max()))
+        ref_extent = (float(ref.x.min()), float(ref.y.min()),
+                      float(ref.x.max()), float(ref.y.max()))
+
         covers = (
-            ds_xmin <= ref_xmin <= ref_xmax <= ds_xmax
-            and ds_ymin <= ref_ymin <= ref_ymax <= ds_ymax
+            ds_extent[0] <= ref_extent[0] <= ref_extent[2] <= ds_extent[2] and
+            ds_extent[1] <= ref_extent[1] <= ref_extent[3] <= ds_extent[3]
         )
         if covers:
-            x_slice = (
-                slice(ref_xmin, ref_xmax)
-                if ds.x[0] < ds.x[-1]
-                else slice(ref_xmax, ref_xmin)
-            )
-            y_slice = (
-                slice(ref_ymin, ref_ymax)
-                if ds.y[0] < ds.y[-1]
-                else slice(ref_ymax, ref_ymin)
-            )
+            # slice depends on axis direction
+            x_slice = slice(ref_extent[0], ref_extent[2]) if ds.x[0] < ds.x[-1] else slice(ref_extent[2], ref_extent[0])
+            y_slice = slice(ref_extent[1], ref_extent[3]) if ds.y[0] < ds.y[-1] else slice(ref_extent[3], ref_extent[1])
             ds = ds.sel(x=x_slice, y=y_slice)
-            # orientation check after crop
+
+            # final orientation checks after cropping
             if ds.x.equals(ref.x) and ds.y.equals(ref.y):
                 return ds
             if ds.x[::-1].equals(ref.x):
@@ -241,23 +239,18 @@ def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
             if ds.x.equals(ref.x) and ds.y.equals(ref.y):
                 return ds
 
-    ds_shape = (ds.y.size, ds.x.size)
+    # ── 5. give up – incompatible grids ──────────────────────────────────
+    ds_shape  = (ds.y.size,  ds.x.size)
     ref_shape = (ref.y.size, ref.x.size)
-    try:
-        ds_res = (float(ds.x[1] - ds.x[0]), float(ds.y[1] - ds.y[0]))
-        ref_res = (float(ref.x[1] - ref.x[0]), float(ref.y[1] - ref.y[0]))
-    except Exception:
-        ds_res = (float("nan"), float("nan"))
-        ref_res = (float("nan"), float("nan"))
-
     msg = (
-        "Raster grids incompatible (ds: shape {} res {}; ref: shape {} res {}). "
-        "Check that all inputs share the same 0.00025‑deg grid.".format(
-            ds_shape, ds_res, ref_shape, ref_res
-        )
+        "Raster grids incompatible "
+        f"(ds shape {ds_shape} res {ds_res}; "
+        f"ref shape {ref_shape} res {ref_res}). "
+        "Check that all inputs share the same 0.00025‑deg grid."
     )
     logging.error(msg)
     raise ValueError(msg)
+
 
 
 
