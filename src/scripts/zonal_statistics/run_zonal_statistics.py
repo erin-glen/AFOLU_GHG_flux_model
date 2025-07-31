@@ -12,6 +12,7 @@ import argparse
 import logging
 import re
 import sys
+from pathlib import Path
 
 import dask.array as da
 import fsspec
@@ -98,6 +99,17 @@ PIXEL_AREA_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contex
 STATE_NODE_XLSX_LOCAL = "./src/LULUCF/LULUCF_state_node_lookup_table.xlsx"
 STATE_NODE_XLSX_S3 = "https://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_model/LULUCF/state_node_lookup_tables/LULUCF_state_node_lookup_table.xlsx"
 # ===  END PATH MANIFEST  ======================================================
+
+
+def build_output_parquet(model_version: str, years: list[int]) -> str:
+    """Return default Parquet path for a given model version and year list."""
+    base = (
+        Path("data/climate/AFOLU_flux_model/organic_soils/outputs")
+        / f"version_{model_version}"
+        / "zonal_stats"
+    )
+    year_part = "_".join(str(y) for y in years)
+    return str(base / f"zonal_stats_{year_part}.parquet")
 
 
 """
@@ -480,6 +492,9 @@ def run(args: argparse.Namespace) -> None:
         stage=stage,
     )
 
+    fs, out_path = fsspec.core.url_to_fs(args.output_parquet)
+    fs.makedirs(out_path, exist_ok=True)
+
     if args.debug:
         logger.setLevel(logging.DEBUG)
     logger.debug("Starting run with args: %s", args)
@@ -714,7 +729,14 @@ def main(argv=None):
         default=4000,
         help="Tile chunk in pixels (lower -> less per-task memory)",
     )
-    parser.add_argument("--output_parquet", required=True, help="Output Parquet folder")
+    parser.add_argument(
+        "--output_parquet",
+        help=(
+            "Output Parquet folder. Defaults to "
+            "data/climate/AFOLU_flux_model/organic_soils/outputs/"
+            "version_{model_version}/zonal_stats"
+        ),
+    )
     parser.add_argument("--debug", action="store_true", help="Verbose logging")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
@@ -731,6 +753,12 @@ def main(argv=None):
     parser.add_argument("--tile_ids", action="append", help="Comma separated tile IDs")
 
     args = parser.parse_args(argv)
+
+    if not args.output_parquet:
+        args.output_parquet = build_output_parquet(
+            args.model_version, args.interval_end_years
+        )
+
     run(args)
 
 
