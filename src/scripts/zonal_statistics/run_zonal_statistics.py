@@ -189,6 +189,52 @@ def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
     if ds.x.size == ref.x.size and ds.y.size == ref.y.size:
         return ds.reindex_like(ref, method=None)
 
+    # ----- new logic: crop larger arrays to the reference grid ---------
+    try:
+        ds_res = (float(ds.x[1] - ds.x[0]), float(ds.y[1] - ds.y[0]))
+        ref_res = (float(ref.x[1] - ref.x[0]), float(ref.y[1] - ref.y[0]))
+    except Exception:
+        ds_res = (float("nan"), float("nan"))
+        ref_res = (float("nan"), float("nan"))
+
+    res_match = (
+        np.isclose(ds_res[0], ref_res[0]) and np.isclose(ds_res[1], ref_res[1])
+    )
+    if res_match:
+        ds_xmin = float(ds.x.min())
+        ds_xmax = float(ds.x.max())
+        ds_ymin = float(ds.y.min())
+        ds_ymax = float(ds.y.max())
+        ref_xmin = float(ref.x.min())
+        ref_xmax = float(ref.x.max())
+        ref_ymin = float(ref.y.min())
+        ref_ymax = float(ref.y.max())
+        covers = (
+            ds_xmin <= ref_xmin <= ref_xmax <= ds_xmax
+            and ds_ymin <= ref_ymin <= ref_ymax <= ds_ymax
+        )
+        if covers:
+            x_slice = (
+                slice(ref_xmin, ref_xmax)
+                if ds.x[0] < ds.x[-1]
+                else slice(ref_xmax, ref_xmin)
+            )
+            y_slice = (
+                slice(ref_ymin, ref_ymax)
+                if ds.y[0] < ds.y[-1]
+                else slice(ref_ymax, ref_ymin)
+            )
+            ds = ds.sel(x=x_slice, y=y_slice)
+            # orientation check after crop
+            if ds.x.equals(ref.x) and ds.y.equals(ref.y):
+                return ds
+            if ds.x[::-1].equals(ref.x):
+                ds = ds.sel(x=ds.x[::-1])
+            if ds.y[::-1].equals(ref.y):
+                ds = ds.sel(y=ds.y[::-1])
+            if ds.x.equals(ref.x) and ds.y.equals(ref.y):
+                return ds
+
     ds_shape = (ds.y.size, ds.x.size)
     ref_shape = (ref.y.size, ref.x.size)
     try:
