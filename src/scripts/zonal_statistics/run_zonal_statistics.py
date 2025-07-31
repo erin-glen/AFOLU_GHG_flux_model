@@ -175,6 +175,12 @@ def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
     if ds.x.equals(ref.x) and ds.y.equals(ref.y):
         return ds
 
+    # ── Fix 2 ───────────────────────────────────────────────────────────
+    # Accept grids that differ only by ≤1×10‑12° (floating‑point noise).
+    if np.allclose(ds.x, ref.x) and np.allclose(ds.y, ref.y):
+        return ds
+    # -------------------------------------------------------------------
+
     # reversed axes?
     flip_x = ds.x[::-1].equals(ref.x)
     flip_y = ds.y[::-1].equals(ref.y)
@@ -429,6 +435,16 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
         else:
             logging.debug("Creating new Zarr store %s", zarr_path)
         ds = make_xarray_chunks(uri_list, chunk_size)
+
+        # ── Fix 1 ────────────────────────────────────────────────────────
+        # Snap every coordinate to the nearest 1×10‑12° so that the
+        # concatenated Zarr uses *exactly* the same values as the contextual
+        # layers (pre‑empting sub‑nanometre rounding noise).
+        for axis in ("x", "y"):
+            if axis in ds.coords:
+                ds = ds.assign_coords({axis: np.round(ds[axis].astype(float), 12)})
+        # ----------------------------------------------------------------
+
         ds = ds.chunk({"x": chunk_size, "y": chunk_size})
         ds.to_zarr(zarr_path, mode="w")
 
