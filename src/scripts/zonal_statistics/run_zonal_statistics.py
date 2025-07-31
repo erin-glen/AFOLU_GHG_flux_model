@@ -67,16 +67,20 @@ ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 OUTPUT_BASE = "{root}/version_{model_version}/"
 
 DRAINED_STATE_NODES = (
-    OUTPUT_BASE + "drained_state/"
-    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+        OUTPUT_BASE + "drained_state/"
+                      "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+)
+BURNED_STATE_NODES = (
+        OUTPUT_BASE + "burned_state/"
+                      "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
 )
 DRAINED_TOTAL_MG_CO2E_PIXEL = (
-    OUTPUT_BASE + "drained_total_Mg_CO2e_pixel_yr/"
-    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+        OUTPUT_BASE + "drained_total_Mg_CO2e_pixel_yr/"
+                      "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
 )
 BURNED_TOTAL_MG_CO2E_PIXEL = (
-    OUTPUT_BASE + "burned_total_Mg_CO2e_pixel/"
-    "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
+        OUTPUT_BASE + "burned_total_Mg_CO2e_pixel/"
+                      "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
 )
 
 # Zarr cache folders (one per interval)
@@ -84,10 +88,11 @@ ZARR_CACHE_PREFIX = OUTPUT_BASE + "zarr/{run_date}/{interval}/"
 
 ZARR_PATHS = {
     "drained_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
-    + "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
+                                   + "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
     "burned_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
-    + "burned_total_Mg_CO2e_pixel_{interval}.zarr",
+                                  + "burned_total_Mg_CO2e_pixel_{interval}.zarr",
     "drained_state_nodes": ZARR_CACHE_PREFIX + "drained_state_node_{interval}.zarr",
+    "burned_state_nodes": ZARR_CACHE_PREFIX + "burned_state_node_{interval}.zarr",
 }
 
 # Contextual layers (static)
@@ -99,15 +104,17 @@ PIXEL_AREA_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contex
 # Lookup table
 STATE_NODE_XLSX_LOCAL = "./src/LULUCF/LULUCF_state_node_lookup_table.xlsx"
 STATE_NODE_XLSX_S3 = "https://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_model/LULUCF/state_node_lookup_tables/LULUCF_state_node_lookup_table.xlsx"
+
+
 # ===  END PATH MANIFEST  ======================================================
 
 
 def build_output_parquet(model_version: str, years: list[int]) -> str:
     """Return default Parquet path for a given model version and year list."""
     base = (
-        Path("data/climate/AFOLU_flux_model/organic_soils/outputs")
-        / f"version_{model_version}"
-        / "zonal_stats"
+            Path("data/climate/AFOLU_flux_model/organic_soils/outputs")
+            / f"version_{model_version}"
+            / "zonal_stats"
     )
     year_part = "_".join(str(y) for y in years)
     return str(base / f"zonal_stats_{year_part}.parquet")
@@ -175,7 +182,6 @@ def safe_crop(ds, ref):
     return ds.sel(x=ref.x, y=ref.y, method="nearest")
 
 
-
 def crop_to_bbox(ds: xr.DataArray, bbox: list[float]) -> xr.DataArray:
     """Slice ``ds`` to ``bbox`` handling coordinate order."""
     west, south, east, north = bbox
@@ -183,13 +189,14 @@ def crop_to_bbox(ds: xr.DataArray, bbox: list[float]) -> xr.DataArray:
     y_slice = slice(south, north) if ds.y[0] < ds.y[-1] else slice(north, south)
     return ds.sel(x=x_slice, y=y_slice)
 
+
 # ───────────────────────────────────────────────────────────────────────────
 # Helper – open a Zarr store, drop “band”, optional crop, apply chunking
 # ───────────────────────────────────────────────────────────────────────────
 def open_zarr_region(
-    path: str,
-    bbox: list[float] | None,
-    chunk_size: int,
+        path: str,
+        bbox: list[float] | None,
+        chunk_size: int,
 ) -> xr.DataArray:
     """
     Return a 2‑D DataArray from *path*.
@@ -210,7 +217,7 @@ def open_zarr_region(
     # ── select a variable ────────────────────────────────────────────────
     if isinstance(ds, xr.DataArray):
         data_arr = ds
-    else:                                               # pick first var with x & y
+    else:  # pick first var with x & y
         vars_xy = [v for v in ds.data_vars.values() if {"x", "y"}.issubset(v.dims)]
         data_arr = vars_xy[0] if vars_xy else next(iter(ds.data_vars.values()))
 
@@ -229,7 +236,7 @@ def open_zarr_region(
 
     # ── rechunk only existing spatial dims ───────────────────────────────
     chunk_dict = {d: chunk_size for d in ("x", "y") if d in data_arr.dims}
-    if chunk_dict:                                   # avoid .chunk({}) for 1‑D vars
+    if chunk_dict:  # avoid .chunk({}) for 1‑D vars
         data_arr = data_arr.chunk(chunk_dict)
 
     if isinstance(data_arr.data, da.core.Array):
@@ -284,9 +291,9 @@ def build_interval_pairs(end_years: list[int]) -> list[tuple[int, int]]:
 
 
 def create_interval_df(
-    coord_dict: dict,
-    flux_type_dict: dict,
-    interval_end_year: int,
+        coord_dict: dict,
+        flux_type_dict: dict,
+        interval_end_year: int,
 ) -> pd.DataFrame:
     """Convert flox output to a processed dataframe."""
     df = pd.DataFrame(coord_dict)
@@ -297,7 +304,7 @@ def create_interval_df(
 
 
 def calculate_interval_flux_densities(
-    df: pd.DataFrame, contextual_layer_names: list[str]
+        df: pd.DataFrame, contextual_layer_names: list[str]
 ) -> pd.DataFrame:
     """Calculate per-hectare flux densities."""
     area_df = df[df["flux_type"] == "area__ha"].copy()
@@ -430,7 +437,6 @@ def run(args: argparse.Namespace) -> None:
     adm0_folder, adm0_zarr_name = ADM0_GTIFF_FOLDER, ADM0_ZARR
     pixel_area_folder, pixel_area_zarr_name = PIXEL_AREA_GTIFF_FOLDER, PIXEL_AREA_ZARR
 
-
     # Reserved for future use
     # state_node_lookup_table_local, state_node_lookup_table_s3 = (
     #     STATE_NODE_XLSX_LOCAL,
@@ -450,7 +456,7 @@ def run(args: argparse.Namespace) -> None:
     adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size)
     pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size)
 
-    contextual_layer_names = ["drained_state_nodes", "gadm_adm0"]
+    contextual_layer_names = ["drained_state_nodes", "burned_state_nodes", "gadm_adm0"]
 
     node_codes = zc.NODE_CODES
     gadm_adm0_ids = zc.GADM_ADM0_IDS
@@ -470,6 +476,9 @@ def run(args: argparse.Namespace) -> None:
         node_zarr_name = ZARR_PATHS["drained_state_nodes"].format(
             interval=interval, **OUTPUT_KW
         )
+        burned_node_zarr_name = ZARR_PATHS["burned_state_nodes"].format(
+            interval=interval, **OUTPUT_KW
+        )
 
         # --- build flux‑layer caches if missing ----------------------------
         drained_folder = DRAINED_TOTAL_MG_CO2E_PIXEL.format(
@@ -481,6 +490,9 @@ def run(args: argparse.Namespace) -> None:
         node_folder = DRAINED_STATE_NODES.format(
             interval=interval, **OUTPUT_KW
         )
+        burned_node_folder = BURNED_STATE_NODES.format(
+            interval=interval, **OUTPUT_KW
+        )
         ensure_zarr_exists(
             list_folder_uris(drained_folder), drained_total_zarr_name, args.chunk_size
         )
@@ -490,11 +502,15 @@ def run(args: argparse.Namespace) -> None:
         ensure_zarr_exists(
             list_folder_uris(node_folder), node_zarr_name, args.chunk_size
         )
+        ensure_zarr_exists(
+            list_folder_uris(burned_node_folder), burned_node_zarr_name, args.chunk_size
+        )
         # -------------------------------------------------------------------
 
         drained_total = open_zarr_region(drained_total_zarr_name, bbox, args.chunk_size)
         burned_total = open_zarr_region(burned_total_zarr_name, bbox, args.chunk_size)
         drained_state_nodes = open_zarr_region(node_zarr_name, bbox, args.chunk_size)
+        burned_state_nodes = open_zarr_region(burned_node_zarr_name, bbox, args.chunk_size)
         logger.debug("Flux layers opened for interval %s", interval)
 
         reference = drained_state_nodes
@@ -503,6 +519,7 @@ def run(args: argparse.Namespace) -> None:
             pixel_area_aligned = safe_crop(pixel_area, reference)
             drained_total_aligned = safe_crop(drained_total, reference)
             burned_total_aligned = safe_crop(burned_total, reference)
+            burned_state_nodes_aligned = safe_crop(burned_state_nodes, reference)
         except ValueError as exc:
             logger.error("%s", exc)
             raise
@@ -535,16 +552,18 @@ def run(args: argparse.Namespace) -> None:
         )
         logger.debug("Flux cube stacked for interval %s", interval)
 
-        flux_cube, adm0_aligned, drained_state_nodes = xr.align(
+        flux_cube, adm0_aligned, drained_state_nodes, burned_state_nodes_aligned = xr.align(
             flux_cube,
             adm0_aligned,
             drained_state_nodes,
+            burned_state_nodes_aligned,
             join="override",
         )
         logger.debug("Arrays aligned for reduction for interval %s", interval)
 
         adm0_aligned.name = "gadm_adm0"
         drained_state_nodes.name = "drained_state_nodes"
+        burned_state_nodes_aligned.name = "burned_state_nodes"
 
         # Build reduction kwargs based on flox version
         _xr_kwargs = {}
@@ -563,10 +582,11 @@ def run(args: argparse.Namespace) -> None:
         with dask.annotate(label=f"reduce:{interval}"):
             flux_results = xarray_reduce(
                 flux_cube,
-                *(adm0_aligned, drained_state_nodes),
+                *(adm0_aligned, drained_state_nodes, burned_state_nodes_aligned),
                 func="sum",
                 expected_groups=(
                     gadm_adm0_ids,
+                    node_codes,
                     node_codes,
                 ),
                 fill_value=np.nan,
@@ -680,7 +700,6 @@ def main(argv=None):
 if __name__ == "__main__":
     main()
 
-
 """
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --interval_end_years 2024 \
@@ -688,7 +707,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --run_date 20250724 \
        --tile_ids 00N_110E \
        --model_version 0_5_0 \
-       
+
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --interval_end_years 2005 2010 2015 2020 2024 \
        --cluster_name zonal_stats \
@@ -697,7 +716,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --model_version 0_5_0 \
 """
 
-# TODO burned state nodes
+
 # TODO node meanings
 # TODO test updated environment (flox >= 0.10)
 # TODO test improved safe crop (eventually)
