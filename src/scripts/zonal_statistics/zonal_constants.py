@@ -42,3 +42,13 @@ GADM_ADM0_IDS = np.array([
 ], dtype=np.uint16)
 
 PRIMARY_FOREST_IFL_CODES = np.array([0, 1], dtype=np.uint8)
+
+# ---------------------------------------------------------------------------
+# Node code meanings
+# ---------------------------------------------------------------------------
+# These mappings provide human readable labels for the decision tree node codes
+# emitted by the drainage emissions model.  The meanings are stored here so
+# that the zonal statistics workflow does not need to read the original Excel
+# lookup table.  The placeholders can be replaced with the official
+# descriptions if/when they become available.
+NODE_MEANINGS = {code: f"node_{code}" for code in NODE_CODES}

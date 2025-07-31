@@ -298,6 +298,11 @@ def create_interval_df(
     """Convert flox output to a processed dataframe."""
     df = pd.DataFrame(coord_dict)
     df["flux_type"] = df["flux_type"].replace(flux_type_dict)
+    # Map node codes to human-readable meanings
+    if "drained_state_nodes" in df.columns:
+        df["drained_state_meaning"] = df["drained_state_nodes"].map(zc.NODE_MEANINGS)
+    if "burned_state_nodes" in df.columns:
+        df["burned_state_meaning"] = df["burned_state_nodes"].map(zc.NODE_MEANINGS)
     df["interval_end"] = interval_end_year
     df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000
     return df
@@ -717,7 +722,6 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
 """
 
 
-# TODO node meanings
 # TODO test updated environment (flox >= 0.10)
 # TODO test improved safe crop (eventually)
 # TODO post processing for output parquet
