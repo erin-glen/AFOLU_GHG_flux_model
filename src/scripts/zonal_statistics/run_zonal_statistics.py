@@ -580,7 +580,6 @@ def run(args: argparse.Namespace) -> None:
         df.to_parquet(
             args.output_parquet,
             partition_cols=["interval_end"],
-            append=not first_write,
             index=False,
             compression="zstd",
             engine="pyarrow",
