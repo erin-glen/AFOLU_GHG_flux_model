@@ -255,12 +255,28 @@ def open_zarr_region(
 
 
 def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
-    """Convert flox results to a coordinate dictionary."""
+    """Return flox results as a coordinate dictionary.
+
+    ``flox`` >= 0.10 returns a :class:`sparse.COO` array which exposes
+    ``coords`` and ``data`` attributes.  Older versions yield a dense
+    :class:`numpy.ndarray`.  This helper supports both representations.
+    """
+
     logging.info("   Post-processing %s : %s", interval, timestr())
-    sparse = flux_results.data  # sparse COO array
+
+    arr = flux_results.data
     dim_names = flux_results.dims
-    indices = sparse.coords
-    values = sparse.data
+
+    if hasattr(arr, "coords") and hasattr(arr, "data"):
+        # sparse.COO array
+        indices = arr.coords
+        values = arr.data
+    else:
+        # Dense numpy array – expand to full coordinate grid
+        grid = np.indices(arr.shape)
+        indices = grid.reshape(len(arr.shape), -1)
+        values = arr.ravel()
+
     coord_dict = {
         dim: flux_results.coords[dim].values[indices[i]]
         for i, dim in enumerate(dim_names)
