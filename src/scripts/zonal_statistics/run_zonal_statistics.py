@@ -307,13 +307,13 @@ def create_interval_df(
     # Map node codes to human-readable meanings
     if "drained_state_nodes" in df.columns:
         df["drained_state_meaning"] = (
-            df["drained_state_nodes"].astype("string").str.zfill(6).map(
+            df["drained_state_nodes"].astype("string").str.zfill(8).map(
                 DRAINED_STATE_NODE_MEANINGS
             )
         )
     if "burned_state_nodes" in df.columns:
         df["burned_state_meaning"] = (
-            df["burned_state_nodes"].astype("string").str.zfill(6).map(
+            df["burned_state_nodes"].astype("string").str.zfill(8).map(
                 BURNED_STATE_NODE_MEANINGS
             )
         )
@@ -617,21 +617,6 @@ def run(args: argparse.Namespace) -> None:
         df = create_interval_df(coord_dict, flux_type_dict, interval_end_year)
         df = calculate_interval_flux_densities(df, contextual_layer_names)
 
-        # ── map numeric node codes → plain-language meanings ───────────
-        if "drained_state_nodes" in df.columns:
-            df["drained_state_meaning"] = (
-                df["drained_state_nodes"]
-                .astype("string")
-                .str.zfill(6)
-                .map(DRAINED_STATE_NODE_MEANINGS)
-            )
-        if "burned_state" in df.columns:
-            df["burned_state_meaning"] = (
-                df["burned_state"]
-                .astype("string")
-                .str.zfill(6)
-                .map(BURNED_STATE_NODE_MEANINGS)
-            )
 
         df.to_parquet(
             args.output_parquet,
