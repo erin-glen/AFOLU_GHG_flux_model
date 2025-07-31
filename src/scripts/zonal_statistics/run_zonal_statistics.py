@@ -189,10 +189,23 @@ def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
     if ds.x.size == ref.x.size and ds.y.size == ref.y.size:
         return ds.reindex_like(ref, method=None)
 
-    raise ValueError(
-        "Raster grids incompatible (different shape/resolution). "
-        "Check that all inputs share the same 0.0025‑deg grid."
+    ds_shape = (ds.y.size, ds.x.size)
+    ref_shape = (ref.y.size, ref.x.size)
+    try:
+        ds_res = (float(ds.x[1] - ds.x[0]), float(ds.y[1] - ds.y[0]))
+        ref_res = (float(ref.x[1] - ref.x[0]), float(ref.y[1] - ref.y[0]))
+    except Exception:
+        ds_res = (float("nan"), float("nan"))
+        ref_res = (float("nan"), float("nan"))
+
+    msg = (
+        "Raster grids incompatible (ds: shape {} res {}; ref: shape {} res {}). "
+        "Check that all inputs share the same 0.0025‑deg grid.".format(
+            ds_shape, ds_res, ref_shape, ref_res
+        )
     )
+    logging.error(msg)
+    raise ValueError(msg)
 
 
 
@@ -503,10 +516,14 @@ def run(args: argparse.Namespace) -> None:
         logger.debug("Flux layers opened for interval %s", interval)
 
         reference = drained_state_nodes
-        adm0_aligned = safe_crop(adm0, reference)
-        pixel_area_aligned = safe_crop(pixel_area, reference)
-        drained_total_aligned = safe_crop(drained_total, reference)
-        burned_total_aligned = safe_crop(burned_total, reference)
+        try:
+            adm0_aligned = safe_crop(adm0, reference)
+            pixel_area_aligned = safe_crop(pixel_area, reference)
+            drained_total_aligned = safe_crop(drained_total, reference)
+            burned_total_aligned = safe_crop(burned_total, reference)
+        except ValueError as exc:
+            logger.error("%s", exc)
+            raise
         logger.debug("Datasets aligned for interval %s", interval)
 
         # Grab one URI from each folder to label flux_type
