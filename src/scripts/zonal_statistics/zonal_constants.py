@@ -43,12 +43,118 @@ GADM_ADM0_IDS = np.array([
 
 PRIMARY_FOREST_IFL_CODES = np.array([0, 1], dtype=np.uint8)
 
-# ---------------------------------------------------------------------------
-# Node code meanings
-# ---------------------------------------------------------------------------
-# These mappings provide human readable labels for the decision tree node codes
-# emitted by the drainage emissions model.  The meanings are stored here so
-# that the zonal statistics workflow does not need to read the original Excel
-# lookup table.  The placeholders can be replaced with the official
-# descriptions if/when they become available.
-NODE_MEANINGS = {code: f"node_{code}" for code in NODE_CODES}
+# ╭──────────────────────────────────────────────────────────────────╮
+# │  ORGANIC‑SOILS  –  NODE‑MEANING LOOK‑UP TABLES (6‑digit codes)   │
+# ╰──────────────────────────────────────────────────────────────────╯
+#
+# * All keys are **strings padded to six digits** – exactly what you
+#   find in the `drained_state` and `burned_state` rasters / Parquet.
+# * Meanings are short, lowercase, snake‑case labels that you can
+#   safely use as join keys or Parquet partition names.
+# * These tables have no external dependencies; they are pure Python
+#   literals and import instantly.
+
+# ── helper to pad codes to 6 digits ─────────────────────────────────
+_pad = lambda s: s.zfill(6)
+
+# 1‑A  Drainage soil / drainage‑emission nodes  ─────────────────────
+#  First two digits ::= peat drainage‑evidence class
+_drain_root = {
+    "11": "peat_drained_primary_infra",          # dadap / canals
+    "12": "peat_drained_secondary_infra",        # roads / ENGERT / GRIP
+    "13": "peat_drained_cropland_settlement",
+    "14": "peat_drained_plantation",
+    "15": "peat_drained_extraction",
+    "16": "peat_undrained",
+    "2":  "non_peat",
+}
+
+#  Next digits ::= drainage‑emission class (only for drained peat)
+#  1 → boreal, 2 → temperate, 3 → tropical
+_drain_emit = {
+    # BOREAL
+    "111": "boreal_forest_poor",
+    "112": "boreal_forest_rich",
+    "12":  "boreal_grassland",
+    "13":  "boreal_cropland",
+    "14":  "boreal_extraction",
+    "15":  "boreal_settlement",
+    "16":  "boreal_wetland",
+    "17":  "boreal_otherland",
+    # TEMPERATE
+    "21":  "temperate_forest",
+    "221": "temperate_grassland_poor",   # 2 (temperate)‑2 (grass)‑1/2 (nutrient)
+    "222": "temperate_grassland_rich",
+    "23":  "temperate_cropland",
+    "24":  "temperate_extraction",
+    "25":  "temperate_settlement",
+    "26":  "temperate_wetland",
+    "27":  "temperate_otherland",
+    # TROPICAL
+    "311": "tropical_long_rotation",
+    "312": "tropical_short_rotation",
+    "313": "tropical_oil_palm",
+    "32":  "tropical_forest",
+    "33":  "tropical_grassland",
+    "34":  "tropical_cropland",
+    "35":  "tropical_extraction",
+    "38":  "tropical_settlement",
+    "39":  "tropical_wetland",
+    "30":  "tropical_otherland",
+}
+
+# Build the full drained‑state table (root + emission) --------------
+DRAINED_STATE_NODE_MEANINGS: dict[str, str] = {}
+
+#  A) undrained peat & non‑peat classes (length ≤2)
+for code, label in _drain_root.items():
+    if code in ("16", "2"):
+        DRAINED_STATE_NODE_MEANINGS[_pad(code)] = label
+
+#  B) drained classes with emission sub‑codes
+for root_code in ("11", "12", "13", "14", "15"):
+    for emit_code, emit_label in _drain_emit.items():
+        full = _pad(root_code + emit_code)
+        DRAINED_STATE_NODE_MEANINGS[full] = (
+            f"{_drain_root[root_code]}__{emit_label}"
+        )
+
+# 1‑B  Burned‑area nodes  ───────────────────────────────────────────
+#  First digit → climate domain; second digit → drained / undrained
+_burn_root = {
+    "11": "boreal_drained",
+    "12": "boreal_undrained",
+    "21": "temperate_drained",
+    "22": "temperate_undrained",
+    "31": "tropical_drained_crop_or_plantation",
+    "32": "tropical_drained_other",
+    "33": "tropical_undrained",
+    "4":  "other_domain",
+}
+
+#  Burned‑emission sub‑codes: 1 = drained, 2 = undrained, etc.
+_burn_emit = {
+    # boreal & temperate share the same sub‑structure
+    "1": "drained",
+    "2": "undrained",
+    # tropical uses three groups
+    "3": "tropical_undrained",
+    # 4 = other (always captures in the model)
+    "4": "other",
+}
+
+BURNED_STATE_NODE_MEANINGS: dict[str, str] = {}
+
+for root_code, label in _burn_root.items():
+    # tropical root codes already encode drained status fully
+    if root_code.startswith("3"):
+        BURNED_STATE_NODE_MEANINGS[_pad(root_code)] = label
+        continue
+    # otherwise append emission discriminators
+    for sub, sub_label in _burn_emit.items():
+        full = _pad(root_code + sub)
+        BURNED_STATE_NODE_MEANINGS[full] = f"{label}__{sub_label}"
+
+# 2  Convenience sets for fast validation  ──────────────────────────
+ALL_DRAINED_STATE_CODES = frozenset(DRAINED_STATE_NODE_MEANINGS.keys())
+ALL_BURNED_STATE_CODES  = frozenset(BURNED_STATE_NODE_MEANINGS.keys())
