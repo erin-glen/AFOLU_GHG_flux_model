@@ -49,20 +49,23 @@ DEFAULT_TABLE = _to_typed(DEFAULT)
 LOW_TABLE = _to_typed(LOW)
 HIGH_TABLE = _to_typed(HIGH)
 
-ZERO = np.float32(0.0)
-ZERO_ARRAY = np.array([ZERO, ZERO, ZERO, ZERO, ZERO, ZERO], dtype=np.float32)
 
 DEFAULT_TABLE.update({
     # Boreal
-    "boreal_settlement": ZERO_ARRAY,
-    "boreal_wetland": ZERO_ARRAY,
-    "boreal_otherland": ZERO_ARRAY,
+    "boreal_settlement": np.array([5.7, 9.5, 1.4, 1165.0, 0.12, 0.05], dtype=np.float32),  # boreal grassland proxy
+    "boreal_wetland": np.array([2.8, 0.3, 6.1, 542.0, 0.12, 0.05], dtype=np.float32),  # boreal extraction proxy
+    "boreal_otherland": np.array([5.7, 9.5, 1.4, 1165.0, 0.12, 0.05], dtype=np.float32),  # boreal grassland proxy
+
     # Temperate
-    "temperate_settlement": ZERO_ARRAY,
-    "temperate_wetland": ZERO_ARRAY,
-    "temperate_otherland": ZERO_ARRAY,
+    "temperate_settlement": np.array([6.1, 8.2, 16.0, 1165.0, 0.31, 0.05], dtype=np.float32),
+    # temperate grassland rich proxy
+    "temperate_wetland": np.array([6.1, 8.2, 16.0, 1165.0, 0.31, 0.05], dtype=np.float32),
+    # temperate grassland rich proxy
+    "temperate_otherland": np.array([6.1, 8.2, 16.0, 1165.0, 0.31, 0.05], dtype=np.float32),
+    # temperate grassland rich proxy
+
     # Tropical
-    "tropical_settlement": ZERO_ARRAY,
-    "tropical_wetland": ZERO_ARRAY,
-    "tropical_otherland": ZERO_ARRAY,
+    "tropical_settlement": np.array([9.6, 5.0, 7.0, 2259.0, 0.82, 0.02], dtype=np.float32),  # tropical grassland proxy
+    "tropical_wetland": np.array([2.0, 0.0, 0.0, 2259.0, 0.82, 0.02], dtype=np.float32),  # tropical extraction proxy
+    "tropical_otherland": np.array([9.6, 5.0, 7.0, 2259.0, 0.82, 0.02], dtype=np.float32) # tropical grassland proxy
 })
