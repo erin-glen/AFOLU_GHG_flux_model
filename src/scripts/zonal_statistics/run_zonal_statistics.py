@@ -728,6 +728,12 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --run_date 20250724 \
        --tile_ids 00N_110E \
        --model_version 0_5_0
+       
+python -m src.scripts.zonal_statistics.run_zonal_statistics \
+       --interval_end_years 2024 \
+       --cluster_name zonal_stats \
+       --run_date 20250724 \
+       --model_version 0_5_0
 
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --interval_end_years 2005 2010 2015 2020 2024 \
