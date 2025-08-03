@@ -115,15 +115,16 @@ STATE_NODE_XLSX_S3 = "https://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_mode
 # ===  END PATH MANIFEST  ======================================================
 
 
-def build_output_parquet(model_version: str, years: list[int]) -> str:
-    """Return default Parquet path for a given model version and year list."""
-    base = (
-            Path("data/climate/AFOLU_flux_model/organic_soils/outputs")
-            / f"version_{model_version}"
-            / "zonal_stats"
-    )
+def build_output_parquet(_model_version: str, years: list[int]) -> str:
+    """Return default Parquet path within the organic soils output directory.
+
+    The results are written to the ``zonal_stats`` subdirectory of the main
+    organic soils output folder on S3.
+    """
+    base = f"{ROOT}/zonal_stats"
     year_part = "_".join(str(y) for y in years)
-    return str(base / f"zonal_stats_{year_part}.parquet")
+    return f"{base}/zonal_stats_{year_part}.parquet"
+
 
 
 """
