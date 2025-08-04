@@ -450,6 +450,9 @@ def run(args: argparse.Namespace) -> None:
 
     fs, out_path = fsspec.core.url_to_fs(args.output_parquet)
     fs.makedirs(str(Path(out_path).parent), exist_ok=True)
+    if fs.exists(out_path):
+        logger.warning("Output path %s exists – removing before write", args.output_parquet)
+        fs.rm(out_path, recursive=True)
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
@@ -499,6 +502,9 @@ def run(args: argparse.Namespace) -> None:
     gadm_adm0_ids = zc.GADM_ADM0_IDS
 
     interval_pairs = build_interval_pairs(args.interval_end_years)
+
+    # Collect per‑interval results so we can write once at the end
+    dfs: list[pd.DataFrame] = []
     for interval_start_year, interval_end_year in interval_pairs:
         interval = f"{interval_start_year}_{interval_end_year}"
         logger.info("Processing interval %s : %s", interval, timestr())
@@ -621,24 +627,25 @@ def run(args: argparse.Namespace) -> None:
         coord_dict = convert_to_coord_dict(flux_results, interval)
         df = create_interval_df(coord_dict, flux_type_dict, interval_end_year)
         df = calculate_interval_flux_densities(df, contextual_layer_names)
+        dfs.append(df)
+        logger.info("Processed interval %s", interval)
 
-        df.to_parquet(
-            args.output_parquet,
-            partition_cols=["interval_end"],
-            index=False,
-            compression="zstd",
-            engine="pyarrow",
-        )
-        logger.info("Wrote results for interval %s", interval)
-        first_write = False
-        del df
-
+    # Write all intervals in a single Parquet operation so we reuse the
+    # same filesystem and avoid partial writes to existing directories.
+    full_df = pd.concat(dfs, ignore_index=True)
+    full_df.to_parquet(
+        args.output_parquet,
+        partition_cols=["interval_end"],
+        index=False,
+        compression="zstd",
+        engine="pyarrow",
+        filesystem=fs,
+    )
     logger.info(
         "Parquet write complete – partitions written to %s", args.output_parquet
     )
 
-    fs, path = fsspec.core.url_to_fs(args.output_parquet)
-    list_target = path if fs.isdir(path) else str(Path(path).parent)
+    list_target = out_path if fs.isdir(out_path) else str(Path(out_path).parent)
     print(f"Listing contents of: {list_target}")
     print(fs.ls(list_target, detail=True))
 
