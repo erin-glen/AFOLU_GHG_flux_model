@@ -5,13 +5,18 @@ Local test:
 python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.1_aggregate_smoothed_mangrove_extent_1x1_degree --first_10x10s_to_process 2
 
 Coiled test:
-python -m scripts.utilities.create_cluster -n 1 -t 2 -m 16 -cn mangrove_10x10_tiles
+python -m scripts.utilities.create_cluster -n 1 -t 2 -m 2 -cn mangrove_10x10_tiles
 python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.1_aggregate_smoothed_mangrove_extent_1x1_degree -cn mangrove_10x10_tiles --first_10x10s_to_process 2
 
 Full Coiled run:
-python -m scripts.utilities.create_cluster -n 40 -t 7 -m 32 -cn mangrove_10x10_tiles
+python -m scripts.utilities.create_cluster -n 20 -t 8 -m 8 -cn mangrove_10x10_tiles
 python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.1_aggregate_smoothed_mangrove_extent_1x1_degree -cn mangrove_10x10_tiles
-Time: x through calculation; x through tile stats; Credits: x; Cost: x; peak memory: x GB/worker
+Time: x for all years; Cost: x; peak memory: x GB/worker
+Note: Try lower memory next time
+
+todo:
+- have step 0 and step 1 do pixel count instead of chunk stats for comparison
+
 """
 
 import argparse
@@ -41,6 +46,8 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
+    # chunk stats for all years
+    all_years_stats = []
 
     for year in cn.mangrove_extent_years:
 
@@ -58,7 +65,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
         # These are the basis for the aggregation tasks.
         list_of_s3_name_dicts_total = uu.create_list_for_aggregation(input_dir_list, main_logger)
-        #TODO this is different
 
         # For testing. Limits the number of output rasters to that given in the command line
         if first_10x10s_to_process:
@@ -88,7 +94,6 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
         main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
 
-
         # Each task is a single 10x10 deg aggregated geotif
         delayed_results_10x10_deg = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload, output_dir, 'extent')
                                             for s3_name_dict in list_of_s3_name_dicts_total]
@@ -99,36 +104,42 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage}", main_logger)
 
-
-        ### Step 3: Chunk stats (i.e. pixel counts) for 10x10 degree outputs, aggregates logs
-
-        # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
-        # cluster, not all the workers.
-        if not run_local:
-            workers = client.scheduler_info()["workers"]
-            n_workers = len(workers)
-
-            # Reduces number of workers in the cluster down to 1 if there is more than 10
-            if n_workers > 10:
-                main_logger.info("Resizing cluster to 1 worker")
-
-                resize_cluster.resize_coiled_cluster(cluster_name, 1)
-
-        # Prepares 10x10 deg chunk stats spreadsheet: pixel count for outputs
+        # Add chunk stats for this year to all_years_stats
         if (not no_stats) and (success_count_10x10 > 0):
-            uu.aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger)
+            #uu.aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger)
+            all_years_stats.extend(all_10x10_stats)
+
+
+    ### Step 3: Chunk stats for 10x10 degree outputs, aggregates logs
+
+    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    # cluster, not all the workers.
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
+
+        # Reduces number of workers in the cluster down to 1 if there is more than 10
+        if n_workers > 10:
+            main_logger.info("Resizing cluster to 1 worker")
+
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
+
+    # Prepares 10x10 deg chunk stats spreadsheet: mangrove extent
+    stage = 'smoothed_mangrove_extent_all_years_10x10_deg_aggreg'
+    if (not no_stats) and (len(all_years_stats) > 0):
+        uu.aggregate_10x10_chunk_stats(all_years_stats, stage, no_upload, main_logger)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
-        # Sets it so that no worker logs are created if doing a local run
-        if not run_local:
+    # Sets it so that no worker logs are created if doing a local run
+    if not run_local:
 
-            # Creates combined log from all workers if not deactivated
-            worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
-            uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats and worker log compilation", main_logger)
+        # Creates combined log from all workers if not deactivated
+        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats and worker log compilation", main_logger)
 
-            # Adds the workers' logs to the main log and uploads to s3
-            lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
+        # Adds the workers' logs to the main log and uploads to s3
+        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
 
     # Closes the Dask client if not running locally
     if not run_local:
