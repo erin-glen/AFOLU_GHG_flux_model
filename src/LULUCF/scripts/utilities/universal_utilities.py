@@ -1152,7 +1152,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, s
             if ds is None:
                 raise RuntimeError(f"Failed to open merged raster: {merged_file}")
 
-            # Open pixel area raster
+            # Build the path to the pixel area raster
             pixel_area_vsis3_path = f"/vsis3/{cn.pixel_area_dir[5:]}{cn.pixel_area_pattern}_{tile_id}.tif"
             area_ds = gdal.Open(pixel_area_vsis3_path)
             if area_ds is None:
@@ -1161,84 +1161,52 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, s
             # Get bands and dimensions
             band = ds.GetRasterBand(1)
             area_band = area_ds.GetRasterBand(1)
+            x_size = band.XSize
+            y_size = band.YSize
+            block_size_x, block_size_y = band.GetBlockSize()
 
-            #read 10 x 10 deg rasters as numpy arrays
-            merged_array = band.ReadAsArray()
-            area_array = area_band.ReadAsArray()
-            if merged_array is None or area_array is None:
-                raise RuntimeError("Failed to read data arrays.")
+            total_extent = 0.0
+            for y in range(0, y_size, block_size_y):
+                rows_to_read = min(block_size_y, y_size - y)
+                for x in range(0, x_size, block_size_x):
+                    cols_to_read = min(block_size_x, x_size - x)
 
-            # Dereference the gdal.Dataset by breaking the link to free up memory
+                    mangrove_block = band.ReadAsArray(x, y, cols_to_read, rows_to_read)
+                    area_block = area_band.ReadAsArray(x, y, cols_to_read, rows_to_read)
+
+                    if mangrove_block is None or area_block is None:
+                        continue
+
+                    valid_mask = mangrove_block != raster_nodata_value
+                    total_extent += np.sum(area_block[valid_mask])
+
             ds = None
             area_ds = None
-
-            # calculate per pixel areas
-            pixel_area_array = merged_array * area_array
-            del merged_array
-            del area_array
-
-            # You can use tile_id as a simple bounds_str
-            bounds_str = boundstr(get_10x10_tile_bounds(tile_id))
-
-            chunk_stats = [calculate_stats(
-                array_per_ha=None,
-                name=out_file_name,
-                bounds_str=bounds_str,
-                tile_id=tile_id,
-                in_out='output_layer',
-                array_per_pixel=pixel_area_array
-            )]
-
-            del pixel_area_array
-            gc.collect()
-
-            # x_size = band.XSize
-            # y_size = band.YSize
-            # block_size_x, block_size_y = band.GetBlockSize()
-            #
-            # total_extent = 0.0
-            # for y in range(0, y_size, block_size_y):
-            #     rows_to_read = min(block_size_y, y_size - y)
-            #     for x in range(0, x_size, block_size_x):
-            #         cols_to_read = min(block_size_x, x_size - x)
-            #
-            #         mangrove_block = band.ReadAsArray(x, y, cols_to_read, rows_to_read)
-            #         area_block = area_band.ReadAsArray(x, y, cols_to_read, rows_to_read)
-            #
-            #         if mangrove_block is None or area_block is None:
-            #             continue
-            #
-            #         valid_mask = mangrove_block != raster_nodata_value
-            #         total_extent += np.sum(area_block[valid_mask])
-            #
-            # ds = None
-            # area_ds = None
-            #todo: delete this section
 
         except Exception as e:
             lu.print_and_log(f"Error calculating extent for {merged_file}: {e}", is_final, logger_worker)
             return f"failure calculating extent for {s3_name_dict}"
 
         # Gets the output file pattern and year/year_range
-        #out_pattern, year_range = strip_and_extract_years(out_file_name)
+        out_pattern, year_range = strip_and_extract_years(out_file_name)
 
-        # # Dictionary is in a list because it's necessary for chunk stats processing later.
-        # chunk_stats = [{
-        #     'chunk_id': 'N/A',
-        #     'tile_id': tile_id,
-        #     'layer_name': out_file_name,
-        #     'tile_name': out_file_name,
-        #     'in_out': 'output_layer',
-        #     'pattern': out_pattern,
-        #     'years': year_range,
-        #     'min_value': 'no data',
-        #     'mean_value': 'no data',
-        #     'max_value': 'no data',
-        #     'count_value': 'no data',
-        #     'sum_value': total_extent,
-        #     'data_type': 'no data'
-        # }]
-        # todo: delete this section
+        # Dictionary is in a list because it's necessary for chunk stats processing later.
+        chunk_stats = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': out_file_name,
+            'tile_name': out_file_name,
+            'in_out': 'output_layer',
+            'pattern': out_pattern,
+            'years': year_range,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': 'no data',
+            'sum_value': total_extent,
+            'data_type': 'no data'
+        }]
+
 
 
     ### Part 4: Uploads 10x10 to s3 using multipart uploading
@@ -2006,8 +1974,7 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt, ma
 
     # Check if the VRT file already exists in S3
     if vrt_exists_in_s3(output_vrt_s3):
-        return main_logger.info(f"VRT file already exists in S3: {output_vrt_s3}. Skipping creation.") #TODO: This isn't getting added to main log
-
+        return main_logger.info(f"VRT file already exists in S3: {output_vrt_s3}. Skipping creation.")
     vsis3_paths = []
     for s3_path in raw_raster_paths_list_s3:
         vsis3_path = s3_path.replace("s3://", "/vsis3/")
@@ -2212,7 +2179,6 @@ def delete_build_vrt_input_files(raw_raster_paths_list_s3, vrt):
 ###################################################################################################
 def reaggregate_resolution(data, original_res, target_res):
     #Courtesy of ChatGPT
-    #TODO include the ChatGPT conversation link. Useful to come back to it sometimes...
     """
     Reaggregates a numpy array by summing values within the target resolution window.
 
