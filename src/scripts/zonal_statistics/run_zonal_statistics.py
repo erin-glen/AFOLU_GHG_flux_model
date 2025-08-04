@@ -633,6 +633,10 @@ def run(args: argparse.Namespace) -> None:
         "Parquet write complete – partitions written to %s", args.output_parquet
     )
 
+    fs, path = fsspec.core.url_to_fs(args.output_parquet)
+    print(f"Listing contents of: {args.output_parquet}")
+    print(fs.ls(path, detail=True))
+
     if client:
         logger.debug("Closing Dask client")
         client.close()
@@ -640,6 +644,7 @@ def run(args: argparse.Namespace) -> None:
         logger.debug("Closing cluster")
         cluster.close()
     uu.stage_duration(start_ts, uu.timestr(), stage)
+
 
 
 def main(argv=None):
