@@ -516,10 +516,16 @@ def run(args: argparse.Namespace) -> None:
         # Build dataset folders and cache paths for this interval
         paths = build_paths(interval, **OUTPUT_KW)
 
+        # Cache S3 listings to avoid repeated folder scans
+        cached_uri_lists = {
+            key: list_folder_uris(spec["folder"])
+            for key, spec in paths.items()
+        }
+
         # --- build flux‑layer caches if missing ----------------------------
-        for entry in paths.values():
+        for key, spec in paths.items():
             ensure_zarr_exists(
-                list_folder_uris(entry["folder"]), entry["zarr"], args.chunk_size
+                cached_uri_lists[key], spec["zarr"], args.chunk_size
             )
         # -------------------------------------------------------------------
 
@@ -551,8 +557,8 @@ def run(args: argparse.Namespace) -> None:
 
         # Grab one URI from each folder to label flux_type
         flux_type_dict = {
-            0: parse_pattern_from_uri(list_folder_uris(paths["drained_total_Mg_CO2e_pixel"]["folder"])),
-            1: parse_pattern_from_uri(list_folder_uris(paths["burned_total_Mg_CO2e_pixel"]["folder"])),
+            0: parse_pattern_from_uri(cached_uri_lists["drained_total_Mg_CO2e_pixel"]),
+            1: parse_pattern_from_uri(cached_uri_lists["burned_total_Mg_CO2e_pixel"]),
             2: "area__ha",
         }
 
