@@ -19,6 +19,7 @@ import dask
 import fsspec
 import numpy as np
 import pandas as pd
+import flox
 
 # ── node-meaning look-ups ──────────────────────────────────────────────
 from src.scripts.zonal_statistics.zonal_constants import (
@@ -29,21 +30,32 @@ import s3fs
 import xarray as xr
 import zarr
 
-# ── flox compatibility (works for flox 0.5  →  ≥0.10) ─────────────────────
-try:
-    # future‑proof in case flox later re‑exports from its root
-    from flox import ReindexArrayType, ReindexStrategy, xarray_reduce  # type: ignore
-except ImportError:
-    from flox.xarray import xarray_reduce  # noqa: F401
+from flox import ReindexArrayType, ReindexStrategy
+from flox.xarray import xarray_reduce
 
-    try:
-        from flox.reindex import ReindexArrayType  # noqa: F401
-        from flox.reindex import ReindexStrategy
-    except ImportError:
-        # flox ≤0.8 – no sparse‑reindex API; fall back to defaults
-        ReindexArrayType = None
-        ReindexStrategy = None
 # ──────────────────────────────────────────────────────────────────────────
+
+
+def flox_sparse_reindex_kwargs() -> dict:
+    """Return kwargs enabling sparse reindexing when supported.
+
+    The :mod:`flox` ``ReindexStrategy`` API was introduced in version 0.10.
+    When unavailable we fall back to dense aggregation while emitting a
+    warning so the caller is aware that memory usage may increase.
+    """
+
+    if ReindexStrategy is None or ReindexArrayType is None:
+        logging.warning(
+            "Sparse re-index helpers missing – using dense aggregation; "
+            "memory use will be higher. Consider installing flox >= 0.10."
+        )
+        return {}
+
+    return {
+        "reindex": ReindexStrategy(
+            blockwise=False, array_type=ReindexArrayType.SPARSE_COO
+        )
+    }
 
 
 # LocalCluster not needed; uu.connect_to_cluster already handles local fallback.
@@ -124,7 +136,6 @@ def build_output_parquet(_model_version: str, years: list[int]) -> str:
     base = f"{ROOT}/zonal_stats"
     year_part = "_".join(str(y) for y in years)
     return f"{base}/zonal_stats_{year_part}.parquet"
-
 
 
 """
@@ -341,7 +352,7 @@ def calculate_interval_flux_densities(
         merged["value_per_ha"] = merged["value"] / merged["value_area"]
     merged.loc[merged["value_area"] == 0, "value_per_ha"] = np.nan
     new_rows = merged.copy()
-    new_rows["flux_type"] = new_rows["flux_type"] + "__CO2_per_ha"
+    new_rows["flux_type"] = new_rows["flux_type"].astype(str) + "__CO2_per_ha"
     new_rows["value"] = new_rows["value_per_ha"]
     new_rows = new_rows.drop(
         columns=["value_area", "interval_end_area", "value_per_ha"]
@@ -439,6 +450,8 @@ def run(args: argparse.Namespace) -> None:
     if args.debug:
         logger.setLevel(logging.DEBUG)
     logger.debug("Starting run with args: %s", args)
+    logger.debug("Detected flox version %s", flox.__version__)
+
     logger.info(
         "Connected to cluster %s", cluster.name if cluster else "local-threaded"
     )
@@ -585,19 +598,6 @@ def run(args: argparse.Namespace) -> None:
         drained_state_nodes.name = "drained_state_nodes"
         burned_state_nodes_aligned.name = "burned_state_nodes"
 
-        # Build reduction kwargs based on flox version
-        _xr_kwargs = {}
-        if ReindexStrategy is not None:
-            _xr_kwargs["reindex"] = ReindexStrategy(
-                blockwise=False, array_type=ReindexArrayType.SPARSE_COO
-            )
-        else:
-            logger.warning(
-                "Sparse re-index helpers missing – using dense aggregation; "
-                "memory use will be higher. Consider installing flox >= 0.10."
-            )
-
-        flux_type_ids = np.arange(3, dtype=np.uint8)
         logger.debug("Running flox reduce for interval %s", interval)
         with dask.annotate(label=f"reduce:{interval}"):
             flux_results = xarray_reduce(
@@ -610,14 +610,13 @@ def run(args: argparse.Namespace) -> None:
                     node_codes,
                 ),
                 fill_value=np.nan,
-                **_xr_kwargs,
+                **flox_sparse_reindex_kwargs(),
             ).compute()
         logger.debug("Flox reduce complete for interval %s", interval)
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
         df = create_interval_df(coord_dict, flux_type_dict, interval_end_year)
         df = calculate_interval_flux_densities(df, contextual_layer_names)
-
 
         df.to_parquet(
             args.output_parquet,
@@ -728,8 +727,9 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --cluster_name zonal_stats \
        --run_date 20250724 \
        --tile_ids 00N_110E \
-       --model_version 0_5_0
-       
+       --model_version 0_5_0 \
+       --debug
+
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --interval_end_years 2024 \
        --cluster_name zonal_stats \
