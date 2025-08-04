@@ -744,7 +744,5 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --model_version 0_5_0
 """
 
-
-# TODO test updated environment (flox >= 0.10)
 # TODO test improved safe crop (eventually)
 # TODO post processing for output parquet
