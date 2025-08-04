@@ -498,6 +498,13 @@ def run(args: argparse.Namespace) -> None:
     )
 
     logger.debug("Opening contextual layers")
+    # Persist static contextual layers once so repeated interval crops do not
+    # rebuild Dask graphs or re-read from disk
+    adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size).persist()
+    pixel_area = (
+        open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size).persist()
+    )
+
     adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size)
     pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size)
 
