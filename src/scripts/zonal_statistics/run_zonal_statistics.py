@@ -20,6 +20,10 @@ import fsspec
 import numpy as np
 import pandas as pd
 import flox
+import boto3
+import tempfile
+import posixpath
+import shutil
 
 # ── node-meaning look-ups ──────────────────────────────────────────────
 from src.scripts.zonal_statistics.zonal_constants import (
@@ -448,12 +452,17 @@ def run(args: argparse.Namespace) -> None:
         stage=stage,
     )
 
-    fs, out_path = fsspec.core.url_to_fs(args.output_parquet)
-    if fs.exists(out_path):
+    bucket, prefix = uu.split_s3_path(args.output_parquet)
+    s3c = boto3.client("s3")
+    existing = uu.get_existing_s3_files(bucket, prefix)
+    if existing:
         logger.warning(
             "Output path %s exists – removing before write", args.output_parquet
         )
-        fs.rm(out_path, recursive=True)
+        s3c.delete_objects(
+            Bucket=bucket,
+            Delete={"Objects": [{"Key": k} for k in existing]},
+        )
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
@@ -631,22 +640,27 @@ def run(args: argparse.Namespace) -> None:
         dfs.append(df)
         logger.info("Processed interval %s", interval)
 
-    # Write all intervals in a single Parquet operation so we reuse the
-    # same filesystem and avoid partial writes to existing directories.
+    # Write all intervals locally then upload to S3 to mirror core model practices
     full_df = pd.concat(dfs, ignore_index=True)
+    local_dir = Path(tempfile.mkdtemp(prefix="zonal_stats_"))
     full_df.to_parquet(
-        out_path,
+        local_dir,
         partition_cols=["interval_end"],
         index=False,
         compression="zstd",
         engine="pyarrow",
-        filesystem=fs,
     )
+    for f in local_dir.rglob("*"):
+        if f.is_file():
+            rel_key = posixpath.join(prefix, f.relative_to(local_dir).as_posix())
+            s3c.upload_file(str(f), bucket, rel_key)
+    shutil.rmtree(local_dir)
     logger.info(
-        "Parquet write complete – partitions written to %s", args.output_parquet
+        "Parquet write complete – partitions uploaded to %s", args.output_parquet
     )
 
-    list_target = out_path if fs.isdir(out_path) else str(Path(out_path).parent)
+    fs = s3fs.S3FileSystem(anon=False)
+    list_target = args.output_parquet
     print(f"Listing contents of: {list_target}")
     print(fs.ls(list_target, detail=True))
 
