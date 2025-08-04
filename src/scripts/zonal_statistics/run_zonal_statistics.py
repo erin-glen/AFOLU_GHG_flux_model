@@ -265,11 +265,15 @@ def open_zarr_region(
     if "band" in data_arr.dims:
         data_arr = data_arr.isel(band=0, drop=True)
 
-    # ── optional spatial crop ────────────────────────────────────────────
+    # ── corrected spatial crop ────────────────────────────────────────────
     if bbox is not None and {"x", "y"}.issubset(data_arr.dims):
         west, south, east, north = bbox
-        x_slice = slice(west, east) if west < east else slice(east, west)
-        y_slice = slice(south, north) if south < north else slice(north, south)
+        x_ascending = data_arr.x[0] < data_arr.x[-1]
+        y_ascending = data_arr.y[0] < data_arr.y[-1]
+
+        x_slice = slice(min(west, east), max(west, east)) if x_ascending else slice(max(east, west), min(east, west))
+        y_slice = slice(min(south, north), max(south, north)) if y_ascending else slice(max(north, south), min(north, south))
+
         data_arr = data_arr.sel(x=x_slice, y=y_slice)
     elif bbox is not None:
         logging.warning("Skipping spatial crop for %s – x/y dims not present.", path)
@@ -283,6 +287,7 @@ def open_zarr_region(
         data_arr.data = data_arr.data.map_blocks(lambda x: x, name=f"{Path(path).stem}")
 
     return data_arr
+
 
 
 def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
@@ -601,6 +606,21 @@ def run(args: argparse.Namespace) -> None:
         adm0_aligned.name = "gadm_adm0"
         drained_state_nodes.name = "drained_state_nodes"
         burned_state_nodes_aligned.name = "burned_state_nodes"
+
+        # ─── DEBUG: Check input arrays before reduction ────────────────────
+        logger.debug("drained_total_aligned mean: %s", drained_total_aligned.mean().values)
+        logger.debug("burned_total_aligned mean: %s", burned_total_aligned.mean().values)
+        logger.debug("pixel_area_aligned mean: %s", pixel_area_aligned.mean().values)
+
+        logger.debug("adm0_aligned unique values: %s",
+                     np.unique(adm0_aligned.values[~np.isnan(adm0_aligned.values)]))
+
+        logger.debug("drained_state_nodes unique values: %s",
+                     np.unique(drained_state_nodes.values[~np.isnan(drained_state_nodes.values)]))
+
+        logger.debug("burned_state_nodes_aligned unique values: %s",
+                     np.unique(burned_state_nodes_aligned.values[~np.isnan(burned_state_nodes_aligned.values)]))
+        # ───────────────────────────────────────────────────────────────────
 
         logger.debug("Running flox reduce for interval %s", interval)
         with dask.annotate(label=f"reduce:{interval}"):
