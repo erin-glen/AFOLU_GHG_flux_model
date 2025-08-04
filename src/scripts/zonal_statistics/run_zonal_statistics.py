@@ -146,13 +146,7 @@ ADM0_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_l
 PIXEL_AREA_GTIFF_FOLDER = "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
 PIXEL_AREA_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/pixel_area/20250730/global_pixel_area_20250730.zarr"
 
-# Lookup table
-STATE_NODE_XLSX_LOCAL = "./src/LULUCF/LULUCF_state_node_lookup_table.xlsx"
-STATE_NODE_XLSX_S3 = "https://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_model/LULUCF/state_node_lookup_tables/LULUCF_state_node_lookup_table.xlsx"
-
-
 # ===  END PATH MANIFEST  ======================================================
-
 
 def build_output_parquet(model_version: str, years: list[int]) -> str:
     """Return default Parquet output location.
@@ -630,8 +624,19 @@ def run(args: argparse.Namespace) -> None:
         dfs.append(df)
         logger.info("Processed interval %s", interval)
 
-    # Write all intervals locally then upload to S3 to mirror core model practices
+    # ╭──────────────────────────────────────────────────────────────────╮
+    # │  Write all intervals locally then upload to S3 (core‑model style)│
+    # ╰──────────────────────────────────────────────────────────────────╯
+
     full_df = pd.concat(dfs, ignore_index=True)
+
+    # ── 1.  Guarantee Arrow‑friendly dtype for the partition column ─────────
+    if "interval_end" in full_df.columns:
+        full_df["interval_end"] = full_df["interval_end"].astype("int64", copy=False)
+
+    # ── 2.  Quick sanity check before writing ───────────────────────────────
+    logger.debug("Rows in concatenated DataFrame   : %s", f"{len(full_df):,}")
+
     local_dir = Path(tempfile.mkdtemp(prefix="zonal_stats_"))
     full_df.to_parquet(
         local_dir,
@@ -640,17 +645,43 @@ def run(args: argparse.Namespace) -> None:
         compression="zstd",
         engine="pyarrow",
     )
+
+    logger.debug(
+        "Files written locally            : %s",
+        [
+            p.relative_to(local_dir).as_posix()
+            for p in local_dir.rglob('*')
+            if p.is_file()
+        ],
+    )
+
+    # ── 3.  Upload every file we just wrote ─────────────────────────────────
+    uploaded = 0
     for f in local_dir.rglob("*"):
         if f.is_file():
             rel_key = posixpath.join(prefix, f.relative_to(local_dir).as_posix())
+            assert not rel_key.startswith(
+                "/"
+            ), "S3 object key must never begin with '/'"
             full_s3 = f"s3://{bucket}/{rel_key}"
             logger.debug("Uploading %s to %s", f, full_s3)
             uu.upload_file_to_s3(str(f), bucket, rel_key)
+            uploaded += 1
+
+    logger.debug(
+        "Uploaded %s object%s to s3://%s/%s",
+        uploaded,
+        "" if uploaded == 1 else "s",
+        bucket,
+        prefix,
+    )
+
     shutil.rmtree(local_dir)
     logger.info(
         "Parquet write complete – partitions uploaded to %s", args.output_parquet
     )
 
+    # ── 4.  Confirm that the dataset is now present on S3 ───────────────────
     fs = s3fs.S3FileSystem(anon=False)
     list_target = args.output_parquet.rstrip("/") + "/"
     print(f"Listing contents of: {list_target}")
