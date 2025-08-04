@@ -85,37 +85,60 @@ ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 #  The three CLI flags --model_version, --run_date, and the per-loop
 #  interval string "{interval}" are interpolated later with .format().
 
-# Literal template – evaluated later with .format(...)
-OUTPUT_BASE = "{root}/version_{model_version}/"
+# Base output folder (no trailing slash to simplify joining)
+OUTPUT_BASE = "{root}/version_{model_version}"
 
-DRAINED_STATE_NODES = (
-        OUTPUT_BASE + "drained_state/"
-                      "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
-)
-BURNED_STATE_NODES = (
-        OUTPUT_BASE + "burned_state/"
-                      "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
-)
-DRAINED_TOTAL_MG_CO2E_PIXEL = (
-        OUTPUT_BASE + "drained_total_Mg_CO2e_pixel_yr/"
-                      "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
-)
-BURNED_TOTAL_MG_CO2E_PIXEL = (
-        OUTPUT_BASE + "burned_total_Mg_CO2e_pixel/"
-                      "ogh_standard_model/five_year_intervals/{interval}/40000_pixels/{run_date}/"
-)
-
-# Zarr cache folders (one per interval)
-ZARR_CACHE_PREFIX = OUTPUT_BASE + "zarr/{run_date}/{interval}/"
-
-ZARR_PATHS = {
-    "drained_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
-                                   + "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
-    "burned_total_Mg_CO2e_pixel": ZARR_CACHE_PREFIX
-                                  + "burned_total_Mg_CO2e_pixel_{interval}.zarr",
-    "drained_state_nodes": ZARR_CACHE_PREFIX + "drained_state_node_{interval}.zarr",
-    "burned_state_nodes": ZARR_CACHE_PREFIX + "burned_state_node_{interval}.zarr",
+# Configuration for each dataset handled by this script.  The ``folder``
+# value is interpolated into ``FOLDER_TEMPLATE`` while ``zarr`` names the
+# cached Zarr file created for each interval.  This mirrors the style used in
+# ``2_per_pixel_soils_outputs`` where dataset paths are derived from compact
+# definitions rather than repeated string literals.
+DATASETS = {
+    "drained_state_nodes": {
+        "folder": "drained_state",
+        "zarr": "drained_state_node_{interval}.zarr",
+    },
+    "burned_state_nodes": {
+        "folder": "burned_state",
+        "zarr": "burned_state_node_{interval}.zarr",
+    },
+    "drained_total_Mg_CO2e_pixel": {
+        "folder": "drained_total_Mg_CO2e_pixel_yr",
+        "zarr": "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
+    },
+    "burned_total_Mg_CO2e_pixel": {
+        "folder": "burned_total_Mg_CO2e_pixel",
+        "zarr": "burned_total_Mg_CO2e_pixel_{interval}.zarr",
+    },
 }
+
+# Template pieces used to build full paths on demand
+ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_date}/{interval}/"
+FOLDER_TEMPLATE = (
+    OUTPUT_BASE
+    + "/{folder}/ogh_standard_model/five_year_intervals/{interval}/"
+    "40000_pixels/{run_date}/"
+)
+
+
+def build_paths(interval: str, **kw) -> dict[str, dict[str, str]]:
+    """Return folder/zarr paths for all datasets in *interval*.
+
+    Parameters are passed via ``kw`` (typically ``root``, ``model_version`` and
+    ``run_date``).  Each entry in the returned dictionary has the keys
+    ``"folder"`` and ``"zarr"``.
+    """
+
+    zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
+    paths: dict[str, dict[str, str]] = {}
+    for name, spec in DATASETS.items():
+        paths[name] = {
+            "folder": FOLDER_TEMPLATE.format(
+                folder=spec["folder"], interval=interval, **kw
+            ),
+            "zarr": zarr_base + spec["zarr"].format(interval=interval),
+        }
+    return paths
 
 # Contextual layers (static)
 ADM0_GTIFF_FOLDER = "s3://gfw2-data/gadm_administrative_boundaries/v4.1/v4.1.64__from_gfw-data-lake/raster/epsg-4326/10/40000/adm0/gdal-geotiff/"
@@ -520,50 +543,28 @@ def run(args: argparse.Namespace) -> None:
         logger.info("Processing interval %s : %s", interval, timestr())
         logger.debug("Opening flux zarrs for interval %s", interval)
 
-        drained_total_zarr_name = ZARR_PATHS["drained_total_Mg_CO2e_pixel"].format(
-            interval=interval, **OUTPUT_KW
-        )
-        burned_total_zarr_name = ZARR_PATHS["burned_total_Mg_CO2e_pixel"].format(
-            interval=interval, **OUTPUT_KW
-        )
-        node_zarr_name = ZARR_PATHS["drained_state_nodes"].format(
-            interval=interval, **OUTPUT_KW
-        )
-        burned_node_zarr_name = ZARR_PATHS["burned_state_nodes"].format(
-            interval=interval, **OUTPUT_KW
-        )
+        # Build dataset folders and cache paths for this interval
+        paths = build_paths(interval, **OUTPUT_KW)
 
         # --- build flux‑layer caches if missing ----------------------------
-        drained_folder = DRAINED_TOTAL_MG_CO2E_PIXEL.format(
-            interval=interval, **OUTPUT_KW
-        )
-        burned_folder = BURNED_TOTAL_MG_CO2E_PIXEL.format(
-            interval=interval, **OUTPUT_KW
-        )
-        node_folder = DRAINED_STATE_NODES.format(
-            interval=interval, **OUTPUT_KW
-        )
-        burned_node_folder = BURNED_STATE_NODES.format(
-            interval=interval, **OUTPUT_KW
-        )
-        ensure_zarr_exists(
-            list_folder_uris(drained_folder), drained_total_zarr_name, args.chunk_size
-        )
-        ensure_zarr_exists(
-            list_folder_uris(burned_folder), burned_total_zarr_name, args.chunk_size
-        )
-        ensure_zarr_exists(
-            list_folder_uris(node_folder), node_zarr_name, args.chunk_size
-        )
-        ensure_zarr_exists(
-            list_folder_uris(burned_node_folder), burned_node_zarr_name, args.chunk_size
-        )
+        for entry in paths.values():
+            ensure_zarr_exists(
+                list_folder_uris(entry["folder"]), entry["zarr"], args.chunk_size
+            )
         # -------------------------------------------------------------------
 
-        drained_total = open_zarr_region(drained_total_zarr_name, bbox, args.chunk_size)
-        burned_total = open_zarr_region(burned_total_zarr_name, bbox, args.chunk_size)
-        drained_state_nodes = open_zarr_region(node_zarr_name, bbox, args.chunk_size)
-        burned_state_nodes = open_zarr_region(burned_node_zarr_name, bbox, args.chunk_size)
+        drained_total = open_zarr_region(
+            paths["drained_total_Mg_CO2e_pixel"]["zarr"], bbox, args.chunk_size
+        )
+        burned_total = open_zarr_region(
+            paths["burned_total_Mg_CO2e_pixel"]["zarr"], bbox, args.chunk_size
+        )
+        drained_state_nodes = open_zarr_region(
+            paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size
+        )
+        burned_state_nodes = open_zarr_region(
+            paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size
+        )
         logger.debug("Flux layers opened for interval %s", interval)
 
         reference = drained_state_nodes
@@ -580,16 +581,8 @@ def run(args: argparse.Namespace) -> None:
 
         # Grab one URI from each folder to label flux_type
         flux_type_dict = {
-            0: parse_pattern_from_uri(
-                list_folder_uris(
-                    DRAINED_TOTAL_MG_CO2E_PIXEL.format(interval=interval, **OUTPUT_KW)
-                )
-            ),
-            1: parse_pattern_from_uri(
-                list_folder_uris(
-                    BURNED_TOTAL_MG_CO2E_PIXEL.format(interval=interval, **OUTPUT_KW)
-                )
-            ),
+            0: parse_pattern_from_uri(list_folder_uris(paths["drained_total_Mg_CO2e_pixel"]["folder"])),
+            1: parse_pattern_from_uri(list_folder_uris(paths["burned_total_Mg_CO2e_pixel"]["folder"])),
             2: "area__ha",
         }
 
