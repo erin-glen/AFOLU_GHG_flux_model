@@ -14,7 +14,6 @@ List available worker types for Coiled clusters with: coiled.list_instance_types
 Using more than 1 thread/worker slows down processing a lot when there are more tasks than workers for the core LULUCF model,
 which is the situation for large analyses, obviously.
 """
-
 import coiled
 import argparse
 import sys

@@ -31,10 +31,8 @@ import sys
 import argparse
 import dask
 from dask.distributed import print
-from ..utilities import constants_and_names as cn
-from ..utilities import log_utilities as lu
-from ..utilities import universal_utilities as uu
 
+from src.utilities import constants_and_names as cn, log_utilities as lu, universal_utilities as uu
 
 ########################################################################################################################
 

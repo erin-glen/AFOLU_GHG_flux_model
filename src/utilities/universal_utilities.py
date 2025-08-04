@@ -33,7 +33,6 @@ gdal.UseExceptions()
 # Project imports
 from src.utilities import constants_and_names as cn, log_utilities as lu
 
-
 ###################################################################################################
 # S3 Utilities
 ###################################################################################################
