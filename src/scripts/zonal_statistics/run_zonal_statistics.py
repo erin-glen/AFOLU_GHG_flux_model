@@ -57,14 +57,9 @@ def flox_sparse_reindex_kwargs() -> dict:
 
     return {
         "reindex": ReindexStrategy(
-            blockwise=False, array_type=ReindexArrayType.SPARSE_COO
+            blockwise=True, array_type=ReindexArrayType.SPARSE_COO
         )
     }
-
-
-# LocalCluster not needed; uu.connect_to_cluster already handles local fallback.
-# `Client` import is unused (uu.connect_to_cluster returns an
-# initialized client).  Remove to silence lint warnings.
 
 # Absolute import so the script can run as `python run_zonal_statistics.py`
 import src.scripts.zonal_statistics.zonal_constants as zc
@@ -75,24 +70,10 @@ from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.utilities import log_utilities as lu
 
-# constant no longer referenced after previous unit-alignment patch
-
-# ╭────────────────────────────────────────────────────────────────────────────╮
-# │  ORGANIC SOILS ZONAL‑STATISTICS – PATH MANIFEST (single source of truth)  │
-# ╰────────────────────────────────────────────────────────────────────────────╯
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
-
-#  The three CLI flags --model_version, --run_date, and the per-loop
-#  interval string "{interval}" are interpolated later with .format().
-
 # Base output folder (no trailing slash to simplify joining)
 OUTPUT_BASE = "{root}/version_{model_version}"
 
-# Configuration for each dataset handled by this script.  The ``folder``
-# value is interpolated into ``FOLDER_TEMPLATE`` while ``zarr`` names the
-# cached Zarr file created for each interval.  This mirrors the style used in
-# ``2_per_pixel_soils_outputs`` where dataset paths are derived from compact
-# definitions rather than repeated string literals.
 DATASETS = {
     "drained_state_nodes": {
         "folder": "drained_state",
@@ -505,13 +486,6 @@ def run(args: argparse.Namespace) -> None:
 
     adm0_folder, adm0_zarr_name = ADM0_GTIFF_FOLDER, ADM0_ZARR
     pixel_area_folder, pixel_area_zarr_name = PIXEL_AREA_GTIFF_FOLDER, PIXEL_AREA_ZARR
-
-    # Reserved for future use
-    # state_node_lookup_table_local, state_node_lookup_table_s3 = (
-    #     STATE_NODE_XLSX_LOCAL,
-    #     STATE_NODE_XLSX_S3,
-    # )
-    # sheet = "v030_20250430"
 
     # Ensure contextual zarrs exist
     logger.debug("Checking contextual layer adm0")
