@@ -284,6 +284,9 @@ def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
     logging.info("   Post-processing %s : %s", interval, timestr())
 
     arr = flux_results.data
+    if isinstance(arr, da.Array):
+        # Gather any lazily persisted results into local memory
+        arr = arr.compute()
     dim_names = flux_results.dims
 
     if hasattr(arr, "coords") and hasattr(arr, "data"):
@@ -623,8 +626,9 @@ def run(args: argparse.Namespace) -> None:
                     node_codes,
                 ),
                 fill_value=np.nan,
+                split_out=4,  # spread reduction across multiple chunks
                 **flox_sparse_reindex_kwargs(),
-            ).compute()
+            ).persist()
         logger.debug("Flox reduce complete for interval %s", interval)
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
