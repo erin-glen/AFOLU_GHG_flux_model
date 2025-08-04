@@ -449,9 +449,10 @@ def run(args: argparse.Namespace) -> None:
     )
 
     fs, out_path = fsspec.core.url_to_fs(args.output_parquet)
-    fs.makedirs(str(Path(out_path).parent), exist_ok=True)
     if fs.exists(out_path):
-        logger.warning("Output path %s exists – removing before write", args.output_parquet)
+        logger.warning(
+            "Output path %s exists – removing before write", args.output_parquet
+        )
         fs.rm(out_path, recursive=True)
 
     if args.debug:
@@ -634,7 +635,7 @@ def run(args: argparse.Namespace) -> None:
     # same filesystem and avoid partial writes to existing directories.
     full_df = pd.concat(dfs, ignore_index=True)
     full_df.to_parquet(
-        args.output_parquet,
+        out_path,
         partition_cols=["interval_end"],
         index=False,
         compression="zstd",
