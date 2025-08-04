@@ -232,8 +232,10 @@ def open_zarr_region(
       (typically `"x"` and `"y"`).
     """
     mapper = fsspec.get_mapper(path, anon=False, check=False)
+
+    # Use consolidated metadata to avoid repeated per‑chunk metadata fetches.
     with dask.annotate(label=f"open:{Path(path).stem}"):
-        ds = xr.open_zarr(mapper)
+        ds = xr.open_zarr(mapper, consolidated=True)
 
     # ── select a variable ────────────────────────────────────────────────
     if isinstance(ds, xr.DataArray):
