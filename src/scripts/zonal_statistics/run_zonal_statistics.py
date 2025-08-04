@@ -128,14 +128,18 @@ STATE_NODE_XLSX_S3 = "https://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_mode
 
 
 def build_output_parquet(_model_version: str, years: list[int]) -> str:
-    """Return default Parquet path within the organic soils output directory.
+    """Return default Parquet output location.
 
-    The results are written to the ``zonal_stats`` subdirectory of the main
-    organic soils output folder on S3.
+    The results live within the ``zonal_stats`` subdirectory of the main
+    organic soils output folder on S3.  ``pandas.DataFrame.to_parquet`` writes
+    partitioned datasets to a *directory*, so we omit the ``.parquet``
+    extension here.  Callers wanting a single Parquet file should provide an
+    explicit filename via ``--output_parquet``.
     """
+
     base = f"{ROOT}/zonal_stats"
     year_part = "_".join(str(y) for y in years)
-    return f"{base}/zonal_stats_{year_part}.parquet"
+    return f"{base}/zonal_stats_{year_part}"
 
 
 """
@@ -445,7 +449,7 @@ def run(args: argparse.Namespace) -> None:
     )
 
     fs, out_path = fsspec.core.url_to_fs(args.output_parquet)
-    fs.makedirs(out_path, exist_ok=True)
+    fs.makedirs(str(Path(out_path).parent), exist_ok=True)
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
@@ -634,8 +638,9 @@ def run(args: argparse.Namespace) -> None:
     )
 
     fs, path = fsspec.core.url_to_fs(args.output_parquet)
-    print(f"Listing contents of: {args.output_parquet}")
-    print(fs.ls(path, detail=True))
+    list_target = path if fs.isdir(path) else str(Path(path).parent)
+    print(f"Listing contents of: {list_target}")
+    print(fs.ls(list_target, detail=True))
 
     if client:
         logger.debug("Closing Dask client")
