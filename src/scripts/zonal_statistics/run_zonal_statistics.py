@@ -154,28 +154,25 @@ STATE_NODE_XLSX_S3 = "https://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_mode
 # ===  END PATH MANIFEST  ======================================================
 
 
-def build_output_parquet(_model_version: str, years: list[int]) -> str:
+def build_output_parquet(model_version: str, years: list[int]) -> str:
     """Return default Parquet output location.
 
-    The results live within the ``zonal_stats`` subdirectory of the main
-    organic soils output folder on S3.  ``pandas.DataFrame.to_parquet`` writes
-    partitioned datasets to a *directory*, so we omit the ``.parquet``
-    extension here.  Callers wanting a single Parquet file should provide an
-    explicit filename via ``--output_parquet``.
+    Paths mirror those produced by the core model. ``pandas.DataFrame`` writes
+    partitioned datasets to a *directory*, so the ``.parquet`` extension is
+    intentionally omitted.
     """
 
-    base = f"{ROOT}/zonal_stats"
+    base = posixpath.join(ROOT, f"version_{model_version}", "zonal_stats")
     year_part = "_".join(str(y) for y in years)
-    return f"{base}/zonal_stats_{year_part}"
+    return posixpath.join(base, f"zonal_stats_{year_part}/")
 
 
-"""
 def create_state_node_df(
     state_node_lookup_table_local: str, state_node_lookup_table_s3: str, sheet_name: str
 ) -> pd.DataFrame:
-    ""Load the state node lookup table from S3 falling back to a local file.""
+    """"Load the state node lookup table from S3 falling back to a local file.""
     pass  # Deprecated – retained for reference
-"""
+    """
 
 
 def list_folder_uris(base_uri: str) -> pd.Series:
@@ -476,13 +473,13 @@ def run(args: argparse.Namespace) -> None:
     )
 
     bucket, prefix = uu.split_s3_path(args.output_parquet)
-    s3c = boto3.client("s3")
+    logger.info("Output parquet path resolved to s3://%s/%s", bucket, prefix)
     existing = uu.get_existing_s3_files(bucket, prefix)
     if existing:
         logger.warning(
             "Output path %s exists – removing before write", args.output_parquet
         )
-        s3c.delete_objects(
+        boto3.client("s3").delete_objects(
             Bucket=bucket,
             Delete={"Objects": [{"Key": k} for k in existing]},
         )
@@ -646,14 +643,16 @@ def run(args: argparse.Namespace) -> None:
     for f in local_dir.rglob("*"):
         if f.is_file():
             rel_key = posixpath.join(prefix, f.relative_to(local_dir).as_posix())
-            s3c.upload_file(str(f), bucket, rel_key)
+            full_s3 = f"s3://{bucket}/{rel_key}"
+            logger.debug("Uploading %s to %s", f, full_s3)
+            uu.upload_file_to_s3(str(f), bucket, rel_key)
     shutil.rmtree(local_dir)
     logger.info(
         "Parquet write complete – partitions uploaded to %s", args.output_parquet
     )
 
     fs = s3fs.S3FileSystem(anon=False)
-    list_target = args.output_parquet
+    list_target = args.output_parquet.rstrip("/") + "/"
     print(f"Listing contents of: {list_target}")
     print(fs.ls(list_target, detail=True))
 
@@ -684,8 +683,6 @@ def main(argv=None):
             "20250101",
             "--interval_end_years",
             "2020",
-            "--output_parquet",
-            "zonal_stats_test.parquet",
             "--run_local",
             "--bounding_box",
             "112",
@@ -710,14 +707,6 @@ def main(argv=None):
         default=4000,
         help="Tile chunk in pixels (lower -> less per-task memory)",
     )
-    parser.add_argument(
-        "--output_parquet",
-        help=(
-            "Output Parquet folder. Defaults to "
-            "data/climate/AFOLU_flux_model/organic_soils/outputs/"
-            "version_{model_version}/zonal_stats"
-        ),
-    )
     parser.add_argument("--debug", action="store_true", help="Verbose logging")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
@@ -734,11 +723,9 @@ def main(argv=None):
     parser.add_argument("--tile_ids", action="append", help="Comma separated tile IDs")
 
     args = parser.parse_args(argv)
-
-    if not args.output_parquet:
-        args.output_parquet = build_output_parquet(
-            args.model_version, args.interval_end_years
-        )
+    args.output_parquet = build_output_parquet(
+        args.model_version, args.interval_end_years
+    )
 
     run(args)
 
