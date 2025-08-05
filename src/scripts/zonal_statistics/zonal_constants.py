@@ -2,9 +2,11 @@ import numpy as np
 
 """Node code utilities for organic soils zonal statistics."""
 
-def _pad_right(code: str, digits: int = 8) -> str:
-    """Right‑pad ``code`` with zeros to ``digits`` length."""
-    return code.ljust(digits, "0")
+_PAD_DIGITS = 8
+
+def _pad_right(code: str) -> str:
+    """Right‑pad ``code`` with zeros to the standard length."""
+    return code.ljust(_PAD_DIGITS, "0")
 
 _drain_root = {
     "11": "peat_drained_primary_infra",          # dadap / canals
@@ -66,34 +68,36 @@ _burn_emit = {
     "4": "other",
 }
 
-# ── lookup tables ───────────────────────────────────────────────────
-DRAINED_STATE_NODE_MEANINGS: dict[str, str] = {}
-for code, label in _drain_root.items():
-    if code in ("16", "2"):
-        DRAINED_STATE_NODE_MEANINGS[_pad_right(code)] = label
-for root in ("11", "12", "13", "14", "15"):
-    for emit_code, emit_label in _drain_emit.items():
-        full = _pad_right(root + emit_code)
-        DRAINED_STATE_NODE_MEANINGS[full] = (
-            f"{_drain_root[root]}__{emit_label}"
-        )
+## ── lookup tables ───────────────────────────────────────────────────
+DRAINED_STATE_NODE_MEANINGS: dict[str, str] = {
+    _pad_right(code): label
+    for code, label in _drain_root.items()
+    if code in ("16", "2")
+}
+DRAINED_STATE_NODE_MEANINGS.update(
+    {
+        _pad_right(root + emit_code): f"{_drain_root[root]}__{emit_label}"
+        for root in ("11", "12", "13", "14", "15")
+        for emit_code, emit_label in _drain_emit.items()
+    }
+)
 
-BURNED_STATE_NODE_MEANINGS: dict[str, str] = {}
-for root_code, label in _burn_root.items():
-    if root_code.startswith("3"):
-        BURNED_STATE_NODE_MEANINGS[_pad_right(root_code)] = label
-        continue
-    for sub, sub_label in _burn_emit.items():
-        full = _pad_right(root_code + sub)
-        BURNED_STATE_NODE_MEANINGS[full] = f"{label}__{sub_label}"
+BURNED_STATE_NODE_MEANINGS: dict[str, str] = {
+    _pad_right(root_code): label
+    for root_code, label in _burn_root.items()
+    if root_code.startswith("3")
+}
+BURNED_STATE_NODE_MEANINGS.update(
+    {
+        _pad_right(root_code + sub): f"{label}__{sub_label}"
+        for root_code, label in _burn_root.items()
+        if not root_code.startswith("3")
+        for sub, sub_label in _burn_emit.items()
+    }
+)
 
 ALL_DRAINED_STATE_CODES = frozenset(DRAINED_STATE_NODE_MEANINGS.keys())
 ALL_BURNED_STATE_CODES = frozenset(BURNED_STATE_NODE_MEANINGS.keys())
-
-NODE_CODES = np.array(
-    sorted(int(c) for c in ALL_DRAINED_STATE_CODES | ALL_BURNED_STATE_CODES),
-    dtype=np.uint32,
-)
 
 GADM_ADM0_IDS = np.array([
     0.0, 4.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 28.0, 31.0, 32.0, 36.0,
@@ -122,5 +126,3 @@ GADM_ADM0_IDS = np.array([
     832.0, 833.0, 834.0, 840.0, 850.0, 854.0, 858.0, 860.0, 862.0, 876.0,
     882.0, 887.0, 894.0
 ], dtype=np.uint16)
-
-PRIMARY_FOREST_IFL_CODES = np.array([0, 1], dtype=np.uint8)
