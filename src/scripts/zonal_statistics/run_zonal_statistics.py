@@ -39,16 +39,17 @@ import zarr
 from flox import ReindexArrayType, ReindexStrategy
 from flox.xarray import xarray_reduce
 
-# ──────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------
+# 1️⃣  OPTION FLAG – turn sparse mode on/off from the CLI
+# ------------------------------------------------------------------
+SPARSE_DEFAULT = True          # set False for quick local smoke tests
 
 
-def flox_sparse_reindex_kwargs() -> dict:
-    """Return kwargs enabling sparse reindexing when supported.
+def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
+    """Return kwargs enabling sparse reindexing when supported."""
 
-    The :mod:`flox` ``ReindexStrategy`` API was introduced in version 0.10.
-    When unavailable we fall back to dense aggregation while emitting a
-    warning so the caller is aware that memory usage may increase.
-    """
+    if not use_sparse:
+        return {}
 
     if ReindexStrategy is None or ReindexArrayType is None:
         logging.warning(
@@ -567,8 +568,14 @@ def run(args: argparse.Namespace) -> None:
 
     interval_pairs = build_interval_pairs(args.interval_end_years)
 
-    # Collect per‑interval results so we can write once at the end
-    dfs: list[pd.DataFrame] = []
+    logger.debug("Writing Parquet directly to %s", args.output_parquet)
+    s3_arrow = pafs.S3FileSystem(region="us-east-1")  # adjust if needed
+    base_dir = args.output_parquet.replace("s3://", "", 1).rstrip("/")
+
+    # ------------------------------------------------------------------
+    # 3️⃣  STREAMING WRITE – one Parquet partition per interval
+    #     avoids concatenating a 30 M‑row dataframe in memory.
+    # ------------------------------------------------------------------
     for interval_start_year, interval_end_year in interval_pairs:
         interval = f"{interval_start_year}_{interval_end_year}"
         logger.info("Processing interval %s : %s", interval, timestr())
@@ -652,29 +659,26 @@ def run(args: argparse.Namespace) -> None:
                 )
 
 
+        # ------------------------------------------------------------------
+        # 2️⃣  SPARSE‑SAFE REDUCE
+        #     * do **not** pass expected_groups – they create a dense
+        #       rectangle that is mostly zero ⇒ stripped by COO.
+        #     * leave fill_value **unset** so that missing combos become NaN,
+        #       not 0, preventing silent drop‑out.
+        # ------------------------------------------------------------------
         with dask.annotate(label=f"reduce:{interval}"):
             flux_cube = xr.concat(
                 [drained_total_aligned, burned_total_aligned, pixel_area_aligned],
                 dim="flux_type",
             ).assign_coords(flux_type=("flux_type", [0, 1, 2]))
 
-            # ----------------------------------------------------------
-            # ②  Disable sparse output.  With `sparse=True` +
-            #     `fill_value=0`, every group that summed to zero was
-            #     *dropped* from the COO representation – leaving us with
-            #     an apparently empty cube.  Dense output is safe for the
-            #     tile‑sized jobs we are running here and greatly
-            #     simplifies downstream debugging.
-            # ----------------------------------------------------------
             flux_results = xarray_reduce(
                 flux_cube,
                 adm0_aligned,
                 drained_state_nodes,
                 burned_state_nodes_aligned,
                 func="sum",
-                expected_groups=(gadm_adm0_ids, node_codes, node_codes),
-                fill_value=0,
-                sparse=False,
+                **flox_sparse_reindex_kwargs(not args.no_sparse),
             ).compute()
 
         logger.debug("Flox reduce complete for interval %s", interval)
@@ -689,47 +693,17 @@ def run(args: argparse.Namespace) -> None:
         if args.debug:
             logger.debug("Interval DataFrame rows: %s", len(df))
             logger.debug("Interval DataFrame head:\n%s", df.head())
-        dfs.append(df)
-        logger.info("Processed interval %s", interval)
-
-    # ╭──────────────────────────────────────────────────────────────────╮
-    # │  Write all intervals directly to S3 as Parquet                    │
-    # ╰──────────────────────────────────────────────────────────────────╯
-
-    full_df = pd.concat(dfs, ignore_index=True)
-
-    # ── 1.  Guarantee Arrow‑friendly dtype for the partition column ─────────
-    if "interval_end" in full_df.columns:
-        full_df["interval_end"] = full_df["interval_end"].astype("int64", copy=False)
-
-    # ── 2.  Quick sanity check before writing ───────────────────────────────
-    logger.debug("Rows in concatenated DataFrame   : %s", f"{len(full_df):,}")
-
-    # Cast long strings → categorical to shrink output
-    for col in ("drained_state_meaning", "burned_state_meaning", "flux_type"):
-        if col in full_df.columns:
-            full_df[col] = full_df[col].astype("category")
-
-    # ── Direct Parquet write to S3 (no tmp dir, no manual upload) ─────────
-    logger.debug("Writing Parquet directly to %s", args.output_parquet)
-    s3_arrow = pafs.S3FileSystem(region="us-east-1")  # adjust if needed
-    base_dir = args.output_parquet.replace("s3://", "", 1).rstrip("/")  # ⇦ Arrow expects bucket/key when FS provided
-    ds.write_dataset(
-        pa.Table.from_pandas(full_df, preserve_index=False),
-        base_dir=base_dir,
-        filesystem=s3_arrow,
-        partitioning=["interval_end"],
-        format="parquet",
-        existing_data_behavior="delete_matching",
-    )
-    logger.info("Parquet write complete – uploaded to %s", args.output_parquet)
+        ds.write_dataset(
+            pa.Table.from_pandas(df, preserve_index=False),
+            base_dir=base_dir,
+            filesystem=s3_arrow,
+            partitioning=["interval_end"],
+            format="parquet",
+            existing_data_behavior="delete_matching",
+        )
+        logger.info("Wrote %s rows for interval %s", len(df), interval)
 
     if args.debug:
-        # --------------------------------------------------------------
-        # ③  Only attempt to list the parquet fragments when the parent
-        #     directory actually exists – avoids a noisy FileNotFoundError
-        #     in the (rare) case an empty DF was written.
-        # --------------------------------------------------------------
         fs = s3fs.S3FileSystem(anon=False)
         list_target = args.output_parquet.rstrip("/") + "/"
         logger.debug("Listing S3 contents: %s", list_target)
@@ -790,6 +764,12 @@ def main(argv=None):
         help="Tile chunk in pixels (lower -> less per-task memory)",
     )
     parser.add_argument("--debug", action="store_true", help="Verbose logging")
+    parser.add_argument(
+        "--no_sparse",
+        action="store_true",
+        default=not SPARSE_DEFAULT,
+        help="Disable sparse-COO output (dense fallback).",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--run_local",
