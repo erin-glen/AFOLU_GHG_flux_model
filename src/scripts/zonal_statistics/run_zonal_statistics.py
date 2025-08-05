@@ -42,11 +42,9 @@ import zarr
 from flox import ReindexArrayType, ReindexStrategy
 from flox.xarray import xarray_reduce
 
-SPARSE_DEFAULT = True          # set False for quick local smoke tests
+SPARSE_DEFAULT = True
+# set False for quick local smoke tests
 
-# ------------------------------------------------------------------
-# Helper: kwargs for flox that switch on sparse-COO + fill_value=0
-# ------------------------------------------------------------------
 def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
     """
     Return keyword arguments for ``flox.xarray_reduce``.
@@ -123,8 +121,6 @@ FOLDER_TEMPLATE = (
     "40000_pixels/{run_date}/"
 )
 
-
-
 def build_paths(interval: str, **kw) -> dict[str, dict[str, str]]:
     """Return folder/zarr paths for all datasets in *interval*.
 
@@ -150,8 +146,6 @@ ADM0_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_l
 PIXEL_AREA_GTIFF_FOLDER = "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
 PIXEL_AREA_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/pixel_area/20250730/global_pixel_area_20250730.zarr"
 
-# ===  END PATH MANIFEST  ======================================================
-
 def build_output_parquet(model_version: str, years: list[int]) -> str:
     """Return default Parquet output location.
 
@@ -163,14 +157,6 @@ def build_output_parquet(model_version: str, years: list[int]) -> str:
     base = posixpath.join(ROOT, f"version_{model_version}", "zonal_stats")
     year_part = "_".join(str(y) for y in years)
     return posixpath.join(base, f"zonal_stats_{year_part}/")
-
-
-def create_state_node_df(
-    state_node_lookup_table_local: str, state_node_lookup_table_s3: str, sheet_name: str
-) -> pd.DataFrame:
-    """"Load the state node lookup table from S3 falling back to a local file.""
-    pass  # Deprecated – retained for reference
-    """
 
 
 def list_folder_uris(base_uri: str) -> pd.Series:
@@ -227,12 +213,7 @@ def safe_crop(ds, ref):
         ds.sel(x=ref.x, y=ref.y, method="nearest")
         .assign_coords(x=ref.x, y=ref.y)
     )
-# (crop_to_bbox helper is no longer used – remove to avoid dead code)
 
-
-# ───────────────────────────────────────────────────────────────────────────
-# Helper – open a Zarr store, drop “band”, optional crop, apply chunking
-# ───────────────────────────────────────────────────────────────────────────
 def open_zarr_region(
         path: str,
         bbox: list[float] | None,
@@ -287,8 +268,6 @@ def open_zarr_region(
 
     # map_blocks wrapper removed – it added a graph layer for no benefit
     return data_arr
-
-
 
 def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
     """Return flox results as a coordinate dictionary.
@@ -865,6 +844,3 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --tile_ids 00N_110E \
        --model_version 0_5_0
 """
-
-# TODO test improved safe crop (eventually)
-# TODO post processing for output parquet
