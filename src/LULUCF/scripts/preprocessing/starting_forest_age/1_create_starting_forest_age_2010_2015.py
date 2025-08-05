@@ -1,10 +1,23 @@
 """
 Maps forest age in 2010 and 2015 in 1x1 deg geotifs using GAMI v2.1.
+Requires Python library zarr v2.x; can't use zarr v3.x, which is what my more recent conda environments are using (for zonal stats purposes).
+If I try running this with zarr3, I get errors about not being able to access the files.
+
+So, start with:
+conda activate coiled_20250203
+
+https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=8f5974e7-3ece-11ef-967a-4ffbfe06208e
+https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/
+Metadata: https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/2023-006_Besnard-et-al_Data-Description-v2.1.pdf
+Also needs zarr package
+
+Mini GEE app for age viewing from Simon Besnard (email 6/27/25):
+https://besnardsim.users.earthengine.app/view/globalforestage
+GEE asset: projects/ee-besnardsim/assets/GAMI_v2_0_mean_100m
 
 This preprocessing step doesn't scale quite like others, as far as I can tell.
 It starts by reading in the relevant ZARR pieces for the chunks being processed, but I don't know how that scales.
 Reading the ZARR chunks involves dozens of tasks and takes much longer than all the subsequent processing.
-That's why I am trying the full/global run with -n 6 -t 8; I don't know how helpful it is to have lots of workers for this.
 When I was developing this script, I was able to quickly get something that worked on a single 1x1 chunk but then
 slowed down in proportion to the number of chunks, even when there was an ample number of workers.
 Obviously, that's not how it should go with Dask.
@@ -16,37 +29,43 @@ but that simply did not scale.
 Note that I also tried processing 10x10 degree chunks but the problem there was that the processing of the chunks
 once downloaded took too much memory and would've required really large workers.
 
-Run from src/LULUCF
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
-Local:
-python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1 --run_local --no_upload
+Local (won't run Dask locally because of usage of submit):
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_create_starting_forest_age_2010_2015 -bb 10 49 11 50 -cs 1 --run_local --no_upload
 
 Coiled tiny test:
-python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 1
-python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 49 11 50 -cs 1
+python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 1 -t 1 -m 2
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1
 
 Coiled larger test (because this doesn't always scale beyond 1 chunk well):
-python -m scripts.utilities.create_cluster -cn AFOLU_flux_model_scripts -n 4 -t 4
-python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -bb 10 47 13 50 -cs 1
+python -m src.utilities.create_cluster -cn LULUCF_preprocessing -n 4 -t 4 -m 4
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -bb 10 47 13 50 -cs 1
 
 Full run:
-python -m scripts.utilities.create_cluster -n 12 -t 9 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.starting_forest_age.0_create_starting_forest_age -cn AFOLU_flux_model_scripts -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
-When I ran with -n 7 -t 9, it would process only about 3 batches of 300 chunks (900 chunks) before failing,
-sometimes because it ran out of memory. Increasing the cluster size to -n 12 -t 9 made it run through 1800 chunks before failing!
-I think that the cluster with 7 workers simply couldn't handle all the data it was downloading at a certain point.
+python -m src.utilities.create_cluster -n 40 -t 9 -m 32 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_create_starting_forest_age_2010_2015 -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive forest age 2010/2015 run."
+
+In the three times I've run this, I've found that it gets through more and more batches the more workers I give it.
+-n 10 could only get through a few batches at a time in data-dense latitudes and took over a dozen restarts to get through all the batches.
+-n 20 did better and took about 7 restarts to get through all the batches.
+-n 40 did best yet and required only 2 restarts to get through all the batches.
+The first two starts with -n 40 eventually failed with "No disk space left of workers" errors
+(https://cloud.coiled.io/clusters/1014981/account/wri-forest-research/information?organization=wri&tab=Alerts).
+-n 40 used approximately 1600 Coiled credits and $80 in AWS charges over all three clusters. It took nearly 20 hours to run.
+Part 1: https://cloud.coiled.io/clusters/1014981/account/wri-forest-research/information?organization=wri
+Part 2: https://cloud.coiled.io/clusters/1015660/account/wri-forest-research/information?organization=wri
+Part 3: https://cloud.coiled.io/clusters/1016516/account/wri-forest-research/information?organization=wri
+
+I didn't try lots of different configurations, like the number of threads/worker.
+More optimization is possible but I hope to never have to do this again.
+If I do run it again, try with -m 16.
+
 I also noticed that the batches took wildly different amounts of time depending on where they were.
 Some batches in the 60N band took 1 hour to run, while those around 50S took 20 minutes to run, and batches in 70N
 and 80N took just a few minutes to run. I suppose this makes sense, but is worth noting all the same.
 
-If I ever re-run this, be prepared for it to be a slog. Maybe try upping it to 20 workers or so and see if that leads
-to getting through more batches before failure. I would definitely continue to use batches, though.
 chunk_list = chunk_list[1501:] is how I resumed the processing at the batch that failed.
-
-https://dataservices.gfz-potsdam.de/panmetaworks/showshort.php?id=8f5974e7-3ece-11ef-967a-4ffbfe06208e
-https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/
-Metadata: https://datapub.gfz-potsdam.de/download/10.5880.GFZ.1.4.2023.006-VEnuo/2023-006_Besnard-et-al_Data-Description-v2.1.pdf
-Also needs zarr package
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67dcb99b-edb8-800a-abd8-f718de76043c
 https://chatgpt.com/share/e/67e1b7f6-c0d4-800a-a945-3133de9bf3a0
@@ -70,9 +89,9 @@ import fsspec
 from fsspec.implementations.cached import CachingFileSystem
 
 # Project imports
-from ...utilities import constants_and_names as cn
-from ...utilities import log_utilities as lu
-from ...utilities import universal_utilities as uu
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+from src.utilities import universal_utilities as uu
 
 
 def try_open_zarr(url, cache_path, consolidated=True):
@@ -152,7 +171,8 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
 
         lu.print_and_log(f"Cleaning {bounds_str}: {uu.timestr()}", False, logger_worker) # Prints even during full run
-        da_cleaned = da_chunk.where(da_chunk != -9999, 0)
+        # da_cleaned = da_chunk.where(da_chunk != -9999, 0)
+        da_cleaned = da_chunk.where((da_chunk >= 0))
         da_median = da_cleaned.median(dim="members")  # Median of the 20 ESA AGB estimates upon which age is based
 
         # Target high-res lat/lon grid
@@ -163,12 +183,12 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         lu.print_and_log(f"Interpolating {bounds_str}: {uu.timestr()}", is_final, logger_worker)
         da_resampled = da_median.interp(latitude=new_lat, longitude=new_lon, method="nearest")
 
-        # Rounds from float to int, sets min as 0 and max as 100, and makes NoData = 0
-        da_2010 = da_resampled.round().clip(0, 100).fillna(0).astype("int8")
+        # Rounds from float to int and makes NoData = 0
+        da_2010 = da_resampled.round().fillna(0).astype("int16")
         arr_2010 = da_2010.values
 
-        # Creates the 2015 age map by adding 5 to the 2010 age map where it does not equal 0, then setting to max to 100
-        arr_2015 = np.where(arr_2010 != 0, arr_2010 + 5, 0).clip(0, 100).astype("int8")
+        # Creates the 2015 age map by adding 5 to the 2010 age map where it does not equal 0
+        arr_2015 = np.where(arr_2010 != 0, arr_2010 + 5, 0).astype("int16")
 
         transform = Affine.translation(lon_min, lat_max) * Affine.scale(cn.resolution, -cn.resolution)
         crs = "EPSG:4326"
@@ -181,7 +201,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         lu.print_and_log(f"Saving 2010 raster {file_2010}: {uu.timestr()}", is_final, logger_worker)
         with rasterio.open(file_2010, 'w', driver='GTiff',
             height=arr_2010.shape[0], width=arr_2010.shape[1],
-            count=1, dtype="int8", crs=crs, transform=transform,
+            count=1, dtype="int16", crs=crs, transform=transform,
             compress="LZW", tiled=True, blockxsize=400, blockysize=400
         ) as dst:
             dst.write(arr_2010, 1)
@@ -190,7 +210,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         lu.print_and_log(f"Saving 2015 raster {file_2015}: {uu.timestr()}", is_final, logger_worker)
         with rasterio.open(file_2015, 'w', driver='GTiff',
             height=arr_2015.shape[0], width=arr_2015.shape[1],
-            count=1, dtype="int8", crs=crs, transform=transform,
+            count=1, dtype="int16", crs=crs, transform=transform,
             compress="LZW", tiled=True, blockxsize=400, blockysize=400
         ) as dst:
             dst.write(arr_2015, 1)
@@ -260,7 +280,11 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Years for age maps: {age_years}")
 
-    # Returns a dataframe of chunk_id and ISO for the GADM3.6 1x1 deg fishnet.
+    # Shapefile of chunk footprints to use if none is supplied on the command line
+    if not chunk_shapefile_uri:
+        chunk_shapefile_uri = cn.fishnet_1x1deg_uri
+
+    # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
     fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
@@ -268,19 +292,10 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
     chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
 
-    # chunk_list = chunk_list[0:1501]
-    # chunk_list = chunk_list[1501:]
-    # chunk_list = chunk_list[2101:]
-    # chunk_list = chunk_list[2701:]
-    # chunk_list = chunk_list[3601:]
-    # chunk_list = chunk_list[4501:]
-    # chunk_list = chunk_list[5101:]
-    # chunk_list = chunk_list[6301:]
-    # chunk_list = chunk_list[8101:]
-    # chunk_list = chunk_list[11401:]
-    # chunk_list = chunk_list[13201:]
-    # chunk_list = chunk_list[14401:]
-    # chunk_list = chunk_list[16501:]
+    # # To restart part way through the chunk_list
+    # chunk_list = chunk_list[11400:]
+    # chunk_list = chunk_list[18000:]
+
 
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
@@ -374,7 +389,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Create carbon pools in 2000.")
+    parser = argparse.ArgumentParser(description="Create starting forest age in 2010 and 2015.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')

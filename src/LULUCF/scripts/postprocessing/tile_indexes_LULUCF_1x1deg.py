@@ -1,9 +1,9 @@
 """
-Run from src/LULUCF
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 # 6 workers with 5 threads each should be able to process 39 outputs in one pass (3 workers * (12 threads/worker + 1 bonus thread that's always there)).
 # Making tile indexes takes basically no memory, so each worker can handle lots of tasks at the same time, it seems.
-python -m scripts.utilities.create_cluster -n 3 -t 12
+python -m src.utilities.create_cluster -n 3 -t 12
 python -m scripts.postprocessing.LULUCF_fluxes_tile_indexes_1x1deg -cn AFOLU_flux_model_scripts -d 20241121
 """
 
@@ -14,9 +14,8 @@ import dask
 from dask.distributed import print
 
 # Project imports
-from src.LULUCF.scripts.utilities import constants_and_names as cn
-from src.LULUCF.scripts.utilities import log_utilities as lu
-from src.LULUCF.scripts.utilities import universal_utilities as uu
+from src.utilities import constants_and_names as cn, log_utilities as lu, universal_utilities as uu
+
 
 def main(cluster_name, date, run_local=False, no_upload=False, no_log=False):
 

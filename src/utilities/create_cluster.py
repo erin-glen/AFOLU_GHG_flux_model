@@ -1,18 +1,24 @@
 """
-Run from src/LULUCF/
-python -m scripts.utilities.create_cluster -n 1 -t 2 -m 16 -cn LULUCF_model
-python -m scripts.utilities.create_cluster -n 5 -t 3 -m 32 -cn LULUCF_model
-python -m scripts.utilities.create_cluster -n 20 -t 4 -m 64 -cn LULUCF_model
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
+python -m src.utilities.create_cluster -n 1 -m 16 -cn LULUCF_model
+python -m src.utilities.create_cluster -n 5 -m 32 -cn LULUCF_model
+python -m src.utilities.create_cluster -n 20 -m 64 -cn LULUCF_model
 
+Table of instance types: https://aws.amazon.com/ec2/instance-types/
+Table of spot pricing: https://aws.amazon.com/ec2/spot/pricing/
 These are the cheapest worker types and they have fewer vCPUs than usual for the memory.
 This makes them less costly on AWS and use fewer Coiled credits.
+
+List available worker types for Coiled clusters with: coiled.list_instance_types() in the Python shell
+
+Using more than 1 thread/worker slows down processing a lot when there are more tasks than workers for the core LULUCF model,
+which is the situation for large analyses, obviously.
 """
 
 import coiled
 import argparse
 import sys
 
-from . import constants_and_names as cn
 
 def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
 
@@ -20,9 +26,12 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
     worker_memory_str = f"{worker_memory}GiB"
     scheduler_memory_str = f"{worker_memory}GiB"
 
-    # Uses the larger workers if requested or if more workers are requested.
-    # Assumes that if using more workers, you want bigger workers. 12 is a semi-arbitrary cutoff.
-    if worker_memory == 64:
+    if worker_memory == 128:
+        idle_timeout = 10
+        scheduler_vm_type = "x2iedn.xlarge"
+        worker_vm_type = "x2iedn.xlarge"
+
+    elif worker_memory == 64:
         idle_timeout = 15
         scheduler_vm_type = "x2gd.xlarge"
         worker_vm_type = "x2gd.xlarge"
@@ -37,8 +46,30 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         scheduler_vm_type = "x2gd.medium"
         worker_vm_type = "x2gd.medium"
 
+    elif worker_memory == 8:
+        idle_timeout = 25
+        scheduler_vm_type = "r8g.medium"
+        worker_vm_type = "r8g.medium"
+
+    elif worker_memory == 4:
+        idle_timeout = 25
+        scheduler_vm_type = "m8g.medium"
+        worker_vm_type = "m8g.medium"
+
+    # t2.small not available with Coiled. t3.small has 2 vCPUs, so it's not actually Coiled credit-effective.
+    elif worker_memory == 2:
+        idle_timeout = 25
+        scheduler_vm_type = "t3.small"
+        worker_vm_type = "t3.small"
+
+    # # Couldn't get a cluster started that used 1GB workers using t3a.micro, t3.micro, or t4g.micro. Don't know why.
+    # elif worker_memory == 1:
+    #     idle_timeout = 25
+    #     scheduler_vm_type = "t3a.micro"
+    #     worker_vm_type = "t3a.micro"
+
     else:
-        sys.exit('Memory argument not 16, 32, or 64 GB')
+        sys.exit('Memory argument not 2, 4, 8, 16, 32, 64, or 128 GB')
 
     idle_timeout = f"{idle_timeout} minutes"
 
@@ -56,7 +87,7 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         worker_vm_types = worker_vm_type,
         worker_options={
             "nthreads": threads_per_worker
-        }
+        },
     )
 
     print(f"Cluster created with name: {cluster.name}")
@@ -69,7 +100,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', type=str, help='Coiled cluster name')
     parser.add_argument('-n', '--n_workers', type=int, default=1, help='Number of workers for the cluster')
     parser.add_argument('-m', '--worker_memory', type=int, help='Memory per worker')
-    parser.add_argument('-t', '--threads_per_worker', type=int, default='2', help='Number of threads/worker (default=2)')
+    parser.add_argument('-t', '--threads_per_worker', type=int, default='1', help='Number of threads/worker (default=1)')
 
     args = parser.parse_args()
 

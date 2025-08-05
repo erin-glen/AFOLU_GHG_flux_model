@@ -1,18 +1,42 @@
 """
-Run from src/LULUCF/
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
+
+Currently only aggregates per-ha outputs to 10x10 deg, not per-pixel outputs.
 
 Local test:
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools --year 2015 --first_10x10s_to_process 2
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools --year 2015 --first_10x10s_to_process 2
 
 Coiled test:
-python -m scripts.utilities.create_cluster -n 1 -t 2 -m 16 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_model --year 2015 --first_10x10s_to_process 2
+python -m src.utilities.create_cluster -n 1 -t 1 -m 2 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 --first_10x10s_to_process 2
 
-Full Coiled run:
-python -m scripts.utilities.create_cluster -n 40 -t 7 -m 32 -cn LULUCF_preprocessing
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000
-python -m scripts.preprocessing.starting_carbon_pools.1_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2015
-Time: 24:24 through calculation; 24:40 through tile stats; Credits: 35.5; Cost: $1.80; peak memory: 8 GB/worker
+Full run 2000:
+python -m src.utilities.create_cluster -n 200 -t 1 -m 2 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2000
+Peak memory per worker: ~350-400 MB
+Time for total processing for each task: average of 303 seconds, min of 87 seconds and max of 1327 seconds (based on extraction from log)
+Time until chunk stats: 1:43:55
+Time after chunk stats: 1:44:22
+Coiled credits: 737.4 (402/hr for 200 t3.small workers, according to dashboard)
+AWS cost: $3.86 ($2.10/hr for 200 t3.small workers, according to dashboard)
+
+Full run 2015:
+python -m src.utilities.create_cluster -n 200 -t 1 -m 2 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools -cn LULUCF_preprocessing --year 2015
+Peak memory per worker: ~350-400 MB
+Time for total processing for each task: average of 231 seconds, min of 86 seconds and max of 690 seconds (based on extraction from log)
+Time until chunk stats: 1:17:04
+Time after chunk stats: 1:17:23
+Coiled credits: 557 (402/hr for 200 t3.small workers, according to dashboard)
+AWS cost: $2.93 ($2.10/hr for 200 t3.small workers, according to dashboard)
+I don't know why the 2015 was 30 minutes faster and used almost 200 fewer Coiled credits than the 2000 one. Maybe just luck of the cluster?
+
+There are 3560 10x10s across 10 folders (356/folder), so 200 workers seems appropriate.
+
+Notes on optimizing threads/worker: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210803828525318?focus=true
+Tests of LULUCF output aggregation show that 1 thread/worker with 4GB workers is low in Coiled credit usage
+and runs quickly compared to other configurations.
+So, if I run this again, consider changing the worker to -t 1 -m 4.
 """
 
 import argparse
@@ -21,10 +45,10 @@ import re
 import sys
 
 # Project imports
-from ...utilities import constants_and_names as cn
-from ...utilities import universal_utilities as uu
-from ...utilities import log_utilities as lu
-from ...utilities import resize_cluster
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+from src.utilities import universal_utilities as uu
+from src.utilities import resize_cluster
 
 
 def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_upload= False,
@@ -38,10 +62,12 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Directories to process
     if year == 2000:
-        output_dir_list = [cn.agc_2000_dir, cn.bgc_2000_dir, cn.deadwood_c_2000_dir, cn.litter_c_2000_dir]
+        output_dir_list = [cn.agc_2000_raw_dir, cn.bgc_2000_raw_dir, cn.deadwood_c_2000_raw_dir, cn.litter_c_2000_raw_dir, cn.non_soil_c_2000_raw_dir,
+                           cn.agc_2000_LC_masked_dir, cn.bgc_2000_LC_masked_dir, cn.deadwood_c_2000_LC_masked_dir, cn.litter_c_2000_LC_masked_dir, cn.non_soil_c_2000_LC_masked_dir]
+        # output_dir_list = [cn.agc_2000_raw_dir]  # To test a specific carbon pool
     elif year == 2015:
-        output_dir_list = [cn.agc_2015_dir, cn.bgc_2015_dir, cn.deadwood_c_2015_dir, cn.litter_c_2015_dir]
-        # output_dir_list = [cn.deadwood_c_2015_dir]  # To test a specific carbon pool
+        output_dir_list = [cn.agc_2015_raw_dir, cn.bgc_2015_raw_dir, cn.deadwood_c_2015_raw_dir, cn.litter_c_2015_raw_dir, cn.non_soil_c_2015_raw_dir,
+                           cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir, cn.non_soil_c_2015_LC_masked_dir]
     else:
         print(f"Year input {year} not valid. Terminating.")
         sys.exit()
@@ -62,6 +88,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     # Creates list of output directories specific to the run
     output_dir_list = [path.replace("CHUNK_SIZE", str(4000)) for path in output_dir_list]
     output_dir_list = [path.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning) for path in output_dir_list]
+    output_dir_list.sort()  # Sorts in-place
     main_logger.info(f"Directories to aggregate: {output_dir_list}")
 
 
@@ -88,8 +115,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     # Converts set of tile_ids to sorted list of tile_ids
     chunk_list = sorted(tile_ids)
-    main_logger.info(f"tile_ids to process: {chunk_list}")
-    main_logger.info(f"Number of tile_ids to process: {len(chunk_list)}")
+    main_logger.info(f"tile_ids to aggregate within: {chunk_list} ({len(chunk_list)}) tile_ids")
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
@@ -146,7 +172,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Create carbon pools in 2000.")
+    parser = argparse.ArgumentParser(description="Aggregate 1x1 degree starting carbon densities to 10x10 degree COGs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-f', '--first_10x10s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('--year', type=int, required=True, help='Year for carbon pools')

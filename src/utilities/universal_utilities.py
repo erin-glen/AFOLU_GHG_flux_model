@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
+import psutil
 import pytz
 import sys
 import rasterio
@@ -19,15 +20,17 @@ import concurrent.futures
 from botocore.config import Config
 from dask.distributed import print
 from dask.distributed import Client, LocalCluster
-from dask import delayed
 from datetime import datetime
 from io import BytesIO
 from numba import jit
 from osgeo import gdal
 
+# Turns off a FutureWarning about gdal.UseExceptions() vs. gdal.DontUseExceptions()
+gdal.UseExceptions()
+
 # Project imports
-from . import constants_and_names as cn
-from . import log_utilities as lu
+from src.utilities import constants_and_names as cn, log_utilities as lu
+
 
 ###################################################################################################
 # S3 Utilities
@@ -494,33 +497,39 @@ def xy_to_tile_id(top_left_x, top_left_y):
 
 # Interval info for model run.
 # interval_year_diff is the difference between the start and end years of the interval, not the number of years in the interval.
-# The difference between those arises for 5-year intervals (e.g., 2016-2020), where there are 5 years in the interval
+# The difference between interval_length and interval_year_diff arises for 5-year intervals (e.g., 2016-2020), where there are 5 years in the interval
 # but the difference between the start and end years is 4.
 def get_interval_info(end_year, main_logger, start_year):
 
     if start_year == 2000 and end_year == 2020:
         interval_type = cn.intervals_five_years
-        interval_year_diff = cn.five_year_interval_duration - 1  # -1 because the interval really starts one year after the end of the previous interval
-        interval_length = cn.five_year_interval_duration
+        interval_length = [cn.five_year_interval_duration] * len(cn.interval_end_years_5_years)
+        # interval_year_diff = [5, 5, 5, 5]  # Expected for 2000-2020
+        interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years)  # -1 because the interval really starts one year after the end of the previous interval
+        # interval_year_diff = [4, 4, 4, 4]  # Expected for 2000-2020
         output_years = cn.interval_end_years_5_years
     elif start_year == 2015 and end_year == 2023:
         interval_type = cn.intervals_annual
-        interval_year_diff = 1
-        interval_length = 1
+        interval_length = [1] * len(cn.interval_end_years_annual)
+        # interval_length = [1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2023
+        interval_year_diff = [1] * len(cn.interval_end_years_annual)
+        # interval_year_diff = [1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2023
         output_years = cn.interval_end_years_annual
     elif start_year == 2000 and end_year == 2023:  # Hybrid model (2000-2023)
         interval_type = cn.intervals_hybrid
-        interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
         interval_length = [cn.five_year_interval_duration] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
-        # intervals = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]
+        # interval_length = [5, 5, 5, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2023
+        interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
+        # interval_year_diff = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2023
         output_years = cn.interval_end_years_5_years[:-1] + cn.interval_end_years_annual
     else:
         main_logger.error("interval_type not valid")
         sys.exit(1)
 
     main_logger.info(f"Interval type: {interval_type}")
-    main_logger.info(f"Interval duration: {interval_length} years")
     main_logger.info(f"Interval end years/Output years: {output_years}")
+    main_logger.info(f"Interval duration: {interval_length} years")
+    main_logger.info(f"Interval year difference: {interval_year_diff} years")
 
     return interval_type, interval_year_diff, interval_length, output_years
 
@@ -535,7 +544,7 @@ def create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size_deg, first_c
         chunk_size_pixels = int(cn.full_raster_dims * chunk_size_deg / 10)
 
         main_logger.info("Using bounding box and chunk size to determine chunks")
-        main_logger.info(f"Chunk source: Bounding box {bounding_box}")
+        main_logger.info(f"Chunk source: Bounding box {bounding_box} (W, S, E, N)")
         main_logger.info(f"Chunk size: {chunk_size_deg} degree, {chunk_size_pixels} pixels")
         chunk_list = get_chunk_bounds_from_bounding_box(bounding_box, chunk_size_deg)
 
@@ -730,9 +739,9 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
             # For outputs that cover an interval (fluxes)
             else:
                 if interval_type == cn.intervals_five_years:
-                    output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration)}_{str(output_year)}")
+                    output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
                 elif interval_type == cn.intervals_annual:
-                    output_dir = basic_output.replace('START_END',f"{str(output_year - interval_duration)}_{str(output_year)}")
+                    output_dir = basic_output.replace('START_END',f"{str(output_year - interval_duration[count])}_{str(output_year)}")
                 else:  # Hybrid model (2000-2023)
                     output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
 
@@ -892,36 +901,41 @@ def create_list_for_aggregation(s3_in_folders, main_logger):
     list_of_s3_names_total = []  # Final list of dictionaries of input s3 paths and output aggregated 10x10 raster names
 
     # Iterates through all the input s3 folders
-    for s3_in_folder in s3_in_folders:
+    for i, s3_in_folder in enumerate(s3_in_folders):
 
-        main_logger.info(f"Listing files in {s3_in_folder}")
+        try:
+            main_logger.info(f"Listing files in folder {i} out of {len(s3_in_folders)}: {s3_in_folder}")
 
-        simple_output_file_names = []  # List of output aggregated output 10x10 rasters
+            simple_output_file_names = []  # List of output aggregated output 10x10 rasters
 
-        # Raw filenames in an input folder, e.g., ['00N_000E__6_-2_8_0__IPCC_classes_2020.tif', '00N_000E__6_-4_8_-2__IPCC_classes_2020.tif',...]
-        filenames = list_raster_names_in_s3_folder(s3_in_folder)
+            # Raw filenames in an input folder, e.g., ['00N_000E__6_-2_8_0__IPCC_classes_2020.tif', '00N_000E__6_-4_8_-2__IPCC_classes_2020.tif',...]
+            filenames = list_raster_names_in_s3_folder(s3_in_folder)
 
-        # Iterates through all the files in a folder and converts them to the output names.
-        # Essentially [tile_id]__[pattern].tif. Drops the chunk bounds from the middle.
-        for filename in filenames:
-            result = re.sub(cn.small_chunk_pattern, '__', filename)
-            simple_output_file_names.append(result)  # New list of simplified file names used for 10x10 degree outputs
+            # Iterates through all the files in a folder and converts them to the output names.
+            # Essentially [tile_id]__[pattern].tif. Drops the chunk bounds from the middle.
+            for filename in filenames:
+                result = re.sub(cn.small_chunk_pattern, '__', filename)
+                simple_output_file_names.append(result)  # New list of simplified file names used for 10x10 degree outputs
 
-        # Removes duplicate simplified file names.
-        # There are duplicates because each 10x10 output raster has many constituent chunks, each of which have the same aggregated, final name
-        # e.g., ['00N_000E__IPCC_classes_2020.tif', '00N_010E__IPCC_classes_2020.tif', ...]
-        simple_output_file_names = np.unique(simple_output_file_names).tolist()
+            # Removes duplicate simplified file names.
+            # There are duplicates because each 10x10 output raster has many constituent chunks, each of which have the same aggregated, final name
+            # e.g., ['00N_000E__IPCC_classes_2020.tif', '00N_010E__IPCC_classes_2020.tif', ...]
+            simple_output_file_names = np.unique(simple_output_file_names).tolist()
 
-        # Makes nested lists of the file names. Nested for next step.
-        # e.g., [['00N_110E__AGC_density_MgC_ha_2000.tif']]
-        simple_output_file_names = [[item] for item in simple_output_file_names]
+            # Makes nested lists of the file names. Nested for next step.
+            # e.g., [['00N_110E__AGC_density_MgC_ha_2000.tif']]
+            simple_output_file_names = [[item] for item in simple_output_file_names]
 
-        # Makes a list of dictionaries, where the key is the input s3 path and the value is the output aggregated name
-        # e.g., [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif']}]
-        list_of_s3_name_dicts = [{key: value} for value in simple_output_file_names for key in [s3_in_folder]]
+            # Makes a list of dictionaries, where the key is the input s3 path and the value is the output aggregated name
+            # e.g., [{'gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/AGC_density_MgC_ha/2000/8000_pixels/20240821/': ['00N_110E__AGC_density_MgC_ha_2000.tif']}]
+            list_of_s3_name_dicts = [{key: value} for value in simple_output_file_names for key in [s3_in_folder]]
 
-        # Adds the dictionary of s3 paths and output names for this folder to the list for all folders
-        list_of_s3_names_total.append(list_of_s3_name_dicts)
+            # Adds the dictionary of s3 paths and output names for this folder to the list for all folders
+            list_of_s3_names_total.append(list_of_s3_name_dicts)
+
+        except Exception as e:
+            main_logger.error(f"Failed processing folder {s3_in_folder} due to error: {e}")
+            continue
 
     # Combines all the lists from individual output folders into a single list
     # Now it's:
@@ -942,6 +956,10 @@ def flatten_list(nested_list):
 # Merges rasters that are <10x10 degrees into 10x10 degree rasters in the standard grid.
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
 def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
+
+    process = psutil.Process(os.getpid())
+
+    chunk_start_time = time.time()
 
     ### Part 1: Merges 1x1 deg rasters to 10x10 deg
 
@@ -967,9 +985,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     # Lists the tile paths for the relevant rasters
     tile_paths = [vsis3_in_folder + filename for filename in filenames_in_focus_area]
 
-    lu.print_and_log(f"flm: Merging small rasters in {tile_id} in {vsis3_in_folder}", is_final, logger_worker)
-    if is_final:   # Prints to console if it is a final run
-        print(f"Merging small rasters in {tile_id} in {vsis3_in_folder}")
+    lu.print_and_log(f"flm: Merging small rasters in {tile_id} in {vsis3_in_folder}: {timestr()}", False, logger_worker)
 
     # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
     out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
@@ -992,9 +1008,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     # Merges the rasters (courtesy of ChatGPT: https://chatgpt.com/share/e/13158ebb-dd0a-41d8-8dfb-9ee12e4c804e)
     # This is the only system I found that maintains the extent of all the constituent rasters and doesn't change their resolution or pixel size or shift them.
     # I also tried various gdal_translate, build_vrt, and numpy padding approaches, none of which worked in all cases.
-    merged_file = f"/tmp/merged_{out_file_name}"
+    merged_file = f"/tmp/merged_non_COG_{out_file_name}"
 
-    #TODO Add -of COG to make it a COG, per https://gdal.org/en/stable/drivers/raster/cog.html?
     merge_command = [
         'gdal_merge.py',
         '-o', merged_file,
@@ -1013,19 +1028,50 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
     try:
         subprocess.check_call(merge_command)
-        lu.print_and_log(f"Successfully merged rasters into {merged_file}", is_final, logger_worker)
+        lu.print_and_log(f"Successfully merged rasters into {merged_file}: {timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"After creating geotif for {merged_file}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
     except subprocess.CalledProcessError as e:
         lu.print_and_log(f"Error merging rasters: {e}: {timestr()}", False, logger_worker)
         return f"failure merging {s3_name_dict}"
 
-    ### Part 2: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters)
+    chunk_non_cog_end_time = time.time()
+    lu.print_and_log(f"Merging {merged_file} took {round(chunk_non_cog_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
+
+    ### Part 2: Converts geotifs to COGs
+
+    # Convert to Cloud Optimized GeoTIFF
+    # https://gfw.atlassian.net/wiki/spaces/LCL/pages/1918238725/STAC-API+pre-flight+checklist
+    merged_cog_file = f"/tmp/merged_cog_{out_file_name}"
+    translate_command = [
+        'gdal_translate',
+        merged_file,
+        merged_cog_file,
+        '-of', 'COG',
+        '-co', 'COMPRESS=DEFLATE',
+        '-co', 'PREDICTOR=2',
+        '-co', 'BIGTIFF=IF_SAFER',
+        '-co', 'OVERVIEW_RESAMPLING=average'
+    ]
+
+    try:
+        subprocess.check_call(translate_command)
+        lu.print_and_log(f"Successfully created COG: {merged_cog_file}: {timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"After creating COG for {merged_cog_file}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+    except subprocess.CalledProcessError as e:
+        lu.print_and_log(f"Error converting to COG: {e}: {timestr()}", False, logger_worker)
+        return f"failure converting to COG for {s3_name_dict}"
+
+    chunk_cog_end_time = time.time()
+    lu.print_and_log(f"Through COG creation for {merged_cog_file} took {round(chunk_cog_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
+
+    ### Part 3: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters)
 
     # Computes valid pixel count in the output 10x10 raster for comparison with the sum of the constituent 1x1s
     lu.print_and_log(f"Counting pixels in {tile_id} for {out_file_name}: {timestr()}", is_final, logger_worker)
 
     # Computes count of valid pixels by reading raster in chunks (can't read full 10x10 into memory all at once
     try:
-        ds = gdal.Open(merged_file)
+        ds = gdal.Open(merged_cog_file)
         if ds is not None:
             band = ds.GetRasterBand(1)
             valid_pixel_count = 0
@@ -1052,8 +1098,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         else:
             valid_pixel_count = -1  # Failed to open file
     except Exception as e:
-        lu.print_and_log(f"Error counting pixels for {merged_file}: {e}", is_final, logger_worker)
-        print(f"Error counting pixels for {merged_file}: {e}")
+        lu.print_and_log(f"Error counting pixels for {merged_cog_file}: {e}", is_final, logger_worker)
+        print(f"Error counting pixels for {merged_cog_file}: {e}")
         return f"failure counting pixels for {s3_name_dict}"
 
     # Gets the output file pattern and year/year_range
@@ -1078,12 +1124,12 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         'data_type': 'no data'
     }]
 
-    ### Part 3: Uploads 10x10 to s3 using multipart uploading
+    ### Part 4: Uploads 10x10 to s3 using multipart uploading
     ### https://chatgpt.com/share/e/67d848cf-8b08-800a-b0e8-79a72c9eb49a.
 
     lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}: {timestr()}", is_final, logger_worker)
 
-    if not no_upload:
+    if no_upload:
 
         #Because boto3 does multipart uploading for files >100MB, this only adds multipart uploading for files
         # between part_size and 100MB.
@@ -1096,7 +1142,7 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
             upload_id = response['UploadId']
 
             parts = []
-            with open(merged_file, 'rb') as f:
+            with open(merged_cog_file, 'rb') as f:
                 part_number = 1
                 while chunk := f.read(part_size):
                     response = s3_client.upload_part(
@@ -1126,6 +1172,10 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
     # Deletes the local merged raster
     os.remove(merged_file)
+    os.remove(merged_cog_file)
+
+    chunk_end_time = time.time()
+    lu.print_and_log(f"Full processing for {merged_cog_file} took {round(chunk_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
 
     return f"Success merging {s3_name_dict}", chunk_stats
 
@@ -1190,8 +1240,11 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
     # Processes the chunk stats and returned messages
     # Results are the messages from the chunks and chunk stats
     for result in results:
-
-        return_message, chunk_stats = result
+        try:
+            return_message, chunk_stats = result
+        except Exception as e:
+            main_logger.error(f"Malformed result: {result} | Error: {e}")
+            continue
 
         if "Success" in return_message:
             success_count += 1
@@ -1285,6 +1338,19 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'data_type': array_per_ha.dtype.name
         }
 
+# Makes sure that all columns in output chunk stats Pandas dataframe are indeed numeric
+# From https://chatgpt.com/c/68751cbe-6888-800a-bf9d-3657b048a810
+def sanitize_numeric_columns(df, numeric_cols):
+    df = df.copy()  # Prevents SettingWithCopyWarning
+    for col in numeric_cols:
+        if col not in df.columns:
+            continue
+
+        # Safely coerces non-numeric to numeric
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    return df
+
 
 # Calculates chunk-level stats for all inputs and outputs and saves to Excel spreadsheet.
 # Calculates the min and max value for each input and output across all chunks.
@@ -1376,73 +1442,110 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     sum_1x1_to_10x10 = sum_1x1_to_10x10[['tile_id', 'layer_name', 'tile_name', 'total_count']]
 
 
-    ### Part 3: Organizes pixel counts for aggregated 10x10 outputs (if created).
-    ### Calculates the difference between the pixel counts. Difference should be 0 for every 10x10 output.
+    ### Part 3: Saves dataframes to Excel spreadsheet if three of the main output tabs are <900,000 rows; otherwise, saves to parquet format
+    # other_1x1_outputs is the output table that has the most rows, so it's the best way to judge what's output is too large for Excel.
+    # Excel's row limit is more like 1.5 million, but that'd be a really unwieldy spreadsheet.
+    if (len(other_1x1_outputs) > 900000) or (len(net_flux_1x1_outputs) > 900000) or (len(gross_flux_1x1_outputs) > 900000):
+        main_logger.info(f"Row count {len(other_1x1_outputs)} greater than 900,000. Writing all outputs to Parquet.")
 
-    # # Gets pixel counts in 10x10 deg chunks and joins the 1x1 pixel counts summed to 10x10 to their table
-    # if all_10x10_stats:
-    #
-    #     # Converts accumulated 1x1 chunk statistics to a DataFrame
-    #     df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
-    #
-    #     # Merges totals_10x10 with df_all_10x10_stats on tile_name
-    #     merged_1x1_10x10_counts = sum_1x1_to_10x10.merge(df_all_10x10_stats[['tile_name', 'count_value']], on='tile_name', how='left')
-    #
-    #     # Computes the difference between the pixel counts in the summed 1x1s and the corresponding 10x10
-    #     merged_1x1_10x10_counts['count_difference'] = merged_1x1_10x10_counts['total_count'] - merged_1x1_10x10_counts['count_value']
-    #     merged_1x1_10x10_counts = merged_1x1_10x10_counts.rename(columns={'total_count': 'pixel_count_1x1_summed', 'count_value': 'pixel_count_10x10'})
-    #
-    #     sum_difference = merged_1x1_10x10_counts['count_difference'].sum()
-    #     if sum_difference == 0:
-    #         main_logger.info(f"Difference between pixel counts in 1x1s vs. their respective 10x10s: {sum_difference} pixels: {timestr()}")
-    #     else:
-    #         main_logger.warning(f"WARNING: Difference between pixel counts in 1x1s vs. their respective 10x10s: {sum_difference} pixels: {timestr()}")
+        # Saves each output DataFrame as Parquet
+        out_base = f"{stage}_{timestr()}"
+        output_dir = cn.local_chunk_stats_path
 
+        # Makes sure that numeric columns are indeed numeric before saving them to parquet.
+        # Parquet is picky about this.
+        # From https://chatgpt.com/c/68751cbe-6888-800a-bf9d-3657b048a810
+        main_logger.info(f"Cleaning non-numeric outputs for saving to Parquet: {timestr()}")
 
-    ### Part 4: Saves dataframes to Excel spreadsheet
+        # Numeric columns that need cleaning
+        numeric_columns = ['min_value', 'mean_value', 'max_value', 'count_value', 'sum_value']
 
-    # Writes the data to a single Excel file with separate sheets.
-    # Should continue with model post-processing even if chunk stats don't work for some reason
-    # (e.g., more many rows output than rows in an Excel spreadsheet)
-    out_spreadsheet = f'{stage}_1x1_chunk_statistics_{timestr()}.xlsx'
-    local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+        (
+            annual_1x1_inputs, other_1x1_inputs, gross_flux_1x1_outputs, net_flux_1x1_outputs,
+            other_1x1_outputs, min_max_1x1_stats, sum_1x1_to_10x10,
+        ) = [
+            sanitize_numeric_columns(df, numeric_columns)
+            for df in [
+                annual_1x1_inputs, other_1x1_inputs, gross_flux_1x1_outputs, net_flux_1x1_outputs,
+                other_1x1_outputs, min_max_1x1_stats, sum_1x1_to_10x10,
+            ]
+        ]
 
-    main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
-    try:
-        with pd.ExcelWriter(local_spreadsheet) as writer:
+        # Saves to Parquet
+        # Groups output files from model run into a timestamped folder
+        timestamp = timestr()
+        parquet_folder = Path(f"{output_dir}parquet_{timestamp}/")
+        parquet_folder.mkdir(parents=True, exist_ok=True)
 
-            # Writes input rows to one sheet
-            main_logger.info(f"Writing inputs to spreadsheet: {timestr()}")
-            annual_1x1_inputs.to_excel(writer, sheet_name='annual_1x1_inputs', index=False)
-            other_1x1_inputs.to_excel(writer, sheet_name='other_1x1_inputs', index=False)
+        annual_1x1_inputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__annual_1x1_inputs.parquet", index=False)
+        other_1x1_inputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__other_1x1_inputs.parquet", index=False)
+        gross_flux_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__gross_outputs_1x1.parquet", index=False)
+        net_flux_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__net_outputs_1x1.parquet", index=False)
+        other_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__other_outputs_1x1.parquet", index=False)
+        min_max_1x1_stats.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__min_max_for_layers_1x1.parquet", index=False)
+        sum_1x1_to_10x10.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__1x1_counts_in_10x10.parquet", index=False)
 
-            # Writes output rows based on layer_name conditions to separate sheets
-            main_logger.info(f"Writing outputs to spreadsheet: {timestr()}")
-            gross_flux_1x1_outputs.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
-            net_flux_1x1_outputs.to_excel(writer, sheet_name='net_outputs_1x1', index=False)
-            other_1x1_outputs.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
+        # Uploads to S3 if needed
+        if not no_upload:
+            for filename in [
+                f"{out_base}__v{cn.model_version_underscore}__annual_1x1_inputs.parquet",
+                f"{out_base}__v{cn.model_version_underscore}__other_1x1_inputs.parquet",
+                f"{out_base}__v{cn.model_version_underscore}__gross_outputs_1x1.parquet",
+                f"{out_base}__v{cn.model_version_underscore}__net_outputs_1x1.parquet",
+                f"{out_base}__v{cn.model_version_underscore}__other_outputs_1x1.parquet",
+                f"{out_base}__v{cn.model_version_underscore}__min_max_for_layers_1x1.parquet",
+                f"{out_base}__v{cn.model_version_underscore}__1x1_counts_in_10x10.parquet",
+            ]:
+                full_path = f"{parquet_folder}/{filename}"
+                s3_key = f"{cn.s3_chunk_stats_path}parquet_{timestamp}/{filename}"
+                main_logger.info(f"Uploading {filename} to S3: {timestr()}")
+                s3_client.upload_file(full_path, cn.short_bucket_prefix, Key=s3_key)
 
-            # Writes the min and max statistics to the second sheet
-            min_max_1x1_stats.to_excel(writer, sheet_name='min_max_for_layers_1x1', index=False)
+    # Saves chunk stats to Excel
+    else:
 
-            # Writes the 1x1s summed to 10x10, if available
-            sum_1x1_to_10x10.to_excel(writer, sheet_name='1x1_counts_in_10x10', index=False)
+        # Writes the data to a single Excel file with separate sheets.
+        # Should continue with model post-processing even if chunk stats don't work for some reason
+        # (e.g., more many rows output than rows in an Excel spreadsheet)
+        out_spreadsheet = f'{stage}_1x1_chunk_statistics_{timestr()}.xlsx'
+        local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
 
-            # # Writes the 10x10 pixel counts, if calculated
-            # if all_10x10_stats:
-            #     merged_1x1_10x10_counts.to_excel(writer, sheet_name='pix_counts_compa_10x10_1x1', index=False)
+        main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
+        try:
+            with pd.ExcelWriter(local_spreadsheet) as writer:
 
-        main_logger.info(merged_1x1_stats.head())  # Show first few rows of the stats DataFrame for inspection
+                # Writes input rows to one sheet
+                main_logger.info(f"Writing inputs to spreadsheet: {timestr()}")
+                annual_1x1_inputs.to_excel(writer, sheet_name='annual_1x1_inputs', index=False)
+                other_1x1_inputs.to_excel(writer, sheet_name='other_1x1_inputs', index=False)
 
-        main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
+                # Writes output rows based on layer_name conditions to separate sheets
+                main_logger.info(f"Writing outputs to spreadsheet: {timestr()}")
+                gross_flux_1x1_outputs.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
+                net_flux_1x1_outputs.to_excel(writer, sheet_name='net_outputs_1x1', index=False)
+                other_1x1_outputs.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
 
-    except Exception as e:
-        main_logger.info(f"Can't print chunk stats: {e}")
+                # Writes the min and max statistics to the second sheet
+                min_max_1x1_stats.to_excel(writer, sheet_name='min_max_for_layers_1x1', index=False)
 
-    if not no_upload:
-        main_logger.info(f"Uploading chunk stats spreadsheet to s3: {timestr()}")
-        s3_client.upload_file(local_spreadsheet, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
-        main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}")
+                # Writes the 1x1s summed to 10x10, if available
+                sum_1x1_to_10x10.to_excel(writer, sheet_name='1x1_counts_in_10x10', index=False)
+
+            main_logger.info(merged_1x1_stats.head())  # Show first few rows of the stats DataFrame for inspection
+
+            main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
+
+        except Exception as e:
+            main_logger.info(f"Can't save chunk stats to Excel: {e}")
+
+        if not no_upload:
+            main_logger.info(f"Uploading chunk stats spreadsheet to s3: {timestr()}")
+            try:
+                s3_client.upload_file(local_spreadsheet, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}")
+                main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}")
+            except Exception as e:
+                main_logger.warning(f"Chunk stats upload to S3 failed: {e}. Continuing without halting.")
+
 
 
 def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):

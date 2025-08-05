@@ -1,16 +1,16 @@
 """
-Run from src/LULUCF
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Coiled test area without land (i.e. no data):
-python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 1
+python -m src.utilities.create_cluster -cn AFOLU_preprocessing -n 1
 python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p secondary_natural_forest -bb -120 30 -110 40 -cs 10
 
 Coiled test area with data:
-python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 1
+python -m src.utilities.create_cluster -cn AFOLU_preprocessing -n 1
 python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p secondary_natural_forest -bb -120 30 -110 40 -cs 10
 
 Coiled full run:
-python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 20 -t 12
+python -m src.utilities.create_cluster -cn AFOLU_preprocessing -n 20 -t 12
 python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -ct coiled -p secondary_natural_forest -bb -180 -60 180 80 -cs 10
 
 #QC
@@ -24,10 +24,7 @@ import os
 import sys
 import argparse
 import dask
-from dask.distributed import print
-from ..utilities import constants_and_names as cn
-from ..utilities import log_utilities as lu
-from ..utilities import universal_utilities as uu
+from src.utilities import constants_and_names as cn, log_utilities as lu, universal_utilities as uu
 
 
 ########################################################################################################################

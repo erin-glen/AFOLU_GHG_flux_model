@@ -9,11 +9,11 @@ Run this preprocessing code on the hdfs in s3. The years to run are chosen in ma
 hdf processing based on https://chatgpt.com/c/67b0d477-1fc0-800a-b41e-44d954cb9b3e
 I have not made this code align with other model components for the most part, e.g., no logs, no output stats, etc.
 
-python -m scripts.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.burned_area.1_burned_area_hdf_to_raw_raster -cn AFOLU_flux_model_scripts
+python -m src.utilities.create_cluster -n 1 -cn AFOLU_flux_model_scripts
+python -m src.LULUCF.scripts.preprocessing.burned_area.1_burned_area_hdf_to_raw_raster -cn AFOLU_flux_model_scripts
 
-python -m scripts.utilities.create_cluster -n 100 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.burned_area.1_burned_area_hdf_to_raw_raster -cn AFOLU_flux_model_scripts
+python -m src.utilities.create_cluster -n 100 -cn AFOLU_flux_model_scripts
+python -m src.LULUCF.scripts.preprocessing.burned_area.1_burned_area_hdf_to_raw_raster -cn AFOLU_flux_model_scripts
 
 268 h-v stacks for every year 2001-2024, except for 2005, which has 267 h-v stacks (missing h01v08 in original hdf site)
 2001-2024: took about 1.5 hours to run, used about 600 Coiled credits, cost about $20 on AWS.
@@ -36,7 +36,7 @@ import numpy as np
 import rasterio
 import tempfile
 from dask import delayed
-from dask.distributed import Client, print
+from dask.distributed import print
 from rasterio.transform import from_bounds
 from pyhdf.SD import SD, SDC
 from dask import bag as db
@@ -44,8 +44,8 @@ from rasterio.crs import CRS
 from collections import defaultdict
 
 # Project imports
-from ...utilities import constants_and_names as cn
-from ...utilities import universal_utilities as uu
+from src.utilities import constants_and_names as cn
+from src.utilities import universal_utilities as uu
 
 # S3 Configuration
 BUCKET_NAME = "gfw2-data"

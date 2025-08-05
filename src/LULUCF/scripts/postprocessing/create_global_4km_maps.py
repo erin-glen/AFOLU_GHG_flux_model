@@ -1,7 +1,7 @@
 """
-Run from src/LULUCF
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
-python -m scripts.utilities.create_cluster -n 20 -m 32 -c 4 -t 1 -i 15 -cn global_4km_raster
+python -m src.utilities.create_cluster -n 20 -m 32 -c 4 -t 1 -i 15 -cn global_4km_raster
 python -m scripts.postprocessing.create_global_4km_maps -cn global_4km_raster
 
 It took 1 hour, 5 minutes (192 coiled credits) to create 10x10 per-pixel tiles (0.04 resolution) and
@@ -17,9 +17,8 @@ import numpy as np
 import argparse
 import dask
 from dask.distributed import print
-from ..utilities import constants_and_names as cn
-from ..utilities import universal_utilities as uu
-from ..utilities import log_utilities as lu
+from src.utilities import constants_and_names as cn, log_utilities as lu, universal_utilities as uu
+
 
 ########################################################################################################################
 

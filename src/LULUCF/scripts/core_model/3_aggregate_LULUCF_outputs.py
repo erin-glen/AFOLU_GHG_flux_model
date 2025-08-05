@@ -1,45 +1,49 @@
 """
-Run from src/LULUCF
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Can only run on 1x1 degree chunks that do not have the run timestamp in the file name.
 The way this builds the input file names, it can't handle filenames with the run timestamp.
 It also can't handle chunks smaller than 1x1 degree.
+Aggregates in batches because there are so many tasks for this step that it's just more likely to fail part way through
+and so having batches allows easier restarting. The tasks are in a pre-determined alphabetical order,
+so each batch should have the same contents for any given set of inputs.
 
 Local test:
-python -m scripts.core_model.3_aggregate_LULUCF_outputs -yr 2015 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -yr 2000 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
 
 Coiled small test:
-python -m scripts.utilities.create_cluster -n 1 -cn LULUCF_postprocessing
-python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
 
-Coiled large shapefile test:
-python -m scripts.utilities.create_cluster -n 50 -t 5 -cn LULUCF_postprocessing
-python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --input_date YYYYMMDD
+Coiled large shapefile test (create a cluster with 1 worker, then resize it to 100 workers after local processing is done):
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --input_date YYYYMMDD -nw 100 -ln "This is the aggregation of the 1884-chunk run."
 
-Full Coiled run:
-python -m scripts.utilities.create_cluster -n 50 -t 5 -cn LULUCF_postprocessing
-python -m scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2015 2023 --input_date YYYYMMDD
+Full Coiled run (create a cluster with 1 worker, then resize it to 200 workers after local processing is done):
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --input_date YYYYMMDD -nw 200 -ln "This is intended to be the definitive global run."
 
-From before:
-Took about 30 minutes to do the aggregated gross and net flux outputs. A few 10x10 tiles from many of the folders
-weren't output, and I got various GDAL errors throughout. Not investigating further now.
-Log to explore is https://cloud.coiled.io/clusters/676603/account/wri-forest-research/information?workspace=WRI-forest-research&tab=Logs&filterPattern=&showLifecycle=0
-It has some potentially useful errors.
+Notes on optimizing threads/worker: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210803828525318?focus=true
+Tests of this aggregation and other aggregations show that 1 thread/worker with 4GB workers is low in Coiled credit usage
+and runs quickly compared to other configurations.
+
+14256 tiles in 273 folders for 1884-chunk output
 """
 
 import argparse
 import dask
 import re
 import sys
+import pandas as pd
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import log_utilities as lu
-from ..utilities import universal_utilities as uu
-from ..utilities import resize_cluster
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+from src.utilities import universal_utilities as uu
+from src.utilities import resize_cluster
 
 
-def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, year_range, input_date, number_of_workers, run_local=False, no_stats=False, no_log=False, no_upload=False,
          first_10x10s_to_process=None, log_note=None):
 
 
@@ -48,6 +52,12 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
     # Model stage being run
     stage = 'LULUCF_aggregation_to_10x10_deg'
     model_type = 'standard_model'
+
+    # Runs chunks in batches of specified size.
+    # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
+    batch_size = 3000
+    # batch_size = 15  # For testing batch processing
+    # batch_size = 1  # For testing batch processing
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
@@ -72,6 +82,7 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
     main_logger.info(f"Run date: {input_date}")
+    main_logger.info(f"Batch size: {batch_size} chunks")
     main_logger.info(f"no_upload: {no_upload}")
 
     # Calculates the interval type, difference between start and end years of intervals,
@@ -97,12 +108,15 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
     land_state_node_list = uu.create_output_dir_name_list(land_state_node_list, interval_type, start_year,'4000',
                                                      model_type, interval_end_years, interval_year_diff, input_date)
 
-    # Full list of folders to aggregate
+    # Full list of folders to aggregate, in alphabetical order
     output_dir_list = output_dir_list_per_ha + output_dir_list_per_pixel + land_state_node_list
+    output_dir_list.sort()  # Sorts in-place
+    main_logger.info(f"Directories to aggregate: {output_dir_list}")
 
     # # For testing- first folder only, so contents of all folders don't need to be listed
     # output_dir_list = output_dir_list[0:1]
-    # print(output_dir_list)
+    # output_dir_list = output_dir_list[0:3]
+    main_logger.info(f"output_dir_list: {output_dir_list}")
 
     main_logger.info(f"There are {len(output_dir_list)} folders to aggregate to 10x10s")
 
@@ -118,7 +132,7 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
         list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[0:first_10x10s_to_process]
 
     # list_of_s3_name_dicts_total = list_of_s3_name_dicts_total[338:339]  # To limit it to a specific tile
-    # print(list_of_s3_name_dicts_total)
+    print("list_of_s3_name_dicts_total:", list_of_s3_name_dicts_total)
 
     # Extracts and lists unique tile_ids, the target for aggregation
     tile_ids = set()
@@ -130,28 +144,70 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
                     tile_ids.add(match.group())
 
     # Converts set of tile_ids to sorted list of tile_ids
-    chunk_list = sorted(tile_ids)
-    main_logger.info(f"tile_ids to process: {chunk_list}")
-    main_logger.info(f"Number of tile_ids to process: {len(chunk_list)}")
+    tile_id_list = sorted(tile_ids)
+    main_logger.info(f"tile_ids to aggregate within: {tile_id_list} ({len(tile_id_list)}) tile_ids")
 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
-    if len(chunk_list) > 20:
+    if len(list_of_s3_name_dicts_total) > 30:
         is_final = True
         main_logger.info("Running as final model.")
 
     main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs: {uu.timestr()}")
 
+    chunk_batches = [list_of_s3_name_dicts_total[i:i + batch_size] for i in range(0, len(list_of_s3_name_dicts_total), batch_size)]
+    main_logger.info(f"There are {len(chunk_batches)} batches to process: {uu.timestr()}")
 
-    # Each task is a single 10x10 deg aggregated geotif
-    delayed_results_10x10_deg = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
-                                        for s3_name_dict in list_of_s3_name_dicts_total]
+    # Resizes cluster up to more workers now that all the local enumerating is done.
+    # This way, it doesn't run a large cluster while all the local preprocessing is done.
+    if not run_local:
 
-    results_10x10_deg = dask.compute(*delayed_results_10x10_deg)
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
 
-    success_count_10x10, all_10x10_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, results_10x10_deg)
+        # Adds more workers if less than 9 were originally specified. 9 is an arbitrary number above which I'm not likely to be doing testing.
+        # Otherwise, just keeps the number of workers already there (if number not specified for this script).
+        if (n_workers < 9) and (number_of_workers):
+            main_logger.info(f"Resizing cluster to specified number of workers: {number_of_workers}")
+            resize_cluster.resize_coiled_cluster(cluster_name, number_of_workers)
+        elif is_final:
+            main_logger.info(f"Resizing cluster to large run number of workers: 100")
+            resize_cluster.resize_coiled_cluster(cluster_name, 100)
+        else:
+            main_logger.info("Not resizing cluster")
 
-    uu.stage_duration(start_time, uu.timestr(), f"{stage}", main_logger)
+    # Accumulates all output messages and statistics across batches
+    # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
+    all_10x10_results = []
+    all_10x10_stats = []
+    success_count = 0  # Count of successful chunks
+
+    # Iterates through the batches
+    for i, chunk_batch in enumerate(chunk_batches):
+        main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks): {uu.timestr()}")
+
+        # Each task is a single 10x10 deg aggregated geotif (10x10 deg for a given output)
+        delayed_results_10x10_deg = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
+                                            for s3_name_dict in chunk_batch]
+
+        results_batch_10x10_deg = dask.compute(*delayed_results_10x10_deg)
+
+        all_10x10_results.extend(results_batch_10x10_deg)
+
+        success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_final, main_logger, results_batch_10x10_deg)
+        all_10x10_stats.extend(batch_stats)
+
+        # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
+        # That way there are some basic chunk stats (not sorted or anything) to fall back on.
+        if len(chunk_batches) > 1:
+            main_logger.info(f"Writing batch stats to spreadsheet: {uu.timestr()}")
+            df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
+            out_spreadsheet = f'TEMP_{stage}_10x10_chunk_statistics__thru_batch_{i}_{uu.timestr()}.xlsx'
+            local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+            with pd.ExcelWriter(local_spreadsheet) as writer:
+                df_all_10x10_stats.to_excel(writer, sheet_name=f'pix_counts__thru_batch_{i}', index=False)
+
+        uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
 
     ### Step 3: Chunk stats (i.e. pixel counts) for 10x10 degree outputs, aggregates logs
@@ -169,7 +225,7 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
     # Prepares 10x10 deg chunk stats spreadsheet: pixel count for outputs
-    if (not no_stats) and (success_count_10x10 > 0):
+    if (not no_stats) and (success_count > 0):
         uu.aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
@@ -192,10 +248,11 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Aggregate 1x1 degree outputs from LULUCF model to 10x10 degree geotifs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-rd', '--input_date', help='Date of run, in YYYYMMDD')
+    parser.add_argument('-rd', '--input_date', help='Date of core model run, in YYYYMMDD')
     parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
     parser.add_argument('-f', '--first_10x10s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
+    parser.add_argument('-nw', '--number_of_workers', type=int, help='Number of workers to rescale to after local input list processing is done. Optonal')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
@@ -209,10 +266,11 @@ if __name__ == "__main__":
     year_range = args.year_range
     first_10x10s_to_process = args.first_10x10s_to_process
     log_note = args.log_note
+    number_of_workers = args.number_of_workers
 
     run_local = args.run_local
     no_stats = args.no_stats
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, year_range, input_date, run_local, no_stats, no_log, no_upload, first_10x10s_to_process=first_10x10s_to_process, log_note=log_note)
+    main(cluster_name, year_range, input_date, number_of_workers, run_local, no_stats, no_log, no_upload,  first_10x10s_to_process=first_10x10s_to_process, log_note=log_note)

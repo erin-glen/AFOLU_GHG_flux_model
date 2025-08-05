@@ -1,7 +1,7 @@
 """
 
-Run from src/LULUCF/
-python -m scripts.utilities.create_cluster -n 11 -cn AFOLU_flux_model_scripts
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
+python -m src.utilities.create_cluster -n 11 -cn AFOLU_flux_model_scripts
 python -m scripts.preprocessing.Potapov_file_system_to_s3_copy -cn AFOLU_flux_model_scripts
 
 For 2015-2023, there are 2826 files. Takes <10 minutes to transfer them.
@@ -10,7 +10,6 @@ For 2015-2023, there are 2826 files. Takes <10 minutes to transfer them.
 
 """
 
-import dask
 import dask.bag as db
 import boto3
 import argparse
@@ -19,8 +18,7 @@ import requests
 from dask.distributed import print
 
 # Project imports
-from ..utilities import constants_and_names as cn
-from ..utilities import universal_utilities as uu
+from src.utilities import constants_and_names as cn, universal_utilities as uu
 
 
 def download_and_upload_file(file_url, s3_key):
