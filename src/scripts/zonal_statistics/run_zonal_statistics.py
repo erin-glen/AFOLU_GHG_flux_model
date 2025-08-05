@@ -36,7 +36,8 @@ import s3fs
 import xarray as xr
 import zarr
 
-from flox import ReindexArrayType, ReindexStrategy, xarray_reduce
+from flox import ReindexArrayType, ReindexStrategy
+from flox.xarray import xarray_reduce
 
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -652,7 +653,6 @@ def run(args: argparse.Namespace) -> None:
         partitioning=["interval_end"],
         format="parquet",
         existing_data_behavior="delete_matching",
-        compression="zstd",
     )
     logger.info("Parquet write complete – uploaded to %s", args.output_parquet)
 
