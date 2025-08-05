@@ -21,9 +21,11 @@ import numpy as np
 import pandas as pd
 import flox
 import boto3
-import tempfile
 import posixpath
-import shutil
+# ─── new: direct S3 Parquet write ──────────────────────────────────────
+import pyarrow.dataset as ds
+import pyarrow as pa
+import pyarrow.fs as pafs
 
 # ── node-meaning look-ups ──────────────────────────────────────────────
 from src.scripts.zonal_statistics.zonal_constants import (
@@ -35,7 +37,6 @@ import xarray as xr
 import zarr
 
 from flox import ReindexArrayType, ReindexStrategy
-from flox.xarray import xarray_reduce
 
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -266,9 +267,7 @@ def open_zarr_region(
     if chunk_dict:  # avoid .chunk({}) for 1‑D vars
         data_arr = data_arr.chunk(chunk_dict)
 
-    if isinstance(data_arr.data, da.core.Array):
-        data_arr.data = data_arr.data.map_blocks(lambda x: x, name=f"{Path(path).stem}")
-
+    # map_blocks wrapper removed – it added a graph layer for no benefit
     return data_arr
 
 
@@ -500,11 +499,15 @@ def run(args: argparse.Namespace) -> None:
         list_folder_uris(pixel_area_folder), pixel_area_zarr_name, args.chunk_size
     )
 
-    logger.debug("Opening contextual layers")
-    # Persist static rasters so subsequent interval loops reuse them.
-    adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size).persist()
+    logger.debug("Opening contextual layers (persist & cast)")
+    adm0 = (
+        open_zarr_region(adm0_zarr_name, bbox, args.chunk_size)
+        .astype("uint32")
+        .persist()
+    )
     pixel_area = (
-        open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size).persist()
+        open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size)
+        .persist()
     )
 
     contextual_layer_names = ["drained_state_nodes", "burned_state_nodes", "gadm_adm0"]
@@ -564,68 +567,56 @@ def run(args: argparse.Namespace) -> None:
             raise
         logger.debug("Datasets aligned for interval %s", interval)
 
-        # Grab one URI from each folder to label flux_type
+        # Map index → name once for later DataFrame
         flux_type_dict = {
-            0: parse_pattern_from_uri(cached_uri_lists["drained_total_Mg_CO2e_pixel"]),
-            1: parse_pattern_from_uri(cached_uri_lists["burned_total_Mg_CO2e_pixel"]),
+            0: parse_pattern_from_uri(
+                cached_uri_lists["drained_total_Mg_CO2e_pixel"]
+            ),
+            1: parse_pattern_from_uri(
+                cached_uri_lists["burned_total_Mg_CO2e_pixel"]
+            ),
             2: "area__ha",
         }
-
-        flux_cube = xr.DataArray(
-            da.stack(
-                [
-                    drained_total_aligned,
-                    burned_total_aligned,
-                    pixel_area_aligned,
-                ]
-            ),
-            dims=("flux_type", "y", "x"),
-        )
-        logger.debug("Flux cube stacked for interval %s", interval)
-
-        flux_cube, adm0_aligned, drained_state_nodes, burned_state_nodes_aligned = xr.align(
-            flux_cube,
-            adm0_aligned,
-            drained_state_nodes,
-            burned_state_nodes_aligned,
-            join="override",
-        )
-        logger.debug("Arrays aligned for reduction for interval %s", interval)
 
         adm0_aligned.name = "gadm_adm0"
         drained_state_nodes.name = "drained_state_nodes"
         burned_state_nodes_aligned.name = "burned_state_nodes"
 
-        # ─── DEBUG: Check input arrays before reduction ────────────────────
-        logger.debug("drained_total_aligned mean: %s", drained_total_aligned.mean().values)
-        logger.debug("burned_total_aligned mean: %s", burned_total_aligned.mean().values)
-        logger.debug("pixel_area_aligned mean: %s", pixel_area_aligned.mean().values)
+        if args.debug:
+            for n, arr in {
+                "drained_total": drained_total_aligned,
+                "burned_total": burned_total_aligned,
+                "pixel_area": pixel_area_aligned,
+                "adm0": adm0_aligned,
+            }.items():
+                logger.debug(
+                    "%s → shape=%s chunks=%s dtype=%s",
+                    n,
+                    arr.shape,
+                    arr.chunks,
+                    arr.dtype,
+                )
 
-        logger.debug("adm0_aligned unique values: %s",
-                     np.unique(adm0_aligned.values[~np.isnan(adm0_aligned.values)]))
-
-        logger.debug("drained_state_nodes unique values: %s",
-                     np.unique(drained_state_nodes.values[~np.isnan(drained_state_nodes.values)]))
-
-        logger.debug("burned_state_nodes_aligned unique values: %s",
-                     np.unique(burned_state_nodes_aligned.values[~np.isnan(burned_state_nodes_aligned.values)]))
-        # ───────────────────────────────────────────────────────────────────
-
-        logger.debug("Running flox reduce for interval %s", interval)
-        with dask.annotate(label=f"reduce:{interval}"):
-            flux_results = xarray_reduce(
-                flux_cube,
-                *(adm0_aligned, drained_state_nodes, burned_state_nodes_aligned),
-                func="sum",
-                expected_groups=(
-                    gadm_adm0_ids,
-                    node_codes,
-                    node_codes,
-                ),
-                fill_value=np.nan,
-                split_out=4,              # distribute reduction work
-                **flox_sparse_reindex_kwargs(),
-            ).persist()                  # keep in cluster memory
+        # Disable task fusion for the heavy pixel‑wise graph
+        with dask.config.set({"optimization.fuse.active": False}):
+            with dask.annotate(label=f"reduce:{interval}"):
+                flux_results = flox.groupby_reduce(
+                    data=(
+                        drained_total_aligned,
+                        burned_total_aligned,
+                        pixel_area_aligned,
+                    ),
+                    groupers=(
+                        adm0_aligned,
+                        drained_state_nodes,
+                        burned_state_nodes_aligned,
+                    ),
+                    func="sum",
+                    expected_groups=(gadm_adm0_ids, node_codes, node_codes),
+                    fill_value=np.nan,
+                    split_out=4,
+                    **flox_sparse_reindex_kwargs(),
+                ).rename({"variable": "flux_type"}).persist()
         logger.debug("Flox reduce complete for interval %s", interval)
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
@@ -635,7 +626,7 @@ def run(args: argparse.Namespace) -> None:
         logger.info("Processed interval %s", interval)
 
     # ╭──────────────────────────────────────────────────────────────────╮
-    # │  Write all intervals locally then upload to S3 (core‑model style)│
+    # │  Write all intervals directly to S3 as Parquet                    │
     # ╰──────────────────────────────────────────────────────────────────╯
 
     full_df = pd.concat(dfs, ignore_index=True)
@@ -647,55 +638,30 @@ def run(args: argparse.Namespace) -> None:
     # ── 2.  Quick sanity check before writing ───────────────────────────────
     logger.debug("Rows in concatenated DataFrame   : %s", f"{len(full_df):,}")
 
-    local_dir = Path(tempfile.mkdtemp(prefix="zonal_stats_"))
-    full_df.to_parquet(
-        local_dir,
-        partition_cols=["interval_end"],
-        index=False,
+    # Cast long strings → categorical to shrink output
+    for col in ("drained_state_meaning", "burned_state_meaning"):
+        if col in full_df.columns:
+            full_df[col] = full_df[col].astype("category")
+
+    # ── Direct Parquet write to S3 (no tmp dir, no manual upload) ─────────
+    logger.debug("Writing Parquet directly to %s", args.output_parquet)
+    s3_arrow = pafs.S3FileSystem(region="us-east-1")  # adjust if needed
+    ds.write_dataset(
+        pa.Table.from_pandas(full_df, preserve_index=False),
+        base_dir=args.output_parquet.rstrip("/"),
+        filesystem=s3_arrow,
+        partitioning=["interval_end"],
+        format="parquet",
+        existing_data_behavior="delete_matching",
         compression="zstd",
-        engine="pyarrow",
     )
+    logger.info("Parquet write complete – uploaded to %s", args.output_parquet)
 
-    logger.debug(
-        "Files written locally            : %s",
-        [
-            p.relative_to(local_dir).as_posix()
-            for p in local_dir.rglob('*')
-            if p.is_file()
-        ],
-    )
-
-    # ── 3.  Upload every file we just wrote ─────────────────────────────────
-    uploaded = 0
-    for f in local_dir.rglob("*"):
-        if f.is_file():
-            rel_key = posixpath.join(prefix, f.relative_to(local_dir).as_posix())
-            assert not rel_key.startswith(
-                "/"
-            ), "S3 object key must never begin with '/'"
-            full_s3 = f"s3://{bucket}/{rel_key}"
-            logger.debug("Uploading %s to %s", f, full_s3)
-            uu.upload_file_to_s3(str(f), bucket, rel_key)
-            uploaded += 1
-
-    logger.debug(
-        "Uploaded %s object%s to s3://%s/%s",
-        uploaded,
-        "" if uploaded == 1 else "s",
-        bucket,
-        prefix,
-    )
-
-    shutil.rmtree(local_dir)
-    logger.info(
-        "Parquet write complete – partitions uploaded to %s", args.output_parquet
-    )
-
-    # ── 4.  Confirm that the dataset is now present on S3 ───────────────────
-    fs = s3fs.S3FileSystem(anon=False)
-    list_target = args.output_parquet.rstrip("/") + "/"
-    print(f"Listing contents of: {list_target}")
-    print(fs.ls(list_target, detail=True))
+    if args.debug:
+        fs = s3fs.S3FileSystem(anon=False)
+        list_target = args.output_parquet.rstrip("/") + "/"
+        logger.debug("Listing S3 contents: %s", list_target)
+        logger.debug(fs.ls(list_target, detail=True))
 
     if client:
         logger.debug("Closing Dask client")
