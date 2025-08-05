@@ -556,7 +556,14 @@ def run(args: argparse.Namespace) -> None:
 
     contextual_layer_names = ["drained_state_nodes", "burned_state_nodes", "gadm_adm0"]
 
-    node_codes = zc.NODE_CODES
+    # ------------------------------------------------------------------
+    # Keep pixels where *either* layer has “no state node” (code 0)
+    # ---------------------------------------------------------------
+    # Without 0 in the re‑index list every tuple that contains a zero
+    # ( e.g. (country , drained=13131200 , burned=0) ) is discarded by
+    # flox.  Adding 0 here ensures those pixels survive the groupby.
+    # ------------------------------------------------------------------
+    node_codes = [0] + zc.NODE_CODES
     gadm_adm0_ids = zc.GADM_ADM0_IDS
 
     interval_pairs = build_interval_pairs(args.interval_end_years)
