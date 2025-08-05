@@ -581,11 +581,11 @@ def run(args: argparse.Namespace) -> None:
     gadm_adm0_ids = zc.GADM_ADM0_IDS
     # ---- convert frozensets → sorted numeric arrays for flox ------------
     drained_codes_arr = np.array(
-        sorted(int(c) for c in ALL_DRAINED_STATE_CODES), dtype=np.uint32
-    )
+            sorted({0, *map(int, ALL_DRAINED_STATE_CODES)}), dtype=np.uint32
+                                                                     )
     burned_codes_arr = np.array(
-        sorted(int(c) for c in ALL_BURNED_STATE_CODES), dtype=np.uint32
-    )
+            sorted({0, *map(int, ALL_BURNED_STATE_CODES)}), dtype=np.uint32
+                                                                    )
 
     interval_pairs = build_interval_pairs(args.interval_end_years)
 
