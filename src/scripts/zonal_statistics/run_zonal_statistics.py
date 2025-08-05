@@ -36,7 +36,7 @@ import s3fs
 import xarray as xr
 import zarr
 
-from flox import ReindexArrayType, ReindexStrategy
+from flox import ReindexArrayType, ReindexStrategy, xarray_reduce
 
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -492,13 +492,9 @@ def run(args: argparse.Namespace) -> None:
         list_folder_uris(pixel_area_folder), pixel_area_zarr_name, args.chunk_size
     )
 
-    logger.debug("Opening contextual layers (persist & cast)")
-    adm0 = (
-        open_zarr_region(adm0_zarr_name, bbox, args.chunk_size)
-        .astype("uint32")
-        .persist()
-    )
-    pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size).persist()
+    logger.debug("Opening contextual layers (cast; lazy)")
+    adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size).astype("uint32")
+    pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size)
 
     contextual_layer_names = ["drained_state_nodes", "burned_state_nodes", "gadm_adm0"]
 
@@ -559,6 +555,17 @@ def run(args: argparse.Namespace) -> None:
             raise
         logger.debug("Datasets aligned for interval %s", interval)
 
+        flux_cube = xr.DataArray(
+            da.stack(
+                [
+                    drained_total_aligned.data,
+                    burned_total_aligned.data,
+                    pixel_area_aligned.data,
+                ]
+            ),
+            dims=("flux_type",) + drained_total_aligned.dims,
+        )
+
         # Map index → name once for later DataFrame
         flux_type_dict = {
             0: parse_pattern_from_uri(
@@ -569,6 +576,14 @@ def run(args: argparse.Namespace) -> None:
             ),
             2: "area__ha",
         }
+
+        flux_cube, adm0_aligned, drained_state_nodes, burned_state_nodes_aligned = xr.align(
+            flux_cube,
+            adm0_aligned,
+            drained_state_nodes,
+            burned_state_nodes_aligned,
+            join="override",
+        )
 
         adm0_aligned.name = "gadm_adm0"
         drained_state_nodes.name = "drained_state_nodes"
@@ -589,29 +604,17 @@ def run(args: argparse.Namespace) -> None:
                     arr.dtype,
                 )
 
-        # Disable task fusion for the heavy pixel‑wise graph
-        with dask.config.set({"optimization.fuse.active": False}):
-            with dask.annotate(label=f"reduce:{interval}"):
-                flux_results = (
-                    flox.groupby_reduce(
-                        (
-                            drained_total_aligned,
-                            burned_total_aligned,
-                            pixel_area_aligned,
-                        ),
-                        (
-                            adm0_aligned,
-                            drained_state_nodes,
-                            burned_state_nodes_aligned,
-                        ),
-                        func="sum",
-                        expected_groups=(gadm_adm0_ids, node_codes, node_codes),
-                        fill_value=0,          # keep ints → ints; avoids float up‑cast
-                        **flox_sparse_reindex_kwargs(),
-                    )
-                    .rename({"variable": "flux_type"})
-                    .persist()
-                )
+        with dask.annotate(label=f"reduce:{interval}"):
+            flux_results = xarray_reduce(
+                flux_cube,
+                adm0_aligned,
+                drained_state_nodes,
+                burned_state_nodes_aligned,
+                func="sum",
+                expected_groups=(gadm_adm0_ids, node_codes, node_codes),
+                fill_value=0,
+                **flox_sparse_reindex_kwargs(),
+            )
         logger.debug("Flox reduce complete for interval %s", interval)
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
