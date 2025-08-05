@@ -8,7 +8,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "0.4.0"
+model_version = "0.4.2"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets
@@ -40,9 +40,9 @@ NT_T_gain_year_count_default = math.ceil(five_year_interval_duration / 2)
 
 ### Model years in annual series
 first_model_year_annual = 2015  # First year of annual data
-last_model_year_annual = 2023   # Last year of annual data
+last_model_year_annual = 2024   # Last year of annual data
 
-years_annual = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+years_annual = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
 interval_end_years_annual = years_annual[1:]
 
 possible_task_statuses = ["pending_", "loading_", "preprocessing_", "calculating_", "uploading_", "error_"]
@@ -258,13 +258,13 @@ pixel_meanings = [flux_density_pixel_meaning, flux_per_pixel_pixel_meaning,
 ##### Inputs
 
 land_cover_5_year_path = f"{LULUCF_path}landcover/composite/five_year/v1/raw/"
-land_cover_annual_path = f"{LULUCF_path}landcover/composite/annual/v1/raw/"
+land_cover_annual_path = f"{LULUCF_path}landcover/composite/annual/v2/raw/"
 land_cover_pattern = "land_cover_composite"  # Raw tifs don't have a pattern; this is just for use in the numba data dictionary
 
 vegetation_height_annual_GLAD_path = "https://glad.geog.umd.edu/Potapov/Global_TCH_2015-23"
 vegetation_height_5_year_path = f"{LULUCF_path}landcover/vegetation_height/five_year/v1/raw/"
 vegetation_height_5_year_pattern = "vegetation_height"
-vegetation_height_annual_path = f"{LULUCF_path}landcover/vegetation_height/annual/20250114/raw/"
+vegetation_height_annual_path = f"{LULUCF_path}landcover/vegetation_height/annual/v2_20250716/raw/"
 vegetation_height_annual_pattern = ""
 vegetation_height_pattern = "vegetation_height"  # Raw tifs don't have a pattern; this is just for use in the numba data dictionary
 
@@ -496,14 +496,13 @@ secondary_natural_forest_61_80_processed_dir = f"{full_bucket_prefix}/climate/se
 secondary_natural_forest_81_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_81_100/"
 secondary_natural_forest_21_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_21_100/"
 
-# TODO switch to new processed date when all are ready
-# natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/"
-natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/"
+secondary_forest_curve_run_date = '20250616'
+natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{secondary_forest_curve_run_date}/"
 natural_forest_growth_curve_pattern = "natural_forest_mean_growth_rate__Mg_AGC_ha_yr"
-natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_40', '41_60', '61_80', '81_100', '21_100']
+natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_40', '41_60', '61_80', '81_100']
 
-#TODO: Update to path pattern instead of processed_dir/ pattern in hansenize. Delete processed after.
-drivers_run_date = '20241224'
+#TODO: @Mel Update to path pattern instead of processed_dir/ pattern in hansenize. Delete processed after.
+drivers_run_date = '20250414'
 drivers_raw_dir = f"{full_bucket_prefix}/drivers_of_loss/1_km/raw/update2023_20241218/"
 drivers_raw_pattern = "drivers_forest_loss_1km_2023_band1.tif"
 drivers_processed_dir = f"{full_bucket_prefix}/drivers_of_loss/1_km/processed/{drivers_run_date}/"
@@ -648,7 +647,7 @@ otherland_IPCC = 6
 IPCC_class_max_val = 6  # Maximum value of IPCC class codes
 
 land_state_pattern = "land_state_node"
-land_state_node_fire_value = 9  # State nodes that end in 9 had fire
+land_state_node_fire_value = 9  # State nodes that end in this value had fire
 
 agc_rf_pre_dist_pattern = "removal_factor__AGC__MgC"
 

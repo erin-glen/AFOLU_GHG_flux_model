@@ -2,24 +2,24 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work):
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload -yr 2000 2023 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload -yr 2000 2024 --run_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_model
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2000 2023 --run_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 -yr 2000 2023 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2000 2024 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 -yr 2000 2024 --run_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --run_date YYYYMMDD
 
 Coiled large shapefile test:
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_model
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2023 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --run_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn LULUCF_model
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --run_date YYYYMMDD  --log_note "This is a full run."
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --run_date YYYYMMDD  --log_note "This is a full run."
 
 To download all outputs locally:
 python src/utilities/download_outputs_local.py v1 23_-4_24_-3
@@ -96,7 +96,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     natrl_forest_curve_41_60_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__41_60_years"].astype('float32')
     natrl_forest_curve_61_80_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__61_80_years"].astype('float32')
     natrl_forest_curve_81_100_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__81_100_years"].astype('float32')
-    natrl_forest_curve_21_100_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__21_100_years"].astype('float32')
 
     # Removal factor (Mg C/ha/yr)
     # Because this is used to store the RF from the previous interval,
@@ -340,7 +339,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 natrl_forest_curve_41_60_AGC_RF = natrl_forest_curve_41_60_AGC_RF_block[row, col]
                 natrl_forest_curve_61_80_AGC_RF = natrl_forest_curve_61_80_AGC_RF_block[row, col]
                 natrl_forest_curve_81_100_AGC_RF = natrl_forest_curve_81_100_AGC_RF_block[row, col]
-                natrl_forest_curve_21_100_AGC_RF = natrl_forest_curve_21_100_AGC_RF_block[row, col]
 
                 planted_forest_type_cell = planted_forest_type_block[row, col]
                 planted_forest_tree_crop_cell = planted_forest_tree_crop_block[row, col]
@@ -1774,8 +1772,8 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
-                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2023
-                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2023
+                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2024
+                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2024
         print("Year range selection not valid")
         sys.exit()
     else:
@@ -1859,7 +1857,8 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Young natural forest rasters (several age intervals).
     # Each growth interval's rate is in its own folder.
     for growth_interval in cn.natural_forest_growth_curve_intervals:
-        download_dict[f"{cn.natural_forest_growth_curve_pattern}__{growth_interval}_years"] = f"{cn.natural_forest_growth_curve_dir}rate_{growth_interval}/{sample_tile_id}_{cn.natural_forest_growth_curve_pattern}__{growth_interval}_years.tif"
+        download_dict[f"{cn.natural_forest_growth_curve_pattern}__{growth_interval}_years"] = \
+            f"{cn.natural_forest_growth_curve_dir}rate_{growth_interval}/{sample_tile_id}_{cn.natural_forest_growth_curve_pattern}__{growth_interval}_years__nibble_{cn.secondary_forest_curve_run_date}.tif"
 
     # Burned area rasters (every year)-- same code for annual, 5-year model, or hybrid.
     # Each burned area year needs to be in its own folder.
@@ -1932,6 +1931,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         key: value.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning)
         for key, value in download_dict.items()
     }
+    # print(download_dict)
 
 
     # Returns the first tile in each input so that the datatype can be determined.
@@ -2029,7 +2029,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         if len(chunk_batches) > 1:
             main_logger.info(f"Writing batch stats to spreadsheet: {uu.timestr()}")
             df_batch_stats = pd.DataFrame(batch_stats)
-            out_spreadsheet = f'TEMP_{stage}__batch_{i}_{uu.timestr()}.xlsx'
+            out_spreadsheet = f'TEMP_BATCH_{stage}__batch_{i}_{uu.timestr()}.xlsx'
             local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
             with pd.ExcelWriter(local_spreadsheet) as writer:
                 df_batch_stats.to_excel(writer, sheet_name=f'stats__batch_{i}', index=False)
@@ -2094,7 +2094,7 @@ if __name__ == "__main__":
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
-    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
+    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2024.')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')

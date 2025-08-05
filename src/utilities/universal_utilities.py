@@ -508,19 +508,19 @@ def get_interval_info(end_year, main_logger, start_year):
         interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years)  # -1 because the interval really starts one year after the end of the previous interval
         # interval_year_diff = [4, 4, 4, 4]  # Expected for 2000-2020
         output_years = cn.interval_end_years_5_years
-    elif start_year == 2015 and end_year == 2023:
+    elif start_year == 2015 and end_year == max(cn.years_annual):
         interval_type = cn.intervals_annual
         interval_length = [1] * len(cn.interval_end_years_annual)
-        # interval_length = [1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2023
+        # interval_length = [1, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2024
         interval_year_diff = [1] * len(cn.interval_end_years_annual)
-        # interval_year_diff = [1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2023
+        # interval_year_diff = [1, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2024
         output_years = cn.interval_end_years_annual
-    elif start_year == 2000 and end_year == 2023:  # Hybrid model (2000-2023)
+    elif start_year == 2000 and end_year == max(cn.years_annual):  # Hybrid model (2000-2024)
         interval_type = cn.intervals_hybrid
         interval_length = [cn.five_year_interval_duration] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
-        # interval_length = [5, 5, 5, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2023
+        # interval_length = [5, 5, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2024
         interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
-        # interval_year_diff = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2023
+        # interval_year_diff = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2024
         output_years = cn.interval_end_years_5_years[:-1] + cn.interval_end_years_annual
     else:
         main_logger.error("interval_type not valid")
@@ -742,7 +742,7 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
                     output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
                 elif interval_type == cn.intervals_annual:
                     output_dir = basic_output.replace('START_END',f"{str(output_year - interval_duration[count])}_{str(output_year)}")
-                else:  # Hybrid model (2000-2023)
+                else:  # Hybrid model (2000-2024)
                     output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
 
             output_full_dirs.append(output_dir)

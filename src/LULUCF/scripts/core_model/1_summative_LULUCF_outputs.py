@@ -6,21 +6,21 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 20 -1 21 0 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 20 -1 21 0 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 -yr 2000 2023 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 -yr 2000 2024 --input_date YYYYMMDD
 
 Coiled large shapefile test (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2023 --input_date YYYYMMDD -ln "Summative outputs for 1884-feature shapefile for model v0.4.0."
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --input_date YYYYMMDD -ln "Summative outputs for 1884-feature shapefile for model v0.4.0."
 
 Full run (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
 
 Optimization notes: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210788116876878?focus=true
 """
@@ -416,8 +416,8 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
-                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2023
-                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2023
+                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2024
+                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2024
         print("Year range selection not valid")
         sys.exit()
     else:
@@ -563,7 +563,7 @@ if __name__ == "__main__":
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
-    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
+    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2024.')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
