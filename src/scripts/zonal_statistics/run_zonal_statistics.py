@@ -37,6 +37,7 @@ import xarray as xr
 import zarr
 
 from flox import ReindexArrayType, ReindexStrategy
+from flox.xarray import xarray_reduce
 
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -492,12 +493,8 @@ def run(args: argparse.Namespace) -> None:
         list_folder_uris(pixel_area_folder), pixel_area_zarr_name, args.chunk_size
     )
 
-    logger.debug("Opening contextual layers (persist & cast)")
-    adm0 = (
-        open_zarr_region(adm0_zarr_name, bbox, args.chunk_size)
-        .astype("uint32")
-        .persist()
-    )
+    logger.debug("Opening contextual layers")
+    adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size).astype("uint32")
     pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size).persist()
 
     contextual_layer_names = ["drained_state_nodes", "burned_state_nodes", "gadm_adm0"]
@@ -589,29 +586,24 @@ def run(args: argparse.Namespace) -> None:
                     arr.dtype,
                 )
 
-        # Disable task fusion for the heavy pixel‑wise graph
-        with dask.config.set({"optimization.fuse.active": False}):
-            with dask.annotate(label=f"reduce:{interval}"):
-                flux_results = (
-                    flox.groupby_reduce(
-                        (
-                            drained_total_aligned,
-                            burned_total_aligned,
-                            pixel_area_aligned,
-                        ),
-                        (
-                            adm0_aligned,
-                            drained_state_nodes,
-                            burned_state_nodes_aligned,
-                        ),
-                        func="sum",
-                        expected_groups=(gadm_adm0_ids, node_codes, node_codes),
-                        fill_value=0,          # keep ints → ints; avoids float up‑cast
-                        **flox_sparse_reindex_kwargs(),
-                    )
-                    .rename({"variable": "flux_type"})
-                    .persist()
-                )
+
+        with dask.annotate(label=f"reduce:{interval}"):
+            flux_cube = xr.concat(
+                [drained_total_aligned, burned_total_aligned, pixel_area_aligned],
+                dim="flux_type",
+            ).assign_coords(flux_type=("flux_type", [0, 1, 2]))
+
+            flux_results = xarray_reduce(
+                flux_cube,
+                adm0_aligned,
+                drained_state_nodes,
+                burned_state_nodes_aligned,
+                func="sum",
+                expected_groups=(gadm_adm0_ids, node_codes, node_codes),
+                fill_value=0,
+                **flox_sparse_reindex_kwargs(),
+            ).compute()
+
         logger.debug("Flox reduce complete for interval %s", interval)
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
