@@ -31,6 +31,8 @@ import pyarrow.fs as pafs
 from src.scripts.zonal_statistics.zonal_constants import (
     DRAINED_STATE_NODE_MEANINGS,
     BURNED_STATE_NODE_MEANINGS,
+    ALL_DRAINED_STATE_CODES,
+    ALL_BURNED_STATE_CODES,
 )
 import s3fs
 import xarray as xr
@@ -555,22 +557,19 @@ def run(args: argparse.Namespace) -> None:
     adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size).astype("uint32")
     pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size).persist()
 
-    contextual_layer_names = ["drained_state_nodes", "burned_state_nodes", "gadm_adm0"]
+    contextual_layer_names_d = ["drained_state_nodes", "gadm_adm0"]
+    contextual_layer_names_b = ["burned_state_nodes", "gadm_adm0"]
 
-    # ------------------------------------------------------------------
-    # ①  Keep pixels whose *burned* state is 0   (≈ “no fire recorded”)
-    #     or whose *drained* state is 0           (≈ “not drained”).
-    #     Those pixels would otherwise disappear because `flox` only
-    #     keeps combinations that are explicitly enumerated here.
-    # ------------------------------------------------------------------
-    node_codes = [0] + zc.NODE_CODES
     gadm_adm0_ids = zc.GADM_ADM0_IDS
 
     interval_pairs = build_interval_pairs(args.interval_end_years)
 
     logger.debug("Writing Parquet directly to %s", args.output_parquet)
-    s3_arrow = pafs.S3FileSystem(region="us-east-1")  # adjust if needed
-    base_dir = args.output_parquet.replace("s3://", "", 1).rstrip("/")
+    # create two sub‑folders: `<...>/drained/` and `<...>/burned/`
+    s3_arrow = pafs.S3FileSystem(region="us-east-1")
+    base_dir_root = args.output_parquet.replace("s3://", "", 1).rstrip("/")
+    base_dir_drained = posixpath.join(base_dir_root, "drained")
+    base_dir_burned  = posixpath.join(base_dir_root, "burned")
 
     # ------------------------------------------------------------------
     # 3️⃣  STREAMING WRITE – one Parquet partition per interval
@@ -626,17 +625,6 @@ def run(args: argparse.Namespace) -> None:
             raise
         logger.debug("Datasets aligned for interval %s", interval)
 
-        # Map index → name once for later DataFrame
-        flux_type_dict = {
-            0: parse_pattern_from_uri(
-                cached_uri_lists["drained_total_Mg_CO2e_pixel"]
-            ),
-            1: parse_pattern_from_uri(
-                cached_uri_lists["burned_total_Mg_CO2e_pixel"]
-            ),
-            2: "area__ha",
-        }
-
         adm0_aligned.name = "gadm_adm0"
         drained_state_nodes.name = "drained_state_nodes"
         burned_state_nodes_aligned.name = "burned_state_nodes"
@@ -659,49 +647,67 @@ def run(args: argparse.Namespace) -> None:
                 )
 
 
-        # ------------------------------------------------------------------
-        # 2️⃣  SPARSE‑SAFE REDUCE
-        #     * do **not** pass expected_groups – they create a dense
-        #       rectangle that is mostly zero ⇒ stripped by COO.
-        #     * leave fill_value **unset** so that missing combos become NaN,
-        #       not 0, preventing silent drop‑out.
-        # ------------------------------------------------------------------
-        with dask.annotate(label=f"reduce:{interval}"):
-            flux_cube = xr.concat(
-                [drained_total_aligned, burned_total_aligned, pixel_area_aligned],
+        # -------------------------  DR A I N E D  -------------------------
+        with dask.annotate(label=f"reduce:drained:{interval}"):
+            cube_d = xr.concat(
+                [drained_total_aligned, pixel_area_aligned],
                 dim="flux_type",
-            ).assign_coords(flux_type=("flux_type", [0, 1, 2]))
-
-            flux_results = xarray_reduce(
-                flux_cube,
+            ).assign_coords(flux_type=("flux_type", [0, 2]))
+            res_d = xarray_reduce(
+                cube_d,
                 adm0_aligned,
                 drained_state_nodes,
-                burned_state_nodes_aligned,
                 func="sum",
+                expected_groups=(gadm_adm0_ids, ALL_DRAINED_STATE_CODES),
                 **flox_sparse_reindex_kwargs(not args.no_sparse),
             ).compute()
-
-        logger.debug("Flox reduce complete for interval %s", interval)
-        if args.debug:
-            for dim in ("gadm_adm0", "drained_state_nodes", "burned_state_nodes"):
-                vals = flux_results[dim].values
-                logger.debug("flox group %s (%d): %s", dim, vals.size, vals)
-
-        coord_dict = convert_to_coord_dict(flux_results, interval)
-        df = create_interval_df(coord_dict, flux_type_dict, interval_end_year)
-        df = calculate_interval_flux_densities(df, contextual_layer_names)
-        if args.debug:
-            logger.debug("Interval DataFrame rows: %s", len(df))
-            logger.debug("Interval DataFrame head:\n%s", df.head())
+        dict_d = convert_to_coord_dict(res_d, interval)
+        ft_dict_d = {
+            0: parse_pattern_from_uri(cached_uri_lists["drained_total_Mg_CO2e_pixel"]),
+            2: "area__ha",
+        }
+        df_d = create_interval_df(dict_d, ft_dict_d, interval_end_year)
+        df_d = calculate_interval_flux_densities(df_d, contextual_layer_names_d)
         ds.write_dataset(
-            pa.Table.from_pandas(df, preserve_index=False),
-            base_dir=base_dir,
+            pa.Table.from_pandas(df_d, preserve_index=False),
+            base_dir=base_dir_drained,
             filesystem=s3_arrow,
             partitioning=["interval_end"],
             format="parquet",
             existing_data_behavior="delete_matching",
         )
-        logger.info("Wrote %s rows for interval %s", len(df), interval)
+        logger.info("Wrote %s rows (drained) for %s", len(df_d), interval)
+
+        # -------------------------  B U R N E D  --------------------------
+        with dask.annotate(label=f"reduce:burned:{interval}"):
+            cube_b = xr.concat(
+                [burned_total_aligned, pixel_area_aligned],
+                dim="flux_type",
+            ).assign_coords(flux_type=("flux_type", [1, 2]))
+            res_b = xarray_reduce(
+                cube_b,
+                adm0_aligned,
+                burned_state_nodes_aligned,
+                func="sum",
+                expected_groups=(gadm_adm0_ids, ALL_BURNED_STATE_CODES),
+                **flox_sparse_reindex_kwargs(not args.no_sparse),
+            ).compute()
+        dict_b = convert_to_coord_dict(res_b, interval)
+        ft_dict_b = {
+            1: parse_pattern_from_uri(cached_uri_lists["burned_total_Mg_CO2e_pixel"]),
+            2: "area__ha",
+        }
+        df_b = create_interval_df(dict_b, ft_dict_b, interval_end_year)
+        df_b = calculate_interval_flux_densities(df_b, contextual_layer_names_b)
+        ds.write_dataset(
+            pa.Table.from_pandas(df_b, preserve_index=False),
+            base_dir=base_dir_burned,
+            filesystem=s3_arrow,
+            partitioning=["interval_end"],
+            format="parquet",
+            existing_data_behavior="delete_matching",
+        )
+        logger.info("Wrote %s rows (burned)  for %s", len(df_b), interval)
 
     if args.debug:
         fs = s3fs.S3FileSystem(anon=False)
