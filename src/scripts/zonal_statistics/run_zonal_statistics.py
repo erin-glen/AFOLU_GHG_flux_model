@@ -26,6 +26,7 @@ import posixpath
 import pyarrow.dataset as ds
 import pyarrow as pa
 import pyarrow.fs as pafs
+import shutil
 
 # ── node-meaning look-ups ──────────────────────────────────────────────
 from src.scripts.zonal_statistics.zonal_constants import (
@@ -588,12 +589,12 @@ def run(args: argparse.Namespace) -> None:
 
     interval_pairs = build_interval_pairs(args.interval_end_years)
 
-    logger.debug("Writing Parquet directly to %s", args.output_parquet)
-    # create two sub‑folders: `<...>/drained/` and `<...>/burned/`
-    s3_arrow = pafs.S3FileSystem(region="us-east-1")
-    base_dir_root = args.output_parquet.replace("s3://", "", 1).rstrip("/")
-    base_dir_drained = posixpath.join(base_dir_root, "drained")
-    base_dir_burned  = posixpath.join(base_dir_root, "burned")
+    logger.debug("Writing Parquet to local staging directory %s", args.local_output)
+    local_arrow = pafs.LocalFileSystem()
+    base_dir_root = Path(args.local_output).expanduser().resolve()
+    base_dir_root.mkdir(parents=True, exist_ok=True)
+    base_dir_drained = base_dir_root / "drained"
+    base_dir_burned = base_dir_root / "burned"
 
     # ------------------------------------------------------------------
     # 3️⃣  STREAMING WRITE – one Parquet partition per interval
@@ -694,8 +695,8 @@ def run(args: argparse.Namespace) -> None:
         df_d = calculate_interval_flux_densities(df_d, contextual_layer_names_d)
         ds.write_dataset(
             pa.Table.from_pandas(df_d, preserve_index=False),
-            base_dir=base_dir_drained,
-            filesystem=s3_arrow,
+            base_dir=str(base_dir_drained),
+            filesystem=local_arrow,
             partitioning=["interval_end"],
             format="parquet",
             existing_data_behavior="delete_matching",
@@ -725,13 +726,20 @@ def run(args: argparse.Namespace) -> None:
         df_b = calculate_interval_flux_densities(df_b, contextual_layer_names_b)
         ds.write_dataset(
             pa.Table.from_pandas(df_b, preserve_index=False),
-            base_dir=base_dir_burned,
-            filesystem=s3_arrow,
+            base_dir=str(base_dir_burned),
+            filesystem=local_arrow,
             partitioning=["interval_end"],
             format="parquet",
             existing_data_behavior="delete_matching",
         )
         logger.info("Wrote %s rows (burned)  for %s", len(df_b), interval)
+
+    logger.debug("Uploading staged data to %s", args.output_parquet)
+    s3fs.S3FileSystem().put(str(base_dir_root), args.output_parquet.rstrip("/"), recursive=True)
+
+    if not args.keep_local:
+        logger.debug("Removing local staging directory %s", base_dir_root)
+        shutil.rmtree(base_dir_root, ignore_errors=True)
 
     if args.debug:
         fs = s3fs.S3FileSystem(anon=False)
@@ -792,6 +800,16 @@ def main(argv=None):
         type=int,
         default=4000,
         help="Tile chunk in pixels (lower -> less per-task memory)",
+    )
+    parser.add_argument(
+        "--local_output",
+        default="/tmp/zonal_stats",
+        help="Local staging directory for Parquet output",
+    )
+    parser.add_argument(
+        "--keep-local",
+        action="store_true",
+        help="Keep staged files after upload",
     )
     parser.add_argument("--debug", action="store_true", help="Verbose logging")
     parser.add_argument(
