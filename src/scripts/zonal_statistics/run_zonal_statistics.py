@@ -557,11 +557,10 @@ def run(args: argparse.Namespace) -> None:
     contextual_layer_names = ["drained_state_nodes", "burned_state_nodes", "gadm_adm0"]
 
     # ------------------------------------------------------------------
-    # Keep pixels where *either* layer has “no state node” (code 0)
-    # ---------------------------------------------------------------
-    # Without 0 in the re‑index list every tuple that contains a zero
-    # ( e.g. (country , drained=13131200 , burned=0) ) is discarded by
-    # flox.  Adding 0 here ensures those pixels survive the groupby.
+    # ①  Keep pixels whose *burned* state is 0   (≈ “no fire recorded”)
+    #     or whose *drained* state is 0           (≈ “not drained”).
+    #     Those pixels would otherwise disappear because `flox` only
+    #     keeps combinations that are explicitly enumerated here.
     # ------------------------------------------------------------------
     node_codes = [0] + zc.NODE_CODES
     gadm_adm0_ids = zc.GADM_ADM0_IDS
@@ -659,6 +658,14 @@ def run(args: argparse.Namespace) -> None:
                 dim="flux_type",
             ).assign_coords(flux_type=("flux_type", [0, 1, 2]))
 
+            # ----------------------------------------------------------
+            # ②  Disable sparse output.  With `sparse=True` +
+            #     `fill_value=0`, every group that summed to zero was
+            #     *dropped* from the COO representation – leaving us with
+            #     an apparently empty cube.  Dense output is safe for the
+            #     tile‑sized jobs we are running here and greatly
+            #     simplifies downstream debugging.
+            # ----------------------------------------------------------
             flux_results = xarray_reduce(
                 flux_cube,
                 adm0_aligned,
@@ -667,7 +674,7 @@ def run(args: argparse.Namespace) -> None:
                 func="sum",
                 expected_groups=(gadm_adm0_ids, node_codes, node_codes),
                 fill_value=0,
-                **flox_sparse_reindex_kwargs(),
+                sparse=False,
             ).compute()
 
         logger.debug("Flox reduce complete for interval %s", interval)
@@ -718,10 +725,18 @@ def run(args: argparse.Namespace) -> None:
     logger.info("Parquet write complete – uploaded to %s", args.output_parquet)
 
     if args.debug:
+        # --------------------------------------------------------------
+        # ③  Only attempt to list the parquet fragments when the parent
+        #     directory actually exists – avoids a noisy FileNotFoundError
+        #     in the (rare) case an empty DF was written.
+        # --------------------------------------------------------------
         fs = s3fs.S3FileSystem(anon=False)
         list_target = args.output_parquet.rstrip("/") + "/"
         logger.debug("Listing S3 contents: %s", list_target)
-        logger.debug(fs.ls(list_target, detail=True))
+        try:
+            logger.debug(fs.ls(list_target, detail=True))
+        except FileNotFoundError:
+            logger.debug("Destination folder does not exist (yet).")
 
     if client:
         logger.debug("Closing Dask client")
