@@ -221,9 +221,14 @@ def process_chunk_buffered(bounds, tile_id, feature_type):
         logging.info(f"[{tile_id}|{chunk_str}] buffered raster all zeros => skip")
         return
 
-    xr_ras = xr.DataArray(
-        buffered, dims=("y", "x"), coords={"y": orig_da.y, "x": orig_da.x}
-    )
+    # ``orig_da`` coordinates occasionally contain one extra value compared to the
+    # underlying data array.  This happens after the padded ``clip_box`` call
+    # above where GDAL may retain both edge coordinates.  Ensure the coordinate
+    # arrays match the shape of ``buffered`` to avoid ``ValueError: conflicting
+    # sizes for dimension`` when constructing the ``DataArray``.
+    y_coords = orig_da.y[: buffered.shape[0]]
+    x_coords = orig_da.x[: buffered.shape[1]]
+    xr_ras = xr.DataArray(buffered, dims=("y", "x"), coords={"y": y_coords, "x": x_coords})
     xr_ras = xr_ras.rio.write_crs(da.rio.crs, inplace=True)
     xr_ras = xr_ras.rio.write_transform(orig_da.rio.transform(), inplace=True)
     local_dir_path = os.path.dirname(local_out)
