@@ -20,6 +20,8 @@ import dask_geopandas as dgpd
 import posixpath
 import xarray as xr
 import rioxarray as rxr
+import rasterio
+from rasterio.merge import merge as merge_rasters
 from pyogrio.errors import FeatureError
 from rasterio.features import rasterize
 from shapely.geometry import box
@@ -129,76 +131,129 @@ def process_chunk_buffered(bounds, tile_id, feature_type):
     raster_path = f"/vsis3/{cn.s3_bucket_name}/{prefix_30m}{tile_id}{PEAT_30M_PATTERN}"
 
     try:
-        da = rxr.open_rasterio(raster_path, masked=True)
+        ds_main = rasterio.open(raster_path)
     except Exception as e:
         logging.error(f"[{tile_id}|{chunk_str}] Could not open union mask: {e}")
         return
 
     bounds_wgs84 = bounds
-    minx, miny, maxx, maxy = bounds
+    minx_crs, miny_crs, maxx_crs, maxy_crs = transform_bounds(
+        "EPSG:4326", ds_main.crs, *bounds, densify_pts=21
+    )
+    xres, yres = ds_main.res
+    pad_x = abs(xres) * MAX_DISTANCE
+    pad_y = abs(yres) * MAX_DISTANCE
+    expanded_bounds_crs = (
+        minx_crs - pad_x,
+        miny_crs - pad_y,
+        maxx_crs + pad_x,
+        maxy_crs + pad_y,
+    )
+    expanded_bounds_wgs84 = transform_bounds(
+        ds_main.crs,
+        "EPSG:4326",
+        *expanded_bounds_crs,
+        densify_pts=21,
+    )
+
+    tile_ids = {
+        uutil.xy_to_tile_id(x, y)
+        for x in (expanded_bounds_wgs84[0], expanded_bounds_wgs84[2])
+        for y in (expanded_bounds_wgs84[1], expanded_bounds_wgs84[3])
+    }
+    if tile_id not in tile_ids:
+        tile_ids.add(tile_id)
+
+    datasets = [ds_main]
+    for tid in tile_ids:
+        if tid == tile_id:
+            continue
+        path = f"/vsis3/{cn.s3_bucket_name}/{prefix_30m}{tid}{PEAT_30M_PATTERN}"
+        try:
+            datasets.append(rasterio.open(path))
+        except Exception as e:
+            logging.error(f"[{tid}|{chunk_str}] Could not open union mask: {e}")
+
+    if not datasets:
+        logging.info(f"[{tile_id}|{chunk_str}] No union mask data => skip")
+        return
+
+    mosaic_arr, mosaic_transform = merge_rasters(datasets)
+    crs = datasets[0].crs
+    for ds in datasets:
+        ds.close()
+
+    da = xr.DataArray(mosaic_arr[0], dims=("y", "x"))
+    da = da.rio.write_crs(crs)
+    da = da.rio.write_transform(mosaic_transform)
+
     try:
-        minx, miny, maxx, maxy = transform_bounds(
-            "EPSG:4326", da.rio.crs, minx, miny, maxx, maxy, densify_pts=21
-        )
-        xres, yres = da.rio.resolution()
-        pad_x = abs(xres) * MAX_DISTANCE
-        pad_y = abs(yres) * MAX_DISTANCE
         expanded_da = da.rio.clip_box(
-            minx=minx - pad_x,
-            miny=miny - pad_y,
-            maxx=maxx + pad_x,
-            maxy=maxy + pad_y,
+            minx=expanded_bounds_crs[0],
+            miny=expanded_bounds_crs[1],
+            maxx=expanded_bounds_crs[2],
+            maxy=expanded_bounds_crs[3],
         )
         if expanded_da.isnull().all():
-            logging.info(f"[{tile_id}|{chunk_str}] No data in expanded raster. Skipping.")
+            logging.info(
+                f"[{tile_id}|{chunk_str}] No data in expanded raster. Skipping."
+            )
             return
-        orig_da = expanded_da.rio.clip_box(minx=minx, miny=miny, maxx=maxx, maxy=maxy)
+        orig_da = expanded_da.rio.clip_box(
+            minx=minx_crs, miny=miny_crs, maxx=maxx_crs, maxy=maxy_crs
+        )
         if orig_da.isnull().all():
-            logging.info(f"[{tile_id}|{chunk_str}] No data in original bounds. Skipping.")
+            logging.info(
+                f"[{tile_id}|{chunk_str}] No data in original bounds. Skipping."
+            )
             return
     except Exception as e:
         logging.error(f"[{tile_id}|{chunk_str}] clip_box error: {e}")
         return
 
-    mask_data = expanded_da[0].data == 1
+    mask_data = expanded_da.data == 1
     if np.all(mask_data == 0):
         logging.info(f"[{tile_id}|{chunk_str}] expanded mask is all zeros => skip")
         return
 
     s3_raw_prefix = cn.datasets[group][sub]['s3_raw']
     base_name = "roads" if "roads" in feature_type else "canals"
-    shp_name = f"{base_name}_{tile_id}.shp"
-    s3_path = os.path.join(s3_raw_prefix, shp_name).replace("\\", "/")
-    vsis3_path = f"/vsis3/{cn.s3_bucket_name}/{s3_path}"
+    line_dgdfs = []
+    for tid in tile_ids:
+        shp_name = f"{base_name}_{tid}.shp"
+        s3_path = os.path.join(s3_raw_prefix, shp_name).replace("\\", "/")
+        vsis3_path = f"/vsis3/{cn.s3_bucket_name}/{s3_path}"
+        logging.info(f"[{tid}|{chunk_str}] Reading lines from {vsis3_path}")
+        try:
+            dgdf = dgpd.read_file(vsis3_path, npartitions=8)
+        except Exception as e:
+            logging.error(f"Could not read lines: {e}")
+            continue
+        if dgdf.crs is None:
+            dgdf = dgdf.set_crs("EPSG:4326")
+        if dask_gdf_is_empty(dgdf, data_path=vsis3_path):
+            continue
+        line_dgdfs.append(dgdf)
 
-    logging.info(f"[{tile_id}|{chunk_str}] Reading lines from {vsis3_path}")
-    try:
-        lines_dgdf = dgpd.read_file(vsis3_path, npartitions=8)
-    except Exception as e:
-        logging.error(f"Could not read lines: {e}")
-        return
-
-    if lines_dgdf.crs is None:
-        lines_dgdf = lines_dgdf.set_crs("EPSG:4326")
-
-    if dask_gdf_is_empty(lines_dgdf, data_path=vsis3_path):
+    if not line_dgdfs:
         logging.info(f"[{tile_id}|{chunk_str}] lines are empty => skip")
         return
 
-    chunk_poly = box(minx - pad_x, miny - pad_y, maxx + pad_x, maxy + pad_y)
+    lines_dgdf = dgpd.concat(line_dgdfs)
+    chunk_poly = box(*expanded_bounds_crs)
     lines_clip = dgpd.clip(lines_dgdf.to_crs(da.rio.crs), chunk_poly)
-    if dask_gdf_is_empty(lines_clip, data_path=vsis3_path):
+    if dask_gdf_is_empty(lines_clip):
         logging.info(f"[{tile_id}|{chunk_str}] lines do not intersect chunk => skip")
         return
 
     try:
         lines_gdf = lines_clip.compute()
     except FeatureError as exc:
-        logging.error(f"FeatureError while reading {vsis3_path}: {exc}")
+        logging.error(f"FeatureError while reading lines: {exc}")
         return
 
     transform_exp = expanded_da.rio.transform()
-    out_shape_exp = expanded_da.shape[1:]
+    out_shape_exp = expanded_da.shape
     shapes = ((geom, 1) for geom in lines_gdf.geometry)
     burned = rasterize(
         shapes,
@@ -214,21 +269,16 @@ def process_chunk_buffered(bounds, tile_id, feature_type):
 
     pad_px = MAX_DISTANCE
     buffered = buffered_full[
-        pad_px : pad_px + orig_da.shape[1], pad_px : pad_px + orig_da.shape[2]
+        pad_px : pad_px + orig_da.shape[0], pad_px : pad_px + orig_da.shape[1]
     ]
 
     if np.all(buffered == 0):
         logging.info(f"[{tile_id}|{chunk_str}] buffered raster all zeros => skip")
         return
 
-    # ``orig_da`` coordinates occasionally contain one extra value compared to the
-    # underlying data array.  This happens after the padded ``clip_box`` call
-    # above where GDAL may retain both edge coordinates.  Ensure the coordinate
-    # arrays match the shape of ``buffered`` to avoid ``ValueError: conflicting
-    # sizes for dimension`` when constructing the ``DataArray``.
-    y_coords = orig_da.y[: buffered.shape[0]]
-    x_coords = orig_da.x[: buffered.shape[1]]
-    xr_ras = xr.DataArray(buffered, dims=("y", "x"), coords={"y": y_coords, "x": x_coords})
+    xr_ras = xr.DataArray(
+        buffered, dims=("y", "x"), coords={"y": orig_da.y, "x": orig_da.x}
+    )
     xr_ras = xr_ras.rio.write_crs(da.rio.crs, inplace=True)
     xr_ras = xr_ras.rio.write_transform(orig_da.rio.transform(), inplace=True)
     local_dir_path = os.path.dirname(local_out)
