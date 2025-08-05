@@ -58,7 +58,7 @@ def flox_sparse_reindex_kwargs() -> dict:
 
     return {
         "reindex": ReindexStrategy(
-            blockwise=True, array_type=ReindexArrayType.SPARSE_COO
+            blockwise=False, array_type=ReindexArrayType.SPARSE_COO
         )
     }
 
