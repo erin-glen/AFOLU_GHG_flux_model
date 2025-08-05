@@ -56,9 +56,10 @@ def flox_sparse_reindex_kwargs() -> dict:
         )
         return {}
 
+    # keep blockwise=True: speed‑up & lower RAM in distributed mode
     return {
         "reindex": ReindexStrategy(
-            blockwise=False, array_type=ReindexArrayType.SPARSE_COO
+            blockwise=True, array_type=ReindexArrayType.SPARSE_COO
         )
     }
 
@@ -202,14 +203,7 @@ def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
 # From long chat in https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/684749fe-7b30-800a-ba8b-c502377f2c3a
 def safe_crop(ds, ref):
     return ds.sel(x=ref.x, y=ref.y, method="nearest")
-
-
-def crop_to_bbox(ds: xr.DataArray, bbox: list[float]) -> xr.DataArray:
-    """Slice ``ds`` to ``bbox`` handling coordinate order."""
-    west, south, east, north = bbox
-    x_slice = slice(west, east) if ds.x[0] < ds.x[-1] else slice(east, west)
-    y_slice = slice(south, north) if ds.y[0] < ds.y[-1] else slice(north, south)
-    return ds.sel(x=x_slice, y=y_slice)
+# (crop_to_bbox helper is no longer used – remove to avoid dead code)
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -505,10 +499,7 @@ def run(args: argparse.Namespace) -> None:
         .astype("uint32")
         .persist()
     )
-    pixel_area = (
-        open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size)
-        .persist()
-    )
+    pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size).persist()
 
     contextual_layer_names = ["drained_state_nodes", "burned_state_nodes", "gadm_adm0"]
 
@@ -547,11 +538,13 @@ def run(args: argparse.Namespace) -> None:
         burned_total = open_zarr_region(
             paths["burned_total_Mg_CO2e_pixel"]["zarr"], bbox, args.chunk_size
         )
-        drained_state_nodes = open_zarr_region(
-            paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size
+        drained_state_nodes = (
+            open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size)
+            .astype("uint32")        # ⇦ shrink 2× compared with default int64
         )
-        burned_state_nodes = open_zarr_region(
-            paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size
+        burned_state_nodes = (
+            open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size)
+            .astype("uint32")
         )
         logger.debug("Flux layers opened for interval %s", interval)
 
@@ -600,23 +593,27 @@ def run(args: argparse.Namespace) -> None:
         # Disable task fusion for the heavy pixel‑wise graph
         with dask.config.set({"optimization.fuse.active": False}):
             with dask.annotate(label=f"reduce:{interval}"):
-                flux_results = flox.groupby_reduce(
-                    data=(
-                        drained_total_aligned,
-                        burned_total_aligned,
-                        pixel_area_aligned,
-                    ),
-                    groupers=(
-                        adm0_aligned,
-                        drained_state_nodes,
-                        burned_state_nodes_aligned,
-                    ),
-                    func="sum",
-                    expected_groups=(gadm_adm0_ids, node_codes, node_codes),
-                    fill_value=np.nan,
-                    split_out=4,
-                    **flox_sparse_reindex_kwargs(),
-                ).rename({"variable": "flux_type"}).persist()
+                flux_results = (
+                    flox.groupby_reduce(
+                        (
+                            drained_total_aligned,
+                            burned_total_aligned,
+                            pixel_area_aligned,
+                        ),
+                        (
+                            adm0_aligned,
+                            drained_state_nodes,
+                            burned_state_nodes_aligned,
+                        ),
+                        func="sum",
+                        expected_groups=(gadm_adm0_ids, node_codes, node_codes),
+                        fill_value=0,          # keep ints → ints; avoids float up‑cast
+                        split_out=4,
+                        **flox_sparse_reindex_kwargs(),
+                    )
+                    .rename({"variable": "flux_type"})
+                    .persist()
+                )
         logger.debug("Flox reduce complete for interval %s", interval)
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
@@ -639,16 +636,17 @@ def run(args: argparse.Namespace) -> None:
     logger.debug("Rows in concatenated DataFrame   : %s", f"{len(full_df):,}")
 
     # Cast long strings → categorical to shrink output
-    for col in ("drained_state_meaning", "burned_state_meaning"):
+    for col in ("drained_state_meaning", "burned_state_meaning", "flux_type"):
         if col in full_df.columns:
             full_df[col] = full_df[col].astype("category")
 
     # ── Direct Parquet write to S3 (no tmp dir, no manual upload) ─────────
     logger.debug("Writing Parquet directly to %s", args.output_parquet)
     s3_arrow = pafs.S3FileSystem(region="us-east-1")  # adjust if needed
+    base_dir = args.output_parquet.replace("s3://", "", 1).rstrip("/")  # ⇦ Arrow expects bucket/key when FS provided
     ds.write_dataset(
         pa.Table.from_pandas(full_df, preserve_index=False),
-        base_dir=args.output_parquet.rstrip("/"),
+        base_dir=base_dir,
         filesystem=s3_arrow,
         partitioning=["interval_end"],
         format="parquet",
