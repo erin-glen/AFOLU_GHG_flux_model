@@ -419,6 +419,60 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
         zarr.convenience.consolidate_metadata(fs.get_mapper(path))
 
 
+def log_array_summary(
+        logger: logging.Logger,
+        name: str,
+        arr: xr.DataArray,
+        *,
+        categories: bool = False,
+        sample_size: int = 5,
+) -> None:
+    """Emit detailed statistics for a :class:`~xarray.DataArray`.
+
+    Parameters
+    ----------
+    logger:
+        Logger used for emitting debug messages.
+    name:
+        Human‑readable array label included in all log lines.
+    arr:
+        The array to inspect.  It may be backed by Dask; statistics are
+        computed lazily and then realised.
+    categories:
+        When ``True`` the function logs unique values present in ``arr``.
+    sample_size:
+        Number of flattened sample values to log for a quick sanity check.
+    """
+
+    logger.debug(
+        "%s → shape=%s chunks=%s dtype=%s",
+        name,
+        arr.shape,
+        arr.chunks,
+        arr.dtype,
+    )
+    min_val, max_val, mean_val = dask.compute(
+        arr.min(), arr.max(), arr.mean()
+    )
+    sample = arr.data.ravel()[:sample_size].compute().tolist()
+    logger.debug(
+        "%s stats: min=%s max=%s mean=%s sample=%s",
+        name,
+        min_val,
+        max_val,
+        mean_val,
+        sample,
+    )
+    if categories:
+        unique_vals = np.array(da.unique(arr.data).compute())
+        logger.debug(
+            "%s unique categories (%d): %s",
+            name,
+            unique_vals.size,
+            unique_vals.tolist(),
+        )
+
+
 def run(args: argparse.Namespace) -> None:
     stage = "zonal_statistics"
     start_ts = uu.timestr()
@@ -580,13 +634,15 @@ def run(args: argparse.Namespace) -> None:
                 "burned_total": burned_total_aligned,
                 "pixel_area": pixel_area_aligned,
                 "adm0": adm0_aligned,
+                "drained_state_nodes": drained_state_nodes,
+                "burned_state_nodes": burned_state_nodes_aligned,
             }.items():
-                logger.debug(
-                    "%s → shape=%s chunks=%s dtype=%s",
+                log_array_summary(
+                    logger,
                     n,
-                    arr.shape,
-                    arr.chunks,
-                    arr.dtype,
+                    arr,
+                    categories=n
+                    in {"adm0", "drained_state_nodes", "burned_state_nodes"},
                 )
 
 
@@ -608,10 +664,17 @@ def run(args: argparse.Namespace) -> None:
             ).compute()
 
         logger.debug("Flox reduce complete for interval %s", interval)
+        if args.debug:
+            for dim in ("gadm_adm0", "drained_state_nodes", "burned_state_nodes"):
+                vals = flux_results[dim].values
+                logger.debug("flox group %s (%d): %s", dim, vals.size, vals)
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
         df = create_interval_df(coord_dict, flux_type_dict, interval_end_year)
         df = calculate_interval_flux_densities(df, contextual_layer_names)
+        if args.debug:
+            logger.debug("Interval DataFrame rows: %s", len(df))
+            logger.debug("Interval DataFrame head:\n%s", df.head())
         dfs.append(df)
         logger.info("Processed interval %s", interval)
 
