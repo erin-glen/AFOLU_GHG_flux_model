@@ -607,7 +607,6 @@ def run(args: argparse.Namespace) -> None:
                         func="sum",
                         expected_groups=(gadm_adm0_ids, node_codes, node_codes),
                         fill_value=0,          # keep ints → ints; avoids float up‑cast
-                        split_out=4,
                         **flox_sparse_reindex_kwargs(),
                     )
                     .rename({"variable": "flux_type"})
