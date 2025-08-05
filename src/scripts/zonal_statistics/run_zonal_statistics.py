@@ -202,7 +202,10 @@ def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
 # ref is the reference dataset that is being cropped to.
 # From long chat in https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/684749fe-7b30-800a-ba8b-c502377f2c3a
 def safe_crop(ds, ref):
-    return ds.sel(x=ref.x, y=ref.y, method="nearest")
+    return (
+        ds.sel(x=ref.x, y=ref.y, method="nearest")
+        .assign_coords(x=ref.x, y=ref.y)
+    )
 # (crop_to_bbox helper is no longer used – remove to avoid dead code)
 
 
@@ -641,7 +644,6 @@ def run(args: argparse.Namespace) -> None:
         partitioning=["interval_end"],
         format="parquet",
         existing_data_behavior="delete_matching",
-        compression="zstd",
     )
     logger.info("Parquet write complete – uploaded to %s", args.output_parquet)
 
