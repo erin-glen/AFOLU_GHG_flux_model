@@ -233,7 +233,7 @@ def open_zarr_region(
     """
     mapper = fsspec.get_mapper(path, anon=False, check=False)
 
-    # Use consolidated metadata to avoid repeated per‑chunk metadata fetches.
+    # Faster: read consolidated metadata once instead of per‑chunk.
     with dask.annotate(label=f"open:{Path(path).stem}"):
         ds = xr.open_zarr(mapper, consolidated=True)
 
@@ -284,8 +284,8 @@ def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
     logging.info("   Post-processing %s : %s", interval, timestr())
 
     arr = flux_results.data
+    # If the reduce result is still lazy, bring it into local memory once.
     if isinstance(arr, da.Array):
-        # Gather any lazily persisted results into local memory
         arr = arr.compute()
     dim_names = flux_results.dims
 
@@ -501,15 +501,11 @@ def run(args: argparse.Namespace) -> None:
     )
 
     logger.debug("Opening contextual layers")
-    # Persist static contextual layers once so repeated interval crops do not
-    # rebuild Dask graphs or re-read from disk
+    # Persist static rasters so subsequent interval loops reuse them.
     adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size).persist()
     pixel_area = (
         open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size).persist()
     )
-
-    adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size)
-    pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size)
 
     contextual_layer_names = ["drained_state_nodes", "burned_state_nodes", "gadm_adm0"]
 
@@ -528,18 +524,19 @@ def run(args: argparse.Namespace) -> None:
         # Build dataset folders and cache paths for this interval
         paths = build_paths(interval, **OUTPUT_KW)
 
-        # Cache S3 listings to avoid repeated folder scans
+        # -------------------------------------------------------------------
+        # One S3 dir‑list per dataset → cache; reuse everywhere below
+        # -------------------------------------------------------------------
         cached_uri_lists = {
             key: list_folder_uris(spec["folder"])
             for key, spec in paths.items()
         }
 
-        # --- build flux‑layer caches if missing ----------------------------
+        # Ensure each Zarr exists (no repeated list_folder_uris calls)
         for key, spec in paths.items():
             ensure_zarr_exists(
                 cached_uri_lists[key], spec["zarr"], args.chunk_size
             )
-        # -------------------------------------------------------------------
 
         drained_total = open_zarr_region(
             paths["drained_total_Mg_CO2e_pixel"]["zarr"], bbox, args.chunk_size
@@ -626,9 +623,9 @@ def run(args: argparse.Namespace) -> None:
                     node_codes,
                 ),
                 fill_value=np.nan,
-                split_out=4,  # spread reduction across multiple chunks
+                split_out=4,              # distribute reduction work
                 **flox_sparse_reindex_kwargs(),
-            ).persist()
+            ).persist()                  # keep in cluster memory
         logger.debug("Flox reduce complete for interval %s", interval)
 
         coord_dict = convert_to_coord_dict(flux_results, interval)
