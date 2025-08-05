@@ -56,10 +56,9 @@ def flox_sparse_reindex_kwargs() -> dict:
         )
         return {}
 
-    # keep blockwise=True: speed‑up & lower RAM in distributed mode
     return {
         "reindex": ReindexStrategy(
-            blockwise=True, array_type=ReindexArrayType.SPARSE_COO
+            blockwise=False, array_type=ReindexArrayType.SPARSE_COO
         )
     }
 
