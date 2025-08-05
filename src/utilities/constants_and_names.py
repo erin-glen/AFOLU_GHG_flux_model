@@ -648,6 +648,7 @@ otherland_IPCC = 6
 IPCC_class_max_val = 6  # Maximum value of IPCC class codes
 
 land_state_pattern = "land_state_node"
+land_state_node_fire_value = 9  # State nodes that end in 9 had fire
 
 agc_rf_pre_dist_pattern = "removal_factor__AGC__MgC"
 
