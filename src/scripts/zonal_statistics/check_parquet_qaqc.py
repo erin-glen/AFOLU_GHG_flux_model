@@ -110,13 +110,13 @@ def main() -> None:
             --------
             Inspect a local dataset folder:
 
-                python check_parquet_qaqc.py --parquet ./zonal_stats.parquet
+                python -m src.scripts.zonal_statistics.check_parquet_qaqc.py --parquet ./zonal_stats.parquet
 
             Only load the 2024 and 2019 partitions (fast):
 
-                python check_parquet_qaqc.py --parquet s3://bucket/zonal_stats.parquet \\
-                       --interval_end 2024 2019
-            """
+                python -m src.scripts.zonal_statistics.check_parquet_qaqc --parquet s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_5_0/zonal_stats/zonal_stats_2024/drained/2024/part-0.parquet
+                       --interval_end 2024 
+                       """
         ),
     )
     parser.add_argument(
