@@ -20,7 +20,7 @@ python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --input_date YYYYMMDD -nw 100 -ln "This is the aggregation of the 1884-chunk run."
 
 Full Coiled run (create a cluster with 1 worker, then resize it to 200 workers after local processing is done):
-python -m src.utilities.create_cluster -n 2 -t 1 -m 4 -cn LULUCF_postprocessing
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --input_date YYYYMMDD -nw 200 -ln "This is intended to be the definitive global run."
 
 Notes on optimizing threads/worker: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210803828525318?focus=true
@@ -55,8 +55,8 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
 
     # Runs chunks in batches of specified size.
     # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
-    # batch_size = 3000
-    batch_size = 5  # For testing batch processing
+    batch_size = 3000
+    # batch_size = 15  # For testing batch processing
     # batch_size = 1  # For testing batch processing
 
     # Determines if arguments for start and end year are valid
@@ -114,9 +114,9 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
     main_logger.info(f"Directories to aggregate: {output_dir_list}")
 
     # # For testing- first folder only, so contents of all folders don't need to be listed
-    output_dir_list = output_dir_list[0:1]
+    # output_dir_list = output_dir_list[0:1]
     # output_dir_list = output_dir_list[0:3]
-    main_logger.info("output_dir_list:", output_dir_list)
+    main_logger.info(f"output_dir_list: {output_dir_list}")
 
     main_logger.info(f"There are {len(output_dir_list)} folders to aggregate to 10x10s")
 
