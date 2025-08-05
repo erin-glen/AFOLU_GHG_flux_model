@@ -41,30 +41,46 @@ import zarr
 from flox import ReindexArrayType, ReindexStrategy
 from flox.xarray import xarray_reduce
 
-# ------------------------------------------------------------------
-# 1️⃣  OPTION FLAG – turn sparse mode on/off from the CLI
-# ------------------------------------------------------------------
 SPARSE_DEFAULT = True          # set False for quick local smoke tests
 
-
+# ------------------------------------------------------------------
+# Helper: kwargs for flox that switch on sparse-COO + fill_value=0
+# ------------------------------------------------------------------
 def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
-    """Return kwargs enabling sparse reindexing when supported."""
+    """
+    Return keyword arguments for ``flox.xarray_reduce``.
 
+    When *use_sparse* is True and the installed ``flox`` version supports
+    sparse re-indexing, the dict contains
+
+        {
+            "reindex": ReindexStrategy(blockwise=False,
+                                       array_type=ReindexArrayType.SPARSE_COO),
+            "fill_value": 0
+        }
+
+    Otherwise an empty dict is returned so that the call falls back to the
+    default dense behaviour.
+    """
     if not use_sparse:
         return {}
 
+    # Guard against older flox versions
     if ReindexStrategy is None or ReindexArrayType is None:
         logging.warning(
-            "Sparse re-index helpers missing – using dense aggregation; "
-            "memory use will be higher. Consider installing flox >= 0.10."
+            "Sparse re-index helpers missing – falling back to dense "
+            "aggregation; memory use will be higher.  Consider installing "
+            "flox >= 0.10."
         )
         return {}
 
     return {
         "reindex": ReindexStrategy(
             blockwise=False, array_type=ReindexArrayType.SPARSE_COO
-        )
+        ),
+        "fill_value": 0,    # ← required so sparse COO has a concrete empty-cell value
     }
+
 
 # Absolute import so the script can run as `python run_zonal_statistics.py`
 import src.scripts.zonal_statistics.zonal_constants as zc
@@ -105,6 +121,7 @@ FOLDER_TEMPLATE = (
     + "/{folder}/ogh_standard_model/five_year_intervals/{interval}/"
     "40000_pixels/{run_date}/"
 )
+
 
 
 def build_paths(interval: str, **kw) -> dict[str, dict[str, str]]:
@@ -561,6 +578,13 @@ def run(args: argparse.Namespace) -> None:
     contextual_layer_names_b = ["burned_state_nodes", "gadm_adm0"]
 
     gadm_adm0_ids = zc.GADM_ADM0_IDS
+    # ---- convert frozensets → sorted numeric arrays for flox ------------
+    drained_codes_arr = np.array(
+        sorted(int(c) for c in ALL_DRAINED_STATE_CODES), dtype=np.uint32
+    )
+    burned_codes_arr = np.array(
+        sorted(int(c) for c in ALL_BURNED_STATE_CODES), dtype=np.uint32
+    )
 
     interval_pairs = build_interval_pairs(args.interval_end_years)
 
@@ -658,7 +682,7 @@ def run(args: argparse.Namespace) -> None:
                 adm0_aligned,
                 drained_state_nodes,
                 func="sum",
-                expected_groups=(gadm_adm0_ids, ALL_DRAINED_STATE_CODES),
+                expected_groups=(gadm_adm0_ids, drained_codes_arr),
                 **flox_sparse_reindex_kwargs(not args.no_sparse),
             ).compute()
         dict_d = convert_to_coord_dict(res_d, interval)
@@ -689,7 +713,7 @@ def run(args: argparse.Namespace) -> None:
                 adm0_aligned,
                 burned_state_nodes_aligned,
                 func="sum",
-                expected_groups=(gadm_adm0_ids, ALL_BURNED_STATE_CODES),
+                expected_groups=(gadm_adm0_ids, burned_codes_arr),
                 **flox_sparse_reindex_kwargs(not args.no_sparse),
             ).compute()
         dict_b = convert_to_coord_dict(res_b, interval)
