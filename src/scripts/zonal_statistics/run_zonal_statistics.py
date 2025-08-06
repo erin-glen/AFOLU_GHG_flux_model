@@ -803,8 +803,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --cluster_name zonal_stats \
        --run_date 20250724 \
        --tile_ids 00N_110E \
-       --model_version 0_5_0 \
-       --debug 
+       --model_version 0_5_0 
 
 *Note that running debug slows things down a lot!!
 
