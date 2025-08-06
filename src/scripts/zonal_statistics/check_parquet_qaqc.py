@@ -136,3 +136,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+"""
+python -m src.scripts.zonal_statistics.check_parquet_qaqc -p s3://climate/AFOLU_flux_model/organic_soils/outputs/version_0_5_0/zonal_stats/zonal_stats_2024/drained/2024/part-0.parquet
+"""

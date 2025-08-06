@@ -1,4 +1,5 @@
 import pandas as pd
+import pyarrow
 
 PATH = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_5_0/zonal_stats/zonal_stats_2024/drained/2024/"  # a *directory* not a file!
 
@@ -13,3 +14,7 @@ filters = [
 
 df = pd.read_parquet(PATH, columns=cols, filters=filters, engine="pyarrow")
 print(len(df), "rows loaded")
+
+"""
+python -m src.scripts.zonal_statistics.parquet_qaqc_light
+"""
