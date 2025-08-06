@@ -20,52 +20,52 @@ _drain_root = {
 
 _drain_emit = {
     # BOREAL
-    "111": "boreal_forest_poor",
-    "112": "boreal_forest_rich",
-    "12":  "boreal_grassland",
-    "13":  "boreal_cropland",
-    "14":  "boreal_extraction",
-    "15":  "boreal_settlement",
-    "16":  "boreal_wetland",
-    "17":  "boreal_otherland",
+    "1111": "boreal_forest_poor",
+    "1112": "boreal_forest_rich",
+    "112":  "boreal_grassland",
+    "113":  "boreal_cropland",
+    "114":  "boreal_extraction",
+    "115":  "boreal_settlement",
+    "116":  "boreal_wetland",
+    "117":  "boreal_otherland",
     # TEMPERATE
-    "21":  "temperate_forest",
-    "221": "temperate_grassland_poor",
-    "222": "temperate_grassland_rich",
-    "23":  "temperate_cropland",
-    "24":  "temperate_extraction",
-    "25":  "temperate_settlement",
-    "26":  "temperate_wetland",
-    "27":  "temperate_otherland",
+    "121":  "temperate_forest",
+    "1221": "temperate_grassland_poor",
+    "1222": "temperate_grassland_rich",
+    "123":  "temperate_cropland",
+    "124":  "temperate_extraction",
+    "125":  "temperate_settlement",
+    "126":  "temperate_wetland",
+    "127":  "temperate_otherland",
     # TROPICAL
-    "311": "tropical_long_rotation",
-    "312": "tropical_short_rotation",
-    "313": "tropical_oil_palm",
-    "32":  "tropical_forest",
-    "33":  "tropical_grassland",
-    "34":  "tropical_cropland",
-    "35":  "tropical_extraction",
-    "38":  "tropical_settlement",
-    "39":  "tropical_wetland",
-    "30":  "tropical_otherland",
+    "1311": "tropical_long_rotation",
+    "1312": "tropical_short_rotation",
+    "1313": "tropical_oil_palm",
+    "132":  "tropical_forest",
+    "133":  "tropical_grassland",
+    "134":  "tropical_cropland",
+    "135":  "tropical_extraction",
+    "138":  "tropical_settlement",
+    "139":  "tropical_wetland",
+    "13":  "tropical_otherland",
 }
 
 _burn_root = {
-    "11": "boreal_drained",
-    "12": "boreal_undrained",
-    "21": "temperate_drained",
-    "22": "temperate_undrained",
-    "31": "tropical_drained_crop_or_plantation",
-    "32": "tropical_drained_other",
-    "33": "tropical_undrained",
-    "4":  "other_domain",
+    "1": "boreal",
+    "2": "temperate",
+    "3": "tropical",
+    "4": "other_domain",
 }
 
 _burn_emit = {
-    "1": "drained",
-    "2": "undrained",
-    "3": "tropical_undrained",
-    "4": "other",
+    "1": {"11": "drained", "12": "undrained"},
+    "2": {"21": "drained", "22": "undrained"},
+    "3": {
+        "31": "drained_crop_or_plantation",
+        "32": "drained_other",
+        "33": "undrained",
+    },
+    "4": {"4": "other"},
 }
 
 ## ── lookup tables ───────────────────────────────────────────────────
@@ -83,18 +83,10 @@ DRAINED_STATE_NODE_MEANINGS.update(
 )
 
 BURNED_STATE_NODE_MEANINGS: dict[str, str] = {
-    _pad_right(root_code): label
-    for root_code, label in _burn_root.items()
-    if root_code.startswith("3")
+    _pad_right(root + sub): f"{_burn_root[root]}__{label}"
+    for root, sub_dict in _burn_emit.items()
+    for sub, label in sub_dict.items()
 }
-BURNED_STATE_NODE_MEANINGS.update(
-    {
-        _pad_right(root_code + sub): f"{label}__{sub_label}"
-        for root_code, label in _burn_root.items()
-        if not root_code.startswith("3")
-        for sub, sub_label in _burn_emit.items()
-    }
-)
 
 ALL_DRAINED_STATE_CODES = frozenset(DRAINED_STATE_NODE_MEANINGS.keys())
 ALL_BURNED_STATE_CODES = frozenset(BURNED_STATE_NODE_MEANINGS.keys())
