@@ -184,8 +184,9 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
     s3_client.upload_file(combined_local_log, "gfw2-data", Key=f"{cn.s3_log_path}{combined_log_name}")
 
-    # Remove the main log if the stage doesn't run in batches.
-    # The main log must be kept for stages the run in batches because each batch uses the same main log.
+    # Removes the main log if the stage doesn't run in batches.
+    # The main log must be kept for stages that run in batches because each batch uses the same main log.
+    # The main log can be manually deleted after the run is done.
     if not "create_forest_age_2010_2015__1x1_deg" or "LULUCF_fluxes" in stage:
         os.remove(main_log)
 
