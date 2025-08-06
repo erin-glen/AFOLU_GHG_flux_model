@@ -43,6 +43,8 @@ from flox import ReindexArrayType, ReindexStrategy
 from flox.xarray import xarray_reduce
 
 SPARSE_DEFAULT = True
+
+
 # set False for quick local smoke tests
 
 def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
@@ -77,7 +79,7 @@ def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
         "reindex": ReindexStrategy(
             blockwise=False, array_type=ReindexArrayType.SPARSE_COO
         ),
-        "fill_value": 0,    # ← required so sparse COO has a concrete empty-cell value
+        "fill_value": 0,  # ← required so sparse COO has a concrete empty-cell value
     }
 
 
@@ -116,10 +118,11 @@ DATASETS = {
 # Template pieces used to build full paths on demand
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_date}/{interval}/"
 FOLDER_TEMPLATE = (
-    OUTPUT_BASE
-    + "/{folder}/ogh_standard_model/five_year_intervals/{interval}/"
-    "40000_pixels/{run_date}/"
+        OUTPUT_BASE
+        + "/{folder}/ogh_standard_model/five_year_intervals/{interval}/"
+          "40000_pixels/{run_date}/"
 )
+
 
 def build_paths(interval: str, **kw) -> dict[str, dict[str, str]]:
     """Return folder/zarr paths for all datasets in *interval*.
@@ -140,11 +143,13 @@ def build_paths(interval: str, **kw) -> dict[str, dict[str, str]]:
         }
     return paths
 
+
 # Contextual layers (static)
 ADM0_GTIFF_FOLDER = "s3://gfw2-data/gadm_administrative_boundaries/v4.1/v4.1.64__from_gfw-data-lake/raster/epsg-4326/10/40000/adm0/gdal-geotiff/"
 ADM0_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/GADM4_1_adm0_global/20250604/global_GADM41_adm0_20250604.zarr"
 PIXEL_AREA_GTIFF_FOLDER = "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
 PIXEL_AREA_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/pixel_area/20250730/global_pixel_area_20250730.zarr"
+
 
 def build_output_parquet(model_version: str, years: list[int]) -> str:
     """Return default Parquet output location.
@@ -193,7 +198,10 @@ def parse_pattern_from_uri(uri_series: pd.Series) -> str:
     }
     if len(matches) != 1:
         raise ValueError(f"Mixed or unparseable flux‑type patterns: {matches}")
-    return matches.pop()
+
+    # strip a trailing "_" occasionally left by the raster‑writer
+    flux_type = matches.pop().rstrip("_")
+    return flux_type
 
 
 def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
@@ -213,6 +221,7 @@ def safe_crop(ds, ref):
         ds.sel(x=ref.x, y=ref.y, method="nearest")
         .assign_coords(x=ref.x, y=ref.y)
     )
+
 
 def open_zarr_region(
         path: str,
@@ -255,7 +264,8 @@ def open_zarr_region(
         y_ascending = data_arr.y[0] < data_arr.y[-1]
 
         x_slice = slice(min(west, east), max(west, east)) if x_ascending else slice(max(east, west), min(east, west))
-        y_slice = slice(min(south, north), max(south, north)) if y_ascending else slice(max(north, south), min(north, south))
+        y_slice = slice(min(south, north), max(south, north)) if y_ascending else slice(max(north, south),
+                                                                                        min(north, south))
 
         data_arr = data_arr.sel(x=x_slice, y=y_slice)
     elif bbox is not None:
@@ -268,6 +278,7 @@ def open_zarr_region(
 
     # map_blocks wrapper removed – it added a graph layer for no benefit
     return data_arr
+
 
 def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
     """Return flox results as a coordinate dictionary.
@@ -346,27 +357,35 @@ def create_interval_df(
 def calculate_interval_flux_densities(
         df: pd.DataFrame, contextual_layer_names: list[str]
 ) -> pd.DataFrame:
-    """Calculate per-hectare flux densities."""
-    area_df = df[df["flux_type"] == "area__ha"].copy()
-    flux_df = df[df["flux_type"] != "area__ha"].copy()
-    merged = pd.merge(
-        flux_df,
-        area_df[contextual_layer_names + ["interval_end", "value"]],
-        on=contextual_layer_names,
-        how="left",
-        suffixes=("", "_area"),
+    """
+    Add a *value_per_ha* column without duplicating rows.
+
+    • rows where ``flux_type == 'area__ha'`` stay unchanged
+    • every other row gets a new numeric column ``value_per_ha`` obtained
+      by dividing the aggregated flux by the matching zone area
+    """
+    # ── fast lookup table of zone area (hectares) ───────────────────────
+    area_lookup = (
+        df[df["flux_type"] == "area__ha"]
+        .set_index(contextual_layer_names + ["interval_end"])["value"]
     )
-    # Guard against divide-by-zero for degenerate zones
+
+    mask_flux = df["flux_type"] != "area__ha"
+
+    # broadcast the zone‑area onto each flux row (vectorised, no merge)
+    df.loc[mask_flux, "value_per_ha"] = (
+        df.loc[mask_flux]
+        .set_index(contextual_layer_names + ["interval_end"])
+        .index.map(area_lookup)
+        .to_numpy()
+    )
+
     with np.errstate(divide="ignore", invalid="ignore"):
-        merged["value_per_ha"] = merged["value"] / merged["value_area"]
-    merged.loc[merged["value_area"] == 0, "value_per_ha"] = np.nan
-    new_rows = merged.copy()
-    new_rows["flux_type"] = new_rows["flux_type"].astype(str) + "__CO2_per_ha"
-    new_rows["value"] = new_rows["value_per_ha"]
-    new_rows = new_rows.drop(
-        columns=["value_area", "interval_end_area", "value_per_ha"]
-    )
-    return pd.concat([df, new_rows], ignore_index=True)
+        df.loc[mask_flux, "value_per_ha"] = (
+                df.loc[mask_flux, "value"] / df.loc[mask_flux, "value_per_ha"]
+        )
+
+    return df
 
 
 def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> None:
@@ -560,11 +579,11 @@ def run(args: argparse.Namespace) -> None:
     gadm_adm0_ids = zc.GADM_ADM0_IDS
     # ---- convert frozensets → sorted numeric arrays for flox ------------
     drained_codes_arr = np.array(
-            sorted({0, *map(int, ALL_DRAINED_STATE_CODES)}), dtype=np.uint32
-                                                                     )
+        sorted({0, *map(int, ALL_DRAINED_STATE_CODES)}), dtype=np.uint32
+    )
     burned_codes_arr = np.array(
-            sorted({0, *map(int, ALL_BURNED_STATE_CODES)}), dtype=np.uint32
-                                                                    )
+        sorted({0, *map(int, ALL_BURNED_STATE_CODES)}), dtype=np.uint32
+    )
 
     interval_pairs = build_interval_pairs(args.interval_end_years)
 
@@ -609,7 +628,7 @@ def run(args: argparse.Namespace) -> None:
         )
         drained_state_nodes = (
             open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size)
-            .astype("uint32")        # ⇦ shrink 2× compared with default int64
+            .astype("uint32")  # ⇦ shrink 2× compared with default int64
         )
         burned_state_nodes = (
             open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size)
@@ -647,9 +666,8 @@ def run(args: argparse.Namespace) -> None:
                     n,
                     arr,
                     categories=n
-                    in {"adm0", "drained_state_nodes", "burned_state_nodes"},
+                               in {"adm0", "drained_state_nodes", "burned_state_nodes"},
                 )
-
 
         # -------------------------  DR A I N E D  -------------------------
         with dask.annotate(label=f"reduce:drained:{interval}"):
@@ -736,7 +754,6 @@ def run(args: argparse.Namespace) -> None:
         logger.debug("Closing cluster")
         cluster.close()
     uu.stage_duration(start_ts, uu.timestr(), stage)
-
 
 
 def main(argv=None):
@@ -830,7 +847,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --tile_ids 00N_110E \
        --model_version 0_5_0 \
        --debug 
-       
+
 *Note that running debug slows things down a lot!!
 
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
