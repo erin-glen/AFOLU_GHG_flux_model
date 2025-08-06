@@ -13,7 +13,11 @@ Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
 python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --run_date YYYYMMDD
 
-Coiled large shapefile test:
+Coiled Cerrado test (174 features):
+python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn LULUCF_model
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp -yr 2000 2024 --run_date YYYYMMDD
+
+Coiled large shapefile test (1884 features):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_model
 python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --run_date YYYYMMDD
 
