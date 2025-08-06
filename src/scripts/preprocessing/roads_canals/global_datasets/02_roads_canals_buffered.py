@@ -247,7 +247,12 @@ def process_chunk_buffered(bounds, tile_id, feature_type):
         return
 
     # Combine the per‑tile GeoDataFrames into one
-    lines_dgdf = dd.concat(line_dgdfs, interleave_partitions=True)
+    # Concatenate into a Dask GeoDataFrame. Using ``dgpd.concat`` preserves
+    # the geometry metadata, whereas ``dd.concat`` would return a plain
+    # Dask DataFrame and drop the GeoDataFrame-specific methods like
+    # ``to_crs``. The latter would prevent reprojection and yield empty
+    # outputs.
+    lines_dgdf = dgpd.concat(line_dgdfs, interleave_partitions=True)
 
     chunk_poly = box(*expanded_bounds_crs)
     lines_clip = dgpd.clip(lines_dgdf.to_crs(da.rio.crs), chunk_poly)
