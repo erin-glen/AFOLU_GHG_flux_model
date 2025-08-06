@@ -17,6 +17,7 @@ import boto3
 import numpy as np
 import dask
 import dask_geopandas as dgpd
+import dask.dataframe as dd
 import posixpath
 import xarray as xr
 import rasterio
@@ -245,7 +246,9 @@ def process_chunk_buffered(bounds, tile_id, feature_type):
         logging.info(f"[{tile_id}|{chunk_str}] lines are empty => skip")
         return
 
-    lines_dgdf = dgpd.concat(line_dgdfs)
+    # Combine the per‑tile GeoDataFrames into one
+    lines_dgdf = dd.concat(line_dgdfs, interleave_partitions=True)
+
     chunk_poly = box(*expanded_bounds_crs)
     lines_clip = dgpd.clip(lines_dgdf.to_crs(da.rio.crs), chunk_poly)
     if dask_gdf_is_empty(lines_clip):
