@@ -19,7 +19,6 @@ import dask
 import dask_geopandas as dgpd
 import posixpath
 import xarray as xr
-import rioxarray as rxr
 import rasterio
 from rasterio.merge import merge as merge_rasters
 from pyogrio.errors import FeatureError
@@ -111,6 +110,13 @@ def compute_buffered(binary, mask, max_dist=MAX_DISTANCE):
 @dask.delayed
 def process_chunk_buffered(bounds, tile_id, feature_type):
     """Rasterise lines to distance rings using the 30 m union mask."""
+    # ``rioxarray`` registers the ``rio`` accessor on xarray objects when it is
+    # imported.  The dask workers running this function might not have executed
+    # the module-level import, which would leave ``xr.DataArray`` without the
+    # ``rio`` accessor and cause ``AttributeError: 'DataArray' object has no
+    # attribute 'rio'``. Importing here ensures the accessor is available on
+    # every worker.
+    import rioxarray  # noqa: F401
     chunk_str = "_".join(map(str, bounds))
     group, sub = feature_type.split('_', 1)
     local_dir = cn.datasets[group][sub]['local_processed']
