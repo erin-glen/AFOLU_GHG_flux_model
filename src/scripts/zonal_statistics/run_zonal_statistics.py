@@ -181,7 +181,7 @@ def parse_pattern_from_uri(uri_series: pd.Series) -> str:
 
     The filenames are expected to end with ``_<start>_<end>.tif`` where
     ``start`` and ``end`` are four digit years.  Examples include organic soils
-    outputs such as ``drained_total_Mg_CO2e_ha`` and ``burned_total_Mg_CO2e_ha``.
+    outputs such as ``drained_total_Mg_CO2e_pixel`` and ``burned_total_Mg_CO2e_pixel``.
     """
     if uri_series.empty:
         raise ValueError("No GeoTIFFs found – cannot derive flux‑type pattern")
@@ -198,10 +198,7 @@ def parse_pattern_from_uri(uri_series: pd.Series) -> str:
     }
     if len(matches) != 1:
         raise ValueError(f"Mixed or unparseable flux‑type patterns: {matches}")
-
-    # strip a trailing "_" occasionally left by the raster‑writer
-    flux_type = matches.pop().rstrip("_")
-    return flux_type
+    return matches.pop()
 
 
 def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
@@ -351,40 +348,6 @@ def create_interval_df(
         )
     df["interval_end"] = interval_end_year
     df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000
-    return df
-
-
-def calculate_interval_flux_densities(
-        df: pd.DataFrame, contextual_layer_names: list[str]
-) -> pd.DataFrame:
-    """
-    Add a *value_per_ha* column without duplicating rows.
-
-    • rows where ``flux_type == 'area__ha'`` stay unchanged
-    • every other row gets a new numeric column ``value_per_ha`` obtained
-      by dividing the aggregated flux by the matching zone area
-    """
-    # ── fast lookup table of zone area (hectares) ───────────────────────
-    area_lookup = (
-        df[df["flux_type"] == "area__ha"]
-        .set_index(contextual_layer_names + ["interval_end"])["value"]
-    )
-
-    mask_flux = df["flux_type"] != "area__ha"
-
-    # broadcast the zone‑area onto each flux row (vectorised, no merge)
-    df.loc[mask_flux, "value_per_ha"] = (
-        df.loc[mask_flux]
-        .set_index(contextual_layer_names + ["interval_end"])
-        .index.map(area_lookup)
-        .to_numpy()
-    )
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        df.loc[mask_flux, "value_per_ha"] = (
-                df.loc[mask_flux, "value"] / df.loc[mask_flux, "value_per_ha"]
-        )
-
     return df
 
 
@@ -573,9 +536,6 @@ def run(args: argparse.Namespace) -> None:
     adm0 = open_zarr_region(adm0_zarr_name, bbox, args.chunk_size).astype("uint32")
     pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size).persist()
 
-    contextual_layer_names_d = ["drained_state_nodes", "gadm_adm0"]
-    contextual_layer_names_b = ["burned_state_nodes", "gadm_adm0"]
-
     gadm_adm0_ids = zc.GADM_ADM0_IDS
     # ---- convert frozensets → sorted numeric arrays for flox ------------
     drained_codes_arr = np.array(
@@ -689,7 +649,6 @@ def run(args: argparse.Namespace) -> None:
             2: "area__ha",
         }
         df_d = create_interval_df(dict_d, ft_dict_d, interval_end_year)
-        df_d = calculate_interval_flux_densities(df_d, contextual_layer_names_d)
         ds.write_dataset(
             pa.Table.from_pandas(df_d, preserve_index=False),
             base_dir=str(base_dir_drained),
@@ -720,7 +679,6 @@ def run(args: argparse.Namespace) -> None:
             2: "area__ha",
         }
         df_b = create_interval_df(dict_b, ft_dict_b, interval_end_year)
-        df_b = calculate_interval_flux_densities(df_b, contextual_layer_names_b)
         ds.write_dataset(
             pa.Table.from_pandas(df_b, preserve_index=False),
             base_dir=str(base_dir_burned),
