@@ -237,11 +237,14 @@ def open_zarr_region(
     • The result is rechunked *only* along the spatial dims that exist
       (typically `"x"` and `"y"`).
     """
-    mapper = fsspec.get_mapper(path, anon=False, check=False)
-
-    # Faster: read consolidated metadata once instead of per‑chunk.
+    # zarr ≥ 3 prefers a path + storage_options over an FSMap
+    s3_opts = {"anon": False}                    # tweak if credentials are needed
     with dask.annotate(label=f"open:{Path(path).stem}"):
-        ds = xr.open_zarr(mapper, consolidated=True)
+        ds = xr.open_zarr(
+            path,
+            consolidated=None,                   # v3: consolidated metadata optional
+            storage_options=s3_opts,
+        )
 
     # ── select a variable ────────────────────────────────────────────────
     if isinstance(ds, xr.DataArray):
@@ -366,7 +369,11 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
     has_xy = False
     if group_exists:
         logging.debug("Opening existing Zarr store %s", zarr_path)
-        ds = xr.open_zarr(fs.get_mapper(path), consolidated=metadata_exists)
+        ds = xr.open_zarr(
+            zarr_path,
+            consolidated=None,                   # leave auto‑detect to xarray/zarr
+            storage_options=fs.storage_options if hasattr(fs, "storage_options") else {"anon": False},
+        )
         has_xy = {"x", "y"}.issubset(ds.dims)
 
     if group_exists and metadata_exists and has_xy:
@@ -397,8 +404,12 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
         ds.to_zarr(zarr_path, mode="w")
 
     if not metadata_exists or not has_xy:
-        logging.debug("Consolidating metadata for %s", zarr_path)
-        zarr.convenience.consolidate_metadata(fs.get_mapper(path))
+        # zarr‑3 stores don’t yet implement consolidated metadata; only run for v2.
+        if zarr.version_info[0] < 3:
+            logging.debug("Consolidating metadata for %s (zarr‑v2)", zarr_path)
+            zarr.convenience.consolidate_metadata(fs.get_mapper(path))
+        else:
+            logging.debug("Skipping consolidate_metadata for zarr‑v3 store %s", zarr_path)
 
 
 def log_array_summary(
