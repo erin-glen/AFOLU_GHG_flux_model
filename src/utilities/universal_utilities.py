@@ -1127,14 +1127,12 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     ### Part 4: Uploads 10x10 to s3 using multipart uploading
     ### https://chatgpt.com/share/e/67d848cf-8b08-800a-b0e8-79a72c9eb49a.
 
-    lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}: {timestr()}", is_final, logger_worker)
+    if no_upload == False:
 
-    if no_upload:
-
-        #Because boto3 does multipart uploading for files >100MB, this only adds multipart uploading for files
+        # Because boto3 does multipart uploading for files >100MB, this only adds multipart uploading for files
         # between part_size and 100MB.
         try:
-            lu.print_and_log(f"Uploading {out_file_name} to s3: {timestr()}", is_final, logger_worker)
+            lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}: {timestr()}", is_final, logger_worker)
             part_size = 20 * 1024 * 1024  # 20MB chunks
 
             # Starts multipart upload

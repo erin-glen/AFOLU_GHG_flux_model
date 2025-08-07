@@ -56,11 +56,11 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         scheduler_vm_type = "m8g.medium"
         worker_vm_type = "m8g.medium"
 
-    # t2.small not available with Coiled. t3.small has 2 vCPUs, so it's not actually Coiled credit-effective.
-    elif worker_memory == 2:
-        idle_timeout = 25
-        scheduler_vm_type = "t3.small"
-        worker_vm_type = "t3.small"
+    # # t2.small not available with Coiled. t3.small has 2 vCPUs, so it's not actually Coiled credit-effective.
+    # elif worker_memory == 2:
+    #     idle_timeout = 25
+    #     scheduler_vm_type = "t3.small"
+    #     worker_vm_type = "t3.small"
 
     # # Couldn't get a cluster started that used 1GB workers using t3a.micro, t3.micro, or t4g.micro. Don't know why.
     # elif worker_memory == 1:
