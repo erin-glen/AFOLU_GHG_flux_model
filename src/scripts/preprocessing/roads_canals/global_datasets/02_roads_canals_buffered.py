@@ -17,7 +17,6 @@ import boto3
 import numpy as np
 import dask
 import dask_geopandas as dgpd
-import dask.dataframe as dd
 import posixpath
 import xarray as xr
 import rasterio
@@ -246,13 +245,22 @@ def process_chunk_buffered(bounds, tile_id, feature_type):
         logging.info(f"[{tile_id}|{chunk_str}] lines are empty => skip")
         return
 
-    # Combine the per‑tile GeoDataFrames into one
-    # Concatenate into a Dask GeoDataFrame. Using ``dgpd.concat`` preserves
-    # the geometry metadata, whereas ``dd.concat`` would return a plain
-    # Dask DataFrame and drop the GeoDataFrame-specific methods like
-    # ``to_crs``. The latter would prevent reprojection and yield empty
-    # outputs.
-    lines_dgdf = dgpd.concat(line_dgdfs, interleave_partitions=True)
+    # ---- combine the per‑tile GeoDataFrames into one ----
+    try:
+        # dask‑geopandas ≥ 0.3 provides its own concat helper
+        lines_dgdf = dgpd.concat(line_dgdfs, interleave_partitions=True)
+    except AttributeError:
+        # fallback for older versions
+        import dask.dataframe as dd
+        from dask_geopandas import from_dask_dataframe
+
+        lines_ddf = dd.concat(line_dgdfs, interleave_partitions=True)
+        geom_name = line_dgdfs[0].geometry.name
+        lines_dgdf = from_dask_dataframe(
+            lines_ddf,
+            geometry=geom_name,
+            crs=line_dgdfs[0].crs,
+        )
 
     chunk_poly = box(*expanded_bounds_crs)
     lines_clip = dgpd.clip(lines_dgdf.to_crs(da.rio.crs), chunk_poly)
@@ -278,7 +286,8 @@ def process_chunk_buffered(bounds, tile_id, feature_type):
         all_touched=True,
     )
 
-    binary = (burned > 0) & mask_data
+    # keep all road pixels inside the expanded window; mask AFTER buffering
+    binary = burned > 0
     buffered_full = compute_buffered(binary, mask_data, max_dist=MAX_DISTANCE)
 
     pad_px = MAX_DISTANCE
