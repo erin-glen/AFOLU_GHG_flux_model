@@ -12,31 +12,32 @@ DATA_TYPES = [
     # "burned_co2_Mg_CO2_ha",
     # "burned_co_Mg_CO2e_ha",
     "burned_state",
-    "burned_years_count",
-    "burned_total_Mg_CO2e_ha",
+    # "burned_years_count",
+    # "burned_total_Mg_CO2e_ha",
     "burned_total_Mg_CO2e_pixel",
     # "drained_ch4_ditch_Mg_CO2e_ha_yr",
     # "drained_ch4_land_Mg_CO2e_ha_yr",
     # "drained_co2_Mg_CO2_ha_yr",
     # "drained_co2_offsite_Mg_CO2_ha_yr",
-    # "drained_n2o_Mg_CO2e_ha_yr",
-    "drained_total_Mg_CO2e_ha_yr",
+    # # "drained_n2o_Mg_CO2e_ha_yr",
+    # "drained_total_Mg_CO2e_ha_yr",
     "drained_total_Mg_CO2e_pixel_yr",
     # "drained_soil",
     "drained_state",
 ]
+
 
 INVENTORY_PERIODS = [
     "2001_2005",
     "2006_2010",
     "2011_2015",
     "2016_2020",
-    "2021_2024",
+    "2021_2024"
 ]
 
 version = cn.model_version_underscore
 BASE_URL = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_{version}"
-OUTPUT_DATE = "20250724"
+OUTPUT_DATE = "20250807"
 
 
 def get_input_datasets(pixel_resolution: str = "4000_pixels") -> list:
