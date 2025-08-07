@@ -38,6 +38,7 @@ from src.scripts.zonal_statistics.zonal_constants import (
 import s3fs
 import xarray as xr
 import zarr
+from packaging.version import Version
 
 from flox import ReindexArrayType, ReindexStrategy
 from flox.xarray import xarray_reduce
@@ -405,7 +406,7 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
 
     if not metadata_exists or not has_xy:
         # zarr‑3 stores don’t yet implement consolidated metadata; only run for v2.
-        if zarr.version_info[0] < 3:
+        if Version(zarr.__version__).major < 3:
             logging.debug("Consolidating metadata for %s (zarr‑v2)", zarr_path)
             zarr.convenience.consolidate_metadata(fs.get_mapper(path))
         else:
