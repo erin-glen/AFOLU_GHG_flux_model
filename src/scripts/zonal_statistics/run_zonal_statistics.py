@@ -799,11 +799,11 @@ if __name__ == "__main__":
 
 """
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
-       --interval_end_years 2024 \
+       --interval_end_years 2020 2024 \
        --cluster_name zonal_stats \
-       --run_date 20250724 \
+       --run_date 20250807 \
        --tile_ids 00N_110E \
-       --model_version 0_5_0 
+       --model_version 0_6_0 
 
 *Note that running debug slows things down a lot!!
 
