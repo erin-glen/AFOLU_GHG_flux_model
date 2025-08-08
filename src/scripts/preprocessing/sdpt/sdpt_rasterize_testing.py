@@ -22,6 +22,8 @@ import numpy as np
 import rasterio
 from rasterio.features import rasterize
 from rasterio.transform import from_origin
+from shapely.geometry import GeometryCollection
+import shapely
 # NEW: fast spatial-filter reader
 from pyogrio import read_dataframe as _read_df
 
@@ -243,9 +245,39 @@ def rasterize_chunk_df(subset_gdf, bbox, tile_id, run_mode):
             logging.info(f"Partial TIF => {out_tif} exists locally => skipping.")
             return
 
-    shapes = [
-        (geom, val) for geom, val in zip(subset_gdf.geometry, subset_gdf["raster_val"])
-    ]
+    # ── geometry hygiene ─────────────────────────────────────────
+    raw_n = len(subset_gdf)
+    subset_gdf = subset_gdf.dropna(subset=["geometry"]).copy()
+    if hasattr(subset_gdf, "is_empty"):
+        subset_gdf = subset_gdf[~subset_gdf.geometry.is_empty]
+    # fix invalids cheaply
+    if hasattr(subset_gdf, "is_valid"):
+        inv_mask = ~subset_gdf.geometry.is_valid
+        if inv_mask.any():
+            try:
+                subset_gdf.loc[inv_mask, "geometry"] = shapely.make_valid(
+                    subset_gdf.loc[inv_mask, "geometry"].values
+                )
+            except Exception:
+                # universal fallback
+                subset_gdf.loc[inv_mask, "geometry"] = subset_gdf.loc[
+                    inv_mask, "geometry"
+                ].buffer(0)
+    # explode collections/multis
+    subset_gdf = subset_gdf.explode(index_parts=False, ignore_index=True)
+    # drop any empties after fixes
+    subset_gdf = subset_gdf[subset_gdf.geometry.notna()]
+    if hasattr(subset_gdf, "is_empty"):
+        subset_gdf = subset_gdf[~subset_gdf.geometry.is_empty]
+    clean_n = len(subset_gdf)
+    if clean_n == 0:
+        logging.info(
+            f"No valid shapes after cleaning in {bbox} (raw={raw_n}). Skipping."
+        )
+        return
+    logging.info(f"QA: cleaned geoms in {bbox} raw={raw_n} -> clean={clean_n}")
+
+    shapes = list(zip(subset_gdf.geometry.values, subset_gdf["raster_val"].values))
     if not shapes:
         logging.info(f"No shapes to rasterize in {bbox}, skipping.")
         return
