@@ -27,6 +27,7 @@ import pyarrow.dataset as ds
 import pyarrow as pa
 import pyarrow.fs as pafs
 import shutil
+import inspect  # NEW
 
 # ── node-meaning look-ups ──────────────────────────────────────────────
 from src.scripts.zonal_statistics.zonal_constants import (
@@ -45,24 +46,13 @@ from flox.xarray import xarray_reduce
 
 SPARSE_DEFAULT = True
 
+# Sentinel that appears when int fill (-2147483648) is viewed as uint32
+INT32_FILL_UINT32 = np.uint32(2147483648)  # NEW
 
-# set False for quick local smoke tests
 
 def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
     """
     Return keyword arguments for ``flox.xarray_reduce``.
-
-    When *use_sparse* is True and the installed ``flox`` version supports
-    sparse re-indexing, the dict contains
-
-        {
-            "reindex": ReindexStrategy(blockwise=False,
-                                       array_type=ReindexArrayType.SPARSE_COO),
-            "fill_value": 0
-        }
-
-    Otherwise an empty dict is returned so that the call falls back to the
-    default dense behaviour.
     """
     if not use_sparse:
         return {}
@@ -80,7 +70,7 @@ def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
         "reindex": ReindexStrategy(
             blockwise=False, array_type=ReindexArrayType.SPARSE_COO
         ),
-        "fill_value": 0,  # ← required so sparse COO has a concrete empty-cell value
+        "fill_value": 0,
     }
 
 
@@ -94,7 +84,6 @@ from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.utilities import log_utilities as lu
 
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
-# Base output folder (no trailing slash to simplify joining)
 OUTPUT_BASE = "{root}/version_{model_version}"
 
 DATASETS = {
@@ -116,23 +105,16 @@ DATASETS = {
     },
 }
 
-# Template pieces used to build full paths on demand
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_date}/{interval}/"
 FOLDER_TEMPLATE = (
-        OUTPUT_BASE
-        + "/{folder}/ogh_standard_model/five_year_intervals/{interval}/"
-          "40000_pixels/{run_date}/"
+    OUTPUT_BASE
+    + "/{folder}/ogh_standard_model/five_year_intervals/{interval}/"
+      "40000_pixels/{run_date}/"
 )
 
 
 def build_paths(interval: str, **kw) -> dict[str, dict[str, str]]:
-    """Return folder/zarr paths for all datasets in *interval*.
-
-    Parameters are passed via ``kw`` (typically ``root``, ``model_version`` and
-    ``run_date``).  Each entry in the returned dictionary has the keys
-    ``"folder"`` and ``"zarr"``.
-    """
-
+    """Return folder/zarr paths for all datasets in *interval*."""
     zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
     paths: dict[str, dict[str, str]] = {}
     for name, spec in DATASETS.items():
@@ -153,13 +135,7 @@ PIXEL_AREA_ZARR = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contex
 
 
 def build_output_parquet(model_version: str, years: list[int]) -> str:
-    """Return default Parquet output location.
-
-    Paths mirror those produced by the core model. ``pandas.DataFrame`` writes
-    partitioned datasets to a *directory*, so the ``.parquet`` extension is
-    intentionally omitted.
-    """
-
+    """Return default Parquet output location."""
     base = posixpath.join(ROOT, f"version_{model_version}", "zonal_stats")
     year_part = "_".join(str(y) for y in years)
     return posixpath.join(base, f"zonal_stats_{year_part}/")
@@ -178,12 +154,7 @@ def list_folder_uris(base_uri: str) -> pd.Series:
 
 
 def parse_pattern_from_uri(uri_series: pd.Series) -> str:
-    """Extract the dataset name from the first URI in ``uri_series``.
-
-    The filenames are expected to end with ``_<start>_<end>.tif`` where
-    ``start`` and ``end`` are four digit years.  Examples include organic soils
-    outputs such as ``drained_total_Mg_CO2e_pixel`` and ``burned_total_Mg_CO2e_pixel``.
-    """
+    """Extract the dataset name from the first URI in ``uri_series``."""
     if uri_series.empty:
         raise ValueError("No GeoTIFFs found – cannot derive flux‑type pattern")
 
@@ -199,21 +170,33 @@ def parse_pattern_from_uri(uri_series: pd.Series) -> str:
     }
     if len(matches) != 1:
         raise ValueError(f"Mixed or unparseable flux‑type patterns: {matches}")
-    return matches.pop()
+    return matches.pop().rstrip("_")  # NEW: trim any trailing underscore
 
 
+# ── CHANGED: robust, deterministic mosaic ───────────────────────────────
 def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
-    """Open multiple GeoTIFFs into a chunked Xarray dataset."""
+    """
+    Open multiple GeoTIFFs into a chunked Xarray dataset.
+
+    - Deterministic ordering
+    - Rasterio engine
+    - Combine by coords (true mosaic)
+    - Keep integer codes (no implicit NaNs)
+    - Squeeze any singleton band dimension
+    """
+    uris = sorted(tile_uris.values.tolist())
     return xr.open_mfdataset(
-        tile_uris.values.tolist(),
+        uris,
+        engine="rasterio",
+        combine="by_coords",
+        preprocess=lambda ds: ds.squeeze(drop=True),
         parallel=True,
         chunks={"x": chunk_size, "y": chunk_size},
-    ).squeeze()
+        mask_and_scale=False,
+    )
 
 
 # Crops one input to the other input's extent.
-# ref is the reference dataset that is being cropped to.
-# From long chat in https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/684749fe-7b30-800a-ba8b-c502377f2c3a
 def safe_crop(ds, ref):
     return (
         ds.sel(x=ref.x, y=ref.y, method="nearest")
@@ -227,82 +210,57 @@ def open_zarr_region(
         chunk_size: int,
 ) -> xr.DataArray:
     """
-    Return a 2‑D DataArray from *path*.
-
-    • Works whether the Zarr was written as (y,x) **or** (band,y,x):
-      the first `band` slice is kept and the dimension is dropped.
-
-    • If *bbox* is supplied and the array has `x` and `y` coords,
-      the data are cropped with `.sel(x=…, y=…)`.
-
-    • The result is rechunked *only* along the spatial dims that exist
-      (typically `"x"` and `"y"`).
+    Return a 2‑D DataArray from *path* (v2 or v3 zarr).
     """
-    # zarr ≥ 3 prefers a path + storage_options over an FSMap
-    s3_opts = {"anon": False}                    # tweak if credentials are needed
+    s3_opts = {"anon": False}
     with dask.annotate(label=f"open:{Path(path).stem}"):
         ds = xr.open_zarr(
             path,
-            consolidated=None,                   # v3: consolidated metadata optional
+            consolidated=None,
             storage_options=s3_opts,
         )
 
-    # ── select a variable ────────────────────────────────────────────────
     if isinstance(ds, xr.DataArray):
         data_arr = ds
-    else:  # pick first var with x & y
+    else:
         vars_xy = [v for v in ds.data_vars.values() if {"x", "y"}.issubset(v.dims)]
         data_arr = vars_xy[0] if vars_xy else next(iter(ds.data_vars.values()))
 
-    # ── drop leading “band” dimension if present ─────────────────────────
     if "band" in data_arr.dims:
         data_arr = data_arr.isel(band=0, drop=True)
 
-    # ── corrected spatial crop ────────────────────────────────────────────
     if bbox is not None and {"x", "y"}.issubset(data_arr.dims):
         west, south, east, north = bbox
         x_ascending = data_arr.x[0] < data_arr.x[-1]
         y_ascending = data_arr.y[0] < data_arr.y[-1]
 
         x_slice = slice(min(west, east), max(west, east)) if x_ascending else slice(max(east, west), min(east, west))
-        y_slice = slice(min(south, north), max(south, north)) if y_ascending else slice(max(north, south),
-                                                                                        min(north, south))
+        y_slice = slice(min(south, north), max(south, north)) if y_ascending else slice(max(north, south), min(north, south))
 
         data_arr = data_arr.sel(x=x_slice, y=y_slice)
     elif bbox is not None:
         logging.warning("Skipping spatial crop for %s – x/y dims not present.", path)
 
-    # ── rechunk only existing spatial dims ───────────────────────────────
     chunk_dict = {d: chunk_size for d in ("x", "y") if d in data_arr.dims}
-    if chunk_dict:  # avoid .chunk({}) for 1‑D vars
+    if chunk_dict:
         data_arr = data_arr.chunk(chunk_dict)
 
-    # map_blocks wrapper removed – it added a graph layer for no benefit
     return data_arr
 
 
 def convert_to_coord_dict(flux_results: xr.DataArray, interval: str) -> dict:
-    """Return flox results as a coordinate dictionary.
-
-    ``flox`` >= 0.10 returns a :class:`sparse.COO` array which exposes
-    ``coords`` and ``data`` attributes.  Older versions yield a dense
-    :class:`numpy.ndarray`.  This helper supports both representations.
-    """
-
+    """Return flox results as a coordinate dictionary."""
     logging.info("   Post-processing %s : %s", interval, timestr())
 
     arr = flux_results.data
-    # If the reduce result is still lazy, bring it into local memory once.
     if isinstance(arr, da.Array):
         arr = arr.compute()
     dim_names = flux_results.dims
 
     if hasattr(arr, "coords") and hasattr(arr, "data"):
-        # sparse.COO array
         indices = arr.coords
         values = arr.data
     else:
-        # Dense numpy array – expand to full coordinate grid
         grid = np.indices(arr.shape)
         indices = grid.reshape(len(arr.shape), -1)
         values = arr.ravel()
@@ -337,7 +295,6 @@ def create_interval_df(
     """Convert flox output to a processed dataframe."""
     df = pd.DataFrame(coord_dict)
     df["flux_type"] = df["flux_type"].replace(flux_type_dict)
-    # Map node codes to human-readable meanings
     if "drained_state_nodes" in df.columns:
         df["drained_state_meaning"] = (
             df["drained_state_nodes"].astype("string").str.zfill(8).map(
@@ -355,62 +312,126 @@ def create_interval_df(
     return df
 
 
-def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> None:
-    """Ensure a Zarr store with consolidated metadata and valid coordinates.
+# ── Zarr store helpers ──────────────────────────────────────────────────
+def _detect_zarr_store(fs, path: str) -> tuple[bool, int | None]:
+    """Return (exists, version) where version is 2, 3, or None."""
+    if fs.exists(posixpath.join(path, "zarr.json")):
+        return True, 3
+    if (
+        fs.exists(posixpath.join(path, ".zgroup"))
+        or fs.exists(posixpath.join(path, ".zarray"))
+        or fs.exists(posixpath.join(path, ".zmetadata"))
+    ):
+        return True, 2
+    return False, None
 
-    The store is created from the provided URIs when missing, and ``.zmetadata``
-    is generated if absent.  Existing stores are opened to verify that ``x`` and
-    ``y`` coordinates are present; if not, the store is rebuilt.
+
+def _is_drained_state_store(zarr_path: str) -> bool:
+    name = zarr_path.rsplit("/", 1)[-1]
+    return "drained_state_node" in name  # simple, robust signal
+
+
+def _check_fill_sentinel_in_slice(zarr_path: str, max_side: int = 2048) -> bool:
+    """Open a small top-left slice and check for int32 fill sentinel (as uint32)."""
+    try:
+        ds = xr.open_zarr(zarr_path, consolidated=None, storage_options={"anon": False})
+        var = next(iter(ds.data_vars.values())) if isinstance(ds, xr.Dataset) else ds
+        y = min(var.sizes.get("y", 0), max_side)
+        x = min(var.sizes.get("x", 0), max_side)
+        if not y or not x:
+            return False
+        sl = var.isel(y=slice(0, y), x=slice(0, x)).data
+        return bool((sl == INT32_FILL_UINT32).any().compute())
+    except Exception:
+        return False
+
+
+def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int, *, force: bool = False) -> None:
+    """
+    Ensure a Zarr store exists and is usable (has x/y). If missing or invalid, (re)build it.
+    For v2 stores, add consolidated metadata if missing. Never tries to consolidate v3.
     """
     logging.debug("Ensuring Zarr store %s", zarr_path)
     fs, path = fsspec.core.url_to_fs(zarr_path)
-    group_exists = fs.exists(f"{path}/.zgroup")
-    metadata_exists = fs.exists(f"{path}/.zmetadata")
+
+    store_exists, store_version = _detect_zarr_store(fs, path)
+    consolidated_exists = fs.exists(posixpath.join(path, ".zmetadata")) if store_version == 2 else False
+
+    if force and store_exists:
+        logging.info("Force rebuild requested: removing %s", zarr_path)
+        fs.rm(path, recursive=True)
+        store_exists, store_version = False, None
 
     has_xy = False
-    if group_exists:
-        logging.debug("Opening existing Zarr store %s", zarr_path)
-        ds = xr.open_zarr(
-            zarr_path,
-            consolidated=None,                   # leave auto‑detect to xarray/zarr
-            storage_options=fs.storage_options if hasattr(fs, "storage_options") else {"anon": False},
-        )
-        has_xy = {"x", "y"}.issubset(ds.dims)
+    if store_exists:
+        try:
+            ds = xr.open_zarr(
+                zarr_path,
+                consolidated=None,
+                storage_options=getattr(fs, "storage_options", {"anon": False}),
+            )
+            dims = ds.dims if hasattr(ds, "dims") else getattr(ds, "dims", ())
+            has_xy = {"x", "y"}.issubset(dims)
+        except Exception as e:
+            logging.warning("Existing Zarr at %s could not be opened (%s); will rebuild.", zarr_path, e)
+            store_exists, store_version = False, None
 
-    if group_exists and metadata_exists and has_xy:
-        return
+    # If a usable store already exists, finalize v2 consolidation and return
+    if store_exists and has_xy:
+        if store_version == 2 and not consolidated_exists:
+            logging.debug("Consolidating metadata for existing Zarr v2 store %s", zarr_path)
+            zarr.convenience.consolidate_metadata(fs.get_mapper(path))
+        # Quick sentinel check in a slice; if present, force rebuild
+        if _is_drained_state_store(zarr_path) and _check_fill_sentinel_in_slice(zarr_path):
+            logging.warning("Fill sentinel detected in existing Zarr slice for %s; rebuilding.", zarr_path)
+            fs.rm(path, recursive=True)
+            store_exists = False
+        else:
+            return
 
+    # Build from GeoTIFFs
     if uri_list.empty:
         raise FileNotFoundError(f"No GeoTIFFs found for {zarr_path}")
 
-    if not group_exists or not has_xy:
-        if group_exists and not has_xy:
-            logging.debug(
-                "Rebuilding Zarr store %s due to missing x/y coordinates", zarr_path
-            )
-        else:
-            logging.debug("Creating new Zarr store %s", zarr_path)
-        ds = make_xarray_chunks(uri_list, chunk_size)
+    logging.debug("%s Zarr store %s", "Rebuilding" if store_exists else "Creating", zarr_path)
+    ds = make_xarray_chunks(uri_list, chunk_size)
 
-        # ── Fix 1 ────────────────────────────────────────────────────────
-        # Snap every coordinate to the nearest 1×10‑12° so that the
-        # concatenated Zarr uses *exactly* the same values as the contextual
-        # layers (pre‑empting sub‑nanometre rounding noise).
-        for axis in ("x", "y"):
-            if axis in ds.coords:
-                ds = ds.assign_coords({axis: np.round(ds[axis].astype(float), 12)})
-        # ----------------------------------------------------------------
+    # Snap coordinates to avoid sub‑nm drift
+    for axis in ("x", "y"):
+        if axis in ds.coords:
+            ds = ds.assign_coords({axis: np.round(ds[axis].astype(float), 12)})
 
-        ds = ds.chunk({"x": chunk_size, "y": chunk_size})
-        ds.to_zarr(zarr_path, mode="w")
+    ds = ds.chunk({"x": chunk_size, "y": chunk_size})
 
-    if not metadata_exists or not has_xy:
-        # zarr‑3 stores don’t yet implement consolidated metadata; only run for v2.
-        if Version(zarr.__version__).major < 3:
-            logging.debug("Consolidating metadata for %s (zarr‑v2)", zarr_path)
-            zarr.convenience.consolidate_metadata(fs.get_mapper(path))
-        else:
-            logging.debug("Skipping consolidate_metadata for zarr‑v3 store %s", zarr_path)
+    # Enforce dtype for drained_state_nodes (avoid NaN → int fill path)
+    if _is_drained_state_store(zarr_path):
+        for v in ds.data_vars:
+            ds[v] = ds[v].astype("uint32")
+
+    # Prefer explicit v3 when writing fresh caches
+    to_zarr_kwargs = {}
+    try:
+        if "zarr_format" in inspect.signature(ds.to_zarr).parameters:
+            to_zarr_kwargs["zarr_format"] = 3
+        elif "zarr_version" in inspect.signature(ds.to_zarr).parameters:
+            to_zarr_kwargs["zarr_version"] = 3
+    except Exception:
+        pass
+
+    ds.to_zarr(zarr_path, mode="w", **to_zarr_kwargs)
+
+    # If v2, consolidate metadata
+    exists_after, ver_after = _detect_zarr_store(fs, path)
+    if exists_after and ver_after == 2 and not fs.exists(posixpath.join(path, ".zmetadata")):
+        logging.debug("Consolidating metadata for newly written Zarr v2 store %s", zarr_path)
+        zarr.convenience.consolidate_metadata(fs.get_mapper(path))
+
+    # Validate: quick slice check for int32 fill sentinel
+    if _is_drained_state_store(zarr_path) and _check_fill_sentinel_in_slice(zarr_path):
+        raise RuntimeError(
+            f"Detected int32 fill sentinel (2147483648) in {zarr_path} after write. "
+            "This indicates missing data were introduced during mosaic—check inputs and retry with --force_rebuild_zarr."
+        )
 
 
 def log_array_summary(
@@ -421,23 +442,7 @@ def log_array_summary(
         categories: bool = False,
         sample_size: int = 5,
 ) -> None:
-    """Emit detailed statistics for a :class:`~xarray.DataArray`.
-
-    Parameters
-    ----------
-    logger:
-        Logger used for emitting debug messages.
-    name:
-        Human‑readable array label included in all log lines.
-    arr:
-        The array to inspect.  It may be backed by Dask; statistics are
-        computed lazily and then realised.
-    categories:
-        When ``True`` the function logs unique values present in ``arr``.
-    sample_size:
-        Number of flattened sample values to log for a quick sanity check.
-    """
-
+    """Emit detailed statistics for a DataArray."""
     logger.debug(
         "%s → shape=%s chunks=%s dtype=%s",
         name,
@@ -538,10 +543,10 @@ def run(args: argparse.Namespace) -> None:
 
     # Ensure contextual zarrs exist
     logger.debug("Checking contextual layer adm0")
-    ensure_zarr_exists(list_folder_uris(adm0_folder), adm0_zarr_name, args.chunk_size)
+    ensure_zarr_exists(list_folder_uris(adm0_folder), adm0_zarr_name, args.chunk_size, force=args.force_rebuild_zarr)  # CHANGED
     logger.debug("Checking contextual layer pixel_area")
     ensure_zarr_exists(
-        list_folder_uris(pixel_area_folder), pixel_area_zarr_name, args.chunk_size
+        list_folder_uris(pixel_area_folder), pixel_area_zarr_name, args.chunk_size, force=args.force_rebuild_zarr  # CHANGED
     )
 
     logger.debug("Opening contextual layers")
@@ -549,7 +554,6 @@ def run(args: argparse.Namespace) -> None:
     pixel_area = open_zarr_region(pixel_area_zarr_name, bbox, args.chunk_size).persist()
 
     gadm_adm0_ids = zc.GADM_ADM0_IDS
-    # ---- convert frozensets → sorted numeric arrays for flox ------------
     drained_codes_arr = np.array(
         sorted({0, *map(int, ALL_DRAINED_STATE_CODES)}), dtype=np.uint32
     )
@@ -568,28 +572,24 @@ def run(args: argparse.Namespace) -> None:
 
     # ------------------------------------------------------------------
     # 3️⃣  STREAMING WRITE – one Parquet partition per interval
-    #     avoids concatenating a 30 M‑row dataframe in memory.
     # ------------------------------------------------------------------
     for interval_start_year, interval_end_year in interval_pairs:
         interval = f"{interval_start_year}_{interval_end_year}"
         logger.info("Processing interval %s : %s", interval, timestr())
         logger.debug("Opening flux zarrs for interval %s", interval)
 
-        # Build dataset folders and cache paths for this interval
         paths = build_paths(interval, **OUTPUT_KW)
 
-        # -------------------------------------------------------------------
-        # One S3 dir‑list per dataset → cache; reuse everywhere below
-        # -------------------------------------------------------------------
+        # Cache dir listings
         cached_uri_lists = {
             key: list_folder_uris(spec["folder"])
             for key, spec in paths.items()
         }
 
-        # Ensure each Zarr exists (no repeated list_folder_uris calls)
+        # Ensure each Zarr exists
         for key, spec in paths.items():
             ensure_zarr_exists(
-                cached_uri_lists[key], spec["zarr"], args.chunk_size
+                cached_uri_lists[key], spec["zarr"], args.chunk_size, force=args.force_rebuild_zarr  # CHANGED
             )
 
         drained_total = open_zarr_region(
@@ -600,13 +600,24 @@ def run(args: argparse.Namespace) -> None:
         )
         drained_state_nodes = (
             open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size)
-            .astype("uint32")  # ⇦ shrink 2× compared with default int64
+            .astype("uint32")
         )
         burned_state_nodes = (
             open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size)
             .astype("uint32")
         )
         logger.debug("Flux layers opened for interval %s", interval)
+
+        # Guardrail: prevent silent int32 fill sentinel from propagating
+        try:
+            has_fill = bool((drained_state_nodes.data == INT32_FILL_UINT32).any().compute())
+        except Exception:
+            has_fill = False
+        if has_fill:
+            raise RuntimeError(
+                f"Detected int32 fill sentinel (2147483648) in drained_state_nodes "
+                f"for interval {interval}. Rebuild the Zarr with --force_rebuild_zarr."
+            )
 
         reference = drained_state_nodes
         try:
@@ -619,6 +630,21 @@ def run(args: argparse.Namespace) -> None:
             logger.error("%s", exc)
             raise
         logger.debug("Datasets aligned for interval %s", interval)
+
+        # (Optional) keep chunk shapes in sync to avoid blockwise explosions
+        if isinstance(reference.data, da.Array):
+            target_chunks = dict(zip(reference.dims, (c[0] for c in reference.chunks)))
+            for arr_name, arr in (
+                ("adm0", adm0_aligned),
+                ("pixel_area", pixel_area_aligned),
+                ("drained_total", drained_total_aligned),
+                ("burned_total", burned_total_aligned),
+                ("burned_state_nodes", burned_state_nodes_aligned),
+            ):
+                try:
+                    arr = arr.chunk({d: target_chunks[d] for d in target_chunks if d in arr.dims})
+                except Exception:
+                    pass
 
         adm0_aligned.name = "gadm_adm0"
         drained_state_nodes.name = "drained_state_nodes"
@@ -637,8 +663,7 @@ def run(args: argparse.Namespace) -> None:
                     logger,
                     n,
                     arr,
-                    categories=n
-                               in {"adm0", "drained_state_nodes", "burned_state_nodes"},
+                    categories=n in {"adm0", "drained_state_nodes", "burned_state_nodes"},
                 )
 
         # -------------------------  DR A I N E D  -------------------------
@@ -727,12 +752,7 @@ def run(args: argparse.Namespace) -> None:
 
 
 def main(argv=None):
-    """Parse CLI args and dispatch to :func:`run`.
-
-    When ``argv`` is empty the function runs a small local smoke test
-    over a 1×1‑degree tile using default S3 paths.
-    """
-
+    """Parse CLI args and dispatch to :func:`run`."""
     argv = sys.argv[1:] if argv is None else argv
     if not argv:
         print("No CLI args: running 1×1‑degree local smoke test")
@@ -784,6 +804,12 @@ def main(argv=None):
         default=not SPARSE_DEFAULT,
         help="Disable sparse-COO output (dense fallback).",
     )
+    # NEW: allow forcing Zarr rebuilds cleanly
+    parser.add_argument(
+        "--force_rebuild_zarr",
+        action="store_true",
+        help="Ignore existing Zarr caches and rebuild them.",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--run_local",
@@ -815,7 +841,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --cluster_name zonal_stats \
        --run_date 20250807 \
        --tile_ids 00N_110E \
-       --model_version 0_6_0 
+       --model_version 0_6_0
 
 *Note that running debug slows things down a lot!!
 

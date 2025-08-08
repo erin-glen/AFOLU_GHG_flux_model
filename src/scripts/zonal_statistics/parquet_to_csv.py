@@ -44,13 +44,13 @@ if __name__ == "__main__":
 
 """
 python -m src.scripts.zonal_statistics.parquet_to_csv \
--p s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_5_0/zonal_stats/zonal_stats_2024/drained/2024/part-0.parquet \
--c s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_5_0/zonal_stats/zonal_stats_2024/drained/2024/drained.csv 
+-p s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_6_0/zonal_stats/zonal_stats_2024/drained/2024/part-0.parquet \
+-c s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_6_0/zonal_stats/zonal_stats_2024/drained/2024/drained.csv 
 """
 
 """
 python -m src.scripts.zonal_statistics.parquet_to_csv \
--p s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_5_0/zonal_stats/zonal_stats_2024/archive/drained/2024/part-0.parquet \
--c s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_5_0/zonal_stats/zonal_stats_2024/archive/drained/2024/drained.csv 
+-p s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_6_0/zonal_stats/zonal_stats_2020_2024/drained/2020/part-0.parquet \
+-c s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_6_0/zonal_stats/zonal_stats_2020_2024/drained/2020/drained_2020.csv
 
 """
