@@ -848,13 +848,17 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --interval_end_years 2024 \
        --cluster_name zonal_stats \
-       --run_date 20250708 \
+       --run_date 20250807 \
        --model_version 0_6_0
 
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --interval_end_years 2005 2010 2015 2020 2024 \
        --cluster_name zonal_stats \
-       --run_date 20250708 \
-       --tile_ids 00N_110E \
+       --run_date 20250807 \
        --model_version 0_6_0
 """
+
+#todo fix blockwise warning
+#from ChatGPT: This happens when inputs to a blockwise op (your xr.concat → xarray_reduce) have different chunk grids, so Dask has to split one to match the other → lots more chunks.
+# Fix: make all arrays share the exact same x/y chunking before concat/reduce, and keep flux_type in a single chunk.
+
