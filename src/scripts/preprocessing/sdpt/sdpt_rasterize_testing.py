@@ -406,6 +406,7 @@ def main(
     chunk_bounds=None,
     run_mode="default",
     client="local",
+    smoke_test=False,
 ):
     """
     If chunk_bounds is provided => only process that bounding box.
@@ -430,6 +431,23 @@ def main(
         logging.info(f"Coiled cluster => {cluster.name}")
 
     tasks = []
+    if smoke_test:
+        # quick check: first tile we see + tiny bbox
+        shapefiles = list_sdpt_shapefiles()
+        if not shapefiles:
+            logging.error("No SDPT shapefiles found on S3.")
+            return
+        test_tile = os.path.basename(shapefiles[0])[len("tile_"):-4]
+        bbx = (-180, -90, -179.5, -89.5)
+        try:
+            _ = _read_tile_bbox(_tile_shp_path(test_tile), bbx)
+            logging.info(f"pyogrio smoke test OK for tile {test_tile} bbox {bbx}")
+        finally:
+            if dask_client:
+                dask_client.close()
+            if cluster:
+                cluster.close()
+        return
 
     try:
         if tile_id:
@@ -491,6 +509,11 @@ if __name__ == "__main__":
         default="local",
         help="Dask client type (local or coiled).",
     )
+    parser.add_argument(
+        "--smoke_test",
+        action="store_true",
+        help="Run a quick pyogrio S3+bbox read test and exit.",
+    )
 
     args = parser.parse_args()
 
@@ -512,6 +535,7 @@ if __name__ == "__main__":
             chunk_bounds=args.chunk_bounds,
             run_mode=args.run_mode,
             client=args.client,
+            smoke_test=args.smoke_test,
         )
 
 """
