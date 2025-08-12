@@ -1,5 +1,5 @@
 """
-Run from src/LULUCF/
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local:
 1x1 deg data chunk:
@@ -9,15 +9,15 @@ python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_m
 python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_1x1_degree -bb 60 -11 61 -10 -cs 1 --run_local
 
 Coiled test run:
-python -m scripts.utilities.create_cluster -n 2 -t 2 -m 8 -cn mangrove_smoothing_1x1deg
-python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_1x1_degree -cn mangrove_smoothing_1x1deg  -bb 110 -10 120 0 -cs 1
+python -m src.utilities.create_cluster -n 2 -t 2 -m 8 -cn mangrove_smoothing_1x1deg
+python -m src.LULUCF.scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_1x1_degree -cn mangrove_smoothing_1x1deg  -bb 110 -10 120 0 -cs 1
 Note: Took 8 minutes to smooth all 11 mangrove extent years in 00N_110E (100 1x1 deg chunks: 54 data chunks, 46 skipped chunks) with 2 workers, 2 thread per worker and 8 GB per worker (vs 17 min locally).
 
 Coiled full run:
-python -m scripts.utilities.create_cluster -n 20 -t 8 -m 16 -cn mangrove_smoothing_1x1deg_full_run
-python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_1x1_degree -cn mangrove_smoothing_1x1deg_full_run -ln "This is intended to be the definitive global run for mangrove extent smoothing using GADM v4.1."
+python -m src.utilities.create_cluster -n 20 -t 8 -m 16 -cn mangrove_smoothing_1x1deg_full_run
+python -m src.LULUCF.scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_1x1_degree -cn mangrove_smoothing_1x1deg_full_run -ln "This is intended to be the definitive global run for mangrove extent smoothing using GADM v4.1."
 Note: Took 40 minutes (13 coiled credits) to smooth all 11 mangrove extent years globally (1,519 data chunks, 17,313 skipped chunks) with 20 workers, 8 thread per worker and 16 GB per worker.
-
+Note: Try with 1 thread per worker
 
 todo:
 - see if it can scale from 1 degree to 10 degrees
@@ -34,11 +34,8 @@ import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
 # Project imports
-from ...utilities import constants_and_names as cn
-from ...utilities import universal_utilities as uu
-from ...utilities import log_utilities as lu
-from ...utilities import numba_utilities as nu
-from ...utilities import resize_cluster
+from src.utilities import constants_and_names as cn, log_utilities as lu, universal_utilities as uu, numba_utilities as nu, resize_cluster
+
 
 #Function to smooth the mangrove data:
     # fills in pixels where there is no mangrove extent (0) one year, but there is mangrove extent (1) in the previous year and the following year

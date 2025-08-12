@@ -1,18 +1,18 @@
 """
-Run from src/LULUCF/
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
-python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.1_aggregate_smoothed_mangrove_extent_1x1_degree --first_10x10s_to_process 2
+python -m src.LULUCF.scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.1_aggregate_smoothed_mangrove_extent_1x1_degree --first_10x10s_to_process 2
 
 Coiled test:
-python -m scripts.utilities.create_cluster -n 1 -t 2 -m 2 -cn mangrove_10x10_tiles
-python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.1_aggregate_smoothed_mangrove_extent_1x1_degree -cn mangrove_10x10_tiles --first_10x10s_to_process 2
+python -m src.utilities.create_cluster -n 2 -m 2 -cn mangrove_10x10_tiles
+python -m src.LULUCF.scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.1_aggregate_smoothed_mangrove_extent_1x1_degree -cn mangrove_10x10_tiles --first_10x10s_to_process 2
 
 Full Coiled run:
-python -m scripts.utilities.create_cluster -n 20 -t 8 -m 8 -cn mangrove_10x10_tiles
-python -m scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.1_aggregate_smoothed_mangrove_extent_1x1_degree -cn mangrove_10x10_tiles
-Time: x for all years; Cost: x; peak memory: x GB/worker
-Note: Try lower memory next time
+python -m src.utilities.create_cluster -n 20 -t 8 -m 8 -cn mangrove_10x10_tiles
+python -m src.LULUCF.scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.1_aggregate_smoothed_mangrove_extent_1x1_degree -cn mangrove_10x10_tiles
+Time: 35 for all years; Cost: 24 credits; peak memory: x GB/worker
+Note: Try with 1 thread per worker with 4 GB workers next time
 
 todo:
 - have step 0 and step 1 do pixel count instead of chunk stats for comparison
@@ -25,11 +25,7 @@ import re
 import sys
 
 # Project imports
-from ...utilities import constants_and_names as cn
-from ...utilities import universal_utilities as uu
-from ...utilities import log_utilities as lu
-from ...utilities import resize_cluster
-
+from src.utilities import constants_and_names as cn, log_utilities as lu, universal_utilities as uu, resize_cluster
 
 def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload= False,
          first_10x10s_to_process=None, log_note=None):

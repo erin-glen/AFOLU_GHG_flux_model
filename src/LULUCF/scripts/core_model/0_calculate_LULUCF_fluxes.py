@@ -2,7 +2,7 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work):
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload -yr 2000 2023 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -bb 116.25 -2 116.5 -1.75 -cs 0.25 --run_local --no_upload -yr 2000 2023 --run_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_model
@@ -59,7 +59,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                   primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                   model_start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_final):
 
-    # Separate dictionaries for output numpy arrays of each datatype, named by output data type).
+    # Separate dictionaries for output numpy arrays of each datatype, named by output data type.
     # This is because a dictionary in a Numba function cannot have arrays with multiple data types, so each dictionary has to store only one data type,
     # just like inputs to the function.
     out_dict_uint8 = {}
@@ -102,6 +102,19 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     # it persists from one interval to the next. Therefore, it must be defined before the first iteration.
     # That way, removal factors can be over-written by those used in the most recent interval.
     agc_rf_pre_dist_out_block = np.zeros(agc_dens_block.shape).astype('float32')
+
+    # Mangrove extent
+    mangrove_extent_1996_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_1996"]
+    mangrove_extent_2007_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2007"]
+    mangrove_extent_2008_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2008"]
+    mangrove_extent_2009_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2009"]
+    mangrove_extent_2010_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2010"]
+    mangrove_extent_2015_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2015"]
+    mangrove_extent_2016_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2016"]
+    mangrove_extent_2017_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2017"]
+    mangrove_extent_2018_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2018"]
+    mangrove_extent_2019_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2019"]
+    mangrove_extent_2020_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_2020"]
 
     planted_forest_type_block = in_dict_uint8[cn.planted_forest_type_pattern]
     planted_forest_tree_crop_block = in_dict_uint8[cn.planted_forest_tree_crop_pattern]
@@ -163,6 +176,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     # 1=height loss relative to the maximum vegetation height occurred in this interval.
     # 2=height loss relative to the maximum vegetation height occurred in a previous interval.
     first_time_sig_loss_from_max_height_block = np.zeros(agc_dens_block.shape).astype('uint8')
+    #todo: Q - more elaboration
 
     # Tracks whether there was a partial (non-fire) or full disturbance in a previous interval (not including just fire,
     # which does not count as a partial disturbance in this model if height does not decrease significantly with it).
@@ -176,7 +190,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     # This is primarily used to determine what age the forest is (which matters for assigning removal factors).
     part_or_full_dist_in_curr_interval_block = np.zeros(agc_dens_block.shape).astype('uint8')
 
-    # print("interval_end_years:", interval_end_years)
+    print("interval_end_years:", interval_end_years)
 
     # All years covered by the model, including the start year of the model
     years_so_far = [model_start_year]
@@ -184,7 +198,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     # Iterates through model intervals
     for i, interval_end_year in enumerate(interval_end_years):
 
-        # print(f"Now at interval ending in {interval_end_year}:")
+        print(f"Now at interval ending in {interval_end_year}:")
 
         # Length of the interval and difference between the start and end years (years)
         interval_length = interval_length_list[i]
@@ -195,7 +209,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
         # Eventually used to determine whether current height has decreased significantly from maximum height
         # since last non-tall veg year over multiple intervals (gradual height loss).
         years_so_far = years_so_far + [interval_end_year]
-        # print(years_so_far)
 
         # Pre-fetches vegetation height data for this chunk and stores in a dictionary or list.
         # Eventually used to determine whether current height has decreased significantly from maximum height since last non-tall veg year over multiple intervals (gradual height loss).
@@ -206,7 +219,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
             in_dict_uint8[f"{cn.vegetation_height_pattern}_{year}"]
             for year in years_so_far
         ]
-        # print(vegetation_heights_so_far_block)
+        print(vegetation_heights_so_far_block)
 
         # Land cover and vegetation height at the start and end of the interval,
         # e.g., 2005/2010 or 2016/2017
@@ -215,10 +228,28 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
         veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}"]
         veg_h_curr_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year}"]
 
-        # print(f"{cn.land_cover_pattern}_{interval_end_year - interval_length}:", LC_prev_block)
-        # print(f"{cn.land_cover_pattern}_{interval_end_year}:", LC_curr_block)
-        # print(f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}:", veg_h_prev_block)
-        # print(f"{cn.vegetation_height_pattern}_{interval_end_year}:", veg_h_curr_block)
+        # Mangrove extent at the start and end of the interval
+        if interval_end_year == 2005:
+            mangrove_prev_block = mangrove_extent_1996_block
+            mangrove_curr_block = mangrove_extent_1996_block
+        elif interval_end_year == 2010:
+            mangrove_prev_block = mangrove_extent_1996_block
+            mangrove_curr_block = mangrove_extent_2010_block
+        elif interval_end_year == 2015:
+            mangrove_prev_block = mangrove_extent_2010_block
+            mangrove_curr_block = mangrove_extent_2015_block
+        else:
+            mangrove_prev_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_{interval_end_year - interval_length}"]
+            mangrove_curr_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_{interval_end_year}"]
+        print(f"mangrove_prev_block: {mangrove_prev_block}")
+        print(f"mangrove_curr_block: {mangrove_curr_block}")
+        #TODO: add logic here for gain/ loss within the 2006-2010 time interval
+        #TODO: check that it is stepping into the if statements correctly
+
+        print(f"{cn.land_cover_pattern}_{interval_end_year - interval_length}:", LC_prev_block)
+        print(f"{cn.land_cover_pattern}_{interval_end_year}:", LC_curr_block)
+        print(f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}:", veg_h_prev_block)
+        print(f"{cn.vegetation_height_pattern}_{interval_end_year}:", veg_h_curr_block)
 
         # Creates a list of all the burned area arrays from 2001 to the end of the interval.
         # The values in the array are the year burned starting from 1, e.g., 2001=1, 2008=8, 2017=17.
@@ -324,11 +355,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
             for col in range(LC_curr_block.shape[1]):
 
                 ### Reads input pixel values for interval
-
                 LC_prev = LC_prev_block[row, col]
                 LC_curr = LC_curr_block[row, col]
                 veg_h_prev = veg_h_prev_block[row, col]
                 veg_h_curr = veg_h_curr_block[row, col]
+                mangrove_prev = mangrove_prev_block[row, col]
+                mangrove_curr = mangrove_curr_block[row, col]
 
                 # Secondary forest removal factors (Mg AGC/ha/yr)
                 natrl_forest_curve_0_5_AGC_RF = natrl_forest_curve_0_5_AGC_RF_block[row, col]
@@ -1777,8 +1809,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     else:
         start_year = year_range[0]
         end_year = year_range[1]
-        # print(f"Start year: {start_year}")
-        # print(f"End year: {end_year}")
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -1908,6 +1938,16 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     else:
         sys.exit('interval_type not found')
 
+    # GMW mangrove extent timeseries depend on start year (not end year since GMW data ends in 2000)
+    if start_year == 2000:
+        for year in cn.mangrove_extent_years:
+            download_dict[f"{cn.mangrove_extent_processed_pattern}_{year}"] = f"{cn.mangrove_extent_processed_dir}{year}/{sample_tile_id}__{cn.mangrove_extent_processed_pattern}_{year}.tif"
+    elif start_year == 2015:
+        for year in [y for y in cn.mangrove_extent_years if y >= 2015]:
+            download_dict[f"{cn.mangrove_extent_processed_pattern}_{year}"] = f"{cn.mangrove_extent_processed_dir}{year}/{sample_tile_id}__{cn.mangrove_extent_processed_pattern}_{year}.tif"
+    else:
+        sys.exit('interval_type not found')
+
     # Forest disturbance rasters (every year)-- only for 5-year intervals (including hybrid model)
     # All years need to be in their own folder
     if interval_type in cn.intervals_five_years:
@@ -1929,6 +1969,9 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         for key, value in download_dict.items()
     }
 
+    print("download_dict:")
+    for key, item in download_dict.items():
+        print(f"{key}: {item}")
 
     # Returns the first tile in each input so that the datatype can be determined.
     # This is done up front, once per tile set, rather than on each chunk, since
@@ -1954,7 +1997,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     output_dir_list.sort()  # Alphabetically order the outputs (modifies output_dir_list)
     if is_final:
         main_logger.info(f"output_dir_list for {stage}: {output_dir_list}")
-    # print(output_dir_list)
+    #print(output_dir_list)
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.
@@ -1970,6 +2013,8 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Creates numpy array of ratios of BGC, deadwood C, and litter C relative to AGC. Relevant columns must be specified.
     mangrove_C_ratio_array = uu.convert_lookup_table_to_array(cn.RF_C_ratio_spreadsheet_full_path, cn.mangrove_rate_ratio_tab,
                                                               ['gainEcoCon', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
+    print(f"mangrove_C_ratio_array: {mangrove_C_ratio_array}")
+    #TODO: keep AGB_gain_tons_ha_yr and convert AGB RFs to AGC RFs?
 
     # Creates numpy array of emission factors for partially disturbed forest by driver and continent-ecozone combination
     partial_disturbance_EF_array = uu.convert_lookup_table_to_array(cn.partial_disturbance_emission_factor_table_full_path,

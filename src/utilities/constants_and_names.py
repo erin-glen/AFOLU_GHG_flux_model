@@ -475,17 +475,17 @@ forest_age_output_pattern = "forest_age_at_end_of_interval"
 
 #todo: refactor hansenize inputs: 
 # Robinson_5_year_rates_processed_date or Robinson_20_year_rates_processed_date --> Robinson_processed_date
-# path --> processed_dir
+# Robinson_processed_date --> secondary_forest_curve_run_date
 
 Robinson_processed_date = '20250616'
 
 #Robinson 5-year rates
 Robinson_5_year_raw_date = '20250616'
 secondary_natural_forest_5_year_raw_dir =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/{Robinson_5_year_raw_date}/"
-secondary_natural_forest_0_5_pattern =  f"natural_forest_mean_growth_rate__Mg_AGC_ha_yr__0_5_years__nibble_{Robinson_processed_date}"   # both the raw raster name and processed pattern for hansenized tiles
-secondary_natural_forest_6_10_pattern =  f"natural_forest_mean_growth_rate__Mg_AGC_ha_yr__6_10_years__nibble_{Robinson_processed_date}"
-secondary_natural_forest_11_15_pattern =  f"natural_forest_mean_growth_rate__Mg_AGC_ha_yr__11_15_years__nibble_{Robinson_processed_date}"
-secondary_natural_forest_16_20_pattern =  f"natural_forest_mean_growth_rate__Mg_AGC_ha_yr__16_20_years__nibble_{Robinson_processed_date}"
+secondary_natural_forest_0_5_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__0_5_years__nibble"
+secondary_natural_forest_6_10_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__6_10_years__nibble"
+secondary_natural_forest_11_15_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__11_15_years__nibble"
+secondary_natural_forest_16_20_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__16_20_years__nibble"
 
 secondary_natural_forest_0_5_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_0_5/"
 secondary_natural_forest_6_10_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_6_10/"
@@ -495,11 +495,11 @@ secondary_natural_forest_16_20_processed_dir = f"{full_bucket_prefix}/climate/se
 #Robinson 20+-year rates
 Robinson_20_year_raw_date = '20250516'
 secondary_natural_forest_20_year_raw_dir =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/{Robinson_20_year_raw_date}/"
-secondary_natural_forest_21_40_pattern =  f"natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years__nibble_{Robinson_processed_date}"
-secondary_natural_forest_41_60_pattern =  f"natural_forest_mean_growth_rate__Mg_AGC_ha_yr__41_60_years__nibble_{Robinson_processed_date}"
-secondary_natural_forest_61_80_pattern =  f"natural_forest_mean_growth_rate__Mg_AGC_ha_yr__61_80_years__nibble_{Robinson_processed_date}"
-secondary_natural_forest_81_100_pattern =  f"natural_forest_mean_growth_rate__Mg_AGC_ha_yr__81_100_years__nibble_{Robinson_processed_date}"
-secondary_natural_forest_21_100_pattern =  f"natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_100_years__nibble_{Robinson_processed_date}"
+secondary_natural_forest_21_40_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years__nibble"
+secondary_natural_forest_41_60_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__41_60_years__nibble"
+secondary_natural_forest_61_80_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__61_80_years__nibble"
+secondary_natural_forest_81_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__81_100_years__nibble"
+secondary_natural_forest_21_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_100_years__nibble"
 
 secondary_natural_forest_21_40_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_21_40/"
 secondary_natural_forest_41_60_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_41_60/"
@@ -507,13 +507,12 @@ secondary_natural_forest_61_80_processed_dir = f"{full_bucket_prefix}/climate/se
 secondary_natural_forest_81_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_81_100/"
 secondary_natural_forest_21_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_21_100/"
 
-# TODO @David, are you using this commented out code?
-# Robinson_processed_date = '20250516'
-# natural_forest_growth_curve_raw_path =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/20250516/"
-# natural_forest_growth_curve_raw_pattern =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/20250516/"
-# natural_forest_growth_curve_path = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/20241004/"
-# natural_forest_growth_curve_pattern = "natural_forest_mean_growth_rate__Mg_AGC_ha_yr"
-# natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_40', '41_60', '61_80', '81_100', '21_100']
+
+secondary_forest_curve_run_date = '20250616'
+natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{secondary_forest_curve_run_date}/"
+natural_forest_growth_curve_pattern = "natural_forest_mean_growth_rate__Mg_AGC_ha_yr"
+natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_40', '41_60', '61_80', '81_100']
+
 
 #TODO: Update to path pattern instead of processed_dir/ pattern in hansenize. Delete processed after.
 drivers_run_date = '20241224'

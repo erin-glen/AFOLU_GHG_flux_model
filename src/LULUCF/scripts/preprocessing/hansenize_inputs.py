@@ -1,20 +1,27 @@
 """
-Run from src/LULUCF
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Coiled test area without land (i.e. no data):
-python -m scripts.utilities.create_cluster -cn AFOLU_preprocessing -n 1
-python -m scripts.preprocessing.hansenize_inputs -cn AFOLU_preprocessing -p secondary_natural_forest -bb -120 30 -110 40 -cs 10
+python -m src.utilities.create_cluster -cn QC -n 2 -m 16
+python -m src.LULUCF.scripts.preprocessing.hansenize_inputs -cn QC -p secondary_natural_forest -bb -120 30 -110 40 -cs 10
+python -m src.LULUCF.scripts.preprocessing.hansenize_inputs -cn QC -p secondary_natural_forest -bb 100 -10 110 10 -cs 10 --no_upload
+python -m src.LULUCF.scripts.preprocessing.hansenize_inputs -cn QC -p mangroves -bb -120 30 -110 40 -cs 10
+python -m src.LULUCF.scripts.preprocessing.hansenize_inputs -cn QC -p mangroves -bb 100 -10 110 10 -cs 10 --no_upload
+python -m src.LULUCF.scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_1x1_degree -cn QC -bb 60 -11 61 -10 -cs 1
+python -m src.LULUCF.scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.0_smooth_mangrove_extent_1x1_degree -cn QC -bb 116 -3 117 -2 -cs 1 --no_upload
+python -m src.LULUCF.scripts.preprocessing.gmw_smooth_mangrove_extent_timeseries.1_aggregate_smoothed_mangrove_extent_1x1_degree -cn QC --first_10x10s_to_process 1 --no_upload
 
 Coiled test area with data:
-python -m scripts.utilities.create_cluster -cn hansenize_mangroves_test -n 2 -t 2 -m 16
-python -m scripts.preprocessing.hansenize_inputs -cn hansenize_mangroves_test -p mangroves -bb 100 -10 110 10 -cs 10
+python -m src.utilities.create_cluster -cn hansenize_mangroves_test -n 2 -m 16
+python -m src.LULUCF.scripts.preprocessing.hansenize_inputs -cn hansenize_mangroves_test -p mangroves -bb 100 -10 110 10 -cs 10
 
 Coiled full run:
-python -m scripts.utilities.create_cluster -cn hansenize_mangroves -n 20 -t 12 -m 8
-python -m scripts.preprocessing.hansenize_inputs -cn hansenize_mangroves -p mangroves -bb -180 -60 180 80 -cs 10
+python -m src.utilities.create_cluster -cn hansenize_mangroves -n 20 -t 12 -m 8
+python -m src.LULUCF.scripts.preprocessing.hansenize_inputs -cn hansenize_mangroves -p mangroves -bb -180 -60 180 80 -cs 10
 # Note: Tried this with -n 20 -t 12 -m 16 (for mangrove extent from 1996 to 2016) and then again with -n 20 -t 12 -m 8 (for mangrove extent from 2017 to 2020).
     # After reducing the memory to 8 and using a smaller vm type, gdal_warp per dataset finshed 2x a fast (10 minutes in stead of 20).
     # Could be that it is stored closer on memory or that we just got a faster cluster the second time around.
+Note: Try with 1 thread per worker
 
 todo:
 - delete .keep in each processed directory
@@ -58,63 +65,63 @@ def main(cluster_name, process, bounding_box, chunk_size, run_local, no_upload):
     if 'secondary_natural_forest' in process:
         download_upload_dictionary[f"secondary_natural_forest_0_5"] = {
             'raw_dir': cn.secondary_natural_forest_5_year_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_0_5_pattern,
+            'raw_pattern': f"{cn.secondary_natural_forest_0_5_pattern}_{cn.Robinson_5_year_raw_date}",
             'vrt': f"/tmp/secondary_natural_forest_0_5.vrt",
             'processed_dir': cn.secondary_natural_forest_0_5_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_0_5_pattern
         }
         download_upload_dictionary["secondary_natural_forest_6_10"] = {
             'raw_dir': cn.secondary_natural_forest_5_year_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_6_10_pattern,
+            'raw_pattern': f"{cn.secondary_natural_forest_6_10_pattern}_{cn.Robinson_5_year_raw_date}",
             'vrt': f"/tmp/secondary_natural_forest_6_10.vrt",
             'processed_dir': cn.secondary_natural_forest_6_10_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_6_10_pattern
         }
         download_upload_dictionary["secondary_natural_forest_11_15"] = {
             'raw_dir': cn.secondary_natural_forest_5_year_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_11_15_pattern,
+            'raw_pattern': f"{cn.secondary_natural_forest_11_15_pattern}_{cn.Robinson_5_year_raw_date}",
             'vrt': f"/tmp/secondary_natural_forest_11_15.vrt",
             'processed_dir': cn.secondary_natural_forest_11_15_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_11_15_pattern
         }
         download_upload_dictionary["secondary_natural_forest_16_20"] = {
             'raw_dir': cn.secondary_natural_forest_5_year_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_16_20_pattern,
+            'raw_pattern': f"{cn.secondary_natural_forest_16_20_pattern}_{cn.Robinson_5_year_raw_date}",
             'vrt': f"/tmp/secondary_natural_forest_16_20.vrt",
             'processed_dir': cn.secondary_natural_forest_16_20_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_16_20_pattern
         }
         download_upload_dictionary["secondary_natural_forest_21_100"] = {
             'raw_dir': cn.secondary_natural_forest_20_year_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_21_100_pattern,
+            'raw_pattern': f"{cn.secondary_natural_forest_21_100_pattern}_{cn.Robinson_20_year_raw_date}",
             'vrt': f"/tmp/secondary_natural_forest_21_100.vrt",
             'processed_dir': cn.secondary_natural_forest_21_100_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_21_100_pattern
         }
         download_upload_dictionary["secondary_natural_forest_21_40"] = {
             'raw_dir': cn.secondary_natural_forest_20_year_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_21_40_pattern,
+            'raw_pattern': f"{cn.secondary_natural_forest_21_40_pattern}_{cn.Robinson_20_year_raw_date}",
             'vrt': f"/tmp/secondary_natural_forest_21_40.vrt",
             'processed_dir': cn.secondary_natural_forest_21_40_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_21_40_pattern
         }
         download_upload_dictionary["secondary_natural_forest_41_60"] = {
             'raw_dir': cn.secondary_natural_forest_20_year_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_41_60_pattern,
+            'raw_pattern': f"{cn.secondary_natural_forest_41_60_pattern}_{cn.Robinson_20_year_raw_date}",
             'vrt': f"/tmp/secondary_natural_forest_41_60.vrt",
             'processed_dir': cn.secondary_natural_forest_41_60_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_41_60_pattern
         }
         download_upload_dictionary["secondary_natural_forest_61_80"] = {
             'raw_dir': cn.secondary_natural_forest_20_year_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_61_80_pattern,
+            'raw_pattern': f"{cn.secondary_natural_forest_61_80_pattern}_{cn.Robinson_20_year_raw_date}",
             'vrt': f"/tmp/secondary_natural_forest_61_80.vrt",
             'processed_dir': cn.secondary_natural_forest_61_80_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_61_80_pattern
         }
         download_upload_dictionary["secondary_natural_forest_81_100"] = {
             'raw_dir': cn.secondary_natural_forest_20_year_raw_dir,
-            'raw_pattern': cn.secondary_natural_forest_81_100_pattern,
+            'raw_pattern': f"{cn.secondary_natural_forest_81_100_pattern}_{cn.Robinson_20_year_raw_date}",
             'vrt': f"/tmp/secondary_natural_forest_81_100.vrt",
             'processed_dir': cn.secondary_natural_forest_81_100_processed_dir,
             'processed_pattern': cn.secondary_natural_forest_81_100_pattern
@@ -231,6 +238,7 @@ def main(cluster_name, process, bounding_box, chunk_size, run_local, no_upload):
 
         # Add output_vrt_s3 to dictionary
         output_vrt_s3 = f"{items['raw_dir']}{os.path.basename(items['vrt'])}"
+        main_logger.info(f"output_vrt_s3: {output_vrt_s3}") #todo
         main_logger.info(f"Adding output_vrt_s3 path to dictionary: {output_vrt_s3}")
         download_upload_dictionary[key]['output_vrt_s3'] = output_vrt_s3
 
@@ -245,6 +253,7 @@ def main(cluster_name, process, bounding_box, chunk_size, run_local, no_upload):
         main_logger.info(f"There are {len(input_raster_list_s3)} rasters in the raw data folder to include in the vrt")
         if input_raster_list_s3:
             download_upload_dictionary[key]['raw_raster_list'] = input_raster_list_s3
+            main_logger.info(f"Input raster list: {items['raw_raster_list']}")
 
         # Create a vrt from all raw input rasters
         main_logger.info(f"Submitting VRT build for {key}: {uu.timestr('time')}\n")
