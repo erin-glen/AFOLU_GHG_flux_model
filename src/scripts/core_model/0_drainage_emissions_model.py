@@ -861,7 +861,6 @@ def run_drainage_model(
         for tid in tile_ids:
             bds = uu.get_10x10_tile_bounds(tid)
             chunks.extend(uu.get_chunk_bounds(bds, chunk_size))
-        sample_tid = tile_ids[0]
     elif chunk_shapefile_uri:
         fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
         chunks, _ = uu.create_chunk_list(
@@ -872,11 +871,9 @@ def run_drainage_model(
             fishnet_iso_df,
             main_logger,
         )
-        sample_tid = uu.xy_to_tile_id(chunks[0][0], chunks[0][3])
     else:
         bounding_box = bounding_box or [110, -10, 120, 0]
         chunks = uu.get_chunk_bounds(bounding_box, chunk_size)
-        sample_tid = uu.xy_to_tile_id(chunks[0][0], chunks[0][3])
     is_final = len(chunks) > 20
 
     # Normalize interval settings and compute interval list
@@ -891,6 +888,8 @@ def run_drainage_model(
     bag_items = [(bds, iv[0], iv[1]) for iv in intervals for bds in chunks]
     bag = dask.bag.from_sequence(bag_items, npartitions=len(bag_items))
 
+    typed_dict_cache = {}
+
     def _wrap(t):
         final_year = cn.five_year_inventory_periods[-1][1]
         closing_year = t[2]
@@ -898,13 +897,19 @@ def run_drainage_model(
         main_logger.info(
             f"{bstr} interval {t[1]}-{t[2]} uses land cover {closing_year}"
         )
-        download_dict = cn.get_dynamic_download_dict(
-            sample_tid,
-            t[1],
-            closing_year,
-            peat_dataset=peat_dataset,
-        )
-        typed_dict = uu.add_file_type_to_dict(download_dict)
+
+        key = (t[1], closing_year)
+        if key not in typed_dict_cache:
+            download_dict = cn.get_dynamic_download_dict(
+                cn.sample_tile_id,
+                t[1],
+                closing_year,
+                peat_dataset=peat_dataset,
+            )
+            first_tiles = uu.first_file_name_in_s3_folder(download_dict)
+            typed_dict_cache[key] = uu.add_file_type_to_dict(first_tiles)
+
+        typed_dict = typed_dict_cache[key]
 
         return calculate_and_upload_drainage(
             t[0],
