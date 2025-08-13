@@ -2,8 +2,7 @@
 To run:
 
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.create_stock_and_stock_change_10x10s \
-  -cn LULUCF_mineral_soil -bb 110 -10 120 0 -cs 10 -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.create_stock_and_stock_change_10x10s -cn LULUCF_mineral_soil -bb 110 -10 120 0 -cs 10 --input_date YYYYMMDD
 """
 
 import argparse
@@ -31,14 +30,15 @@ TILE_DEGREES = 10
 fs = s3fs.S3FileSystem(anon=False)
 
 SOC_COGS = {
-    # "2000_2005": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif",
-    # "2005_2010": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif",
+    "2000_2005": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif",
+    "2005_2010": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif",
     "2010_2015": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20100101_20151231_g_epsg.4326_v20250204.tif",
     "2015_2020": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"
 }
 
-
-def extract_tile_from_global_cog(cog_url, bounds, chunk_length_pixels):
+# Extracts specified area from a global raster
+# Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6877a34b-02cc-800a-88cc-a123cdc9ed1b
+def extract_tile_from_global_raster(cog_url, bounds, chunk_length_pixels):
     with rasterio.Env(AWS_NO_SIGN_REQUEST='YES'):
         with rasterio.open(cog_url) as src:
             col_start = round((bounds[0] - src.bounds.left) / cn.resolution)
@@ -82,23 +82,23 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage):
 
     ### Part 1: Calculate densities at each interval
 
-    for year_range, url in SOC_COGS.items():
-        lu.print_and_log(f"Downloading SOC density for {year_range} for {tile_id}: {uu.timestr()}", False, logger_worker)
-        data, profile = extract_tile_from_global_cog(url, bounds, chunk_length_pixels)
-        soc_data[year_range] = data
+    for year_ranges, url in SOC_COGS.items():
+        lu.print_and_log(f"Downloading SOC density for {year_ranges} for {bounds_str}: {uu.timestr()}", False, logger_worker)
+        data, profile = extract_tile_from_global_raster(url, bounds, chunk_length_pixels)
+        soc_data[year_ranges] = data
 
-        lu.print_and_log(f"  Saving {year_range} for {tile_id}: {uu.timestr()}", False, logger_worker)
+        lu.print_and_log(f"  Saving {year_ranges} for {bounds_str}: {uu.timestr()}", False, logger_worker)
         with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
             with rasterio.open(tmp.name, "w", **profile) as dst:
                 dst.write(data, 1)
 
             # Sets up s3 destination folder. File name depends on whether output is 40000x40000 pixels or smaller.
             if chunk_length_pixels == cn.full_raster_dims:
-                s3_key = f"{cn.min_soil_density_dir}{tile_id}_{cn.min_soil_density_pattern}__{year_range}.tif"
+                s3_key = f"{cn.min_soil_density_dir}{tile_id}_{cn.min_soil_density_pattern}__{year_ranges}.tif"
             else:
-                s3_key = f"{cn.min_soil_density_dir}{tile_id}_{bounds_str}_{cn.min_soil_density_pattern}__{year_range}__{uu.timestr()}.tif"
+                s3_key = f"{cn.min_soil_density_dir}{tile_id}_{bounds_str}_{cn.min_soil_density_pattern}__{year_ranges}__{uu.timestr()}.tif"
             s3_key = s3_key.replace("s3://", "")  # For s3fs access
-            s3_key = s3_key.replace("START_END", year_range)
+            s3_key = s3_key.replace("START_END", year_ranges)
             s3_key = s3_key.replace("PER_HA_OR_PIXEL", "per_ha")
             s3_key = s3_key.replace("CHUNK_SIZE_pixels", f"{chunk_length_pixels}_pixels")
 
@@ -112,34 +112,39 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage):
 
     ### Part 2: Calculate density changes between adjacent intervals
 
-    # Compute and save deltas
-    year_range = list(SOC_COGS.keys())
-    lu.print_and_log(f"Calculating SOC deltas for {tile_id}: {uu.timestr()}", False, logger_worker)
-    for i in range(len(year_range) - 1):
-        y1 = year_range[i]
-        y2 = year_range[i + 1]
-        year_diff = int(y2[:4])-int(y1[:4])
-        delta = (soc_data[y2].astype(np.int16) - soc_data[y1].astype(np.int16))/year_diff  # Interval arrays must be unsigned so difference can be negative
+    # Sets metadata for change outputs (consecutive intervals and total)
+    delta_profile = profile.copy()
+    delta_profile.update({
+        "dtype": "float32"
+    })
 
-        # Density change has to be float32 because it's not an integer
-        delta_int = delta.astype(np.float32)
+    # Computes and save deltas
+    year_ranges = list(SOC_COGS.keys())
+    lu.print_and_log(f"Calculating consecutive SOC changes for {bounds_str}: {uu.timestr()}", False, logger_worker)
+    for i in range(len(year_ranges) - 1):
+        start_interval = year_ranges[i]
+        end_interval = year_ranges[i + 1]
+        print(start_interval)
+        print(end_interval)
+        year_diff = int(end_interval[:4])-int(start_interval[:4])
+        lu.print_and_log(f"Calculating SOC change for {start_interval} to {end_interval} for {bounds_str}: {uu.timestr()}", False, logger_worker)
 
-        delta_profile = profile.copy()
-        delta_profile.update({
-            "dtype": "float32"
-        })
+        delta = (soc_data[end_interval].astype(np.int16) - soc_data[start_interval].astype(np.int16))/year_diff  # Interval arrays must be unsigned so difference can be negative
+
+        # Density change has to be float32
+        delta_float = delta.astype(np.float32)
 
         with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
             with rasterio.open(tmp.name, "w", **delta_profile) as dst:
-                dst.write(delta_int, 1)
+                dst.write(delta_float, 1)
 
             # Sets up s3 destination folder. File name depends on whether output is 40000x40000 pixels or smaller.
             if chunk_length_pixels == cn.full_raster_dims:
-                delta_key = f"{cn.min_soil_density_dir}{tile_id}_{cn.min_soil_density_pattern}_{y1}_{y2}.tif"
+                delta_key = f"{cn.min_soil_density_dir}{tile_id}_{cn.min_soil_density_pattern}_{start_interval}_{end_interval}.tif"
             else:
-                delta_key = f"{cn.min_soil_change_dir}{tile_id}_{bounds_str}_{cn.min_soil_change_pattern}_{year_range}__{uu.timestr()}.tif"
+                delta_key = f"{cn.min_soil_change_dir}{tile_id}_{bounds_str}_{cn.min_soil_change_pattern}__{start_interval}_{end_interval}__{uu.timestr()}.tif"
             delta_key = delta_key.replace("s3://", "")  # For s3fs access
-            delta_key = delta_key.replace("START_END", f"{y1}_{y2}")
+            delta_key = delta_key.replace("START_END", f"{start_interval}__{end_interval}")
             delta_key = delta_key.replace("PER_HA_OR_PIXEL", "per_ha")
             delta_key = delta_key.replace("CHUNK_SIZE_pixels", f"{chunk_length_pixels}_pixels")
 
@@ -148,6 +153,35 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage):
 
 
     ### Part 3: Calculate density change between start and end intervals
+
+    lu.print_and_log(f"Calculating full-period SOC change for {bounds_str}: {uu.timestr()}", False, logger_worker)
+
+    start_interval = year_ranges[0]
+    end_interval = year_ranges[-1]
+    year_diff = int(end_interval[:4]) - int(start_interval[:4])
+    delta_full = (soc_data[end_interval].astype(np.int16) - soc_data[start_interval].astype(np.int16)) / year_diff
+
+    # Density change has to be float32
+    delta_full_float = delta_full.astype(np.float32)
+
+    lu.print_and_log(f"After calculating differences for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        with rasterio.open(tmp.name, "w", **delta_profile) as dst:
+            dst.write(delta_full_float, 1)
+
+        # Sets up s3 destination folder. File name depends on whether output is 40000x40000 pixels or smaller.
+        if chunk_length_pixels == cn.full_raster_dims:
+            delta_full_key = f"{cn.min_soil_density_dir}{tile_id}_{cn.min_soil_density_pattern}__{start_interval}_{end_interval}.tif"
+        else:
+            delta_full_key = f"{cn.min_soil_change_dir}{tile_id}_{bounds_str}_{cn.min_soil_change_pattern}__{start_interval}_{end_interval}__{uu.timestr()}.tif"
+        delta_full_key = delta_full_key.replace("s3://", "")  # For s3fs access
+        delta_full_key = delta_full_key.replace("START_END", f"{start_interval}__{end_interval}")
+        delta_full_key = delta_full_key.replace("PER_HA_OR_PIXEL", "per_ha")
+        delta_full_key = delta_full_key.replace("CHUNK_SIZE_pixels", f"{chunk_length_pixels}_pixels")
+
+        fs.put(tmp.name, delta_full_key)
+        lu.print_and_log(f"  Uploaded {delta_full_key}: {uu.timestr()}", False, logger_worker)
 
     return_message = f"Success for {bounds_str}: {uu.timestr()}"
 
@@ -158,17 +192,8 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage):
     # return return_message, chunk_stats  # Return both the success message and the statistics
 
 
-def get_tile_grid():
-    grid = []
-    for west in range(-180, 180, TILE_DEGREES):
-        for north in range(80, -60, -TILE_DEGREES):  # Note: descending latitude (north to south)
-    # for west in range(110, 120, TILE_DEGREES):
-    #     for north in range(0, -10, -TILE_DEGREES):  # Note: descending latitude (north to south)
-            grid.append((west, north))
-    return grid
 
-
-def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, run_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
          chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     ### Step 1: Preparation
@@ -197,7 +222,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, None, None, main_logger)
+    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, None, fishnet_iso_df, main_logger)
 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
@@ -233,7 +258,6 @@ if __name__ == "__main__":
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
-    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2024.')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
@@ -249,7 +273,6 @@ if __name__ == "__main__":
     chunk_size = args.chunk_size
     chunk_shapefile_uri = args.chunk_shapefile_uri
     first_chunks = args.first_chunks
-    year_range = args.year_range
     log_note = args.log_note
 
     run_local = args.run_local
@@ -258,5 +281,5 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, run_date, year_range, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
+    main(cluster_name, run_date, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size, first_chunks=first_chunks, log_note=log_note)
