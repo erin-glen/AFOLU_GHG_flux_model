@@ -1,13 +1,17 @@
 """
 To run:
 
-python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_mineral_soil
+python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_mineral_soil
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.create_stock_and_stock_change_10x10s -cn LULUCF_mineral_soil -bb 110 -1 111 0 -cs 10 --input_date YYYYMMDD
+
+python -m src.utilities.create_cluster -n 1 -t 1 -m 64 -cn LULUCF_mineral_soil
 python -m src.LULUCF.scripts.mineral_soil_organic_carbon.create_stock_and_stock_change_10x10s -cn LULUCF_mineral_soil -bb 110 -10 120 0 -cs 10 --input_date YYYYMMDD
 """
 
 import argparse
 import os
 import dask
+import concurrent.futures
 import numpy as np
 import psutil
 import rasterio
@@ -30,10 +34,10 @@ TILE_DEGREES = 10
 fs = s3fs.S3FileSystem(anon=False)
 
 SOC_COGS = {
-    "2000_2005": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif",
-    "2005_2010": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif",
-    "2010_2015": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20100101_20151231_g_epsg.4326_v20250204.tif",
-    "2015_2020": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"
+    "2000_2005": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif"],
+    "2005_2010": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif"],
+    "2010_2015": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20100101_20151231_g_epsg.4326_v20250204.tif"],
+    "2015_2020": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"]
 }
 
 # Extracts specified area from a global raster
@@ -80,25 +84,62 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload):
 
     soc_data = {}
 
-    ### Part 1: Calculate densities at each interval
+    download_dict = SOC_COGS
 
-    for year_ranges, url in SOC_COGS.items():
-        lu.print_and_log(f"Downloading SOC density for {year_ranges} for {bounds_str}: {uu.timestr()}", False, logger_worker)
-        data, profile = extract_tile_from_global_raster(url, bounds, chunk_length_pixels)
-        soc_data[year_ranges] = data
 
-        lu.print_and_log(f"  Saving {year_ranges} for {bounds_str}: {uu.timestr()}", False, logger_worker)
+    ### Part 1: Downloads all inputs for chunk.
+
+    # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
+    # Thus, this returns a complete set of inputs (missing chunks filled).
+    # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
+    # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
+    futures = uu.prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger_worker)
+
+    lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+
+    # Dictionary that stores the dataset name (key) and downloaded data and their statuses (values)
+    layers = {}
+
+    # Ensures futures stores Future objects
+    # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages for chunks
+    for future in concurrent.futures.as_completed(futures):
+        layer = futures[future]  # Gets the corresponding key
+        data, status = future.result()  # Unpacks the tuple result
+        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+            lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
+        layers[layer] = data
+
+    density_end_time = time.time()
+    lu.print_and_log(f"  {bounds_str} took {round(density_end_time - density_start_time)} seconds: {uu.timestr()}",False, logger_worker)
+
+
+    ### Part 2: Calculate carbon densities at each interval
+
+    for year_range, interval_array in layers.items():
+        soc_data[year_range] = interval_array
+        profile = {
+            "driver": "GTiff",
+            "height": chunk_length_pixels,
+            "width": chunk_length_pixels,
+            "count": 1,
+            "dtype": interval_array.dtype,
+            "crs": "EPSG:4326",
+            "transform": Affine.translation(bounds[0], bounds[3]) * Affine.scale(cn.resolution, -cn.resolution),
+            "compress": "DEFLATE"
+        }
+
+        lu.print_and_log(f"  Saving {year_range} for {bounds_str}: {uu.timestr()}", False, logger_worker)
         with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
             with rasterio.open(tmp.name, "w", **profile) as dst:
-                dst.write(data, 1)
+                dst.write(interval_array, 1)
 
             # Sets up s3 destination folder. File name depends on whether output is 40000x40000 pixels or smaller.
             if chunk_length_pixels == cn.full_raster_dims:
-                s3_key = f"{cn.min_soil_density_dir}{tile_id}_{cn.min_soil_density_pattern}__{year_ranges}.tif"
+                s3_key = f"{cn.min_soil_density_dir}{tile_id}_{cn.min_soil_density_pattern}__avg_{year_range}.tif"
             else:
-                s3_key = f"{cn.min_soil_density_dir}{tile_id}_{bounds_str}_{cn.min_soil_density_pattern}__{year_ranges}__{uu.timestr()}.tif"
+                s3_key = f"{cn.min_soil_density_dir}{tile_id}_{bounds_str}_{cn.min_soil_density_pattern}__avg_{year_range}__{uu.timestr()}.tif"
             s3_key = s3_key.replace("s3://", "")  # For s3fs access
-            s3_key = s3_key.replace("START_END", year_ranges)
+            s3_key = s3_key.replace("START_END", year_range)
             s3_key = s3_key.replace("PER_HA_OR_PIXEL", "per_ha")
             s3_key = s3_key.replace("CHUNK_SIZE_pixels", f"{chunk_length_pixels}_pixels")
 
@@ -111,7 +152,7 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload):
     lu.print_and_log(f"  {bounds_str} took {round(density_end_time - density_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
 
-    # ### Part 2: Calculate density changes between adjacent intervals
+    # ### Part 3: Calculate density changes between adjacent intervals
     #
     # # Sets metadata for change outputs (consecutive intervals and total)
     # delta_profile = profile.copy()
@@ -153,9 +194,9 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload):
     #             lu.print_and_log(f"  Uploading {delta_key}: {uu.timestr()}", False, logger_worker)
     #             fs.put(tmp.name, delta_key)
     #             lu.print_and_log(f"  Uploaded {delta_key}: {uu.timestr()}", False, logger_worker)
-    #
-    #
-    # ### Part 3: Calculate density change between start and end intervals
+
+
+    # ### Part 4: Calculate density change between start and end intervals
     #
     # lu.print_and_log(f"Calculating full-period SOC change for {bounds_str}: {uu.timestr()}", False, logger_worker)
     #
@@ -187,14 +228,14 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload):
     #         lu.print_and_log(f"  Uploading {delta_full_key}: {uu.timestr()}", False, logger_worker)
     #         fs.put(tmp.name, delta_full_key)
     #         lu.print_and_log(f"  Uploaded {delta_full_key}: {uu.timestr()}", False, logger_worker)
-
-    return_message = f"Success for {bounds_str}: {uu.timestr()}"
-
-    # Removes task tracking file from S3 once task is successful
-    uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
-
-    return return_message  # Return both the success message and the statistics
-    # return return_message, chunk_stats  # Return both the success message and the statistics
+    #
+    # return_message = f"Success for {bounds_str}: {uu.timestr()}"
+    #
+    # # Removes task tracking file from S3 once task is successful
+    # uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
+    #
+    # return return_message  # Return both the success message and the statistics
+    # # return return_message, chunk_stats  # Return both the success message and the statistics
 
 
 
