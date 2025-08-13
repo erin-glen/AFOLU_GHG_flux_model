@@ -23,6 +23,8 @@ python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessi
 python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
 
 Optimization notes: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210788116876878?focus=true
+
+TODO Check that the multiplication of the full model sums by interval_length work. I haven't run it since adding those.
 """
 
 import argparse
@@ -284,18 +286,20 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         # print(gross_removals_key)
         # print(out_dict[gross_removals_key].min())
 
-    # Store the full model summed outputs in out_dict with appropriate suffixes
+    # Store the full model summed outputs in out_dict with appropriate suffixes.
+    # Need to multiply by interval length because 5-year interval outputs actually contain 5 years of fluxes that need to be summed.
+    # TODO Check that the multiplication by interval_length works. I haven't run it.
     full_period_label = f"{start_year}_{end_year}"
-    out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_emis_CO2_only
-    out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_emis_non_CO2_only
-    out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_emis_all_gases
-    out_dict[f"{cn.gross_removals_all_C_pools_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_removals
-    out_dict[f"{cn.net_flux_agc_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_AGC_all_gases
-    out_dict[f"{cn.net_flux_bgc_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_BGC_all_gases
-    out_dict[f"{cn.net_flux_deadwood_c_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_deadwood_c_all_gases
-    out_dict[f"{cn.net_flux_litter_c_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_litter_c_all_gases
-    out_dict[f"{cn.net_flux_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_all_pools_CO2_only
-    out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_all_pools_all_gases
+    out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_ha_{full_period_label}"] = total_gross_emis_CO2_only * interval_length
+    out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_ha_{full_period_label}"] = total_gross_emis_non_CO2_only * interval_length
+    out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}_ha_{full_period_label}"] = total_gross_emis_all_gases * interval_length
+    out_dict[f"{cn.gross_removals_all_C_pools_pattern}_ha_{full_period_label}"] = total_gross_removals * interval_length
+    out_dict[f"{cn.net_flux_agc_pattern}_ha_{full_period_label}"] = total_net_flux_AGC_all_gases * interval_length
+    out_dict[f"{cn.net_flux_bgc_pattern}_ha_{full_period_label}"] = total_net_flux_BGC_all_gases * interval_length
+    out_dict[f"{cn.net_flux_deadwood_c_pattern}_ha_{full_period_label}"] = total_net_flux_deadwood_c_all_gases * interval_length
+    out_dict[f"{cn.net_flux_litter_c_pattern}_ha_{full_period_label}"] = total_net_flux_litter_c_all_gases * interval_length
+    out_dict[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_ha_{full_period_label}"] = total_net_flux_all_pools_CO2_only * interval_length
+    out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}_ha_{full_period_label}"] = total_net_flux_all_pools_all_gases * interval_length
 
     # print(out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
     # print(out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
@@ -436,8 +440,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
-    # Starting time for stage
-    start_time = uu.timestr()
+    start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
     main_logger.info(f"Run date: {input_date}")
@@ -497,14 +500,14 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     ### Step 2: Create 1x1 degree outputs
 
-    summative_output_delayed_results = [dask.delayed(create_summative_LULUCF_outputs)
+    summative_output_tasks = [dask.delayed(create_summative_LULUCF_outputs)
                        (chunk, start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years_list,
                         is_final, no_upload,
                         summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list, stage)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results
-    summative_output_results = dask.compute(*summative_output_delayed_results)
+    summative_output_results = dask.compute(*summative_output_tasks)
 
     success_count, all_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, summative_output_results)
 

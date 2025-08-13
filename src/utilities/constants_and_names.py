@@ -622,8 +622,22 @@ global_cropland_total_amount_all_crops_nonpeat_2019_raw_pattern = "Global_grid_a
 global_cropland_total_amount_all_crops_nonpeat_2019_processed_dir = f"{global_cropland_emissions_processed_dir}/total_amount/non_peatland/2019/"
 global_cropland_total_amount_all_crops_nonpeat_2019_processed_pattern = f"all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif"
 
-### Soil carbon timeseries
-OGH_soil_carbon_timeseries_spreadsheet = 'https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv'
+### Soil carbon timeseries (URIs from https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv)
+SOC_COGS = {
+    "2000_2005": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif",
+    "2005_2010": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif",
+    "2010_2015": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20100101_20151231_g_epsg.4326_v20250204.tif",
+    "2015_2020": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"
+}
+
+mineral_soil_C_run_date =  '20250813'
+min_soil_base_output_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/mineral_soil_carbon/"
+
+min_soil_density_pattern = "mineral_SOC_density_30cm_MgC"
+min_soil_density_dir = f"{min_soil_base_output_dir}{min_soil_density_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{mineral_soil_C_run_date}/"
+min_soil_change_pattern = "mineral_SOC_change_30cm_MgC_yr"
+min_soil_change_dir = f"{min_soil_base_output_dir}{min_soil_change_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{mineral_soil_C_run_date}/"
+
 
 
 ##### Outputs
