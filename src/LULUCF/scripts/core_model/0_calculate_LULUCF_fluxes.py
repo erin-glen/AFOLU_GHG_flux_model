@@ -241,8 +241,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
         else:
             mangrove_prev_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_{interval_end_year - interval_length}"]
             mangrove_curr_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_{interval_end_year}"]
-        print(f"mangrove_prev_block: {mangrove_prev_block}")
-        print(f"mangrove_curr_block: {mangrove_curr_block}")
+        print(f"mangrove_prev_block - {cn.mangrove_extent_processed_pattern}_{interval_end_year - interval_length}: {mangrove_prev_block}")
+        print(f"mangrove_curr_block - {cn.mangrove_extent_processed_pattern}_{interval_end_year}: {mangrove_curr_block}")
         #TODO: add logic here for gain/ loss within the 2006-2010 time interval
         #TODO: check that it is stepping into the if statements correctly
 
@@ -286,9 +286,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
         else:
             raise ValueError("interval_length not valid: must be 1 or 5")
 
-        # print("burned_area_blocks_all_intervals_so_far")
-        # print(burned_area_blocks_all_intervals_so_far)
-        # print("burned_area_blocks_all_intervals_so_far max for all intervals so far:", np.max(burned_area_blocks_all_intervals_so_far))
+        print("burned_area_blocks_all_intervals_so_far")
+        print(burned_area_blocks_all_intervals_so_far)
+        print("burned_area_blocks_all_intervals_so_far max for all intervals so far:", np.max(burned_area_blocks_all_intervals_so_far))
 
 
         # Creates a list of all the annual Potapov forest disturbance rasters from 2001 to the end of the interval.
@@ -312,15 +312,15 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # uint8 is okay because the highest value should be 23 (not 2020).
                 annual_forest_dist_blocks_all_intervals_so_far.append(year_disturb_array.astype('uint8'))
 
-            #     print(year)
-            #     print("year_disturb_array:", year_disturb_array)
-            #     print("year_disturb_array max:", np.max(year_disturb_array))
-            #     print("annual_forest_dist_blocks_all_intervals_so_far:", annual_forest_dist_blocks_all_intervals_so_far)
-            #     print("annual_forest_dist_blocks_all_intervals_so_far max:", np.max(annual_forest_dist_blocks_all_intervals_so_far))
-            #
-            # print("annual_forest_dist_blocks_all_intervals_so_far")
-            # print(annual_forest_dist_blocks_all_intervals_so_far)
-            # print("annual_forest_dist_blocks_all_intervals_so_far max for all intervals so far:", np.max(annual_forest_dist_blocks_all_intervals_so_far))
+                # print(year)
+                # print("year_disturb_array:", year_disturb_array)
+                # print("year_disturb_array max:", np.max(year_disturb_array))
+                # print("annual_forest_dist_blocks_all_intervals_so_far:", annual_forest_dist_blocks_all_intervals_so_far)
+                # print("annual_forest_dist_blocks_all_intervals_so_far max:", np.max(annual_forest_dist_blocks_all_intervals_so_far))
+
+            print("annual_forest_dist_blocks_all_intervals_so_far")
+            print(annual_forest_dist_blocks_all_intervals_so_far)
+            print("annual_forest_dist_blocks_all_intervals_so_far max for all intervals so far:", np.max(annual_forest_dist_blocks_all_intervals_so_far))
 
         # Tracks how many times each pixel was burned during the interval
         times_burned_in_interval_block = np.zeros(agc_dens_block.shape).astype('uint8')
@@ -359,8 +359,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 LC_curr = LC_curr_block[row, col]
                 veg_h_prev = veg_h_prev_block[row, col]
                 veg_h_curr = veg_h_curr_block[row, col]
-                mangrove_prev = mangrove_prev_block[row, col]
-                mangrove_curr = mangrove_curr_block[row, col]
+                mang_prev = mangrove_prev_block[row, col]
+                mang_curr = mangrove_curr_block[row, col]
 
                 # Secondary forest removal factors (Mg AGC/ha/yr)
                 natrl_forest_curve_0_5_AGC_RF = natrl_forest_curve_0_5_AGC_RF_block[row, col]
@@ -460,6 +460,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 c_dens_in_ToF = [agc_dens_in, bgc_dens_in, np.float32(0), np.float32(0)]
                 # No starting carbon
                 c_dens_in_empty = [np.float32(0), np.float32(0), np.float32(0), np.float32(0)]
+                #TODO - Q - do I need to recalculate other carbon pools using mangrove ratios here?
 
                 # Aboveground removal factors based on stand age at the start of the interval (as opposed to the end) (Mg C/ha/yr).
                 # So, for a five-year interval, if the starting age is 39 years, it will use the 20-40 year RF for the entire interval
@@ -507,13 +508,17 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 Cf_forest = nu.calc_Cf_forest(climate_domain_cell, drivers_cell, primary_forest_proxy)
 
                 #TODO @Mel Apply whatever rules you think are right to determine if mangrove C ratios should be calculated.
-                # The ingestion of the ratios should be correct, but do check it.
-                #Separate mangrove carbon pool ratios-- doesn't overwrite the non-mangrove ratios
-                # if {MANGROVE_PRESENT in pixel for this interval}:
-                #     r_s_ratio_mang = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 1]
-                #     deadwood_c_ratio_mang = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 2]
-                #     litter_c_ratio_mang = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 3]
 
+                # Separate mangrove removal factor and carbon pool ratios so they don't overwrite the non-mangrove ratios
+                if (mang_prev == 1) or (mang_curr == 1):
+                    # Determines the removal factor and ratios of belowground C:AGC, deadwood C:AGC and litter C:AGC for mangroves based on the continent-ecozone combination
+                    mangrove_AGC_RF, r_s_ratio_mang, deadwood_c_ratio_mang, litter_c_ratio_mang = nu.calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array)
+                    print(f"continent_ecozone_cell: {continent_ecozone_cell}")
+                    print(f"mangrove_AGC_RF: {mangrove_AGC_RF}")
+                    print(f"r_s_ratio_mang: {r_s_ratio_mang}")
+                    print(f"deadwood_c_ratio_mang: {deadwood_c_ratio_mang}")
+                    print(f"litter_c_ratio_mang: {litter_c_ratio_mang}")
+                #TODO: Check that mangrove RF and ratios are correct
 
                 ### Defines specific land cover classes, including planted tree classification
 
@@ -557,7 +562,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 all_tree_crops = (all_oil_palm or (planted_forest_tree_crop_cell == 2))
 
                 # Flag for whether the Descals year of planting is:
-                # Annual intervals: planting year one year after the the end of the interval
+                # Annual intervals: planting year one year after the end of the interval
                 # 5-year intervals: planting year during the 5-year interval
                 # (to determine if forest loss should occur in the year before oil palm is detected)
                 if interval_length == 1:  # For annual intervals
@@ -2012,9 +2017,9 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Creates numpy array of ratios of BGC, deadwood C, and litter C relative to AGC. Relevant columns must be specified.
     mangrove_C_ratio_array = uu.convert_lookup_table_to_array(cn.RF_C_ratio_spreadsheet_full_path, cn.mangrove_rate_ratio_tab,
-                                                              ['gainEcoCon', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
+                                                              ['gainEcoCon', 'AGB_gain_tons_ha_yr', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
     print(f"mangrove_C_ratio_array: {mangrove_C_ratio_array}")
-    #TODO: keep AGB_gain_tons_ha_yr and convert AGB RFs to AGC RFs?
+    #TODO: Note - added AGB_gain_tons_ha_yr to use as mangrove RF
 
     # Creates numpy array of emission factors for partially disturbed forest by driver and continent-ecozone combination
     partial_disturbance_EF_array = uu.convert_lookup_table_to_array(cn.partial_disturbance_emission_factor_table_full_path,

@@ -357,6 +357,33 @@ def calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RF_array):
 
     return primary_forest_RF
 
+# Returns the aboveground biomass accumulation rate (Mg biomass/ha/yr) for mangroves based on the continent-ecozone combination
+# Converts it to a removal factor (Mg AGC/ha/yr) by multiplying it by the carbon fraction for mangrove forests.
+# Also returns the ratios of BGC:AGC, deadwood C:AGC and litter C:AGC for mangrove forests
+@jit(nopython=True)
+def calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array):
+
+    mangrove_RF_indices = np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)
+
+    # Checks if there are matching indices and extracts corresponding mangrove RF
+    if mangrove_RF_indices[0].size > 0:  # If matching continent-ecozone combination...
+        mangrove_BA = mangrove_C_ratio_array[mangrove_RF_indices[0][0], 1]  # Uses matching mangrove biomass accumulation rate
+        mangrove_RF = mangrove_BA * cn.biomass_to_carbon_mangrove           # Converts units of biomass to units of carbon (i.e. removal factor)
+
+        mangrove_r_s_ratio = mangrove_C_ratio_array[mangrove_RF_indices[0][0], 2]           # Uses matching mangrove BGC:AGC ratio
+        mangrove_deadwood_c_ratio = mangrove_C_ratio_array[mangrove_RF_indices[0][0], 3]    # Uses matching mangrove deadwood:AGC ratio
+        mangrove_litter_c_ratio = mangrove_C_ratio_array[mangrove_RF_indices[0][0], 4]      # Uses matching mangrove litter:AGC ratio
+
+    else:  # If no matching continent-ecozone combination...
+        mangrove_BA = np.mean(mangrove_C_ratio_array[:, 1])         # Uses average of all mangrove biomass accumulation rates
+        mangrove_RF = mangrove_BA * cn.biomass_to_carbon_mangrove
+
+        mangrove_r_s_ratio = np.mean(mangrove_C_ratio_array[:, 2])          # Uses average of all mangrove BGC:AGC ratios
+        mangrove_deadwood_c_ratio = np.mean(mangrove_C_ratio_array[:, 3])   # Uses average of all mangrove deadwood:AGC ratio
+        mangrove_litter_c_ratio = np.mean(mangrove_C_ratio_array[:, 4])     # Uses average of all mangrove litter:AGC ratio
+
+    return mangrove_RF, mangrove_r_s_ratio, mangrove_deadwood_c_ratio, mangrove_litter_c_ratio
+
 
 # Returns the emission factors for partially disturbed forest by driver based on the continent-ecozone combination (unit: fraction AGC lost)
 # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67feb6f2-c124-800a-9279-61f0e3a67faf
