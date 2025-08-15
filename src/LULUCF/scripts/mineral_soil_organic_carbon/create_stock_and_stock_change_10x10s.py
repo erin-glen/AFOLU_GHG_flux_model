@@ -4,7 +4,7 @@ To run:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_mineral_soil
 python -m src.LULUCF.scripts.mineral_soil_organic_carbon.create_stock_and_stock_change_10x10s -cn LULUCF_mineral_soil -bb 110 -1 111 0 -cs 10 --input_date YYYYMMDD
 
-python -m src.utilities.create_cluster -n 1 -t 1 -m 64 -cn LULUCF_mineral_soil
+python -m src.utilities.create_cluster -n 1 -t 1 -m 128 -cn LULUCF_mineral_soil
 python -m src.LULUCF.scripts.mineral_soil_organic_carbon.create_stock_and_stock_change_10x10s -cn LULUCF_mineral_soil -bb 110 -10 120 0 -cs 10 --input_date YYYYMMDD
 """
 
@@ -18,11 +18,8 @@ import rasterio
 import tempfile
 import s3fs
 import time
-from rasterio.windows import Window
 from rasterio.transform import Affine
-
 from dask.distributed import print
-import coiled
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -30,39 +27,7 @@ from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
 
-TILE_DEGREES = 10
 fs = s3fs.S3FileSystem(anon=False)
-
-SOC_COGS = {
-    "2000_2005": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif"],
-    "2005_2010": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif"],
-    "2010_2015": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20100101_20151231_g_epsg.4326_v20250204.tif"],
-    "2015_2020": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"]
-}
-
-# Extracts specified area from a global raster
-# Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6877a34b-02cc-800a-88cc-a123cdc9ed1b
-def extract_tile_from_global_raster(cog_url, bounds, chunk_length_pixels):
-    with rasterio.Env(AWS_NO_SIGN_REQUEST='YES'):
-        with rasterio.open(cog_url) as src:
-            col_start = round((bounds[0] - src.bounds.left) / cn.resolution)
-            row_start = round((src.bounds.top - bounds[3]) / cn.resolution)
-
-            window = Window(col_start, row_start, chunk_length_pixels, chunk_length_pixels)
-            data = src.read(1, window=window)
-
-            transform = Affine.translation(bounds[0], bounds[3]) * Affine.scale(cn.resolution, -cn.resolution)
-
-            out_meta = src.meta.copy()
-            out_meta.update({
-                "driver": "GTiff",
-                "height": chunk_length_pixels,
-                "width": chunk_length_pixels,
-                "transform": transform,
-                "compress": "DEFLATE"
-            })
-
-            return data, out_meta
 
 
 def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload):
@@ -82,9 +47,14 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload):
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
 
-    soc_data = {}
+    download_dict = cn.SOC_COGS
 
-    download_dict = SOC_COGS
+    # Dictionary of outputs, used for chunk stats
+    out_dict = {}
+
+    # Converts the raw COG's kg C/m^3 (top 30 cm) that is rescaled by 10 -> Mg C/ha without the rescaling.
+    # OGH rescaled the global COGs by 10 to make them ints instead of floats to save storage.
+    SOC_CONVERSION_FACTOR = 3.0 / 10.0  # = 0.3
 
 
     ### Part 1: Downloads all inputs for chunk.
@@ -112,130 +82,184 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload):
     density_end_time = time.time()
     lu.print_and_log(f"  {bounds_str} took {round(density_end_time - density_start_time)} seconds: {uu.timestr()}",False, logger_worker)
 
+    # Need to put the SOC layers in chronological order so they can be differenced later
+    layers_ordered = dict(sorted(layers.items()))
 
-    ### Part 2: Calculate carbon densities at each interval
+    # Gets the first COG's URL
+    first_url = list(SOC_COGS.values())[0][0]
 
-    for year_range, interval_array in layers.items():
-        soc_data[year_range] = interval_array
-        profile = {
-            "driver": "GTiff",
-            "height": chunk_length_pixels,
-            "width": chunk_length_pixels,
-            "count": 1,
-            "dtype": interval_array.dtype,
-            "crs": "EPSG:4326",
-            "transform": Affine.translation(bounds[0], bounds[3]) * Affine.scale(cn.resolution, -cn.resolution),
-            "compress": "DEFLATE"
-        }
+    # Open the raster and grab nodata
+    with rasterio.Env(AWS_NO_SIGN_REQUEST='YES'):
+        with rasterio.open(first_url) as src:
+            nodata_val = src.nodata
+
+    profile = {
+        "driver": "GTiff",
+        "height": chunk_length_pixels,
+        "width": chunk_length_pixels,
+        "count": 1,
+        "dtype": 'float32',
+        "crs": "EPSG:4326",
+        "transform": Affine.translation(bounds[0], bounds[3]) * Affine.scale(cn.resolution, -cn.resolution),
+        "compress": "DEFLATE",
+        "nodata": 0.0
+    }
+
+
+    ### Part 2: Calculate carbon densities at each interval (Mg C/ha for 0-30 cm)
+
+    for year_range in list(layers.keys()):
+        interval_array = layers[year_range]
+
+        # Replace NoData with 0
+        interval_array = np.where(interval_array == nodata_val, 0, interval_array)
+
+        # Convert units from kg/m³ * 10 -> Mg/ha
+        converted_array = (interval_array * SOC_CONVERSION_FACTOR).astype(np.float32)
+
+        # Save back to layers so layers_ordered will be correct
+        layers[year_range] = converted_array
 
         lu.print_and_log(f"  Saving {year_range} for {bounds_str}: {uu.timestr()}", False, logger_worker)
         with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
             with rasterio.open(tmp.name, "w", **profile) as dst:
-                dst.write(interval_array, 1)
+                dst.write(converted_array, 1)
+
+            lu.print_and_log(f"After writing densities for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
 
             # Sets up s3 destination folder. File name depends on whether output is 40000x40000 pixels or smaller.
             if chunk_length_pixels == cn.full_raster_dims:
-                s3_key = f"{cn.min_soil_density_dir}{tile_id}_{cn.min_soil_density_pattern}__avg_{year_range}.tif"
+                s3_key = f"{cn.SOC_density_dir}{tile_id}_{cn.SOC_density_pattern}__avg_{year_range}.tif"
             else:
-                s3_key = f"{cn.min_soil_density_dir}{tile_id}_{bounds_str}_{cn.min_soil_density_pattern}__avg_{year_range}__{uu.timestr()}.tif"
+                s3_key = f"{cn.SOC_density_dir}{tile_id}_{bounds_str}_{cn.SOC_density_pattern}__avg_{year_range}__{uu.timestr()}.tif"
             s3_key = s3_key.replace("s3://", "")  # For s3fs access
-            s3_key = s3_key.replace("START_END", year_range)
+            s3_key = s3_key.replace("START_END", f"avg_{year_range}")
             s3_key = s3_key.replace("PER_HA_OR_PIXEL", "per_ha")
             s3_key = s3_key.replace("CHUNK_SIZE_pixels", f"{chunk_length_pixels}_pixels")
+
+            # Save to stats dictionary (still store converted array)
+            out_dict[f"{cn.SOC_density_pattern}__{year_range}"] = converted_array
 
             if not no_upload:
                 lu.print_and_log(f"  Uploading {s3_key}: {uu.timestr()}", False, logger_worker)
                 fs.put(tmp.name, s3_key)
-                lu.print_and_log(f"  Uploaded {s3_key}: {uu.timestr()}", False, logger_worker)
+                lu.print_and_log(f"  Uploaded {s3_key}: {uu.timestr()}", is_final, logger_worker)
 
-    density_end_time = time.time()
-    lu.print_and_log(f"  {bounds_str} took {round(density_end_time - density_start_time)} seconds: {uu.timestr()}", False, logger_worker)
-
-
-    # ### Part 3: Calculate density changes between adjacent intervals
-    #
-    # # Sets metadata for change outputs (consecutive intervals and total)
-    # delta_profile = profile.copy()
-    # delta_profile.update({
-    #     "dtype": "float32"
-    # })
-    #
-    # # Computes and save deltas
-    # year_ranges = list(SOC_COGS.keys())
-    # lu.print_and_log(f"Calculating consecutive SOC changes for {bounds_str}: {uu.timestr()}", False, logger_worker)
-    # for i in range(len(year_ranges) - 1):
-    #     start_interval = year_ranges[i]
-    #     end_interval = year_ranges[i + 1]
-    #     print(start_interval)
-    #     print(end_interval)
-    #     year_diff = int(end_interval[:4])-int(start_interval[:4])
-    #     lu.print_and_log(f"Calculating SOC change for {start_interval} to {end_interval} for {bounds_str}: {uu.timestr()}", False, logger_worker)
-    #
-    #     delta = (soc_data[end_interval].astype(np.int16) - soc_data[start_interval].astype(np.int16))/year_diff  # Interval arrays must be unsigned so difference can be negative
-    #
-    #     # Density change has to be float32
-    #     delta_float = delta.astype(np.float32)
-    #
-    #     with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
-    #         with rasterio.open(tmp.name, "w", **delta_profile) as dst:
-    #             dst.write(delta_float, 1)
-    #
-    #         # Sets up s3 destination folder. File name depends on whether output is 40000x40000 pixels or smaller.
-    #         if chunk_length_pixels == cn.full_raster_dims:
-    #             delta_key = f"{cn.min_soil_density_dir}{tile_id}_{cn.min_soil_density_pattern}_{start_interval}_{end_interval}.tif"
-    #         else:
-    #             delta_key = f"{cn.min_soil_change_dir}{tile_id}_{bounds_str}_{cn.min_soil_change_pattern}__{start_interval}_{end_interval}__{uu.timestr()}.tif"
-    #         delta_key = delta_key.replace("s3://", "")  # For s3fs access
-    #         delta_key = delta_key.replace("START_END", f"{start_interval}__{end_interval}")
-    #         delta_key = delta_key.replace("PER_HA_OR_PIXEL", "per_ha")
-    #         delta_key = delta_key.replace("CHUNK_SIZE_pixels", f"{chunk_length_pixels}_pixels")
-    #
-    #         if not no_upload:
-    #             lu.print_and_log(f"  Uploading {delta_key}: {uu.timestr()}", False, logger_worker)
-    #             fs.put(tmp.name, delta_key)
-    #             lu.print_and_log(f"  Uploaded {delta_key}: {uu.timestr()}", False, logger_worker)
+        # After all are processed, sort layers for delta calculations
+    layers_ordered = dict(sorted(layers.items()))
 
 
-    # ### Part 4: Calculate density change between start and end intervals
-    #
-    # lu.print_and_log(f"Calculating full-period SOC change for {bounds_str}: {uu.timestr()}", False, logger_worker)
-    #
-    # start_interval = year_ranges[0]
-    # end_interval = year_ranges[-1]
-    # year_diff = int(end_interval[:4]) - int(start_interval[:4])
-    # delta_full = (soc_data[end_interval].astype(np.int16) - soc_data[start_interval].astype(np.int16)) / year_diff
-    #
-    # # Density change has to be float32
-    # delta_full_float = delta_full.astype(np.float32)
-    #
-    # lu.print_and_log(f"After calculating differences for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
-    #
-    # with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
-    #     with rasterio.open(tmp.name, "w", **delta_profile) as dst:
-    #         dst.write(delta_full_float, 1)
-    #
-    #     # Sets up s3 destination folder. File name depends on whether output is 40000x40000 pixels or smaller.
-    #     if chunk_length_pixels == cn.full_raster_dims:
-    #         delta_full_key = f"{cn.min_soil_density_dir}{tile_id}_{cn.min_soil_density_pattern}__{start_interval}_{end_interval}.tif"
-    #     else:
-    #         delta_full_key = f"{cn.min_soil_change_dir}{tile_id}_{bounds_str}_{cn.min_soil_change_pattern}__{start_interval}_{end_interval}__{uu.timestr()}.tif"
-    #     delta_full_key = delta_full_key.replace("s3://", "")  # For s3fs access
-    #     delta_full_key = delta_full_key.replace("START_END", f"{start_interval}__{end_interval}")
-    #     delta_full_key = delta_full_key.replace("PER_HA_OR_PIXEL", "per_ha")
-    #     delta_full_key = delta_full_key.replace("CHUNK_SIZE_pixels", f"{chunk_length_pixels}_pixels")
-    #
-    #     if not no_upload:
-    #         lu.print_and_log(f"  Uploading {delta_full_key}: {uu.timestr()}", False, logger_worker)
-    #         fs.put(tmp.name, delta_full_key)
-    #         lu.print_and_log(f"  Uploaded {delta_full_key}: {uu.timestr()}", False, logger_worker)
-    #
-    # return_message = f"Success for {bounds_str}: {uu.timestr()}"
-    #
-    # # Removes task tracking file from S3 once task is successful
-    # uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
-    #
+    ### Part 3: Calculate density changes between adjacent intervals
+
+    # Computes and save deltas
+    year_ranges = list(layers_ordered.keys())    # Need to read from the chronologically ordered dictionary, not the unordered layers dict
+    lu.print_and_log(f"Calculating consecutive SOC changes for {bounds_str}: {uu.timestr()}", False, logger_worker)
+    for i in range(len(year_ranges) - 1):
+        start_interval = year_ranges[i]
+        end_interval = year_ranges[i + 1]
+        year_diff = int(end_interval[:4])-int(start_interval[:4])
+        lu.print_and_log(f"Calculating SOC change for {start_interval} to {end_interval} for {bounds_str}: {uu.timestr()}", False, logger_worker)
+
+        delta = (layers_ordered[end_interval] - layers_ordered[start_interval]) / year_diff  # Interval arrays must be unsigned so difference can be negative
+
+        # Density change has to be float32
+        delta_float = delta.astype(np.float32)
+
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+            with rasterio.open(tmp.name, "w", **profile) as dst:
+                dst.write(delta_float, 1)
+
+            lu.print_and_log(f"After calculating differences for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
+
+            # Sets up s3 destination folder. File name depends on whether output is 40000x40000 pixels or smaller.
+            if chunk_length_pixels == cn.full_raster_dims:
+                delta_key = f"{cn.SOC_change_dir}{tile_id}_{cn.SOC_change_pattern}__{start_interval}_{end_interval}.tif"
+            else:
+                delta_key = f"{cn.SOC_change_dir}{tile_id}_{bounds_str}_{cn.SOC_change_pattern}__{start_interval}_{end_interval}__{uu.timestr()}.tif"
+            delta_key = delta_key.replace("s3://", "")  # For s3fs access
+            delta_key = delta_key.replace("START_END", f"{start_interval}__{end_interval}")
+            delta_key = delta_key.replace("PER_HA_OR_PIXEL", "per_ha")
+            delta_key = delta_key.replace("CHUNK_SIZE_pixels", f"{chunk_length_pixels}_pixels")
+
+            # Saves output to dictionary for chunk stats calculations
+            out_dict[f"{cn.SOC_change_pattern}__{start_interval}_{end_interval}"] = delta_float
+
+            if not no_upload:
+                lu.print_and_log(f"  Uploading {delta_key}: {uu.timestr()}", False, logger_worker)
+                fs.put(tmp.name, delta_key)
+                lu.print_and_log(f"  Uploaded {delta_key}: {uu.timestr()}", is_final, logger_worker)
+
+
+    ### Part 4: Calculate density change between start and end intervals
+
+    lu.print_and_log(f"Calculating full-period SOC change for {bounds_str}: {uu.timestr()}", False, logger_worker)
+
+    start_interval = year_ranges[0]
+    end_interval = year_ranges[-1]
+    year_diff = int(end_interval[:4]) - int(start_interval[:4])
+    delta_full = (layers_ordered[end_interval] - layers_ordered[start_interval]) / year_diff
+
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        with rasterio.open(tmp.name, "w", **profile) as dst:
+            dst.write(delta_full, 1)
+
+        lu.print_and_log(f"After calculating differences for {bounds_str} for full period: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+
+        # Sets up s3 destination folder. File name depends on whether output is 40000x40000 pixels or smaller.
+        if chunk_length_pixels == cn.full_raster_dims:
+            delta_full_key = f"{cn.SOC_change_dir}{tile_id}_{cn.SOC_change_pattern}__{start_interval}_{end_interval}.tif"
+        else:
+            delta_full_key = f"{cn.SOC_change_dir}{tile_id}_{bounds_str}_{cn.SOC_change_pattern}__{start_interval}_{end_interval}__{uu.timestr()}.tif"
+        delta_full_key = delta_full_key.replace("s3://", "")  # For s3fs access
+        delta_full_key = delta_full_key.replace("START_END", f"{start_interval}__{end_interval}")
+        delta_full_key = delta_full_key.replace("PER_HA_OR_PIXEL", "per_ha")
+        delta_full_key = delta_full_key.replace("CHUNK_SIZE_pixels", f"{chunk_length_pixels}_pixels")
+
+        # Saves output to dictionary for chunk stats calculations
+        out_dict[f"{cn.SOC_change_pattern}__{start_interval}_{end_interval}"] = delta_full
+
+        if not no_upload:
+            lu.print_and_log(f"  Uploading {delta_full_key}: {uu.timestr()}", False, logger_worker)
+            fs.put(tmp.name, delta_full_key)
+            lu.print_and_log(f"  Uploaded {delta_full_key}: {uu.timestr()}", False, logger_worker)
+
+
+    ### Part 5: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
+    ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
+    ### Also useful for a quick sum of outputs without doing zonal stats
+
+    lu.print_and_log(f"Populating chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+
+    # The relevant pixel area (m^2) file in s3
+    pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
+
+    # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
+    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, bounds, chunk_length_pixels, 'Float32')
+    pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
+
+    # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
+    # NOTE: The full-interval chunk sums don't exactly match the sums of the individual intervals' chunk sums
+    # because of float32 rounding errors. However the output full-model rasters are definitely close enough
+    # at the pixel level, so I'm fine with this slight difference.
+    # Worked on it in https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/681244d9-83dc-800a-b397-0706e79391c0
+    # but never implemented the fix because the very slight rounding results in <0.01% difference.
+
+    for key, array_per_ha in out_dict.items():
+
+        # Converts per hectare values to per pixel values for the output numpy array
+        output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
+
+        chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
+
+    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+
+    return_message = f"Success for {bounds_str}: {uu.timestr()}"
+
+    # Removes task tracking file from S3 once task is successful
+    uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
+
     # return return_message  # Return both the success message and the statistics
-    # # return return_message, chunk_stats  # Return both the success message and the statistics
+    return return_message, chunk_stats  # Return both the success message and the statistics
 
 
 
@@ -290,10 +314,54 @@ def main(cluster_name, run_date, run_local=False, no_stats=False, no_log=False, 
 
     results = dask.compute(*output_delayed_tasks)
 
+    success_count, all_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, results)
 
-    print("All done.")
-    for res in results:
-        print(res)
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+
+
+    ### Step 3: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs
+
+    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    # cluster, not all the workers.
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
+
+        # Reduces number of workers in the cluster down to 1 if there is more than 10
+        if n_workers > 10:
+            main_logger.info("Resizing cluster to 1 worker")
+
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
+
+    # # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
+    # if not no_upload and is_final:
+    #     for output_folder in summative_outputs_by_interval_dir_list:
+    #         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+    #         main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+    #         # print(geotiff_files)
+
+    # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
+    # and min and max values across all chunks for all inputs and outputs
+    # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
+    if (not no_stats) and (success_count > 0):
+        uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+
+    # Sets it so that no worker logs are created if doing a local run
+    if not run_local:
+
+        # Creates combined log from all workers if not deactivated
+        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats, and worker log compilation", main_logger)
+
+        # Adds the workers' logs to the main log and uploads to s3
+        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
+
+    # Closes the Dask client if not running locally
+    if not run_local:
+        client.close()
+
 
 
 if __name__ == "__main__":
