@@ -1952,7 +1952,8 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     if is_final:
         main_logger.info(f"download_dict_with_data_types for {stage}: {download_dict_with_data_types}")
-
+        for key, value in download_dict_with_data_types.items():
+            main_logger.info(f"  {key}: {value}")
 
     # Creates a list of output directories (core and intermediates) for all outputs and intervals based on specifics of the model run
     output_dir_list_core_intermediate = cn.LULUCF_core_output_dirs + cn.LULUCF_intermediate_output_dirs
@@ -1962,6 +1963,8 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     output_dir_list.sort()  # Alphabetically order the outputs (modifies output_dir_list)
     if is_final:
         main_logger.info(f"output_dir_list for {stage}: {output_dir_list}")
+        for item in output_dir_list:
+            main_logger.info(f"  {item}")
     # print(output_dir_list)
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.

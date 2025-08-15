@@ -218,7 +218,8 @@ SDPT_other_code = 3
 
 ##### Miscellaneous
 
-date_date_range_pattern = r'_\d{4}(_\d{4})?'   # Pattern for date (XXXX) or date range XXXX_YYYY in output file names
+# Pattern for date (XXXX) or date range (XXXX_YYYY) with 1 or 2 leading _ in output file names
+date_date_range_pattern = r'_{1,2}\d{4}(_\d{4})?'
 
 AFOLU_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/"
 LULUCF_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/"
@@ -586,17 +587,20 @@ SOC_COGS = {
 SOC_timeseries_run_date = '20250815'
 SOC_timeseries_base_output_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/soil_organic_carbon_timeseries/"
 
+SOC_density_intervals = ['2000_2005', '2005_2010', '2010_2015', '2015_2020']
+SOC_change_intervals = ['2000_2005_2005_2010', '2005_2010_2010_2015', '2010_2015_2015_2020', '2000_2005_2015_2020']   # Last one is the full-period delta
+
 # Extent of raw COGs
-SOC_density_full_extent_pattern = "SOC_density__full_extent__0-30cm_MgC_ha"
-SOC_density_full_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{SOC_timeseries_run_date}/"
-SOC_change_full_extent_pattern = "SOC_change__full_extent__0-30cm_MgC_ha_yr"
-SOC_change_full_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{SOC_timeseries_run_date}/"
+SOC_density_full_extent_pattern = "SOC_density__full_extent__0-30cm_MgC"
+SOC_density_full_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+SOC_change_full_extent_pattern = "SOC_change__full_extent__0-30cm_MgC_yr"
+SOC_change_full_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 
 # Extent of mineral soil (excludes thresholded organic soil extent created by Erin Glen)
-SOC_density_min_soil_extent_pattern = "SOC_density__mineral_soil_extent__0-30cm_MgC_ha"
-SOC_density_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{SOC_timeseries_run_date}/"
-SOC_change_min_soil_extent_pattern = "SOC_change__mineral_soil_extent__0-30cm_MgC_ha_yr"
-SOC_change_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{SOC_timeseries_run_date}/"
+SOC_density_min_soil_extent_pattern = "SOC_density__mineral_soil_extent__0-30cm_MgC"
+SOC_density_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_min_soil_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+SOC_change_min_soil_extent_pattern = "SOC_change__mineral_soil_extent__0-30cm_MgC_yr"
+SOC_change_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_min_soil_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 
 # Cropland emissions
 cropland_emis_run_date =  '20241204'

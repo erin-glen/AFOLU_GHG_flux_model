@@ -303,6 +303,8 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # print(summative_inputs_by_interval_dir_list)
     if is_final:
         main_logger.info(f"summative_inputs_by_interval_dir_list: {summative_inputs_by_interval_dir_list}")
+        for item in summative_inputs_by_interval_dir_list:
+            main_logger.info(f"  {item}")
 
     summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
                                                                            chunk_size_pixels, model_type, interval_end_years,
@@ -310,6 +312,8 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # print(summative_outputs_by_interval_dir_list)
     if is_final:
         main_logger.info(f"summative_outputs_by_interval_dir_list: {summative_outputs_by_interval_dir_list}")
+        for item in summative_outputs_by_interval_dir_list:
+            main_logger.info(f"  {item}")
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")

@@ -1738,6 +1738,7 @@ def strip_and_extract_years(key):
 
     try:
         year_range = re.search(cn.date_date_range_pattern, key).group()[1:]
+        year_range = year_range.lstrip('_')  # Removes any leading _
     except:
         year_range = 'no year range'
 
