@@ -566,10 +566,39 @@ burned_area_hdf_converted_to_raw_raster_dir = "fires/MODIS_burned_area/MCD64A1.0
 burned_area_final_dir = "fires/MODIS_burned_area/MCD64A1.061/2_final_outputs__Hansenized/"  # With each year in its own folder
 burned_area_final_pattern = "burned_area_final"
 
-organic_soil_extent_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"
-organic_soil_extent_pattern = "peat_mask_processed"
+# Organic soil mask, from Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
+# and thresholded by Erin Glen for peat emissions model. Includes only pixels with organic soil probability >23%,
+# a cutoff determined by OpenGeoHub and implemented by Erin.
+organic_soil_extent_dir = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/peat_mask/OGH/tiles/"
+organic_soil_extent_pattern = "ogh_mask"
 
-#cropland emissions
+### Soil organic carbon (SOC) timeseries (URIs from https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv)
+# From Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
+# Units of raw global COGs are kg C/m^3 for 0-30 cm, multiplied by 10 (rescale factor) to make COGs ints.
+# Values in dict need to be lists (even with just 1 element) because of how uu.prepare_to_download_chunk works.
+SOC_COGS = {
+    "2000_2005": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif"],
+    "2005_2010": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif"],
+    "2010_2015": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20100101_20151231_g_epsg.4326_v20250204.tif"],
+    "2015_2020": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"]
+}
+
+SOC_timeseries_run_date = '20250815'
+SOC_timeseries_base_output_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/soil_organic_carbon_timeseries/"
+
+# Extent of raw COGs
+SOC_density_full_extent_pattern = "SOC_density__full_extent__0-30cm_MgC_ha"
+SOC_density_full_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{SOC_timeseries_run_date}/"
+SOC_change_full_extent_pattern = "SOC_change__full_extent__0-30cm_MgC_ha_yr"
+SOC_change_full_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{SOC_timeseries_run_date}/"
+
+# Extent of mineral soil (excludes thresholded organic soil extent created by Erin Glen)
+SOC_density_min_soil_extent_pattern = "SOC_density__mineral_soil_extent__0-30cm_MgC_ha"
+SOC_density_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{SOC_timeseries_run_date}/"
+SOC_change_min_soil_extent_pattern = "SOC_change__mineral_soil_extent__0-30cm_MgC_ha_yr"
+SOC_change_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{SOC_timeseries_run_date}/"
+
+# Cropland emissions
 cropland_emis_run_date =  '20241204'
 global_cropland_emissions_raw_dir = f"{AFOLU_path}cropland_emissions/raw__from_Cornell/20241126/year_2020/all_sources/"
 global_cropland_emissions_processed_dir = f"{AFOLU_path}cropland_emissions/processed/{cropland_emis_run_date}/year_2020/all_sources"
@@ -621,23 +650,6 @@ global_cropland_total_amount_all_crops_nonpeat_2006_processed_pattern = f"all_GH
 global_cropland_total_amount_all_crops_nonpeat_2019_raw_pattern = "Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif"
 global_cropland_total_amount_all_crops_nonpeat_2019_processed_dir = f"{global_cropland_emissions_processed_dir}/total_amount/non_peatland/2019/"
 global_cropland_total_amount_all_crops_nonpeat_2019_processed_pattern = f"all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif"
-
-### Soil organic carbon (SOC) timeseries (URIs from https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv)
-# Units of raw global COGs are kg C/m^3 for 0-30 cm, multiplied by 10 (rescale factor) to make COGs ints
-SOC_COGS = {
-    "2000_2005": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif",
-    "2005_2010": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif",
-    "2010_2015": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20100101_20151231_g_epsg.4326_v20250204.tif",
-    "2015_2020": "https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"
-}
-
-SOC_timeseries_run_date = '20250815'
-SOC_timeseries_base_output_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/soil_organic_carbon_timeseries/"
-
-SOC_density_pattern = "SOC_density_0-30cm_MgC_ha"
-SOC_density_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{SOC_timeseries_run_date}/"
-SOC_change_pattern = "SOC_change_0-30cm_MgC_ha_yr"
-SOC_change_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{SOC_timeseries_run_date}/"
 
 
 
