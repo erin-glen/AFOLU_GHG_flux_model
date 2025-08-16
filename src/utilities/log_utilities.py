@@ -187,7 +187,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
     # Removes the main log if the stage doesn't run in batches.
     # The main log must be kept for stages that run in batches because each batch uses the same main log.
     # The main log can be manually deleted after the run is done.
-    if not "create_forest_age_2010_2015__1x1_deg" or "LULUCF_fluxes" in stage:
+    if stage not in ["create_forest_age_2010_2015__1x1_deg", "LULUCF_fluxes"]:
         os.remove(main_log)
 
     if not no_log:
