@@ -54,7 +54,7 @@ from src.utilities import resize_cluster
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-@jit(nopython=True)
+#@jit(nopython=True)  #TODO: turn back on and comment out print statements
 def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, in_dict_float32,
                   primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                   model_start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_final):
@@ -228,23 +228,24 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
         veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}"]
         veg_h_curr_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year}"]
 
-        # Mangrove extent at the start and end of the interval
-        if interval_end_year == 2005:
-            mangrove_prev_block = mangrove_extent_1996_block
-            mangrove_curr_block = mangrove_extent_1996_block
-        elif interval_end_year == 2010:
-            mangrove_prev_block = mangrove_extent_1996_block
-            mangrove_curr_block = mangrove_extent_2010_block
-        elif interval_end_year == 2015:
-            mangrove_prev_block = mangrove_extent_2010_block
-            mangrove_curr_block = mangrove_extent_2015_block
-        else:
-            mangrove_prev_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_{interval_end_year - interval_length}"]
-            mangrove_curr_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_{interval_end_year}"]
-        print(f"mangrove_prev_block - {cn.mangrove_extent_processed_pattern}_{interval_end_year - interval_length}: {mangrove_prev_block}")
-        print(f"mangrove_curr_block - {cn.mangrove_extent_processed_pattern}_{interval_end_year}: {mangrove_curr_block}")
-        #TODO: add logic here for gain/ loss within the 2006-2010 time interval
-        #TODO: check that it is stepping into the if statements correctly
+        # # Mangrove extent at the start and end of the interval
+        # if interval_end_year == 2005:
+        #     mangrove_prev_block = mangrove_extent_1996_block
+        #     mangrove_curr_block = mangrove_extent_1996_block
+        # elif interval_end_year == 2010:
+        #     mangrove_prev_block = mangrove_extent_1996_block
+        #     mangrove_curr_block = mangrove_extent_2010_block
+        # elif interval_end_year == 2015:
+        #     mangrove_prev_block = mangrove_extent_2010_block
+        #     mangrove_curr_block = mangrove_extent_2015_block
+        # else:
+        #     mangrove_prev_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_{interval_end_year - interval_length}"]
+        #     mangrove_curr_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_{interval_end_year}"]
+        # print(f"mangrove_prev_block - {cn.mangrove_extent_processed_pattern}_{interval_end_year - interval_length}: {mangrove_prev_block}")
+        # print(f"mangrove_curr_block - {cn.mangrove_extent_processed_pattern}_{interval_end_year}: {mangrove_curr_block}")
+        # #TODO: add logic here for gain/ loss within the 2006-2010 time interval
+        # #TODO: check that it is stepping into the if statements correctly
+        # #TODO: update with ending with 2020 but our model covering through 2023?
 
         print(f"{cn.land_cover_pattern}_{interval_end_year - interval_length}:", LC_prev_block)
         print(f"{cn.land_cover_pattern}_{interval_end_year}:", LC_curr_block)
@@ -359,8 +360,23 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 LC_curr = LC_curr_block[row, col]
                 veg_h_prev = veg_h_prev_block[row, col]
                 veg_h_curr = veg_h_curr_block[row, col]
-                mang_prev = mangrove_prev_block[row, col]
-                mang_curr = mangrove_curr_block[row, col]
+
+                # Mangrove extent years (1 = mangrove, 0 = no mangrove)
+                mang_1996 = mangrove_extent_1996_block[row, col]
+                mang_2007 = mangrove_extent_2007_block[row, col]
+                mang_2008 = mangrove_extent_2008_block[row, col]
+                mang_2009 = mangrove_extent_2009_block[row, col]
+                mang_2010 = mangrove_extent_2010_block[row, col]
+                mang_2015 = mangrove_extent_2015_block[row, col]
+                mang_2016 = mangrove_extent_2016_block[row, col]
+                mang_2017 = mangrove_extent_2017_block[row, col]
+                mang_2018 = mangrove_extent_2018_block[row, col]
+                mang_2019 = mangrove_extent_2019_block[row, col]
+                mang_2020 = mangrove_extent_2020_block[row, col]
+
+                # Array of entire mangrove timeseries
+                mang_timeseries = np.array([mang_1996, mang_2007, mang_2008, mang_2009, mang_2010,
+                                            mang_2015, mang_2016, mang_2017, mang_2018, mang_2019, mang_2020])
 
                 # Secondary forest removal factors (Mg AGC/ha/yr)
                 natrl_forest_curve_0_5_AGC_RF = natrl_forest_curve_0_5_AGC_RF_block[row, col]
@@ -454,13 +470,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # This assumes no residual AGC and BGC when tree cover gain occurs.
                 # It also assumes that there can be some deadwood and litter C left over.
                 c_dens_in_NT_T = [np.float32(0), np.float32(0), deadwood_c_dens_in, litter_c_dens_in]
+                # todo: Q - Should we make the same assumptions for mangrove gain?
                 # Tree crops (including oil palm): no deadwood or litter carbon
                 c_dens_in_tree_crops = [agc_dens_in, bgc_dens_in, np.float32(0), np.float32(0)]
                 # Trees outside forests: no deadwood or litter carbon
                 c_dens_in_ToF = [agc_dens_in, bgc_dens_in, np.float32(0), np.float32(0)]
                 # No starting carbon
                 c_dens_in_empty = [np.float32(0), np.float32(0), np.float32(0), np.float32(0)]
-                #TODO - Q - do I need to recalculate other carbon pools using mangrove ratios here?
 
                 # Aboveground removal factors based on stand age at the start of the interval (as opposed to the end) (Mg C/ha/yr).
                 # So, for a five-year interval, if the starting age is 39 years, it will use the 20-40 year RF for the entire interval
@@ -507,18 +523,71 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # Based on driver of loss, not the interval-end land cover.
                 Cf_forest = nu.calc_Cf_forest(climate_domain_cell, drivers_cell, primary_forest_proxy)
 
-                #TODO @Mel Apply whatever rules you think are right to determine if mangrove C ratios should be calculated.
+                # Calculating mangrove-specific information if mangroves are present
+                # Checks whether mangroves are present at all within the entire timeseries
+                if np.any(mang_timeseries == 1):
 
-                # Separate mangrove removal factor and carbon pool ratios so they don't overwrite the non-mangrove ratios
-                if (mang_prev == 1) or (mang_curr == 1):
-                    # Determines the removal factor and ratios of belowground C:AGC, deadwood C:AGC and litter C:AGC for mangroves based on the continent-ecozone combination
-                    mangrove_AGC_RF, r_s_ratio_mang, deadwood_c_ratio_mang, litter_c_ratio_mang = nu.calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array)
-                    print(f"continent_ecozone_cell: {continent_ecozone_cell}")
-                    print(f"mangrove_AGC_RF: {mangrove_AGC_RF}")
-                    print(f"r_s_ratio_mang: {r_s_ratio_mang}")
-                    print(f"deadwood_c_ratio_mang: {deadwood_c_ratio_mang}")
-                    print(f"litter_c_ratio_mang: {litter_c_ratio_mang}")
-                #TODO: Check that mangrove RF and ratios are correct
+                    # Gets the first year of mangrove gain and last year of mangrove loss to determine if this interval is mangrove loss, gain, or maintenance.
+                    mang_years = np.array(cn.mangrove_extent_years)
+                    first_mang_gain_year, last_mang_loss_year = nu.mangrove_first_gain_last_loss_years(mang_timeseries, mang_years)
+                    print(f"first_mang_gain_year: {first_mang_gain_year}")
+                    print(f"last_mang_loss_year: {last_mang_loss_year}")
+
+                    if interval_end_year == 2005:
+                        # All pixels with mangrove extent in 1996 will be mangrove remaining mangrove between 2000 - 2005.
+                        # No mangrove gain or loss in this interval since no GMWv3 years available between these years.
+                        mang_loss = False
+                        mang_gain = False
+                        mang_remaining_mang = mang_1996 == 1
+
+                        if mang_remaining_mang:
+                            mang_dist = False
+                            mang_dist_year = 0
+                            mang_gain_year_count_pre_dist = interval_length  # 5 years
+                            mang_gain_year_count_post_dist = 0
+
+                            # Determines the removal factor and ratios of belowground, deadwood and litter carbon for mangroves based on the continent-ecozone combination
+                            mangrove_AGC_RF, r_s_ratio_mang, deadwood_c_ratio_mang, litter_c_ratio_mang = nu.calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array)
+
+                        print(f"mang_loss: {mang_loss}")
+                        print(f"mang_gain: {mang_gain}")
+                        print(f"mang_remaining_mang: {mang_remaining_mang}")
+                        print(f"continent_ecozone_cell: {continent_ecozone_cell}")
+                        print(f"mangrove_AGC_RF: {mangrove_AGC_RF}")
+                        print(f"r_s_ratio_mang: {r_s_ratio_mang}")
+                        print(f"deadwood_c_ratio_mang: {deadwood_c_ratio_mang}")
+                        print(f"litter_c_ratio_mang: {litter_c_ratio_mang}")
+
+                    else:
+                        mang_year_index_list = nu.map_years_to_gmwv3_data(interval_end_year, interval_length)
+                        mang_interval_timeseries = mang_timeseries[mang_year_index_list]
+
+                        print(f"mang_year_index_list: {mang_year_index_list}")
+                        print(f"mang_interval_timeseries between {interval_start_year} - {interval_end_year}: {mang_interval_timeseries}")
+
+                    # Excluding 2000-2005 because mangrove extent is static during that interval (using 1996 data) so values are hard coded above
+                    if (interval_end_year != 2005) and np.any(mang_interval_timeseries == 1):
+
+                        # Determines whether it is mangrove loss, gain, or maintenance using the first year of mangrove gain and last year of mangrove loss from the entire timeseries
+                        mang_loss, mang_gain, mang_remaining_mang = nu.mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year, last_mang_loss_year)
+
+                        # Determines if there is mangrove disturbance during this interval (1->0), the year of disturbance, and calculates the number of gain years before and after disturbance
+                        # If there are multiple years of disturbance (1->0) in the interval, the first one is reported as disturbance.
+                        # If no disturbance, then mang_gain_year_count_pre_dist = number of years with mangrove extent during interval and mang_gain_year_count_post_dist = 0
+                        mang_dist, mang_dist_year, mang_gain_year_count_pre_dist, mang_gain_year_count_post_dist = nu.mangrove_gain_year_count_summary(mang_interval_timeseries, interval_start_year, interval_end_year)
+
+                        # Determines the removal factor and ratios of belowground, deadwood and litter carbon for mangroves based on the continent-ecozone combination
+                        mangrove_AGC_RF, r_s_ratio_mang, deadwood_c_ratio_mang, litter_c_ratio_mang = nu.calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array)
+
+                        print(f"mang_loss: {mang_loss}")
+                        print(f"mang_gain: {mang_gain}")
+                        print(f"mang_remaining_mang: {mang_remaining_mang}")
+                        print(f"continent_ecozone_cell: {continent_ecozone_cell}")
+                        print(f"mangrove_AGC_RF: {mangrove_AGC_RF}")
+                        print(f"r_s_ratio_mang: {r_s_ratio_mang}")
+                        print(f"deadwood_c_ratio_mang: {deadwood_c_ratio_mang}")
+                        print(f"litter_c_ratio_mang: {litter_c_ratio_mang}")
+                    #TODO: Check that mangrove RF and ratios are correct
 
                 ### Defines specific land cover classes, including planted tree classification
 
@@ -784,8 +853,44 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # That way, the mangrove decision tree gets priority.
                 # Mangroves will have top-level node=1
 
+                #todo: Q - @David instead of mangroves as a separate node (1), would it make sense to include mangrove gain,
+                # loss, and mang remaining mang in the tree logic below so all gain starts with 2, all loss starts with 3, etc.
+                ### Mangrove gain
+                if mang_gain:
+                    node = nu.accrete_node(node, 1)
+                    state_out = nu.accrete_node(node, 1) # Gain of mangroves (11)
+                    RF_AGC_final = mangrove_AGC_RF
+                    RF_BGC_final = RF_AGC_final * r_s_ratio_mang
+                    (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
+                        nu.calc_NT_T(interval_length, RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio=deadwood_c_ratio_mang, litter_c_ratio=litter_c_ratio_mang))
+                    #TODO: Q - Should starting AGC and BGC be set to 0 like in c_dens_in_NT_T? Currently using existing AGC, BGC, deadwood, and litter?
+
+                ### Mangrove loss
+                elif mang_loss:
+                    node = nu.accrete_node(node, 1)
+                    state_out = nu.accrete_node(node, 2)  # Loss of mangroves (12)
+
+                ### Mangrove remaining mangrove
+                elif mang_remaining_mang:
+                    node = nu.accrete_node(node, 1)
+                    state_out = nu.accrete_node(node, 3)  # Mangrove remaining mangrove (13)
+                    RF_AGC_final = mangrove_AGC_RF
+                    RF_BGC_final = RF_AGC_final * r_s_ratio_mang
+
+                    # Fire is ignored for mangrove emissions
+                    (c_gross_emis_out, c_gross_removals_out, agc_ef_out_cell,
+                     non_co2_flux_out, c_dens_out, gain_year_count,
+                     forest_age_end_of_interval) = nu.calc_mang_mang_no_disturbs(
+                        interval_length, forest_age_start_of_interval, RF_AGC_final, RF_BGC_final, interval_end_year,
+                        c_dens_in, deadwood_c_ratio=deadwood_c_ratio_mang, litter_c_ratio=litter_c_ratio_mang)
+                #TODO: Assuming no partial disturbance?
+                #TODO: Pass in gain_year_count_as an argument?
+                #TODO: Used burn logic to determine mangorve loss in 5 year interval?
+
+
+
                 ### Tree gain
-                if tree_gain:  # Terrestrial non-trees converted to trees (2)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                elif tree_gain:  # Terrestrial non-trees converted to trees (2)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
                     node = nu.accrete_node(node, 2)
                     if all_planted_trees:  # Gain of planted trees (21)
                         node = nu.accrete_node(node, 1)

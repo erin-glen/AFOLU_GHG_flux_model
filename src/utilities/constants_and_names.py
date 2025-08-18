@@ -203,6 +203,7 @@ biomass_emissions_only = np.array([1, 1, 0, 0]).astype('uint8')  # AGC and BGC
 all_but_bgc_emissions = np.array([1, 0, 1, 1]).astype('uint8')  # AGC, deadwood C, and litter C
 deadwood_litter_emissions = np.array([0, 0, 1, 1]).astype('uint8')  # deadwood C and litter C
 all_non_soil_pools = np.array([1, 1, 1, 1]).astype('uint8')  # AGC, BGC, deadwood C, and litter C
+no_carbon_pools = np.array([0, 0, 0, 0]).astype('uint8')  # None
 
 # SDPT v2.0 planted forest type codes
 SDPT_oil_palm_code = 1
