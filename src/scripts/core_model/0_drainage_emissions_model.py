@@ -666,6 +666,19 @@ def calculate_and_upload_drainage(
     )
     outputs = {**out_u32, **out_f32}
 
+    # burned-area emissions are totals for the whole inventory period; convert
+    # to annual values based on the number of years in the period
+    interval_length = iv_end - iv_start + 1
+    burned_layers = {
+        "burned_co2_Mg_CO2_ha": "burned_co2_Mg_CO2_ha_yr",
+        "burned_co_Mg_CO2e_ha": "burned_co_Mg_CO2e_ha_yr",
+        "burned_ch4_Mg_CO2e_ha": "burned_ch4_Mg_CO2e_ha_yr",
+        "burned_total_Mg_CO2e_ha": "burned_total_Mg_CO2e_ha_yr",
+    }
+    for old, new in burned_layers.items():
+        if old in outputs:
+            outputs[new] = outputs.pop(old) / interval_length
+
     # stats for outputs, with explicit layer categorization
     drainage_classification_layers = ["drained_soil", "drained_state"]
     burned_classification_layers = ["burned_state"]

@@ -14,7 +14,7 @@ DATA_TYPES = [
     "burned_state",
     # "burned_years_count",
     # "burned_total_Mg_CO2e_ha",
-    "burned_total_Mg_CO2e_pixel",
+    "burned_total_Mg_CO2e_pixel_yr",
     # "drained_ch4_ditch_Mg_CO2e_ha_yr",
     # "drained_ch4_land_Mg_CO2e_ha_yr",
     # "drained_co2_Mg_CO2_ha_yr",

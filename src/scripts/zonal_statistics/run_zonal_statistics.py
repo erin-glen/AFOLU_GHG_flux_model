@@ -75,9 +75,9 @@ DATASETS = {
         "folder": "drained_total_Mg_CO2e_pixel_yr",
         "zarr": "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
     },
-    "burned_total_Mg_CO2e_pixel": {
-        "folder": "burned_total_Mg_CO2e_pixel",
-        "zarr": "burned_total_Mg_CO2e_pixel_{interval}.zarr",
+    "burned_total_Mg_CO2e_pixel_yr": {
+        "folder": "burned_total_Mg_CO2e_pixel_yr",
+        "zarr": "burned_total_Mg_CO2e_pixel_yr_{interval}.zarr",
     },
 }
 
@@ -465,7 +465,7 @@ def run(args: argparse.Namespace) -> None:
 
         # Open flux/state layers
         drained_total = open_zarr_region(paths["drained_total_Mg_CO2e_pixel"]["zarr"], bbox, args.chunk_size)
-        burned_total = open_zarr_region(paths["burned_total_Mg_CO2e_pixel"]["zarr"], bbox, args.chunk_size)
+        burned_total = open_zarr_region(paths["burned_total_Mg_CO2e_pixel_yr"]["zarr"], bbox, args.chunk_size)
         drained_state_nodes = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
         burned_state_nodes = open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
         logger.debug("Flux layers opened for interval %s", interval)
@@ -545,7 +545,7 @@ def run(args: argparse.Namespace) -> None:
             ).compute()
         dict_b = convert_to_coord_dict(res_b, interval)
         ft_dict_b = {
-            1: parse_pattern_from_uri(cached_uri_lists["burned_total_Mg_CO2e_pixel"]),
+            1: parse_pattern_from_uri(cached_uri_lists["burned_total_Mg_CO2e_pixel_yr"]),
             2: "area__ha",
         }
         df_b = create_interval_df(dict_b, ft_dict_b, interval_end_year)

@@ -30,7 +30,6 @@ PERIODS = {
     "2016_2020": (2016, 2020),
     "2021_2024": (2021, 2024),
 }
-PERIOD_LEN = {p: end - start + 1 for p, (start, end) in PERIODS.items()}
 
 
 def year_to_period(year: int) -> str | None:
@@ -52,17 +51,10 @@ def load_model_outputs(path: str | Path) -> pd.DataFrame:
 
     keep_layers = {
         "drained_total_Mg_CO2e_ha_yr": "drained",
-        "burned_total_Mg_CO2e_ha":     "burned",
+        "burned_total_Mg_CO2e_ha_yr": "burned",
     }
     df = df[df["layer_name"].isin(keep_layers)]
     df["emission_type"] = df["layer_name"].map(keep_layers)
-
-    # burned rows are totals for the whole period → convert to annual
-    df["period_len"] = df["years"].map(PERIOD_LEN)
-    burned = df["emission_type"] == "burned"
-    df.loc[burned, "sum_value"] = (
-        df.loc[burned, "sum_value"] / df.loc[burned, "period_len"]
-    )
 
     return (
         df.rename(columns={"years": "period", "sum_value": "annual_Mg_CO2e"})
