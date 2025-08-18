@@ -36,6 +36,7 @@ c_to_co2 = np.float32(cn.c_to_co2)
 n2o_n_to_n2o = np.float32(cn.n2o_n_to_n2o)
 gwp_ch4 = np.float32(cn.gwp_ch4)
 gwp_n2o = np.float32(cn.gwp_n2o)
+gwp_co = np.float32(cn.gwp_co)
 combustion_factor = np.float32(cn.combustion_factor)
 
 forest_code = cn.ipcc_codes["forest"]
@@ -465,6 +466,7 @@ def calculate_drainage_and_emissions(
                         np.float32(gef_co2),
                         np.float32(gef_co),
                         np.float32(gef_ch4),
+                        gwp_co,
                         gwp_ch4,
                     )
 
@@ -508,7 +510,7 @@ def calculate_drainage_and_emissions(
     out_dict_float32["drained_co2_offsite_Mg_CO2_ha_yr"] = drained_co2_offsite_out
     out_dict_float32["drained_total_Mg_CO2e_ha_yr"] = drained_total_co2e_out
     out_dict_float32["burned_co2_Mg_CO2_ha"] = burned_co2_out
-    out_dict_float32["burned_co_Mg_CO_ha"] = burned_co_out
+    out_dict_float32["burned_co_Mg_CO2e_ha"] = burned_co_out
     out_dict_float32["burned_ch4_Mg_CO2e_ha"] = burned_ch4_out
     out_dict_float32["burned_total_Mg_CO2e_ha"] = burned_total_co2e_out
     return out_dict_uint32, out_dict_float32
@@ -699,7 +701,7 @@ def calculate_and_upload_drainage(
     interval_length = iv_end - iv_start + 1
     burned_layers = {
         "burned_co2_Mg_CO2_ha": "burned_co2_Mg_CO2_ha_yr",
-        "burned_co_Mg_CO_ha": "burned_co_Mg_CO_ha_yr",
+        "burned_co_Mg_CO2e_ha": "burned_co_Mg_CO2e_ha_yr",
         "burned_ch4_Mg_CO2e_ha": "burned_ch4_Mg_CO2e_ha_yr",
         "burned_total_Mg_CO2e_ha": "burned_total_Mg_CO2e_ha_yr",
     }
