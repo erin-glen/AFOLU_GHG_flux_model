@@ -171,7 +171,6 @@ def calculate_burned_area_emissions(
         gef_co2,
         gef_co,
         gef_ch4,
-        gwp_co,
         gwp_ch4
 ):
     """
