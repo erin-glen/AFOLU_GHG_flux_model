@@ -49,6 +49,7 @@ otherland_code = cn.ipcc_codes["otherland"]
 boreal_code = cn.ecozone_codes["boreal"]
 temperate_code = cn.ecozone_codes["temperate"]
 tropical_code = cn.ecozone_codes["tropical"]
+unknown_ecozone_code = cn.ecozone_codes["unknown"]
 
 poor_nutrient_code = cn.nutrient_status_codes["poor"]
 rich_nutrient_code = cn.nutrient_status_codes["rich"]
@@ -116,7 +117,8 @@ def calculate_drainage_and_emissions(
     engert_block = in_dict_float32["engert"]
     grip_block = in_dict_float32["grip"]
     extraction_block = in_dict_uint8["extraction"]
-    ecozone_block = in_dict_int16["climate_domain"]
+    continent_ecozone_block = in_dict_int16["continent_ecozone"]
+    climate_zone_block = in_dict_uint8["climate_zone"]
     descals_type_block = in_dict_int16["descals_type"]
 
     # optional burned‑area mask
@@ -160,7 +162,17 @@ def calculate_drainage_and_emissions(
             engert = engert_block[row, col]
             grip = grip_block[row, col]
             extraction = extraction_block[row, col]
-            ecozone = ecozone_block[row, col]
+            continent_ecozone = continent_ecozone_block[row, col]
+            climate_zone = climate_zone_block[row, col]
+            # Determine simplified ecozone from climate zone
+            if 1 <= climate_zone <= 4:
+                ecozone = tropical_code
+            elif 5 <= climate_zone <= 8:
+                ecozone = temperate_code
+            elif climate_zone >= 9:
+                ecozone = boreal_code
+            else:
+                ecozone = unknown_ecozone_code
             descals_type = descals_type_block[row, col]
 
             # default nutrient status by ecozone
@@ -614,12 +626,13 @@ def calculate_and_upload_drainage(
         "planted_forest_type",
         "extraction",
         "land_cover",
+        "climate_zone",
     ]
     uint8 += [
         f"{cn.burned_area_final_pattern}_{yr}"
         for yr in range(iv_start, iv_end + 1)
     ]
-    int16 = ["climate_domain", "descals_type"]
+    int16 = ["continent_ecozone", "descals_type"]
     float32 = [
         "dadap",
         "osm_roads",
@@ -638,14 +651,6 @@ def calculate_and_upload_drainage(
         )
 
     combine_burned_area(layers, iv_start, iv_end, count_burned_years)
-
-    # Remap FAO ecozone values to simplified climate domain codes
-    if "climate_domain" in layers:
-        cd = layers["climate_domain"].astype(np.int16, copy=False)
-        remapped = np.zeros_like(cd, dtype=np.int16)
-        for src_val, dst_val in cn.climate_domain_remap.items():
-            remapped[cd == src_val] = np.int16(dst_val)
-        layers["climate_domain"] = remapped
 
     # create typed dicts for numba
     td8, td16, td32, td32f = nu.create_typed_dicts(layers)
