@@ -484,7 +484,7 @@ def map_years_to_gmwv3_data(interval_end_year, interval_length):
             mang_index_list = [0, 0, 1, 2, 3, 4]    # 2005 (1996), 2006 (1996), 2007, 2008, 2009, 2010
         elif interval_end_year == 2015:
             mang_index_list = [4, 4, 4, 4, 4, 5]    # 2010, 2011 (2010), 2012 (2010), 2013 (2010), 2014 (2010), 2015
-        elif (interval_end_year == 2020)
+        elif (interval_end_year == 2020):
             mang_index_list = [5, 6, 7, 8, 9, 10]   # 2015, 2016, 2017, 2018, 2019, 2020
     elif interval_length == 1:
         if interval_end_year == 2015:
