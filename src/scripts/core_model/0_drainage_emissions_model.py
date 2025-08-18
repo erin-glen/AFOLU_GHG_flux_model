@@ -36,7 +36,6 @@ c_to_co2 = np.float32(cn.c_to_co2)
 n2o_n_to_n2o = np.float32(cn.n2o_n_to_n2o)
 gwp_ch4 = np.float32(cn.gwp_ch4)
 gwp_n2o = np.float32(cn.gwp_n2o)
-gwp_co = np.float32(cn.gwp_co)
 combustion_factor = np.float32(cn.combustion_factor)
 
 forest_code = cn.ipcc_codes["forest"]
@@ -466,7 +465,6 @@ def calculate_drainage_and_emissions(
                         np.float32(gef_co2),
                         np.float32(gef_co),
                         np.float32(gef_ch4),
-                        gwp_co,
                         gwp_ch4,
                     )
 
