@@ -1,11 +1,27 @@
 """
-To run:
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
-python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.create_stock_and_stock_change_10x10s -cn LULUCF_mineral_soil -bb 110 -1 111 0 -cs 10 --input_date YYYYMMDD
+Local test:
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -bb 110 -1 111 0 -cs 10
 
+Coiled small test (1x1 deg):
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_mineral_soil
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn LULUCF_mineral_soil -bb 110 -1 111 0 -cs 10
+
+Coiled 10x10 deg test (not using):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 128 -cn LULUCF_mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.create_stock_and_stock_change_10x10s -cn LULUCF_mineral_soil -bb 110 -10 120 0 -cs 10 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn LULUCF_mineral_soil -bb 110 -10 120 0 -cs 10
+
+Coiled large shapefile test:
+python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn LULUCF_mineral_soil
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn LULUCF_mineral_soil -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -ln "SOC timeseries for 1884-feature shapefile."
+
+Full run:
+python -m src.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_mineral_soil
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn LULUCF_mineral_soil -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive SOC timeseries creation."
+
+Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6877a34b-02cc-800a-88cc-a123cdc9ed1b
+Selection of 100 workers for full run based on tests in https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1211069739892865?focus=true
 """
 
 import argparse
@@ -15,10 +31,7 @@ import concurrent.futures
 import numpy as np
 import psutil
 import rasterio
-import tempfile
-import s3fs
 import time
-from rasterio.transform import Affine
 from dask.distributed import print
 from concurrent.futures import ThreadPoolExecutor
 
@@ -27,8 +40,6 @@ from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
-
-fs = s3fs.S3FileSystem(anon=False)
 
 def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, outputs_by_interval_dir_list):
 
@@ -78,32 +89,15 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, o
     for future in concurrent.futures.as_completed(futures):
         layer = futures[future]  # Gets the corresponding key
         data, status = future.result()  # Unpacks the tuple result
-        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
             lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
         layers[layer] = data
-
-    density_end_time = time.time()
-    lu.print_and_log(f"  {bounds_str} took {round(density_end_time - density_start_time)} seconds: {uu.timestr()}",False, logger_worker)
-
 
     # Gets the first COG's URL and gets the NoData value
     first_url = list(cn.SOC_COGS.values())[0][0]
     with rasterio.Env(AWS_NO_SIGN_REQUEST='YES'):
         with rasterio.open(first_url) as src:
             nodata_val = src.nodata
-
-    # Metadata for output geotifs
-    profile = {
-        "driver": "GTiff",
-        "height": chunk_length_pixels,
-        "width": chunk_length_pixels,
-        "count": 1,
-        "dtype": 'float32',
-        "crs": "EPSG:4326",
-        "transform": Affine.translation(bounds[0], bounds[3]) * Affine.scale(cn.resolution, -cn.resolution),
-        "compress": "DEFLATE",
-        "nodata": 0.0
-    }
 
     organic_soil_mask_uri = f"{cn.organic_soil_extent_dir}{tile_id}_{cn.organic_soil_extent_pattern}.tif"
 
@@ -122,6 +116,10 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, o
         # Convert units from kg/m³ * 10 -> Mg/ha
         converted_array_full_extent = (interval_array_full_extent * SOC_CONVERSION_FACTOR).astype(np.float32)
 
+        # print(f"\n--- Chunk {bounds_str} ---")
+        # print(f"SOC density array shape for {bounds_str} for {year_range}: {converted_array_full_extent.shape}")
+        # print(f"Organic soil mask shape for {bounds_str} for {year_range}: {organic_soil_mask.shape}")
+
         # Masks extent to just mineral soil (excludes pixels with high chance of being organic soil, per OpenGeoHub analysis)
         converted_array_min_soil_extent = np.where(organic_soil_mask == 0, converted_array_full_extent, 0)
 
@@ -135,8 +133,8 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, o
     out_dict_full_extent_ordered = dict(sorted(out_dict_full_extent.items()))
     out_dict_min_soil_extent_ordered = dict(sorted(out_dict_min_soil_extent.items()))
 
-    # print(out_dict_full_extent_ordered)
-    # print(out_dict_min_soil_extent_ordered)
+    density_end_time = time.time()
+    lu.print_and_log(f"  {bounds_str} downloads and density calcs took {round(density_end_time - density_start_time)} seconds: {uu.timestr()}",False, logger_worker)
 
 
     ### Part 3: Calculate density changes between adjacent intervals (Mg C/ha/yr for 0-30 cm)
@@ -149,10 +147,7 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, o
         start_interval = year_ranges[i][-9:]
         end_interval = year_ranges[i + 1][-9:]
         year_diff = int(end_interval[:4])-int(start_interval[:4])
-        # print(i)
-        # print(start_interval)
-        # print(end_interval)
-        # print(year_diff)
+
         lu.print_and_log(f"Calculating SOC change for {start_interval} to {end_interval} for {bounds_str}: {uu.timestr()}", False, logger_worker)
 
         delta_full_extent = (out_dict_full_extent_ordered[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}__{end_interval}"] -
@@ -196,7 +191,7 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, o
     # Combines the two output dictionaries into a single dictionary
     out_dict = out_dict_full_extent_ordered | out_dict_min_soil_extent_ordered
 
-    lu.print_and_log(f"Populating chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Populating chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
 
     # The relevant pixel area (m^2) file in s3
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
@@ -219,7 +214,7 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, o
 
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
-    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
 
 
     ### Part 4: Saves numpy arrays as rasters and uploads to s3
@@ -348,7 +343,7 @@ def main(cluster_name, run_date, run_local=False, no_stats=False, no_log=False, 
 
     # print(outputs_by_interval_dir_list)
     if is_final:
-        main_logger.info(f"outputs_dir_list: {outputs_by_interval_dir_list}")
+        main_logger.info(f"outputs_dir_list ({len(outputs_dir_list)} folders):")
         for item in outputs_by_interval_dir_list:
             main_logger.info(f"  {item}")
 
@@ -359,7 +354,7 @@ def main(cluster_name, run_date, run_local=False, no_stats=False, no_log=False, 
 
     ### Step 2: Create outputs
 
-    output_delayed_tasks = [dask.delayed(create_soil_C_density_and_change_tiles)(chunk, is_final, stage, no_upload,outputs_by_interval_dir_list) for chunk in chunk_list]
+    output_delayed_tasks = [dask.delayed(create_soil_C_density_and_change_tiles)(chunk, is_final, stage, no_upload, outputs_by_interval_dir_list) for chunk in chunk_list]
 
     results = dask.compute(*output_delayed_tasks)
 
@@ -382,12 +377,12 @@ def main(cluster_name, run_date, run_local=False, no_stats=False, no_log=False, 
 
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
-    # # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-    # if not no_upload and is_final:
-    #     for output_folder in summative_outputs_by_interval_dir_list:
-    #         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-    #         main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-    #         # print(geotiff_files)
+    # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
+    if not no_upload and is_final:
+        for output_folder in outputs_by_interval_dir_list:
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+            # print(geotiff_files)
 
     # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs

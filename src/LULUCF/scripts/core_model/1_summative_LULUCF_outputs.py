@@ -118,7 +118,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     for future in concurrent.futures.as_completed(futures):
         layer = futures[future]  # Gets the corresponding key
         data, status = future.result()  # Unpacks the tuple result
-        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
             lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
         layers[layer] = data
 
@@ -483,7 +483,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
                                                                            interval_year_diff_list, input_date, "per_ha")
     # print(summative_inputs_by_interval_dir_list)
     if is_final:
-        main_logger.info(f"summative_inputs_by_interval_dir_list: {summative_inputs_by_interval_dir_list}")
+        main_logger.info(f"summative_inputs_by_interval_dir_list:")
         for item in summative_inputs_by_interval_dir_list:
             main_logger.info(f"  {item}")
 
@@ -493,7 +493,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
                                                                             interval_year_diff_list, input_date, "per_ha")
     # print(summative_outputs_by_interval_dir_list)
     if is_final:
-        main_logger.info(f"outputs_dir_list: {summative_outputs_by_interval_dir_list}")
+        main_logger.info(f"outputs_dir_list:")
         for item in summative_outputs_by_interval_dir_list:
             main_logger.info(f"  {item}")
 

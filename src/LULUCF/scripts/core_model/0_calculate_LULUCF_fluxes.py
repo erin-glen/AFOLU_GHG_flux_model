@@ -1579,7 +1579,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     for future in concurrent.futures.as_completed(futures):
         layer = futures[future]  # Gets the corresponding key
         data, status = future.result()  # Unpacks the tuple result
-        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
             lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
         layers[layer] = data
 
@@ -1951,7 +1951,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
 
     if is_final:
-        main_logger.info(f"download_dict_with_data_types for {stage}: {download_dict_with_data_types}")
+        main_logger.info(f"download_dict_with_data_types for {stage}:")
         for key, value in download_dict_with_data_types.items():
             main_logger.info(f"  {key}: {value}")
 
@@ -1962,7 +1962,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                                      interval_year_diff_list, run_date, "per_ha")
     output_dir_list.sort()  # Alphabetically order the outputs (modifies output_dir_list)
     if is_final:
-        main_logger.info(f"output_dir_list for {stage}: {output_dir_list}")
+        main_logger.info(f"output_dir_list for {stage}:")
         for item in output_dir_list:
             main_logger.info(f"  {item}")
     # print(output_dir_list)

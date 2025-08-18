@@ -584,7 +584,7 @@ SOC_COGS = {
     "2015_2020": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"]
 }
 
-SOC_timeseries_run_date = '20250815'
+SOC_timeseries_run_date = '20250818'
 SOC_timeseries_base_output_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/soil_organic_carbon_timeseries/"
 
 SOC_density_intervals = ['2000_2005', '2005_2010', '2010_2015', '2015_2020']

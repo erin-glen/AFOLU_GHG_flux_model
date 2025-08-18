@@ -98,7 +98,7 @@ def create_starting_forest_age_2000(bounds, download_dict_with_data_types, year,
     for future in concurrent.futures.as_completed(futures):
         layer = futures[future]  # Gets the corresponding key
         data, status = future.result()  # Unpacks the tuple result
-        if 'success' not in status:  # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
             lu.print_and_log(f"{status}", is_final, logger_worker)
         layers[layer] = data
 

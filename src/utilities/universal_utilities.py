@@ -604,11 +604,38 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
 
     # If the uri exists, the relevant window is opened and returned and returned as an array.
     # Note that this chunk could still just have NoData values, which would be downloaded.
+    # And, if the uri exists but the raster just doesn't extend there (e.g., far north), the array has to be padded to
+    # reach the expected size.
     try:
         with rasterio.open(uri) as ds:
             window = rasterio.windows.from_bounds(*bounds, ds.transform)
             data = ds.read(1, window=window)
-            status = "success"
+
+            # Checks if array shape is not what we expect (full chunk size) and pads the array if the array is incomplete.
+            # Per https://chatgpt.com/c/67dcb99b-edb8-800a-abd8-f718de76043c
+
+            expected_shape = (chunk_length_pixels, chunk_length_pixels)
+            if data.shape != expected_shape:
+                original_shape = data.shape
+                numpy_dtype = map_to_numpy_dtype(data_type)
+                padded_data = np.zeros(expected_shape, dtype=numpy_dtype)
+
+                # Calculates offset in pixels relative to chunk
+                row_offset = max(0, int(window.row_off))
+                col_offset = max(0, int(window.col_off))
+
+                rows, cols = data.shape
+                end_row = min(row_offset + rows, chunk_length_pixels)
+                end_col = min(col_offset + cols, chunk_length_pixels)
+
+                # Fills the correct slice of the padded array
+                padded_data[row_offset:end_row, col_offset:end_col] = data[:end_row - row_offset, :end_col - col_offset]
+
+                data = padded_data
+                status = f"padded {bounds_str} chunk from {original_shape} to {expected_shape}"
+
+            else:
+                status = "success- chunk complete, no padding needed"
 
     # If the uri doesn't exist, a numpy array of the correct size and datatype populated with 0s is returned.
     except Exception as e:
