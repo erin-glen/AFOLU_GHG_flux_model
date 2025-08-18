@@ -76,7 +76,7 @@ s3_chunk_stats_path = "climate/AFOLU_flux_model/organic_soils/chunk_stats/"
 pixel_area_dir = f"{full_bucket_prefix}/analyses/area_28m/"
 pixel_area_pattern = "hanson_2013_area"
 
-progress_tracking_path = "climate/AFOLU_flux_model/organic/soils/task_progress_txts/"
+progress_tracking_path = "climate/AFOLU_flux_model/organic_soils/task_progress_txts/"
 
 possible_task_statuses = [
     "pending_",
@@ -361,6 +361,10 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
         'osm_canals': posixpath.join(dirs['osm_canals'], patterns['osm_canals'].format(tile_id=tile_id)),
         'planted_forest_type': posixpath.join(dirs['planted_forest_type'], patterns['planted_forest_type'].format(tile_id=tile_id)),
         'extraction': posixpath.join(dirs['extraction'], patterns['extraction'].format(tile_id=tile_id)),
+        'climate_domain': posixpath.join(
+            dirs['climate_domain'],
+            patterns['climate_domain'].format(tile_id=tile_id),
+        ),
         'continent_ecozone': posixpath.join(
             dirs['continent_ecozone'],
             patterns['continent_ecozone'].format(tile_id=tile_id),
