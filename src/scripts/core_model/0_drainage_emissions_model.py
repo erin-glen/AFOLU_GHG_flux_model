@@ -510,7 +510,7 @@ def calculate_drainage_and_emissions(
     out_dict_float32["drained_co2_offsite_Mg_CO2_ha_yr"] = drained_co2_offsite_out
     out_dict_float32["drained_total_Mg_CO2e_ha_yr"] = drained_total_co2e_out
     out_dict_float32["burned_co2_Mg_CO2_ha"] = burned_co2_out
-    out_dict_float32["burned_co_Mg_CO2e_ha"] = burned_co_out
+    out_dict_float32["burned_co_Mg_CO_ha"] = burned_co_out
     out_dict_float32["burned_ch4_Mg_CO2e_ha"] = burned_ch4_out
     out_dict_float32["burned_total_Mg_CO2e_ha"] = burned_total_co2e_out
     return out_dict_uint32, out_dict_float32
@@ -701,7 +701,7 @@ def calculate_and_upload_drainage(
     interval_length = iv_end - iv_start + 1
     burned_layers = {
         "burned_co2_Mg_CO2_ha": "burned_co2_Mg_CO2_ha_yr",
-        "burned_co_Mg_CO2e_ha": "burned_co_Mg_CO2e_ha_yr",
+        "burned_co_Mg_CO_ha": "burned_co_Mg_CO_ha_yr",
         "burned_ch4_Mg_CO2e_ha": "burned_ch4_Mg_CO2e_ha_yr",
         "burned_total_Mg_CO2e_ha": "burned_total_Mg_CO2e_ha_yr",
     }
