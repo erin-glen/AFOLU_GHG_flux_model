@@ -48,7 +48,6 @@ otherland_code = cn.ipcc_codes["otherland"]
 boreal_code = cn.ecozone_codes["boreal"]
 temperate_code = cn.ecozone_codes["temperate"]
 tropical_code = cn.ecozone_codes["tropical"]
-unknown_ecozone_code = cn.ecozone_codes["unknown"]
 
 poor_nutrient_code = cn.nutrient_status_codes["poor"]
 rich_nutrient_code = cn.nutrient_status_codes["rich"]
@@ -58,13 +57,6 @@ unknown_nutrient_code = cn.nutrient_status_codes["unknown"]
 long_rotation_code = cn.plantation_type_codes["long_rotation"]
 short_rotation_code = cn.plantation_type_codes["short_rotation"]
 oil_palm_code = cn.plantation_type_codes["oil_palm"]
-
-# --- climate-domain → ecozone LUT (Numba-friendly; mirrors cn.climate_domain_remap)
-_domain_max_key = max(cn.climate_domain_remap.keys()) if cn.climate_domain_remap else 0
-domain_to_ecozone_lut = np.zeros(_domain_max_key + 1, dtype=np.uint8)
-for _k, _v in cn.climate_domain_remap.items():
-    domain_to_ecozone_lut[int(_k)] = np.uint8(_v)
-
 
 # helpers for numba dict lookups
 @jit(nopython=True)
@@ -94,7 +86,6 @@ def calculate_drainage_and_emissions(
     burned_table,
     mark_missing,
     count_burned_years,
-    domain_to_ecozone_lut,
 ):
     """
     1) Drainage classification & state
@@ -124,16 +115,8 @@ def calculate_drainage_and_emissions(
     engert_block = in_dict_float32["engert"]
     grip_block = in_dict_float32["grip"]
     extraction_block = in_dict_uint8["extraction"]
-    continent_ecozone_block = in_dict_int16["continent_ecozone"]
-    climate_zone_block = in_dict_uint8["climate_zone"]
+    ecozone_block = in_dict_int16["climate_domain"]
     descals_type_block = in_dict_int16["descals_type"]
-
-    # optional climate-domain block (prefer when present)
-    climate_domain_block = None
-    for k in in_dict_uint8.keys():
-        if k == "climate_domain":
-            climate_domain_block = in_dict_uint8[k]
-            break
 
     # optional burned‑area mask
     burned_block = None
@@ -176,25 +159,7 @@ def calculate_drainage_and_emissions(
             engert = engert_block[row, col]
             grip = grip_block[row, col]
             extraction = extraction_block[row, col]
-            continent_ecozone = continent_ecozone_block[row, col]
-            climate_zone = climate_zone_block[row, col]
-
-            # Determine simplified ecozone (prefer climate-domain remap; fallback to climate-zone)
-            if climate_domain_block is not None:
-                cd = int(climate_domain_block[row, col])
-                if 0 <= cd < len(domain_to_ecozone_lut):
-                    ecozone = domain_to_ecozone_lut[cd]
-                else:
-                    ecozone = unknown_ecozone_code
-            else:
-                if 1 <= climate_zone <= 4:
-                    ecozone = tropical_code
-                elif 5 <= climate_zone <= 8:
-                    ecozone = temperate_code
-                elif climate_zone >= 9:
-                    ecozone = boreal_code
-                else:
-                    ecozone = unknown_ecozone_code
+            ecozone = ecozone_block[row, col]
             descals_type = descals_type_block[row, col]
 
             # default nutrient status by ecozone
@@ -647,14 +612,12 @@ def calculate_and_upload_drainage(
         "planted_forest_type",
         "extraction",
         "land_cover",
-        "climate_zone",
-        "climate_domain",
     ]
     uint8 += [
         f"{cn.burned_area_final_pattern}_{yr}"
         for yr in range(iv_start, iv_end + 1)
     ]
-    int16 = ["continent_ecozone", "descals_type"]
+    int16 = ["climate_domain", "descals_type"]
     float32 = [
         "dadap",
         "osm_roads",
@@ -674,6 +637,14 @@ def calculate_and_upload_drainage(
 
     combine_burned_area(layers, iv_start, iv_end, count_burned_years)
 
+    # Remap FAO ecozone values to simplified climate domain codes
+    if "climate_domain" in layers:
+        cd = layers["climate_domain"].astype(np.int16, copy=False)
+        remapped = np.zeros_like(cd, dtype=np.int16)
+        for src_val, dst_val in cn.climate_domain_remap.items():
+            remapped[cd == src_val] = np.int16(dst_val)
+        layers["climate_domain"] = remapped
+
     # create typed dicts for numba
     td8, td16, td32, td32f = nu.create_typed_dicts(layers)
 
@@ -690,7 +661,6 @@ def calculate_and_upload_drainage(
         baf.DEFAULT_TABLE,
         mark_missing,
         count_burned_years,
-        domain_to_ecozone_lut,
     )
     outputs = {**out_u32, **out_f32}
 
