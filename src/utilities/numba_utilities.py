@@ -672,6 +672,55 @@ def calc_NT_T(interval_length, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litt
 
     return c_gross_emissions_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age
 
+# Gross fluxes and ending carbon stocks for mangrove gain or mangrove remaining mangrove
+# Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
+# Applies to 5-year intervals and annual intervals.
+# Only difference is the mang_gain_year_count_pre_dist and mang_gain_year_count_post_dist
+#todo Q: Don't need seperate function for mangrove gain, right?
+#todo: don't need to keep track of agr for mangroves, right? If so, delete.
+#todo: Q: Reused code from NT_T above but without interval_length and added in forest_age_interval_start & gain_year_count_pre/post_dist. Should I modify funciton above?
+@jit(nopython=True)
+def calc_mang_mang_no_disturbs(forest_age_start, gain_year_count_pre_dist, gain_year_count_post_dist, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
+
+    # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
+    agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
+
+    #Raise error if disturbance flag is false but gain_year_count_post_dist > 0
+    if (gain_year_count_post_dist > 0):
+        raise ValueError(f"No mangrove disturbance during interval but gain_year_count_post_dist={gain_year_count_post_dist} is greater than 0")
+    #TODO: after testing, can remove dist_flag and gain_year_count_post_dist from input arguments
+
+    # Step 1: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
+    agc_gross_removals_out = float((agc_rf * gain_year_count_pre_dist) * -1)  #float() necessary for Numba typing
+    bgc_gross_removals_out = float((bgc_rf * gain_year_count_pre_dist) * -1)  #float() necessary for Numba typing
+    deadwood_c_gross_removals_out = agc_gross_removals_out * deadwood_c_ratio
+    litter_c_gross_removals_out = agc_gross_removals_out * litter_c_ratio
+
+    # Step 2: Calculates gross emissions by carbon pools (Mg C/ha/interval). Gross emissions are positive.
+    # There are no gross emissions in mangrove pixels with no disturbance, so C pool emissions set to 0.
+    agc_gross_emis_out = 0
+    bgc_gross_emis_out = 0
+    deadwood_c_gross_emis_out = 0
+    litter_c_gross_emis_out = 0
+
+    # Step 4: Calculates ending carbon densities by carbon pool (Mg C/ha)
+    agc_dens_out = agc_dens_in - agc_gross_removals_out
+    bgc_dens_out = bgc_dens_in - bgc_gross_removals_out
+    deadwood_c_dens_out = deadwood_c_dens_in - deadwood_c_gross_removals_out
+    litter_c_dens_out = litter_c_dens_in - litter_c_gross_removals_out
+
+    # Step 5: Prepares outputs
+    # Consolidates all gross fluxes from all carbon pools into arrays to reduce the number of arguments returned to the decision tree
+    c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')  # Mg C/ha/interval
+    c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')  # Mg C/ha/interval
+    c_dens_out = np.array([agc_dens_out, bgc_dens_out, deadwood_c_dens_out, litter_c_dens_out]).astype('float32')  # Mg C/ha
+
+    # Step 6: Increments the forest age (years).
+    # Forest age starts at 0 years by definition for NT->T.
+    forest_age = forest_age_start + gain_year_count_pre_dist
+
+    return c_gross_emissions_out, c_gross_removals_out, c_dens_out, gain_year_count_pre_dist, forest_age
+
 
 # Gross fluxes and ending carbon stocks for trees converted to non-trees with and without fire.
 # Non-CO2 gas emissions are only calculated if fire was detected during the interval.
@@ -1322,174 +1371,6 @@ def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, first
         raise ValueError("interval_length not valid: must be 1 or 5")
 
     return state_out, c_gross_emissions_out, c_gross_removals_out, agc_ef_CO2, non_co2_fluxes_out, c_dens_out, gain_year_count_pre_dist, forest_age_interval_end
-
-# Gross fluxes and ending carbon stocks for mangroves remaining mangroves
-# Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
-# Applies to 5-year intervals and annual intervals.
-@jit(nopython=True)
-def calc_mang_mang_no_disturbs(interval_length, forest_age_interval_start, RF_AGC, RF_BGC, interval_end_year,
-                               c_dens_in, deadwood_c_ratio, litter_c_ratio):
-
-    # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
-    agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
-
-    # Step 1: Calculates the number of years of carbon gain.
-    gain_year_count = interval_length
-
-
-    # Step 2: Calculates gross removals by carbon pools (Mg C/ha/interval) for 5-year and annual intervals. Gross removals are negative.
-    # Works for 5-year and annual intervals alike.
-    agc_gross_removals_out = float((RF_AGC * gain_year_count) * -1) #float() necessary for Numba typing
-    bgc_gross_removals_out = float((RF_BGC * gain_year_count) * -1) #float() necessary for Numba typing
-    deadwood_c_gross_removals_out= agc_gross_removals_out * deadwood_c_ratio
-    litter_c_gross_removals_out= agc_gross_removals_out * litter_c_ratio
-
-    # Consolidates outputs into array to reduce the number of arguments returned to the decision tree.
-    # Must specify float32 because numba is quite particular about datatypes.
-    c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')
-
-
-    # Step 3: Calculates carbon densities at the year of fire by carbon pool (Mg C/ha). This is not output from the model.
-    # For 5-year intervals, C pools pre-disturbance differ from input carbon pools.
-    # For annual intervals, C pools pre-disturbance are the same as input carbon pools because there is no gain before disturbance/fire.
-    if interval_length == 5:
-        agc_pre_disturb = agc_dens_in - agc_gross_removals_out
-        bgc_pre_disturb = bgc_dens_in - bgc_gross_removals_out
-        deadwood_c_pre_disturb = deadwood_c_dens_in - deadwood_c_gross_removals_out
-        litter_c_pre_disturb = litter_c_dens_in - litter_c_gross_removals_out
-
-        # Pre-disturbance carbon densities as an array, used as input for non-CO2 fire emissions and post-disturbance removals (if applicable)
-        c_pre_disturb = np.array([agc_pre_disturb, bgc_pre_disturb, deadwood_c_pre_disturb, litter_c_pre_disturb]).astype('float32')
-
-    # Assigning interval start C pools to pre-disturbance C pools rather than calculating them like in the 5-year interval
-    # branch reduces the number of calculations and is more explicit
-    elif interval_length == 1:
-        agc_pre_disturb = agc_dens_in
-        bgc_pre_disturb = bgc_dens_in
-        deadwood_c_pre_disturb = deadwood_c_dens_in
-        litter_c_pre_disturb = litter_c_dens_in
-        c_pre_disturb = np.array(c_dens_in).astype('float32')
-
-    else:
-        raise ValueError("interval_length not valid: must be 1 or 5")
-
-
-    # Step 5: Calculates CO2 gross emissions from fire by carbon pools (Mg C/ha/interval).  Which ones are emitted depends on whether fire was detected.
-
-    # Calculates CO2 emissions from fire for each C pool using fire emission factors
-    # if a Gef for CO2 is supplied AND if there was fire during the interval.
-    # This is used for non-stand replacing forest disturbances (as opposed to entire C pools being combusted).
-    # From IPCC 2019 Eqn. 2.27
-    if first_year_burned_during_interval > 0:
-
-        # Equations divide by C_to_CO2 to put the emissions back in Mg C/ha. They are later converted back to Mg CO2/ha,
-        # but we need CO2 fire emissions in Mg C/ha here for consistency with all other outputs.
-        agc_gross_emis_out = ((agc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * agc_ef_CO2
-        bgc_gross_emis_out = ((bgc_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * bgc_ef_CO2
-        deadwood_c_gross_emis_out = ((deadwood_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * deadwood_c_ef_CO2
-        litter_c_gross_emis_out = ((litter_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * litter_c_ef_CO2
-
-        # Emission factor for burned forest is the combustion factor for forrest
-        agc_ef_CO2 = Cf_forest
-
-        # # For testing CO2 fire emissions
-        # print("c_dens_in:", c_dens_in)
-        # print("agc_rf:", agc_rf)
-        # print("gain_year_count_pre_dist:", gain_year_count_pre_dist)
-        # print("agc_pre_disturb:", agc_pre_disturb)
-        # print(f"Cf_forest: {Cf_forest}; Gef_co2: {Gef_co2}")
-        # print("AGC emission factor for fire:", agc_ef_CO2)
-        # print("agc_gross_emis_out:", agc_gross_emis_out)
-        # os.quit()
-
-    # No emissions or emission factor if no fire detected
-    else:
-
-        agc_gross_emis_out = 0
-        bgc_gross_emis_out = 0
-        deadwood_c_gross_emis_out = 0
-        litter_c_gross_emis_out = 0
-        agc_ef_CO2 = 0
-
-    # Gross emissions as an array
-    c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')
-
-
-    # Step 6: Updates gross removals to include post-fire gross removals, if applicable (Mg C/ha/interval).
-    # gain year count is the number of years between the disturbance and the end of the interval.
-    # This uses the same RFs before and after the fire.
-    # Only applies to 5-year interval data.
-    if (first_year_burned_during_interval > 0) and (interval_length == 5):
-
-        post_dist_RF = np.array([RF_AGC, RF_BGC, RF_AGC * deadwood_c_ratio, RF_AGC * litter_c_ratio]).astype('float32')
-        gain_year_count_post_dist = cn.five_year_interval_duration - gain_year_count_pre_dist - 1
-        post_dist_gross_removals = gain_year_count_post_dist * post_dist_RF
-
-        c_gross_removals_out = c_gross_removals_out - post_dist_gross_removals
-
-        # print("post_dist_RF:", post_dist_RF)
-        # print("gain_year_count_pre_dist:", gain_year_count_pre_dist)
-        # print("gain_year_count_post_dist:", gain_year_count_post_dist)
-        # print("post_dist_gross_removals:", post_dist_gross_removals)
-        # print("c_gross_removals_out_after_dist:", c_gross_removals_out)
-        # os.quit()
-
-
-    # Step 7: Calculates ending carbon densities by carbon pool.
-    # Starts with carbon density in (list converted to np array), adds gross removals (subtracts negative value), subtracts emissions.
-    # Ending carbon pools are not affected by non-CO2 emissions in the next step.
-    c_dens_out = np.array(c_dens_in).astype('float32') - c_gross_removals_out - c_gross_emissions_out
-
-
-    # Step 8: Calculates non-CO2 emissions (if relevant) (Mg CO2e/ha/interval)
-    # Default non-CO2 emissions values
-    ch4_flux_out = 0
-    n2o_flux_out = 0
-
-    # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
-    if first_year_burned_during_interval > 0:
-
-        state_out = accrete_node(node, 1)
-
-        # Selects just the carbon pools that have non-CO2 emissions from fire
-        c_pools_for_fire_non_CO2 = np.where(c_pools_fire_non_CO2 == 1, c_pre_disturb, 0)
-
-        # Sums the C pools that have non-CO2 fire emissions. We don't track which C pools the CH4 and N2O emissions come from,
-        # so the pools are combined.
-        c_pools_for_fire_total = np.sum(c_pools_for_fire_non_CO2)
-
-        # Calculates non-CO2 fire emissions using the selected C pools in the year before disturbance
-        ch4_flux_out, n2o_flux_out = non_CO2_fire_equations(c_pools_for_fire_total, Cf_forest, Gef_ch4, Gef_n2o)
-
-        # # For testing non-CO2 emissions
-        # print("c_dens_in:", c_dens_in)
-        # print("c_pre_disturb:", c_pre_disturb)
-        # print(f"Cf_forest: {Cf_forest}; Gef_ch4: {Gef_ch4}; GWP CH4: {cn.gwp_ch4}")
-        # print(f"Cf_forest: {Cf_forest}; Gef_n2o: {Gef_n2o}; GWP N2O: {cn.gwp_n2o}")
-        # print("c_pools_for_fire_non_CO2:", c_pools_for_fire_non_CO2)
-        # print("c_pools_for_fire_total:", c_pools_for_fire_total)
-        # print(f"ch4_flux_out: {ch4_flux_out}; n2o_flux_out: {n2o_flux_out};")
-        # os.quit()
-
-    # Node code if no fire in the last interval. No CH4 and N2O emissions calculated.
-    else:
-
-        state_out = accrete_node(node, 2)
-
-    non_co2_fluxes_out = np.array([ch4_flux_out, n2o_flux_out]).astype('float32')
-
-
-    # Step 9: Updates the forest age. Increments by the number of years in the interval.
-    # Age is not affected by fire, so age always increases in this function.
-    if interval_length == 5:
-        forest_age_interval_end = forest_age_interval_start + cn.five_year_interval_duration
-    elif interval_length == 1:
-        forest_age_interval_end = forest_age_interval_start + 1
-    else:
-        raise ValueError("interval_length not valid: must be 1 or 5")
-
-    return c_gross_emissions_out, c_gross_removals_out, agc_ef_CO2, non_co2_fluxes_out, c_dens_out, gain_year_count_pre_dist, forest_age_interval_end
-
 
 
 # Gross fluxes and ending carbon stocks for non-cropland (without tall vegetation) converted to cropland (without tall vegetation).

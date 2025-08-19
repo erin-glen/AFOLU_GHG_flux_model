@@ -523,7 +523,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # Based on driver of loss, not the interval-end land cover.
                 Cf_forest = nu.calc_Cf_forest(climate_domain_cell, drivers_cell, primary_forest_proxy)
 
-                # Calculating mangrove-specific information if mangroves are present
                 # Checks whether mangroves are present at all within the entire timeseries
                 if np.any(mang_timeseries == 1):
 
@@ -548,6 +547,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
 
                             # Determines the removal factor and ratios of belowground, deadwood and litter carbon for mangroves based on the continent-ecozone combination
                             mangrove_AGC_RF, r_s_ratio_mang, deadwood_c_ratio_mang, litter_c_ratio_mang = nu.calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array)
+                        #TODO: Update in the other mangrove functions so these values aren't hard coded?
 
                         print(f"mang_loss: {mang_loss}")
                         print(f"mang_gain: {mang_gain}")
@@ -568,7 +568,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     # Excluding 2000-2005 because mangrove extent is static during that interval (using 1996 data) so values are hard coded above
                     if (interval_end_year != 2005) and np.any(mang_interval_timeseries == 1):
 
-                        # Determines whether it is mangrove loss, gain, or maintenance using the first year of mangrove gain and last year of mangrove loss from the entire timeseries
+                        # Determines whether interval is mangrove loss, gain, or maintenance using the first year of mangrove gain and last year of mangrove loss from the entire timeseries
                         mang_loss, mang_gain, mang_remaining_mang = nu.mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year, last_mang_loss_year)
 
                         # Determines if there is mangrove disturbance during this interval (1->0), the year of disturbance, and calculates the number of gain years before and after disturbance
@@ -855,15 +855,26 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
 
                 #todo: Q - @David instead of mangroves as a separate node (1), would it make sense to include mangrove gain,
                 # loss, and mang remaining mang in the tree logic below so all gain starts with 2, all loss starts with 3, etc.
+
+
+
                 ### Mangrove gain
                 if mang_gain:
                     node = nu.accrete_node(node, 1)
-                    state_out = nu.accrete_node(node, 1) # Gain of mangroves (11)
+                    node = nu.accrete_node(node, 1) # Gain of mangroves (11)
                     RF_AGC_final = mangrove_AGC_RF
                     RF_BGC_final = RF_AGC_final * r_s_ratio_mang
-                    (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
-                        nu.calc_NT_T(interval_length, RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio=deadwood_c_ratio_mang, litter_c_ratio=litter_c_ratio_mang))
-                    #TODO: Q - Should starting AGC and BGC be set to 0 like in c_dens_in_NT_T? Currently using existing AGC, BGC, deadwood, and litter?
+
+                    if not mang_dist:
+                        state_out = nu.accrete_node(node, 1)    # Gain of mangroves, no disturbance (111)
+                        (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
+                            nu.calc_mang_mang_no_disturbs(0, mang_gain_year_count_pre_dist,
+                                mang_gain_year_count_post_dist, RF_AGC_final, RF_BGC_final, c_dens_in,
+                                deadwood_c_ratio=deadwood_c_ratio_mang, litter_c_ratio=litter_c_ratio_mang))
+                    #TODO: Q - Should starting AGC and BGC be set to 0 like in c_dens_in_NT_T? Currently using existing AGC, BGC, deadwood, and litter in pixel?
+                    else:
+                        state_out = nu.accrete_node(node, 2)  # Gain of mangroves, disturbance (112)
+
 
                 ### Mangrove loss
                 elif mang_loss:
@@ -873,21 +884,21 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 ### Mangrove remaining mangrove
                 elif mang_remaining_mang:
                     node = nu.accrete_node(node, 1)
-                    state_out = nu.accrete_node(node, 3)  # Mangrove remaining mangrove (13)
+                    node = nu.accrete_node(node, 3)  # Mangrove remaining mangrove (13)
                     RF_AGC_final = mangrove_AGC_RF
                     RF_BGC_final = RF_AGC_final * r_s_ratio_mang
 
-                    # Fire is ignored for mangrove emissions
-                    (c_gross_emis_out, c_gross_removals_out, agc_ef_out_cell,
-                     non_co2_flux_out, c_dens_out, gain_year_count,
-                     forest_age_end_of_interval) = nu.calc_mang_mang_no_disturbs(
-                        interval_length, forest_age_start_of_interval, RF_AGC_final, RF_BGC_final, interval_end_year,
-                        c_dens_in, deadwood_c_ratio=deadwood_c_ratio_mang, litter_c_ratio=litter_c_ratio_mang)
-                #TODO: Assuming no partial disturbance?
-                #TODO: Pass in gain_year_count_as an argument?
-                #TODO: Used burn logic to determine mangorve loss in 5 year interval?
+                    if not mang_dist:
+                        state_out = nu.accrete_node(node, 1)  # Mangrove remaining mangrove, no disturbance (131)
+                        (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
+                            nu.calc_mang_mang_no_disturbs(forest_age_start_of_interval, mang_gain_year_count_pre_dist,
+                            mang_gain_year_count_post_dist, RF_AGC_final, RF_BGC_final, c_dens_in,
+                            deadwood_c_ratio=deadwood_c_ratio_mang, litter_c_ratio=litter_c_ratio_mang))
+                    else:
+                        state_out = nu.accrete_node(node, 2)  # Mangrove remaining mangrove, disturbance (132)
 
 
+                #TODO: Assuming no fire, no partial disturbance?
 
                 ### Tree gain
                 elif tree_gain:  # Terrestrial non-trees converted to trees (2)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
