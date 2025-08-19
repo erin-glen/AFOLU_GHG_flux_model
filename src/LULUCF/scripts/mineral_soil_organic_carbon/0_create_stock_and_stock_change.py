@@ -25,10 +25,11 @@ Selection of 100 workers for full run based on tests in https://app.asana.com/1/
 """
 
 import argparse
+import gc
 import os
-import dask
 import concurrent.futures
 import numpy as np
+import pandas as pd
 import psutil
 import rasterio
 import time
@@ -41,7 +42,7 @@ from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
 
-def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, outputs_by_interval_dir_list):
+def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, nodata_val, outputs_by_interval_dir_list):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -50,7 +51,7 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, o
 
     logger_worker = lu.setup_logging_worker()
 
-    density_start_time = time.time()
+    chunk_start_time = time.time()
 
     # uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
 
@@ -93,12 +94,6 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, o
             lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
         layers[layer] = data
 
-    # Gets the first COG's URL and gets the NoData value
-    first_url = list(cn.SOC_COGS.values())[0][0]
-    with rasterio.Env(AWS_NO_SIGN_REQUEST='YES'):
-        with rasterio.open(first_url) as src:
-            nodata_val = src.nodata
-
     organic_soil_mask_uri = f"{cn.organic_soil_extent_dir}{tile_id}_{cn.organic_soil_extent_pattern}.tif"
 
     organic_soil_mask = uu.get_tile_dataset_rio(organic_soil_mask_uri, bounds, chunk_length_pixels, 'uint8')
@@ -132,9 +127,6 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, o
     # Need to put the SOC layers in chronological order so they can be differenced later for full extent and mineral soil extent
     out_dict_full_extent_ordered = dict(sorted(out_dict_full_extent.items()))
     out_dict_min_soil_extent_ordered = dict(sorted(out_dict_min_soil_extent.items()))
-
-    density_end_time = time.time()
-    lu.print_and_log(f"  {bounds_str} downloads and density calcs took {round(density_end_time - density_start_time)} seconds: {uu.timestr()}",False, logger_worker)
 
 
     ### Part 3: Calculate density changes between adjacent intervals (Mg C/ha/yr for 0-30 cm)
@@ -269,6 +261,9 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, o
 
         lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}", is_final, logger_worker)
 
+    chunk_end_time = time.time()
+    lu.print_and_log(f"  {bounds_str} downloads and density calcs took {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}",False, logger_worker)
+
     return_message = f"Success for {bounds_str}: {uu.timestr()}"
 
     # Removes task tracking file from S3 once task is successful
@@ -286,6 +281,11 @@ def main(cluster_name, run_date, run_local=False, no_stats=False, no_log=False, 
     # Model stage being run
     stage = 'soil_carbon_densities_and_changes'
     model_type = 'standard_model'
+
+    # Runs chunks in batches of specified size.
+    # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
+    batch_size = 3000
+    # batch_size = 3  # For testing batch processing
 
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
@@ -347,6 +347,12 @@ def main(cluster_name, run_date, run_local=False, no_stats=False, no_log=False, 
         for item in outputs_by_interval_dir_list:
             main_logger.info(f"  {item}")
 
+    # Gets the first COG's URL and gets the NoData value
+    first_url = list(cn.SOC_COGS.values())[0][0]
+    with rasterio.Env(AWS_NO_SIGN_REQUEST='YES'):
+        with rasterio.open(first_url) as src:
+            nodata_val = src.nodata
+
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
@@ -354,13 +360,55 @@ def main(cluster_name, run_date, run_local=False, no_stats=False, no_log=False, 
 
     ### Step 2: Create outputs
 
-    output_delayed_tasks = [dask.delayed(create_soil_C_density_and_change_tiles)(chunk, is_final, stage, no_upload, outputs_by_interval_dir_list) for chunk in chunk_list]
+    # Creates list of tasks to run (1 task = 1 chunk)
+    main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
+    main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
-    results = dask.compute(*output_delayed_tasks)
+    chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
+    main_logger.info(f"There are {len(chunk_batches)} batches to process: {uu.timestr()}")
 
-    success_count, all_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, results)
+    # Accumulates all output messages and statistics across batches
+    # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
+    all_results = []
+    all_stats = []
+    success_count = 0  # Count of successful chunks
 
-    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+    # Iterates through the batches
+    for i, chunk_batch in enumerate(chunk_batches):
+        main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks): {uu.timestr()}")
+        main_logger.info("Creating batch task txts in s3...")
+        uu.create_s3_task_files(stage, chunk_batch)
+
+        # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
+        futures = []
+        for chunk in chunk_batch:
+
+            future = client.submit(create_soil_C_density_and_change_tiles, chunk,
+                                   is_final, stage, no_upload, nodata_val, outputs_by_interval_dir_list)
+            futures.append(future)
+
+        batch_results = client.gather(futures)
+
+        all_results.extend(batch_results)
+
+        success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_final, main_logger, batch_results)
+        all_stats.extend(batch_stats)
+
+        # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
+        # That way there are some basic chunk stats (not sorted or anything) to fall back on.
+        if len(chunk_batches) > 1:
+            main_logger.info(f"Writing batch stats to spreadsheet: {uu.timestr()}")
+            df_batch_stats = pd.DataFrame(batch_stats)
+            out_spreadsheet = f'TEMP_BATCH_{i}__{stage}__{uu.timestr()}.xlsx'
+            local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+            with pd.ExcelWriter(local_spreadsheet) as writer:
+                df_batch_stats.to_excel(writer, sheet_name=f'stats__batch_{i}', index=False)
+
+        del futures
+        del batch_results
+        client.run(gc.collect)
+
+        uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
 
     ### Step 3: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs

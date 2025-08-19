@@ -28,32 +28,32 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
 
     if worker_memory == 128:
         idle_timeout = 10
-        scheduler_vm_type = "x2iedn.xlarge"
+        scheduler_vm_type = "x2iedn.xlarge"    # 4 vCPU/worker
         worker_vm_type = "x2iedn.xlarge"
 
     elif worker_memory == 64:
         idle_timeout = 15
-        scheduler_vm_type = "x2gd.xlarge"
+        scheduler_vm_type = "x2gd.xlarge"    # 4 vCPU/worker
         worker_vm_type = "x2gd.xlarge"
 
     elif worker_memory == 32:
         idle_timeout = 20
-        scheduler_vm_type = "x8g.large"
+        scheduler_vm_type = "x8g.large"   # 2 vCPU/worker
         worker_vm_type = "x8g.large"
 
     elif worker_memory == 16:
         idle_timeout = 25
-        scheduler_vm_type = "x2gd.medium"
+        scheduler_vm_type = "x2gd.medium"   # 1 vCPU/worker
         worker_vm_type = "x2gd.medium"
 
     elif worker_memory == 8:
         idle_timeout = 25
-        scheduler_vm_type = "r8g.medium"
+        scheduler_vm_type = "r8g.medium"   # 1 vCPU/worker
         worker_vm_type = "r8g.medium"
 
     elif worker_memory == 4:
         idle_timeout = 25
-        scheduler_vm_type = "m8g.medium"
+        scheduler_vm_type = "m8g.medium"   # 1 vCPU/worker
         worker_vm_type = "m8g.medium"
 
     # # t2.small not available with Coiled. t3.small has 2 vCPUs, so it's not actually Coiled credit-effective.

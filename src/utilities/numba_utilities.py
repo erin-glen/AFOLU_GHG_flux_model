@@ -17,7 +17,7 @@ def accrete_node(combined, new_digit):
 
 # Makes all output states the same number of digits (currently 7) by padding 0s to the right
 @jit(nopython=True)
-def pad_to_6_digits(state_out, max_digits_state_out):
+def pad_to_8_digits(state_out, max_digits_state_out):
 
     if state_out < 10 ** (max_digits_state_out-1):
         digits = int(np.log10(state_out)) + 1 if state_out > 0 else 1

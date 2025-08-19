@@ -1444,7 +1444,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     raise ValueError("Maximum state_out is greater than the expected number of digits")
 
                 # Converts the state to 8 digits (trailing 0s) for consistency across all nodes
-                state_out = nu.pad_to_6_digits(state_out, max_digits_state_out)
+                state_out = nu.pad_to_8_digits(state_out, max_digits_state_out)
 
                 state_out_block[row, col] = state_out
 
@@ -1989,10 +1989,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                                                      '3_shift_cult_EF',	'4_logging_EF',	'5_wildfire_EF',
                                                                      '6_sett_infrastr_EF', '7_natrl_dist_EF'])
 
-    # Makes a txt for each task in the list. These are deleted as tasks are completed.
-    main_logger.info("Creating task txts in s3...")
-    uu.create_s3_task_files(stage, chunk_list)
-
 
     ### Step 2: Create 1x1 degree outputs
 
@@ -2005,7 +2001,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Accumulates all output messages and statistics across batches
     # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-    all_flux_results = []
+    all_results = []
     all_1x1_stats = []
     success_count = 0  # Count of successful chunks
 
@@ -2024,11 +2020,11 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                    interval_length_list, interval_end_years, is_final, no_upload, output_dir_list, stage)
             futures.append(future)
 
-        batch_flux_results = client.gather(futures)
+        batch_results = client.gather(futures)
 
-        all_flux_results.extend(batch_flux_results)
+        all_results.extend(batch_results)
 
-        success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_final, main_logger, batch_flux_results)
+        success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_final, main_logger, batch_results)
         all_1x1_stats.extend(batch_stats)
 
         # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
@@ -2042,7 +2038,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                 df_batch_stats.to_excel(writer, sheet_name=f'stats__batch_{i}', index=False)
 
         del futures
-        del batch_flux_results
+        del batch_results
         client.run(gc.collect)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
@@ -2065,7 +2061,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
     if not no_upload and is_final:
         for output_folder in output_dir_list:
-
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output rasters in {output_folder}: {file_count}")
             # print(geotiff_files)
