@@ -865,16 +865,20 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     RF_AGC_final = mangrove_AGC_RF
                     RF_BGC_final = RF_AGC_final * r_s_ratio_mang
 
-                    if not mang_dist:
-                        state_out = nu.accrete_node(node, 1)    # Gain of mangroves, no disturbance (111)
+                    if mang_dist:
+                        state_out = nu.accrete_node(node, 1)  # Gain of mangroves + disturbance (111)
+                        (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
+                            nu.calc_mang_mang_disturbs(interval_length, 0, mang_dist_year, mang_gain_year_count_pre_dist,
+                                mang_gain_year_count_post_dist, RF_AGC_final, RF_BGC_final, interval_end_year, c_dens_in,
+                                most_recent_year_not_tall_veg, deadwood_c_ratio_mang, litter_c_ratio_mang))
+
+                    else:
+                        state_out = nu.accrete_node(node, 2)  # Gain of mangroves, no disturbance (112)
                         (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
                             nu.calc_mang_mang_no_disturbs(0, mang_gain_year_count_pre_dist,
                                 mang_gain_year_count_post_dist, RF_AGC_final, RF_BGC_final, c_dens_in,
-                                deadwood_c_ratio=deadwood_c_ratio_mang, litter_c_ratio=litter_c_ratio_mang))
-                    #TODO: Q - Should starting AGC and BGC be set to 0 like in c_dens_in_NT_T? Currently using existing AGC, BGC, deadwood, and litter in pixel?
-                    else:
-                        state_out = nu.accrete_node(node, 2)  # Gain of mangroves, disturbance (112)
-
+                                deadwood_c_ratio_mang, litter_c_ratio_mang))
+                    # TODO: Q - Should starting AGC and BGC be set to 0 like in c_dens_in_NT_T? Currently using existing AGC, BGC, deadwood, and litter in pixel?
 
                 ### Mangrove loss
                 elif mang_loss:
@@ -888,16 +892,20 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     RF_AGC_final = mangrove_AGC_RF
                     RF_BGC_final = RF_AGC_final * r_s_ratio_mang
 
-                    if not mang_dist:
-                        state_out = nu.accrete_node(node, 1)  # Mangrove remaining mangrove, no disturbance (131)
+                    if mang_dist:
+                        state_out = nu.accrete_node(node, 1)  # Mangrove remaining mangrove, disturbance (131)
+                        (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
+                            nu.calc_mang_mang_disturbs(interval_length, forest_age_start_of_interval, mang_dist_year,
+                                mang_gain_year_count_pre_dist, mang_gain_year_count_post_dist, RF_AGC_final, RF_BGC_final,
+                                interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
+                                deadwood_c_ratio_mang, litter_c_ratio_mang))
+
+                    else:
+                        state_out = nu.accrete_node(node, 2)  # Mangrove remaining mangrove, no disturbance (132)
                         (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
                             nu.calc_mang_mang_no_disturbs(forest_age_start_of_interval, mang_gain_year_count_pre_dist,
                             mang_gain_year_count_post_dist, RF_AGC_final, RF_BGC_final, c_dens_in,
-                            deadwood_c_ratio=deadwood_c_ratio_mang, litter_c_ratio=litter_c_ratio_mang))
-                    else:
-                        state_out = nu.accrete_node(node, 2)  # Mangrove remaining mangrove, disturbance (132)
-
-
+                            deadwood_c_ratio_mang, litter_c_ratio_mang))
                 #TODO: Assuming no fire, no partial disturbance?
 
                 ### Tree gain
