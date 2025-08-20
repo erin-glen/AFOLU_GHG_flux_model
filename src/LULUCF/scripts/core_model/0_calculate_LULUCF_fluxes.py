@@ -860,6 +860,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                             nu.calc_mang_temp_loss(interval_length, 0, mang_loss_year_in_interval, mang_gain_year_count_pre_loss,
                                 mang_gain_year_count_post_loss, RF_AGC_final, RF_BGC_final, interval_end_year, c_dens_in_NT_T,
                                 most_recent_year_not_tall_veg, deadwood_c_ratio_mang, litter_c_ratio_mang))
+                        print(f"Node code is {state_out}, gain of mangroves + temp loss in interval (111)")
+                        print(f"c_dens_in_NT_T: {c_dens_in_NT_T}")
+                        print(f"c_dens_out: {c_dens_out}")
+                        print(f"c_gross_removals_out: {c_gross_removals_out}")
+                        print(f"c_gross_emis_out: {c_gross_emis_out}")
+                        print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
 
                     else:
                         state_out = nu.accrete_node(node, 2)  # Gain of mangroves, no loss in interval (112)
@@ -867,6 +873,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                             nu.calc_mang(0, mang_gain_year_count_pre_loss,
                                 mang_gain_year_count_post_loss, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T,
                                 deadwood_c_ratio_mang, litter_c_ratio_mang))
+                        print(f"Node code is {state_out}, gain of mangroves, no loss in interval (112)")
+                        print(f"c_dens_in_NT_T: {c_dens_in_NT_T}")
+                        print(f"c_dens_out: {c_dens_out}")
+                        print(f"c_gross_removals_out: {c_gross_removals_out}")
+                        print(f"c_gross_emis_out: {c_gross_emis_out}")
+                        print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
                     # TODO: Add in most_recent_year_not_tall_veg logic to calc_mang and calc_mang_temp_loss
 
 
@@ -882,16 +894,20 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
 
                     if water_LC_curr:
                         state_out = nu.accrete_node(node, 0)    # Permanent loss of mangroves to water (120)
+                        print(f"Node code is {state_out}, permanent loss of mangroves to water (120)")
                         #TODO: delete after testing
 
                     elif LC_curr == cn.cropland:
                         state_out = nu.accrete_node(node, 1)    # Permanent loss of mangroves to cropland (121)
+                        print(f"Node code is {state_out}, permanent loss of mangroves to cropland (121)")
 
                     elif LC_curr == cn.builtup:
                         state_out = nu.accrete_node(node, 2)    # Permanent loss of mangroves to settlement (122)
+                        print(f"Node code is {state_out}, permanent loss of mangroves to settlement (122)")
 
                     else:
                         state_out = nu.accrete_node(node, 3)            # Permanent loss of mangroves to anything else (123)
+                        print(f"Node code is {state_out}, permanent loss of mangroves to anything else (123)")
 
 
                 ### Mangrove remaining mangrove
@@ -908,6 +924,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                 mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss, RF_AGC_final, RF_BGC_final,
                                 interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                 deadwood_c_ratio_mang, litter_c_ratio_mang))
+                        print(f"Node code is {state_out}, mangrove remaining mangrove + temp loss in interval (131)")
+                        print(f"c_dens_in_NT_T: {c_dens_in_NT_T}")
+                        print(f"c_dens_out: {c_dens_out}")
+                        print(f"c_gross_removals_out: {c_gross_removals_out}")
+                        print(f"c_gross_emis_out: {c_gross_emis_out}")
+                        print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
 
                     else:
                         state_out = nu.accrete_node(node, 2)  # Mangrove remaining mangrove, no loss in interval (132)
@@ -915,6 +937,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                             nu.calc_mang(forest_age_start_of_interval, mang_gain_year_count_pre_loss,
                             mang_gain_year_count_post_loss, RF_AGC_final, RF_BGC_final, c_dens_in,
                             deadwood_c_ratio_mang, litter_c_ratio_mang))
+                        print(f"Node code is {state_out}, mangrove remaining mangrove, no loss in interval (132)")
+                        print(f"c_dens_in_NT_T: {c_dens_in_NT_T}")
+                        print(f"c_dens_out: {c_dens_out}")
+                        print(f"c_gross_removals_out: {c_gross_removals_out}")
+                        print(f"c_gross_emis_out: {c_gross_emis_out}")
+                        print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
 
 
                 ### Tree gain
