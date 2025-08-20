@@ -22,6 +22,15 @@ python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stoc
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6877a34b-02cc-800a-88cc-a123cdc9ed1b
 Selection of 100 workers for full run based on tests in https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1211069739892865?focus=true
+
+Cluster: https://cloud.coiled.io/clusters/1102243/account/wri-forest-research/information?organization=wri
+Peak memory: ~1600 MB/worker
+Average processing time per chunk (from log, with only 9000 tasks in it): average of 83 seconds (range: 21-176 seconds, stdev = 24)
+Time until chunk stats: 5:13:59
+Time with chunk stats: 5:18:34
+Coiled tasks: 18832 (expected number)
+Coiled credits: 522 (101/hr)
+AWS cost: $11.8 ($2.28/hr)
 """
 
 import argparse

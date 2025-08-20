@@ -130,6 +130,13 @@ trees_outside_forests_agc_rf_max = 2.8
 gwp_ch4 = 27 # AR6 WG1 Table 7.15
 gwp_n2o = 273 # AR6 WG1 Table 7.15
 
+# Combustion factor for trees that had fire but no height reduction or other sign of disturbance
+# (i.e. undisturbed trees remaining trees).
+# From IPCC 2019, Table 2.6, "Boreal forest- ground fire" (applied globally, though boreal)
+Cf_forest_undisturbed = 0.15
+
+other_landcover_node = 7
+
 
 ### Crop residue and grassland burning constants
 
@@ -155,8 +162,6 @@ Gef_N2O_grassland = 0.21
 
 # Combustion factor for savanna and grassland burning (IPCC 2019, V4, Ch. 2, Table 2.6-- all savanna grasslands (mid/late dry season burns)
 Cf_grassland = 0.77
-
-other_landcover_node = 7
 
 
 ### GLCLU cover codes

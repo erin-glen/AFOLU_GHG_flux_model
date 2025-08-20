@@ -308,7 +308,7 @@ def calc_short_veg_removals(climate_zone):
     elif climate_zone == 1:  # Tropical- montane (average of tropical dry and tropical wet/moist values)
         short_veg_AGB_RF = (2.3 + 6.2)/2
         short_veg_BGB_RF = (((8.7 + 16.1)/2) - short_veg_AGB_RF)
-    else: # Outside ecozone bounds-- apply boreal values
+    else: # Outside climate zone bounds-- apply boreal values
         short_veg_AGB_RF = 1.7
         short_veg_BGB_RF = (8.5-short_veg_AGB_RF)
 
@@ -389,7 +389,8 @@ def calc_partial_disturbance_EFs(drivers_cell, continent_ecozone_cell, partial_d
     return partial_disturbance_EF
 
 # Calculates Cf for fire emissions from forests (as opposed to savanna/grassland or crop residue burning).
-# From IPCC 2019 Table 2.6 (unitless)
+# From IPCC 2019 Table 2.6 (unitless).
+# There is also a separate Cf for pixels that are burned but show no height reduction ("undisturbed"), cn.Cf_forest_undisturbed
 @jit(nopython=True)
 def calc_Cf_forest(climate_domain_cell, drivers_cell, ifl_primary_cell):
 
