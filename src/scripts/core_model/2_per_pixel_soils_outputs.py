@@ -42,12 +42,14 @@ OUTPUT_DATE = "20250807"
 PIXEL_RES = "4000_pixels"
 
 
-def get_input_folders(pixel_resolution: str = PIXEL_RES) -> list:
+def get_input_folders(
+    pixel_resolution: str = PIXEL_RES, run_name: str = "ogh_standard_model"
+) -> list:
     paths = []
     for period in INVENTORY_PERIODS:
         for dtype in DATA_TYPES:
             path = (
-                f"{BASE_URL}/{dtype}/ogh_standard_model/"
+                f"{BASE_URL}/{dtype}/{run_name}/"
                 f"five_year_intervals/{period}/{pixel_resolution}/{OUTPUT_DATE}/"
             )
             paths.append(path)
@@ -177,9 +179,10 @@ def main(
         chunk_size=None,
         first_chunks=None,
         log_note=None,
+        run_name: str = "ogh_standard_model",
 ):
     stage = "per_pixel_soils_outputs"
-    model_type = "ogh_standard_model"
+    model_type = run_name
 
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
@@ -218,7 +221,7 @@ def main(
 
     is_final = True if len(chunk_list) > 20 else False
 
-    input_dirs = get_input_folders()
+    input_dirs = get_input_folders(run_name=run_name)
 
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
@@ -269,6 +272,7 @@ if __name__ == "__main__":
     parser.add_argument("--no_stats", action="store_true", help="Skip chunk stats spreadsheet")
     parser.add_argument("--no_log", action="store_true", help="Do not create combined log")
     parser.add_argument("--no_upload", action="store_true", help="Do not upload outputs to S3")
+    parser.add_argument("--run_name", default="ogh_standard_model", help="Model run name")
 
     args = parser.parse_args()
 
@@ -283,6 +287,7 @@ if __name__ == "__main__":
         chunk_size=args.chunk_size,
         first_chunks=args.first_chunks,
         log_note=args.log_note,
+        run_name=args.run_name,
     )
 
     """
@@ -290,11 +295,13 @@ python -m src.scripts.core_model.2_per_pixel_soils_outputs \
   --cluster_name per_pixel \
   --bounding_box 110 -10 120 0 \
   --chunk_size 1 \
-  --log_note "Testing per-pixel outputs" 
+  --run_name ogh_sensitivity_1km \
+  --log_note "Testing per-pixel outputs"
 
 python -m src.scripts.core_model.2_per_pixel_soils_outputs \
   --cluster_name per_pixel \
-  --chunk_size 1 
+  --chunk_size 1 \
+  --run_name ogh_sensitivity_1km
 
 
     """

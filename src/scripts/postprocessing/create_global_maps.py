@@ -58,6 +58,7 @@ def get_input_datasets(
     pixel_resolution: str,
     data_types: list[str] | None = None,
     inventory_periods: list[str] | None = None,
+    run_name: str = "ogh_standard_model",
 ) -> list[str]:
     """Return list of S3 folders for organic soil outputs."""
     data_types = data_types or DATA_TYPES
@@ -67,7 +68,7 @@ def get_input_datasets(
     for period in inventory_periods:
         for dtype in data_types:
             path = (
-                f"{BASE_URL}/{dtype}/ogh_standard_model/"
+                f"{BASE_URL}/{dtype}/{run_name}/"
                 f"five_year_intervals/{period}/{pixel_resolution}/{OUTPUT_DATE}"
             )
             paths.append(path)
@@ -188,10 +189,10 @@ def combine_global_raster(tiles, bounds_list, tile_id, global_4km_outfile, globa
     return "Success"
 
 
-def build_download_upload_dict(pixel_resolution: str) -> dict:
+def build_download_upload_dict(pixel_resolution: str, run_name: str) -> dict:
     """Create download/upload dictionary from drainage output paths."""
     dictionary = {}
-    for path in get_input_datasets(pixel_resolution):
+    for path in get_input_datasets(pixel_resolution, run_name=run_name):
         parts = path.rstrip("/").split("/")
         dataset = parts[8]
         interval = parts[11]
@@ -224,6 +225,7 @@ def build_download_upload_dict(pixel_resolution: str) -> dict:
 def main(
     cluster_name: str,
     pixel_resolution: str,
+    run_name: str = "ogh_standard_model",
     run_local: bool = False,
     use_pixel_area: bool = True,
 ):
@@ -234,7 +236,7 @@ def main(
         cluster_name, run_local=run_local
     )
 
-    download_upload_dictionary = build_download_upload_dict(pixel_resolution)
+    download_upload_dictionary = build_download_upload_dict(pixel_resolution, run_name)
 
     for key, items in download_upload_dictionary.items():
         bounds_list = []
@@ -327,6 +329,7 @@ if __name__ == "__main__":
         default="40000_pixels",
         help="Input raster resolution",
     )
+    parser.add_argument("--run_name", default="ogh_standard_model", help="Model run name")
     parser.add_argument(
         "--run_local",
         action="store_true",
@@ -342,10 +345,11 @@ if __name__ == "__main__":
     main(
         args.cluster_name,
         args.pixel_resolution,
+        args.run_name,
         args.run_local,
         not args.skip_pixel_area,
     )
 
 """
-python -m src.scripts.postprocessing.create_global_4km_maps -cm create_maps
+python -m src.scripts.postprocessing.create_global_4km_maps -cm create_maps --run_name ogh_sensitivity_1km
 """

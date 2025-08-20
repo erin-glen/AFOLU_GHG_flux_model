@@ -40,13 +40,15 @@ BASE_URL = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/versi
 OUTPUT_DATE = "20250818"
 
 
-def get_input_datasets(pixel_resolution: str = "4000_pixels") -> list:
+def get_input_datasets(
+    pixel_resolution: str = "4000_pixels", run_name: str = "ogh_standard_model"
+) -> list:
     """Return list of S3 folders for organic soil outputs."""
     paths = []
     for period in INVENTORY_PERIODS:
         for dtype in DATA_TYPES:
             path = (
-                f"{BASE_URL}/{dtype}/ogh_standard_model/"
+                f"{BASE_URL}/{dtype}/{run_name}/"
                 f"five_year_intervals/{period}/{pixel_resolution}/{OUTPUT_DATE}"
             )
             paths.append(path)
@@ -72,6 +74,7 @@ def main(
     no_upload: bool = False,
     no_log: bool = False,
     pixel_resolution: str = "4000_pixels",
+    run_name: str = "ogh_standard_model",
 ):
     logger = lu.setup_logging_main()
 
@@ -86,7 +89,7 @@ def main(
     start_time = uu.timestr()
     lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
 
-    input_datasets = get_input_datasets(pixel_resolution)
+    input_datasets = get_input_datasets(pixel_resolution, run_name)
 
     list_of_s3_name_dicts_total = uu.create_list_for_aggregation(input_datasets, logger)
 
@@ -149,6 +152,7 @@ if __name__ == "__main__":
         default="4000_pixels",
         help="Input raster resolution to process",
     )
+    parser.add_argument("--run_name", default="ogh_standard_model", help="Model run name")
 
     args = parser.parse_args()
 
@@ -158,8 +162,9 @@ if __name__ == "__main__":
         args.no_upload,
         args.no_log,
         args.pixel_resolution,
+        args.run_name,
     )
 
 """
-python -m src.scripts.core_model.3_aggregate_soils_outputs -cn aggregate
+python -m src.scripts.core_model.3_aggregate_soils_outputs -cn aggregate --run_name ogh_sensitivity_1km
 """

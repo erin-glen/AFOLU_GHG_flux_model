@@ -85,7 +85,7 @@ DATASETS = {
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_date}/{interval}/"
 FOLDER_TEMPLATE = (
     OUTPUT_BASE
-    + "/{folder}/ogh_standard_model/five_year_intervals/{interval}/"
+    + "/{folder}/{run_name}/five_year_intervals/{interval}/"
       "40000_pixels/{run_date}/"
 )
 
@@ -420,7 +420,12 @@ def run(args: argparse.Namespace) -> None:
         logger.debug("Using bounding box: %s", bbox)
 
     # Resolve manifest placeholders
-    OUTPUT_KW = dict(root=ROOT, model_version=args.model_version, run_date=args.run_date)
+    OUTPUT_KW = dict(
+        root=ROOT,
+        model_version=args.model_version,
+        run_date=args.run_date,
+        run_name=args.run_name,
+    )
 
     adm0_folder, adm0_zarr_name = ADM0_GTIFF_FOLDER, ADM0_ZARR
     pixel_area_folder, pixel_area_zarr_name = PIXEL_AREA_GTIFF_FOLDER, PIXEL_AREA_ZARR
@@ -613,6 +618,7 @@ def main(argv=None):
     parser.add_argument("--debug", action="store_true", help="Verbose logging")
     parser.add_argument("--no_sparse", action="store_true", default=not SPARSE_DEFAULT,
                         help="Disable sparse-COO output (dense fallback).")
+    parser.add_argument("--run_name", default="ogh_standard_model", help="Model run name")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run_local", action="store_true", help="Run locally without Dask/Coiled")
     mode.add_argument("--cluster_name", default="zonal_stats", help="Name of the Coiled cluster to attach to")
@@ -631,6 +637,7 @@ Example:
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
        --interval_end_years 2005 2010 2015 2020 2024 \
        --cluster_name zonal_stats \
+       --run_name ogh_sensitivity_1km \
        --run_date 20250807 \
        --model_version 0_6_0
 """
