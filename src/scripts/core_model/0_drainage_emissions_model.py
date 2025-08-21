@@ -528,6 +528,7 @@ def calculate_and_upload_drainage(
     iv_end,
     closing_year,
     peat_dataset="ogh",
+    run_name="ogh_standard_model",
     mark_missing=False,
     count_burned_years=False,
 ):
@@ -549,6 +550,8 @@ def calculate_and_upload_drainage(
         Land cover composite year for this interval.
     peat_dataset : str, optional
         Peat mask dataset name.
+    run_name : str, optional
+        Model run identifier used to label output paths.
     mark_missing : bool, optional
         Append sentinel digits for missing emission factors if ``True``.
     count_burned_years : bool, optional
@@ -757,7 +760,7 @@ def calculate_and_upload_drainage(
             is_final,
             logger,
             interval_type=interval_tag,
-            model_type=f"{peat_dataset}_standard_model",
+            model_type=run_name,
             no_data_val=0,
         )
         lu.print_and_log(
@@ -832,6 +835,7 @@ def run_drainage_model(
     interval_type="annual",
     tile_ids=None,
     peat_dataset="ogh",
+    run_name="ogh_standard_model",
     mark_missing=False,
     count_burned_years=False,
 ):
@@ -931,6 +935,7 @@ def run_drainage_model(
             t[2],
             closing_year,
             peat_dataset,
+            run_name,
             mark_missing,
             count_burned_years,
         )
@@ -986,6 +991,7 @@ def main(argv=None):
             interval_type=cn.intervals_five_year,
             all_five_year_periods=False,
             peat_dataset="ogh",
+            run_name="ogh_standard_model",
             mark_missing=False,
             count_burned_years=False,
         )
@@ -1049,6 +1055,11 @@ def main(argv=None):
         help="Peat mask dataset to use",
     )
     p.add_argument(
+        "--run_name",
+        default="ogh_standard_model",
+        help="Run name used to label output directories",
+    )
+    p.add_argument(
         "--mark_missing_factors",
         action="store_true",
         help=(
@@ -1086,6 +1097,7 @@ def main(argv=None):
         all_five_year_periods=args.all_five_year_periods,
         tile_ids=tile_ids,
         peat_dataset=args.peat_dataset,
+        run_name=args.run_name,
         mark_missing=args.mark_missing_factors,
         count_burned_years=args.count_burned_years,
     )
@@ -1101,7 +1113,8 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2016 \
   --end_year 2020 \
-  --interval_type five_year
+  --interval_type five_year \
+  --run_name custom_run
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
@@ -1118,7 +1131,8 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --start_year 2016 \
   --end_year 2020 \
   --interval_type five_year \
-  --peat_dataset peatmap
+  --peat_dataset peatmap \
+  --run_name peatmap_standard_model
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
@@ -1157,4 +1171,18 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --all_five_year_periods \
   --mark_missing_factors \
   --count_burned_years
+  
+  
+python -m src.scripts.core_model.0_drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --full_model \
+  --chunk_size 1 \
+  --start_year 2001 \
+  --end_year 2024 \
+  --all_five_year_periods \
+  --mark_missing_factors \
+  --count_burned_years \
+  --peat_dataset gfw \
+  --run_name gfw_standard_model
+  
 """
