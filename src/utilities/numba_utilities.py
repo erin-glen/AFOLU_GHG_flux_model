@@ -388,52 +388,67 @@ def calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array):
 # Also returns last year of mangrove loss (1->0) when there is no subsequent gain.
 # Otherwise, if not gain after 1996 or permanent loss (timeseries ending in 0), then mangrove remaining mangrove.
 @jit(nopython=True)
-def mangrove_first_gain_last_loss_years(data_array, years):
+def mangrove_first_gain_last_loss_years(data_array, year_array):
+
     length = data_array.shape[0]
 
     # first_mangrove_gain_year
-    if data_array[0] == 1:
+    if data_array[0] == 1:      #If mangrove in starting year, cannot be mangrove gain later on in series so first_gain year == 0
         first_gain = 0
     else:
         first_gain = 0
-        prev = data_array[0]
+        #prev = data_array[0]
         for year in range(1, length):
+            prev = data_array[year - 1]
             curr = data_array[year]
+
             if prev == 0 and curr == 1:
-                first_gain = years[year]
+                first_gain = year_array[year]
                 break
-            prev = curr
+            #prev = curr
 
     #last_mangrove_loss_year
-    last_loss = 0
-    suffix_all_zero = 1  # flag: are all values after year zero?
-    for year in range(length - 1, 0, -1): #loop backwards over mangrove extent years starting from last year (inclusive), stepping by -1
-        if data_array[year] != 0:
-            suffix_all_zero = 0
-        if data_array[year-1] == 1 and data_array[year] == 0 and suffix_all_zero == 1:
-            last_loss = years[year]
-            break
+    if data_array[length-1] == 1:
+        last_loss = 0       #If mangrove in final year, cannout have permanent mangrove loss so last_loss year == 0
+    else:
+        last_loss = 0
+        suffix_all_zero = 1  # flag: are all values after year zero?
+
+        # Loop backwards over mangrove extent years starting from last year (inclusive) looking for
+        # the first time it switches from 0 (curr) to 1 (prev) to get final mangrove loss year
+        for year in range(length - 1, 0, -1):
+            # If there is mangrove extent in current year, the suffix_all_zero flag is set to False and last_loss = 0
+            if data_array[year] != 0:
+                suffix_all_zero = 0
+            # If suffix_all_zero flag is True, and mangrove extent in prev year = 1 and in curr year = 0, gets current year.
+            if data_array[year-1] == 1 and data_array[year] == 0 and suffix_all_zero == 1:
+                last_loss = year_array[year]
+                break
 
     return first_gain, last_loss
 
+# Function to get whether the interval is mangrove gain, loss, or maintenance
+# Note: This function assumes mangrove is in the interval because we've already checked that condition in the LULUCF code
 @jit(nopython=True)
 def mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year, last_mang_loss_year):
-    mang_loss = False
+
     mang_gain = False
     mang_remaining_mang = False
 
     # Mangrove state hierarchy is mang_loss > mang_gain > mang_remaining_mang
     mang_loss = (last_mang_loss_year > interval_start_year) and (last_mang_loss_year <= interval_end_year)
+
     if not mang_loss:
         mang_gain = (first_mang_gain_year > interval_start_year) and (first_mang_gain_year <= interval_end_year)
-    elif (not mang_loss) and (not mang_gain):
+
+    if (not mang_loss) and (not mang_gain):
         mang_remaining_mang = True
 
    # Checks that only 1 mangrove state is true
     true_count = int(mang_loss) + int(mang_gain) + int(mang_remaining_mang)
     if true_count != 1:
         raise ValueError(
-            f"Invalid classification. Only 1 of the following should True: "
+            f"Invalid classification. Only 1 of the following should be True: "
             f"loss={mang_loss}, gain={mang_gain}, remaining={mang_remaining_mang}"
         )
 
@@ -444,32 +459,52 @@ def mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year
 @jit(nopython=True)
 def mangrove_gain_year_count_summary(data_array, interval_start_year, interval_end_year):
 
-    years = np.arange(interval_start_year, interval_end_year + 1)
+    array_length = data_array.shape[0]
+    years_length = (interval_end_year - interval_start_year) + 1
 
     # Check that data array and year array have the same number of items
-    array_length = len(data_array)
-    year_length = len(years)
-
-    if array_length != year_length:
-        raise ValueError(f"Length mismatch: mangrove data_array for interval has {array_length} elements, but years has {year_length} elements.")
+    if array_length != years_length:
+        raise ValueError("Length mismatch between data_array and years range")
 
     # Find index of first 1→0 transition, or returns None if not found
-    loss_year_index = next((i for i in range(1, array_length) if data_array[i-1] == 1 and data_array[i] == 0), None)
+    loss_index = -1
+    for i in range(1, array_length):
+        if data_array[i - 1] == 1 and data_array[i] == 0:
+            loss_index = i
+            break
 
-    if loss_year_index is not None:
+    if loss_index != -1:
         mang_loss = True
-        mang_loss_year = years[loss_year_index]
-        pre_count = sum(data_array[1:loss_year_index])  # sums mangrove extent years starting after previous interval year and before loss year
-        post_count = sum(data_array[loss_year_index+1:])  # sums mangrove extent years after loss year
+        mang_loss_year = interval_start_year + loss_index
+
+        # sums years with mangrove extent starting after previous interval year and before loss year
+        pre_count = 0
+        for k in range(1, loss_index):
+            if data_array[k] == 1:
+                pre_count += 1
+
+        # sums mangrove extent years after loss year
+        post_count = 0
+        for k in range(loss_index + 1, array_length):
+            if data_array[k] == 1:
+                post_count += 1
     else:
         mang_loss = False
         mang_loss_year = 0
-        pre_count = sum(data_array[1:])     #sums years after the previous interval's value (first item in the timeseries)
+
+        # If no loss, sums all years with mangrove extent starting after previous interval year
+        pre_count = 0
+        for k in range(1, array_length):
+            if data_array[k] == 1:
+                pre_count += 1
+        #If no loss, post_count is 0
         post_count = 0
 
+    # Validate totals against the number of interval years (exclude the first/prior year)
+    interval_len = array_length - 1
     total = pre_count + post_count
-    if not (0 <= total <= array_length-1):
-        raise ValueError(f"Invalid number of pre-loss and post-loss={total}, must be >=0 and <= {array_length-1}")
+    if not (0 <= total <= interval_len):
+        raise ValueError("Invalid counts: pre+post must be >=0 and <= interval length")
 
     return mang_loss, mang_loss_year, pre_count, post_count
 

@@ -8,7 +8,7 @@ Usage (run from /mnt/c/GIS/git/AFOLU_GHG_flux_model):
     python src/utilities/download_outputs_local.py v32_COD_exploration 23_-4_24_-3
 
 Arguments:
-1. <subfolder>: Local subfolder to save outputs to (inside /mnt/c/GIS/AFOLU_flux_model/test_data/output/v0_3_0/)
+1. <subfolder>: Local subfolder to save outputs to (inside /mnt/c/GIS/AFOLU_flux_model/test_data/output/v0_4_1/)
 2. [filename_filter]: Optional string that must be in the filename to be downloaded
 """
 
@@ -19,8 +19,8 @@ from botocore.exceptions import ClientError
 
 # Constants
 BUCKET = "gfw2-data"
-PREFIX = "climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_0/"
-BASE_DEST = "/mnt/c/GIS/AFOLU_flux_model/test_data/output/v0_4_0/"
+PREFIX = "climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_1/"
+BASE_DEST = "/mnt/c/GIS/AFOLU_flux_model/test_data/output/v0_4_1/"
 
 def main():
     if len(sys.argv) < 2:

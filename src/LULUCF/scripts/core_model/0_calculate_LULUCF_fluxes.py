@@ -2,12 +2,12 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work):
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -bb 116.25 -2 116.5 -1.75 -cs 0.25 --run_local --no_upload -yr 2000 2023 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -bb 116.25 -2.25 116.5 -2 -cs 0.25 --run_local --no_upload -yr 2000 2023 --run_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_model
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2000 2023 --run_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 -yr 2000 2023 --run_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_model_mangrove_testing
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model_mangrove_testing -bb 116.25 -2.25 116.5 -2 -cs 0.25 -yr 2000 2023 --run_date 20250820
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 -yr 2000 2023 --run_date 20250820
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
@@ -95,7 +95,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     natrl_forest_curve_41_60_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__41_60_years"].astype('float32')
     natrl_forest_curve_61_80_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__61_80_years"].astype('float32')
     natrl_forest_curve_81_100_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__81_100_years"].astype('float32')
-    natrl_forest_curve_21_100_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__21_100_years"].astype('float32')
+    #natrl_forest_curve_21_100_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__21_100_years"].astype('float32')
 
     # Removal factor (Mg C/ha/yr)
     # Because this is used to store the RF from the previous interval,
@@ -368,7 +368,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 natrl_forest_curve_41_60_AGC_RF = natrl_forest_curve_41_60_AGC_RF_block[row, col]
                 natrl_forest_curve_61_80_AGC_RF = natrl_forest_curve_61_80_AGC_RF_block[row, col]
                 natrl_forest_curve_81_100_AGC_RF = natrl_forest_curve_81_100_AGC_RF_block[row, col]
-                natrl_forest_curve_21_100_AGC_RF = natrl_forest_curve_21_100_AGC_RF_block[row, col]
+                #natrl_forest_curve_21_100_AGC_RF = natrl_forest_curve_21_100_AGC_RF_block[row, col]
 
                 planted_forest_type_cell = planted_forest_type_block[row, col]
                 planted_forest_tree_crop_cell = planted_forest_tree_crop_block[row, col]
@@ -511,7 +511,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
 
                     # Gets the first year of mangrove gain and last year of mangrove loss during the entire timeseries
                     # to determine if this interval is mangrove loss, gain, or maintenance.
-                    mang_years = np.array(cn.mangrove_extent_years).astype('uint8')
+                    mang_years = np.array(cn.mangrove_extent_years)
+                    print(f"mang_timeseries: {mang_timeseries}")
+                    print(f"mang_years: {mang_years}")
                     first_mang_gain_year, last_mang_loss_year = nu.mangrove_first_gain_last_loss_years(mang_timeseries, mang_years)
                     print(f"first_mang_gain_year: {first_mang_gain_year}")
                     print(f"last_mang_loss_year: {last_mang_loss_year}")
@@ -572,6 +574,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                         print(f"deadwood_c_ratio_mang: {deadwood_c_ratio_mang}")
                         print(f"litter_c_ratio_mang: {litter_c_ratio_mang}")
                     #TODO: Check that mangrove RF and ratios are correct
+                else:
+                    mang_gain = False
+                    mang_loss = False
+                    mang_remaining_mang = False
+                    #TODO: make more elegant after testing
 
                 ### Defines specific land cover classes, including planted tree classification
 
@@ -925,7 +932,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                 interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
                                 deadwood_c_ratio_mang, litter_c_ratio_mang))
                         print(f"Node code is {state_out}, mangrove remaining mangrove + temp loss in interval (131)")
-                        print(f"c_dens_in_NT_T: {c_dens_in_NT_T}")
+                        print(f"c_dens_in: {c_dens_in}")
                         print(f"c_dens_out: {c_dens_out}")
                         print(f"c_gross_removals_out: {c_gross_removals_out}")
                         print(f"c_gross_emis_out: {c_gross_emis_out}")
@@ -938,7 +945,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                             mang_gain_year_count_post_loss, RF_AGC_final, RF_BGC_final, c_dens_in,
                             deadwood_c_ratio_mang, litter_c_ratio_mang))
                         print(f"Node code is {state_out}, mangrove remaining mangrove, no loss in interval (132)")
-                        print(f"c_dens_in_NT_T: {c_dens_in_NT_T}")
+                        print(f"c_dens_in: {c_dens_in}")
                         print(f"c_dens_out: {c_dens_out}")
                         print(f"c_gross_removals_out: {c_gross_removals_out}")
                         print(f"c_gross_emis_out: {c_gross_emis_out}")
@@ -2135,9 +2142,9 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         for key, value in download_dict.items()
     }
 
-    print("download_dict:")
-    for key, item in download_dict.items():
-        print(f"{key}: {item}")
+    # print("Download dictionary::")
+    # for key, item in download_dict.items():
+    #     print(f"{key}: {item}")
 
     # Returns the first tile in each input so that the datatype can be determined.
     # This is done up front, once per tile set, rather than on each chunk, since
