@@ -759,5 +759,14 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --tile_pixels 4000 \
   --chunk_size 10000 \
   --combine_zarr interval
+  
+python -m src.scripts.zonal_statistics.run_zonal_statistics \
+  --interval_end_years 2024 \
+  --cluster_name zonal_stats \
+  --run_date 20250820 \
+  --model_version 0_6_5 \
+  --tile_pixels 4000 \
+  --chunk_size 10000 \
+  --combine_zarr interval
 
 """
