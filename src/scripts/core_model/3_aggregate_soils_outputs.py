@@ -166,5 +166,5 @@ if __name__ == "__main__":
     )
 
 """
-python -m src.scripts.core_model.3_aggregate_soils_outputs -cn aggregate --run_name ogh_sensitivity_1km
+python -m src.scripts.core_model.3_aggregate_soils_outputs -cn aggregate --run_name ogh_standard_model
 """
