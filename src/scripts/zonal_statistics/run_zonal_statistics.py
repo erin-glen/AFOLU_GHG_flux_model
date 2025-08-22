@@ -18,7 +18,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Union, Optional, List
 from functools import lru_cache
 
 import dask.array as da
@@ -184,7 +184,7 @@ def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
         chunks={"x": chunk_size, "y": chunk_size},
     ).squeeze()
 
-def _first_xy_var(ds: xr.Dataset | xr.DataArray) -> xr.DataArray:
+def _first_xy_var(ds: Union[xr.Dataset, xr.DataArray]) -> xr.DataArray:
     """Return the first data variable with x/y dims."""
     if isinstance(ds, xr.DataArray):
         da = ds
@@ -205,7 +205,7 @@ def safe_crop(ds, ref):
 
 def open_zarr_region(
     path: str,
-    bbox: list[float] | None,
+    bbox: Optional[List[float]],
     chunk_size: int,
 ) -> xr.DataArray:
     """Open a 2‑D array from zarr; drop leading band; crop to bbox; rechunk."""
@@ -235,7 +235,7 @@ def open_zarr_region(
 
     return data_arr
 
-def crop_and_chunk(data_arr: xr.DataArray, bbox: list[float] | None, chunk_size: int) -> xr.DataArray:
+def crop_and_chunk(data_arr: xr.DataArray, bbox: Optional[List[float]], chunk_size: int) -> xr.DataArray:
     """Crop a DataArray to bbox (if provided) and rechunk on x/y."""
     if bbox is not None and {"x", "y"}.issubset(data_arr.dims):
         west, south, east, north = bbox
@@ -383,7 +383,7 @@ def log_array_summary(
     logger.debug("%s stats: min=%s max=%s mean=%s sample=%s", name, min_val, max_val, mean_val, sample)
     if categories:
         unique_vals = np.array(da.unique(arr.data).compute())
-    logger.debug("%s unique categories (%d): %s", name, unique_vals.size, unique_vals.tolist())
+        logger.debug("%s unique categories (%d): %s", name, unique_vals.size, unique_vals.tolist())
 
 @lru_cache(maxsize=None)
 def s3_exists(prefix: str) -> bool:
@@ -752,8 +752,12 @@ if __name__ == "__main__":
 """
 Example:
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
-       --interval_end_years 2005 2010 2015 2020 2024 \
-       --cluster_name zonal_stats \
-       --run_date 20250807 \
-       --model_version 0_6_0
+  --interval_end_years 2005 2010 2015 2020 2024 \
+  --cluster_name zonal_stats \
+  --run_date 20250820 \
+  --model_version 0_6_5 \
+  --tile_pixels 4000 \
+  --chunk_size 10000 \
+  --combine_zarr interval
+
 """
