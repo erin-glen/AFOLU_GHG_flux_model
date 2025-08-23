@@ -758,7 +758,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --model_version 0_6_5 \
   --tile_pixels 4000 \
   --chunk_size 10000 \
-  --combine_zarr interval
+  --combine_zarr none
   
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --interval_end_years 2024 \
@@ -767,7 +767,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --model_version 0_6_5 \
   --tile_pixels 4000 \
   --chunk_size 10000 \
-  --combine_zarr interval
+  --combine_zarr none
   
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --interval_end_years 2024 \
@@ -776,7 +776,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --model_version 0_6_5 \
   --tile_pixels 4000 \
   --chunk_size 10000 \
-  --combine_zarr interval \
+  --combine_zarr none \
   --tile_id 00N_110E
 
 """
