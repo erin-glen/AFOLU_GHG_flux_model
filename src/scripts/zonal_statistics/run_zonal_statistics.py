@@ -18,7 +18,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, Tuple, Union, Optional, List
+from typing import Any, Dict, Tuple, Optional, List
 from functools import lru_cache
 
 import dask.array as da
@@ -58,7 +58,6 @@ from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.utilities import log_utilities as lu
 
-
 SPARSE_DEFAULT = True
 
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
@@ -85,7 +84,7 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         ],
         "zarr_by_unit": {
             "pixel": "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
-            "ha":    "drained_total_Mg_CO2e_ha_yr_{interval}.zarr",
+            "ha": "drained_total_Mg_CO2e_ha_yr_{interval}.zarr",
         },
         "var": "drained_total",
     },
@@ -96,19 +95,19 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         ],
         "zarr_by_unit": {
             "pixel": "burned_total_Mg_CO2e_pixel_yr_{interval}.zarr",
-            "ha":    "burned_total_Mg_CO2e_ha_yr_{interval}.zarr",
+            "ha": "burned_total_Mg_CO2e_ha_yr_{interval}.zarr",
         },
         "var": "burned_total",
     },
 }
 
 # Zarr cache paths (written once if missing)
-ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_date}/{interval}/"
-COMBINED_ZARR_TEMPLATE = OUTPUT_BASE + "/zarr/{run_date}/{interval}/combined_interval.zarr"
+ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_date}/{run_name}/tile_{tile_pixels}/{interval}/"
+COMBINED_ZARR_TEMPLATE = OUTPUT_BASE + "/zarr/{run_date}/{run_name}/tile_{tile_pixels}/{interval}/combined_interval.zarr"
 FOLDER_TEMPLATE = (
-    OUTPUT_BASE
-    + "/{folder}/{run_name}/five_year_intervals/{interval}/"
-      "{tile_pixels}_pixels/{run_date}/"
+        OUTPUT_BASE
+        + "/{folder}/{run_name}/five_year_intervals/{interval}/"
+          "{tile_pixels}_pixels/{run_date}/"
 )
 
 # Contextual layers (static)
@@ -184,7 +183,8 @@ def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
         chunks={"x": chunk_size, "y": chunk_size},
     ).squeeze()
 
-def _first_xy_var(ds: Union[xr.Dataset, xr.DataArray]) -> xr.DataArray:
+
+def _first_xy_var(ds: xr.Dataset | xr.DataArray) -> xr.DataArray:
     """Return the first data variable with x/y dims."""
     if isinstance(ds, xr.DataArray):
         da = ds
@@ -195,6 +195,7 @@ def _first_xy_var(ds: Union[xr.Dataset, xr.DataArray]) -> xr.DataArray:
         da = da.isel(band=0, drop=True)
     return da
 
+
 def safe_crop(ds, ref):
     """Crops one input to the other input's extent (x/y)."""
     return (
@@ -204,16 +205,16 @@ def safe_crop(ds, ref):
 
 
 def open_zarr_region(
-    path: str,
-    bbox: Optional[List[float]],
-    chunk_size: int,
+        path: str,
+        bbox: Optional[List[float]],
+        chunk_size: int,
 ) -> xr.DataArray:
     """Open a 2‑D array from zarr; drop leading band; crop to bbox; rechunk."""
     s3_opts = {"anon": False}
     with dask.annotate(label=f"open:{Path(path).stem}"):
         ds = xr.open_zarr(
             path,
-            consolidated=None,   # v2 auto-detect; v3 tolerated
+            consolidated=None,  # v2 auto-detect; v3 tolerated
             storage_options=s3_opts,
         )
 
@@ -224,7 +225,8 @@ def open_zarr_region(
         x_ascending = data_arr.x[0] < data_arr.x[-1]
         y_ascending = data_arr.y[0] < data_arr.y[-1]
         x_slice = slice(min(west, east), max(west, east)) if x_ascending else slice(max(east, west), min(east, west))
-        y_slice = slice(min(south, north), max(south, north)) if y_ascending else slice(max(north, south), min(north, south))
+        y_slice = slice(min(south, north), max(south, north)) if y_ascending else slice(max(north, south),
+                                                                                        min(north, south))
         data_arr = data_arr.sel(x=x_slice, y=y_slice)
     elif bbox is not None:
         logging.warning("Skipping spatial crop for %s – x/y dims not present.", path)
@@ -235,6 +237,7 @@ def open_zarr_region(
 
     return data_arr
 
+
 def crop_and_chunk(data_arr: xr.DataArray, bbox: Optional[List[float]], chunk_size: int) -> xr.DataArray:
     """Crop a DataArray to bbox (if provided) and rechunk on x/y."""
     if bbox is not None and {"x", "y"}.issubset(data_arr.dims):
@@ -242,7 +245,8 @@ def crop_and_chunk(data_arr: xr.DataArray, bbox: Optional[List[float]], chunk_si
         x_ascending = data_arr.x[0] < data_arr.x[-1]
         y_ascending = data_arr.y[0] < data_arr.y[-1]
         x_slice = slice(min(west, east), max(west, east)) if x_ascending else slice(max(east, west), min(east, west))
-        y_slice = slice(min(south, north), max(south, north)) if y_ascending else slice(max(north, south), min(north, south))
+        y_slice = slice(min(south, north), max(south, north)) if y_ascending else slice(max(north, south),
+                                                                                        min(north, south))
         data_arr = data_arr.sel(x=x_slice, y=y_slice)
     chunk_dict = {d: chunk_size for d in ("x", "y") if d in data_arr.dims}
     if chunk_dict:
@@ -289,9 +293,10 @@ def build_interval_pairs(end_years: list[int]) -> list[tuple[int, int]]:
 
 
 def create_interval_df(
-    coord_dict: dict,
-    flux_type_dict: dict,
-    interval_end_year: int,
+        coord_dict: dict,
+        flux_type_dict: dict,
+        interval_start_year: int,
+        interval_end_year: int,
 ) -> pd.DataFrame:
     """Convert flox output to a processed dataframe (no per‑ha densities)."""
     df = pd.DataFrame(coord_dict)
@@ -311,8 +316,10 @@ def create_interval_df(
             )
         )
 
-    # Tag interval end and convert area m² → ha
+    # Tag interval start/end and convert area m² → ha
+    df["interval_start"] = interval_start_year
     df["interval_end"] = interval_end_year
+    df["value_unit"] = np.where(df["flux_type"].eq("area__ha"), "ha", "Mg CO2e")
     df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000
     return df
 
@@ -370,12 +377,12 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
 
 
 def log_array_summary(
-    logger: logging.Logger,
-    name: str,
-    arr: xr.DataArray,
-    *,
-    categories: bool = False,
-    sample_size: int = 5,
+        logger: logging.Logger,
+        name: str,
+        arr: xr.DataArray,
+        *,
+        categories: bool = False,
+        sample_size: int = 5,
 ) -> None:
     logger.debug("%s → shape=%s chunks=%s dtype=%s", name, arr.shape, arr.chunks, arr.dtype)
     min_val, max_val, mean_val = dask.compute(arr.min(), arr.max(), arr.mean())
@@ -384,6 +391,7 @@ def log_array_summary(
     if categories:
         unique_vals = np.array(da.unique(arr.data).compute())
         logger.debug("%s unique categories (%d): %s", name, unique_vals.size, unique_vals.tolist())
+
 
 @lru_cache(maxsize=None)
 def s3_exists(prefix: str) -> bool:
@@ -414,7 +422,7 @@ def _resolve_flux_folder_and_unit(folder_candidates: list[str], interval: str, *
 
 def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str, Any]]:
     """Return folder/zarr paths (and unit for flux) for all datasets in *interval*."""
-    zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
+    zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, tile_pixels=tile_pixels, **kw)
     paths: Dict[str, Dict[str, Any]] = {}
     kw2 = dict(kw)
     kw2["tile_pixels"] = tile_pixels
@@ -426,7 +434,8 @@ def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str,
             paths[name] = {"folder": folder_uri, "zarr": zarr_base + zarr_name, "unit": unit, "var": spec["var"]}
         else:
             folder_uri = FOLDER_TEMPLATE.format(folder=spec["folder"], interval=interval, **kw2)
-            paths[name] = {"folder": folder_uri, "zarr": zarr_base + spec["zarr"].format(interval=interval), "unit": None, "var": spec["var"]}
+            paths[name] = {"folder": folder_uri, "zarr": zarr_base + spec["zarr"].format(interval=interval),
+                           "unit": None, "var": spec["var"]}
     return paths
 
 
@@ -440,7 +449,8 @@ def ensure_combined_interval_zarr(paths: dict, chunk_size: int, combined_path: s
     metadata_exists = fs.exists(f"{inner}/.zmetadata")
     if group_exists and metadata_exists:
         try:
-            xr.open_zarr(combined_path, consolidated=None, storage_options=getattr(fs, "storage_options", {"anon": False}))
+            xr.open_zarr(combined_path, consolidated=None,
+                         storage_options=getattr(fs, "storage_options", {"anon": False}))
             return
         except Exception:
             logging.debug("Rebuilding combined Zarr due to open error: %s", combined_path)
@@ -460,6 +470,7 @@ def ensure_combined_interval_zarr(paths: dict, chunk_size: int, combined_path: s
     ds.to_zarr(combined_path, mode="w")
     if Version(zarr.__version__).major < 3:
         zarr.convenience.consolidate_metadata(fs.get_mapper(inner))
+
 
 # -------------------- main driver --------------------
 def run(args: argparse.Namespace) -> None:
@@ -561,22 +572,26 @@ def run(args: argparse.Namespace) -> None:
         # Cache S3 listings and ensure zarrs once per dataset
         cached_uri_lists = {key: list_folder_uris(spec["folder"]) for key, spec in paths.items()}
         if args.combine_zarr == "interval":
-            combined_path = COMBINED_ZARR_TEMPLATE.format(interval=interval, **OUTPUT_KW)
+            combined_path = COMBINED_ZARR_TEMPLATE.format(interval=interval, tile_pixels=args.tile_pixels, **OUTPUT_KW)
             ensure_combined_interval_zarr(paths, args.chunk_size, combined_path)
             s3_opts = {"anon": False}
             ds_combined = xr.open_zarr(combined_path, consolidated=None, storage_options=s3_opts)
             drained_total = crop_and_chunk(ds_combined[paths["drained_total"]["var"]], bbox, args.chunk_size)
             burned_total = crop_and_chunk(ds_combined[paths["burned_total"]["var"]], bbox, args.chunk_size)
-            drained_state_nodes = crop_and_chunk(ds_combined[paths["drained_state_nodes"]["var"]].astype("uint32"), bbox, args.chunk_size)
-            burned_state_nodes = crop_and_chunk(ds_combined[paths["burned_state_nodes"]["var"]].astype("uint32"), bbox, args.chunk_size)
+            drained_state_nodes = crop_and_chunk(ds_combined[paths["drained_state_nodes"]["var"]].astype("uint32"),
+                                                 bbox, args.chunk_size)
+            burned_state_nodes = crop_and_chunk(ds_combined[paths["burned_state_nodes"]["var"]].astype("uint32"), bbox,
+                                                args.chunk_size)
         else:
             for key, spec in paths.items():
                 ensure_zarr_exists(cached_uri_lists[key], spec["zarr"], args.chunk_size)
             # Open flux/state layers
             drained_total = open_zarr_region(paths["drained_total"]["zarr"], bbox, args.chunk_size)
             burned_total = open_zarr_region(paths["burned_total"]["zarr"], bbox, args.chunk_size)
-            drained_state_nodes = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
-            burned_state_nodes = open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
+            drained_state_nodes = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype(
+                "uint32")
+            burned_state_nodes = open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size).astype(
+                "uint32")
         logger.debug("Flux layers opened for interval %s", interval)
 
         # Align everything to drained_state_nodes grid
@@ -633,12 +648,12 @@ def run(args: argparse.Namespace) -> None:
             0: parse_pattern_from_uri(cached_uri_lists["drained_total"]),
             2: "area__ha",
         }
-        df_d = create_interval_df(dict_d, ft_dict_d, interval_end_year)
+        df_d = create_interval_df(dict_d, ft_dict_d, interval_start_year, interval_end_year)
 
         ds.write_dataset(
             pa.Table.from_pandas(df_d, preserve_index=False),
             base_dir=str(base_dir_drained),
-            filesystem=local_arrow,          # ← LOCAL ONLY
+            filesystem=local_arrow,  # ← LOCAL ONLY
             partitioning=["interval_end"],
             format="parquet",
             existing_data_behavior="delete_matching",
@@ -663,12 +678,12 @@ def run(args: argparse.Namespace) -> None:
             1: parse_pattern_from_uri(cached_uri_lists["burned_total"]),
             2: "area__ha",
         }
-        df_b = create_interval_df(dict_b, ft_dict_b, interval_end_year)
+        df_b = create_interval_df(dict_b, ft_dict_b, interval_start_year, interval_end_year)
 
         ds.write_dataset(
             pa.Table.from_pandas(df_b, preserve_index=False),
             base_dir=str(base_dir_burned),
-            filesystem=local_arrow,          # ← LOCAL ONLY
+            filesystem=local_arrow,  # ← LOCAL ONLY
             partitioning=["interval_end"],
             format="parquet",
             existing_data_behavior="delete_matching",
@@ -676,8 +691,13 @@ def run(args: argparse.Namespace) -> None:
         logger.info("Wrote %s rows (burned)  for %s", len(df_b), interval)
 
     # ---------- Upload the staged local directory to S3 ----------
+    # Upload subfolders directly to avoid an extra '/zonal_stats/' level in S3.
     logger.debug("Uploading staged data to %s", args.output_parquet)
-    s3fs.S3FileSystem().put(str(base_dir_root), args.output_parquet.rstrip("/"), recursive=True)
+    fs_s3 = s3fs.S3FileSystem()
+    for sub in ("drained", "burned"):
+        local_sub = str(base_dir_root / sub)
+        dest_sub = posixpath.join(args.output_parquet.rstrip("/"), sub)
+        fs_s3.put(local_sub, dest_sub, recursive=True)
 
     # Optional cleanup
     if not args.keep_local:
@@ -759,7 +779,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --tile_pixels 4000 \
   --chunk_size 10000 \
   --combine_zarr none
-  
+
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --interval_end_years 2024 \
   --cluster_name zonal_stats \
@@ -768,7 +788,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --tile_pixels 4000 \
   --chunk_size 10000 \
   --combine_zarr none
-  
+
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --interval_end_years 2024 \
   --cluster_name zonal_stats \
