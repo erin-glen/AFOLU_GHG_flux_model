@@ -142,8 +142,9 @@ def calculate_drainage_emissions_co2e(
     n2o_emissions_co2e = (ef_n2o * n2o_n_to_n2o * gwp_n2o) / 1000.0
 
     # 3) CH4 in kg => tonne => multiply GWP
-    ch4_land_emissions_co2e = (ef_ch4_land / 1000.0) * gwp_ch4
-    ch4_ditch_emissions_co2e = (ef_ch4_ditch / 1000.0) * gwp_ch4 * frac_ditch
+    # CH4: apply land factor to (1 - frac_ditch); ditch factor to frac_ditch
+    ch4_land_emissions_co2e = (((1.0 - frac_ditch) * ef_ch4_land) / 1000.0) * gwp_ch4
+    ch4_ditch_emissions_co2e = ((frac_ditch * ef_ch4_ditch) / 1000.0) * gwp_ch4
 
     # 4) Sum into a drainage total (still per ha at this point)
     drainage_total_co2e = (
