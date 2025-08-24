@@ -647,24 +647,34 @@ def run(args: argparse.Namespace) -> None:
         )
         logger.info("Wrote %s rows (burned)  for %s", len(df_b), interval)
 
-    # ---------- Upload staged Parquet to S3 ----------
+    # ---------- Upload staged Parquet to S3 (upload subfolders directly) ----------
     logger.debug("Uploading staged data to %s", args.output_parquet)
-    s3fs.S3FileSystem().put(str(base_dir_root), args.output_parquet.rstrip("/"), recursive=True)
+    fs_s3 = s3fs.S3FileSystem()
+    dest_root = args.output_parquet.rstrip("/")
+    for sub in ("drained", "burned"):
+        local_sub = base_dir_root / sub
+        if local_sub.exists():
+            dest_sub = posixpath.join(dest_root, sub)
+            logger.debug("Uploading %s -> %s", local_sub, dest_sub)
+            fs_s3.put(str(local_sub), dest_sub, recursive=True)
+        else:
+            logger.debug("Local subfolder missing, skipping upload: %s", local_sub)
 
     # Optional cleanup
     if not args.keep_local:
         logger.debug("Removing local staging directory %s", base_dir_root)
         shutil.rmtree(base_dir_root, ignore_errors=True)
 
+    # Optional post-upload listing (debug)
     if args.debug:
-        fs = s3fs.S3FileSystem(anon=False)
         list_target = args.output_parquet.rstrip("/") + "/"
         logger.debug("Listing S3 contents: %s", list_target)
         try:
-            logger.debug(fs.ls(list_target, detail=True))
+            logger.debug(fs_s3.ls(list_target, detail=True))
         except FileNotFoundError:
             logger.debug("Destination folder does not exist (yet).")
 
+    # Teardown
     if client:
         logger.debug("Closing Dask client")
         client.close()
