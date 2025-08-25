@@ -1337,19 +1337,36 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
     return success_count, all_stats
 
 
-def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger):
-    """Aggregate per-chunk statistics into structured categories and upload to S3."""
+def compile_1x1_chunk_stats(
+    all_1x1_stats,
+    chunk_shapefile_uri,
+    stage,
+    no_upload,
+    main_logger,
+    run_name="standard_model",
+):
+    """Aggregate per-chunk statistics into structured categories and upload to S3.
+
+    Parameters
+    ----------
+    run_name : str, optional
+        Model run identifier used to label output paths. Defaults to
+        ``"standard_model"`` for backward compatibility.
+    """
 
     import boto3
     import pandas as pd
     import geopandas as gpd
+    import os
+    import posixpath
     from src.scripts.utilities.constants_and_names import (
         local_chunk_stats_path,
         short_bucket_prefix,
-        s3_chunk_stats_path,
         full_bucket_prefix,
         burned_area_final_pattern,
         land_cover_pattern,
+        outputs_path,
+        today_date,
     )
     from src.scripts.utilities.universal_utilities import timestr
 
@@ -1409,7 +1426,18 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
 
     # Excel spreadsheet creation
     out_spreadsheet = f"{stage}_1x1_chunk_statistics_{timestr()}.xlsx"
-    local_spreadsheet = f"{local_chunk_stats_path}{out_spreadsheet}"
+
+    # Build informative local and S3 directories mirroring raster outputs
+    local_dir = os.path.join(local_chunk_stats_path, run_name, today_date)
+    s3_dir = posixpath.join(
+        outputs_path.removeprefix("s3://gfw2-data/"),
+        "chunk_stats",
+        run_name,
+        today_date,
+    )
+
+    os.makedirs(local_dir, exist_ok=True)
+    local_spreadsheet = os.path.join(local_dir, out_spreadsheet)
 
     main_logger.info(f"Writing stats to Excel: {timestr()}")
     with pd.ExcelWriter(local_spreadsheet) as writer:
@@ -1433,10 +1461,10 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
         s3_client.upload_file(
             local_spreadsheet,
             short_bucket_prefix,
-            Key=f"{s3_chunk_stats_path}{out_spreadsheet}",
+            Key=posixpath.join(s3_dir, out_spreadsheet),
         )
         main_logger.info(
-            f"Uploaded to {full_bucket_prefix}/{s3_chunk_stats_path}{out_spreadsheet}: {timestr()}"
+            f"Uploaded to {full_bucket_prefix}/{posixpath.join(s3_dir, out_spreadsheet)}: {timestr()}"
         )
 
 

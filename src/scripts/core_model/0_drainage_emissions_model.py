@@ -950,7 +950,12 @@ def run_drainage_model(
     # Aggregate per‑chunk statistics and merge with the fishnet shapefile
     if (not no_stats) and (success_count > 0):
         uu.compile_1x1_chunk_stats(
-            all_stats, chunk_shapefile_uri, stage, no_upload, main_logger
+            all_stats,
+            chunk_shapefile_uri,
+            stage,
+            no_upload,
+            main_logger,
+            run_name=run_name,
         )
 
 
