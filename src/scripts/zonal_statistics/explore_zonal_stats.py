@@ -143,8 +143,8 @@ if __name__ == "__main__":
 
 """
 python -m src.scripts.zonal_statistics.explore_zonal_stats \
-  --model_version 0_6_0 \
-  --years 2005 2010 2015 2020 2024 \
+  --model_version 0_7_0 \
+  --years 2020 2024 \
   --component drained \
   --out_csv /mnt/c/tmp/drained_summary.csv
 """
