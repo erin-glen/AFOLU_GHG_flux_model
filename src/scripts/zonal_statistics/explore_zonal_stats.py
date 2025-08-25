@@ -13,13 +13,10 @@ python -m src.scripts.zonal_statistics.explore_zonal_stats \
 from __future__ import annotations
 import argparse
 from pathlib import Path
+import posixpath
 import duckdb
 
-BASE_S3 = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
-
-def build_prefix(model_version: str, years: list[str]) -> str:
-    years_part = "_".join(str(y) for y in years)
-    return f"{BASE_S3}/version_{model_version}/zonal_stats/zonal_stats_{years_part}"
+from src.scripts.zonal_statistics.run_zonal_statistics import build_output_parquet
 
 def _ensure_httpfs(con: duckdb.DuckDBPyConnection, aws_region: str | None):
     con.execute("INSTALL httpfs; LOAD httpfs;")
@@ -90,8 +87,8 @@ def connect_and_register(base_prefix: str, *, aws_region: str | None = None) -> 
     con = duckdb.connect()
     _ensure_httpfs(con, aws_region)
 
-    drained_glob = f"{base_prefix}/drained/**/*.parquet"
-    burned_glob  = f"{base_prefix}/burned/**/*.parquet"
+    drained_glob = posixpath.join(base_prefix, "drained", "**", "*.parquet")
+    burned_glob  = posixpath.join(base_prefix, "burned",  "**", "*.parquet")
     _check_nonempty_glob(con, drained_glob)
     _check_nonempty_glob(con, burned_glob)
 
@@ -129,7 +126,7 @@ def main(argv=None):
     p.add_argument("--out_csv", default=None)
     args = p.parse_args(argv)
 
-    prefix = build_prefix(args.model_version, args.years)
+    prefix = build_output_parquet(args.model_version, [int(y) for y in args.years])
     con = connect_and_register(prefix, aws_region=args.aws_region)
 
     print(quick_totals(con, component=args.component).head())
@@ -144,7 +141,7 @@ if __name__ == "__main__":
 """
 python -m src.scripts.zonal_statistics.explore_zonal_stats \
   --model_version 0_7_0 \
-  --years 2020 2024 \
+  --years 2024 \
   --component drained \
   --out_csv /mnt/c/tmp/drained_summary.csv
 """
