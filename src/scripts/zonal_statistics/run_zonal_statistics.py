@@ -742,8 +742,8 @@ Examples:
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --interval_end_years 2005 2010 2015 2020 2024 \
   --cluster_name zonal_stats \
-  --run_date 20250820 \
-  --model_version 0_6_5 \
+  --run_date 20250825 \
+  --model_version 0_7_0 \
   --tile_pixels 4000 \
   --chunk_size 10000 \
   --combine_zarr none
