@@ -9,7 +9,7 @@ Key guarantees in this version:
 - Never parses flux names from TIFF filenames; uses explicit labels.
 - Zarr caches under .../zarr/{run_date}/{interval}/ (no tile-size suffix).
 - Only build Zarrs if missing/invalid; supports both Zarr v2 and v3.
-- Stage Parquet locally and upload each partition to S3 immediately.
+- Always stage Parquet locally; upload staged folder to S3 at the end.
 - No per-ha densities; sums only; area is m² → ha in post-process.
 """
 
@@ -57,6 +57,7 @@ from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.utilities import log_utilities as lu
 
+
 # --------------------------------- config ---------------------------------
 SPARSE_DEFAULT = True
 
@@ -84,7 +85,7 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         ],
         "zarr_by_unit": {
             "pixel": "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
-            "ha": "drained_total_Mg_CO2e_ha_yr_{interval}.zarr",
+            "ha":    "drained_total_Mg_CO2e_ha_yr_{interval}.zarr",
         },
         "var": "drained_total",
     },
@@ -95,7 +96,7 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         ],
         "zarr_by_unit": {
             "pixel": "burned_total_Mg_CO2e_pixel_yr_{interval}.zarr",
-            "ha": "burned_total_Mg_CO2e_ha_yr_{interval}.zarr",
+            "ha":    "burned_total_Mg_CO2e_ha_yr_{interval}.zarr",
         },
         "var": "burned_total",
     },
@@ -107,8 +108,8 @@ COMBINED_ZARR_TEMPLATE = ZARR_CACHE_PREFIX + "combined_interval.zarr"
 
 # Input folders (still depend on tile size to locate inputs)
 FOLDER_TEMPLATE = (
-        OUTPUT_BASE
-        + "/{folder}/{run_name}/five_year_intervals/{interval}/{tile_pixels}_pixels/{run_date}/"
+    OUTPUT_BASE
+    + "/{folder}/{run_name}/five_year_intervals/{interval}/{tile_pixels}_pixels/{run_date}/"
 )
 
 # Contextual layers (static)
@@ -361,8 +362,7 @@ def ensure_combined_interval_zarr(paths: dict, chunk_size: int, combined_path: s
     has_zgroup, has_zmeta, has_v3json = _zarr_store_exists(fs, inner)
     if (has_v3json or (has_zgroup and has_zmeta)):
         try:
-            xr.open_zarr(combined_path, consolidated=None,
-                         storage_options=getattr(fs, "storage_options", {"anon": False}))
+            xr.open_zarr(combined_path, consolidated=None, storage_options=getattr(fs, "storage_options", {"anon": False}))
             return
         except Exception:
             logging.debug("Rebuilding combined Zarr due to open error: %s", combined_path)
@@ -530,20 +530,6 @@ def run(args: argparse.Namespace) -> None:
 
     logger.debug("Writing Parquet to local staging directory %s", base_dir_root)
 
-    fs_s3 = s3fs.S3FileSystem()
-    dest_root = args.output_parquet.rstrip("/")
-
-    def _upload_partition(local_dir: Path, subfolder: str, interval_end: int) -> None:
-        local_part = local_dir / f"interval_end={interval_end}"
-        if local_part.exists():
-            dest_part = posixpath.join(dest_root, subfolder, f"interval_end={interval_end}")
-            logger.debug("Uploading %s -> %s", local_part, dest_part)
-            fs_s3.put(str(local_part), dest_part, recursive=True)
-            if not args.keep_local:
-                shutil.rmtree(local_part, ignore_errors=True)
-        else:
-            logger.debug("Local subfolder missing, skipping upload: %s", local_part)
-
     # Process each interval
     interval_pairs = build_interval_pairs(args.interval_end_years)
     for interval_start_year, interval_end_year in interval_pairs:
@@ -567,20 +553,16 @@ def run(args: argparse.Namespace) -> None:
             ds_combined = xr.open_zarr(combined_path, consolidated=None, storage_options={"anon": False})
             drained_total = crop_and_chunk(ds_combined[paths["drained_total"]["var"]], bbox, args.chunk_size)
             burned_total = crop_and_chunk(ds_combined[paths["burned_total"]["var"]], bbox, args.chunk_size)
-            drained_state_nodes = crop_and_chunk(ds_combined[paths["drained_state_nodes"]["var"]].astype("uint32"),
-                                                 bbox, args.chunk_size)
-            burned_state_nodes = crop_and_chunk(ds_combined[paths["burned_state_nodes"]["var"]].astype("uint32"), bbox,
-                                                args.chunk_size)
+            drained_state_nodes = crop_and_chunk(ds_combined[paths["drained_state_nodes"]["var"]].astype("uint32"), bbox, args.chunk_size)
+            burned_state_nodes = crop_and_chunk(ds_combined[paths["burned_state_nodes"]["var"]].astype("uint32"), bbox, args.chunk_size)
         else:
             cached_uri_lists = {key: list_folder_uris(spec["folder"]) for key, spec in paths.items()}
             for key, spec in paths.items():
                 ensure_zarr_exists(cached_uri_lists[key], spec["zarr"], args.chunk_size)
             drained_total = open_zarr_region(paths["drained_total"]["zarr"], bbox, args.chunk_size)
             burned_total = open_zarr_region(paths["burned_total"]["zarr"], bbox, args.chunk_size)
-            drained_state_nodes = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype(
-                "uint32")
-            burned_state_nodes = open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size).astype(
-                "uint32")
+            drained_state_nodes = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
+            burned_state_nodes = open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
 
         # Align everything to drained_state_nodes grid
         reference = drained_state_nodes
@@ -637,7 +619,6 @@ def run(args: argparse.Namespace) -> None:
             existing_data_behavior="delete_matching",
         )
         logger.info("Wrote %s rows (drained) for %s", len(df_d), interval)
-        _upload_partition(base_dir_drained, "drained", interval_end_year)
 
         # -------- Burned aggregation (sum) --------
         with dask.annotate(label=f"reduce:burned:{interval}"):
@@ -665,9 +646,19 @@ def run(args: argparse.Namespace) -> None:
             existing_data_behavior="delete_matching",
         )
         logger.info("Wrote %s rows (burned)  for %s", len(df_b), interval)
-        _upload_partition(base_dir_burned, "burned", interval_end_year)
 
-    # Partitions uploaded to S3 after each interval
+    # ---------- Upload staged Parquet to S3 (upload subfolders directly) ----------
+    logger.debug("Uploading staged data to %s", args.output_parquet)
+    fs_s3 = s3fs.S3FileSystem()
+    dest_root = args.output_parquet.rstrip("/")
+    for sub in ("drained", "burned"):
+        local_sub = base_dir_root / sub
+        if local_sub.exists():
+            dest_sub = posixpath.join(dest_root, sub)
+            logger.debug("Uploading %s -> %s", local_sub, dest_sub)
+            fs_s3.put(str(local_sub), dest_sub, recursive=True)
+        else:
+            logger.debug("Local subfolder missing, skipping upload: %s", local_sub)
 
     # Optional cleanup
     if not args.keep_local:
@@ -748,14 +739,14 @@ if __name__ == "__main__":
 Examples:
 # Full set (robust; skips corrupt tiles if any)
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
-  --interval_end_years 2010 \
+  --interval_end_years 2005 \
   --cluster_name zonal_stats \
   --run_date 20250825 \
   --model_version 0_7_0 \
   --tile_pixels 4000 \
   --chunk_size 10000 \
   --combine_zarr none
-
+  
 # Full set (robust; skips corrupt tiles if any)
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --interval_end_years 2005 2010 2015 2020 2024 \
