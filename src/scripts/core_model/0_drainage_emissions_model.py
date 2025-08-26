@@ -1190,4 +1190,16 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --peat_dataset gfw \
   --run_name gfw_standard_model
   
+python -m src.scripts.core_model.0_drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --full_model \
+  --chunk_size 1 \
+  --start_year 2001 \
+  --end_year 2024 \
+  --all_five_year_periods \
+  --mark_missing_factors \
+  --count_burned_years \
+  --peat_dataset gpd \
+  --run_name gpd_standard_model
+  
 """
