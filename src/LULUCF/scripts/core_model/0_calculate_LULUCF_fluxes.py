@@ -5,9 +5,9 @@ Local test (Dask part does not work):
 python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -bb 116.25 -2.25 116.5 -2 -cs 0.25 --run_local --no_upload -yr 2000 2023 --run_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_model_mangrove_testing
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model_mangrove_testing -bb 116.25 -2.25 116.5 -2 -cs 0.25 -yr 2000 2023 --run_date 20250820
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 -yr 2000 2023 --run_date 20250820
+python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_model_mangrove_testing
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model_mangrove_testing -bb 116.25 -2.25 116.5 -2 -cs 0.25 -yr 2000 2020 --run_date 20250821
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 -yr 2000 2023 --run_date 20250821
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
@@ -27,6 +27,10 @@ python src/utilities/download_outputs_local.py v1 23_-4_24_-3
 Using more than 1 thread/worker slows down processing a lot when there are more tasks than workers for the core LULUCF model,
 which is the situation for large analyses, obviously.
 https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210641504248464?focus=true
+
+TODO: Test AWS credentials before running so they don't error at upload step.
+- Could we add in a way to run from upload step if credentials error out?
+
 """
 
 import argparse
@@ -504,81 +508,73 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 Cf_forest = nu.calc_Cf_forest(climate_domain_cell, drivers_cell, primary_forest_proxy)
 
                 # Checks whether mangroves are present at all within the entire timeseries
+                # If mangroves are present, we assume that there was were never other terrestrial forest type before gain
+                # and that there will not be conversion to other terrestrial forest type after loss
                 is_ever_mang = np.any(mang_timeseries == 1)
                 print(f"is_ever_mang: {is_ever_mang}")
 
                 if is_ever_mang:
 
                     # Gets the first year of mangrove gain and last year of mangrove loss during the entire timeseries
-                    # to determine if this interval is mangrove loss, gain, or maintenance.
+                    # to determine if this interval is mangrove loss, gain, or maintenance or before gain or after loss.
+                    # first_mang_gain_year = 0 if there is extent in first year of the timeseries
+                    # last_mang_loss_year = 0 if there is extent in last year of the timeseries
                     mang_years = np.array(cn.mangrove_extent_years)
                     print(f"mang_timeseries: {mang_timeseries}")
-                    print(f"mang_years: {mang_years}")
+
                     first_mang_gain_year, last_mang_loss_year = nu.mangrove_first_gain_last_loss_years(mang_timeseries, mang_years)
                     print(f"first_mang_gain_year: {first_mang_gain_year}")
                     print(f"last_mang_loss_year: {last_mang_loss_year}")
-                    #TODO: Make sure this works in the decision tree for the following cases:
-                    # if there is never gain (i.e. mangrove present in 1996) and there is never loss (0, 0) # mangrove the entire timeseries
-                    # if there is never gain (i.e. mangrove present in 1996) but there is loss (0, 2007)    # starts as mangrove in 1996 and subsequent loss
-                    # if there is gain and never loss (2007, 0)                                             # does not start as mangrove, gain at some point, and mangrove the rest of the timeseries
-                    # if there is gain and loss (2007, 2015)                                                # does not start as mangrove, gain at some point, and subsequent loss
 
                     # Gets mangrove data for this interval (uses most recent year if there is no mangrove extent for a given year)
                     mang_year_index_list = nu.map_years_to_gmwv3_data(interval_end_year, interval_length)
                     mang_interval_timeseries = mang_timeseries[mang_year_index_list]
-                    print(f"mang_year_index_list: {mang_year_index_list}")
                     print(f"mang_interval_timeseries between {interval_start_year} - {interval_end_year}: {mang_interval_timeseries}")
-                    #TODO: Make sure no gain/ loss in 2000 - 2005 interval. The values should be the following
-                    # mang_loss_in_interval = False. mang_loss_year_in_interval = 0. mang_gain_year_count_pre_loss = 5. mang_gain_year_count_post_loss = 0.
                     #TODO: Make sure its working correctly after 2020, through 2023
 
-                    # TODO: Need to add a caveat that even if mang is not present in this interval but if ever mang and after start year and before end year, step into mangrove DT
-                    # If mangroves are present in this interval, gets the information needed for decision tree calculations
+                    # Determines whether mangroves are present in this interval
                     is_mang_in_interval = np.any(mang_interval_timeseries == 1)
                     print(f"is_mang_in_interval: {is_mang_in_interval}")
+                    #TODO: Can delete this after testing
 
-                    if is_mang_in_interval:
+                    # Determines whether this interval is mangrove gain, maintenance, permanent loss, before gain, or
+                    # after permanent loss using the first year of mangrove gain and last year of mangrove loss
+                    mang_loss, mang_gain, mang_remaining_mang, before_mang_gain, after_mang_loss = nu.mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year, last_mang_loss_year)
+                    #TODO: Make sure this works for 2000-2005 interval (i.e. before_mang_gain was defaulting to mang_remaining_mang before)
 
-                        # Determines whether this interval is mangrove gain, maintenance, or permanent loss using the
-                        # first year of mangrove gain and last year of mangrove loss from the entire timeseries
-                        mang_loss, mang_gain, mang_remaining_mang = nu.mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year, last_mang_loss_year)
-                        #TODO: Make sure this works for 2000-2005 interval
+                    # Gets the following information to use in decision tree calculations:
+                    # 1) mang_loss_in_interval: if there is mangrove loss during this interval (1->0) [True or False]
+                    # 2) mang_loss_year_in_interval: the first year there was mangrove loss during the interval [i.e. 2016]
+                    # 3) mang_gain_year_count_pre_loss: number of sequestration years in interval before mangrove loss
+                    # 4) mang_gain_year_count_post_loss: number of sequestration years in interval after mangrove loss
+                    # If there are multiple years of loss (1->0) in the interval, the first one is reported.
+                    # If no loss, then mang_gain_year_count_pre_loss = number of years with mangrove extent during
+                    # the interval and mang_gain_year_count_post_loss = 0
+                    mang_loss_in_interval, mang_loss_year_in_interval, mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss = nu.mangrove_gain_year_count_summary(mang_interval_timeseries, interval_start_year, interval_end_year)
+                    #TODO: Check that this works for before_mang_gain and after_mang_loss now
+                    #TODO: Currently gets information for the first year of loss during interval.
+                    # Should we change to using the last year of loss during the interval?
+                    # Note: Currently could get mang_gain_year_count_post_loss > 0 for mang_loss
 
-                        # Gets the following information to use in decision tree calculations:
-                        # 1) mang_loss_in_interval: if there is mangrove loss during this interval (1->0) [True or False]
-                        # 2) mang_loss_year_in_interval: the first year there was mangrove loss during the interval [i.e. 2016]
-                        # 3) mang_gain_year_count_pre_loss: number of sequestration years in interval before mangrove loss
-                        # 4) mang_gain_year_count_post_loss: number of sequestration years in interval after mangrove loss
-                        # If there are multiple years of loss (1->0) in the interval, the first one is reported.
-                        # If no loss, then mang_gain_year_count_pre_loss = number of years with mangrove extent during
-                        # the interval and mang_gain_year_count_post_loss = 0
-                        mang_loss_in_interval, mang_loss_year_in_interval, mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss = nu.mangrove_gain_year_count_summary(mang_interval_timeseries, interval_start_year, interval_end_year)
-                        #TODO: Currently gets information for the first year of loss during interval. 
-                        # Should we change to using the last year of loss during the interval?
-                        # Note: could get mang_gain_year_count_post_loss > 0 for mang_loss
-                        
-                        # Determines the removal factor and ratios of belowground, deadwood, and litter carbon for
-                        # mangroves based on the continent-ecozone combination
-                        mangrove_AGC_RF, r_s_ratio_mang, deadwood_c_ratio_mang, litter_c_ratio_mang = nu.calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array)
+                    # Determines the removal factor and ratios of belowground, deadwood, and litter carbon for
+                    # mangroves based on the continent-ecozone combination
+                    mangrove_AGC_RF, r_s_ratio_mang, deadwood_c_ratio_mang, litter_c_ratio_mang = nu.calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array)
 
-                        print(f"mang_loss: {mang_loss}")
-                        print(f"mang_gain: {mang_gain}")
-                        print(f"mang_remaining_mang: {mang_remaining_mang}")
-                        print(f"mang_loss_in_interval: {mang_loss_in_interval}")
-                        print(f"mang_loss_year_in_interval: {mang_loss_year_in_interval}")
-                        print(f"mang_gain_year_count_pre_loss: {mang_gain_year_count_pre_loss}")
-                        print(f"mang_gain_year_count_post_loss: {mang_gain_year_count_post_loss}")
-                        print(f"continent_ecozone_cell: {continent_ecozone_cell}")
-                        print(f"mangrove_AGC_RF: {mangrove_AGC_RF}")
-                        print(f"r_s_ratio_mang: {r_s_ratio_mang}")
-                        print(f"deadwood_c_ratio_mang: {deadwood_c_ratio_mang}")
-                        print(f"litter_c_ratio_mang: {litter_c_ratio_mang}")
-                    #TODO: Check that mangrove RF and ratios are correct
-                else:
-                    mang_gain = False
-                    mang_loss = False
-                    mang_remaining_mang = False
-                    #TODO: make more elegant after testing
+                    print(f"mang_loss: {mang_loss}")
+                    print(f"mang_gain: {mang_gain}")
+                    print(f"mang_remaining_mang: {mang_remaining_mang}")
+                    print(f"before_mang_gain: {before_mang_gain}")
+                    print(f"after_mang_loss: {after_mang_loss}")
+
+                    print(f"mang_loss_year_in_interval: {mang_loss_year_in_interval}")
+                    print(f"mang_gain_year_count_pre_loss: {mang_gain_year_count_pre_loss}")
+                    print(f"mang_gain_year_count_post_loss: {mang_gain_year_count_post_loss}")
+
+                    print(f"continent_ecozone_cell: {continent_ecozone_cell}")
+                    print(f"mangrove_AGC_RF: {mangrove_AGC_RF}")
+                    print(f"r_s_ratio_mang: {r_s_ratio_mang}")
+                    print(f"deadwood_c_ratio_mang: {deadwood_c_ratio_mang}")
+                    print(f"litter_c_ratio_mang: {litter_c_ratio_mang}")
 
                 ### Defines specific land cover classes, including planted tree classification
 
@@ -847,14 +843,11 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 #todo: Q - @David instead of mangroves as a separate node (1), would it make sense to include mangrove gain,
                 # loss, and mang remaining mang in the tree logic below so all gain starts with 2, all loss starts with 3, etc.
 
-                #todo: Qs:
-                # what to do in earlier intervals if mangrove gain is later (ie.2015) but is terrestrial trees between 2000-2015
-                # what to do in later intrevals is mangrove loss in earlier interval (i.e. 2010) but terrestrial/ crop/ builtup after?
-
-                # TODO: Need to add a caveat that even if mang is not present in this interval but if ever mang and after start year and before end year, step into mangrove DT
+                #todo: Q - gain_year_count, should gain year count be mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss, or the sum?
+                # currently mang_gain_year_count_pre_loss.
 
                 ### Mangrove gain
-                # Starting age set to 0. AGC and BGC are set to 0 (like NT->T) but uses existing deadwood and litter.
+                # Starting age set to 0. AGC and BGC are set to 0 (c_dens_in_NT_T) but existing deadwood and litter carbon pools are used.
                 if mang_gain:
                     node = nu.accrete_node(node, 1)
                     node = nu.accrete_node(node, 1) # Gain of mangroves (11)
@@ -863,42 +856,45 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
 
                     if mang_loss_in_interval:
                         state_out = nu.accrete_node(node, 1)  # Gain of mangroves + temp loss in interval (111)
-                        (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
-                            nu.calc_mang_temp_loss(interval_length, 0, mang_loss_year_in_interval, mang_gain_year_count_pre_loss,
-                                mang_gain_year_count_post_loss, RF_AGC_final, RF_BGC_final, interval_end_year, c_dens_in_NT_T,
-                                most_recent_year_not_tall_veg, deadwood_c_ratio_mang, litter_c_ratio_mang))
+                        mang_c_pools_EF_no_fire = cn.biomass_emissions_only
+                        print(f"mang_c_pools_EF_no_fire: {mang_c_pools_EF_no_fire}")
+
+                        (c_gross_emis_out, c_gross_removals_out, c_dens_out, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = (
+                            nu.calc_mang_loss(interval_length, mang_c_pools_EF_no_fire, mang_loss_year_in_interval,
+                                mang_gain_year_count_pre_loss,mang_gain_year_count_post_loss, RF_AGC_final, RF_BGC_final, interval_end_year,
+                                c_dens_in_NT_T, most_recent_year_not_tall_veg, deadwood_c_ratio_mang, litter_c_ratio_mang))
                         print(f"Node code is {state_out}, gain of mangroves + temp loss in interval (111)")
-                        print(f"c_dens_in_NT_T: {c_dens_in_NT_T}")
-                        print(f"c_dens_out: {c_dens_out}")
-                        print(f"c_gross_removals_out: {c_gross_removals_out}")
-                        print(f"c_gross_emis_out: {c_gross_emis_out}")
-                        print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
 
                     else:
                         state_out = nu.accrete_node(node, 2)  # Gain of mangroves, no loss in interval (112)
                         (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
-                            nu.calc_mang(0, mang_gain_year_count_pre_loss,
-                                mang_gain_year_count_post_loss, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T,
-                                deadwood_c_ratio_mang, litter_c_ratio_mang))
+                            nu.calc_mang(0, mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss,
+                                RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio_mang, litter_c_ratio_mang))
                         print(f"Node code is {state_out}, gain of mangroves, no loss in interval (112)")
-                        print(f"c_dens_in_NT_T: {c_dens_in_NT_T}")
-                        print(f"c_dens_out: {c_dens_out}")
-                        print(f"c_gross_removals_out: {c_gross_removals_out}")
-                        print(f"c_gross_emis_out: {c_gross_emis_out}")
-                        print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
-                    # TODO: Add in most_recent_year_not_tall_veg logic to calc_mang and calc_mang_temp_loss
+
+                    print(f"c_dens_in_NT_T: {c_dens_in_NT_T}")
+                    print(f"c_dens_out: {c_dens_out}")
+                    print(f"c_gross_removals_out: {c_gross_removals_out}")
+                    print(f"c_gross_emis_out: {c_gross_emis_out}")
+                    print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
+                    # TODO: Add in most_recent_year_not_tall_veg logic to calc_mang and calc_mang_temp_loss?
 
 
                 ### Mangrove loss
                 elif mang_loss:
                     node = nu.accrete_node(node, 1)
                     node = nu.accrete_node(node, 2)             # Permanent loss of mangroves (12)
+                    RF_AGC_final = mangrove_AGC_RF
+                    RF_BGC_final = RF_AGC_final * r_s_ratio_mang
+                    mang_c_pools_EF_no_fire = cn.all_non_soil_pools
 
-                    # Using dummy values for testing
-                    c_dens_out = c_dens_in_empty
-                    gain_year_count = mang_gain_year_count_pre_loss
-                    forest_age_end_of_interval = 0
+                    (c_gross_emis_out, c_gross_removals_out, c_dens_out, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = (
+                        nu.calc_mang_loss(interval_length, mang_c_pools_EF_no_fire, mang_loss_year_in_interval,
+                            mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss, RF_AGC_final, RF_BGC_final, interval_end_year,
+                            c_dens_in, most_recent_year_not_tall_veg, deadwood_c_ratio_mang, litter_c_ratio_mang))
 
+                    #todo: q - If we are assuming no mangrove conversion, there should be no difference in how this is calculated
+                    # for cropland, builtup, or other. Do we need seperate nodes for these?
                     if water_LC_curr:
                         state_out = nu.accrete_node(node, 0)    # Permanent loss of mangroves to water (120)
                         print(f"Node code is {state_out}, permanent loss of mangroves to water (120)")
@@ -916,6 +912,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                         state_out = nu.accrete_node(node, 3)            # Permanent loss of mangroves to anything else (123)
                         print(f"Node code is {state_out}, permanent loss of mangroves to anything else (123)")
 
+                    print(f"mang_c_pools_EF_no_fire: {mang_c_pools_EF_no_fire}")
+                    print(f"c_dens_in: {c_dens_in}")
+                    print(f"c_dens_out: {c_dens_out}")
+                    print(f"c_gross_removals_out: {c_gross_removals_out}")
+                    print(f"c_gross_emis_out: {c_gross_emis_out}")
+                    print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
+
 
                 ### Mangrove remaining mangrove
                 elif mang_remaining_mang:
@@ -926,30 +929,45 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
 
                     if mang_loss_in_interval:
                         state_out = nu.accrete_node(node, 1)  # Mangrove remaining mangrove + temp loss in interval (131)
-                        (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
-                            nu.calc_mang_temp_loss(interval_length, forest_age_start_of_interval, mang_loss_year_in_interval,
-                                mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss, RF_AGC_final, RF_BGC_final,
-                                interval_end_year, c_dens_in, most_recent_year_not_tall_veg,
-                                deadwood_c_ratio_mang, litter_c_ratio_mang))
+                        mang_c_pools_EF_no_fire = cn.biomass_emissions_only
+                        print(f"mang_c_pools_EF_no_fire: {mang_c_pools_EF_no_fire}")
+
+                        (c_gross_emis_out, c_gross_removals_out, c_dens_out, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = (
+                            nu.calc_mang_loss(interval_length, mang_c_pools_EF_no_fire, mang_loss_year_in_interval,
+                                mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss, RF_AGC_final, RF_BGC_final, interval_end_year,
+                                c_dens_in, most_recent_year_not_tall_veg, deadwood_c_ratio_mang, litter_c_ratio_mang))
                         print(f"Node code is {state_out}, mangrove remaining mangrove + temp loss in interval (131)")
-                        print(f"c_dens_in: {c_dens_in}")
-                        print(f"c_dens_out: {c_dens_out}")
-                        print(f"c_gross_removals_out: {c_gross_removals_out}")
-                        print(f"c_gross_emis_out: {c_gross_emis_out}")
-                        print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
 
                     else:
                         state_out = nu.accrete_node(node, 2)  # Mangrove remaining mangrove, no loss in interval (132)
                         (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
-                            nu.calc_mang(forest_age_start_of_interval, mang_gain_year_count_pre_loss,
-                            mang_gain_year_count_post_loss, RF_AGC_final, RF_BGC_final, c_dens_in,
-                            deadwood_c_ratio_mang, litter_c_ratio_mang))
+                            nu.calc_mang(forest_age_start_of_interval, mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss,
+                            RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio_mang, litter_c_ratio_mang))
                         print(f"Node code is {state_out}, mangrove remaining mangrove, no loss in interval (132)")
-                        print(f"c_dens_in: {c_dens_in}")
-                        print(f"c_dens_out: {c_dens_out}")
-                        print(f"c_gross_removals_out: {c_gross_removals_out}")
-                        print(f"c_gross_emis_out: {c_gross_emis_out}")
-                        print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
+
+                    print(f"c_dens_in: {c_dens_in}")
+                    print(f"c_dens_out: {c_dens_out}")
+                    print(f"c_gross_removals_out: {c_gross_removals_out}")
+                    print(f"c_gross_emis_out: {c_gross_emis_out}")
+                    print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
+
+
+                ### Before mangrove gain or after mangrove loss
+                elif before_mang_gain or after_mang_loss:
+                    node = nu.accrete_node(node, 1)
+                    node = nu.accrete_node(node, 0)
+
+                    c_dens_out = c_dens_in_empty
+                    gain_year_count = 0
+                    forest_age_end_of_interval = 0
+
+                    if before_mang_gain:
+                        state_out = nu.accrete_node(node, 0)  # Mangrove before first mangrove gain (100)
+                        print(f"Node code is {state_out}, mangrove before first mangrove gain (100)")
+
+                    elif after_mang_loss:
+                        state_out = nu.accrete_node(node, 1)  # Mangrove after permanent mangrove loss (101)
+                        print(f"Node code is {state_out}, mangrove after permanent mangrove loss (101)")
 
 
                 ### Tree gain

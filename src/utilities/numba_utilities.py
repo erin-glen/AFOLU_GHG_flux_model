@@ -427,13 +427,15 @@ def mangrove_first_gain_last_loss_years(data_array, year_array):
 
     return first_gain, last_loss
 
-# Function to get whether the interval is mangrove gain, loss, or maintenance
+# Function to get whether the interval is mangrove gain, loss, or maintenance or before gain or after loss
 # Note: This function assumes mangrove is in the interval because we've already checked that condition in the LULUCF code
 @jit(nopython=True)
 def mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year, last_mang_loss_year):
-
+    mang_loss = False
     mang_gain = False
     mang_remaining_mang = False
+    before_mang_gain = False
+    after_mang_loss = False
 
     # Mangrove state hierarchy is mang_loss > mang_gain > mang_remaining_mang
     mang_loss = (last_mang_loss_year > interval_start_year) and (last_mang_loss_year <= interval_end_year)
@@ -442,17 +444,23 @@ def mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year
         mang_gain = (first_mang_gain_year > interval_start_year) and (first_mang_gain_year <= interval_end_year)
 
     if (not mang_loss) and (not mang_gain):
-        mang_remaining_mang = True
+        mang_remaining_mang = (first_mang_gain_year <= interval_start_year) and ((last_mang_loss_year == 0) or (last_mang_loss_year > interval_end_year))
+
+    if (not mang_loss) and (not mang_gain) and (not mang_remaining_mang):
+        before_mang_gain = (first_mang_gain_year != 0) and (first_mang_gain_year > interval_end_year)
+
+    if (not mang_loss) and (not mang_gain) and (not mang_remaining_mang) and (not before_mang_gain):
+        after_mang_loss = (last_mang_loss_year != 0) and (last_mang_loss_year < interval_start_year)
 
    # Checks that only 1 mangrove state is true
-    true_count = int(mang_loss) + int(mang_gain) + int(mang_remaining_mang)
+    true_count = int(mang_loss) + int(mang_gain) + int(mang_remaining_mang) + int(before_mang_gain) + int(after_mang_loss)
     if true_count != 1:
         raise ValueError(
             f"Invalid classification. Only 1 of the following should be True: "
-            f"loss={mang_loss}, gain={mang_gain}, remaining={mang_remaining_mang}"
+            f"loss={mang_loss}, gain={mang_gain}, remaining={mang_remaining_mang}, before_gain={before_mang_gain}, after_loss={after_mang_loss}"
         )
 
-    return mang_loss, mang_gain, mang_remaining_mang
+    return mang_loss, mang_gain, mang_remaining_mang, before_mang_gain, after_mang_loss
 
 # Returns whether there was mangrove extent loss (i.e. "disturbance"; 1->0), and if so the year of disturbance
 # Also returns the number of years in the interval before and after mangrove extent loss (for pre- and post-disturbace gain year counts)
@@ -761,30 +769,27 @@ def calc_mang(forest_age_start, gain_year_count, gain_year_count_post_loss, agc_
     return c_gross_emissions_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age
 
 
-# Gross fluxes and ending carbon stocks for mangrove gain/ maintenance with temporary mangrove loss.
-# Only differences between mangrove gain/ maintenance is forest_age_interval_start year and c_dens_in
+# Gross fluxes and ending carbon stocks for intervals with temporary or permanent mangrove loss.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 # Applies to 5-year intervals and annual intervals.
-# Annual model has no gain in the year of temporary mangrove loss
-    # gain_year_count_pre_loss = 0 when there is temporary mangrove loss
-    # gain_year_count_post_loss = 1 when there is no temporary mangrove loss
+# Annual model has no gain in the year of mangrove loss
+    # gain_year_count_pre_loss = 0 when there is mangrove loss
+    # gain_year_count_post_loss = 1 when there is no mangrove loss
 @jit(nopython=True)
-def calc_mang_temp_loss(interval_length, forest_age_interval_start, loss_year, gain_year_count_pre_loss,
+def calc_mang_loss(interval_length, c_pools_no_fire, loss_year, gain_year_count_pre_loss,
                             gain_year_count_post_loss, RF_AGC, RF_BGC, interval_end_year, c_dens_in,
                             most_recent_year_not_tall_veg, deadwood_c_ratio, litter_c_ratio):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
 
-    # Raise error if loss year is 0
-    if (loss_year == 0):
-        raise ValueError(f"Mangrove loss flag is True during interval but loss_year == 0")
-    # TODO: delete after testing. Can change loss_year to index value so count the # of years after in interval
+    # Carbon pools that are emitted as CO2 (depends on whether temporary or permanent mangrove loss)
+    agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = unpack_emission_factors(c_pools_no_fire)
 
     # Raise error if gain_year_count_pre_loss = 1 and interval_length = 1
     if (interval_length == 1) and (gain_year_count_pre_loss == 1):
         raise ValueError(f"Mangrove loss flag is True during annual interval, but gain_year_count_pre_loss = 1")
-    # TODO: delete after testing
+    # TODO: delete after testing annual data
 
     # Step 1: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless).
     # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest and mangrove only).
@@ -796,7 +801,7 @@ def calc_mang_temp_loss(interval_length, forest_age_interval_start, loss_year, g
     # if most_recent_year_not_tall_veg == 0 or most_recent_year_not_tall_veg == interval_end_year:
     #     deadwood_c_ratio = 0.0
     #     litter_c_ratio = 0.0
-    # TODO: Commenting this out for now. Don't know if we should make this assumption for mangroves.
+    # TODO: Commenting this out for now. Don't know if we should make this assumption for mangroves?
 
     # Step 2: Calculates pre-loss gross removals by carbon pools (Mg C/ha/interval) for 5-year and annual intervals. Gross removals are negative.
     # Works for 5-year and annual intervals alike.
@@ -835,13 +840,13 @@ def calc_mang_temp_loss(interval_length, forest_age_interval_start, loss_year, g
     # Step 5: Calculates emissions for each C pool (Mg C/ha/interval) for stand replacing mangrove loss.
     # Does not consider fire or partial loss (i.e. "disturbance") of mangroves
     if loss_year > 0:
-        # Since this is not permanent mangrove loss, only AGC and BGC carbon pools are used
-        # Emissions from deadwood and litter are assumed to be 0
+        # If it is only temporary mangrove loss, only AGC and BGC carbon pools are emitted (cn.biomass_emissions_only)
+        # If it is permanent mangrove loss, all non-soil carbon pools are emitted (cn.all_non_soil_pools)
         # Not converting to CO2 yet for consistency with all other outputs (Mg C/ha)
-        agc_gross_emis_out = agc_pre_loss
-        bgc_gross_emis_out = bgc_pre_loss
-        deadwood_c_gross_emis_out = 0
-        litter_c_gross_emis_out = 0
+        agc_gross_emis_out = agc_pre_loss * agc_ef_CO2
+        bgc_gross_emis_out = bgc_pre_loss * bgc_ef_CO2
+        deadwood_c_gross_emis_out = deadwood_c_pre_loss * deadwood_c_ef_CO2
+        litter_c_gross_emis_out = litter_c_pre_loss * litter_c_ef_CO2
     else:
         raise ValueError(f"Mangrove loss flag is True during interval but loss_year is 0")
 
@@ -866,7 +871,7 @@ def calc_mang_temp_loss(interval_length, forest_age_interval_start, loss_year, g
     # Step 8: Updates the forest age. Age is set to 0 at time of loss. Increments by the number of years in the interval after loss.
     forest_age_interval_end = gain_year_count_post_loss
 
-    return c_gross_emissions_out, c_gross_removals_out, c_dens_out, gain_year_count_pre_loss, forest_age_interval_end
+    return c_gross_emissions_out, c_gross_removals_out, c_dens_out, agc_ef_CO2, gain_year_count_pre_loss, forest_age_interval_end
 
 
 # Gross fluxes and ending carbon stocks for trees converted to non-trees with and without fire.
