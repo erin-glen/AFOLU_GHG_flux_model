@@ -874,7 +874,7 @@ def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_curr_interval, 
         deadwood_c_gross_emis_out = ((deadwood_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * deadwood_c_ef_CO2
         litter_c_gross_emis_out = ((litter_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * litter_c_ef_CO2
 
-        # Emission factor for burned forest is the combustion factor for forrest
+        # Emission factor for burned forest is the combustion factor for forest
         agc_ef_CO2 = Cf_forest
 
         # # For testing CO2 fire emissions

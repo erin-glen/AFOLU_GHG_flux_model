@@ -1241,7 +1241,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest,
                                             deadwood_c_ratio=0, litter_c_ratio=0)
                         else:  # Trees not disturbed in the current interval (422)
-                            #TODO Confirm that cn.Cf_forest_undisturbed is being used correctly in branch 422x
                             node = nu.accrete_node(node, 2)
                             if all_planted_trees:  # Oil palm/planted trees not disturbed in the current interval (4221)
                                 node = nu.accrete_node(node, 1)
