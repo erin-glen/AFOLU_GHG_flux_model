@@ -385,19 +385,18 @@ def calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array):
     return mangrove_RF, mangrove_r_s_ratio, mangrove_deadwood_c_ratio, mangrove_litter_c_ratio
 
 # Returns the first year of mangrove gain (0->1) if there is no mangrove extent at the beginning of the timeseries
+# Also returns first year of mangrove loss (1->0) with or without any subsequent gain.
 # Also returns last year of mangrove loss (1->0) when there is no subsequent gain.
-# Otherwise, if not gain after 1996 or permanent loss (timeseries ending in 0), then mangrove remaining mangrove.
 @jit(nopython=True)
 def mangrove_first_gain_last_loss_years(data_array, year_array):
 
     length = data_array.shape[0]
 
-    # first_mangrove_gain_year
-    if data_array[0] == 1:      #If mangrove in starting year, cannot be mangrove gain later on in series so first_gain year == 0
+    # first mangrove gain year
+    if data_array[0] == 1:      #If mangrove extent in starting year, cannot be mangrove gain later on in series so first_gain year = 0
         first_gain = 0
     else:
         first_gain = 0
-        #prev = data_array[0]
         for year in range(1, length):
             prev = data_array[year - 1]
             curr = data_array[year]
@@ -405,11 +404,19 @@ def mangrove_first_gain_last_loss_years(data_array, year_array):
             if prev == 0 and curr == 1:
                 first_gain = year_array[year]
                 break
-            #prev = curr
+
+    # first mangrove loss year
+    first_loss = 0              #If there is never mangrove loss, first_loss year = 0
+    for year in range(1, length):
+        prev = data_array[year - 1]
+        curr = data_array[year]
+        if prev == 1 and curr == 0:
+            first_loss = year_array[year]
+            break
 
     #last_mangrove_loss_year
     if data_array[length-1] == 1:
-        last_loss = 0       #If mangrove in final year, cannout have permanent mangrove loss so last_loss year == 0
+        last_loss = 0       #If mangrove in final year, cannot have permanent mangrove loss so last_loss year = 0
     else:
         last_loss = 0
         suffix_all_zero = 1  # flag: are all values after year zero?
@@ -417,7 +424,7 @@ def mangrove_first_gain_last_loss_years(data_array, year_array):
         # Loop backwards over mangrove extent years starting from last year (inclusive) looking for
         # the first time it switches from 0 (curr) to 1 (prev) to get final mangrove loss year
         for year in range(length - 1, 0, -1):
-            # If there is mangrove extent in current year, the suffix_all_zero flag is set to False and last_loss = 0
+            # If there is mangrove extent in current year, the suffix_all_zero flag is set to False
             if data_array[year] != 0:
                 suffix_all_zero = 0
             # If suffix_all_zero flag is True, and mangrove extent in prev year = 1 and in curr year = 0, gets current year.
@@ -425,7 +432,7 @@ def mangrove_first_gain_last_loss_years(data_array, year_array):
                 last_loss = year_array[year]
                 break
 
-    return first_gain, last_loss
+    return first_gain, first_loss, last_loss
 
 # Function to get whether the interval is mangrove gain, loss, or maintenance or before gain or after loss
 # Note: This function assumes mangrove is in the interval because we've already checked that condition in the LULUCF code
@@ -450,7 +457,7 @@ def mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year
         before_mang_gain = (first_mang_gain_year != 0) and (first_mang_gain_year > interval_end_year)
 
     if (not mang_loss) and (not mang_gain) and (not mang_remaining_mang) and (not before_mang_gain):
-        after_mang_loss = (last_mang_loss_year != 0) and (last_mang_loss_year < interval_start_year)
+        after_mang_loss = (last_mang_loss_year != 0) and (last_mang_loss_year <= interval_start_year)
 
    # Checks that only 1 mangrove state is true
     true_count = int(mang_loss) + int(mang_gain) + int(mang_remaining_mang) + int(before_mang_gain) + int(after_mang_loss)
@@ -462,8 +469,8 @@ def mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year
 
     return mang_loss, mang_gain, mang_remaining_mang, before_mang_gain, after_mang_loss
 
-# Returns whether there was mangrove extent loss (i.e. "disturbance"; 1->0), and if so the year of disturbance
-# Also returns the number of years in the interval before and after mangrove extent loss (for pre- and post-disturbace gain year counts)
+# Returns whether there was mangrove extent loss (1->0), and if so the year of loss
+# Also returns the number of years in the interval before and after mangrove extent loss (for pre- and post-loss gain year counts)
 @jit(nopython=True)
 def mangrove_gain_year_count_summary(data_array, interval_start_year, interval_end_year):
 
@@ -474,24 +481,23 @@ def mangrove_gain_year_count_summary(data_array, interval_start_year, interval_e
     if array_length != years_length:
         raise ValueError("Length mismatch between data_array and years range")
 
-    # Find index of first 1→0 transition, or returns None if not found
+    # Find index of last 1→0 transition, or returns -1 if not found
     loss_index = -1
     for i in range(1, array_length):
         if data_array[i - 1] == 1 and data_array[i] == 0:
             loss_index = i
-            break
 
     if loss_index != -1:
         mang_loss = True
         mang_loss_year = interval_start_year + loss_index
 
-        # sums years with mangrove extent starting after previous interval year and before loss year
+        # sums years with mangrove extent starting after previous interval year and before last loss year
         pre_count = 0
         for k in range(1, loss_index):
             if data_array[k] == 1:
                 pre_count += 1
 
-        # sums mangrove extent years after loss year
+        # sums mangrove extent years after last loss year
         post_count = 0
         for k in range(loss_index + 1, array_length):
             if data_array[k] == 1:
@@ -500,7 +506,7 @@ def mangrove_gain_year_count_summary(data_array, interval_start_year, interval_e
         mang_loss = False
         mang_loss_year = 0
 
-        # If no loss, sums all years with mangrove extent starting after previous interval year
+        # If no loss, sums all years with mangrove extent starting after previous interval end year
         pre_count = 0
         for k in range(1, array_length):
             if data_array[k] == 1:
@@ -721,8 +727,7 @@ def calc_NT_T(interval_length, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litt
 # Gross fluxes and ending carbon stocks for mangrove gain or mangrove remaining mangrove
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 # Applies to 5-year and annual intervals. Only difference is gain_year_count.
-# Applies to mangrove gain and maintenance. Difference is handled by the input arguments: forest_age_start and c_dens_in.
-#todo Q - Are there any differences between NT_T and T_T that were not included in this? All gain logic and all maintenance logic applied?
+# Applies to mangrove gain and maintenance. Differences are handled by these input arguments: forest_age_start and c_dens_in.
 @jit(nopython=True)
 def calc_mang(forest_age_start, gain_year_count, gain_year_count_post_loss, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
 
@@ -734,7 +739,7 @@ def calc_mang(forest_age_start, gain_year_count, gain_year_count_post_loss, agc_
         raise ValueError(f"No mangrove loss during interval but gain_year_count_post_loss={gain_year_count_post_loss} is greater than 0")
     #TODO: after testing, can remove gain_year_count_post_loss from input arguments
 
-    #TODO: Do we need to apply the following assumption for mangroves that we do for other trees?
+    #TODO: Apply the following assumption for mangroves that we do for other trees?
     #if most_recent_year_not_tall_veg == 0 or most_recent_year_not_tall_veg == interval_end_year:
 
     # Step 1: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
@@ -801,7 +806,7 @@ def calc_mang_loss(interval_length, c_pools_no_fire, loss_year, gain_year_count_
     # if most_recent_year_not_tall_veg == 0 or most_recent_year_not_tall_veg == interval_end_year:
     #     deadwood_c_ratio = 0.0
     #     litter_c_ratio = 0.0
-    # TODO: Commenting this out for now. Don't know if we should make this assumption for mangroves?
+    # TODO: Commenting this out for now. Update assumption for mangroves
 
     # Step 2: Calculates pre-loss gross removals by carbon pools (Mg C/ha/interval) for 5-year and annual intervals. Gross removals are negative.
     # Works for 5-year and annual intervals alike.
