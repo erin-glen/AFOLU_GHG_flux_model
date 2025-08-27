@@ -13,12 +13,34 @@ Outputs (long)
 3) by_burned_state_period.csv
    Columns: interval_end, burned_state_nodes,  burned_state_meaning,  burned_MgCO2e, area_ha
 
+# Annualized long outputs (period values duplicated to each year in the interval; inclusive)
+4) by_country_annual.csv
+   Columns: year, gadm_adm0[, country, iso3], drained_MgCO2e, burned_MgCO2e, total_MgCO2e
+
+5) by_drained_state_annual.csv
+   Columns: year, drained_state_nodes, drained_state_meaning, drained_MgCO2e, area_ha
+
+6) by_burned_state_annual.csv
+   Columns: year, burned_state_nodes,  burned_state_meaning,  burned_MgCO2e, area_ha
+
+7) top<topn>_by_country_drained.csv
+8) top<topn>_by_country_burned.csv
+
+9) top<topn>_by_country_drained_annual.csv
+10) top<topn>_by_country_burned_annual.csv
+
 Optional wide outputs (when --wide is set)
 ------------------------------------------
-4) by_country_period_wide_drained.csv
-5) by_country_period_wide_burned.csv
-6) by_country_period_wide_total.csv
-   Columns: gadm_adm0[, country, iso3], <metric>_<year> for each requested inventory period
+11) by_country_period_wide_drained.csv
+12) by_country_period_wide_burned.csv
+13) by_country_period_wide_total.csv
+   Columns: gadm_adm0[, country, iso3], <metric>_<periodEndYear> for each requested inventory period
+
+# Annualized wide outputs (when --wide is set)
+14) by_country_annual_wide_drained.csv
+15) by_country_annual_wide_burned.csv
+16) by_country_annual_wide_total.csv
+    Columns: gadm_adm0[, country, iso3], <metric>_2001, <metric>_2002, ..., <metric>_2024
 
 Usage
 -----
@@ -36,6 +58,7 @@ python -m src.scripts.zonal_statistics.publish_tables \
 
 Notes
 -----
+- Annualized outputs duplicate each period’s values to every year within that period (inclusive of start/end).
 - If --adm0_lookup is omitted, we auto-build a lookup (in-memory) from zc.GADM_ADM0_IDS
   using ISO-3166-1 numeric → pycountry (if installed). Otherwise iso3/country may be null.
 """
@@ -258,6 +281,32 @@ def _maybe_register_lookup(con: duckdb.DuckDBPyConnection, adm0_lookup: Optional
     return _auto_register_iso_lookup(con)
 
 
+# ------------------------- Annualization helpers --------------------------
+
+def _build_interval_years(years: List[int]) -> pd.DataFrame:
+    """
+    Create a 2-col DataFrame mapping each interval_end to all years in that interval.
+    Uses build_interval_pairs(), which is already used to form the interval folders.
+    """
+    pairs = build_interval_pairs(list(years))  # [(start, end), ...]
+    rows = []
+    for (start, end) in pairs:
+        for y in range(int(start), int(end) + 1):
+            rows.append({"interval_end": int(end), "year": int(y)})
+    df = pd.DataFrame(rows).astype({"interval_end": "int32", "year": "int32"})
+    return df
+
+
+def _register_interval_years(con: duckdb.DuckDBPyConnection, years: List[int]) -> List[int]:
+    """
+    Register 'interval_years' (interval_end, year) in DuckDB and return the sorted list of all years.
+    """
+    df = _build_interval_years(years)
+    con.register("interval_years", df)
+    all_years = sorted(df["year"].unique().tolist())
+    return all_years
+
+
 # ------------------------------- SQL makers -------------------------------
 
 def _copy_sql(con: duckdb.DuckDBPyConnection, sql: str, out_path: str):
@@ -370,8 +419,82 @@ def table_topn_country_sql(component: str, topn: int, with_lookup: bool) -> str:
     """
 
 
+# -------- Annualized SQL (duplicate each interval's values to all years in that interval)
+
+def table_by_country_annual_sql(with_lookup: bool) -> str:
+    base = table_by_country_period_sql(with_lookup=with_lookup)
+    select_l = ", base.country, base.iso3" if with_lookup else ""
+    return f"""
+    WITH base AS ({base})
+    SELECT
+      iy.year AS year,
+      base.gadm_adm0
+      {select_l},
+      base.drained_MgCO2e,
+      base.burned_MgCO2e,
+      base.total_MgCO2e
+    FROM base
+    JOIN interval_years iy
+      ON iy.interval_end = base.interval_end
+    ORDER BY year, total_MgCO2e DESC
+    """
+
+
+def table_by_drained_state_annual_sql() -> str:
+    base = table_by_drained_state_sql()
+    return f"""
+    WITH base AS ({base})
+    SELECT
+      iy.year AS year,
+      base.drained_state_nodes,
+      base.drained_state_meaning,
+      base.drained_MgCO2e,
+      base.area_ha
+    FROM base
+    JOIN interval_years iy
+      ON iy.interval_end = base.interval_end
+    ORDER BY year, drained_MgCO2e DESC
+    """
+
+
+def table_by_burned_state_annual_sql() -> str:
+    base = table_by_burned_state_sql()
+    return f"""
+    WITH base AS ({base})
+    SELECT
+      iy.year AS year,
+      base.burned_state_nodes,
+      base.burned_state_meaning,
+      base.burned_MgCO2e,
+      base.area_ha
+    FROM base
+    JOIN interval_years iy
+      ON iy.interval_end = base.interval_end
+    ORDER BY year, burned_MgCO2e DESC
+    """
+
+
+def table_topn_country_annual_sql(component: str, topn: int, with_lookup: bool) -> str:
+    base = table_topn_country_sql(component, topn, with_lookup)
+    alias = "drained_MgCO2e" if component == "drained" else "burned_MgCO2e"
+    cols_l = ", base.country, base.iso3" if with_lookup else ""
+    return f"""
+    WITH base AS ({base})
+    SELECT
+      iy.year AS year,
+      base.rank,
+      base.gadm_adm0
+      {cols_l},
+      base.{alias}
+    FROM base
+    JOIN interval_years iy
+      ON iy.interval_end = base.interval_end
+    ORDER BY year, rank
+    """
+
 
 def _wide_sql(measure_col: str, years: List[int], with_lookup: bool) -> str:
+    # Wide pivot over period-end summaries (columns for each interval_end year)
     select_l = ", country, iso3" if with_lookup else ""
     group_l  = ", country, iso3" if with_lookup else ""
     cols = []
@@ -383,6 +506,24 @@ def _wide_sql(measure_col: str, years: List[int], with_lookup: bool) -> str:
       gadm_adm0{select_l},
       {cols_sql}
     FROM by_country_long
+    GROUP BY gadm_adm0{group_l}
+    ORDER BY gadm_adm0
+    """
+
+
+def _wide_annual_sql(measure_col: str, years: List[int], with_lookup: bool) -> str:
+    # Wide pivot over annualized by-country data (columns for each YEAR, not period-end)
+    select_l = ", country, iso3" if with_lookup else ""
+    group_l  = ", country, iso3" if with_lookup else ""
+    cols = []
+    for y in years:
+        cols.append(f"SUM(CASE WHEN year = {int(y)} THEN {measure_col} ELSE 0 END) AS {measure_col}_{int(y)}")
+    cols_sql = ",\n      ".join(cols)
+    return f"""
+    SELECT
+      gadm_adm0{select_l},
+      {cols_sql}
+    FROM by_country_annual
     GROUP BY gadm_adm0{group_l}
     ORDER BY gadm_adm0
     """
@@ -414,6 +555,9 @@ def main(argv=None):
     _register_all(con, drained_globs, burned_globs, aws_region=args.aws_region)
     have_lookup = _maybe_register_lookup(con, args.adm0_lookup)
 
+    # Register interval_end → year mapping for annualization
+    all_years = _register_interval_years(con, years)  # e.g., [2001,...,2024]
+
     # Ensure output directory exists if writing locally
     if not args.out_dir.startswith("s3://"):
         Path(args.out_dir).mkdir(parents=True, exist_ok=True)
@@ -422,22 +566,39 @@ def main(argv=None):
     sql_country = table_by_country_period_sql(with_lookup=have_lookup)
     _copy_sql(con, sql_country, posixpath.join(args.out_dir, "by_country_period.csv"))
 
-    # Create a view for reuse (for wide pivots)
+    # View for reuse (period-wide pivots)
     con.execute(f"CREATE OR REPLACE VIEW by_country_long AS {sql_country}")
+
+    # 1b) By country × year (annualized long)
+    sql_country_annual = table_by_country_annual_sql(with_lookup=have_lookup)
+    _copy_sql(con, sql_country_annual, posixpath.join(args.out_dir, "by_country_annual.csv"))
+    con.execute(f"CREATE OR REPLACE VIEW by_country_annual AS {sql_country_annual}")
 
     # 2) By drained state × period
     _copy_sql(con, table_by_drained_state_sql(), posixpath.join(args.out_dir, "by_drained_state_period.csv"))
 
+    # 2b) By drained state × year (annualized)
+    _copy_sql(con, table_by_drained_state_annual_sql(), posixpath.join(args.out_dir, "by_drained_state_annual.csv"))
+
     # 3) By burned state × period
     _copy_sql(con, table_by_burned_state_sql(), posixpath.join(args.out_dir, "by_burned_state_period.csv"))
 
-    # 4) Top-N by country for drained & burned
+    # 3b) By burned state × year (annualized)
+    _copy_sql(con, table_by_burned_state_annual_sql(), posixpath.join(args.out_dir, "by_burned_state_annual.csv"))
+
+    # 4) Top-N by country for drained & burned (period)
     _copy_sql(con, table_topn_country_sql("drained", args.topn, have_lookup),
               posixpath.join(args.out_dir, f"top{args.topn}_by_country_drained.csv"))
     _copy_sql(con, table_topn_country_sql("burned", args.topn, have_lookup),
               posixpath.join(args.out_dir, f"top{args.topn}_by_country_burned.csv"))
 
-    # 5) Optional wide exports (three files)
+    # 4b) Top-N by country (annualized)
+    _copy_sql(con, table_topn_country_annual_sql("drained", args.topn, have_lookup),
+              posixpath.join(args.out_dir, f"top{args.topn}_by_country_drained_annual.csv"))
+    _copy_sql(con, table_topn_country_annual_sql("burned", args.topn, have_lookup),
+              posixpath.join(args.out_dir, f"top{args.topn}_by_country_burned_annual.csv"))
+
+    # 5) Optional wide exports (three files for period + three for annual)
     if args.wide:
         _copy_sql(con, _wide_sql("drained_MgCO2e", years, have_lookup),
                   posixpath.join(args.out_dir, "by_country_period_wide_drained.csv"))
@@ -445,6 +606,13 @@ def main(argv=None):
                   posixpath.join(args.out_dir, "by_country_period_wide_burned.csv"))
         _copy_sql(con, _wide_sql("total_MgCO2e", years, have_lookup),
                   posixpath.join(args.out_dir, "by_country_period_wide_total.csv"))
+
+        _copy_sql(con, _wide_annual_sql("drained_MgCO2e", all_years, have_lookup),
+                  posixpath.join(args.out_dir, "by_country_annual_wide_drained.csv"))
+        _copy_sql(con, _wide_annual_sql("burned_MgCO2e", all_years, have_lookup),
+                  posixpath.join(args.out_dir, "by_country_annual_wide_burned.csv"))
+        _copy_sql(con, _wide_annual_sql("total_MgCO2e", all_years, have_lookup),
+                  posixpath.join(args.out_dir, "by_country_annual_wide_total.csv"))
 
     print("Wrote tables to:", args.out_dir)
 
@@ -464,12 +632,12 @@ python -m src.scripts.zonal_statistics.pub_tables \
   --run_date 20250825 \
   --years 2005 2010 \
   --aws_region us-east-1 \
-  --out_dir /tmp/pub_tables \
+  --out_dir /mnt/c/tmp/pub_tables \
   --topn 20 \
   --wide
 
 # Write CSVs directly to S3 (long + wide), with explicit adm0 lookup CSV
-python -m src.scripts.zonal_statistics.pub_tables \
+python -m src.scripts.zonal_statistics.publish_tables \
   --model_version 0_7_0 \
   --run_name ogh_standard_model \
   --run_date 20250825 \
@@ -481,7 +649,7 @@ python -m src.scripts.zonal_statistics.pub_tables \
   --wide
 
 # Minimal run (single year, long tables only)
-python -m src.scripts.zonal_statistics.pub_tables \
+python -m src.scripts.zonal_statistics.publish_tables \
   --model_version 0_7_0 \
   --run_name ogh_standard_model \
   --run_date 20250825 \
