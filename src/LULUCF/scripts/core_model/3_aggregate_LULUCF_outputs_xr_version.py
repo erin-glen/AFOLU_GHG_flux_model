@@ -81,6 +81,8 @@ def group_files_into_10x10_tiles(tif_files):
 @delayed
 def merge_and_write(group_key, file_list, output_dir, folder_uri=None):
 
+    logger_worker = lu.setup_logging_worker()
+
     fs = s3fs.S3FileSystem(anon=False)
 
     lat10, lon10 = group_key
@@ -127,16 +129,17 @@ def merge_and_write(group_key, file_list, output_dir, folder_uri=None):
 @delayed
 def merge_folder(first_10x10s_to_process, folder_uri):
 
+    logger_worker = lu.setup_logging_worker()
+
+    # Lists all tifs in folder
     fs = s3fs.S3FileSystem(anon=False)
     files = fs.ls(folder_uri)
-    # print(files)
     tif_files = [f"s3://{f}" for f in files if f.endswith(".tif")]
-    # print(tif_files)
 
-    # Regex to extract bounding box
     pattern = re.compile(r"__(-?\d+)_(-?\d+)_(-?\d+)_(-?\d+)__")
     tile_groups = defaultdict(list)
 
+    # Groups all 1x1 deg tiles into 10x10 deg groupings
     for f in tif_files:
         match = pattern.search(f)
         if match:
@@ -145,19 +148,22 @@ def merge_folder(first_10x10s_to_process, folder_uri):
             key = ((lat // 10) * 10, (lon // 10) * 10)
             tile_groups[key].append(f)
 
-    # print(tile_groups)
+    # Apply the limit to how many 10x10s to process
+    if first_10x10s_to_process:
+        tile_items = list(tile_groups.items())[:first_10x10s_to_process]
+    else:
+        tile_items = tile_groups.items()
 
     output_root = folder_uri.replace("4000_pixels", "40000_pixels")
 
-    # Submit per-tile merge jobs
     results = []
-    for group_key, files in tile_groups.items():
-        print(f"Merge: {group_key}")
-        # print(files)
+    for group_key, files in tile_items:
+        lu.print_and_log(f"Listing tiles in {folder_uri}: {uu.timestr()}", False, logger_worker)
         result = merge_and_write(group_key, files, output_root, folder_uri=folder_uri)
         results.append(result)
 
     return results
+
 
 
 
@@ -207,24 +213,24 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
                      "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/AGC_emission_factor_CO2_only__fraction/standard_model/hybrid_intervals/2006_2010/4000_pixels/20250806/"]
 
 
-    # Limit if requested
+    # Limits folders to process (for testing)
     if first_folders_to_process:
         input_folders = input_folders[:first_folders_to_process]
 
-    print(f"📂 Found {len(input_folders)} folders to process")
-    print(input_folders)
+    main_logger.info(f"input folders: {input_folders}")
+    main_logger.info(f"Processing {len(input_folders)} folders: {uu.timestr()}")
 
     futures = [merge_folder(first_10x10s_to_process, folder)
                for folder in input_folders]
 
     folder_results = compute(*futures)
-    # print(folder_results)
-    tile_tasks = [task for sublist in folder_results for task in sublist if task is not None]
 
-    print(f"🧮 Scheduling {len(tile_tasks)} tile tasks")
-    tile_results = compute(*tile_tasks)
-
-    main_logger.info(f"✅ Aggregation complete. {len(tile_results)} tiles written.")
+    # tile_tasks = [task for sublist in folder_results for task in sublist if task is not None]
+    #
+    # main_logger.info(f"Scheduling {len(tile_tasks)} tile tasks: {uu.timestr()}")
+    # tile_results = compute(*tile_tasks)
+    #
+    # main_logger.info(f"Aggregation complete. {len(tile_results)} tiles written: {uu.timestr()}")
 
 
 
