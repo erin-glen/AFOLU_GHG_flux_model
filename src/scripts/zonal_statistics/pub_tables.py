@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Build publication-ready tables from organic-soils zonal statistics.
+Build publication-ready tables from organic-soils zonal statistics (updated for v0.7+ layout).
 
 Outputs (long)
 --------------
@@ -24,6 +24,8 @@ Usage
 -----
 python -m src.scripts.zonal_statistics.publish_tables \
   --model_version 0_7_0 \
+  --run_name ogh_standard_model \
+  --run_date 20250825 \
   --years 2005 2010 2015 2020 2024 \
   --aws_region us-east-1 \
   --out_dir /tmp/pub_tables \
@@ -42,12 +44,15 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import posixpath
-from typing import Optional, List
+from typing import Optional, List, Sequence, Iterable, Tuple
 
 import duckdb
 import pandas as pd
 
-from src.scripts.zonal_statistics.run_zonal_statistics import build_output_parquet
+from src.scripts.zonal_statistics.run_zonal_statistics import (
+    build_output_parquet,
+    build_interval_pairs,
+)
 from src.scripts.zonal_statistics import zonal_constants as zc  # <- for GADM_ADM0_IDS
 
 
@@ -59,41 +64,65 @@ def _ensure_httpfs(con: duckdb.DuckDBPyConnection, aws_region: Optional[str]):
         con.execute(f"SET s3_region='{aws_region}';")
 
 
-def _check_nonempty_glob(con: duckdb.DuckDBPyConnection, path_glob: str, label: str):
-    n_files = con.execute(f"SELECT COUNT(*) FROM glob('{path_glob}')").fetchone()[0]
-    if n_files == 0:
-        raise RuntimeError(f"[{label}] No Parquet files found at: {path_glob}")
+def _count_globs(con: duckdb.DuckDBPyConnection, globs: Sequence[str]) -> int:
+    if not globs:
+        return 0
+    union_sql = " UNION ALL ".join([f"SELECT * FROM glob('{g}')" for g in globs])
+    return con.execute(f"SELECT COUNT(*) FROM ({union_sql})").fetchone()[0]
 
+
+def _check_nonempty_globs(con: duckdb.DuckDBPyConnection, globs: Sequence[str], label: str):
+    n_files = _count_globs(con, globs)
+    if n_files == 0:
+        raise RuntimeError(f"[{label}] No Parquet files found for any of: {list(globs)}")
+
+
+def _read_parquet_list_sql(globs: Sequence[str]) -> str:
+    if not globs:
+        return "[]"
+    items = ", ".join([f"'{g}'" for g in globs])
+    return f"[{items}]"
+
+
+# --------------------------- view construction ---------------------------
 
 def _make_component_view(
-    con: duckdb.DuckDBPyConnection, name: str, glob: str, kind: str
+    con: duckdb.DuckDBPyConnection,
+    name: str,
+    globs: Sequence[str],
+    kind: str,
 ):
     """
     Create views:
-      raw_<name>   : raw read of Parquet (with filename + hive partition cols if present)
+      raw_<name>   : raw read of Parquet (with filename)
       <name>       : normalized schema with interval_end, flux_type, value, gadm_adm0, and state columns
     """
+    rp_list = _read_parquet_list_sql(globs)
     con.execute(f"""
         CREATE OR REPLACE VIEW raw_{name} AS
         SELECT * FROM read_parquet(
-            '{glob}',
+            {rp_list},
             union_by_name=true,
-            filename=1,
-            hive_partitioning=1
+            filename=1
         );
     """)
 
     cols = {r[1] for r in con.execute(f"PRAGMA table_info('raw_{name}')").fetchall()}
 
-    # Prefer the real column if present; else extract from Hive-style folder name.
-    if "interval_end" in cols:
-        interval_expr = "interval_end"
-    else:
-        interval_expr = "TRY_CAST(regexp_extract(filename, 'interval_end=([0-9]{4})', 1) AS INTEGER)"
-
+    filename_expr  = "filename" if "filename" in cols else "NULL"
     value_expr     = "value" if "value" in cols else "CAST(NULL AS DOUBLE)"
     flux_type_expr = "flux_type" if "flux_type" in cols else "CAST(NULL AS VARCHAR)"
     gadm_expr      = "gadm_adm0" if "gadm_adm0" in cols else "CAST(NULL AS INTEGER)"
+
+    # Prefer embedded interval_end; fallback to parse {start}_{end} preceding '/drained/' or '/burned/'
+    if "interval_end" in cols:
+        interval_expr = "interval_end"
+    else:
+        interval_expr = f"""
+            TRY_CAST(
+                regexp_extract({filename_expr}, '([0-9]{{4}})_([0-9]{{4}})/(?:drained|burned)/', 2)
+            AS INTEGER)
+        """
 
     if kind == "drained":
         nodes_expr   = "drained_state_nodes"   if "drained_state_nodes"   in cols else "CAST(NULL AS INTEGER)"
@@ -108,8 +137,7 @@ def _make_component_view(
                 {nodes_expr}                       AS drained_state_nodes,
                 {meaning_expr}                     AS drained_state_meaning
             FROM raw_{name}
-            WHERE {interval_expr} IS NOT NULL
-              AND {value_expr}    IS NOT NULL;
+            WHERE {value_expr} IS NOT NULL;
         """)
     else:
         nodes_expr   = "burned_state_nodes"    if "burned_state_nodes"    in cols else "CAST(NULL AS INTEGER)"
@@ -124,21 +152,49 @@ def _make_component_view(
                 {nodes_expr}                       AS burned_state_nodes,
                 {meaning_expr}                     AS burned_state_meaning
             FROM raw_{name}
-            WHERE {interval_expr} IS NOT NULL
-              AND {value_expr}    IS NOT NULL;
+            WHERE {value_expr} IS NOT NULL;
         """)
 
 
+# --------------------------- path/glob utilities ---------------------------
+
+def _interval_folder_strings(years: Iterable[int]) -> List[str]:
+    """Return strings like '2001_2005' for requested interval end years."""
+    pairs: List[Tuple[int, int]] = build_interval_pairs(list(years))
+    return [f"{s}_{e}" for (s, e) in pairs]
+
+
+def _make_base_prefixes(
+    model_version: str,
+    run_name: str,
+    run_date: str,
+    interval_folders: Sequence[str],
+) -> List[str]:
+    """Return the per-interval base prefixes under which drained/burned live."""
+    bases: List[str] = []
+    for interval in interval_folders:
+        bases.append(build_output_parquet(model_version, run_name, run_date, interval).rstrip("/"))
+    return bases
+
+
+def _make_globs_for_components(base_prefixes: Sequence[str]) -> tuple[list[str], list[str]]:
+    """Return (drained_globs, burned_globs) across intervals."""
+    drained = [posixpath.join(bp, "drained", "*.parquet") for bp in base_prefixes]
+    burned  = [posixpath.join(bp, "burned",  "*.parquet") for bp in base_prefixes]
+    return drained, burned
+
+
 def _register_all(
-    con: duckdb.DuckDBPyConnection, base_prefix: str, aws_region: Optional[str]
+    con: duckdb.DuckDBPyConnection,
+    drained_globs: Sequence[str],
+    burned_globs: Sequence[str],
+    aws_region: Optional[str],
 ):
     _ensure_httpfs(con, aws_region)
-    drained_glob = posixpath.join(base_prefix, "drained", "**", "*.parquet")
-    burned_glob  = posixpath.join(base_prefix, "burned",  "**", "*.parquet")
-    _check_nonempty_glob(con, drained_glob, "drained")
-    _check_nonempty_glob(con, burned_glob,  "burned")
-    _make_component_view(con, "zs_drained", drained_glob, kind="drained")
-    _make_component_view(con, "zs_burned",  burned_glob,  kind="burned")
+    _check_nonempty_globs(con, drained_globs, "drained")
+    _check_nonempty_globs(con, burned_globs,  "burned")
+    _make_component_view(con, "zs_drained", drained_globs, kind="drained")
+    _make_component_view(con, "zs_burned",  burned_globs,  kind="burned")
 
 
 # --------------------------- GADM lookup logic ----------------------------
@@ -156,9 +212,9 @@ def _auto_register_iso_lookup(con: duckdb.DuckDBPyConnection) -> bool:
         pycountry = None
 
     rows: List[dict] = []
-    # Manual overrides for any non-ISO numeric cases (fill if needed)
     MANUAL = {
-        # Example: 383: {"iso3": "XKX", "country": "Kosovo"},
+        # Example override if needed:
+        # 383: {"iso3": "XKX", "country": "Kosovo"},
     }
 
     for code in zc.GADM_ADM0_IDS:
@@ -199,7 +255,6 @@ def _maybe_register_lookup(con: duckdb.DuckDBPyConnection, adm0_lookup: Optional
             raise RuntimeError(f"adm0_lookup is missing columns: {sorted(missing)}")
         return True
 
-    # No CSV provided → build in-memory from zc.GADM_ADM0_IDS
     return _auto_register_iso_lookup(con)
 
 
@@ -282,8 +337,11 @@ def table_topn_country_sql(component: str, topn: int, with_lookup: bool) -> str:
     base = "zs_drained" if component == "drained" else "zs_burned"
     ftype = "drained_total_Mg_CO2e" if component == "drained" else "burned_total_Mg_CO2e"
     alias = "drained_MgCO2e" if component == "drained" else "burned_MgCO2e"
+
     select_l = ", l.country, l.iso3" if with_lookup else ""
-    join_l   = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = t.gadm_adm0" if with_lookup else ""
+    # Join must reference the table that appears in the outer FROM (ranked), not the CTE (t)
+    join_l   = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = ranked.gadm_adm0" if with_lookup else ""
+
     return f"""
     WITH t AS (
       SELECT interval_end, gadm_adm0, SUM(value) AS {alias}
@@ -300,20 +358,20 @@ def table_topn_country_sql(component: str, topn: int, with_lookup: bool) -> str:
       FROM t
     )
     SELECT
-      interval_end,
+      ranked.interval_end,
       rnk AS rank,
-      gadm_adm0
+      ranked.gadm_adm0
       {select_l},
       {alias}
     FROM ranked
     {join_l}
     WHERE rnk <= {topn}
-    ORDER BY interval_end, rank
+    ORDER BY ranked.interval_end, rank
     """
 
 
+
 def _wide_sql(measure_col: str, years: List[int], with_lookup: bool) -> str:
-    """Build conditional-aggregation wide table SQL from the long by-country view."""
     select_l = ", country, iso3" if with_lookup else ""
     group_l  = ", country, iso3" if with_lookup else ""
     cols = []
@@ -335,7 +393,9 @@ def _wide_sql(measure_col: str, years: List[int], with_lookup: bool) -> str:
 def main(argv=None):
     p = argparse.ArgumentParser("Build publication tables from zonal stats")
     p.add_argument("--model_version", required=True)
-    p.add_argument("--years", nargs="+", required=True, help="e.g. 2005 2010 2015 2020 2024")
+    p.add_argument("--run_name", required=True, help="Run name used in run_zonal_statistics")
+    p.add_argument("--run_date", required=True, help="Run date used in run_zonal_statistics (YYYYMMDD)")
+    p.add_argument("--years", nargs="+", required=True, help="Interval end years, e.g. 2005 2010 2015 2020 2024")
     p.add_argument("--aws_region", default=None, help="AWS region for S3 (e.g., us-east-1)")
     p.add_argument("--out_dir", required=True, help="Local folder or s3://bucket/prefix/")
     p.add_argument("--topn", type=int, default=20, help="Top N countries per period")
@@ -344,10 +404,14 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     years = [int(y) for y in args.years]
-    base_prefix = build_output_parquet(args.model_version, years).rstrip("/")
+    # Build list of per-interval folder names and base prefixes
+    interval_folders = _interval_folder_strings(years)
+    base_prefixes = _make_base_prefixes(args.model_version, args.run_name, args.run_date, interval_folders)
+
+    drained_globs, burned_globs = _make_globs_for_components(base_prefixes)
 
     con = duckdb.connect()
-    _register_all(con, base_prefix, aws_region=args.aws_region)
+    _register_all(con, drained_globs, burned_globs, aws_region=args.aws_region)
     have_lookup = _maybe_register_lookup(con, args.adm0_lookup)
 
     # Ensure output directory exists if writing locally
@@ -394,17 +458,21 @@ Examples
 --------
 
 # Local CSV outputs (long + wide)
-python -m src.scripts.zonal_statistics.publish_tables \
+python -m src.scripts.zonal_statistics.pub_tables \
   --model_version 0_7_0 \
-  --years 2005 2010 2015 2020 2024 \
+  --run_name ogh_standard_model \
+  --run_date 20250825 \
+  --years 2005 2010 \
   --aws_region us-east-1 \
   --out_dir /tmp/pub_tables \
   --topn 20 \
   --wide
 
 # Write CSVs directly to S3 (long + wide), with explicit adm0 lookup CSV
-python -m src.scripts.zonal_statistics.publish_tables \
+python -m src.scripts.zonal_statistics.pub_tables \
   --model_version 0_7_0 \
+  --run_name ogh_standard_model \
+  --run_date 20250825 \
   --years 2005 2010 2015 2020 2024 \
   --aws_region us-east-1 \
   --out_dir s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_7_0/zonal_stats/pubs/ \
@@ -413,8 +481,10 @@ python -m src.scripts.zonal_statistics.publish_tables \
   --wide
 
 # Minimal run (single year, long tables only)
-python -m src.scripts.zonal_statistics.publish_tables \
+python -m src.scripts.zonal_statistics.pub_tables \
   --model_version 0_7_0 \
+  --run_name ogh_standard_model \
+  --run_date 20250825 \
   --years 2024 \
   --out_dir /tmp/pub_tables
 """
