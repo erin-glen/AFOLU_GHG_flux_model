@@ -19,8 +19,8 @@ import pandas as pd
 from iso_lookup import ISO_LOOKUP
 
 # ---------------------------------------------------------------------
-MODEL_EXCEL = r"C:\tmp\0724_stats\drainage_model_1x1_chunk_statistics_20250724_20_14_28.xlsx"
-FAO_CSV     = r"C:\tmp\0724_stats\FAOSTAT_data_en_7-25-2025.csv"
+MODEL_EXCEL = r"C:\tmp\chunk_stats\ogh_standard_model\20250824\drainage_model_1x1_chunk_statistics_20250824_23_47_49.xlsx"
+FAO_CSV     = r"C:\tmp\FAO\FAOSTAT_data_en_7-25-2025.csv"
 # ---------------------------------------------------------------------
 
 PERIODS = {

@@ -778,11 +778,11 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --run_name ogh_standard_model \
   --tile_pixels 4000 \
   --chunk_size 10000 \
-  --combine_zarr interval
+  --combine_zarr none
 
 # Multiple intervals, default (separate Zarrs, immediate per-interval uploads)
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
-  --interval_end_years 2005 2010 2015 2020 2024 \
+  --interval_end_years 2010 2015 2020 2024 \
   --cluster_name zonal_stats \
   --run_date 20250825 \
   --model_version 0_7_0 \
@@ -793,7 +793,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
 
 # Multiple intervals filtered by tile IDs
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
-  --interval_end_years 2005 2010 \
+  --interval_end_years 2005  \
   --cluster_name zonal_stats \
   --run_date 20250825 \
   --model_version 0_7_0 \
@@ -813,5 +813,5 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --run_name smoke \
   --tile_pixels 4000 \
   --chunk_size 10000 \
-  --combine_zarr interval
+  --combine_zarr none
 """
