@@ -341,7 +341,7 @@ def connect_to_Coiled_cluster(cluster_name, run_local):
 
         # Iterates through clusters and identifies the running one of the correct name to connect to
         for cluster in all_clusters:
-            if cluster.get("name") == cluster_name and cluster.get("current_state", {}).get("state") == 'ready':
+            if cluster.get("name") == cluster_name and cluster.get("current_state", {}).get("state") in ['scaling', 'ready']:
                 print(f"Connecting to running cluster '{cluster_name}'.")
                 cluster = coiled.Cluster(name=cluster_name)
                 client = Client(cluster)

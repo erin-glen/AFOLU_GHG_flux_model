@@ -107,7 +107,7 @@ def merge_and_write(group_key, file_list, output_dir, folder_uri=None):
             with fsspec.open(s3_output_path, 'wb') as dst_file:
                 dst_file.write(src_file.read())
 
-        lu.print_and_log(f"Uploaded {s3_output_path}", False, logger_worker)
+        lu.print_and_log(f"Uploaded {s3_output_path}: {uu.timestr()}", False, logger_worker)
 
         ### Counts valid pixels in the output raster
         lu.print_and_log(f"Counting pixels in {tile_id} for {out_file}: {uu.timestr()}", False, logger_worker)
@@ -142,8 +142,6 @@ def merge_and_write(group_key, file_list, output_dir, folder_uri=None):
             lu.print_and_log(f"Error counting pixels for {local_path}: {e}", False, logger_worker)
             print(f"Error counting pixels for {local_path}: {e}")
             return f"failure counting pixels for {out_file}"
-
-        print(valid_pixel_count)
 
     task_end_time = time.time()
     lu.print_and_log(f"{out_file} took {round(task_end_time - task_start_time)} seconds: {uu.timestr()}", False, logger_worker)
@@ -195,15 +193,16 @@ def merge_folder(first_10x10s_to_process, folder_uri):
             tile_groups[key].append(f)
 
     # Applies how many 10x10s to process (for testing)
-    if first_10x10s_to_process:
+    if first_10x10s_to_process is not None:
         tile_items = list(tile_groups.items())[:first_10x10s_to_process]
     else:
         tile_items = tile_groups.items()
+        first_10x10s_to_process = "all"
 
     # Changes the output path to the appropriate number of pixels
     output_root = folder_uri.replace("4000_pixels", "40000_pixels")
 
-    # For testing. Redirects outputs to a different version folder.
+    #TODO For testing. Redirects outputs to a different version folder.
     output_root = output_root.replace(cn.model_version_underscore, f"{cn.model_version_underscore}_xr_aggreg")
 
     results = []
@@ -257,26 +256,53 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
     main_logger.info(f"Batch size: {batch_size} chunks")
     main_logger.info(f"no_upload: {no_upload}")
 
-    input_folders = [
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/AGC_emission_factor_CO2_only__fraction/standard_model/hybrid_intervals/2001_2005/4000_pixels/20250806/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/AGC_emission_factor_CO2_only__fraction/standard_model/hybrid_intervals/2006_2010/4000_pixels/20250806/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2001_2005/_ha_yr/4000_pixels/20250806/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2006_2010/_ha_yr/4000_pixels/20250806/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/carbon_density__non_soil__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250806/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/carbon_density__non_soil__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250806/"
-    ]
+    # Calculates the interval type, difference between start and end years of intervals,
+    # and the model output years for the model run
+    interval_type, interval_year_diff, interval_length, interval_end_years = uu.get_interval_info(end_year, main_logger, start_year)
 
+    # # Testing list with a variety of inputs: no unit_type, date_range, date
+    # output_dir_list = [
+    #     "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/AGC_emission_factor_CO2_only__fraction/standard_model/hybrid_intervals/2001_2005/4000_pixels/20250806/",
+    #     "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/AGC_emission_factor_CO2_only__fraction/standard_model/hybrid_intervals/2006_2010/4000_pixels/20250806/",
+    #     "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2001_2005/_ha_yr/4000_pixels/20250806/",
+    #     "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2006_2010/_ha_yr/4000_pixels/20250806/",
+    #     "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/carbon_density__non_soil__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250806/",
+    #     "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/carbon_density__non_soil__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250806/"
+    # ]
+
+    # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
+    # Instead, it creates a list of input folders, from which a download dictionary is created for each chunk (in the chunk-level function).
+    # It's a little simpler this way. Since the datatypes of the inputs don't need to be specified in advance for this script
+    # (since it's not using numba), there's no need to centrally create a download dictionary with each input's datatype
+    # just once on the scheduler, as is more efficient for scripts that use numba.
+    # Creates a list of input directories used in summative output creation based on specifics of the model run
+
+    # Only make 10x10s of the summative outputs. It keeps the workload smaller and these are the only ones that
+    # have per-pixel outputs, which also need to be aggregated into 10x10s.
+    output_dir_list_per_ha = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,'4000',
+                                                     model_type, interval_end_years, interval_year_diff, input_date, "per_ha")
+    output_dir_list_per_pixel = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,'4000',
+                                                     model_type, interval_end_years, interval_year_diff, input_date, "per_pixel")
+
+    # Also need to aggregate the land state nodes
+    land_state_node_list = [s for s in cn.LULUCF_core_output_dirs if cn.land_state_pattern in s]
+    land_state_node_list = uu.create_output_dir_name_list(land_state_node_list, interval_type, start_year,'4000',
+                                                     model_type, interval_end_years, interval_year_diff, input_date)
+
+    # Full list of folders to aggregate, in alphabetical order
+    output_dir_list = output_dir_list_per_ha + output_dir_list_per_pixel + land_state_node_list
+    output_dir_list.sort()  # Sorts in-place
 
     # Limits folders to process (for testing)
     if first_folders_to_process:
-        input_folders = input_folders[:first_folders_to_process]
+        output_dir_list = output_dir_list[:first_folders_to_process]
 
-    main_logger.info(f"input folders: {input_folders}")
-    main_logger.info(f"Processing {len(input_folders)} folders: {uu.timestr()}")
+    main_logger.info(f"Directories to aggregate: {output_dir_list}")
+    main_logger.info(f"There are {len(output_dir_list)} folders to aggregate to 10x10s")
 
     # Creates lists of 10x10s to aggregate but doesn't aggregate them
     futures = [merge_folder(first_10x10s_to_process, folder)
-               for folder in input_folders]
+               for folder in output_dir_list]
 
     folder_results = compute(*futures)
 
@@ -284,12 +310,12 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
     tile_tasks = [task for sublist in folder_results for task in sublist if task is not None]
 
     # Actually executes the aggregation on the flat list of tasks
-    main_logger.info(f"Executing {len(tile_tasks)} aggregation tasks across {len(input_folders)}: {uu.timestr()}")
+    main_logger.info(f"Executing {len(tile_tasks)} aggregation tasks across {len(output_dir_list)}: {uu.timestr()}")
     tile_results = compute(*tile_tasks)
 
-    uu.stage_duration(start_time, uu.timestr(), {stage}, main_logger)
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
-    main_logger.info(f"Aggregation complete. {len(tile_results)} tiles written across {len(input_folders)} folders: {uu.timestr()}")
+    main_logger.info(f"Aggregation complete. {len(tile_results)} tiles written across {len(output_dir_list)} folders: {uu.timestr()}")
 
     # Sets it so that no worker logs are created if doing a local run
     if not run_local:
