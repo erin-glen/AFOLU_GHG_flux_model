@@ -12,6 +12,15 @@ Key guarantees in this version:
 - Stage Parquet locally per full interval (no Hive partitioning) and upload the
   finished folder for each interval to S3 immediately under .../{interval}/(drained|burned)/.
 - No per-ha densities; sums only; area is m² → ha in post-process.
+
+Alignment hardening in this update:
+- New `safe_align_like()` aligns with exact-equality when possible, otherwise uses
+  nearest-neighbor with a 0.5-pixel tolerance; if mismatch exceeds tolerance,
+  it raises (fail-fast).
+- ADM0 integer casting is delayed until *after* alignment (so NaN doesn't become 0 early).
+- The combined-per-interval Zarr is written on a single canonical grid by aligning
+  all variables to a chosen reference grid with the same 0.5-pixel tolerance.
+- Adds a QA log on the share of flux ending up in GADM=0.
 """
 
 from __future__ import annotations
@@ -217,9 +226,57 @@ def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
     return da_
 
 
+def _pixel_step(a: xr.DataArray, dim: str) -> float:
+    vals = a.coords[dim].values
+    if vals.size < 2:
+        return np.nan
+    return float(abs(vals[1] - vals[0]))
+
+
+def safe_align_like(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
+    """Align ds to ref on identical grid; otherwise 'nearest' with 0.5-pixel tolerance.
+
+    - If coordinates are already identical (within floating tolerance), just assign ref coords.
+    - Otherwise, select by nearest with tol=0.5*pixel in each axis.
+    - If any point is out of tolerance (xarray fills NaN), raise (fail-fast).
+    """
+    if not {"x", "y"}.issubset(ds.dims):
+        return ds
+    # exact/equal grid?
+    same_len = ds.sizes.get("x") == ref.sizes.get("x") and ds.sizes.get("y") == ref.sizes.get("y")
+    if same_len:
+        if np.allclose(ds.x.values, ref.x.values) and np.allclose(ds.y.values, ref.y.values):
+            return ds.assign_coords(x=ref.x, y=ref.y)
+
+    # nearest within 0.5 pixel
+    rx = _pixel_step(ref, "x")
+    ry = _pixel_step(ref, "y")
+    if np.isnan(rx) or np.isnan(ry):
+        # degenerate slices (shouldn't occur in 1x1° tiles) → force assign
+        aligned = ds.sel(x=ref.x, y=ref.y, method="nearest")
+    else:
+        tol_x = rx / 2.0
+        tol_y = ry / 2.0
+        aligned = ds.sel(
+            x=ref.x,
+            y=ref.y,
+            method="nearest",
+            tolerance={"x": tol_x, "y": tol_y},
+        )
+
+    # If any selection missed tolerance, xarray will introduce NaNs
+    # For integer arrays this promotes dtype; check generically
+    if bool(aligned.isnull().any().compute().item()):
+        raise ValueError(
+            "Grid mismatch exceeds 0.5-pixel tolerance. "
+            "Reproject or rebuild inputs to the canonical grid."
+        )
+    return aligned.assign_coords(x=ref.x, y=ref.y)
+
+
 def safe_crop(ds, ref):
-    """Crop ds to ref's x/y extent (nearest), then force coords equal to ref."""
-    return ds.sel(x=ref.x, y=ref.y, method="nearest").assign_coords(x=ref.x, y=ref.y)
+    """[DEPRECATED] Use safe_align_like. Kept for compatibility if referenced externally."""
+    return safe_align_like(ds, ref)
 
 
 def open_zarr_region(path: str, bbox: Optional[List[float]], chunk_size: int) -> xr.DataArray:
@@ -366,7 +423,9 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
 
 
 def ensure_combined_interval_zarr(paths: dict, chunk_size: int, combined_path: str) -> None:
-    """Build a single Zarr per interval with all variables if missing/invalid."""
+    """Build a single Zarr per interval with all variables if missing/invalid.
+    This version *forces a single canonical grid* across variables using a 0.5-pixel tolerance.
+    """
     fs, inner = fsspec.core.url_to_fs(combined_path)
     has_zgroup, has_zmeta, has_v3json = _zarr_store_exists(fs, inner)
     if (has_v3json or (has_zgroup and has_zmeta)):
@@ -378,6 +437,7 @@ def ensure_combined_interval_zarr(paths: dict, chunk_size: int, combined_path: s
             logging.debug("Rebuilding combined Zarr due to open error: %s", combined_path)
 
     ds_vars = {}
+    # Load each variable from GeoTIFFs → DataArray
     for key in ("drained_state_nodes", "burned_state_nodes", "drained_total", "burned_total"):
         uris = list_folder_uris(paths[key]["folder"])
         try:
@@ -396,10 +456,46 @@ def ensure_combined_interval_zarr(paths: dict, chunk_size: int, combined_path: s
         for axis in ("x", "y"):
             if axis in da_in.coords:
                 da_in = da_in.assign_coords({axis: np.round(da_in[axis].astype(float), 12)})
+        # State nodes must be uint32
+        if key in ("drained_state_nodes", "burned_state_nodes"):
+            da_in = da_in.astype("uint32")
         ds_vars[paths[key]["var"]] = da_in
 
     if not ds_vars:
         raise FileNotFoundError(f"Combined Zarr: no variables could be built for {combined_path}")
+
+    # Choose a reference grid for the interval (prefer a state layer)
+    ref_key = None
+    for candidate in ("drained_state_nodes", "burned_state_nodes", "drained_total", "burned_total"):
+        vname = paths[candidate]["var"]
+        if vname in ds_vars:
+            ref_key = vname
+            break
+    if ref_key is None:
+        raise FileNotFoundError("Combined Zarr: no variable available to derive a reference grid")
+    ref_var = ds_vars[ref_key]
+
+    # Force every var to the exact ref grid with 0.5-pixel tolerance
+    def _force_like(a: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
+        if {"x", "y"}.issubset(a.dims):
+            rx = _pixel_step(ref, "x")
+            ry = _pixel_step(ref, "y")
+            if np.isnan(rx) or np.isnan(ry):
+                aligned = a.sel(x=ref.x, y=ref.y, method="nearest")
+            else:
+                aligned = a.sel(
+                    x=ref.x, y=ref.y, method="nearest",
+                    tolerance={"x": rx / 2.0, "y": ry / 2.0}
+                )
+            if bool(aligned.isnull().any().compute().item()):
+                raise ValueError(
+                    "Combined Zarr: grid mismatch exceeds 0.5-pixel tolerance when aligning variables."
+                )
+            return aligned.assign_coords(x=ref.x, y=ref.y)
+        return a
+
+    for k in list(ds_vars):
+        ds_vars[k] = _force_like(ds_vars[k], ref_var)
 
     dsx = xr.Dataset(ds_vars).chunk({"x": chunk_size, "y": chunk_size})
     dsx.to_zarr(combined_path, mode="w")
@@ -481,6 +577,29 @@ def _upload_partition_dir(fs_s3: s3fs.S3FileSystem, local_dir: Path, dest_prefix
     return uploaded
 
 
+# ------------------------------- QA helpers -------------------------------
+def _share_to_gadm0(res: xr.DataArray, flux_value: int, logger: logging.Logger, label: str) -> None:
+    """Log the percent of sum going to GADM=0 for a given `flux_type` in a reduce result.
+
+    `res` dims expected: (gadm_adm0, state_nodes, flux_type)
+    """
+    try:
+        arr = res.sel(flux_type=flux_value)
+    except Exception:
+        logger.debug("QA: flux_type=%s not present in reduce result for %s", flux_value, label)
+        return
+    gadm_vals = arr.coords["gadm_adm0"].values
+    if 0 not in gadm_vals:
+        logger.info("QA: no GADM=0 bin in result for %s", label)
+        return
+    total = arr.sum().compute()
+    ocean = arr.sel(gadm_adm0=0).sum().compute()
+    pct = float((ocean / total) * 100.0) if float(total) != 0.0 else 0.0
+    logger.info("QA: share to GADM=0 for %s = %.4f%%", label, pct)
+    if pct > 0.5:
+        logger.warning("QA: High share to GADM=0 for %s (%.2f%%). Check alignment.", label, pct)
+
+
 # --------------------------------- driver ---------------------------------
 def run(args: argparse.Namespace) -> None:
     stage = "zonal_statistics"
@@ -537,7 +656,8 @@ def run(args: argparse.Namespace) -> None:
     ensure_zarr_exists(list_folder_uris(PIXEL_AREA_GTIFF_FOLDER), PIXEL_AREA_ZARR, args.chunk_size)
 
     logger.debug("Opening contextual layers")
-    adm0 = open_zarr_region(ADM0_ZARR, bbox, args.chunk_size).astype("uint32")
+    # NOTE: keep ADM0 as float with NaNs until *after* alignment
+    adm0 = open_zarr_region(ADM0_ZARR, bbox, args.chunk_size)
     pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).persist()
 
     # Expected groups
@@ -592,13 +712,13 @@ def run(args: argparse.Namespace) -> None:
             drained_state_nodes = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
             burned_state_nodes = open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
 
-        # Align everything to drained_state_nodes grid
+        # Align everything to drained_state_nodes grid (strict)
         reference = drained_state_nodes
-        adm0_aligned = safe_crop(adm0, reference)
-        pixel_area_aligned = safe_crop(pixel_area, reference)
-        drained_total_aligned = safe_crop(drained_total, reference)
-        burned_total_aligned = safe_crop(burned_total, reference)
-        burned_state_nodes_aligned = safe_crop(burned_state_nodes, reference)
+        adm0_aligned = safe_align_like(adm0, reference).fillna(0).astype("uint32")
+        pixel_area_aligned = safe_align_like(pixel_area, reference)
+        drained_total_aligned = safe_align_like(drained_total, reference)
+        burned_total_aligned = safe_align_like(burned_total, reference)
+        burned_state_nodes_aligned = safe_align_like(burned_state_nodes, reference)
 
         adm0_aligned.name = "gadm_adm0"
         drained_state_nodes.name = "drained_state_nodes"
@@ -634,6 +754,9 @@ def run(args: argparse.Namespace) -> None:
                 expected_groups=(gadm_adm0_ids, drained_codes_arr),
                 **flox_sparse_reindex_kwargs(not args.no_sparse),
             ).compute()
+        # QA share to GADM=0
+        _share_to_gadm0(res_d, flux_value=0, logger=logger, label=f"drained_total {interval}")
+
         dict_d = convert_to_coord_dict(res_d, interval)
         ft_dict_d = {0: "drained_total_Mg_CO2e", 2: "area__ha"}
         df_d = create_interval_df(dict_d, ft_dict_d, interval_end_year)
@@ -651,6 +774,9 @@ def run(args: argparse.Namespace) -> None:
                 expected_groups=(gadm_adm0_ids, burned_codes_arr),
                 **flox_sparse_reindex_kwargs(not args.no_sparse),
             ).compute()
+        # QA share to GADM=0
+        _share_to_gadm0(res_b, flux_value=1, logger=logger, label=f"burned_total {interval}")
+
         dict_b = convert_to_coord_dict(res_b, interval)
         ft_dict_b = {1: "burned_total_Mg_CO2e", 2: "area__ha"}
         df_b = create_interval_df(dict_b, ft_dict_b, interval_end_year)
@@ -778,7 +904,8 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --run_name ogh_standard_model \
   --tile_pixels 4000 \
   --chunk_size 10000 \
-  --combine_zarr none
+  --combine_zarr none \
+  --tile_id 00N_110E
 
 # Multiple intervals, default (separate Zarrs, immediate per-interval uploads)
 python -m src.scripts.zonal_statistics.run_zonal_statistics \

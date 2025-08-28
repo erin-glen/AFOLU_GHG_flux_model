@@ -8,20 +8,28 @@ Outputs (long)
    Columns: interval_end, gadm_adm0[, country, iso3], drained_MgCO2e, burned_MgCO2e, total_MgCO2e
 
 2) by_drained_state_period.csv
-   Columns: interval_end, drained_state_nodes, drained_state_meaning, drained_MgCO2e, area_ha
+   Columns: interval_end, drained_state_nodes, drained_state_meaning,
+            drained_MgCO2e, area_ha,
+            climate_domain, drained_state, emissions_state   # (auto-derived from zonal_constants)
 
 3) by_burned_state_period.csv
-   Columns: interval_end, burned_state_nodes,  burned_state_meaning,  burned_MgCO2e, area_ha
+   Columns: interval_end, burned_state_nodes, burned_state_meaning,
+            burned_MgCO2e, area_ha,
+            climate_domain, burned_state, emissions_state    # (auto-derived from zonal_constants)
 
 # Annualized long outputs (period values duplicated to each year in the interval; inclusive)
 4) by_country_annual.csv
    Columns: year, gadm_adm0[, country, iso3], drained_MgCO2e, burned_MgCO2e, total_MgCO2e
 
 5) by_drained_state_annual.csv
-   Columns: year, drained_state_nodes, drained_state_meaning, drained_MgCO2e, area_ha
+   Columns: year, drained_state_nodes, drained_state_meaning,
+            drained_MgCO2e, area_ha,
+            climate_domain, drained_state, emissions_state   # (auto-derived)
 
 6) by_burned_state_annual.csv
-   Columns: year, burned_state_nodes,  burned_state_meaning,  burned_MgCO2e, area_ha
+   Columns: year, burned_state_nodes, burned_state_meaning,
+            burned_MgCO2e, area_ha,
+            climate_domain, burned_state, emissions_state    # (auto-derived)
 
 7) top<topn>_by_country_drained.csv
 8) top<topn>_by_country_burned.csv
@@ -59,8 +67,8 @@ python -m src.scripts.zonal_statistics.publish_tables \
 Notes
 -----
 - Annualized outputs duplicate each period’s values to every year within that period (inclusive of start/end).
-- If --adm0_lookup is omitted, we auto-build a lookup (in-memory) from zc.GADM_ADM0_IDS
-  using ISO-3166-1 numeric → pycountry (if installed). Otherwise iso3/country may be null.
+- If --adm0_lookup is omitted, we auto-build a lookup (in-memory) from zc.GADM_ADM0_IDS using ISO-3166-1 → pycountry (if installed).
+- Drained/burned state **context columns** are derived in-memory from zonal_constants (no external file required).
 """
 
 from __future__ import annotations
@@ -76,7 +84,7 @@ from src.scripts.zonal_statistics.run_zonal_statistics import (
     build_output_parquet,
     build_interval_pairs,
 )
-from src.scripts.zonal_statistics import zonal_constants as zc  # <- for GADM_ADM0_IDS
+from src.scripts.zonal_statistics import zonal_constants as zc  # <- for node meanings & GADM IDs
 
 
 # ----------------------------- DuckDB helpers -----------------------------
@@ -235,10 +243,7 @@ def _auto_register_iso_lookup(con: duckdb.DuckDBPyConnection) -> bool:
         pycountry = None
 
     rows: List[dict] = []
-    MANUAL = {
-        # Example override if needed:
-        # 383: {"iso3": "XKX", "country": "Kosovo"},
-    }
+    MANUAL = {}
 
     for code in zc.GADM_ADM0_IDS:
         code = int(code)
@@ -279,6 +284,93 @@ def _maybe_register_lookup(con: duckdb.DuckDBPyConnection, adm0_lookup: Optional
         return True
 
     return _auto_register_iso_lookup(con)
+
+
+# ------------------------- Context from zonal_constants --------------------
+
+def _derive_drained_context_from_zc() -> pd.DataFrame:
+    """
+    Build a mapping DataFrame from zc.DRAINED_STATE_NODE_MEANINGS to:
+      key (padded code), meaning, climate_domain, drained_state, emissions_state
+    """
+    rows = []
+    for key, meaning in zc.DRAINED_STATE_NODE_MEANINGS.items():
+        # meaning examples:
+        #  - "peat_drained_primary_infra__boreal_forest_poor"
+        #  - "peat_undrained"
+        #  - "non_peat"
+        if "__" in meaning:
+            root, emit = meaning.split("__", 1)
+            # emit usually like "<domain>_<class>", e.g., "boreal_forest_poor"
+            climate_domain = None
+            emissions_state = None
+            if "_" in emit:
+                dom, rest = emit.split("_", 1)
+                if dom in {"boreal", "temperate", "tropical"}:
+                    climate_domain = dom
+                    emissions_state = rest
+                else:
+                    # Unprefixed (rare): treat entire emit as emissions_state
+                    emissions_state = emit
+            else:
+                # No underscore in emit (rare)
+                emissions_state = emit
+            drained_state = root
+        else:
+            climate_domain = None
+            drained_state = meaning
+            emissions_state = None
+
+        rows.append({
+            "key": str(key),
+            "meaning": str(meaning),
+            "climate_domain": climate_domain,
+            "drained_state": drained_state,
+            "emissions_state": emissions_state,
+        })
+    return pd.DataFrame(rows)
+
+
+def _derive_burned_context_from_zc() -> pd.DataFrame:
+    """
+    Build a mapping DataFrame from zc.BURNED_STATE_NODE_MEANINGS to:
+      key (padded code), meaning, climate_domain, burned_state, emissions_state
+    """
+    rows = []
+    for key, meaning in zc.BURNED_STATE_NODE_MEANINGS.items():
+        # meaning examples:
+        #  - "boreal__drained"
+        #  - "tropical__drained_crop_or_plantation"
+        if "__" in meaning:
+            dom, state = meaning.split("__", 1)
+            climate_domain = dom
+            burned_state = state
+            emissions_state = state  # no finer split available; use state for emissions_state as well
+        else:
+            # Fallback (unexpected)
+            climate_domain = None
+            burned_state = meaning
+            emissions_state = meaning
+        rows.append({
+            "key": str(key),
+            "meaning": str(meaning),
+            "climate_domain": climate_domain,
+            "burned_state": burned_state,
+            "emissions_state": emissions_state,
+        })
+    return pd.DataFrame(rows)
+
+
+def _register_state_context_views(con: duckdb.DuckDBPyConnection):
+    """
+    Register in-memory context tables derived from zonal_constants:
+      - drained_state_ctx(key, meaning, climate_domain, drained_state, emissions_state)
+      - burned_state_ctx (key, meaning, climate_domain, burned_state,  emissions_state)
+    """
+    ddf = _derive_drained_context_from_zc()
+    bdf = _derive_burned_context_from_zc()
+    con.register("drained_state_ctx", ddf)
+    con.register("burned_state_ctx", bdf)
 
 
 # ------------------------- Annualization helpers --------------------------
@@ -354,30 +446,67 @@ def table_by_country_period_sql(with_lookup: bool) -> str:
 
 
 def table_by_drained_state_sql() -> str:
+    """
+    Period table for drained states with context from drained_state_ctx.
+    Join uses meaning first; falls back to padded node key.
+    """
     return """
+    WITH base AS (
+      SELECT
+        interval_end,
+        drained_state_nodes,
+        drained_state_meaning,
+        SUM(CASE WHEN flux_type = 'drained_total_Mg_CO2e' THEN value ELSE 0 END) AS drained_MgCO2e,
+        SUM(CASE WHEN flux_type = 'area__ha'               THEN value ELSE 0 END) AS area_ha
+      FROM zs_drained
+      GROUP BY 1,2,3
+    )
     SELECT
-      interval_end,
-      drained_state_nodes,
-      drained_state_meaning,
-      SUM(CASE WHEN flux_type = 'drained_total_Mg_CO2e' THEN value ELSE 0 END) AS drained_MgCO2e,
-      SUM(CASE WHEN flux_type = 'area__ha'               THEN value ELSE 0 END) AS area_ha
-    FROM zs_drained
-    GROUP BY 1,2,3
-    ORDER BY interval_end, drained_MgCO2e DESC
+      base.interval_end,
+      base.drained_state_nodes,
+      base.drained_state_meaning,
+      base.drained_MgCO2e,
+      base.area_ha,
+      ctx.climate_domain,
+      ctx.drained_state,
+      ctx.emissions_state
+    FROM base
+    LEFT JOIN drained_state_ctx AS ctx
+      ON (base.drained_state_meaning = ctx.meaning)
+      OR (RPAD(CAST(base.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+    ORDER BY base.interval_end, base.drained_MgCO2e DESC
     """
 
 
 def table_by_burned_state_sql() -> str:
+    """
+    Period table for burned states with context from burned_state_ctx.
+    """
     return """
+    WITH base AS (
+      SELECT
+        interval_end,
+        burned_state_nodes,
+        burned_state_meaning,
+        SUM(CASE WHEN flux_type = 'burned_total_Mg_CO2e' THEN value ELSE 0 END) AS burned_MgCO2e,
+        SUM(CASE WHEN flux_type = 'area__ha'             THEN value ELSE 0 END) AS area_ha
+      FROM zs_burned
+      GROUP BY 1,2,3
+    )
     SELECT
-      interval_end,
-      burned_state_nodes,
-      burned_state_meaning,
-      SUM(CASE WHEN flux_type = 'burned_total_Mg_CO2e' THEN value ELSE 0 END) AS burned_MgCO2e,
-      SUM(CASE WHEN flux_type = 'area__ha'             THEN value ELSE 0 END) AS area_ha
-    FROM zs_burned
-    GROUP BY 1,2,3
-    ORDER BY interval_end, burned_MgCO2e DESC
+      base.interval_end,
+      base.burned_state_nodes,
+      base.burned_state_meaning,
+      base.burned_MgCO2e,
+      base.area_ha,
+      ctx.climate_domain,
+      ctx.burned_state,
+      ctx.emissions_state
+    FROM base
+    LEFT JOIN burned_state_ctx AS ctx
+      ON (base.burned_state_meaning = ctx.meaning)
+      OR (RPAD(CAST(base.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+    ORDER BY base.interval_end, base.burned_MgCO2e DESC
     """
 
 
@@ -388,7 +517,6 @@ def table_topn_country_sql(component: str, topn: int, with_lookup: bool) -> str:
     alias = "drained_MgCO2e" if component == "drained" else "burned_MgCO2e"
 
     select_l = ", l.country, l.iso3" if with_lookup else ""
-    # Join must reference the table that appears in the outer FROM (ranked), not the CTE (t)
     join_l   = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = ranked.gadm_adm0" if with_lookup else ""
 
     return f"""
@@ -449,7 +577,10 @@ def table_by_drained_state_annual_sql() -> str:
       base.drained_state_nodes,
       base.drained_state_meaning,
       base.drained_MgCO2e,
-      base.area_ha
+      base.area_ha,
+      base.climate_domain,
+      base.drained_state,
+      base.emissions_state
     FROM base
     JOIN interval_years iy
       ON iy.interval_end = base.interval_end
@@ -466,30 +597,14 @@ def table_by_burned_state_annual_sql() -> str:
       base.burned_state_nodes,
       base.burned_state_meaning,
       base.burned_MgCO2e,
-      base.area_ha
+      base.area_ha,
+      base.climate_domain,
+      base.burned_state,
+      base.emissions_state
     FROM base
     JOIN interval_years iy
       ON iy.interval_end = base.interval_end
     ORDER BY year, burned_MgCO2e DESC
-    """
-
-
-def table_topn_country_annual_sql(component: str, topn: int, with_lookup: bool) -> str:
-    base = table_topn_country_sql(component, topn, with_lookup)
-    alias = "drained_MgCO2e" if component == "drained" else "burned_MgCO2e"
-    cols_l = ", base.country, base.iso3" if with_lookup else ""
-    return f"""
-    WITH base AS ({base})
-    SELECT
-      iy.year AS year,
-      base.rank,
-      base.gadm_adm0
-      {cols_l},
-      base.{alias}
-    FROM base
-    JOIN interval_years iy
-      ON iy.interval_end = base.interval_end
-    ORDER BY year, rank
     """
 
 
@@ -555,7 +670,10 @@ def main(argv=None):
     _register_all(con, drained_globs, burned_globs, aws_region=args.aws_region)
     have_lookup = _maybe_register_lookup(con, args.adm0_lookup)
 
-    # Register interval_end → year mapping for annualization
+    # Register derived state context (from zonal_constants)
+    _register_state_context_views(con)
+
+    # Annualization map
     all_years = _register_interval_years(con, years)  # e.g., [2001,...,2024]
 
     # Ensure output directory exists if writing locally
@@ -574,29 +692,27 @@ def main(argv=None):
     _copy_sql(con, sql_country_annual, posixpath.join(args.out_dir, "by_country_annual.csv"))
     con.execute(f"CREATE OR REPLACE VIEW by_country_annual AS {sql_country_annual}")
 
-    # 2) By drained state × period
-    _copy_sql(con, table_by_drained_state_sql(), posixpath.join(args.out_dir, "by_drained_state_period.csv"))
+    # 2) By drained state × period (with auto context)
+    _copy_sql(con, table_by_drained_state_sql(),
+              posixpath.join(args.out_dir, "by_drained_state_period.csv"))
 
-    # 2b) By drained state × year (annualized)
-    _copy_sql(con, table_by_drained_state_annual_sql(), posixpath.join(args.out_dir, "by_drained_state_annual.csv"))
+    # 2b) By drained state × year (annualized + context)
+    _copy_sql(con, table_by_drained_state_annual_sql(),
+              posixpath.join(args.out_dir, "by_drained_state_annual.csv"))
 
-    # 3) By burned state × period
-    _copy_sql(con, table_by_burned_state_sql(), posixpath.join(args.out_dir, "by_burned_state_period.csv"))
+    # 3) By burned state × period (with auto context)
+    _copy_sql(con, table_by_burned_state_sql(),
+              posixpath.join(args.out_dir, "by_burned_state_period.csv"))
 
-    # 3b) By burned state × year (annualized)
-    _copy_sql(con, table_by_burned_state_annual_sql(), posixpath.join(args.out_dir, "by_burned_state_annual.csv"))
+    # 3b) By burned state × year (annualized + context)
+    _copy_sql(con, table_by_burned_state_annual_sql(),
+              posixpath.join(args.out_dir, "by_burned_state_annual.csv"))
 
     # 4) Top-N by country for drained & burned (period)
     _copy_sql(con, table_topn_country_sql("drained", args.topn, have_lookup),
               posixpath.join(args.out_dir, f"top{args.topn}_by_country_drained.csv"))
     _copy_sql(con, table_topn_country_sql("burned", args.topn, have_lookup),
               posixpath.join(args.out_dir, f"top{args.topn}_by_country_burned.csv"))
-
-    # 4b) Top-N by country (annualized)
-    _copy_sql(con, table_topn_country_annual_sql("drained", args.topn, have_lookup),
-              posixpath.join(args.out_dir, f"top{args.topn}_by_country_drained_annual.csv"))
-    _copy_sql(con, table_topn_country_annual_sql("burned", args.topn, have_lookup),
-              posixpath.join(args.out_dir, f"top{args.topn}_by_country_burned_annual.csv"))
 
     # 5) Optional wide exports (three files for period + three for annual)
     if args.wide:
@@ -626,7 +742,7 @@ Examples
 --------
 
 # Local CSV outputs (long + wide)
-python -m src.scripts.zonal_statistics.pub_tables \
+python -m src.scripts.zonal_statistics.publish_tables \
   --model_version 0_7_0 \
   --run_name ogh_standard_model \
   --run_date 20250825 \
@@ -634,18 +750,6 @@ python -m src.scripts.zonal_statistics.pub_tables \
   --aws_region us-east-1 \
   --out_dir /mnt/c/tmp/pub_tables \
   --topn 20 \
-  --wide
-
-# Write CSVs directly to S3 (long + wide), with explicit adm0 lookup CSV
-python -m src.scripts.zonal_statistics.publish_tables \
-  --model_version 0_7_0 \
-  --run_name ogh_standard_model \
-  --run_date 20250825 \
-  --years 2005 2010 2015 2020 2024 \
-  --aws_region us-east-1 \
-  --out_dir s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_7_0/zonal_stats/pubs/ \
-  --topn 20 \
-  --adm0_lookup s3://gfw2-data/.../GADM41_adm0_lookup.csv \
   --wide
 
 # Minimal run (single year, long tables only)
