@@ -36,6 +36,7 @@ import argparse
 import fsspec
 import re
 from collections import defaultdict
+import numpy as np
 import os
 import s3fs
 import sys
@@ -44,6 +45,7 @@ import time
 import xarray as xr
 from dask import delayed, compute
 from dask.distributed import Client, print
+from osgeo import gdal
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -64,19 +66,22 @@ def merge_and_write(group_key, file_list, output_dir, folder_uri=None):
     sample_input_filename = sample_tif.split('/')[-1]
     tile_id = sample_input_filename[:8]
 
-    output_layer_pattern = re.compile(r"version_\d+_\d+_\d+/([^/]+)/")
-    match = output_layer_pattern.search(sample_tif)
-    output_layer = match.group(1)
+    layer_pattern = re.search(r"version_\d+_\d+_\d+/([^/]+)/", sample_tif).group(1)
+    # print(layer_pattern)
 
-    date_pattern = re.compile(r"intervals/([^/]+)")
-    match = date_pattern.search(sample_tif)
-    layer_date = match.group(1)
+    layer_date = re.search(r"intervals/([^/]+)", sample_tif).group(1)
+    # print(layer_date)
 
-    unit_pattern = re.compile(r"([^/]+)/4000")
-    match = unit_pattern.search(sample_tif)
-    layer_unit = match.group(1)
+    layer_unit = re.search(r"([^/]+)/4000", sample_tif).group(1)
+    # print(layer_unit)
 
-    out_file = f"{tile_id}__{output_layer}{layer_unit}_{layer_date}.tif"
+    # For emission factor and some other outputs, there is no specific layer_unit part of the output path;
+    # it is reported as the layer_date.
+    # So, if layer_unit = layer_date, we don't use the layer_unit (since it winds up being the same as the date).
+    if layer_unit == layer_date:
+        out_file = f"{tile_id}__{layer_pattern}_{layer_date}.tif"
+    else:
+        out_file = f"{tile_id}__{layer_pattern}{layer_unit}_{layer_date}.tif"
     s3_output_path = f"{output_dir.rstrip('/')}/{out_file}"
 
     # if fs.exists(s3_output_path):
@@ -85,34 +90,85 @@ def merge_and_write(group_key, file_list, output_dir, folder_uri=None):
 
     lu.print_and_log(f"Aggregating {folder_uri}, with output of {s3_output_path}: {uu.timestr()}", False, logger_worker)
 
-    try:
-        ds = xr.open_mfdataset(
-            file_list,
-            combine='by_coords',
-            parallel=True,
-            chunks={'x': 4000, 'y': 4000}
-        ).squeeze()
+    ds = xr.open_mfdataset(
+        file_list,
+        combine='by_coords',
+        parallel=True,
+        chunks={'x': 4000, 'y': 4000}
+    ).squeeze()
 
-        ds = ds.rio.write_crs("EPSG:4326")
+    ds = ds.rio.write_crs("EPSG:4326")
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            local_path = os.path.join(tmpdir, out_file)
-            ds.rio.to_raster(local_path, compress="LZW")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        local_path = os.path.join(tmpdir, out_file)
+        ds.rio.to_raster(local_path, compress="LZW")
 
-            with open(local_path, 'rb') as src_file:
-                with fsspec.open(s3_output_path, 'wb') as dst_file:
-                    dst_file.write(src_file.read())
+        with open(local_path, 'rb') as src_file:
+            with fsspec.open(s3_output_path, 'wb') as dst_file:
+                dst_file.write(src_file.read())
 
         lu.print_and_log(f"Uploaded {s3_output_path}", False, logger_worker)
 
-        task_end_time = time.time()
-        lu.print_and_log(f"{out_file} took {round(task_end_time - task_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+        ### Counts valid pixels in the output raster
+        lu.print_and_log(f"Counting pixels in {tile_id} for {out_file}: {uu.timestr()}", False, logger_worker)
 
-        return s3_output_path
+        try:
+            ds = gdal.Open(local_path)
+            if ds is not None:
+                band = ds.GetRasterBand(1)
+                valid_pixel_count = 0
 
-    except Exception as e:
-        lu.print_and_log(f"Error processing tile {group_key} in {folder_uri}: {e}", False, logger_worker)
-        return None
+                # Get raster dimensions
+                x_size = band.XSize
+                y_size = band.YSize
+
+                # Read in chunks
+                block_size_x, block_size_y = band.GetBlockSize()
+
+                for y in range(0, y_size, block_size_y):
+                    rows_to_read = min(block_size_y, y_size - y)
+                    for x in range(0, x_size, block_size_x):
+                        cols_to_read = min(block_size_x, x_size - x)
+
+                        block = band.ReadAsArray(x, y, cols_to_read, rows_to_read)
+
+                        if block is not None:
+                            valid_pixel_count += np.count_nonzero(block != 0)
+
+                ds = None
+            else:
+                valid_pixel_count = -1
+        except Exception as e:
+            lu.print_and_log(f"Error counting pixels for {local_path}: {e}", False, logger_worker)
+            print(f"Error counting pixels for {local_path}: {e}")
+            return f"failure counting pixels for {out_file}"
+
+        print(valid_pixel_count)
+
+    task_end_time = time.time()
+    lu.print_and_log(f"{out_file} took {round(task_end_time - task_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+
+
+    # Most stats for the 10x10 aren't calculated.
+    # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
+    # Dictionary is in a list because it's necessary for chunk stats processing later.
+    chunk_stats = [{
+        'chunk_id': 'N/A',
+        'tile_id': tile_id,
+        'layer_name': out_file,
+        'tile_name': out_file,
+        'in_out': 'output_layer',
+        'pattern': layer_pattern,
+        'years': layer_date,
+        'min_value': 'no data',
+        'mean_value': 'no data',
+        'max_value': 'no data',
+        'count_value': valid_pixel_count,
+        'sum_value': 'no data',
+        'data_type': 'no data'
+    }]
+
+    return f"Success merging {out_file}", chunk_stats
 
 
 @delayed
@@ -205,7 +261,9 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
         "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/AGC_emission_factor_CO2_only__fraction/standard_model/hybrid_intervals/2001_2005/4000_pixels/20250806/",
         "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/AGC_emission_factor_CO2_only__fraction/standard_model/hybrid_intervals/2006_2010/4000_pixels/20250806/",
         "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2001_2005/_ha_yr/4000_pixels/20250806/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2006_2010/_ha_yr/4000_pixels/20250806/"
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2006_2010/_ha_yr/4000_pixels/20250806/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/carbon_density__non_soil__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250806/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_2/carbon_density__non_soil__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250806/"
     ]
 
 
@@ -216,6 +274,7 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
     main_logger.info(f"input folders: {input_folders}")
     main_logger.info(f"Processing {len(input_folders)} folders: {uu.timestr()}")
 
+    # Creates lists of 10x10s to aggregate but doesn't aggregate them
     futures = [merge_folder(first_10x10s_to_process, folder)
                for folder in input_folders]
 
@@ -224,7 +283,8 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
     # Flattens separate lists of 10x10 aggregations for each s3 folder into a single list that can be fully parallelized
     tile_tasks = [task for sublist in folder_results for task in sublist if task is not None]
 
-    main_logger.info(f"Scheduling {len(tile_tasks)} aggregation tasks across {len(input_folders)}: {uu.timestr()}")
+    # Actually executes the aggregation on the flat list of tasks
+    main_logger.info(f"Executing {len(tile_tasks)} aggregation tasks across {len(input_folders)}: {uu.timestr()}")
     tile_results = compute(*tile_tasks)
 
     uu.stage_duration(start_time, uu.timestr(), {stage}, main_logger)
