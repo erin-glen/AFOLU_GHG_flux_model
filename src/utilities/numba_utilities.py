@@ -724,31 +724,34 @@ def calc_NT_T(interval_length, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litt
 
     return c_gross_emissions_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age
 
-# Gross fluxes and ending carbon stocks for mangrove gain or mangrove remaining mangrove
+# Gross fluxes and ending carbon stocks for mangrove gain or mangrove remaining mangrove without loss in interval.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 # Applies to 5-year and annual intervals. Only difference is gain_year_count.
 # Applies to mangrove gain and maintenance. Differences are handled by these input arguments: forest_age_start and c_dens_in.
 @jit(nopython=True)
-def calc_mang(forest_age_start, gain_year_count, gain_year_count_post_loss, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
+def calc_mang(forest_age_start, first_mang_gain_year, first_mang_loss_year, interval_end_year,
+              gain_year_count, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
 
-    #Raise error if loss flag is false but gain_year_count_post_loss > 0
-    if (gain_year_count_post_loss > 0):
-        raise ValueError(f"No mangrove loss during interval but gain_year_count_post_loss={gain_year_count_post_loss} is greater than 0")
-    #TODO: after testing, can remove gain_year_count_post_loss from input arguments
+    # Step 1: Assigns deadwood C and litter C ratios for removal factors
+    # Deadwood and litter C removals only occur in pixels that are not considered to be in "equilibrium".
+    # Thus, we need to check that there is no regrowth occuring.
+    # Checking that it is not mangrove gain (i.e. no mangrove extent in 1996 but mangrove gain in subsequent year)
+    # Checking that there is mangrove loss through this interval.
+    # If conditions are met, the deadwood and litter ratios are set to 0 (no removals while in "equilibrium").
+    if (first_mang_gain_year == 0) and ((first_mang_loss_year == 0) or (first_mang_loss_year > interval_end_year)):
+        deadwood_c_ratio = 0.0
+        litter_c_ratio = 0.0
 
-    #TODO: Apply the following assumption for mangroves that we do for other trees?
-    #if most_recent_year_not_tall_veg == 0 or most_recent_year_not_tall_veg == interval_end_year:
-
-    # Step 1: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
+    # Step 2: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
     agc_gross_removals_out = float((agc_rf * gain_year_count) * -1)  #float() necessary for Numba typing
     bgc_gross_removals_out = float((bgc_rf * gain_year_count) * -1)  #float() necessary for Numba typing
     deadwood_c_gross_removals_out = agc_gross_removals_out * deadwood_c_ratio
     litter_c_gross_removals_out = agc_gross_removals_out * litter_c_ratio
 
-    # Step 2: Calculates gross emissions by carbon pools (Mg C/ha/interval). Gross emissions are positive.
+    # Step 3: Calculates gross emissions by carbon pools (Mg C/ha/interval). Gross emissions are positive.
     # There are no gross emissions in mangrove pixels with no loss, so C pool emissions set to 0.
     agc_gross_emis_out = 0
     bgc_gross_emis_out = 0
@@ -781,9 +784,9 @@ def calc_mang(forest_age_start, gain_year_count, gain_year_count_post_loss, agc_
     # gain_year_count_pre_loss = 0 when there is mangrove loss
     # gain_year_count_post_loss = 1 when there is no mangrove loss
 @jit(nopython=True)
-def calc_mang_loss(interval_length, c_pools_no_fire, loss_year, gain_year_count_pre_loss,
-                            gain_year_count_post_loss, RF_AGC, RF_BGC, interval_end_year, c_dens_in,
-                            most_recent_year_not_tall_veg, deadwood_c_ratio, litter_c_ratio):
+def calc_mang_loss(interval_length, first_mang_gain_year, first_mang_loss_year, interval_start_year,
+                    c_pools_no_fire, loss_year, gain_year_count_pre_loss, gain_year_count_post_loss,
+                    RF_AGC, RF_BGC, c_dens_in, deadwood_c_ratio, litter_c_ratio):
 
     # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
     agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
@@ -791,29 +794,22 @@ def calc_mang_loss(interval_length, c_pools_no_fire, loss_year, gain_year_count_
     # Carbon pools that are emitted as CO2 (depends on whether temporary or permanent mangrove loss)
     agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = unpack_emission_factors(c_pools_no_fire)
 
-    # Raise error if gain_year_count_pre_loss = 1 and interval_length = 1
-    if (interval_length == 1) and (gain_year_count_pre_loss == 1):
-        raise ValueError(f"Mangrove loss flag is True during annual interval, but gain_year_count_pre_loss = 1")
-    # TODO: delete after testing annual data
-
-    # Step 1: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless).
-    # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest and mangrove only).
-    # Thus, we need to check whether the pixel was non-tall vegetation at some point during the model before the end of this interval.
-    # If conditions aren't met, the deadwood and litter ratios are set to 0 (no removals).
-    # For simplicity, there are no deadwood or litter removals in loss intervals.
-    # This isn't used for annual intervals (just used to calculate gain before loss) but not limiting it to just 5-year intervals
-    # because it's not much computation.
-    # if most_recent_year_not_tall_veg == 0 or most_recent_year_not_tall_veg == interval_end_year:
-    #     deadwood_c_ratio = 0.0
-    #     litter_c_ratio = 0.0
-    # TODO: Commenting this out for now. Update assumption for mangroves
+    # Step 1: Assigns pre-loss deadwood C and litter C ratios for removal factors
+    # Deadwood and litter C removals only occur in pixels that are not considered to be in "equilibrium".
+    # Thus, we need to check if mangroves are in "equilibrium" before loss during this interval.
+    # Checking that it is not mangrove gain (i.e. no mangrove extent in 1996 but mangrove gain in subsequent year)
+    # Checking that the start of the current interval is before any mangrove loss.
+    # If conditions are met, the deadwood and litter ratios are set to 0 (no removals while in "equilibrium").
+    if (first_mang_gain_year == 0) and ((first_mang_loss_year == 0) or (first_mang_loss_year > interval_start_year)):
+        deadwood_c_ratio_pre_loss = 0.0
+        litter_c_ratio_pre_loss = 0.0
 
     # Step 2: Calculates pre-loss gross removals by carbon pools (Mg C/ha/interval) for 5-year and annual intervals. Gross removals are negative.
     # Works for 5-year and annual intervals alike.
     agc_gross_removals_out = float((RF_AGC * gain_year_count_pre_loss) * -1)  # float() necessary for Numba typing
     bgc_gross_removals_out = float((RF_BGC * gain_year_count_pre_loss) * -1)  # float() necessary for Numba typing
-    deadwood_c_gross_removals_out = agc_gross_removals_out * deadwood_c_ratio
-    litter_c_gross_removals_out = agc_gross_removals_out * litter_c_ratio
+    deadwood_c_gross_removals_out = agc_gross_removals_out * deadwood_c_ratio_pre_loss
+    litter_c_gross_removals_out = agc_gross_removals_out * litter_c_ratio_pre_loss
 
     # Consolidates outputs into array to reduce the number of arguments returned to the decision tree.
     c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')
