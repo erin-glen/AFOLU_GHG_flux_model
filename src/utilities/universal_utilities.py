@@ -982,6 +982,7 @@ def flatten_list(nested_list):
 
 # Merges rasters that are <10x10 degrees into 10x10 degree rasters in the standard grid.
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
+# Commented out COG creation; it just outputs basic geotifs for now.
 def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
     process = psutil.Process(os.getpid())
@@ -1064,32 +1065,32 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
     chunk_non_cog_end_time = time.time()
     lu.print_and_log(f"Merging {merged_file} took {round(chunk_non_cog_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
 
-    ### Part 2: Converts geotifs to COGs
-
-    # Convert to Cloud Optimized GeoTIFF
-    # https://gfw.atlassian.net/wiki/spaces/LCL/pages/1918238725/STAC-API+pre-flight+checklist
-    merged_cog_file = f"/tmp/merged_cog_{out_file_name}"
-    translate_command = [
-        'gdal_translate',
-        merged_file,
-        merged_cog_file,
-        '-of', 'COG',
-        '-co', 'COMPRESS=DEFLATE',
-        '-co', 'PREDICTOR=2',
-        '-co', 'BIGTIFF=IF_SAFER',
-        '-co', 'OVERVIEW_RESAMPLING=average'
-    ]
-
-    try:
-        subprocess.check_call(translate_command)
-        lu.print_and_log(f"Successfully created COG: {merged_cog_file}: {timestr()}", is_final, logger_worker)
-        lu.print_and_log(f"After creating COG for {merged_cog_file}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
-    except subprocess.CalledProcessError as e:
-        lu.print_and_log(f"Error converting to COG: {e}: {timestr()}", False, logger_worker)
-        return f"failure converting to COG for {s3_name_dict}"
-
-    chunk_cog_end_time = time.time()
-    lu.print_and_log(f"Through COG creation for {merged_cog_file} took {round(chunk_cog_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
+    # ### Part 2: Converts geotifs to COGs
+    #
+    # # Convert to Cloud Optimized GeoTIFF
+    # # https://gfw.atlassian.net/wiki/spaces/LCL/pages/1918238725/STAC-API+pre-flight+checklist
+    # merged_cog_file = f"/tmp/merged_cog_{out_file_name}"
+    # translate_command = [
+    #     'gdal_translate',
+    #     merged_file,
+    #     merged_cog_file,
+    #     '-of', 'COG',
+    #     '-co', 'COMPRESS=DEFLATE',
+    #     '-co', 'PREDICTOR=2',
+    #     '-co', 'BIGTIFF=IF_SAFER',
+    #     '-co', 'OVERVIEW_RESAMPLING=average'
+    # ]
+    #
+    # try:
+    #     subprocess.check_call(translate_command)
+    #     lu.print_and_log(f"Successfully created COG: {merged_cog_file}: {timestr()}", is_final, logger_worker)
+    #     lu.print_and_log(f"After creating COG for {merged_cog_file}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+    # except subprocess.CalledProcessError as e:
+    #     lu.print_and_log(f"Error converting to COG: {e}: {timestr()}", False, logger_worker)
+    #     return f"failure converting to COG for {s3_name_dict}"
+    #
+    # chunk_cog_end_time = time.time()
+    # lu.print_and_log(f"Through COG creation for {merged_cog_file} took {round(chunk_cog_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
 
     ### Part 3: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters)
 
@@ -1098,7 +1099,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
     # Computes count of valid pixels by reading raster in chunks (can't read full 10x10 into memory all at once
     try:
-        ds = gdal.Open(merged_cog_file)
+        # ds = gdal.Open(merged_cog_file)
+        ds = gdal.Open(merged_file)
         if ds is not None:
             band = ds.GetRasterBand(1)
             valid_pixel_count = 0
@@ -1125,8 +1127,10 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
         else:
             valid_pixel_count = -1  # Failed to open file
     except Exception as e:
-        lu.print_and_log(f"Error counting pixels for {merged_cog_file}: {e}", is_final, logger_worker)
-        print(f"Error counting pixels for {merged_cog_file}: {e}")
+        # lu.print_and_log(f"Error counting pixels for {merged_cog_file}: {e}", is_final, logger_worker)
+        lu.print_and_log(f"Error counting pixels for {merged_file}: {e}", is_final, logger_worker)
+        # print(f"Error counting pixels for {merged_cog_file}: {e}")
+        print(f"Error counting pixels for {merged_file}: {e}")
         return f"failure counting pixels for {s3_name_dict}"
 
     # Gets the output file pattern and year/year_range
@@ -1156,6 +1160,9 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
     if no_upload == False:
 
+        # For testing!!! Redirects outputs to a different version folder.
+        # out_folder = out_folder.replace(cn.model_version_underscore, f"{cn.model_version_underscore}_small_GDAL_geotif_test")
+
         # Because boto3 does multipart uploading for files >100MB, this only adds multipart uploading for files
         # between part_size and 100MB.
         try:
@@ -1167,7 +1174,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
             upload_id = response['UploadId']
 
             parts = []
-            with open(merged_cog_file, 'rb') as f:
+            # with open(merged_cog_file, 'rb') as f:
+            with open(merged_file, 'rb') as f:
                 part_number = 1
                 while chunk := f.read(part_size):
                     response = s3_client.upload_part(
@@ -1197,10 +1205,11 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
 
     # Deletes the local merged raster
     os.remove(merged_file)
-    os.remove(merged_cog_file)
+    # os.remove(merged_cog_file)
 
     chunk_end_time = time.time()
-    lu.print_and_log(f"Full processing for {merged_cog_file} took {round(chunk_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
+    # lu.print_and_log(f"Full processing for {merged_cog_file} took {round(chunk_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
+    lu.print_and_log(f"Full processing for {merged_file} took {round(chunk_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
 
     return f"Success merging {s3_name_dict}", chunk_stats
 

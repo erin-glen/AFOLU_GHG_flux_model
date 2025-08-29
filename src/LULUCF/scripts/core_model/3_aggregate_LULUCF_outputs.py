@@ -115,7 +115,7 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
 
     # # For testing- first folder only, so contents of all folders don't need to be listed
     # output_dir_list = output_dir_list[0:1]
-    # output_dir_list = output_dir_list[0:3]
+    output_dir_list = output_dir_list[0:10]
     main_logger.info(f"output_dir_list: {output_dir_list}")
 
     main_logger.info(f"There are {len(output_dir_list)} folders to aggregate to 10x10s")
@@ -165,9 +165,9 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
         workers = client.scheduler_info()["workers"]
         n_workers = len(workers)
 
-        # Adds more workers if less than 9 were originally specified. 9 is an arbitrary number above which I'm not likely to be doing testing.
+        # Adds more workers if less than 9 were originally specified. 11 is an arbitrary number above which I'm not likely to be doing testing.
         # Otherwise, just keeps the number of workers already there (if number not specified for this script).
-        if (n_workers < 9) and (number_of_workers):
+        if (n_workers < 11) and (number_of_workers):
             main_logger.info(f"Resizing cluster to specified number of workers: {number_of_workers}")
             resize_cluster.resize_coiled_cluster(cluster_name, number_of_workers)
         elif is_final:
