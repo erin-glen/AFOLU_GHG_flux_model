@@ -529,34 +529,32 @@ def map_years_to_gmwv3_data(interval_end_year, interval_length):
 
     if interval_length == 5:
         if interval_end_year == 2005:
-            mang_index_list = [0, 0, 0, 0, 0, 0]    # 2000 (1996), 2001 (1996), 2002 (1996), 2003 (1996), 2004 (1996), 2005 (1996)
-        if interval_end_year == 2010:
-            mang_index_list = [0, 0, 1, 2, 3, 4]    # 2005 (1996), 2006 (1996), 2007, 2008, 2009, 2010
+             return np.array([0, 0, 0, 0, 0, 0], dtype=np.int64)    # 2000 (1996), 2001 (1996), 2002 (1996), 2003 (1996), 2004 (1996), 2005 (1996)
+        elif interval_end_year == 2010:
+             return np.array([0, 0, 1, 2, 3, 4], dtype=np.int64)    # 2005 (1996), 2006 (1996), 2007, 2008, 2009, 2010
         elif interval_end_year == 2015:
-            mang_index_list = [4, 4, 4, 4, 4, 5]    # 2010, 2011 (2010), 2012 (2010), 2013 (2010), 2014 (2010), 2015
+             return np.array([4, 4, 4, 4, 4, 5], dtype=np.int64)    # 2010, 2011 (2010), 2012 (2010), 2013 (2010), 2014 (2010), 2015
         elif (interval_end_year == 2020):
-            mang_index_list = [5, 6, 7, 8, 9, 10]   # 2015, 2016, 2017, 2018, 2019, 2020
+             return np.array([5, 6, 7, 8, 9, 10], dtype=np.int64)   # 2015, 2016, 2017, 2018, 2019, 2020
+
     elif interval_length == 1:
         if interval_end_year == 2015:
-            mang_index_list = [4, 5]                # 2014 (2010), 2015
+             return np.array([4, 5], dtype=np.int64)                # 2014 (2010), 2015
         elif interval_end_year == 2016:
-            mang_index_list = [5, 6]                # 2015, 2016
+             return np.array([5, 6], dtype=np.int64)                # 2015, 2016
         elif interval_end_year == 2017:
-            mang_index_list = [6, 7]                # 2016, 2017
+             return np.array([6, 7], dtype=np.int64)                # 2016, 2017
         elif interval_end_year == 2018:
-            mang_index_list = [7, 8]                # 2017, 2018
+             return np.array([7, 8], dtype=np.int64)                # 2017, 2018
         elif interval_end_year == 2019:
-            mang_index_list = [8, 9]                # 2018, 2019
+             return np.array([8, 9], dtype=np.int64)                # 2018, 2019
         elif interval_end_year == 2020:
-            mang_index_list = [9, 10]               # 2019, 2020
+             return np.array([9, 10], dtype=np.int64)               # 2019, 2020
         elif interval_end_year > 2020:
-            mang_index_list = [10, 10]              # 2020, 2020
+             return np.array([10, 10], dtype=np.int64)              # 2020, 2020
 
-    # Check the mang_index_list has at least 2 items (mang_prev, mang_curr)
-    if mang_index_list:
-        return mang_index_list
     else:
-        raise ValueError(f"No mangrove index mapping found for interval_end_year={interval_end_year}, interval_length={interval_length}")
+        raise ValueError("No mangrove index mapping found for for given interval_end_year and interval_length")
 
 # Returns the emission factors for partially disturbed forest by driver based on the continent-ecozone combination (unit: fraction AGC lost)
 # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67feb6f2-c124-800a-9279-61f0e3a67faf

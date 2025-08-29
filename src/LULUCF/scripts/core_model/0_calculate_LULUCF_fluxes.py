@@ -53,7 +53,7 @@ from src.utilities import resize_cluster
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-#@jit(nopython=True)  #TODO: turn back on and comment out print statements
+@jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, in_dict_float32,
                   primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                   model_start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_final):
@@ -188,7 +188,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     # This is primarily used to determine what age the forest is (which matters for assigning removal factors).
     part_or_full_dist_in_curr_interval_block = np.zeros(agc_dens_block.shape).astype('uint8')
 
-    print("interval_end_years:", interval_end_years)
+    # print("interval_end_years:", interval_end_years)
 
     # All years covered by the model, including the start year of the model
     years_so_far = [model_start_year]
@@ -196,7 +196,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     # Iterates through model intervals
     for i, interval_end_year in enumerate(interval_end_years):
 
-        print(f"Now at interval ending in {interval_end_year}:")
+        # print(f"Now at interval ending in {interval_end_year}:")
 
         # Length of the interval and difference between the start and end years (years)
         interval_length = interval_length_list[i]
@@ -217,7 +217,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
             in_dict_uint8[f"{cn.vegetation_height_pattern}_{year}"]
             for year in years_so_far
         ]
-        #print(vegetation_heights_so_far_block)
+        # print(vegetation_heights_so_far_block)
 
         # Land cover and vegetation height at the start and end of the interval,
         # e.g., 2005/2010 or 2016/2017
@@ -508,28 +508,33 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # If mangroves are present, we assume that there was never other terrestrial forest type before gain
                 # and that there will not be conversion to other terrestrial forest type after loss
                 is_ever_mang = np.any(mang_timeseries == 1)
-                print(f"is_ever_mang: {is_ever_mang}")
+                # print(f"is_ever_mang: {is_ever_mang}")
 
                 if is_ever_mang:
 
                     # Gets the first year of mangrove gain and last year of mangrove loss during the entire timeseries
                     # to determine if this interval is mangrove loss, gain, maintenance, before gain, or after loss.
                     # first_mang_gain_year = 0 if there is extent in first year of the timeseries
-                    # last_mang_loss_year = 0 if there is extent in last year of the timeseries
-                    mang_years = np.array(cn.mangrove_extent_years)
+                    # first_mang_loss_year = 0 if there is never any loss. Otherwise, it is the first year of temporary mangrove loss.
+                    # last_mang_loss_year = 0 if there is extent in last year of the timeseries. It represents permanent mangrove loss.
+                    # Note: It is possible to have first_mang_loss_year = 2010 and last_mang_loss_year = 0 if there was
+                    # temporary loss in 2010 but mangrove are present in the final year of the timeseries (2020).
+                    mang_years = np.array((1996, 2007, 2008, 2009, 2010, 2015, 2016, 2017, 2018, 2019, 2020),dtype=np.int32)
+                    #TODO: PASS IN MORE ELAGENTLY AFTER TESTING
+
                     first_mang_gain_year, first_mang_loss_year, last_mang_loss_year = nu.mangrove_first_gain_last_loss_years(mang_timeseries, mang_years)
-                    print(f"mang_timeseries: {mang_timeseries}")
-                    print(f"first_mang_gain_year: {first_mang_gain_year}")
-                    print(f"first_mang_loss_year: {first_mang_loss_year}")
-                    print(f"last_mang_loss_year: {last_mang_loss_year}")
-                    # TODO: Do we need first_mang_loss_year?? Check that this is now also returning first mangrove loss year correctly.
+                    # print(f"mang_timeseries: {mang_timeseries}")
+                    # print(f"first_mang_gain_year: {first_mang_gain_year}")
+                    # print(f"first_mang_loss_year: {first_mang_loss_year}")
+                    # print(f"last_mang_loss_year: {last_mang_loss_year}")
 
                     # Gets mangrove data for this interval (uses most recent year if there is no mangrove extent for a given year)
                     mang_year_index_list = nu.map_years_to_gmwv3_data(interval_end_year, interval_length)
-                    mang_interval_timeseries = mang_timeseries[mang_year_index_list]
-                    print(f"mang_interval_timeseries between {interval_start_year} - {interval_end_year}: {mang_interval_timeseries}")
+                    mang_interval_timeseries = np.take(mang_timeseries, mang_year_index_list)
+                    # print(f"mang_interval_timeseries between {interval_start_year} - {interval_end_year}: {mang_interval_timeseries}")
 
                     # Determines whether mangroves are present in this interval
+                    # Useful if we end up switching to allow conversion of mangroves to cropland.
                     # is_mang_in_interval = np.any(mang_interval_timeseries == 1)
                     # print(f"is_mang_in_interval: {is_mang_in_interval}")
 
@@ -540,33 +545,32 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     # Gets the following information to use in decision tree calculations:
                     # 1) mang_loss_in_interval: if there is mangrove loss during this interval (1->0) [True or False]
                     # 2) mang_loss_year_in_interval: the last year there was mangrove loss during the interval [i.e. 2016]
-                    # 3) mang_gain_year_count_pre_loss: number of sequestration years in interval before mangrove loss
-                    # 4) mang_gain_year_count_post_loss: number of sequestration years in interval after mangrove loss
+                    # 3) mang_gain_year_count_pre_loss: number of sequestration years in interval before mangrove loss [i.e. 3]
+                    # 4) mang_gain_year_count_post_loss: number of sequestration years in interval after mangrove loss [i.e. 1]
                     # If there are multiple years of loss (1->0) in the interval, the last one is reported.
                     # If no loss, then mang_gain_year_count_pre_loss = number of years with mangrove extent during
                     # the interval and mang_gain_year_count_post_loss = 0
                     mang_loss_in_interval, mang_loss_year_in_interval, mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss = nu.mangrove_gain_year_count_summary(mang_interval_timeseries, interval_start_year, interval_end_year)
-                    #TODO: Check that this is now returning the last year of loss in an interval instead of first year of loss
 
                     # Determines the removal factor and ratios of belowground, deadwood, and litter carbon for
                     # mangroves based on the continent-ecozone combination
                     mangrove_AGC_RF, r_s_ratio_mang, deadwood_c_ratio_mang, litter_c_ratio_mang = nu.calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array)
 
-                    print(f"mang_loss: {mang_loss}")
-                    print(f"mang_gain: {mang_gain}")
-                    print(f"mang_remaining_mang: {mang_remaining_mang}")
-                    print(f"before_mang_gain: {before_mang_gain}")
-                    print(f"after_mang_loss: {after_mang_loss}")
-
-                    print(f"mang_loss_year_in_interval: {mang_loss_year_in_interval}")
-                    print(f"mang_gain_year_count_pre_loss: {mang_gain_year_count_pre_loss}")
-                    print(f"mang_gain_year_count_post_loss: {mang_gain_year_count_post_loss}")
-
-                    print(f"continent_ecozone_cell: {continent_ecozone_cell}")
-                    print(f"mangrove_AGC_RF: {mangrove_AGC_RF}")
-                    print(f"r_s_ratio_mang: {r_s_ratio_mang}")
-                    print(f"deadwood_c_ratio_mang: {deadwood_c_ratio_mang}")
-                    print(f"litter_c_ratio_mang: {litter_c_ratio_mang}")
+                    # print(f"mang_loss: {mang_loss}")
+                    # print(f"mang_gain: {mang_gain}")
+                    # print(f"mang_remaining_mang: {mang_remaining_mang}")
+                    # print(f"before_mang_gain: {before_mang_gain}")
+                    # print(f"after_mang_loss: {after_mang_loss}")
+                    #
+                    # print(f"mang_loss_year_in_interval: {mang_loss_year_in_interval}")
+                    # print(f"mang_gain_year_count_pre_loss: {mang_gain_year_count_pre_loss}")
+                    # print(f"mang_gain_year_count_post_loss: {mang_gain_year_count_post_loss}")
+                    #
+                    # print(f"continent_ecozone_cell: {continent_ecozone_cell}")
+                    # print(f"mangrove_AGC_RF: {mangrove_AGC_RF}")
+                    # print(f"r_s_ratio_mang: {r_s_ratio_mang}")
+                    # print(f"deadwood_c_ratio_mang: {deadwood_c_ratio_mang}")
+                    # print(f"litter_c_ratio_mang: {litter_c_ratio_mang}")
 
 
                 ### Defines specific land cover classes, including planted tree classification
@@ -840,28 +844,26 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     if mang_loss_in_interval:
                         state_out = nu.accrete_node(node, 1)  # Gain of mangroves + temp loss in interval (111)
                         mang_c_pools_EF_no_fire = cn.biomass_emissions_only
-                        print(f"mang_c_pools_EF_no_fire: {mang_c_pools_EF_no_fire}")
+                        # print(f"mang_c_pools_EF_no_fire: {mang_c_pools_EF_no_fire}")
 
                         (c_gross_emis_out, c_gross_removals_out, c_dens_out, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = (
                             nu.calc_mang_loss(interval_length, first_mang_gain_year, first_mang_loss_year, interval_start_year,
                                 mang_c_pools_EF_no_fire, mang_loss_year_in_interval, mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss,
                                 RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio_mang, litter_c_ratio_mang))
-                        print(f"Node code is {state_out}, gain of mangroves + temp loss in interval (111)")
+                        # print(f"Node code is {state_out}, gain of mangroves + temp loss in interval (111)")
 
                     else:
                         state_out = nu.accrete_node(node, 2)  # Gain of mangroves, no loss in interval (112)
                         (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
                             nu.calc_mang(0, first_mang_gain_year, first_mang_loss_year, interval_end_year,
                                 mang_gain_year_count_pre_loss, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio_mang, litter_c_ratio_mang))
-                        print(f"Node code is {state_out}, gain of mangroves, no loss in interval (112)")
-                        #TODO: Check that deadwood_c_ratio and litter_c_ratio never get set to 0 for mangrove gain (112)
+                        # print(f"Node code is {state_out}, gain of mangroves, no loss in interval (112)")
 
-                    print(f"c_dens_in_NT_T: {c_dens_in_NT_T}")
-                    print(f"c_dens_out: {c_dens_out}")
-                    print(f"c_gross_removals_out: {c_gross_removals_out}")
-                    print(f"c_gross_emis_out: {c_gross_emis_out}")
-                    print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
-                    # TODO: Check "equilibrium" logic for calc_mang and calc_mang_temp_loss?
+                    # print(f"c_dens_in_NT_T: {c_dens_in_NT_T}")
+                    # print(f"c_dens_out: {c_dens_out}")
+                    # print(f"c_gross_removals_out: {c_gross_removals_out}")
+                    # print(f"c_gross_emis_out: {c_gross_emis_out}")
+                    # print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
 
 
                 ### Mangrove loss
@@ -877,37 +879,37 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                             mang_c_pools_EF_no_fire, mang_loss_year_in_interval, mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss,
                             RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio_mang, litter_c_ratio_mang))
 
-                    #TODO: If water, maybe don't include all carbon pools?
+                    #TODO: If water, maybe don't include all carbon pools? Check wetland supplement.
                     if water_LC_curr:
                         state_out = nu.accrete_node(node, 1)    # Permanent loss of mangroves to water (121)
-                        print(f"Node code is {state_out}, permanent loss of mangroves to water (121)")
+                        # print(f"Node code is {state_out}, permanent loss of mangroves to water (121)")
 
                     elif LC_curr == cn.cropland:
                         state_out = nu.accrete_node(node, 2)    # Permanent loss of mangroves to cropland (122)
-                        print(f"Node code is {state_out}, permanent loss of mangroves to cropland (122)")
+                        # print(f"Node code is {state_out}, permanent loss of mangroves to cropland (122)")
 
                     elif LC_curr == cn.builtup:
                         state_out = nu.accrete_node(node, 3)    # Permanent loss of mangroves to settlement (123)
-                        print(f"Node code is {state_out}, permanent loss of mangroves to settlement (123)")
+                        # print(f"Node code is {state_out}, permanent loss of mangroves to settlement (123)")
 
                     elif short_veg_LC_curr:
                         state_out = nu.accrete_node(node, 4)    # Permanent loss of mangroves to short vegetation (124)
-                        print(f"Node code is {state_out}, permanent loss of mangroves to short vegetation (124)")
+                        # print(f"Node code is {state_out}, permanent loss of mangroves to short vegetation (124)")
 
                     elif tall_veg_LC_curr:
                         state_out = nu.accrete_node(node, 5)    # Permanent loss of mangroves to tall vegetation (125)
-                        print(f"Node code is {state_out}, permanent loss of mangroves to tall vegetation (125)")
+                        # print(f"Node code is {state_out}, permanent loss of mangroves to tall vegetation (125)")
 
                     else:
                         state_out = nu.accrete_node(node, 6)    # Permanent loss of mangroves to anything else (126)
-                        print(f"Node code is {state_out}, permanent loss of mangroves to anything else (126)")
+                        # print(f"Node code is {state_out}, permanent loss of mangroves to anything else (126)")
 
-                    print(f"mang_c_pools_EF_no_fire: {mang_c_pools_EF_no_fire}")
-                    print(f"c_dens_in: {c_dens_in}")
-                    print(f"c_dens_out: {c_dens_out}")
-                    print(f"c_gross_removals_out: {c_gross_removals_out}")
-                    print(f"c_gross_emis_out: {c_gross_emis_out}")
-                    print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
+                    # print(f"mang_c_pools_EF_no_fire: {mang_c_pools_EF_no_fire}")
+                    # print(f"c_dens_in: {c_dens_in}")
+                    # print(f"c_dens_out: {c_dens_out}")
+                    # print(f"c_gross_removals_out: {c_gross_removals_out}")
+                    # print(f"c_gross_emis_out: {c_gross_emis_out}")
+                    # print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
 
 
                 ### Mangrove remaining mangrove
@@ -920,26 +922,26 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     if mang_loss_in_interval:
                         state_out = nu.accrete_node(node, 1)  # Mangrove remaining mangrove + temp loss in interval (131)
                         mang_c_pools_EF_no_fire = cn.biomass_emissions_only
-                        print(f"mang_c_pools_EF_no_fire: {mang_c_pools_EF_no_fire}")
+                        # print(f"mang_c_pools_EF_no_fire: {mang_c_pools_EF_no_fire}")
 
                         (c_gross_emis_out, c_gross_removals_out, c_dens_out, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = (
                             nu.calc_mang_loss(interval_length, first_mang_gain_year, first_mang_loss_year, interval_start_year,
                                 mang_c_pools_EF_no_fire, mang_loss_year_in_interval, mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss,
                                 RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio_mang, litter_c_ratio_mang))
-                        print(f"Node code is {state_out}, mangrove remaining mangrove + temp loss in interval (131)")
+                        # print(f"Node code is {state_out}, mangrove remaining mangrove + temp loss in interval (131)")
 
                     else:
                         state_out = nu.accrete_node(node, 2)  # Mangrove remaining mangrove, no loss in interval (132)
                         (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
                             nu.calc_mang(forest_age_start_of_interval, first_mang_gain_year, first_mang_loss_year, interval_end_year,
                                 mang_gain_year_count_pre_loss, RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio_mang, litter_c_ratio_mang))
-                        print(f"Node code is {state_out}, mangrove remaining mangrove, no loss in interval (132)")
+                        # print(f"Node code is {state_out}, mangrove remaining mangrove, no loss in interval (132)")
 
-                    print(f"c_dens_in: {c_dens_in}")
-                    print(f"c_dens_out: {c_dens_out}")
-                    print(f"c_gross_removals_out: {c_gross_removals_out}")
-                    print(f"c_gross_emis_out: {c_gross_emis_out}")
-                    print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
+                    # print(f"c_dens_in: {c_dens_in}")
+                    # print(f"c_dens_out: {c_dens_out}")
+                    # print(f"c_gross_removals_out: {c_gross_removals_out}")
+                    # print(f"c_gross_emis_out: {c_gross_emis_out}")
+                    # print(f"forest_age_end_of_interval: {forest_age_end_of_interval}")
 
 
                 ### Before mangrove gain or after mangrove loss
@@ -947,21 +949,21 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     node = nu.accrete_node(node, 1)
                     node = nu.accrete_node(node, 0)
 
-                    c_dens_out = c_dens_in_empty
+                    c_dens_out = np.asarray(c_dens_in_empty, dtype=np.float32)
                     gain_year_count = 0
                     forest_age_end_of_interval = 0
 
                     if before_mang_gain:
                         state_out = nu.accrete_node(node, 0)  # Mangrove before first mangrove gain (100)
-                        print(f"Node code is {state_out}, mangrove before first mangrove gain (100)")
+                        # print(f"Node code is {state_out}, mangrove before first mangrove gain (100)")
 
                     elif after_mang_loss:
                         state_out = nu.accrete_node(node, 1)  # Mangrove after permanent mangrove loss (101)
-                        print(f"Node code is {state_out}, mangrove after permanent mangrove loss (101)")
+                        # print(f"Node code is {state_out}, mangrove after permanent mangrove loss (101)")
 
 
                 ### Tree gain
-                elif tree_gain:  # Terrestrial non-trees converted to trees (2)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                elif tree_gain:  # Terrestrial non-trees converted to trees (2) 
                     node = nu.accrete_node(node, 2)
                     if all_planted_trees:  # Gain of planted trees (21)
                         node = nu.accrete_node(node, 1)
@@ -993,7 +995,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                 nu.calc_NT_T(interval_length, RF_AGC_final, RF_BGC_final, c_dens_in_empty, deadwood_c_ratio=0, litter_c_ratio=0))
 
                 ### Tree loss
-                elif tree_loss:  # Trees converted to non-trees (3)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                elif tree_loss:  # Trees converted to non-trees (3)    
                     node = nu.accrete_node(node, 3)
                     if all_planted_trees:  # Full loss of planted trees (31)
                         node = nu.accrete_node(node, 1)
@@ -1270,7 +1272,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                     deadwood_c_ratio=0, litter_c_ratio=0)
 
                 ### Trees remaining trees
-                elif (tree_prev) and (tree_curr):  # Trees remaining trees (4)    ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                elif (tree_prev) and (tree_curr):  # Trees remaining trees (4)    
                     node = nu.accrete_node(node, 4)
                     if (not all_planted_trees) and interval_before_converted_to_oil_palm: # Non-planted trees with oil palm planted in the next interval (41->411/412)
                         node = nu.accrete_node(node, 1)
@@ -1537,7 +1539,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                         Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
 
                 ### Non-cropland/non-tree to cropland (without trees)
-                elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                elif (LC_prev != cn.cropland) and (LC_curr == cn.cropland): 
                     node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
                     state_out = nu.accrete_node(node, 1)  # Cropland gain (51)
                     c_pools_EF_no_fire = cn.all_non_soil_pools  # Fire not considered in intervals with cropland gain, so no fire option
@@ -1547,7 +1549,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                     c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_NT_cropland_gain(c_pools_EF_no_fire, c_dens_in, rf_array)
                 ### Cropland converted to non-cropland (without trees)
-                elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland): 
                     node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
                     node = nu.accrete_node(node, 2)  # Annual cropland loss (52)
                     if short_veg_LC_curr:
@@ -1579,7 +1581,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                         (state_out, c_gross_emis_out, c_gross_removals_out,
                          c_dens_out, non_co2_flux_out) = nu.calc_cropland_non_cropland(node, c_dens_in, c_pools_EF_no_fire, times_burned_in_interval, rf_post_dist)
                 ### Cropland remaining cropland (without trees)
-                elif (LC_prev == cn.cropland) and (LC_curr == cn.cropland): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                elif (LC_prev == cn.cropland) and (LC_curr == cn.cropland): 
                     node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
                     node = nu.accrete_node(node, 3)  # Cropland->cropland (53->531/532)
                     c_dens_in = [cn.cropland_agc_dens, 0.0, 0.0, 0.0]  # Forces input AGC to cropland default; there shouldn't be any other C pools at this point anyhow. Same values output.
@@ -1588,14 +1590,14 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                      c_dens_out, non_co2_flux_out) = nu.calc_cropland_cropland(node, c_dens_in, times_burned_in_interval)
 
                 ### Non-tree/cropland converted to short vegetation
-                elif (not short_veg_LC_prev) and (short_veg_LC_curr): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                elif (not short_veg_LC_prev) and (short_veg_LC_curr): 
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     state_out = nu.accrete_node(node, 1)  # Short vegetation gain (61)
                     rf_array = short_veg_AGC_BGC_RF
                     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                     c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_short_veg_gain(rf_array)
                 ### Short vegetation converted to non-short vegetation, non-forest or non-cropland
-                elif (short_veg_LC_prev) and (not short_veg_LC_curr): ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                elif (short_veg_LC_prev) and (not short_veg_LC_curr): 
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     node = nu.accrete_node(node, 2)  # Short vegetation loss (62)
                     if water_LC_curr:
@@ -1616,7 +1618,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                         (state_out, c_gross_emis_out, c_gross_removals_out,
                          c_dens_out, non_co2_flux_out) = nu.calc_short_veg_loss(node, c_dens_in, c_pools_EF_no_fire, times_burned_in_interval)
                 ### Short vegetation remaining short vegetation
-                elif short_veg_LC_prev and short_veg_LC_curr: ##TODO: @Mel If mangrove branch at top, no exception needed here?
+                elif short_veg_LC_prev and short_veg_LC_curr: 
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     node = nu.accrete_node(node, 3)  # Short vegetation->Short vegetation (63->631/632)
                     c_dens_in = [short_veg_AGC_RF, short_veg_BGC_RF, 0.0, 0.0]  # Forces input carbon densities to short veg default; other pools forced to 0, regardless of existing value.
