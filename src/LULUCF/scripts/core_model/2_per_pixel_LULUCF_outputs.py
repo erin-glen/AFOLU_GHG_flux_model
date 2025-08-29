@@ -6,22 +6,22 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -bb 20 -1 21 0 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -bb 20 -1 21 0 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 -yr 2000 2023 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 -yr 2000 2024 --input_date YYYYMMDD
 
 Coiled large shapefile test (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2023 --input_date YYYYMMDD -ln "Per-pixel outputs for 1884-feature shapefile for model v0.4.0."
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --input_date YYYYMMDD -ln "Per-pixel outputs for 1884-feature shapefile for model v0.4.0."
 
 Full run (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --input_date YYYYMMDD -ln "This is intended to be the definitive global run."
+python -m src.LULUCF.scripts.core_model.2_per_pixel_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive global run."
 
 Optimization notes: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210788116876880?focus=true
 """
@@ -115,7 +115,7 @@ def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     for future in concurrent.futures.as_completed(futures):
         layer = futures[future]  # Gets the corresponding key
         data, status = future.result()  # Unpacks the tuple result
-        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
             lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
         layers[layer] = data
 
@@ -238,8 +238,8 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
-                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2023
-                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2023
+                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2024
+                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2024
         print("Year range selection not valid")
         sys.exit()
     else:
@@ -302,14 +302,18 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
                                                                            interval_year_diff, input_date, "per_ha")
     # print(summative_inputs_by_interval_dir_list)
     if is_final:
-        main_logger.info(f"summative_inputs_by_interval_dir_list: {summative_inputs_by_interval_dir_list}")
+        main_logger.info(f"summative_inputs_by_interval_dir_list")
+        for item in summative_inputs_by_interval_dir_list:
+            main_logger.info(f"  {item}")
 
     summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
                                                                            chunk_size_pixels, model_type, interval_end_years,
                                                                            interval_year_diff, input_date, "per_pixel")
     # print(summative_outputs_by_interval_dir_list)
     if is_final:
-        main_logger.info(f"summative_outputs_by_interval_dir_list: {summative_outputs_by_interval_dir_list}")
+        main_logger.info(f"summative_outputs_by_interval_dir_list")
+        for item in summative_outputs_by_interval_dir_list:
+            main_logger.info(f"  {item}")
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
@@ -384,7 +388,7 @@ if __name__ == "__main__":
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
-    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
+    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2024.')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')

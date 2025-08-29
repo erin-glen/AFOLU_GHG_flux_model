@@ -6,23 +6,25 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 20 -1 21 0 -cs 1 --no_upload -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 20 -1 21 0 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 -yr 2000 2023 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 -yr 2000 2023 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 -yr 2000 2024 --input_date YYYYMMDD
 
 Coiled large shapefile test (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2023 --input_date YYYYMMDD -ln "Summative outputs for 1884-feature shapefile for model v0.4.0."
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --input_date YYYYMMDD -ln "Summative outputs for 1884-feature shapefile for model v0.4.0."
 
 Full run (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2023 --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
+python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
 
 Optimization notes: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210788116876878?focus=true
+
+TODO Check that the multiplication of the full model sums by interval_length work. I haven't run it since adding those.
 """
 
 import argparse
@@ -116,7 +118,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     for future in concurrent.futures.as_completed(futures):
         layer = futures[future]  # Gets the corresponding key
         data, status = future.result()  # Unpacks the tuple result
-        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
+        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
             lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
         layers[layer] = data
 
@@ -284,18 +286,20 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         # print(gross_removals_key)
         # print(out_dict[gross_removals_key].min())
 
-    # Store the full model summed outputs in out_dict with appropriate suffixes
+    # Store the full model summed outputs in out_dict with appropriate suffixes.
+    # Need to multiply by interval length because 5-year interval outputs actually contain 5 years of fluxes that need to be summed.
+    # TODO Check that the multiplication by interval_length works. I haven't run it.
     full_period_label = f"{start_year}_{end_year}"
-    out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_emis_CO2_only
-    out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_emis_non_CO2_only
-    out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_emis_all_gases
-    out_dict[f"{cn.gross_removals_all_C_pools_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_gross_removals
-    out_dict[f"{cn.net_flux_agc_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_AGC_all_gases
-    out_dict[f"{cn.net_flux_bgc_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_BGC_all_gases
-    out_dict[f"{cn.net_flux_deadwood_c_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_deadwood_c_all_gases
-    out_dict[f"{cn.net_flux_litter_c_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_litter_c_all_gases
-    out_dict[f"{cn.net_flux_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_all_pools_CO2_only
-    out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"] = total_net_flux_all_pools_all_gases
+    out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_ha_{full_period_label}"] = total_gross_emis_CO2_only * interval_length
+    out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_ha_{full_period_label}"] = total_gross_emis_non_CO2_only * interval_length
+    out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}_ha_{full_period_label}"] = total_gross_emis_all_gases * interval_length
+    out_dict[f"{cn.gross_removals_all_C_pools_pattern}_ha_{full_period_label}"] = total_gross_removals * interval_length
+    out_dict[f"{cn.net_flux_agc_pattern}_ha_{full_period_label}"] = total_net_flux_AGC_all_gases * interval_length
+    out_dict[f"{cn.net_flux_bgc_pattern}_ha_{full_period_label}"] = total_net_flux_BGC_all_gases * interval_length
+    out_dict[f"{cn.net_flux_deadwood_c_pattern}_ha_{full_period_label}"] = total_net_flux_deadwood_c_all_gases * interval_length
+    out_dict[f"{cn.net_flux_litter_c_pattern}_ha_{full_period_label}"] = total_net_flux_litter_c_all_gases * interval_length
+    out_dict[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_ha_{full_period_label}"] = total_net_flux_all_pools_CO2_only * interval_length
+    out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}_ha_{full_period_label}"] = total_net_flux_all_pools_all_gases * interval_length
 
     # print(out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
     # print(out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
@@ -416,8 +420,8 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
-                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2023
-                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2023
+                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2024
+                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2024
         print("Year range selection not valid")
         sys.exit()
     else:
@@ -436,8 +440,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
-    # Starting time for stage
-    start_time = uu.timestr()
+    start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
     main_logger.info(f"Run date: {input_date}")
@@ -480,7 +483,9 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
                                                                            interval_year_diff_list, input_date, "per_ha")
     # print(summative_inputs_by_interval_dir_list)
     if is_final:
-        main_logger.info(f"summative_inputs_by_interval_dir_list: {summative_inputs_by_interval_dir_list}")
+        main_logger.info(f"summative_inputs_by_interval_dir_list:")
+        for item in summative_inputs_by_interval_dir_list:
+            main_logger.info(f"  {item}")
 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
     summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
@@ -488,7 +493,9 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
                                                                             interval_year_diff_list, input_date, "per_ha")
     # print(summative_outputs_by_interval_dir_list)
     if is_final:
-        main_logger.info(f"summative_outputs_by_interval_dir_list: {summative_outputs_by_interval_dir_list}")
+        main_logger.info(f"outputs_dir_list:")
+        for item in summative_outputs_by_interval_dir_list:
+            main_logger.info(f"  {item}")
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
@@ -497,14 +504,14 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     ### Step 2: Create 1x1 degree outputs
 
-    summative_output_delayed_results = [dask.delayed(create_summative_LULUCF_outputs)
+    summative_output_tasks = [dask.delayed(create_summative_LULUCF_outputs)
                        (chunk, start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years_list,
                         is_final, no_upload,
                         summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list, stage)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results
-    summative_output_results = dask.compute(*summative_output_delayed_results)
+    summative_output_results = dask.compute(*summative_output_tasks)
 
     success_count, all_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, summative_output_results)
 
@@ -563,7 +570,7 @@ if __name__ == "__main__":
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
-    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
+    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2024.')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')

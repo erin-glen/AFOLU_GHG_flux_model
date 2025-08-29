@@ -17,7 +17,7 @@ def accrete_node(combined, new_digit):
 
 # Makes all output states the same number of digits (currently 7) by padding 0s to the right
 @jit(nopython=True)
-def pad_to_6_digits(state_out, max_digits_state_out):
+def pad_to_8_digits(state_out, max_digits_state_out):
 
     if state_out < 10 ** (max_digits_state_out-1):
         digits = int(np.log10(state_out)) + 1 if state_out > 0 else 1
@@ -308,7 +308,7 @@ def calc_short_veg_removals(climate_zone):
     elif climate_zone == 1:  # Tropical- montane (average of tropical dry and tropical wet/moist values)
         short_veg_AGB_RF = (2.3 + 6.2)/2
         short_veg_BGB_RF = (((8.7 + 16.1)/2) - short_veg_AGB_RF)
-    else: # Outside ecozone bounds-- apply boreal values
+    else: # Outside climate zone bounds-- apply boreal values
         short_veg_AGB_RF = 1.7
         short_veg_BGB_RF = (8.5-short_veg_AGB_RF)
 
@@ -389,7 +389,8 @@ def calc_partial_disturbance_EFs(drivers_cell, continent_ecozone_cell, partial_d
     return partial_disturbance_EF
 
 # Calculates Cf for fire emissions from forests (as opposed to savanna/grassland or crop residue burning).
-# From IPCC 2019 Table 2.6 (unitless)
+# From IPCC 2019 Table 2.6 (unitless).
+# There is also a separate Cf for pixels that are burned but show no height reduction ("undisturbed"), cn.Cf_forest_undisturbed
 @jit(nopython=True)
 def calc_Cf_forest(climate_domain_cell, drivers_cell, ifl_primary_cell):
 
@@ -873,7 +874,7 @@ def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_curr_interval, 
         deadwood_c_gross_emis_out = ((deadwood_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * deadwood_c_ef_CO2
         litter_c_gross_emis_out = ((litter_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * litter_c_ef_CO2
 
-        # Emission factor for burned forest is the combustion factor for forrest
+        # Emission factor for burned forest is the combustion factor for forest
         agc_ef_CO2 = Cf_forest
 
         # # For testing CO2 fire emissions

@@ -21,7 +21,7 @@ Usage (example):
       --resume  [Optional: to resume a copy that was in process]
 
 python -m src.utilities.create_cluster -n 11 -t 4 -m 4 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.GCS_to_s3_copy -cn LULUCF_preprocessing --source_root gs://earthenginepartners-hansen/LCLU_2015_2024_v01 --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULULCF/landcover/composite/annual/v2/raw --task_file my_tasks.json
+python -m src.LULUCF.scripts.preprocessing.GCS_to_s3_copy -cn LULUCF_preprocessing --source_root gs://earthenginepartners-hansen/LCLU_2015_2024_v01 --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/composite/annual/v2/raw --task_file my_tasks.json
 python -m src.LULUCF.scripts.preprocessing.GCS_to_s3_copy -cn LULUCF_preprocessing --source_root gs://earthenginepartners-hansen/Annual_Layers_2015_2024/TCH --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/annual/v2_20250716/raw --task_file my_tasks.json
 python -m src.LULUCF.scripts.preprocessing.GCS_to_s3_copy -cn LULUCF_preprocessing --source_root gs://earthenginepartners-hansen/Annual_Layers_2015_2024/VF --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_cover/annual/v2_20250716/raw --task_file my_tasks.json
 python -m src.LULUCF.scripts.preprocessing.GCS_to_s3_copy -cn LULUCF_preprocessing --source_root gs://earthenginepartners-hansen/Annual_Layers_2015_2024/built-up --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/builtup/annual/v2_20250716/raw --task_file my_tasks.json

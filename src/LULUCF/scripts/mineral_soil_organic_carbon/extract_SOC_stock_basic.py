@@ -1,5 +1,12 @@
 """
-ChatGPT chat: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6877a34b-02cc-800a-88cc-a123cdc9ed1b.
+Basic script for downloading a portion of a global SOC COG, mostly for checking outputs.
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
+python src/LULUCF/scripts/mineral_soil_organic_carbon/extract_SOC_stock_basic.py
+
+Does not use Dask or Coiled.
+Output is in kg C/m^3, multipled by 10 (to keep geotif in int instead of float)
+
+ChatGPT: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6877a34b-02cc-800a-88cc-a123cdc9ed1b.
 Main issue was getting the bounding box to be exactly 1x1 deg and 4000x4000 pixels; it sometimes had an extra pixel
 due to centroid issues.
 """
@@ -8,11 +15,9 @@ import rasterio
 from rasterio.windows import Window
 from rasterio.transform import Affine
 
-#TODO Multiply by 3 to get Mg/ha for 0-30 cm
-
 # Desired tile extent
-lon_min = 20.0
-lat_max = 0.0
+lon_min = -111
+lat_max = 77
 pixel_size = 0.00025
 tile_px = int(1.0 / pixel_size)  # 4000
 
@@ -38,5 +43,5 @@ with rasterio.Env(AWS_NO_SIGN_REQUEST='YES'):
             "transform": transform
         })
 
-        with rasterio.open("soil_carbon_20E_0N_to_21E_1S_v4.tif", "w", **out_meta) as dest:
+        with rasterio.open("80N_120W_soil_carbon_test_area_kgC_m3x10.tif", "w", **out_meta) as dest:
             dest.write(data, 1)
