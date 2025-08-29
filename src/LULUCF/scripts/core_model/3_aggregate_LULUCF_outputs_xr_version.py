@@ -12,22 +12,20 @@ Local test:
 python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs_xr_version -yr 2000 2024 --first_folders_to_process 2 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
 
 Coiled small test:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_postprocessing
+python -m src.utilities.create_cluster -n 2 -m 32 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs_xr_version -cn LULUCF_postprocessing -yr 2000 2024 --first_folders_to_process 2 --first_10x10s_to_process 2 --input_date YYYYMMDD
 
 Coiled large shapefile test (create a cluster with 1 worker, then resize it to 100 workers after local processing is done):
-python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_postprocessing
+python -m src.utilities.create_cluster -n 2 -m 32 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs_xr_version -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD -nw 100 -ln "This is the aggregation of the 1884-chunk run."
 
 Full Coiled run (create a cluster with 1 worker, then resize it to 200 workers after local processing is done):
-python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_postprocessing
+python -m src.utilities.create_cluster -n 2 -m 32 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs_xr_version -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD -nw 200 -ln "This is intended to be the definitive global run."
 
-Notes on optimizing threads/worker: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210803828525318?focus=true
-Tests of this aggregation and other aggregations show that 1 thread/worker with 4GB workers is low in Coiled credit usage
-and runs quickly compared to other configurations.
-
-14256 tiles in 273 folders for 1884-chunk output
+Notes on optimizing memory/worker and threads/worker: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1211174775511287?focus=true
+Tests showed that 16GB/worker is simply not large enough and that not specifying the number of threads/worker is faster.
+Hence, no -t argument.
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68af555f-ee54-8320-956e-217eed17e61a?model=gpt-4o
 """
@@ -207,7 +205,7 @@ def merge_folder(first_10x10s_to_process, folder_uri):
 
     results = []
     for group_key, files in tile_items:
-        lu.print_and_log(f"Listing {first_10x10s_to_process} tiles in {folder_uri}: {uu.timestr()}", False, logger_worker)
+        # lu.print_and_log(f"Listing {first_10x10s_to_process} tiles in {folder_uri}: {uu.timestr()}", False, logger_worker)
         result = merge_and_write(group_key, files, output_root, folder_uri=folder_uri)
         results.append(result)
 

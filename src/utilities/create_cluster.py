@@ -1,8 +1,8 @@
 """
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
-python -m src.utilities.create_cluster -n 1 -m 16 -cn LULUCF_model
-python -m src.utilities.create_cluster -n 5 -m 32 -cn LULUCF_model
-python -m src.utilities.create_cluster -n 20 -m 64 -cn LULUCF_model
+python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
+python -m src.utilities.create_cluster -n 5 -t 1 -m 32 -cn LULUCF_model
+python -m src.utilities.create_cluster -n 20 -t 1 -m 64 -cn LULUCF_model
 
 Table of instance types: https://aws.amazon.com/ec2/instance-types/
 Table of spot pricing: https://aws.amazon.com/ec2/spot/pricing/
@@ -20,7 +20,7 @@ import argparse
 import sys
 
 
-def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
+def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=None):
 
     # Converts worker_memory from an integer to the required format (e.g., 8 to "8GiB")
     worker_memory_str = f"{worker_memory}GiB"
@@ -73,6 +73,10 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
 
     idle_timeout = f"{idle_timeout} minutes"
 
+    worker_options = {}
+    if threads_per_worker is not None:
+        worker_options["nthreads"] = threads_per_worker
+
     cluster = coiled.Cluster(
         n_workers=n_workers,
         use_best_zone=True,
@@ -85,9 +89,7 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         tags = {"project": "AFOLU_flux_model"},
         scheduler_vm_types = scheduler_vm_type,
         worker_vm_types = worker_vm_type,
-        worker_options={
-            "nthreads": threads_per_worker
-        },
+        worker_options = worker_options
     )
 
     print(f"Cluster created with name: {cluster.name}")
@@ -100,7 +102,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', type=str, help='Coiled cluster name')
     parser.add_argument('-n', '--n_workers', type=int, default=1, help='Number of workers for the cluster')
     parser.add_argument('-m', '--worker_memory', type=int, help='Memory per worker')
-    parser.add_argument('-t', '--threads_per_worker', type=int, default='1', help='Number of threads/worker (default=1)')
+    parser.add_argument('-t', '--threads_per_worker', type=int, help='Number of threads/worker')
 
     args = parser.parse_args()
 
@@ -110,4 +112,4 @@ if __name__ == "__main__":
     threads_per_worker = args.threads_per_worker
 
     # Create the cluster with command line arguments
-    create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory)
+    create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker)
