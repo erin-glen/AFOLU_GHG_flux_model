@@ -59,7 +59,7 @@ def populate_main_log_header(client, cluster, log_note, run_local, model_type, s
     main_logger.info(f"Number of workers: {n_workers}")
     main_logger.info(f"Memory per worker: {worker_memory}")
     main_logger.info(f"Threads per worker: {nthreads}")
-    main_logger.info(f"Log note: {log_note}")
+    main_logger.info(f"Log note: {log_note}\n")
 
     return main_logger, main_log_local_path
 
