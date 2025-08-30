@@ -413,7 +413,7 @@ def connect_to_Coiled_cluster(cluster_name, run_local, fallback_to_local_on_fail
 
         # Iterates through clusters and identifies the running one of the correct name to connect to
         for cluster in all_clusters:
-            if cluster.get("name") == cluster_name and cluster.get("current_state", {}).get("state") == 'ready':
+            if (cluster.get("name") == cluster_name) and (cluster.get("current_state", {}).get("state") in ['scaling', 'ready']):
                 print(f"Connecting to running cluster '{cluster_name}'.")
                 cluster = coiled.Cluster(name=cluster_name)
                 client = Client(cluster)
@@ -560,19 +560,19 @@ def get_interval_info(end_year, main_logger, start_year):
         interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years)  # -1 because the interval really starts one year after the end of the previous interval
         # interval_year_diff = [4, 4, 4, 4]  # Expected for 2000-2020
         output_years = cn.interval_end_years_5_years
-    elif start_year == 2015 and end_year == 2023:
+    elif start_year == 2015 and end_year == max(cn.years_annual):
         interval_type = cn.intervals_annual
         interval_length = [1] * len(cn.interval_end_years_annual)
-        # interval_length = [1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2023
+        # interval_length = [1, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2024
         interval_year_diff = [1] * len(cn.interval_end_years_annual)
-        # interval_year_diff = [1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2023
+        # interval_year_diff = [1, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2024
         output_years = cn.interval_end_years_annual
-    elif start_year == 2000 and end_year == 2023:  # Hybrid model (2000-2023)
+    elif start_year == 2000 and end_year == max(cn.years_annual):  # Hybrid model (2000-2024)
         interval_type = cn.intervals_hybrid
         interval_length = [cn.five_year_interval_duration] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
-        # interval_length = [5, 5, 5, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2023
+        # interval_length = [5, 5, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2024
         interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
-        # interval_year_diff = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2023
+        # interval_year_diff = [4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2024
         output_years = cn.interval_end_years_5_years[:-1] + cn.interval_end_years_annual
     else:
         main_logger.error("interval_type not valid")
@@ -659,11 +659,38 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
 
     # If the uri exists, the relevant window is opened and returned and returned as an array.
     # Note that this chunk could still just have NoData values, which would be downloaded.
+    # And, if the uri exists but the raster just doesn't extend there (e.g., far north), the array has to be padded to
+    # reach the expected size.
     try:
         with rasterio.open(uri) as ds:
             window = rasterio.windows.from_bounds(*bounds, ds.transform)
             data = ds.read(1, window=window)
-            status = "success"
+
+            # Checks if array shape is not what we expect (full chunk size) and pads the array if the array is incomplete.
+            # Per https://chatgpt.com/c/67dcb99b-edb8-800a-abd8-f718de76043c
+
+            expected_shape = (chunk_length_pixels, chunk_length_pixels)
+            if data.shape != expected_shape:
+                original_shape = data.shape
+                numpy_dtype = map_to_numpy_dtype(data_type)
+                padded_data = np.zeros(expected_shape, dtype=numpy_dtype)
+
+                # Calculates offset in pixels relative to chunk
+                row_offset = max(0, int(window.row_off))
+                col_offset = max(0, int(window.col_off))
+
+                rows, cols = data.shape
+                end_row = min(row_offset + rows, chunk_length_pixels)
+                end_col = min(col_offset + cols, chunk_length_pixels)
+
+                # Fills the correct slice of the padded array
+                padded_data[row_offset:end_row, col_offset:end_col] = data[:end_row - row_offset, :end_col - col_offset]
+
+                data = padded_data
+                status = f"padded {bounds_str} chunk from {original_shape} to {expected_shape}"
+
+            else:
+                status = "success- chunk complete, no padding needed"
 
     # If the uri doesn't exist, a numpy array of the correct size and datatype populated with 0s is returned.
     except Exception as e:
@@ -797,7 +824,7 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
                     output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
                 elif interval_type == cn.intervals_annual:
                     output_dir = basic_output.replace('START_END',f"{str(output_year - interval_duration[count])}_{str(output_year)}")
-                else:  # Hybrid model (2000-2023)
+                else:  # Hybrid model (2000-2024)
                     output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
 
             output_full_dirs.append(output_dir)
@@ -1006,9 +1033,11 @@ def create_list_for_aggregation(s3_in_folders, main_logger):
 def flatten_list(nested_list):
     return [x for xs in nested_list for x in xs]
 
-
+#TODO @David Note that I added 2 optional inputs to his function (output_dir and stat_type). This shouldn't affect your uses.
+#TODO @Mel Changed back to David's original code. Update and test in mangrove processing scripts. 
 # Merges rasters that are <10x10 degrees into 10x10 degree rasters in the standard grid.
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
+# Commented out COG creation; it just outputs basic geotifs for now.
 def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, stat_type=None):
 
     process = psutil.Process(os.getpid())
@@ -1041,14 +1070,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, s
 
     lu.print_and_log(f"flm: Merging small rasters in {tile_id} in {vsis3_in_folder}: {timestr()}", False, logger_worker)
 
-    # Determine the output folder
-    if output_dir is not None:
-        out_folder = output_dir
-        if not out_folder.endswith("/"):   #ensures dir has terminal /
-            out_folder += "/"
-    else:
-        # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
-        out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
+    # Names the output folder. Same as the input folder but with the dimensions in pixels replaced
+    out_folder = re.sub(r'\d+_pixels', f'{cn.full_raster_dims}_pixels', in_folder)
 
     min_x, min_y, max_x, max_y = get_10x10_tile_bounds(tile_id)
 
@@ -1097,173 +1120,108 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, s
     chunk_non_cog_end_time = time.time()
     lu.print_and_log(f"Merging {merged_file} took {round(chunk_non_cog_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
 
-    ### Part 2: Converts geotifs to COGs
+    # ### Part 2: Converts geotifs to COGs
+    #
+    # # Convert to Cloud Optimized GeoTIFF
+    # # https://gfw.atlassian.net/wiki/spaces/LCL/pages/1918238725/STAC-API+pre-flight+checklist
+    # merged_cog_file = f"/tmp/merged_cog_{out_file_name}"
+    # translate_command = [
+    #     'gdal_translate',
+    #     merged_file,
+    #     merged_cog_file,
+    #     '-of', 'COG',
+    #     '-co', 'COMPRESS=DEFLATE',
+    #     '-co', 'PREDICTOR=2',
+    #     '-co', 'BIGTIFF=IF_SAFER',
+    #     '-co', 'OVERVIEW_RESAMPLING=average'
+    # ]
+    #
+    # try:
+    #     subprocess.check_call(translate_command)
+    #     lu.print_and_log(f"Successfully created COG: {merged_cog_file}: {timestr()}", is_final, logger_worker)
+    #     lu.print_and_log(f"After creating COG for {merged_cog_file}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+    # except subprocess.CalledProcessError as e:
+    #     lu.print_and_log(f"Error converting to COG: {e}: {timestr()}", False, logger_worker)
+    #     return f"failure converting to COG for {s3_name_dict}"
+    #
+    # chunk_cog_end_time = time.time()
+    # lu.print_and_log(f"Through COG creation for {merged_cog_file} took {round(chunk_cog_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
 
-    # Convert to Cloud Optimized GeoTIFF
-    # https://gfw.atlassian.net/wiki/spaces/LCL/pages/1918238725/STAC-API+pre-flight+checklist
-    merged_cog_file = f"/tmp/merged_cog_{out_file_name}"
-    translate_command = [
-        'gdal_translate',
-        merged_file,
-        merged_cog_file,
-        '-of', 'COG',
-        '-co', 'COMPRESS=DEFLATE',
-        '-co', 'PREDICTOR=2',
-        '-co', 'BIGTIFF=IF_SAFER',
-        '-co', 'OVERVIEW_RESAMPLING=average'
-    ]
+    ### Part 3: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters)
 
+    # Computes valid pixel count in the output 10x10 raster for comparison with the sum of the constituent 1x1s
+    lu.print_and_log(f"Counting pixels in {tile_id} for {out_file_name}: {timestr()}", is_final, logger_worker)
+
+    # Computes count of valid pixels by reading raster in chunks (can't read full 10x10 into memory all at once
     try:
-        subprocess.check_call(translate_command)
-        lu.print_and_log(f"Successfully created COG: {merged_cog_file}: {timestr()}", is_final, logger_worker)
-        lu.print_and_log(f"After creating COG for {merged_cog_file}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
-    except subprocess.CalledProcessError as e:
-        lu.print_and_log(f"Error converting to COG: {e}: {timestr()}", False, logger_worker)
-        return f"failure converting to COG for {s3_name_dict}"
-
-    chunk_cog_end_time = time.time()
-    lu.print_and_log(f"Through COG creation for {merged_cog_file} took {round(chunk_cog_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
-
-    ### Part 3: Counts non-No Data pixels in 10x10 raster (for comparison with summed 1x1 rasters) if no stat_type is specified
-
-    if stat_type is None:
-        # Computes valid pixel count in the output 10x10 raster for comparison with the sum of the constituent 1x1s
-        lu.print_and_log(f"Counting pixels in {tile_id} for {out_file_name}: {timestr()}", is_final, logger_worker)
-
-        # Computes count of valid pixels by reading raster in chunks (can't read full 10x10 into memory all at once
-        try:
-            ds = gdal.Open(merged_cog_file)
-            if ds is not None:
-                band = ds.GetRasterBand(1)
-                valid_pixel_count = 0
-
-                # Gets raster dimensions
-                x_size = band.XSize
-                y_size = band.YSize
-
-                # Reads in chunks to avoid high memory usage
-                block_size_x, block_size_y = band.GetBlockSize()
-
-                for y in range(0, y_size, block_size_y):
-                    rows_to_read = min(block_size_y, y_size - y)
-                    for x in range(0, x_size, block_size_x):
-                        cols_to_read = min(block_size_x, x_size - x)
-
-                        # Reads only a portion of the raster at a time
-                        block = band.ReadAsArray(x, y, cols_to_read, rows_to_read)
-
-                        if block is not None:
-                            valid_pixel_count += np.count_nonzero(block != raster_nodata_value)
-
-                ds = None  # Closes dataset
-            else:
-                valid_pixel_count = -1  # Failed to open file
-        except Exception as e:
-            lu.print_and_log(f"Error counting pixels for {merged_cog_file}: {e}", is_final, logger_worker)
-            print(f"Error counting pixels for {merged_cog_file}: {e}")
-            return f"failure counting pixels for {s3_name_dict}"
-
-        # Gets the output file pattern and year/year_range
-        out_pattern, year_range = strip_and_extract_years(out_file_name)
-
-        # Most stats for the 10x10 aren't calculated.
-        # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
-        # Dictionary is in a list because it's necessary for chunk stats processing later.
-        chunk_stats = [{
-            'chunk_id': 'N/A',
-            'tile_id': tile_id,
-            'layer_name': out_file_name,
-            'tile_name': out_file_name,
-            'in_out': 'output_layer',
-            'pattern': out_pattern,
-            'years': year_range,
-            'min_value': 'no data',
-            'mean_value': 'no data',
-            'max_value': 'no data',
-            'count_value': valid_pixel_count,
-            'sum_value': 'no data',
-            'data_type': 'no data'
-        }]
-
-    ### Part 4: Sums extent for binary data in a 10x10 raster (for comparison with summed 1x1 rasters) if stat_type is 'extent'
-    elif stat_type == 'extent':
-
-        # Computes valid extent in the output 10x10 raster for comparison with the sum of the constituent 1x1s
-        lu.print_and_log(f"Summing extent in {tile_id} for {out_file_name}: {timestr()}", is_final, logger_worker)
-
-        try:
-            # Open merged raster
-            ds = gdal.Open(merged_file)
-            if ds is None:
-                raise RuntimeError(f"Failed to open merged raster: {merged_file}")
-
-            # Build the path to the pixel area raster
-            pixel_area_vsis3_path = f"/vsis3/{cn.pixel_area_dir[5:]}{cn.pixel_area_pattern}_{tile_id}.tif"
-            area_ds = gdal.Open(pixel_area_vsis3_path)
-            if area_ds is None:
-                raise RuntimeError(f"Failed to open pixel area raster: {pixel_area_vsis3_path}")
-
-            # Get bands and dimensions
+        # ds = gdal.Open(merged_cog_file)
+        ds = gdal.Open(merged_file)
+        if ds is not None:
             band = ds.GetRasterBand(1)
-            area_band = area_ds.GetRasterBand(1)
+            valid_pixel_count = 0
+
+            # Gets raster dimensions
             x_size = band.XSize
             y_size = band.YSize
+
+            # Reads in chunks to avoid high memory usage
             block_size_x, block_size_y = band.GetBlockSize()
 
-            total_extent = 0.0
             for y in range(0, y_size, block_size_y):
                 rows_to_read = min(block_size_y, y_size - y)
                 for x in range(0, x_size, block_size_x):
                     cols_to_read = min(block_size_x, x_size - x)
 
-                    mangrove_block = band.ReadAsArray(x, y, cols_to_read, rows_to_read)
-                    area_block = area_band.ReadAsArray(x, y, cols_to_read, rows_to_read)
+                    # Reads only a portion of the raster at a time
+                    block = band.ReadAsArray(x, y, cols_to_read, rows_to_read)
 
-                    if mangrove_block is None or area_block is None:
-                        continue
+                    if block is not None:
+                        valid_pixel_count += np.count_nonzero(block != raster_nodata_value)
 
-                    valid_mask = mangrove_block != raster_nodata_value
-                    total_extent += np.sum(area_block[valid_mask])
+            ds = None  # Closes dataset
+        else:
+            valid_pixel_count = -1  # Failed to open file
+    except Exception as e:
+        # lu.print_and_log(f"Error counting pixels for {merged_cog_file}: {e}", is_final, logger_worker)
+        lu.print_and_log(f"Error counting pixels for {merged_file}: {e}", is_final, logger_worker)
+        # print(f"Error counting pixels for {merged_cog_file}: {e}")
+        print(f"Error counting pixels for {merged_file}: {e}")
+        return f"failure counting pixels for {s3_name_dict}"
 
-            ds = None
-            area_ds = None
+    # Gets the output file pattern and year/year_range
+    out_pattern, year_range = strip_and_extract_years(out_file_name)
 
-        except Exception as e:
-            lu.print_and_log(f"Error calculating extent for {merged_file}: {e}", is_final, logger_worker)
-            return f"failure calculating extent for {s3_name_dict}"
+    # Most stats for the 10x10 aren't calculated.
+    # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
+    # Dictionary is in a list because it's necessary for chunk stats processing later.
+    chunk_stats = [{
+        'chunk_id': 'N/A',
+        'tile_id': tile_id,
+        'layer_name': out_file_name,
+        'tile_name': out_file_name,
+        'in_out': 'output_layer',
+        'pattern': out_pattern,
+        'years': year_range,
+        'min_value': 'no data',
+        'mean_value': 'no data',
+        'max_value': 'no data',
+        'count_value': valid_pixel_count,
+        'sum_value': 'no data',
+        'data_type': 'no data'
+    }]
 
-        # Gets the output file pattern and year/year_range
-        out_pattern, year_range = strip_and_extract_years(out_file_name)
-
-        # Dictionary is in a list because it's necessary for chunk stats processing later.
-        chunk_stats = [{
-            'chunk_id': 'N/A',
-            'tile_id': tile_id,
-            'layer_name': out_file_name,
-            'tile_name': out_file_name,
-            'in_out': 'output_layer',
-            'pattern': out_pattern,
-            'years': year_range,
-            'min_value': 'no data',
-            'mean_value': 'no data',
-            'max_value': 'no data',
-            'count_value': 'no data',
-            'sum_value': total_extent,
-            'data_type': 'no data'
-        }]
-
-
-    ### Part 5: Uploads 10x10 to s3 using multipart uploading
+    ### Part 4: Uploads 10x10 to s3 using multipart uploading
     ### https://chatgpt.com/share/e/67d848cf-8b08-800a-b0e8-79a72c9eb49a.
 
-    lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}: {timestr()}", is_final, logger_worker)
+    if no_upload == False:
 
-    if no_upload:
+        # For testing!!! Redirects outputs to a different version folder.
+        # out_folder = out_folder.replace(cn.model_version_underscore, f"{cn.model_version_underscore}_small_GDAL_geotif_test")
 
-        #Because boto3 does multipart uploading for files >100MB, this only adds multipart uploading for files
+        # Because boto3 does multipart uploading for files >100MB, this only adds multipart uploading for files
         # between part_size and 100MB.
         try:
-            lu.print_and_log(f"Uploading {out_file_name} to s3: {timestr()}", is_final, logger_worker)
+            lu.print_and_log(f"Saving {out_file_name} to s3: {out_folder}{out_file_name}: {timestr()}", is_final, logger_worker)
             part_size = 20 * 1024 * 1024  # 20MB chunks
 
             # Starts multipart upload
@@ -1271,7 +1229,8 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, s
             upload_id = response['UploadId']
 
             parts = []
-            with open(merged_cog_file, 'rb') as f:
+            # with open(merged_cog_file, 'rb') as f:
+            with open(merged_file, 'rb') as f:
                 part_number = 1
                 while chunk := f.read(part_size):
                     response = s3_client.upload_part(
@@ -1301,10 +1260,11 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, s
 
     # Deletes the local merged raster
     os.remove(merged_file)
-    os.remove(merged_cog_file)
+    # os.remove(merged_cog_file)
 
     chunk_end_time = time.time()
-    lu.print_and_log(f"Full processing for {merged_cog_file} took {round(chunk_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
+    # lu.print_and_log(f"Full processing for {merged_cog_file} took {round(chunk_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
+    lu.print_and_log(f"Full processing for {merged_file} took {round(chunk_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
 
     return f"Success merging {s3_name_dict}", chunk_stats
 
@@ -1869,6 +1829,7 @@ def strip_and_extract_years(key):
 
     try:
         year_range = re.search(cn.date_date_range_pattern, key).group()[1:]
+        year_range = year_range.lstrip('_')  # Removes any leading _
     except:
         year_range = 'no year range'
 

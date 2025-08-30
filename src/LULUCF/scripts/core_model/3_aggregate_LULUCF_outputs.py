@@ -9,19 +9,19 @@ and so having batches allows easier restarting. The tasks are in a pre-determine
 so each batch should have the same contents for any given set of inputs.
 
 Local test:
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -yr 2000 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -yr 2000 2024 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
 
 Coiled small test:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --first_10x10s_to_process 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2024 --first_10x10s_to_process 2 --input_date YYYYMMDD
 
 Coiled large shapefile test (create a cluster with 1 worker, then resize it to 100 workers after local processing is done):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --input_date YYYYMMDD -nw 100 -ln "This is the aggregation of the 1884-chunk run."
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD -nw 100 -ln "This is the aggregation of the 1884-chunk run."
 
 Full Coiled run (create a cluster with 1 worker, then resize it to 200 workers after local processing is done):
-python -m src.utilities.create_cluster -n 2 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2023 --input_date YYYYMMDD -nw 200 -ln "This is intended to be the definitive global run."
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
+python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD -nw 200 -ln "This is intended to be the definitive global run."
 
 Notes on optimizing threads/worker: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210803828525318?focus=true
 Tests of this aggregation and other aggregations show that 1 thread/worker with 4GB workers is low in Coiled credit usage
@@ -55,14 +55,14 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
 
     # Runs chunks in batches of specified size.
     # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
-    # batch_size = 3000
-    batch_size = 5  # For testing batch processing
+    batch_size = 3000
+    # batch_size = 15  # For testing batch processing
     # batch_size = 1  # For testing batch processing
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
-                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2023
-                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2023
+                          [cn.first_model_year_5_years, cn.last_model_year_annual],  # 2000-2024
+                          [cn.first_model_year_annual, cn.last_model_year_annual]]:  # 2015-2024
         print("Year range selection not valid")
         sys.exit()
     else:
@@ -114,9 +114,9 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
     main_logger.info(f"Directories to aggregate: {output_dir_list}")
 
     # # For testing- first folder only, so contents of all folders don't need to be listed
-    output_dir_list = output_dir_list[0:1]
-    # output_dir_list = output_dir_list[0:3]
-    main_logger.info("output_dir_list:", output_dir_list)
+    # output_dir_list = output_dir_list[0:1]
+    output_dir_list = output_dir_list[0:10]
+    main_logger.info(f"output_dir_list: {output_dir_list}")
 
     main_logger.info(f"There are {len(output_dir_list)} folders to aggregate to 10x10s")
 
@@ -165,9 +165,9 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
         workers = client.scheduler_info()["workers"]
         n_workers = len(workers)
 
-        # Adds more workers if less than 9 were originally specified. 9 is an arbitrary number above which I'm not likely to be doing testing.
+        # Adds more workers if less than 9 were originally specified. 11 is an arbitrary number above which I'm not likely to be doing testing.
         # Otherwise, just keeps the number of workers already there (if number not specified for this script).
-        if (n_workers < 9) and (number_of_workers):
+        if (n_workers < 11) and (number_of_workers):
             main_logger.info(f"Resizing cluster to specified number of workers: {number_of_workers}")
             resize_cluster.resize_coiled_cluster(cluster_name, number_of_workers)
         elif is_final:
@@ -202,7 +202,7 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
         if len(chunk_batches) > 1:
             main_logger.info(f"Writing batch stats to spreadsheet: {uu.timestr()}")
             df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
-            out_spreadsheet = f'TEMP_{stage}_10x10_chunk_statistics__thru_batch_{i}_{uu.timestr()}.xlsx'
+            out_spreadsheet = f'TEMP_BATCH_{stage}_10x10_chunk_statistics__thru_batch_{i}_{uu.timestr()}.xlsx'
             local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
             with pd.ExcelWriter(local_spreadsheet) as writer:
                 df_all_10x10_stats.to_excel(writer, sheet_name=f'pix_counts__thru_batch_{i}', index=False)
@@ -249,7 +249,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Aggregate 1x1 degree outputs from LULUCF model to 10x10 degree geotifs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-rd', '--input_date', help='Date of core model run, in YYYYMMDD')
-    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2023.')
+    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2024.')
     parser.add_argument('-f', '--first_10x10s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
     parser.add_argument('-nw', '--number_of_workers', type=int, help='Number of workers to rescale to after local input list processing is done. Optonal')

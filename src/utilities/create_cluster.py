@@ -1,8 +1,8 @@
 """
-Run from src/LULUCF/
-python -m scripts.utilities.create_cluster -n 1 -m 16 -cn LULUCF_model
-python -m scripts.utilities.create_cluster -n 5 -m 32 -cn LULUCF_model
-python -m scripts.utilities.create_cluster -n 20 -m 64 -cn LULUCF_model
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
+python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
+python -m src.utilities.create_cluster -n 5 -t 1 -m 32 -cn LULUCF_model
+python -m src.utilities.create_cluster -n 20 -t 1 -m 64 -cn LULUCF_model
 
 Table of instance types: https://aws.amazon.com/ec2/instance-types/
 Table of spot pricing: https://aws.amazon.com/ec2/spot/pricing/
@@ -19,7 +19,7 @@ import argparse
 import sys
 
 
-def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
+def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=None):
 
     # Converts worker_memory from an integer to the required format (e.g., 8 to "8GiB")
     worker_memory_str = f"{worker_memory}GiB"
@@ -27,39 +27,39 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
 
     if worker_memory == 128:
         idle_timeout = 10
-        scheduler_vm_type = "x2iedn.xlarge"
+        scheduler_vm_type = "x2iedn.xlarge"    # 4 vCPU/worker
         worker_vm_type = "x2iedn.xlarge"
 
     elif worker_memory == 64:
         idle_timeout = 15
-        scheduler_vm_type = "x2gd.xlarge"
+        scheduler_vm_type = "x2gd.xlarge"    # 4 vCPU/worker
         worker_vm_type = "x2gd.xlarge"
 
     elif worker_memory == 32:
         idle_timeout = 20
-        scheduler_vm_type = "x8g.large"
+        scheduler_vm_type = "x8g.large"   # 2 vCPU/worker
         worker_vm_type = "x8g.large"
 
     elif worker_memory == 16:
         idle_timeout = 25
-        scheduler_vm_type = "x2gd.medium"
+        scheduler_vm_type = "x2gd.medium"   # 1 vCPU/worker
         worker_vm_type = "x2gd.medium"
 
     elif worker_memory == 8:
         idle_timeout = 25
-        scheduler_vm_type = "r8g.medium"
+        scheduler_vm_type = "r8g.medium"   # 1 vCPU/worker
         worker_vm_type = "r8g.medium"
 
     elif worker_memory == 4:
         idle_timeout = 25
-        scheduler_vm_type = "m8g.medium"
+        scheduler_vm_type = "m8g.medium"   # 1 vCPU/worker
         worker_vm_type = "m8g.medium"
 
-    # t2.small not available with Coiled. t3.small has 2 vCPUs, so it's not actually Coiled credit-effective.
-    elif worker_memory == 2:
-        idle_timeout = 25
-        scheduler_vm_type = "t3.small"
-        worker_vm_type = "t3.small"
+    # # t2.small not available with Coiled. t3.small has 2 vCPUs, so it's not actually Coiled credit-effective.
+    # elif worker_memory == 2:
+    #     idle_timeout = 25
+    #     scheduler_vm_type = "t3.small"
+    #     worker_vm_type = "t3.small"
 
     # # Couldn't get a cluster started that used 1GB workers using t3a.micro, t3.micro, or t4g.micro. Don't know why.
     # elif worker_memory == 1:
@@ -71,6 +71,10 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         sys.exit('Memory argument not 2, 4, 8, 16, 32, 64, or 128 GB')
 
     idle_timeout = f"{idle_timeout} minutes"
+
+    worker_options = {}
+    if threads_per_worker is not None:
+        worker_options["nthreads"] = threads_per_worker
 
     cluster = coiled.Cluster(
         n_workers=n_workers,
@@ -84,9 +88,7 @@ def create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory):
         tags = {"project": "AFOLU_flux_model"},
         scheduler_vm_types = scheduler_vm_type,
         worker_vm_types = worker_vm_type,
-        worker_options={
-            "nthreads": threads_per_worker
-        },
+        worker_options = worker_options
     )
 
     print(f"Cluster created with name: {cluster.name}")
@@ -99,7 +101,7 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', type=str, help='Coiled cluster name')
     parser.add_argument('-n', '--n_workers', type=int, default=1, help='Number of workers for the cluster')
     parser.add_argument('-m', '--worker_memory', type=int, help='Memory per worker')
-    parser.add_argument('-t', '--threads_per_worker', type=int, default='1', help='Number of threads/worker (default=1)')
+    parser.add_argument('-t', '--threads_per_worker', type=int, help='Number of threads/worker')
 
     args = parser.parse_args()
 
@@ -109,4 +111,4 @@ if __name__ == "__main__":
     threads_per_worker = args.threads_per_worker
 
     # Create the cluster with command line arguments
-    create_cluster(cluster_name, n_workers, threads_per_worker, worker_memory)
+    create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker)

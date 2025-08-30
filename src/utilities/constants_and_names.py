@@ -7,7 +7,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "0.4.1"
+model_version = "0.4.3"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets
@@ -39,9 +39,9 @@ NT_T_gain_year_count_default = math.ceil(five_year_interval_duration / 2)
 
 ### Model years in annual series
 first_model_year_annual = 2015  # First year of annual data
-last_model_year_annual = 2023   # Last year of annual data
+last_model_year_annual = 2024   # Last year of annual data
 
-years_annual = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+years_annual = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
 interval_end_years_annual = years_annual[1:]
 
 possible_task_statuses = ["pending_", "loading_", "preprocessing_", "calculating_", "uploading_", "error_"]
@@ -129,6 +129,13 @@ trees_outside_forests_agc_rf_max = 2.8
 gwp_ch4 = 27 # AR6 WG1 Table 7.15
 gwp_n2o = 273 # AR6 WG1 Table 7.15
 
+# Combustion factor for trees that had fire but no height reduction or other sign of disturbance
+# (i.e. undisturbed trees remaining trees).
+# From IPCC 2019, Table 2.6, "Boreal forest- ground fire" (applied globally, though boreal)
+Cf_forest_undisturbed = 0.15
+
+other_landcover_node = 7
+
 
 ### Crop residue and grassland burning constants
 
@@ -154,8 +161,6 @@ Gef_N2O_grassland = 0.21
 
 # Combustion factor for savanna and grassland burning (IPCC 2019, V4, Ch. 2, Table 2.6-- all savanna grasslands (mid/late dry season burns)
 Cf_grassland = 0.77
-
-other_landcover_node = 7
 
 
 ### GLCLU cover codes
@@ -218,7 +223,8 @@ SDPT_other_code = 3
 
 ##### Miscellaneous
 
-date_date_range_pattern = r'_\d{4}(_\d{4})?'   # Pattern for date (XXXX) or date range XXXX_YYYY in output file names
+# Pattern for date (XXXX), date range (XXXX_YYYY), or date range (XXXX_YYYY_XXXX_YYYY, SOC only) with 1 or 2 leading _ in output file names
+date_date_range_pattern = r'_{1,2}(?:\d{4}(?:_\d{4})*)'
 
 AFOLU_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/"
 LULUCF_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/"
@@ -258,13 +264,13 @@ pixel_meanings = [flux_density_pixel_meaning, flux_per_pixel_pixel_meaning,
 ##### Inputs
 
 land_cover_5_year_path = f"{LULUCF_path}landcover/composite/five_year/v1/raw/"
-land_cover_annual_path = f"{LULUCF_path}landcover/composite/annual/v1/raw/"
+land_cover_annual_path = f"{LULUCF_path}landcover/composite/annual/v2/raw/"
 land_cover_pattern = "land_cover_composite"  # Raw tifs don't have a pattern; this is just for use in the numba data dictionary
 
 vegetation_height_annual_GLAD_path = "https://glad.geog.umd.edu/Potapov/Global_TCH_2015-23"
 vegetation_height_5_year_path = f"{LULUCF_path}landcover/vegetation_height/five_year/v1/raw/"
 vegetation_height_5_year_pattern = "vegetation_height"
-vegetation_height_annual_path = f"{LULUCF_path}landcover/vegetation_height/annual/20250114/raw/"
+vegetation_height_annual_path = f"{LULUCF_path}landcover/vegetation_height/annual/v2_20250716/raw/"
 vegetation_height_annual_pattern = ""
 vegetation_height_pattern = "vegetation_height"  # Raw tifs don't have a pattern; this is just for use in the numba data dictionary
 
@@ -474,7 +480,8 @@ forest_age_output_pattern = "forest_age_at_end_of_interval"
 # out_raster.save(r"C:\GIS\Carbon_seqr_mapping\secondary_forests\average_rates_for_LULUCF_model\natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years__nibble_20250516.tif")
 # Then, uploaded to s3.
 
-#todo: refactor hansenize inputs: 
+#TODO: @Mel Make sure all refrences to the old commented out names are updated
+# Refactor Hansenize inputs: 
 # Robinson_5_year_rates_processed_date or Robinson_20_year_rates_processed_date --> Robinson_processed_date
 # Robinson_processed_date --> secondary_forest_curve_run_date
 
@@ -508,15 +515,24 @@ secondary_natural_forest_61_80_processed_dir = f"{full_bucket_prefix}/climate/se
 secondary_natural_forest_81_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_81_100/"
 secondary_natural_forest_21_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_21_100/"
 
+# secondary_natural_forest_raw_dir =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/20250516/"
+# secondary_natural_forest_0_5_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__0_5_years__nibble_20250516"   # both the raw raster name and processed pattern for hansenized tiles
+# secondary_natural_forest_6_10_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__6_10_years__nibble_20250516"
+# secondary_natural_forest_11_15_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__11_15_years__nibble_20250516"
+# secondary_natural_forest_16_20_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__16_20_years__nibble_20250516"
+# secondary_natural_forest_21_40_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years__nibble_20250516"
+# secondary_natural_forest_41_60_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__41_60_years__nibble_20250516"
+# secondary_natural_forest_61_80_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__61_80_years__nibble_20250516"
+# secondary_natural_forest_81_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__81_100_years__nibble_20250516"
+# secondary_natural_forest_21_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_100_years__nibble_20250516"
 
 secondary_forest_curve_run_date = '20250616'
 natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{secondary_forest_curve_run_date}/"
 natural_forest_growth_curve_pattern = "natural_forest_mean_growth_rate__Mg_AGC_ha_yr"
 natural_forest_growth_curve_intervals = ['0_5', '6_10', '11_15', '16_20', '21_40', '41_60', '61_80', '81_100']
 
-
-#TODO: Update to path pattern instead of processed_dir/ pattern in hansenize. Delete processed after.
-drivers_run_date = '20241224'
+#TODO: @Mel Update to path pattern instead of processed_dir/ pattern in hansenize. Delete processed after.
+drivers_run_date = '20250414'
 drivers_raw_dir = f"{full_bucket_prefix}/drivers_of_loss/1_km/raw/update2023_20241218/"
 drivers_raw_pattern = "drivers_forest_loss_1km_2023_band1.tif"
 drivers_processed_dir = f"{full_bucket_prefix}/drivers_of_loss/1_km/processed/{drivers_run_date}/"
@@ -580,9 +596,6 @@ burned_area_hdf_converted_to_raw_raster_dir = "fires/MODIS_burned_area/MCD64A1.0
 burned_area_final_dir = "fires/MODIS_burned_area/MCD64A1.061/2_final_outputs__Hansenized/"  # With each year in its own folder
 burned_area_final_pattern = "burned_area_final"
 
-organic_soil_extent_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"
-organic_soil_extent_pattern = "peat_mask_processed"
-
 # GMW mangrove extent
 GMW_version = "v3"
 mangrove_extent_years = [1996, 2007, 2008, 2009, 2010, 2015, 2016, 2017, 2018, 2019, 2020]
@@ -598,7 +611,43 @@ mangrove_1x1deg_smoothed_dir = f"{full_bucket_prefix}/global-mangrove-extent/ver
 mangrove_extent_processed_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/smoothed/raster/"
 mangrove_extent_processed_pattern = f"GMW{GMW_version}_smoothed_mangrove_extent"
 
-#cropland emissions
+# Organic Soils
+# Organic soil mask, from Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
+# and thresholded by Erin Glen for peat emissions model. Includes only pixels with organic soil probability >23%,
+# a cutoff determined by OpenGeoHub and implemented by Erin.
+organic_soil_extent_dir = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/peat_mask/OGH/tiles/"
+organic_soil_extent_pattern = "ogh_mask"
+
+### Soil organic carbon (SOC) timeseries (URIs from https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv)
+# From Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
+# Units of raw global COGs are kg C/m^3 for 0-30 cm, multiplied by 10 (rescale factor) to make COGs ints.
+# Values in dict need to be lists (even with just 1 element) because of how uu.prepare_to_download_chunk works.
+SOC_COGS = {
+    "2000_2005": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif"],
+    "2005_2010": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif"],
+    "2010_2015": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20100101_20151231_g_epsg.4326_v20250204.tif"],
+    "2015_2020": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"]
+}
+
+SOC_timeseries_run_date = '20250819'
+SOC_timeseries_base_output_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/soil_organic_carbon_timeseries/"
+
+SOC_density_intervals = ['2000_2005', '2005_2010', '2010_2015', '2015_2020']
+SOC_change_intervals = ['2000_2005_2005_2010', '2005_2010_2010_2015', '2010_2015_2015_2020', '2000_2005_2015_2020']   # Last one is the full-period delta
+
+# Extent of raw COGs
+SOC_density_full_extent_pattern = "SOC_density__full_extent__0-30cm_MgC"
+SOC_density_full_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+SOC_change_full_extent_pattern = "SOC_change__full_extent__0-30cm_MgC"
+SOC_change_full_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+
+# Extent of mineral soil (excludes thresholded organic soil extent created by Erin Glen)
+SOC_density_min_soil_extent_pattern = "SOC_density__mineral_soil_extent__0-30cm_MgC"
+SOC_density_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_min_soil_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+SOC_change_min_soil_extent_pattern = "SOC_change__mineral_soil_extent__0-30cm_MgC"
+SOC_change_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_min_soil_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+
+# Cropland emissions
 cropland_emis_run_date =  '20241204'
 global_cropland_emissions_raw_dir = f"{AFOLU_path}cropland_emissions/raw__from_Cornell/20241126/year_2020/all_sources/"
 global_cropland_emissions_processed_dir = f"{AFOLU_path}cropland_emissions/processed/{cropland_emis_run_date}/year_2020/all_sources"
@@ -651,8 +700,6 @@ global_cropland_total_amount_all_crops_nonpeat_2019_raw_pattern = "Global_grid_a
 global_cropland_total_amount_all_crops_nonpeat_2019_processed_dir = f"{global_cropland_emissions_processed_dir}/total_amount/non_peatland/2019/"
 global_cropland_total_amount_all_crops_nonpeat_2019_processed_pattern = f"all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif"
 
-### Soil carbon timeseries
-OGH_soil_carbon_timeseries_spreadsheet = 'https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv'
 
 
 ##### Outputs
@@ -676,6 +723,7 @@ otherland_IPCC = 6
 IPCC_class_max_val = 6  # Maximum value of IPCC class codes
 
 land_state_pattern = "land_state_node"
+land_state_node_fire_value = 9  # State nodes that end in this value had fire
 
 agc_rf_pre_dist_pattern = "removal_factor__AGC__MgC"
 

@@ -19,8 +19,8 @@ from botocore.exceptions import ClientError
 
 # Constants
 BUCKET = "gfw2-data"
-PREFIX = "climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_1/"
-BASE_DEST = "/mnt/c/GIS/AFOLU_flux_model/test_data/output/v0_4_1/"
+PREFIX = "climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/"
+BASE_DEST = "/mnt/c/GIS/AFOLU_flux_model/test_data/output/v0_4_3/"
 
 def main():
     if len(sys.argv) < 2:

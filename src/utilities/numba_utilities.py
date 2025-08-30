@@ -17,7 +17,7 @@ def accrete_node(combined, new_digit):
 
 # Makes all output states the same number of digits (currently 7) by padding 0s to the right
 @jit(nopython=True)
-def pad_to_6_digits(state_out, max_digits_state_out):
+def pad_to_8_digits(state_out, max_digits_state_out):
 
     if state_out < 10 ** (max_digits_state_out-1):
         digits = int(np.log10(state_out)) + 1 if state_out > 0 else 1
@@ -308,7 +308,7 @@ def calc_short_veg_removals(climate_zone):
     elif climate_zone == 1:  # Tropical- montane (average of tropical dry and tropical wet/moist values)
         short_veg_AGB_RF = (2.3 + 6.2)/2
         short_veg_BGB_RF = (((8.7 + 16.1)/2) - short_veg_AGB_RF)
-    else: # Outside ecozone bounds-- apply boreal values
+    else: # Outside climate zone bounds-- apply boreal values
         short_veg_AGB_RF = 1.7
         short_veg_BGB_RF = (8.5-short_veg_AGB_RF)
 
@@ -587,7 +587,8 @@ def calc_partial_disturbance_EFs(drivers_cell, continent_ecozone_cell, partial_d
     return partial_disturbance_EF
 
 # Calculates Cf for fire emissions from forests (as opposed to savanna/grassland or crop residue burning).
-# From IPCC 2019 Table 2.6 (unitless)
+# From IPCC 2019 Table 2.6 (unitless).
+# There is also a separate Cf for pixels that are burned but show no height reduction ("undisturbed"), cn.Cf_forest_undisturbed
 @jit(nopython=True)
 def calc_Cf_forest(climate_domain_cell, drivers_cell, ifl_primary_cell):
 
@@ -1032,7 +1033,7 @@ def calc_T_NT(node, interval_length, burned_in_curr_interval, RF_AGC_in, RF_BGC_
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
     if burned_in_curr_interval:
 
-        state_out = accrete_node(node, 1)
+        state_out = accrete_node(node, cn.land_state_node_fire_value)
 
         # Selects just the carbon pools that have non-CO2 emissions from fire
         c_pools_for_fire_non_CO2 = np.where(c_pools_fire_non_CO2 == 1, c_pre_disturb, 0)
@@ -1221,7 +1222,7 @@ def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_curr_interval, 
         deadwood_c_gross_emis_out = ((deadwood_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * deadwood_c_ef_CO2
         litter_c_gross_emis_out = ((litter_c_pre_disturb / cn.biomass_to_carbon_non_mangrove) * Cf_forest * Gef_co2 * cn.g_to_kg) / cn.C_to_CO2 * litter_c_ef_CO2
 
-        # Emission factor for burned forest is the combustion factor for forrest
+        # Emission factor for burned forest is the combustion factor for forest
         agc_ef_CO2 = Cf_forest
 
         # # For testing CO2 fire emissions
@@ -1271,7 +1272,7 @@ def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_curr_interval, 
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
     if burned_in_curr_interval:
 
-        state_out = accrete_node(node, 1)
+        state_out = accrete_node(node, cn.land_state_node_fire_value)
 
         # Selects just the carbon pools that have non-CO2 emissions from fire
         c_pools_for_fire_non_CO2 = np.where(c_pools_fire_non_CO2 == 1, c_pre_disturb, 0)
@@ -1308,7 +1309,7 @@ def calc_T_T_non_stand_disturbs(node, interval_length, burned_in_curr_interval, 
             RF_AGC_pre_dist_out, RF_BGC_pre_dist_out, agc_ef_CO2, gain_year_count_pre_dist, forest_age_interval_end)
 
 
-# Gross fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances.
+# Gross fluxes and ending carbon stocks for trees remaining trees with non-stand-replacing disturbances (fires are allowed).
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 # Applies to 5-year intervals and annual intervals.
 @jit(nopython=True)
@@ -1482,7 +1483,7 @@ def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, first
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
     if first_year_burned_during_interval > 0:
 
-        state_out = accrete_node(node, 1)
+        state_out = accrete_node(node, cn.land_state_node_fire_value)
 
         # Selects just the carbon pools that have non-CO2 emissions from fire
         c_pools_for_fire_non_CO2 = np.where(c_pools_fire_non_CO2 == 1, c_pre_disturb, 0)
@@ -1589,7 +1590,7 @@ def calc_cropland_non_cropland(node, c_dens_in, c_pools_no_fire, times_burned_in
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
     if times_burned_in_interval > 0:
 
-        state_out = accrete_node(node, 1)
+        state_out = accrete_node(node, cn.land_state_node_fire_value)
 
         # Residue carbon in cropland is aboveground carbon only. Shouldn't be carbon in any other pools.
         residue_carbon = c_dens_in[0] * cn.cropland_residue_harvest_ratio
@@ -1641,7 +1642,7 @@ def calc_cropland_cropland(node, c_dens_in, times_burned_in_interval):
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
     if times_burned_in_interval > 0:
 
-        state_out = accrete_node(node, 1)
+        state_out = accrete_node(node, cn.land_state_node_fire_value)
 
         # Residue carbon in cropland is aboveground carbon only. Shouldn't be carbon in any other pools.
         residue_carbon = c_dens_in[0] * cn.cropland_residue_harvest_ratio
@@ -1675,12 +1676,12 @@ def calc_cropland_cropland(node, c_dens_in, times_burned_in_interval):
     return state_out, c_gross_emissions_out, c_gross_removals_out, c_dens_out, non_co2_fluxes_out
 
 
-# Gross fluxes and ending carbon stocks for non-short/med vegetation converted to short/med vegetation
+# Gross fluxes and ending carbon stocks for non-short vegetation/non-forest/non-cropland converted to short vegetation.
 # Applies to 5-year intervals and annual intervals.
-# TODO c_dens_in is all 0s. Is that right? When would it not use 0s?
 @jit(nopython=True)
 def calc_short_veg_gain(rf):
 
+    # C densities should already be 0 because the starting LC should have been forced to 0s, but this is safer.
     c_dens_in = [0, 0, 0, 0]
 
     # Step 1: Calculates carbon densities, carbon gross emissions and carbon gross removals (no changes to any)
@@ -1735,7 +1736,7 @@ def calc_short_veg_loss(node, c_dens_in, c_pools_no_fire, times_burned_in_interv
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
     if times_burned_in_interval > 0:
 
-        state_out = accrete_node(node, 1)
+        state_out = accrete_node(node, cn.land_state_node_fire_value)
 
         # Calculates non-CO2 fire emissions using aboveground carbon only for a single year of burning
         ch4_flux_out, n2o_flux_out = non_CO2_fire_equations(c_dens_in[0],
@@ -1783,7 +1784,7 @@ def calc_short_veg_short_veg(node, c_dens_in, times_burned_in_interval):
     # Only assigns fire node code and calculates CH4 and N2O emissions if the pixel burned in the last interval
     if times_burned_in_interval > 0:
 
-        state_out = accrete_node(node, 1)
+        state_out = accrete_node(node, cn.land_state_node_fire_value)
 
         # Calculates non-CO2 fire emissions using aboveground carbon only for a single year of burning
         ch4_flux_out, n2o_flux_out = non_CO2_fire_equations(c_dens_in[0],

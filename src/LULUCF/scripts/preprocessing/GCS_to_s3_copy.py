@@ -5,11 +5,11 @@ A script to copy data from a Google Cloud Storage bucket/folder
 to an AWS S3 bucket/folder using Dask for parallelism on a Coiled cluster.
 
 Features:
-  - Recursively lists all files from the GCS source.
-  - Creates (or uses) a task file (JSON) to track each file copy's status.
+  - Recursively lists all files from the GCS source (does not use Coiled).
+  - Creates (or uses) a task file (JSON) to track each file copy's status (does not use Coiled).
   - Optionally resumes if some files were already copied or failed previously.
   - Gives a rough time estimate and a confirmation prompt before starting.
-  - Copies files in parallel, chunk by chunk, to handle large files.
+  - Copies files in parallel, chunk by chunk, to handle large files (used Coiled).
   - Marks tasks as completed or failed, allowing you to retry.
 
 Usage (example):
@@ -20,8 +20,27 @@ Usage (example):
       --task-file my_tasks.json \\
       --resume  [Optional: to resume a copy that was in process]
 
-python -m src.utilities.create_cluster -n 11 -t 4 -cn AFOLU_flux_model_scripts
-python -m scripts.preprocessing.GCS_to_s3_copy -cn AFOLU_flux_model_scripts --source_root gs://earthenginepartners-hansen/LCLU_2015_2023_v1 --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULULCF/landcover/composite/annual/v1/raw --task_file my_tasks.json
+python -m src.utilities.create_cluster -n 11 -t 4 -m 4 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.GCS_to_s3_copy -cn LULUCF_preprocessing --source_root gs://earthenginepartners-hansen/LCLU_2015_2024_v01 --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/composite/annual/v2/raw --task_file my_tasks.json
+python -m src.LULUCF.scripts.preprocessing.GCS_to_s3_copy -cn LULUCF_preprocessing --source_root gs://earthenginepartners-hansen/Annual_Layers_2015_2024/TCH --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_height/annual/v2_20250716/raw --task_file my_tasks.json
+python -m src.LULUCF.scripts.preprocessing.GCS_to_s3_copy -cn LULUCF_preprocessing --source_root gs://earthenginepartners-hansen/Annual_Layers_2015_2024/VF --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/vegetation_cover/annual/v2_20250716/raw --task_file my_tasks.json
+python -m src.LULUCF.scripts.preprocessing.GCS_to_s3_copy -cn LULUCF_preprocessing --source_root gs://earthenginepartners-hansen/Annual_Layers_2015_2024/built-up --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/builtup/annual/v2_20250716/raw --task_file my_tasks.json
+python -m src.LULUCF.scripts.preprocessing.GCS_to_s3_copy -cn LULUCF_preprocessing --source_root gs://earthenginepartners-hansen/Annual_Layers_2015_2024/cropland --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/cropland/annual/v2_20250716/raw --task_file my_tasks.json
+python -m src.LULUCF.scripts.preprocessing.GCS_to_s3_copy -cn LULUCF_preprocessing --source_root gs://earthenginepartners-hansen/Annual_Layers_2015_2024/water --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/water/annual/v2_20250716/raw --task_file my_tasks.json
+python -m src.LULUCF.scripts.preprocessing.GCS_to_s3_copy -cn LULUCF_preprocessing --source_root gs://earthenginepartners-hansen/Annual_Layers_2015_2024/snow_ice --dest_root s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/landcover/snow_ice/annual/v2_20250716/raw --task_file my_tasks.json
+
+Running all the individual themes (without the composites) with 11 workers took:
+Coiled credits: 10.8
+AWS costs: $0.27
+Total time: 54 minutes
+This includes brief pauses between each transfer as I set up the next one.
+
+It seems to process one task per thread, so using more threads might speed it up-- although I haven't actually tested performance
+since this is a rare task and quite fast overall.
+
+Because the first part of the script where it lists all the files and determines if they're already copied doesn't use Coiled,
+there's actually a fair amount of the cluster sitting idle while local file checking is happening.
+Thus, adding more workers will only speed up the copying so much.
 
 Authentication:
   - GCS: Didn't need any GCS credentials in environment to run this
