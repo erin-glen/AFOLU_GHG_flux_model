@@ -5,8 +5,8 @@ Local test (Dask part does not work):
 python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -bb 116.25 -2.25 116.5 -2 -cs 0.25 --run_local --no_upload -yr 2000 2023 --run_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model_mangrove_testing
-python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model_mangrove_testing -bb 116.25 -2.25 116.5 -2 -cs 0.25 -yr 2015 2023 --run_date 20250826
+python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
+python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 116.25 -2.25 116.5 -2 -cs 0.25 -yr 2015 2023 --run_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
@@ -844,7 +844,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     if mang_loss_in_interval:
                         state_out = nu.accrete_node(node, 1)  # Gain of mangroves + temp loss in interval (111)
                         mang_c_pools_EF_no_fire = cn.biomass_emissions_only
-                        # print(f"mang_c_pools_EF_no_fire: {mang_c_pools_EF_no_fire}")
 
                         (c_gross_emis_out, c_gross_removals_out, c_dens_out, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = (
                             nu.calc_mang_loss(interval_length, first_mang_gain_year, first_mang_loss_year, interval_start_year,
@@ -879,7 +878,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                             mang_c_pools_EF_no_fire, mang_loss_year_in_interval, mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss,
                             RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio_mang, litter_c_ratio_mang))
 
-                    #TODO: If water, maybe don't include all carbon pools? Check wetland supplement.
+                    #TODO: If water, maybe don't include all carbon pools?
                     if water_LC_curr:
                         state_out = nu.accrete_node(node, 1)    # Permanent loss of mangroves to water (121)
                         # print(f"Node code is {state_out}, permanent loss of mangroves to water (121)")
@@ -904,7 +903,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                         state_out = nu.accrete_node(node, 6)    # Permanent loss of mangroves to anything else (126)
                         # print(f"Node code is {state_out}, permanent loss of mangroves to anything else (126)")
 
-                    # print(f"mang_c_pools_EF_no_fire: {mang_c_pools_EF_no_fire}")
                     # print(f"c_dens_in: {c_dens_in}")
                     # print(f"c_dens_out: {c_dens_out}")
                     # print(f"c_gross_removals_out: {c_gross_removals_out}")
@@ -922,7 +920,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     if mang_loss_in_interval:
                         state_out = nu.accrete_node(node, 1)  # Mangrove remaining mangrove + temp loss in interval (131)
                         mang_c_pools_EF_no_fire = cn.biomass_emissions_only
-                        # print(f"mang_c_pools_EF_no_fire: {mang_c_pools_EF_no_fire}")
 
                         (c_gross_emis_out, c_gross_removals_out, c_dens_out, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = (
                             nu.calc_mang_loss(interval_length, first_mang_gain_year, first_mang_loss_year, interval_start_year,
