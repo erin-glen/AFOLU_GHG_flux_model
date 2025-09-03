@@ -384,7 +384,8 @@ def calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array):
 
     return mangrove_RF, mangrove_r_s_ratio, mangrove_deadwood_c_ratio, mangrove_litter_c_ratio
 
-# Returns the first year of mangrove gain (0->1) if there is no mangrove extent at the beginning of the timeseries
+
+# Returns the first year of mangrove gain (0->1) if there is no mangrove extent at the beginning of the timeseries.
 # Also returns first year of mangrove loss (1->0) with or without any subsequent gain.
 # Also returns last year of mangrove loss (1->0) when there is no subsequent gain.
 @jit(nopython=True)
@@ -421,7 +422,7 @@ def mangrove_first_gain_last_loss_years(data_array, year_array):
         last_loss = 0
         suffix_all_zero = 1  # flag: are all values after year zero?
 
-        # Loop backwards over mangrove extent years starting from last year (inclusive) looking for
+        # Loop backwards over mangrove extent years starting from last year (inclusive), looking for
         # the first time it switches from 0 (curr) to 1 (prev) to get final mangrove loss year
         for year in range(length - 1, 0, -1):
             # If there is mangrove extent in current year, the suffix_all_zero flag is set to False
@@ -434,7 +435,8 @@ def mangrove_first_gain_last_loss_years(data_array, year_array):
 
     return first_gain, first_loss, last_loss
 
-# Function to get whether the interval is mangrove gain, loss, or maintenance or before gain or after loss
+
+# Function to get whether the interval is mangrove gain, loss, or maintenance or before gain or after loss.
 # Note: This function assumes mangrove is in the interval because we've already checked that condition in the LULUCF code
 @jit(nopython=True)
 def mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year, last_mang_loss_year):
@@ -468,6 +470,7 @@ def mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year
         )
 
     return mang_loss, mang_gain, mang_remaining_mang, before_mang_gain, after_mang_loss
+
 
 # Returns whether there was mangrove extent loss (1->0), and if so the year of loss
 # Also returns the number of years in the interval before and after mangrove extent loss (for pre- and post-loss gain year counts)
@@ -522,16 +525,17 @@ def mangrove_gain_year_count_summary(data_array, interval_start_year, interval_e
 
     return mang_loss, mang_loss_year, pre_count, post_count
 
-# Takes in the interval_start_year and interval_end_year and returns a list of index values to extract the
+
+# Takes in the interval_length and interval_end_year and returns a list of index values to extract the
 # corresponding data (including the last year from the previous interval) from the GMWv3 timeseries
 @jit(nopython=True)
 def map_years_to_gmwv3_data(interval_end_year, interval_length):
 
     if interval_length == 5:
         if interval_end_year == 2005:
-             return np.array([0, 0, 0, 0, 0, 0], dtype=np.int64)    # 2000 (1996), 2001 (1996), 2002 (1996), 2003 (1996), 2004 (1996), 2005 (1996)
+             return np.array([0, 0, 0, 0, 1, 1], dtype=np.int64)    # 2000 (1996), 2001 (1996), 2002 (1996), 2003 (1996), 2004 (2007), 2005 (2007)
         elif interval_end_year == 2010:
-             return np.array([0, 0, 1, 2, 3, 4], dtype=np.int64)    # 2005 (1996), 2006 (1996), 2007, 2008, 2009, 2010
+             return np.array([1, 1, 1, 2, 3, 4], dtype=np.int64)    # 2005 (2007), 2006 (2007), 2007, 2008, 2009, 2010
         elif interval_end_year == 2015:
              return np.array([4, 4, 4, 4, 4, 5], dtype=np.int64)    # 2010, 2011 (2010), 2012 (2010), 2013 (2010), 2014 (2010), 2015
         elif (interval_end_year == 2020):
@@ -555,6 +559,7 @@ def map_years_to_gmwv3_data(interval_end_year, interval_length):
 
     else:
         raise ValueError("No mangrove index mapping found for for given interval_end_year and interval_length")
+
 
 # Returns the emission factors for partially disturbed forest by driver based on the continent-ecozone combination (unit: fraction AGC lost)
 # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67feb6f2-c124-800a-9279-61f0e3a67faf
@@ -779,7 +784,7 @@ def calc_mang(forest_age_start, first_mang_gain_year, first_mang_loss_year, inte
 # Gross fluxes and ending carbon stocks for intervals with temporary or permanent mangrove loss.
 # Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
 # Applies to 5-year intervals and annual intervals.
-# Annual model has no gain in the year of mangrove loss
+# Annual model has no gain in the year of mangrove loss.
     # gain_year_count_pre_loss = 0 when there is mangrove loss
     # gain_year_count_post_loss = 1 when there is no mangrove loss
 @jit(nopython=True)
@@ -840,9 +845,9 @@ def calc_mang_loss(interval_length, first_mang_gain_year, first_mang_loss_year, 
     # Step 5: Calculates emissions for each C pool (Mg C/ha/interval) for stand replacing mangrove loss.
     # Does not consider fire or partial loss (i.e. "disturbance") of mangroves
     if loss_year > 0:
-        # If it is only temporary mangrove loss, only AGC and BGC carbon pools are emitted (cn.biomass_emissions_only)
-        # If it is permanent mangrove loss, all non-soil carbon pools are emitted (cn.all_non_soil_pools)
-        # Not converting to CO2 yet for consistency with all other outputs (Mg C/ha)
+        # If it is only temporary mangrove loss, only AGC and BGC carbon pools are emitted (cn.biomass_emissions_only).
+        # If it is permanent mangrove loss, all non-soil carbon pools are emitted (cn.all_non_soil_pools).
+        # Not converting to CO2 yet for consistency with all other outputs (Mg C/ha).
         agc_gross_emis_out = agc_pre_loss * agc_ef_CO2
         bgc_gross_emis_out = bgc_pre_loss * bgc_ef_CO2
         deadwood_c_gross_emis_out = deadwood_c_pre_loss * deadwood_c_ef_CO2

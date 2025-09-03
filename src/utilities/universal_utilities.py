@@ -1497,7 +1497,7 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     output_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'] == 'output_layer']
 
     # Groups inputs that are a timeseries so they can go in their own tab so that no tab is too many rows
-    timeseries_input_layers = f'{cn.burned_area_final_pattern}|{cn.forest_disturbance_layer_name}|{cn.vegetation_height_pattern}|{cn.land_cover_pattern}'
+    timeseries_input_layers = f'{cn.burned_area_final_pattern}|{cn.forest_disturbance_layer_name}|{cn.vegetation_height_pattern}|{cn.land_cover_pattern}|{cn.mangrove_extent_processed_pattern}'
 
     # Splits input rows based on whether they are a timeseries input
     annual_1x1_inputs = input_1x1_rows[input_1x1_rows['layer_name'].str.contains(timeseries_input_layers, case=False, na=False)]
