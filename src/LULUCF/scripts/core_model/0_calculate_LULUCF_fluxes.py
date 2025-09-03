@@ -518,8 +518,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 if is_ever_mang:
 
                     # Years represented by GMWv3.
-                    # Changed 2007 to 2005 because 2007 extent represents 2005 in our model.
-                    mang_years = np.array((1996, 2005, 2008, 2009, 2010, 2015, 2016, 2017, 2018, 2019, 2020),dtype=np.int32)
+                    # Changed 2007 to 2004 because 2007 extent represents 2004 in our model.
+                    mang_years = np.array((1996, 2004, 2008, 2009, 2010, 2015, 2016, 2017, 2018, 2019, 2020),dtype=np.int32)
                     #TODO: PASS IN MORE ELEGANTLY AFTER TESTING. Can't just do np.array(cn.mangrove_extent_years, dtype=np.int32)
 
                     # Gets the first year of mangrove gain and last year of mangrove loss during the entire timeseries
