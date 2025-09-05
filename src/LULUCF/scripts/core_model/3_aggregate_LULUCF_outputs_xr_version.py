@@ -307,9 +307,20 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
     # Flattens separate lists of 10x10 aggregations for each s3 folder into a single list that can be fully parallelized
     tile_tasks = [task for sublist in folder_results for task in sublist if task is not None]
 
-    # Actually executes the aggregation on the flat list of tasks
-    main_logger.info(f"Executing {len(tile_tasks)} aggregation tasks across {len(output_dir_list)}: {uu.timestr()}")
-    tile_results = compute(*tile_tasks)
+    batch_size = 100  # or 200–300 depending on memory; you can tune this
+    tile_results = []
+
+    main_logger.info(f"Executing {len(tile_tasks)} aggregation tasks in batches of {batch_size}: {uu.timestr()}")
+
+    for i in range(0, len(tile_tasks), batch_size):
+        batch = tile_tasks[i:i + batch_size]
+        main_logger.info(f"Processing batch {i // batch_size + 1} of {len(batch)}: tasks {i} to {i + len(batch) - 1}")
+        batch_results = compute(*batch)
+        tile_results.extend(batch_results)
+
+    # # Actually executes the aggregation on the flat list of tasks
+    # main_logger.info(f"Executing {len(tile_tasks)} aggregation tasks across {len(output_dir_list)}: {uu.timestr()}")
+    # tile_results = compute(*tile_tasks)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
