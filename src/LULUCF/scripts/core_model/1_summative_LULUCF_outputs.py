@@ -22,6 +22,18 @@ python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessi
 python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
 
 Optimization notes: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210788116876878?focus=true
+
+Summation error notes: The summative outputs don't exactly match the sums of the individual components at the pixel
+or chunk level when summed independently on a calculator because of floating point errors.
+For example, gross emissions from AGC, BGC, deadwood C, and litter C don't exactly match CO2-only emissions.
+I tried a bit to fix this but (https://chatgpt.com/c/681244d9-83dc-800a-b397-0706e79391c0)
+but it really wasn't worth it. The pixel-level and chunk level summative outputs deviate too little from the sums of
+the individual components to make dealing with float64 worth it.
+Analysis of how little the independently summed components differ from the summative outputs for 1884-chunk results are at
+tab "net_vs_gross_floating_pt_error" in
+https://onewri-my.sharepoint.com/:x:/g/personal/david_gibbs_wri_org/EX4w0jshE5ZIt8Yg0gERfRIB83OWJCfSf5gDbF7SgBHkzQ?e=psKFxQ&nav=MTVfe0NFMjcwREFELUFDMkYtNEUzQi1BMTA4LTVBQTREMThCOEExM30
+This also carries over to the all-interval totals, where the independently summed fluxes from each interval do not
+exactly match the all-interval totals. I don't have a saved analysis for that, but it's also a small difference.
 """
 
 import argparse
@@ -492,14 +504,6 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
                                                                             chunk_size_pixels, model_type, interval_end_years_list,
                                                                             interval_year_diff_list, input_date, "per_ha")
 
-    # TODO for testing
-    # summative_inputs_by_interval_dir_list = [path.replace(cn.model_version_underscore, "0_4_2") for path in summative_inputs_by_interval_dir_list]
-    summative_outputs_by_interval_dir_list = [path.replace(cn.model_version_underscore, "0_4_3__summative_test") for path in summative_outputs_by_interval_dir_list]
-    print(len(summative_inputs_by_interval_dir_list))
-    # summative_inputs_by_interval_dir_list = summative_inputs_by_interval_dir_list[0:20]
-    # print(summative_inputs_by_interval_dir_list)
-
-    # print(summative_outputs_by_interval_dir_list)
     if is_final:
         main_logger.info(f"outputs_dir_list:")
         for item in summative_outputs_by_interval_dir_list:
