@@ -9,8 +9,8 @@ python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_model
 python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2000 2024 --run_date YYYYMMDD
 python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 -yr 2000 2024 --run_date YYYYMMDD
 
-Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
+Coiled small tests (1x1 deg chunk needs 32GB worker):
+python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_model
 python -m src.LULUCF.scripts.core_model.0_calculate_LULUCF_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --run_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
@@ -55,6 +55,12 @@ from src.utilities import log_utilities as lu
 from src.utilities import numba_utilities as nu
 from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
+
+# Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
+# The more files in an s3 folder, the longer it takes to access them without this environment variable.
+# A little testing of it in this script suggests that it doesn't save much, if any time, but leaving it in just in case.
+# Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
+os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
 
 # Function to calculate LULUCF fluxes and carbon densities
@@ -2003,7 +2009,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Runs chunks in batches of specified size.
     # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
-    batch_size = 2000
+    batch_size = 3200  # 6 batches to cover all chunks
     # batch_size = 5  # For testing batch processing
 
     # Determines if arguments for start and end year are valid

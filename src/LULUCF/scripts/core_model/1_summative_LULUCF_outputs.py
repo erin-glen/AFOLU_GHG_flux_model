@@ -7,7 +7,6 @@ It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
 python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -bb 20 -1 21 0 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_postprocessing
@@ -23,8 +22,6 @@ python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessi
 python -m src.LULUCF.scripts.core_model.1_summative_LULUCF_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
 
 Optimization notes: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210788116876878?focus=true
-
-TODO Check that the multiplication of the full model sums by interval_length work. I haven't run it since adding those.
 """
 
 import argparse
@@ -44,8 +41,14 @@ from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
 
+# Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
+# The more files in an s3 folder, the longer it takes to access them without this environment variable.
+# It takes about 9 minutes to access the inputs for a 1x1 deg summative output without this and <1 minute with it.
+# Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
+os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
-def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type, interval_year_diff_list, interval_length,
+
+def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type, interval_year_diff_list, interval_length_list,
                                     interval_end_years, is_final, no_upload,
                                     summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list,
                                     stage):
@@ -206,6 +209,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     for i, interval_end_year in enumerate(interval_end_years):
 
         interval_year_diff = interval_year_diff_list[i]
+        interval_length = interval_length_list[i]
         interval_year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
 
         # All of these must be in cn.LULUCF_summative_output_dirs
@@ -220,86 +224,82 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         net_flux_all_pools_CO2_only_key = f"{cn.net_flux_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
         net_flux_all_pools_all_gases_key = f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
 
-        # Full-model outputs need to be summed as float64 so there aren't rounding errors.
-        # Output geotifs are still float32.
-
+        # Need to multiply by interval length because 5-year interval outputs actually contain 5 years of fluxes that need to be summed.
         # Accumulates gross emissions (CO2 only) across intervals
         if total_gross_emis_CO2_only is None:
-            total_gross_emis_CO2_only = out_dict[gross_emis_CO2_only_key].copy()
+            total_gross_emis_CO2_only = out_dict[gross_emis_CO2_only_key] * interval_length
         else:
-            total_gross_emis_CO2_only += out_dict[gross_emis_CO2_only_key]
+            total_gross_emis_CO2_only += out_dict[gross_emis_CO2_only_key] * interval_length
 
         # Accumulates gross emissions (non-CO2 only) across intervals
         if total_gross_emis_non_CO2_only is None:
-            total_gross_emis_non_CO2_only = out_dict[gross_emis_non_CO2_only_key].copy()
+            total_gross_emis_non_CO2_only = out_dict[gross_emis_non_CO2_only_key] * interval_length
         else:
-            total_gross_emis_non_CO2_only += out_dict[gross_emis_non_CO2_only_key]
+            total_gross_emis_non_CO2_only += out_dict[gross_emis_non_CO2_only_key] * interval_length
 
         # Accumulates gross emissions (all gases) across intervals
         if total_gross_emis_all_gases is None:
-            total_gross_emis_all_gases = out_dict[gross_emis_all_gases_key].copy()
+            total_gross_emis_all_gases = out_dict[gross_emis_all_gases_key] * interval_length
         else:
-            total_gross_emis_all_gases += out_dict[gross_emis_all_gases_key]
+            total_gross_emis_all_gases += out_dict[gross_emis_all_gases_key] * interval_length
 
         # Accumulates gross removals across intervals
         if total_gross_removals is None:
-            total_gross_removals = out_dict[gross_removals_key].copy()
+            total_gross_removals = out_dict[gross_removals_key] * interval_length
         else:
-            total_gross_removals += out_dict[gross_removals_key]
+            total_gross_removals += out_dict[gross_removals_key] * interval_length
 
         # Accumulates net flux (AGC) across intervals
         if total_net_flux_AGC_all_gases is None:
-            total_net_flux_AGC_all_gases = out_dict[net_flux_AGC_all_gases_key].copy()
+            total_net_flux_AGC_all_gases = out_dict[net_flux_AGC_all_gases_key] * interval_length
         else:
-            total_net_flux_AGC_all_gases += out_dict[net_flux_AGC_all_gases_key]
+            total_net_flux_AGC_all_gases += out_dict[net_flux_AGC_all_gases_key] * interval_length
 
         # Accumulates net flux (BGC) across intervals
         if total_net_flux_BGC_all_gases is None:
-            total_net_flux_BGC_all_gases = out_dict[net_flux_BGC_all_gases_key].copy()
+            total_net_flux_BGC_all_gases = out_dict[net_flux_BGC_all_gases_key] * interval_length
         else:
-            total_net_flux_BGC_all_gases += out_dict[net_flux_BGC_all_gases_key]
+            total_net_flux_BGC_all_gases += out_dict[net_flux_BGC_all_gases_key] * interval_length
 
         # Accumulates net flux (deadwood C) across intervals
         if total_net_flux_deadwood_c_all_gases is None:
-            total_net_flux_deadwood_c_all_gases = out_dict[net_flux_deadwood_c_all_gases_key].copy()
+            total_net_flux_deadwood_c_all_gases = out_dict[net_flux_deadwood_c_all_gases_key] * interval_length
         else:
-            total_net_flux_deadwood_c_all_gases += out_dict[net_flux_deadwood_c_all_gases_key]
+            total_net_flux_deadwood_c_all_gases += out_dict[net_flux_deadwood_c_all_gases_key] * interval_length
 
         # Accumulates net flux (litter C) across intervals
         if total_net_flux_litter_c_all_gases is None:
-            total_net_flux_litter_c_all_gases = out_dict[net_flux_litter_c_all_gases_key].copy()
+            total_net_flux_litter_c_all_gases = out_dict[net_flux_litter_c_all_gases_key] * interval_length
         else:
-            total_net_flux_litter_c_all_gases += out_dict[net_flux_litter_c_all_gases_key]
+            total_net_flux_litter_c_all_gases += out_dict[net_flux_litter_c_all_gases_key] * interval_length
 
         # Accumulates net flux (all pools, CO2 only) across intervals
         if total_net_flux_all_pools_CO2_only is None:
-            total_net_flux_all_pools_CO2_only = out_dict[net_flux_all_pools_CO2_only_key].copy()
+            total_net_flux_all_pools_CO2_only = out_dict[net_flux_all_pools_CO2_only_key] * interval_length
         else:
-            total_net_flux_all_pools_CO2_only += out_dict[net_flux_all_pools_CO2_only_key]
+            total_net_flux_all_pools_CO2_only += out_dict[net_flux_all_pools_CO2_only_key] * interval_length
 
         # Accumulates net flux (all pools, all gases) across intervals
         if total_net_flux_all_pools_all_gases is None:
-            total_net_flux_all_pools_all_gases = out_dict[net_flux_all_pools_all_gases_key].copy()
+            total_net_flux_all_pools_all_gases = out_dict[net_flux_all_pools_all_gases_key] * interval_length
         else:
-            total_net_flux_all_pools_all_gases += out_dict[net_flux_all_pools_all_gases_key]
+            total_net_flux_all_pools_all_gases += out_dict[net_flux_all_pools_all_gases_key] * interval_length
 
         # print(gross_removals_key)
         # print(out_dict[gross_removals_key].min())
 
     # Store the full model summed outputs in out_dict with appropriate suffixes.
-    # Need to multiply by interval length because 5-year interval outputs actually contain 5 years of fluxes that need to be summed.
-    # TODO Check that the multiplication by interval_length works. I haven't run it.
     full_period_label = f"{start_year}_{end_year}"
-    out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_ha_{full_period_label}"] = total_gross_emis_CO2_only * interval_length
-    out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_ha_{full_period_label}"] = total_gross_emis_non_CO2_only * interval_length
-    out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}_ha_{full_period_label}"] = total_gross_emis_all_gases * interval_length
-    out_dict[f"{cn.gross_removals_all_C_pools_pattern}_ha_{full_period_label}"] = total_gross_removals * interval_length
-    out_dict[f"{cn.net_flux_agc_pattern}_ha_{full_period_label}"] = total_net_flux_AGC_all_gases * interval_length
-    out_dict[f"{cn.net_flux_bgc_pattern}_ha_{full_period_label}"] = total_net_flux_BGC_all_gases * interval_length
-    out_dict[f"{cn.net_flux_deadwood_c_pattern}_ha_{full_period_label}"] = total_net_flux_deadwood_c_all_gases * interval_length
-    out_dict[f"{cn.net_flux_litter_c_pattern}_ha_{full_period_label}"] = total_net_flux_litter_c_all_gases * interval_length
-    out_dict[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_ha_{full_period_label}"] = total_net_flux_all_pools_CO2_only * interval_length
-    out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}_ha_{full_period_label}"] = total_net_flux_all_pools_all_gases * interval_length
+    out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_ha_{full_period_label}"] = total_gross_emis_CO2_only
+    out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_ha_{full_period_label}"] = total_gross_emis_non_CO2_only
+    out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}_ha_{full_period_label}"] = total_gross_emis_all_gases
+    out_dict[f"{cn.gross_removals_all_C_pools_pattern}_ha_{full_period_label}"] = total_gross_removals
+    out_dict[f"{cn.net_flux_agc_pattern}_ha_{full_period_label}"] = total_net_flux_AGC_all_gases
+    out_dict[f"{cn.net_flux_bgc_pattern}_ha_{full_period_label}"] = total_net_flux_BGC_all_gases
+    out_dict[f"{cn.net_flux_deadwood_c_pattern}_ha_{full_period_label}"] = total_net_flux_deadwood_c_all_gases
+    out_dict[f"{cn.net_flux_litter_c_pattern}_ha_{full_period_label}"] = total_net_flux_litter_c_all_gases
+    out_dict[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_ha_{full_period_label}"] = total_net_flux_all_pools_CO2_only
+    out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}_ha_{full_period_label}"] = total_net_flux_all_pools_all_gases
 
     # print(out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
     # print(out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
@@ -491,6 +491,14 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
                                                                             chunk_size_pixels, model_type, interval_end_years_list,
                                                                             interval_year_diff_list, input_date, "per_ha")
+
+    # TODO for testing
+    # summative_inputs_by_interval_dir_list = [path.replace(cn.model_version_underscore, "0_4_2") for path in summative_inputs_by_interval_dir_list]
+    summative_outputs_by_interval_dir_list = [path.replace(cn.model_version_underscore, "0_4_3__summative_test") for path in summative_outputs_by_interval_dir_list]
+    print(len(summative_inputs_by_interval_dir_list))
+    # summative_inputs_by_interval_dir_list = summative_inputs_by_interval_dir_list[0:20]
+    # print(summative_inputs_by_interval_dir_list)
+
     # print(summative_outputs_by_interval_dir_list)
     if is_final:
         main_logger.info(f"outputs_dir_list:")
@@ -500,7 +508,6 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
-
 
     ### Step 2: Create 1x1 degree outputs
 

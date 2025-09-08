@@ -224,7 +224,7 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
 
     # Runs chunks in batches of specified size.
     # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
-    batch_size = 3000
+    batch_size = 100
     # batch_size = 15  # For testing batch processing
     # batch_size = 1  # For testing batch processing
 
@@ -307,11 +307,11 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
     # Flattens separate lists of 10x10 aggregations for each s3 folder into a single list that can be fully parallelized
     tile_tasks = [task for sublist in folder_results for task in sublist if task is not None]
 
-    batch_size = 100  # or 200–300 depending on memory; you can tune this
     tile_results = []
 
     main_logger.info(f"Executing {len(tile_tasks)} aggregation tasks in batches of {batch_size}: {uu.timestr()}")
 
+    # Batching code per ChatGPT: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68af555f-ee54-8320-956e-217eed17e61a
     for i in range(0, len(tile_tasks), batch_size):
         batch = tile_tasks[i:i + batch_size]
         main_logger.info(f"Processing batch {i // batch_size + 1} of {len(batch)}: tasks {i} to {i + len(batch) - 1}")
