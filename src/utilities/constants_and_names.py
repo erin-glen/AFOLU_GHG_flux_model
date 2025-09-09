@@ -768,6 +768,9 @@ agc_emission_factor = "AGC_emission_factor_CO2_only__fraction"
 
 model_type_placholder = "MODEL_TYPE"
 
+zarr_output_pattern = "global_zarr"
+zarr_pixel_chunks = 10000
+
 # List of output directories with placeholders for parts of the directory
 LULUCF_core_output_dirs = [
     f"{outputs_path}{agc_modeled_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
