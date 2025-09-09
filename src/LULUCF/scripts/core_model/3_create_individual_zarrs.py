@@ -1,15 +1,10 @@
 """
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
-Can only run on 1x1 degree chunks that do not have the run timestamp in the file name.
-The way this builds the input file names, it can't handle filenames with the run timestamp.
-It also can't handle chunks smaller than 1x1 degree.
-Aggregates in batches because there are so many tasks for this step that it's just more likely to fail part way through
-and so having batches allows easier restarting. The tasks are in a pre-determined alphabetical order,
-so each batch should have the same contents for any given set of inputs.
+
 
 Local test:
-python -m src.LULUCF.scripts.core_model.create_global_mega_zarr -yr 2000 2024 --first_folders_to_process 2 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
+python -m src.LULUCF.scripts.core_model.3_create_individual_zarrs -yr 2000 2024 --first_folders_to_process 2 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
 
 Coiled small test:
 python -m src.utilities.create_cluster -n 2 -m 32 -cn LULUCF_postprocessing
@@ -24,6 +19,7 @@ python -m src.utilities.create_cluster -n 2 -m 32 -cn LULUCF_postprocessing
 
 import argparse
 import fsspec
+import rasterio
 import re
 from collections import defaultdict
 import numpy as np
@@ -42,66 +38,69 @@ from osgeo import gdal
 from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
-from src.utilities import resize_cluster
 
 
-def build_global_zarr(output_dir_list, logger, client, zarr_output_path):
-    """Reads GeoTIFFs from multiple folders and writes a unified Zarr dataset."""
+def build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger):
 
-    logger.info(f"Starting Zarr creation for {len(output_dir_list)} folders.")
-    datasets = []
+    main_logger.info(f"Starting Zarr creation for {len(output_dir_list)} folders.")
 
     for folder in output_dir_list:
-        logger.info(f"Scanning GeoTIFFs in: {folder}")
+        main_logger.info(f"Scanning geotiffs in: {folder}")
+        folder_start_time = uu.timestr()
 
         fs = fsspec.filesystem('s3', use_listings_cache=False, anon=False) if folder.startswith('s3://') else fsspec.filesystem('file')
 
         if folder.startswith('s3://'):
-            no_prefix = folder[5:]
-            bucket, *key_parts = no_prefix.split('/')
-
             keys = fs.glob(os.path.join(folder, '*.tif'))
-            tif_files = [f if f.startswith("s3://") else f"s3://{f}" for f in keys]
-
-
+            chunk_list = [f if f.startswith("s3://") else f"s3://{f}" for f in keys]
         else:
-            tif_files = fs.glob(os.path.join(folder, '*.tif'))
+            chunk_list = fs.glob(os.path.join(folder, '*.tif'))
 
-        if not tif_files:
-            logger.warning(f"No TIFFs found in {folder}")
-            continue
+        # Limits chunks to process (for testing)
+        if first_1x1s_to_process:
+            chunk_list = chunk_list[:first_1x1s_to_process]
 
-        folder_name = os.path.basename(os.path.normpath(folder))
-        rasters = []
-        for f in tif_files:
-            logger.info(f"Opening {f} with lazy chunking")
-            da = rioxarray.open_rasterio(f, chunks=True)
-            da = da.expand_dims({'product': [folder_name]})
-            rasters.append(da)
+        # Sample tif for getting various path and metadata from
+        sample_tif = chunk_list[0]
 
-        if rasters:
-            folder_ds = xr.concat(rasters, dim='band')  # May be better as dim='time' later
-            datasets.append(folder_ds)
+        with rasterio.open(sample_tif) as src:
+            data_type = src.dtypes[0]
 
-    if not datasets:
-        logger.error("No datasets to write. Exiting.")
-        return
+        layer_pattern = re.search(r"version_\d+_\d+_\d+(?:_[^/]*)?/([^/]+)/", sample_tif).group(1)
+        # print(layer_pattern)
 
-    logger.info("Concatenating all folders into global dataset")
-    global_ds = xr.concat(datasets, dim='product')  # Could later be 'interval' or 'year' etc.
+        layer_date = re.search(r"intervals/([^/]+)", sample_tif).group(1)
+        # print(layer_date)
 
-    logger.info("Chunking dataset for Dask...")
-    global_ds = global_ds.chunk({'product': 1, 'band': 1, 'x': 1024, 'y': 1024})
+        layer_unit = re.search(r"([^/]+)/4000", sample_tif).group(1)
+        # print(layer_unit)
 
-    logger.info(f"Writing global Zarr to: {zarr_output_path}")
-    global_ds.to_zarr(zarr_output_path, mode='w', consolidated=True)
+        # Constructs the output path
+        if layer_unit == layer_date:
+            out_file = f"{layer_pattern}_{layer_date}.zarr"
+        else:
+            out_file = f"{layer_pattern}{layer_unit}_{layer_date}.zarr"
 
-    logger.info("✅ Zarr writing complete")
+        out_path = folder.replace("4000_pixels", "global_zarr")
+        out_path_final = out_path + out_file
+        # print(out_path_final)
+
+        main_logger.info(f"Opening files in {folder}: {uu.timestr()}")
+        da = xr.open_mfdataset(
+            chunk_list,
+            parallel=True,
+            chunks={'x': 10000, 'y': 10000}
+        ).astype(data_type)
+
+        main_logger.info(f"Saving {folder} as zarr: {uu.timestr()}")
+        da.to_zarr(out_path_final, mode='w')
+
+        folder_end_time = time.time()
+        main_logger.info(f"Zarring {folder} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}")
 
 
-def main(cluster_name, year_range, input_date, number_of_workers, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         first_folders_to_process=None, first_10x10s_to_process=None, log_note=None):
-
+def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
+         first_folders_to_process=None, first_1x1s_to_process=None, log_note=None):
 
     ### Step 1: Preparation
 
@@ -145,7 +144,9 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2001_2005/_ha_yr/4000_pixels/20250904/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2006_2010/_ha_yr/4000_pixels/20250904/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
         "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/"
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/"
     ]
 
     # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
@@ -176,9 +177,9 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
         output_dir_list = output_dir_list[:first_folders_to_process]
 
     main_logger.info(f"Directories to zarr: {output_dir_list}")
-    main_logger.info(f"There are {len(output_dir_list)} folders to combine into zarr")
+    main_logger.info(f"There are {len(output_dir_list)} folders to conert into global zarrs")
 
-    build_global_zarr(output_dir_list, main_logger, client, 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarring/test_global_zarr.zarr')
+    build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
@@ -205,9 +206,8 @@ if __name__ == "__main__":
     parser.add_argument('-rd', '--input_date', help='Date of core model run, in YYYYMMDD')
     parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2024.')
     parser.add_argument('-ffol', '--first_folders_to_process', type=int, help='Number of folders to process from input list')
-    parser.add_argument('-ften', '--first_10x10s_to_process', type=int, help='Number of chunks to process from input list')
+    parser.add_argument('-ften', '--first_1x1s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
-    parser.add_argument('-nw', '--number_of_workers', type=int, help='Number of workers to rescale to after local input list processing is done. Optonal')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
@@ -220,15 +220,14 @@ if __name__ == "__main__":
     input_date = args.input_date
     year_range = args.year_range
     first_folders_to_process = args.first_folders_to_process
-    first_10x10s_to_process = args.first_10x10s_to_process
+    first_1x1s_to_process = args.first_1x1s_to_process
     log_note = args.log_note
-    number_of_workers = args.number_of_workers
 
     run_local = args.run_local
     no_stats = args.no_stats
     no_log = args.no_log
     no_upload = args.no_upload
 
-    main(cluster_name, year_range, input_date, number_of_workers, run_local, no_stats, no_log, no_upload,
+    main(cluster_name, year_range, input_date, run_local, no_stats, no_log, no_upload,
          first_folders_to_process=first_folders_to_process,
-         first_10x10s_to_process=first_10x10s_to_process, log_note=log_note)
+         first_1x1s_to_process=first_1x1s_to_process, log_note=log_note)

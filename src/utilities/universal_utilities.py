@@ -184,7 +184,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
             with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
                                height=chunk_length_pixels, count=1,
                                dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                               tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
+                               tiled=True, blockxsize=4000, blockysize=4000, nodata=no_data_val) as dst:
                 dst.write(data_array, 1)
 
         # No NoData value in output raster
@@ -192,7 +192,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
             with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
                                height=chunk_length_pixels, count=1,
                                dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                               tiled=True, blockxsize=400, blockysize=400) as dst:
+                               tiled=True, blockxsize=4000, blockysize=4000) as dst:
                 dst.write(data_array, 1)
 
         upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
