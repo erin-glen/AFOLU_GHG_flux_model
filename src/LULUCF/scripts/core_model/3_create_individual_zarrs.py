@@ -35,7 +35,6 @@ import warnings
 import xarray as xr
 from dask.distributed import Client, print
 
-import rechunker
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -99,17 +98,21 @@ def build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger):
         da = xr.open_mfdataset(
             chunk_list,
             parallel=True,
-            # chunks={'x': cn.zarr_pixel_chunks, 'y': cn.zarr_pixel_chunks}
+            chunks={'x': cn.zarr_pixel_chunks, 'y': cn.zarr_pixel_chunks}  # This doesn't actually rechunk to 10000x10000. It takes it up to 4000x4000.
         ).astype(data_type)
+
+        # print(da)  # To check chunks
 
         # Explicitly rechunks to 10000x10000
         da = da.chunk({'x': cn.zarr_pixel_chunks, 'y': cn.zarr_pixel_chunks})
+
+        # print(da)  # To check chunks
 
         main_logger.info(f"Saving {folder} as zarr: {uu.timestr()}")
         original_var_name = list(da.data_vars.keys())[0]
         da = da.rename({original_var_name: out_file})
         da.to_zarr(out_path_final, mode='w')
-        print(da)
+        # print(da)
 
         folder_end_time = time.time()
         main_logger.info(f"Zarring {folder} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}")
