@@ -124,7 +124,7 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = 'LULUCF_output_zarr_creation'
+    stage = 'LULUCF_dataset_zarr_creation'
     model_type = 'standard_model'
 
     # Determines if arguments for start and end year are valid
@@ -163,9 +163,11 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2001_2005/_ha_yr/4000_pixels/20250904/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2006_2010/_ha_yr/4000_pixels/20250904/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/"
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/"
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__BGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__BGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/"
     ]
 
     # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.

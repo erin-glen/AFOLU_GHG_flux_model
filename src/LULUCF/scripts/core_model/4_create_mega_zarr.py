@@ -27,6 +27,7 @@ import numpy as np
 import os
 import sys
 import time
+import warnings
 import xarray as xr
 from dask.distributed import Client, print
 
@@ -35,6 +36,13 @@ from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 
+# To hide the warning "UserWarning: Consolidated metadata is currently not part in the Zarr format 3 specification. It may not be supported by other zarr implementations and may change in the future."
+warnings.filterwarnings(
+    "ignore",
+    message="Consolidated metadata is currently not part in the Zarr format 3 specification.*",
+    category=UserWarning,
+    module="zarr.api.asynchronous"
+)
 
 def build_mega_zarr(output_dir_list, main_logger):
 
@@ -46,7 +54,7 @@ def build_mega_zarr(output_dir_list, main_logger):
         main_logger.info(f"Scanning {folder}: {uu.timestr()}")
 
         fs = fsspec.filesystem('s3') if folder.startswith("s3://") else fsspec.filesystem("file")
-        zarr_paths = fs.glob(os.path.join(folder, '*.zarr'))
+        zarr_paths = [f"s3://{path}" for path in fs.glob(os.path.join(folder, '*.zarr'))]
 
         if not zarr_paths:
             main_logger.warning(f"No zarr datasets found in: {folder}")
@@ -56,17 +64,15 @@ def build_mega_zarr(output_dir_list, main_logger):
             main_logger.info(f"Opening zarr {zarr_path}: {uu.timestr()}")
             ds = xr.open_zarr(zarr_path, consolidated=True)
 
-            # Extract interval from path
+            # Extracts interval from path
             interval = re.search(r"hybrid_intervals/([^/]+)", zarr_path).group(1)
 
             for var_name in ds.data_vars:
-                # Expand interval dimension
-                da = ds[var_name].expand_dims({'interval': [interval]})
-                data_vars_by_name[var_name].append(da)
+                base_var_name = re.sub(r"_\d{4}\.zarr$", "", var_name)
+                da = ds[var_name].expand_dims({'interval': [int(interval[-4:])]})  # interval variable is just the end year
+                data_vars_by_name[base_var_name].append(da)
 
             print(ds)
-
-    print(data_vars_by_name)
 
     if not data_vars_by_name:
         main_logger.error(f"No variables found to combine: {uu.timestr()}")
@@ -77,13 +83,19 @@ def build_mega_zarr(output_dir_list, main_logger):
     final_vars = {}
 
     for var_name, da_list in data_vars_by_name.items():
-        main_logger.info(f" - Combining variable {var_name}: {uu.timestr()}")
+        main_logger.info(f"Combining variable {var_name}: {uu.timestr()}")
         combined = xr.concat(da_list, dim='interval')
         final_vars[var_name] = combined.chunk({'x': cn.zarr_pixel_chunks, 'y': cn.zarr_pixel_chunks, 'interval': 1})
 
     mega_ds = xr.Dataset(final_vars)
 
-    output_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing/mega_zarr/all_outputs.zarr"
+    print("MEGAZARR!!!!!!")
+    print(mega_ds)
+    print("AGC shape:", mega_ds["carbon_density__AGC__MgC_ha"].shape)
+    print("BGC shape:", mega_ds["carbon_density__BGC__MgC_ha"].shape)
+    print("interval values:", mega_ds.coords["interval"].values)
+
+    output_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/mega_zarr/20250904/all_outputs.zarr"
 
     main_logger.info(f"Writing mega-Zarr to {output_path}: {uu.timestr()}")
     mega_ds.to_zarr(output_path, mode='w', consolidated=True)
@@ -92,12 +104,12 @@ def build_mega_zarr(output_dir_list, main_logger):
 
 
 def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         first_folders_to_process=None, first_1x1s_to_process=None, log_note=None):
+         first_folders_to_process=None, log_note=None):
 
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = 'LULUCF_output_zarr_creation'
+    stage = 'LULUCF_output_mega_zarr_creation'
     model_type = 'standard_model'
 
     # Determines if arguments for start and end year are valid
@@ -136,9 +148,12 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2001_2005/_ha_yr/4000_pixels/20250904/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2006_2010/_ha_yr/4000_pixels/20250904/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
-        f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2005/_ha/{cn.zarr_output_pattern}/20250904/",
-        f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2010/_ha/{cn.zarr_output_pattern}/20250904/"
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/"
+        f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2005/_ha/{cn.zarr_output_pattern}/20250904/",
+        f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2010/_ha/{cn.zarr_output_pattern}/20250904/",
+        f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__BGC__MgC/standard_model/hybrid_intervals/2005/_ha/{cn.zarr_output_pattern}/20250904/",
+        f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__BGC__MgC/standard_model/hybrid_intervals/2010/_ha/{cn.zarr_output_pattern}/20250904/"
+
     ]
 
     # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
@@ -169,7 +184,7 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
         output_dir_list = output_dir_list[:first_folders_to_process]
 
     main_logger.info(f"Directories to zarr: {output_dir_list}")
-    main_logger.info(f"There are {len(output_dir_list)} folders to conert into global zarrs")
+    main_logger.info(f"There are {len(output_dir_list)} folders to convert into global zarrs")
 
     build_mega_zarr(output_dir_list, main_logger)
 
@@ -198,7 +213,6 @@ if __name__ == "__main__":
     parser.add_argument('-rd', '--input_date', help='Date of core model run, in YYYYMMDD')
     parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2024.')
     parser.add_argument('-ffol', '--first_folders_to_process', type=int, help='Number of folders to process from input list')
-    parser.add_argument('-ften', '--first_1x1s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
@@ -212,7 +226,6 @@ if __name__ == "__main__":
     input_date = args.input_date
     year_range = args.year_range
     first_folders_to_process = args.first_folders_to_process
-    first_1x1s_to_process = args.first_1x1s_to_process
     log_note = args.log_note
 
     run_local = args.run_local
@@ -221,5 +234,4 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     main(cluster_name, year_range, input_date, run_local, no_stats, no_log, no_upload,
-         first_folders_to_process=first_folders_to_process,
-         first_1x1s_to_process=first_1x1s_to_process, log_note=log_note)
+         first_folders_to_process=first_folders_to_process, log_note=log_note)
