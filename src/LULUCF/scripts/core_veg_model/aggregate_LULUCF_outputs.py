@@ -9,19 +9,19 @@ and so having batches allows easier restarting. The tasks are in a pre-determine
 so each batch should have the same contents for any given set of inputs.
 
 Local test:
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -yr 2000 2024 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
+python -m src.LULUCF.scripts.core_veg_model.3_aggregate_LULUCF_outputs -yr 2000 2024 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
 
 Coiled small test:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2024 --first_10x10s_to_process 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.core_veg_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2024 --first_10x10s_to_process 2 --input_date YYYYMMDD
 
 Coiled large shapefile test (create a cluster with 1 worker, then resize it to 100 workers after local processing is done):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD -nw 100 -ln "This is the aggregation of the 1884-chunk run."
+python -m src.LULUCF.scripts.core_veg_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD -nw 100 -ln "This is the aggregation of the 1884-chunk run."
 
 Full Coiled run (create a cluster with 1 worker, then resize it to 200 workers after local processing is done):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD -nw 200 -ln "This is intended to be the definitive global run."
+python -m src.LULUCF.scripts.core_veg_model.3_aggregate_LULUCF_outputs -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD -nw 200 -ln "This is intended to be the definitive global run."
 
 Notes on optimizing threads/worker: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210803828525318?focus=true
 Tests of this aggregation and other aggregations show that 1 thread/worker with 4GB workers is low in Coiled credit usage

@@ -229,7 +229,7 @@ def preprocess_and_upload_1x1_deg_smoothed_mangrove_data(bounds, download_dict_w
         layer = futures[future]
         data, status = future.result()
         if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
-            lu.print_and_log(f"{status}", is_final, logger_worker)
+            lu.print_and_log(f"{status}", False, logger_worker)
         layers[layer] = data
     #print(f"layers: {layers}")
 
@@ -287,7 +287,7 @@ def preprocess_and_upload_1x1_deg_smoothed_mangrove_data(bounds, download_dict_w
             area_layer = area_futures[area_future]
             data, status = area_future.result()
             if 'success' not in status:  # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
-                lu.print_and_log(f"{status}", is_final, logger_worker)
+                lu.print_and_log(f"{status}", False, logger_worker)
             area_layers[area_layer] = data
         #print(f"area_layers: {area_layers}")
         #print(f"maximum pixel area: {area_layers['pixel_area_m2'].max()}")

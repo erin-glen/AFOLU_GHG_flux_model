@@ -25,10 +25,14 @@ from datetime import datetime
 from io import BytesIO
 from numba import jit
 from osgeo import gdal
-import gc
+from rasterio.session import AWSSession
+
 
 # Turns off a FutureWarning about gdal.UseExceptions() vs. gdal.DontUseExceptions()
 gdal.UseExceptions()
+
+session = boto3.Session()
+aws_session = AWSSession(session)
 
 # Project imports
 from src.utilities import constants_and_names as cn, log_utilities as lu
@@ -643,10 +647,6 @@ def stage_duration(start_time_str, end_time_str, stage, logger, format="full"):
 
     logger.info(f"Elapsed time for {stage}: {end_time - start_time}" + "\n")
 
-from rasterio.session import AWSSession
-session = boto3.Session()
-aws_session = AWSSession(session)
-
 # Lazily opens tile within provided bounds (i.e. one chunk) and returns as a numpy array.
 # If it can't open the uri for the chunk (tile does not exist), it creates a numpy array of all 0s
 # of the correct datatype for that input.
@@ -659,12 +659,18 @@ aws_session = AWSSession(session)
 def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
 
     bounds_str = boundstr(bounds)
+    numpy_dtype = map_to_numpy_dtype(data_type)
+    expected_shape = (chunk_length_pixels, chunk_length_pixels)
 
     # If the uri exists, the relevant window is opened and returned and returned as an array.
     # Note that this chunk could still just have NoData values, which would be downloaded.
     # And, if the uri exists but the raster just doesn't extend there (e.g., far north), the array has to be padded to
     # reach the expected size.
     try:
+        # Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
+        # The more files in an s3 folder, the longer it takes to access them without this environment variable.
+        # It takes about 9 minutes to access the inputs for a 1x1 deg summative output without this and <1 minute with it.
+        # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
         with rasterio.Env(aws_session, AWS_REQUEST_PAYER='requester', GDAL_DISABLE_READDIR_ON_OPEN='TRUE'):
             with rasterio.open(uri) as ds:
                 window = rasterio.windows.from_bounds(*bounds, ds.transform)
@@ -672,11 +678,9 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
 
                 # Checks if array shape is not what we expect (full chunk size) and pads the array if the array is incomplete.
                 # Per https://chatgpt.com/c/67dcb99b-edb8-800a-abd8-f718de76043c
-
-                expected_shape = (chunk_length_pixels, chunk_length_pixels)
                 if data.shape != expected_shape:
                     original_shape = data.shape
-                    numpy_dtype = map_to_numpy_dtype(data_type)
+
                     padded_data = np.zeros(expected_shape, dtype=numpy_dtype)
 
                     # Calculates offset in pixels relative to chunk

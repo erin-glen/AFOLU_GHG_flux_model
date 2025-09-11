@@ -100,7 +100,7 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, n
         layer = futures[future]  # Gets the corresponding key
         data, status = future.result()  # Unpacks the tuple result
         if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
-            lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
+            lu.print_and_log(f"{status}: {uu.timestr()}", False, logger_worker)
         layers[layer] = data
 
     organic_soil_mask_uri = f"{cn.organic_soil_extent_dir}{tile_id}_{cn.organic_soil_extent_pattern}.tif"

@@ -7,7 +7,8 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "1.0.0"
+model_version = "0.4.3"
+# model_version = "1.0.0"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets
@@ -226,9 +227,9 @@ SDPT_other_code = 3
 # Pattern for date (XXXX), date range (XXXX_YYYY), or date range (XXXX_YYYY_XXXX_YYYY, SOC only) with 1 or 2 leading _ in output file names
 date_date_range_pattern = r'_{1,2}(?:\d{4}(?:_\d{4})*)'
 
-AFOLU_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/"
-LULUCF_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/"
-cropland_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/cropland_emissions/"
+AFOLU_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/"
+LULUCF_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/"
+cropland_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/cropland_emissions/"
 
 local_log_path = "logs/"
 s3_log_path = "climate/AFOLU_flux_model/LULUCF/model_logs/"
@@ -239,7 +240,7 @@ local_chunk_stats_path = "chunk_stats/"
 s3_chunk_stats_path = "climate/AFOLU_flux_model/LULUCF/chunk_stats/"
 
 # 1x1 deg fishnet between 80N and 60N, 180W and 180E that intersects GADM4.1 and has GADM iso joined to it
-fishnet_1x1deg_s3_dir = f"{AFOLU_path}fishnet_1x1deg/20250429/"
+fishnet_1x1deg_s3_dir = f"{AFOLU_dir}fishnet_1x1deg/20250429/"
 
 fishnet_1x1deg_all_land_name = "fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp"
 
@@ -263,19 +264,19 @@ pixel_meanings = [flux_density_pixel_meaning, flux_per_pixel_pixel_meaning,
 
 ##### Inputs
 
-land_cover_5_year_path = f"{LULUCF_path}landcover/composite/five_year/v1/raw/"
-land_cover_annual_path = f"{LULUCF_path}landcover/composite/annual/v2/raw/"
+land_cover_5_year_path = f"{LULUCF_dir}landcover/composite/five_year/v1/raw/"
+land_cover_annual_path = f"{LULUCF_dir}landcover/composite/annual/v2/raw/"
 land_cover_pattern = "land_cover_composite"  # Raw tifs don't have a pattern; this is just for use in the numba data dictionary
 
 vegetation_height_annual_GLAD_path = "https://glad.geog.umd.edu/Potapov/Global_TCH_2015-23"
-vegetation_height_5_year_path = f"{LULUCF_path}landcover/vegetation_height/five_year/v1/raw/"
+vegetation_height_5_year_path = f"{LULUCF_dir}landcover/vegetation_height/five_year/v1/raw/"
 vegetation_height_5_year_pattern = "vegetation_height"
-vegetation_height_annual_path = f"{LULUCF_path}landcover/vegetation_height/annual/v2_20250716/raw/"
+vegetation_height_annual_path = f"{LULUCF_dir}landcover/vegetation_height/annual/v2_20250716/raw/"
 vegetation_height_annual_pattern = ""
 vegetation_height_pattern = "vegetation_height"  # Raw tifs don't have a pattern; this is just for use in the numba data dictionary
 
 
-forest_disturbance_annual_dir = f"{LULUCF_path}landcover/annual_forest_disturbance/raw/"
+forest_disturbance_annual_dir = f"{LULUCF_dir}landcover/annual_forest_disturbance/raw/"
 forest_disturbance_layer_name = "forest_disturbance"
 
 ### Biomass and carbon densities
@@ -583,7 +584,7 @@ oil_palm_2000_extent_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emi
 oil_palm_2000_extent_pattern = "plantation_2000_or_earlier_processed"
 
 # Descals et al. 2024: https://essd.copernicus.org/articles/16/5111/2024/essd-16-5111-2024-discussion.html
-oil_palm_first_year_dir = f"{AFOLU_path}organic_soils/inputs/processed/descals_plantation/year/20241105/"
+oil_palm_first_year_dir = f"{AFOLU_dir}organic_soils/inputs/processed/descals_plantation/year/20241105/"
 oil_palm_first_year_pattern = "descals_year"
 
 # Originally from gfw-data-lake, so it's in 400x400 windows
@@ -649,8 +650,8 @@ SOC_change_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_m
 
 # Cropland emissions
 cropland_emis_run_date =  '20241204'
-global_cropland_emissions_raw_dir = f"{AFOLU_path}cropland_emissions/raw__from_Cornell/20241126/year_2020/all_sources/"
-global_cropland_emissions_processed_dir = f"{AFOLU_path}cropland_emissions/processed/{cropland_emis_run_date}/year_2020/all_sources"
+global_cropland_emissions_raw_dir = f"{AFOLU_dir}cropland_emissions/raw__from_Cornell/20241126/year_2020/all_sources/"
+global_cropland_emissions_processed_dir = f"{AFOLU_dir}cropland_emissions/processed/{cropland_emis_run_date}/year_2020/all_sources"
 
 global_cropland_mean_rate_harvest_area_all_crops_peat_2006_raw_pattern = "Global_grid_all_GHGs_cropland_mean_rate_harvest_area_CO2eq_all_crops_2006_kg_ha_CO2.tif"
 global_cropland_mean_rate_harvest_area_all_crops_peat_2006_processed_dir = f"{global_cropland_emissions_processed_dir}/mean_rate/including_peatland/2006/harvest_area/"
