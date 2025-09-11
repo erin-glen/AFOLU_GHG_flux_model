@@ -43,6 +43,12 @@ from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
 
+# Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
+# The more files in an s3 folder, the longer it takes to access them without this environment variable.
+# It takes about 9 minutes to access the inputs for a 1x1 deg summative output without this and <1 minute with it.
+# Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
+os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
+
 
 def create_per_pixel_LULUCF_outputs(bounds, start_year, end_year, interval_type, interval_year_diff, interval_length,
                                     interval_end_years, is_final, no_upload,

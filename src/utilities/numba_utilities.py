@@ -357,6 +357,209 @@ def calc_primary_forest_RF(continent_ecozone_cell, primary_forest_RF_array):
 
     return primary_forest_RF
 
+# Returns the aboveground biomass accumulation rate (Mg biomass/ha/yr) for mangroves based on the continent-ecozone combination
+# Converts it to a removal factor (Mg AGC/ha/yr) by multiplying it by the carbon fraction for mangrove forests.
+# Also returns the ratios of BGC:AGC, deadwood C:AGC and litter C:AGC for mangrove forests
+@jit(nopython=True)
+def calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array):
+
+    mangrove_RF_indices = np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)
+
+    # Checks if there are matching indices and extracts corresponding mangrove RF
+    if mangrove_RF_indices[0].size > 0:  # If matching continent-ecozone combination...
+        mangrove_BA = mangrove_C_ratio_array[mangrove_RF_indices[0][0], 1]  # Uses matching mangrove biomass accumulation rate
+        mangrove_RF = mangrove_BA * cn.biomass_to_carbon_mangrove           # Converts units of biomass to units of carbon (i.e. removal factor)
+
+        mangrove_r_s_ratio = mangrove_C_ratio_array[mangrove_RF_indices[0][0], 2]           # Uses matching mangrove BGC:AGC ratio
+        mangrove_deadwood_c_ratio = mangrove_C_ratio_array[mangrove_RF_indices[0][0], 3]    # Uses matching mangrove deadwood:AGC ratio
+        mangrove_litter_c_ratio = mangrove_C_ratio_array[mangrove_RF_indices[0][0], 4]      # Uses matching mangrove litter:AGC ratio
+
+    else:  # If no matching continent-ecozone combination...
+        mangrove_BA = np.mean(mangrove_C_ratio_array[:, 1])         # Uses average of all mangrove biomass accumulation rates
+        mangrove_RF = mangrove_BA * cn.biomass_to_carbon_mangrove
+
+        mangrove_r_s_ratio = np.mean(mangrove_C_ratio_array[:, 2])          # Uses average of all mangrove BGC:AGC ratios
+        mangrove_deadwood_c_ratio = np.mean(mangrove_C_ratio_array[:, 3])   # Uses average of all mangrove deadwood:AGC ratio
+        mangrove_litter_c_ratio = np.mean(mangrove_C_ratio_array[:, 4])     # Uses average of all mangrove litter:AGC ratio
+
+    return mangrove_RF, mangrove_r_s_ratio, mangrove_deadwood_c_ratio, mangrove_litter_c_ratio
+
+
+# Returns the first year of mangrove gain (0->1) if there is no mangrove extent at the beginning of the timeseries.
+# Also returns first year of mangrove loss (1->0) with or without any subsequent gain.
+# Also returns last year of mangrove loss (1->0) when there is no subsequent gain.
+@jit(nopython=True)
+def mangrove_first_gain_last_loss_years(data_array, year_array):
+
+    length = data_array.shape[0]
+
+    # first mangrove gain year
+    if data_array[0] == 1:      #If mangrove extent in starting year, cannot be mangrove gain later on in series so first_gain year = 0
+        first_gain = 0
+    else:
+        first_gain = 0
+        for year in range(1, length):
+            prev = data_array[year - 1]
+            curr = data_array[year]
+
+            if prev == 0 and curr == 1:
+                first_gain = year_array[year]
+                break
+
+    # first mangrove loss year
+    first_loss = 0              #If there is never mangrove loss, first_loss year = 0
+    for year in range(1, length):
+        prev = data_array[year - 1]
+        curr = data_array[year]
+        if prev == 1 and curr == 0:
+            first_loss = year_array[year]
+            break
+
+    #last_mangrove_loss_year
+    if data_array[length-1] == 1:
+        last_loss = 0       #If mangrove in final year, cannot have permanent mangrove loss so last_loss year = 0
+    else:
+        last_loss = 0
+        suffix_all_zero = 1  # flag: are all values after year zero?
+
+        # Loop backwards over mangrove extent years starting from last year (inclusive), looking for
+        # the first time it switches from 0 (curr) to 1 (prev) to get final mangrove loss year
+        for year in range(length - 1, 0, -1):
+            # If there is mangrove extent in current year, the suffix_all_zero flag is set to False
+            if data_array[year] != 0:
+                suffix_all_zero = 0
+            # If suffix_all_zero flag is True, and mangrove extent in prev year = 1 and in curr year = 0, gets current year.
+            if data_array[year-1] == 1 and data_array[year] == 0 and suffix_all_zero == 1:
+                last_loss = year_array[year]
+                break
+
+    return first_gain, first_loss, last_loss
+
+
+# Function to get whether the interval is mangrove gain, loss, or maintenance or before gain or after loss.
+# Note: This function assumes mangrove is in the interval because we've already checked that condition in the LULUCF code
+@jit(nopython=True)
+def mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year, last_mang_loss_year):
+    mang_loss = False
+    mang_gain = False
+    mang_remaining_mang = False
+    before_mang_gain = False
+    after_mang_loss = False
+
+    # Mangrove state hierarchy is mang_loss > mang_gain > mang_remaining_mang
+    mang_loss = (last_mang_loss_year > interval_start_year) and (last_mang_loss_year <= interval_end_year)
+
+    if not mang_loss:
+        mang_gain = (first_mang_gain_year > interval_start_year) and (first_mang_gain_year <= interval_end_year)
+
+    if (not mang_loss) and (not mang_gain):
+        mang_remaining_mang = (first_mang_gain_year <= interval_start_year) and ((last_mang_loss_year == 0) or (last_mang_loss_year > interval_end_year))
+
+    if (not mang_loss) and (not mang_gain) and (not mang_remaining_mang):
+        before_mang_gain = (first_mang_gain_year != 0) and (first_mang_gain_year > interval_end_year)
+
+    if (not mang_loss) and (not mang_gain) and (not mang_remaining_mang) and (not before_mang_gain):
+        after_mang_loss = (last_mang_loss_year != 0) and (last_mang_loss_year <= interval_start_year)
+
+   # Checks that only 1 mangrove state is true
+    true_count = int(mang_loss) + int(mang_gain) + int(mang_remaining_mang) + int(before_mang_gain) + int(after_mang_loss)
+    if true_count != 1:
+        raise ValueError(
+            f"Invalid classification. Only 1 of the following should be True: "
+            f"loss={mang_loss}, gain={mang_gain}, remaining={mang_remaining_mang}, before_gain={before_mang_gain}, after_loss={after_mang_loss}"
+        )
+
+    return mang_loss, mang_gain, mang_remaining_mang, before_mang_gain, after_mang_loss
+
+
+# Returns whether there was mangrove extent loss (1->0), and if so the year of loss
+# Also returns the number of years in the interval before and after mangrove extent loss (for pre- and post-loss gain year counts)
+@jit(nopython=True)
+def mangrove_gain_year_count_summary(data_array, interval_start_year, interval_end_year):
+
+    array_length = data_array.shape[0]
+    years_length = (interval_end_year - interval_start_year) + 1
+
+    # Check that data array and year array have the same number of items
+    if array_length != years_length:
+        raise ValueError("Length mismatch between data_array and years range")
+
+    # Find index of last 1→0 transition, or returns -1 if not found
+    loss_index = -1
+    for i in range(1, array_length):
+        if data_array[i - 1] == 1 and data_array[i] == 0:
+            loss_index = i
+
+    if loss_index != -1:
+        mang_loss = True
+        mang_loss_year = interval_start_year + loss_index
+
+        # sums years with mangrove extent starting after previous interval year and before last loss year
+        pre_count = 0
+        for k in range(1, loss_index):
+            if data_array[k] == 1:
+                pre_count += 1
+
+        # sums mangrove extent years after last loss year
+        post_count = 0
+        for k in range(loss_index + 1, array_length):
+            if data_array[k] == 1:
+                post_count += 1
+    else:
+        mang_loss = False
+        mang_loss_year = 0
+
+        # If no loss, sums all years with mangrove extent starting after previous interval end year
+        pre_count = 0
+        for k in range(1, array_length):
+            if data_array[k] == 1:
+                pre_count += 1
+        #If no loss, post_count is 0
+        post_count = 0
+
+    # Validate totals against the number of interval years (exclude the first/prior year)
+    interval_len = array_length - 1
+    total = pre_count + post_count
+    if not (0 <= total <= interval_len):
+        raise ValueError("Invalid counts: pre+post must be >=0 and <= interval length")
+
+    return mang_loss, mang_loss_year, pre_count, post_count
+
+
+# Takes in the interval_length and interval_end_year and returns a list of index values to extract the
+# corresponding data (including the last year from the previous interval) from the GMWv3 timeseries
+@jit(nopython=True)
+def map_years_to_gmwv3_data(interval_end_year, interval_length):
+
+    if interval_length == 5:
+        if interval_end_year == 2005:
+             return np.array([0, 0, 0, 0, 1, 1], dtype=np.int64)    # 2000 (1996), 2001 (1996), 2002 (1996), 2003 (1996), 2004 (2007), 2005 (2007)
+        elif interval_end_year == 2010:
+             return np.array([1, 1, 1, 2, 3, 4], dtype=np.int64)    # 2005 (2007), 2006 (2007), 2007, 2008, 2009, 2010
+        elif interval_end_year == 2015:
+             return np.array([4, 4, 4, 4, 4, 5], dtype=np.int64)    # 2010, 2011 (2010), 2012 (2010), 2013 (2010), 2014 (2010), 2015
+        elif (interval_end_year == 2020):
+             return np.array([5, 6, 7, 8, 9, 10], dtype=np.int64)   # 2015, 2016, 2017, 2018, 2019, 2020
+
+    elif interval_length == 1:
+        if interval_end_year == 2015:
+             return np.array([4, 5], dtype=np.int64)                # 2014 (2010), 2015
+        elif interval_end_year == 2016:
+             return np.array([5, 6], dtype=np.int64)                # 2015, 2016
+        elif interval_end_year == 2017:
+             return np.array([6, 7], dtype=np.int64)                # 2016, 2017
+        elif interval_end_year == 2018:
+             return np.array([7, 8], dtype=np.int64)                # 2017, 2018
+        elif interval_end_year == 2019:
+             return np.array([8, 9], dtype=np.int64)                # 2018, 2019
+        elif interval_end_year == 2020:
+             return np.array([9, 10], dtype=np.int64)               # 2019, 2020
+        elif interval_end_year > 2020:
+             return np.array([10, 10], dtype=np.int64)              # 2020, 2020
+
+    else:
+        raise ValueError("No mangrove index mapping found for for given interval_end_year and interval_length")
+
 
 # Returns the emission factors for partially disturbed forest by driver based on the continent-ecozone combination (unit: fraction AGC lost)
 # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67feb6f2-c124-800a-9279-61f0e3a67faf
@@ -524,6 +727,156 @@ def calc_NT_T(interval_length, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litt
     forest_age = 0 + gain_year_count
 
     return c_gross_emissions_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age
+
+# Gross fluxes and ending carbon stocks for mangrove gain or mangrove remaining mangrove without loss in interval.
+# Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
+# Applies to 5-year and annual intervals. Only difference is gain_year_count.
+# Applies to mangrove gain and maintenance. Differences are handled by these input arguments: forest_age_start and c_dens_in.
+@jit(nopython=True)
+def calc_mang(forest_age_start, first_mang_gain_year, first_mang_loss_year, interval_end_year,
+              gain_year_count, agc_rf, bgc_rf, c_dens_in, deadwood_c_ratio, litter_c_ratio):
+
+    # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
+    agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
+
+    # Step 1: Assigns deadwood C and litter C ratios for removal factors
+    # Deadwood and litter C removals only occur in pixels that are not considered to be in "equilibrium".
+    # Thus, we need to check that there is no regrowth occuring.
+    # Checking that it is not mangrove gain (i.e. no mangrove extent in 1996 but mangrove gain in subsequent year)
+    # Checking that there is mangrove loss through this interval.
+    # If conditions are met, the deadwood and litter ratios are set to 0 (no removals while in "equilibrium").
+    if (first_mang_gain_year == 0) and ((first_mang_loss_year == 0) or (first_mang_loss_year > interval_end_year)):
+        deadwood_c_ratio = 0.0
+        litter_c_ratio = 0.0
+
+    # Step 2: Calculates gross removals by carbon pools (Mg C/ha/interval). Gross removals are negative.
+    agc_gross_removals_out = float((agc_rf * gain_year_count) * -1)  #float() necessary for Numba typing
+    bgc_gross_removals_out = float((bgc_rf * gain_year_count) * -1)  #float() necessary for Numba typing
+    deadwood_c_gross_removals_out = agc_gross_removals_out * deadwood_c_ratio
+    litter_c_gross_removals_out = agc_gross_removals_out * litter_c_ratio
+
+    # Step 3: Calculates gross emissions by carbon pools (Mg C/ha/interval). Gross emissions are positive.
+    # There are no gross emissions in mangrove pixels with no loss, so C pool emissions set to 0.
+    agc_gross_emis_out = 0
+    bgc_gross_emis_out = 0
+    deadwood_c_gross_emis_out = 0
+    litter_c_gross_emis_out = 0
+
+    # Step 4: Calculates ending carbon densities by carbon pool (Mg C/ha)
+    agc_dens_out = agc_dens_in - agc_gross_removals_out
+    bgc_dens_out = bgc_dens_in - bgc_gross_removals_out
+    deadwood_c_dens_out = deadwood_c_dens_in - deadwood_c_gross_removals_out
+    litter_c_dens_out = litter_c_dens_in - litter_c_gross_removals_out
+
+    # Step 5: Prepares outputs
+    # Consolidates all gross fluxes from all carbon pools into arrays to reduce the number of arguments returned to the decision tree
+    c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')  # Mg C/ha/interval
+    c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')  # Mg C/ha/interval
+    c_dens_out = np.array([agc_dens_out, bgc_dens_out, deadwood_c_dens_out, litter_c_dens_out]).astype('float32')  # Mg C/ha
+
+    # Step 6: Increments the forest age (years).
+    # Forest age starts at 0 years for mangrove gain
+    forest_age = forest_age_start + gain_year_count
+
+    return c_gross_emissions_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age
+
+
+# Gross fluxes and ending carbon stocks for intervals with temporary or permanent mangrove loss.
+# Carbon pool fluxes and densities are input and output as Mg C/ha(/interval) rather than Mg CO2 for arithmetic simplicity.
+# Applies to 5-year intervals and annual intervals.
+# Annual model has no gain in the year of mangrove loss.
+    # gain_year_count_pre_loss = 0 when there is mangrove loss
+    # gain_year_count_post_loss = 1 when there is no mangrove loss
+@jit(nopython=True)
+def calc_mang_loss(interval_length, first_mang_gain_year, first_mang_loss_year, interval_start_year,
+                    c_pools_no_fire, loss_year, gain_year_count_pre_loss, gain_year_count_post_loss,
+                    RF_AGC, RF_BGC, c_dens_in, deadwood_c_ratio, litter_c_ratio):
+
+    # Retrieves the starting densities for each carbon pool from the input array (Mg C/ha)
+    agc_dens_in, bgc_dens_in, deadwood_c_dens_in, litter_c_dens_in = unpack_starting_carbon_densities(c_dens_in)
+
+    # Carbon pools that are emitted as CO2 (depends on whether temporary or permanent mangrove loss)
+    agc_ef_CO2, bgc_ef_CO2, deadwood_c_ef_CO2, litter_c_ef_CO2 = unpack_emission_factors(c_pools_no_fire)
+
+    # Step 1: Assigns pre-loss deadwood C and litter C ratios for removal factors
+    # Deadwood and litter C removals only occur in pixels that are not considered to be in "equilibrium".
+    # Thus, we need to check if mangroves are in "equilibrium" before loss during this interval.
+    # Checking that it is not mangrove gain (i.e. no mangrove extent in 1996 but mangrove gain in subsequent year)
+    # Checking that the start of the current interval is before any mangrove loss.
+    # If conditions are met, the deadwood and litter ratios are set to 0 (no removals while in "equilibrium").
+    if (first_mang_gain_year == 0) and ((first_mang_loss_year == 0) or (first_mang_loss_year > interval_start_year)):
+        deadwood_c_ratio_pre_loss = 0.0
+        litter_c_ratio_pre_loss = 0.0
+
+    # Step 2: Calculates pre-loss gross removals by carbon pools (Mg C/ha/interval) for 5-year and annual intervals. Gross removals are negative.
+    # Works for 5-year and annual intervals alike.
+    agc_gross_removals_out = float((RF_AGC * gain_year_count_pre_loss) * -1)  # float() necessary for Numba typing
+    bgc_gross_removals_out = float((RF_BGC * gain_year_count_pre_loss) * -1)  # float() necessary for Numba typing
+    deadwood_c_gross_removals_out = agc_gross_removals_out * deadwood_c_ratio_pre_loss
+    litter_c_gross_removals_out = agc_gross_removals_out * litter_c_ratio_pre_loss
+
+    # Consolidates outputs into array to reduce the number of arguments returned to the decision tree.
+    c_gross_removals_out = np.array([agc_gross_removals_out, bgc_gross_removals_out, deadwood_c_gross_removals_out, litter_c_gross_removals_out]).astype('float32')
+
+    # Step 4: Calculates carbon densities at the year of loss by carbon pool (Mg C/ha). This is not output from the model.
+    # For 5-year intervals, C pools pre-loss differ from input carbon pools.
+    # For annual intervals, C pools pre-loss are the same as input carbon pools because there is no gain before loss.
+    if interval_length == 5:
+        agc_pre_loss = agc_dens_in - agc_gross_removals_out
+        bgc_pre_loss = bgc_dens_in - bgc_gross_removals_out
+        deadwood_c_pre_loss = deadwood_c_dens_in - deadwood_c_gross_removals_out
+        litter_c_pre_loss = litter_c_dens_in - litter_c_gross_removals_out
+
+        # Pre-loss carbon densities as an array, used as input for loss emissions and post-loss removals (if applicable)
+        c_pre_loss = np.array([agc_pre_loss, bgc_pre_loss, deadwood_c_pre_loss, litter_c_pre_loss]).astype('float32')
+
+    # Assigning interval start C pools to pre-loss C pools rather than calculating them like in the 5-year interval
+    # branch reduces the number of calculations and is more explicit
+    elif interval_length == 1:
+        agc_pre_loss = agc_dens_in
+        bgc_pre_loss = bgc_dens_in
+        deadwood_c_pre_loss = deadwood_c_dens_in
+        litter_c_pre_loss = litter_c_dens_in
+        c_pre_loss = np.array(c_dens_in).astype('float32')
+
+    else:
+        raise ValueError("interval_length not valid: must be 1 or 5")
+
+    # Step 5: Calculates emissions for each C pool (Mg C/ha/interval) for stand replacing mangrove loss.
+    # Does not consider fire or partial loss (i.e. "disturbance") of mangroves
+    if loss_year > 0:
+        # If it is only temporary mangrove loss, only AGC and BGC carbon pools are emitted (cn.biomass_emissions_only).
+        # If it is permanent mangrove loss, all non-soil carbon pools are emitted (cn.all_non_soil_pools).
+        # Not converting to CO2 yet for consistency with all other outputs (Mg C/ha).
+        agc_gross_emis_out = agc_pre_loss * agc_ef_CO2
+        bgc_gross_emis_out = bgc_pre_loss * bgc_ef_CO2
+        deadwood_c_gross_emis_out = deadwood_c_pre_loss * deadwood_c_ef_CO2
+        litter_c_gross_emis_out = litter_c_pre_loss * litter_c_ef_CO2
+    else:
+        raise ValueError(f"Mangrove loss flag is True during interval but loss_year is 0")
+
+    # Gross emissions as an array
+    c_gross_emissions_out = np.array([agc_gross_emis_out, bgc_gross_emis_out, deadwood_c_gross_emis_out, litter_c_gross_emis_out]).astype('float32')
+
+    # Step 6: Updates gross removals to include post-loss gross removals, if applicable (Mg C/ha/interval).
+    # gain_year_count_post_loss is the number of years between the loss and the end of the interval.
+    # This uses the same RFs before and after the loss.
+    # Only applies to 5-year interval data.
+    if (loss_year > 0) and (interval_length == 5):
+        post_loss_RF = np.array([RF_AGC, RF_BGC, RF_AGC * deadwood_c_ratio, RF_AGC * litter_c_ratio]).astype('float32')
+        post_loss_gross_removals = gain_year_count_post_loss * post_loss_RF
+
+        c_gross_removals_out = c_gross_removals_out - post_loss_gross_removals
+
+    # Step 7: Calculates ending carbon densities by carbon pool.
+    # Starts with carbon density in (list converted to np array), adds gross removals (subtracts negative value), subtracts emissions.
+    # Ending carbon pools are not affected by non-CO2 emissions in the next step.
+    c_dens_out = np.array(c_dens_in).astype('float32') - c_gross_removals_out - c_gross_emissions_out
+
+    # Step 8: Updates the forest age. Age is set to 0 at time of loss. Increments by the number of years in the interval after loss.
+    forest_age_interval_end = gain_year_count_post_loss
+
+    return c_gross_emissions_out, c_gross_removals_out, c_dens_out, agc_ef_CO2, gain_year_count_pre_loss, forest_age_interval_end
 
 
 # Gross fluxes and ending carbon stocks for trees converted to non-trees with and without fire.
@@ -1012,7 +1365,7 @@ def calc_T_T_no_disturbs(node, interval_length, forest_age_interval_start, first
 
 
     # Step 2: Assigns deadwood C and litter C ratios for removal factors, if relevant (unitless).
-    # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest only).
+    # Deadwood and litter C removals only occur in pixels that were not tall vegetation at some point (natural forest and mangrove only).
     # Thus, we need to check whether the pixel was non-tall vegetation at some point during the model before the end of this interval.
     # If conditions aren't met, the deadwood and litter ratios are set to 0 (no removals).
     # For simplicity, there are no deadwood or litter removals in loss intervals.

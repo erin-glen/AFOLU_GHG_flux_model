@@ -8,7 +8,7 @@ Usage (run from /mnt/c/GIS/git/AFOLU_GHG_flux_model):
     python src/utilities/download_outputs_local.py v32_COD_exploration 23_-4_24_-3
 
 Arguments:
-1. <subfolder>: Local subfolder to save outputs to (inside /mnt/c/GIS/AFOLU_flux_model/test_data/output/v0_3_0/)
+1. <subfolder>: Local subfolder to save outputs to (inside /mnt/c/GIS/AFOLU_flux_model/test_data/output/v0_4_1/)
 2. [filename_filter]: Optional string that must be in the filename to be downloaded
 """
 

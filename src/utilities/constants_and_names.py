@@ -1,6 +1,5 @@
 import math
 import boto3
-
 import numpy as np
 
 ########
@@ -8,7 +7,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "0.4.2"
+model_version = "0.4.3"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets
@@ -209,6 +208,7 @@ biomass_emissions_only = np.array([1, 1, 0, 0]).astype('uint8')  # AGC and BGC
 all_but_bgc_emissions = np.array([1, 0, 1, 1]).astype('uint8')  # AGC, deadwood C, and litter C
 deadwood_litter_emissions = np.array([0, 0, 1, 1]).astype('uint8')  # deadwood C and litter C
 all_non_soil_pools = np.array([1, 1, 1, 1]).astype('uint8')  # AGC, BGC, deadwood C, and litter C
+no_carbon_pools = np.array([0, 0, 0, 0]).astype('uint8')  # None
 
 # SDPT v2.0 planted forest type codes
 SDPT_oil_palm_code = 1
@@ -479,16 +479,52 @@ forest_age_output_pattern = "forest_age_at_end_of_interval"
 # )
 # out_raster.save(r"C:\GIS\Carbon_seqr_mapping\secondary_forests\average_rates_for_LULUCF_model\natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years__nibble_20250516.tif")
 # Then, uploaded to s3.
-secondary_natural_forest_raw_dir =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/20250516/"
-secondary_natural_forest_0_5_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__0_5_years__nibble_20250516"   # both the raw raster name and processed pattern for hansenized tiles
-secondary_natural_forest_6_10_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__6_10_years__nibble_20250516"
-secondary_natural_forest_11_15_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__11_15_years__nibble_20250516"
-secondary_natural_forest_16_20_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__16_20_years__nibble_20250516"
-secondary_natural_forest_21_40_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years__nibble_20250516"
-secondary_natural_forest_41_60_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__41_60_years__nibble_20250516"
-secondary_natural_forest_61_80_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__61_80_years__nibble_20250516"
-secondary_natural_forest_81_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__81_100_years__nibble_20250516"
-secondary_natural_forest_21_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_100_years__nibble_20250516"
+
+#TODO: @Mel Make sure all refrences to the old commented out names are updated
+# Refactor Hansenize inputs: 
+# Robinson_5_year_rates_processed_date or Robinson_20_year_rates_processed_date --> Robinson_processed_date
+# Robinson_processed_date --> secondary_forest_curve_run_date
+
+Robinson_processed_date = '20250616'
+
+#Robinson 5-year rates
+Robinson_5_year_raw_date = '20250616'
+secondary_natural_forest_5_year_raw_dir =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/{Robinson_5_year_raw_date}/"
+secondary_natural_forest_0_5_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__0_5_years__nibble"
+secondary_natural_forest_6_10_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__6_10_years__nibble"
+secondary_natural_forest_11_15_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__11_15_years__nibble"
+secondary_natural_forest_16_20_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__16_20_years__nibble"
+
+secondary_natural_forest_0_5_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_0_5/"
+secondary_natural_forest_6_10_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_6_10/"
+secondary_natural_forest_11_15_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_11_15/"
+secondary_natural_forest_16_20_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_16_20/"
+
+#Robinson 20+-year rates
+Robinson_20_year_raw_date = '20250516'
+secondary_natural_forest_20_year_raw_dir =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/{Robinson_20_year_raw_date}/"
+secondary_natural_forest_21_40_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years__nibble"
+secondary_natural_forest_41_60_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__41_60_years__nibble"
+secondary_natural_forest_61_80_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__61_80_years__nibble"
+secondary_natural_forest_81_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__81_100_years__nibble"
+secondary_natural_forest_21_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_100_years__nibble"
+
+secondary_natural_forest_21_40_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_21_40/"
+secondary_natural_forest_41_60_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_41_60/"
+secondary_natural_forest_61_80_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_61_80/"
+secondary_natural_forest_81_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_81_100/"
+secondary_natural_forest_21_100_processed_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{Robinson_processed_date}/rate_21_100/"
+
+# secondary_natural_forest_raw_dir =  f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/raw/20250516/"
+# secondary_natural_forest_0_5_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__0_5_years__nibble_20250516"   # both the raw raster name and processed pattern for hansenized tiles
+# secondary_natural_forest_6_10_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__6_10_years__nibble_20250516"
+# secondary_natural_forest_11_15_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__11_15_years__nibble_20250516"
+# secondary_natural_forest_16_20_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__16_20_years__nibble_20250516"
+# secondary_natural_forest_21_40_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_40_years__nibble_20250516"
+# secondary_natural_forest_41_60_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__41_60_years__nibble_20250516"
+# secondary_natural_forest_61_80_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__61_80_years__nibble_20250516"
+# secondary_natural_forest_81_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__81_100_years__nibble_20250516"
+# secondary_natural_forest_21_100_pattern =  "natural_forest_mean_growth_rate__Mg_AGC_ha_yr__21_100_years__nibble_20250516"
 
 secondary_forest_curve_run_date = '20250616'
 natural_forest_growth_curve_dir = f"{full_bucket_prefix}/climate/secondary_forest_carbon_curves__Robinson_et_al/processed/{secondary_forest_curve_run_date}/"
@@ -560,6 +596,22 @@ burned_area_hdf_converted_to_raw_raster_dir = "fires/MODIS_burned_area/MCD64A1.0
 burned_area_final_dir = "fires/MODIS_burned_area/MCD64A1.061/2_final_outputs__Hansenized/"  # With each year in its own folder
 burned_area_final_pattern = "burned_area_final"
 
+# GMW mangrove extent
+GMW_version = "v3"
+mangrove_extent_years = [1996, 2007, 2008, 2009, 2010, 2015, 2016, 2017, 2018, 2019, 2020]
+
+mangrove_extent_raw_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/raw/raster/"
+mangrove_extent_raw_pattern = r"GMW_[NS][0-9]{2}[EW][0-9]{3}_[0-9]{4}_v3.tif"       # e.g "GMW_N00E008_1996_v3.tif" in regex form
+
+mangrove_extent_hansenized_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/hansenized/raster/"
+mangrove_extent_hansenized_pattern = f"GMW{GMW_version}_mangrove_extent"
+
+mangrove_1x1deg_smoothed_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/smoothed_1x1deg/raster/"
+
+mangrove_extent_processed_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/smoothed/raster/"
+mangrove_extent_processed_pattern = f"GMW{GMW_version}_smoothed_mangrove_extent"
+
+# Organic Soils
 # Organic soil mask, from Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
 # and thresholded by Erin Glen for peat emissions model. Includes only pixels with organic soil probability >23%,
 # a cutoff determined by OpenGeoHub and implemented by Erin.
@@ -706,6 +758,7 @@ net_flux_all_C_pools_all_gases_pattern = "net_flux__all_C_pools__all_gases__MgCO
 # Intermediate outputs
 gain_year_count_pattern = "gain_year_count_during_interval"
 most_recent_year_not_tall_veg = "most_recent_year_not_tall_veg"
+year_of_forest_loss = "year_of_forest_loss"
 max_height_since_last_time_not_tall_veg = "max_height_since_last_time_not_tall_veg"
 first_time_sig_loss_from_max_height = "first_time_sig_loss_from_max_height"
 part_or_full_dist_in_earlier_intervals = "partial_or_full_dist_in_earlier_intervals"
@@ -714,6 +767,9 @@ times_burned_in_interval = "times_burned_in_current_interval"
 agc_emission_factor = "AGC_emission_factor_CO2_only__fraction"
 
 model_type_placholder = "MODEL_TYPE"
+
+zarr_output_pattern = "global_zarr"
+zarr_pixel_chunks = 10000
 
 # List of output directories with placeholders for parts of the directory
 LULUCF_core_output_dirs = [

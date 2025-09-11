@@ -239,23 +239,32 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             # Carbon density for short vegetation (Mg C/ha) based on climate zone (IPCC default)
             short_veg_AGC, short_veg_BGC = nu.calc_short_veg_removals(climate_zone_cell)
 
-            # Assigns carbon densities based on vegetation height and composite landcover
+            # Assigns carbon densities based on vegetation height and composite landcover.
+            # Tall vegetation and/or mangrove (i.e. mangrove AGB pixels without tall vegetation keep all C pools)
+            #TODO Need to include GMWv3 1996 extent as another condition for keeping raw carbon pool outputs.
+            # Otherwise, pixels that are treated as mangrove in the model because they have GMWv3 but don't have
+            # mangrove AGB or tall vegetation get assigned other C pool values.
+            # e.g., 114.41835E, 3.4814S (in 00N_110E) has WHRC AGC of 47.47, mangrove AGC of 0, and a
+            # LC-masked AGC of 2.914 because the composite LC is short veg (code 124). However, there is GMW in 1996/2000,
+            # so this pixel should maintain the tree-relevant C-pools rather then be reclassified as short veg.
+            # This requires adding GMWv3 1996 as another input to this script and adding another or statement here.
+            # It can be tested as the coordinate mentioned above.
             if (veg_height_cell >= cn.tree_threshold) or ((mangrove_in_chunk) and (mangrove_agb_cell > 0)):
                 agc_LC_masked_out_cell = agc_raw_out_cell
                 bgc_LC_masked_out_cell = bgc_raw_out_cell
                 deadwood_c_LC_masked_out_cell = deadwood_c_raw_out_cell
                 litter_c_LC_masked_out_cell = litter_c_raw_out_cell
-            elif short_veg_LC:
+            elif short_veg_LC:  # Short vegetation
                 agc_LC_masked_out_cell = short_veg_AGC
                 bgc_LC_masked_out_cell = short_veg_BGC
                 deadwood_c_LC_masked_out_cell = 0
                 litter_c_LC_masked_out_cell = 0
-            elif LC_composite_cell == cn.cropland:
+            elif LC_composite_cell == cn.cropland:  # Cropland
                 agc_LC_masked_out_cell = cn.cropland_agc_dens
                 bgc_LC_masked_out_cell = 0
                 deadwood_c_LC_masked_out_cell = 0
                 litter_c_LC_masked_out_cell = 0
-            else:
+            else:  # Anything else
                 agc_LC_masked_out_cell = 0
                 bgc_LC_masked_out_cell = 0
                 deadwood_c_LC_masked_out_cell = 0

@@ -20,17 +20,18 @@ import concurrent.futures
 from botocore.config import Config
 from dask.distributed import print
 from dask.distributed import Client, LocalCluster
+from dask import delayed
 from datetime import datetime
 from io import BytesIO
 from numba import jit
 from osgeo import gdal
+import gc
 
 # Turns off a FutureWarning about gdal.UseExceptions() vs. gdal.DontUseExceptions()
 gdal.UseExceptions()
 
 # Project imports
 from src.utilities import constants_and_names as cn, log_utilities as lu
-
 
 ###################################################################################################
 # S3 Utilities
@@ -42,7 +43,7 @@ def split_s3_path(s3_path):
     return bucket, key
 
 # List files in an S3 bucket with a certain pattern
-def list_s3_files_with_pattern(s3_path, pattern):
+def list_s3_files_with_pattern(s3_path, pattern, use_regex=False):
     s3 = boto3.client("s3")
     bucket_name, prefix = split_s3_path(s3_path)
 
@@ -66,8 +67,14 @@ def list_s3_files_with_pattern(s3_path, pattern):
         if "Contents" in response:
             for obj in response["Contents"]:
                 key = obj["Key"]
-                if pattern in key:
-                    matching_files.append(f"s3://{bucket_name}/{key}")
+                if use_regex:
+                    compiled_pattern = re.compile(pattern)
+                    filename = key.split("/")[-1]  # get just the filename from the S3 key
+                    if compiled_pattern.fullmatch(filename):
+                        matching_files.append(f"s3://{bucket_name}/{key}")
+                else: 
+                    if pattern in key:
+                        matching_files.append(f"s3://{bucket_name}/{key}")
 
         # Check if there's more data to retrieve
         if response.get("IsTruncated"):  # If True, there are more pages to fetch
@@ -87,18 +94,43 @@ def upload_s3_file(s3_path, local_path):
     bucket, key = split_s3_path(s3_path)
     s3.upload_file(local_path, Bucket=bucket, Key=key)
 
-def check_s3_file_created(s3_path):
+def check_s3_file_created(s3_path, main_logger):
     s3 = boto3.client('s3')
     bucket, key = split_s3_path(s3_path)
     try:
         s3.head_object(Bucket=bucket, Key=key)
-        print(f"File successfully created at: {s3_path}")
+        main_logger.info(f"File successfully created at: {s3_path}")
         return True
     except s3.exceptions.ClientError as e:
         if e.response['Error']['Code'] == "404":
             raise RuntimeError(f"Failed to create file at: {s3_path}")
         else:
             raise RuntimeError(f"Error accessing S3: {e}")
+
+def check_and_make_s3_dir(s3_directory, main_logger):
+    if s3_directory.startswith("s3://"):
+        # Normalize path to ensure it ends with a slash
+        if not s3_directory.endswith("/"):
+            s3_directory += "/"
+
+        # Check if the S3 path exists
+        try:
+            check_cmd = ["aws", "s3", "ls", s3_directory]
+            result = subprocess.run(check_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            if result.stdout:
+                main_logger.info(f"S3 processed directory exists: {s3_directory}")
+            else:
+                raise Exception("Empty result")
+
+        except Exception:
+            # Create a placeholder .keep file to establish the S3 "folder"
+            placeholder_path = s3_directory + ".keep"
+            create_cmd = ["aws", "s3", "cp", "-", placeholder_path]
+            subprocess.run(create_cmd, input=b'', check=True)
+            main_logger.info(f"Created S3 processed directory by uploading placeholder: {placeholder_path}")
+
+    else:
+        main_logger.warning(f"Processed directory is not an S3 path. Skipping creation: {s3_directory}")
 
 # Uploads local rasters to s3 and deletes the local versions after
 def upload_raster_to_s3(file_path, bucket, s3_key):
@@ -152,7 +184,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
             with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
                                height=chunk_length_pixels, count=1,
                                dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                               tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
+                               tiled=True, blockxsize=4000, blockysize=4000, nodata=no_data_val) as dst:
                 dst.write(data_array, 1)
 
         # No NoData value in output raster
@@ -160,7 +192,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
             with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=chunk_length_pixels,
                                height=chunk_length_pixels, count=1,
                                dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                               tiled=True, blockxsize=400, blockysize=400) as dst:
+                               tiled=True, blockxsize=4000, blockysize=4000) as dst:
                 dst.write(data_array, 1)
 
         upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
@@ -228,7 +260,8 @@ def list_raster_full_paths_in_s3_folder_and_count(s3_path):
 # Uploads a shapefile to s3
 def upload_shp(in_folder, shp):
 
-    print(f"flm: Uploading to {in_folder}{shp}: {timestr()}")
+    logger_worker = lu.setup_logging_worker()
+    lu.print_and_log(f"Uploading to {in_folder}{shp}: {timestr('time')}", True, logger_worker)
 
     shp_pattern = shp[:-4]
 
@@ -243,29 +276,66 @@ def upload_shp(in_folder, shp):
     os.remove(f"/tmp/{shp_pattern}.prj")
     os.remove(f"/tmp/{shp_pattern}.shx")
 
-    print(f"flm: Uploaded to {in_folder}{shp}: {timestr()}")
+    lu.print_and_log(f"Uploaded to {in_folder}{shp}: {timestr('time')}", True, logger_worker)
 
 # Saves a data array locally as a raster and then uploads it to s3
-def save_and_upload_raster_10x10(**kwargs):
+def save_and_upload_raster_10x10(bounds, tile_length_pixels, tile_id,
+                                 bounds_str, output_dict, is_final, logger_worker,
+                                 no_data_val=None):
 
-    s3_client = boto3.client("s3") # Needs to be in the same function as the upload_file call
+    upload_tasks = []
 
-    data_array = kwargs['data']   # The data being saved
-    out_file_name = kwargs['out_file_name']   # The output file name
-    out_folder = kwargs['out_folder']   # The output folder
+    transform = rasterio.transform.from_bounds(*bounds, width=tile_length_pixels, height=tile_length_pixels)
 
-    print(f"flm: Saving {out_file_name} locally")
+    lu.print_and_log(f"Saving outputs locally for {tile_id}: {timestr()}", is_final, logger_worker)
 
-    profile_kwargs = {'compress': 'lzw'}   # Adds attribute to compress the output raster
-    # data_array.rio.to_raster(f"{out_file_name}", **profile_kwargs)
-    data_array.rio.to_raster(f"/tmp/{out_file_name}", **profile_kwargs)
+    # For every output file, saves from array to local raster, then to s3.
+    # Can't save directly to s3, unfortunately, so need to save locally first.
+    for key, value in output_dict.items():
+        try:
+            data_array = value[0]
+            data_type = value[1]
+            full_s3_path = value[4]
 
-    print(f"flm: Saving {out_file_name} to {out_folder[10:]}{out_file_name}")
+            #Does not upload the the raster if the array dimensions are not 40000x40000
+            if data_array.shape != (cn.full_raster_dims, cn.full_raster_dims):
+                lu.print_and_log( f"ERROR: Array shape {data_array.shape} for {key} does not match expected 40000x40000. Skipping.",is_final, logger_worker)
+                continue
 
-    s3_client.upload_file(f"/tmp/{out_file_name}", "gfw2-data", Key=f"{out_folder[10:]}{out_file_name}")
+            if is_final:
+                file_name = f"{tile_id}_{key}.tif"
+            else:
+                file_name = f"{tile_id}_{key}__{timestr()}.tif"
 
-    # Deletes the local raster
-    os.remove(f"/tmp/{out_file_name}")
+            # # Only prints if not a final run
+            # # Disabled this because it prints sooooo many lines that it's annoying to scroll through
+            # if not is_final:
+            #     lu.print_and_log(f"Saving {key} for {bounds_str} in {tile_id} for {year_out}: {timestr()}", is_final, logger_worker)
+
+            # Includes NoData value in output raster
+            if no_data_val is not None:
+                with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=tile_length_pixels,
+                                   height=tile_length_pixels, count=1,
+                                   dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                                   tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
+                    dst.write(data_array, 1)
+
+            # No NoData value in output raster
+            else:
+                with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=tile_length_pixels,
+                                   height=tile_length_pixels, count=1,
+                                   dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
+                                   tiled=True, blockxsize=400, blockysize=400) as dst:
+                    dst.write(data_array, 1)
+
+            upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
+
+        except Exception as e:
+            lu.print_and_log(f"ERROR saving {key}: {str(e)}", is_final, logger_worker)
+            continue
+
+    return upload_tasks
+
 
 # Gets the name of the first file in a dictionary of dataset names and folders in s3.
 # Returns dictionary of dataset names with the full path of the first file in the s3 folder.
@@ -312,7 +382,7 @@ def first_file_name_in_s3_folder(download_dict):
 # LULUCF model utilities
 ###################################################################################################
 # Time in Eastern US timezone as a string
-def timestr():
+def timestr(format="full"):
 
     # Define the Eastern Time timezone
     eastern = pytz.timezone('US/Eastern')
@@ -321,13 +391,15 @@ def timestr():
     eastern_time = datetime.now(eastern)
 
     # Format the time as a string
-    return eastern_time.strftime("%Y%m%d_%H_%M_%S")
-
+    if format == "time":
+        return eastern_time.strftime("%H:%M:%S")
+    else:
+        return eastern_time.strftime("%Y%m%d_%H_%M_%S")
 
 # Connects to a Coiled cluster of a specified name if the local flag isn't on.
 # Does not create a Coiled cluster if the specified cluster name doesn't exist (contrary to default Coiled behavior).
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67fff45a-ec78-800a-83e1-8b3618a7e09a
-def connect_to_Coiled_cluster(cluster_name, run_local):
+def connect_to_Coiled_cluster(cluster_name, run_local, fallback_to_local_on_failure=True):
 
     # If local run flag is on, doesn't return a cluster or client
     if run_local:
@@ -335,7 +407,7 @@ def connect_to_Coiled_cluster(cluster_name, run_local):
         return None, None, run_local
 
     # If no local run flag, it tries to attach to the named cluster
-    else:
+    try:
         # Gets info on all Coiled clusters (including terminated ones)
         all_clusters = coiled.list_clusters()
 
@@ -347,38 +419,19 @@ def connect_to_Coiled_cluster(cluster_name, run_local):
                 client = Client(cluster)
                 return cluster, client, run_local
 
-        print(f"Cluster named {cluster_name} not found. Running locally.")
-        run_local = True
-        return None, None, run_local
+        if fallback_to_local_on_failure:
+            print(f"Cluster named {cluster_name} not found. Running locally.")
+            return None, None, True
+        else:
+            raise RuntimeError(f"No running cluster named '{cluster_name}' found.")
 
-
-#TODO: @Mel - find usages, change to using create_cluster.py instead. delete here after.
-# Creates a local client using dask or Coiled cluster with a specified name, # of worker, # of CPUs and # GiB
-def get_client_from_cluster_type(cluster_type, cluster_name=None, workers=None, cpu=None, memory=None):
-
-    if cluster_type == 'coiled':
-        coiled_cluster = coiled.Cluster(
-            n_workers=workers,
-            use_best_zone=True,
-            compute_purchase_option="spot_with_fallback",
-            idle_timeout="10 minutes",
-            region="us-east-1",
-            name=cluster_name,
-            workspace='wri-forest-research',
-            worker_cpu=cpu,
-            worker_memory=memory
-        )
-        client = coiled_cluster.get_client()
-
-    elif cluster_type == 'local':
-        local_cluster = LocalCluster()
-        client = Client(local_cluster)
-    else:
-        print("set cluster_type to one of the following: 'coiled', 'local'")
-
-    return client
-
-
+    except Exception as e:
+        if fallback_to_local_on_failure:
+            print(f"Error while connecting to Coiled cluster: {e}\nRunning locally instead.")
+            return None, None, True
+        else:
+            raise
+#TODO raise error from coiled, test with previous worksace
 
 # Chunk bounds as a string
 def boundstr(bounds):
@@ -437,7 +490,6 @@ def map_to_numpy_dtype(data_type):
         # Add more mappings as needed
     }
     return dtype_map.get(data_type, 'float32')  # Defaults to 'float32' if argument not found
-
 
 # Gets the W, S, E, N bounds of a 10x10 degree tile
 def get_10x10_tile_bounds(tile_id):
@@ -579,15 +631,21 @@ def create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size_deg, first_c
 
 
 # Calculates the elapsed time for a stage
-def stage_duration(start_time_str, end_time_str, stage, logger):
+def stage_duration(start_time_str, end_time_str, stage, logger, format="full"):
 
-    logger.info(f"Stage {stage} ended at: {end_time_str}")
+    if format == "time":
+        logger.info(f"Stage {stage} ended at: {timestr('time')}")
+    else:
+        logger.info(f"Stage {stage} ended at: {end_time_str}")
 
     start_time = datetime.strptime(start_time_str, "%Y%m%d_%H_%M_%S")
     end_time = datetime.strptime(end_time_str, "%Y%m%d_%H_%M_%S")
 
     logger.info(f"Elapsed time for {stage}: {end_time - start_time}" + "\n")
 
+from rasterio.session import AWSSession
+session = boto3.Session()
+aws_session = AWSSession(session)
 
 # Lazily opens tile within provided bounds (i.e. one chunk) and returns as a numpy array.
 # If it can't open the uri for the chunk (tile does not exist), it creates a numpy array of all 0s
@@ -607,35 +665,36 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
     # And, if the uri exists but the raster just doesn't extend there (e.g., far north), the array has to be padded to
     # reach the expected size.
     try:
-        with rasterio.open(uri) as ds:
-            window = rasterio.windows.from_bounds(*bounds, ds.transform)
-            data = ds.read(1, window=window)
+        with rasterio.Env(aws_session, AWS_REQUEST_PAYER='requester', GDAL_DISABLE_READDIR_ON_OPEN='TRUE'):
+            with rasterio.open(uri) as ds:
+                window = rasterio.windows.from_bounds(*bounds, ds.transform)
+                data = ds.read(1, window=window)
 
-            # Checks if array shape is not what we expect (full chunk size) and pads the array if the array is incomplete.
-            # Per https://chatgpt.com/c/67dcb99b-edb8-800a-abd8-f718de76043c
+                # Checks if array shape is not what we expect (full chunk size) and pads the array if the array is incomplete.
+                # Per https://chatgpt.com/c/67dcb99b-edb8-800a-abd8-f718de76043c
 
-            expected_shape = (chunk_length_pixels, chunk_length_pixels)
-            if data.shape != expected_shape:
-                original_shape = data.shape
-                numpy_dtype = map_to_numpy_dtype(data_type)
-                padded_data = np.zeros(expected_shape, dtype=numpy_dtype)
+                expected_shape = (chunk_length_pixels, chunk_length_pixels)
+                if data.shape != expected_shape:
+                    original_shape = data.shape
+                    numpy_dtype = map_to_numpy_dtype(data_type)
+                    padded_data = np.zeros(expected_shape, dtype=numpy_dtype)
 
-                # Calculates offset in pixels relative to chunk
-                row_offset = max(0, int(window.row_off))
-                col_offset = max(0, int(window.col_off))
+                    # Calculates offset in pixels relative to chunk
+                    row_offset = max(0, int(window.row_off))
+                    col_offset = max(0, int(window.col_off))
 
-                rows, cols = data.shape
-                end_row = min(row_offset + rows, chunk_length_pixels)
-                end_col = min(col_offset + cols, chunk_length_pixels)
+                    rows, cols = data.shape
+                    end_row = min(row_offset + rows, chunk_length_pixels)
+                    end_col = min(col_offset + cols, chunk_length_pixels)
 
-                # Fills the correct slice of the padded array
-                padded_data[row_offset:end_row, col_offset:end_col] = data[:end_row - row_offset, :end_col - col_offset]
+                    # Fills the correct slice of the padded array
+                    padded_data[row_offset:end_row, col_offset:end_col] = data[:end_row - row_offset, :end_col - col_offset]
 
-                data = padded_data
-                status = f"padded {bounds_str} chunk from {original_shape} to {expected_shape}"
+                    data = padded_data
+                    status = f"padded {bounds_str} chunk from {original_shape} to {expected_shape}"
 
-            else:
-                status = "success- chunk complete, no padding needed"
+                else:
+                    status = "success- chunk complete, no padding needed"
 
     # If the uri doesn't exist, a numpy array of the correct size and datatype populated with 0s is returned.
     except Exception as e:
@@ -911,7 +970,6 @@ def make_tile_footprint_shp(input_dict, no_upload):
 
     # Uploads shapefile to s3 if upload not disabled
     if not no_upload:
-
         upload_shp(s3_in_folder, shp)
 
     os.remove(f"/tmp/{file_paths_txt}")
@@ -979,11 +1037,12 @@ def create_list_for_aggregation(s3_in_folders, main_logger):
 def flatten_list(nested_list):
     return [x for xs in nested_list for x in xs]
 
-
+#TODO @David Note that I added 2 optional inputs to his function (output_dir and stat_type). This shouldn't affect your uses.
+#TODO @Mel Changed back to David's original code. Update and test in mangrove processing scripts. 
 # Merges rasters that are <10x10 degrees into 10x10 degree rasters in the standard grid.
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
 # Commented out COG creation; it just outputs basic geotifs for now.
-def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload):
+def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, stat_type=None):
 
     process = psutil.Process(os.getpid())
 
@@ -1351,7 +1410,7 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'mean_value': 'no data',
             'max_value': 'no data',
             'count_value': 'no data',
-            'sum_value': 'no data',
+            'sum_value': sum_value,
             'data_type': 'no data'
         }
     else:    # Only calculates stats if there is data in the array
@@ -1442,7 +1501,7 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     output_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'] == 'output_layer']
 
     # Groups inputs that are a timeseries so they can go in their own tab so that no tab is too many rows
-    timeseries_input_layers = f'{cn.burned_area_final_pattern}|{cn.forest_disturbance_layer_name}|{cn.vegetation_height_pattern}|{cn.land_cover_pattern}'
+    timeseries_input_layers = f'{cn.burned_area_final_pattern}|{cn.forest_disturbance_layer_name}|{cn.vegetation_height_pattern}|{cn.land_cover_pattern}|{cn.mangrove_extent_processed_pattern}'
 
     # Splits input rows based on whether they are a timeseries input
     annual_1x1_inputs = input_1x1_rows[input_1x1_rows['layer_name'].str.contains(timeseries_input_layers, case=False, na=False)]
@@ -1976,13 +2035,13 @@ def vrt_exists_in_s3(output_vrt_s3):
 # Function to build a VRT using GDAL using tmp dir as intermediate step to download input files and build VRT
 # raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
 # output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is saved to
-def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
+def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt, main_logger):
+
+    logger_worker = lu.setup_logging_worker()
 
     # Check if the VRT file already exists in S3
     if vrt_exists_in_s3(output_vrt_s3):
-        print(f"VRT file already exists in S3: {output_vrt_s3}. Skipping creation.")
-        return
-
+        return main_logger.info(f"VRT file already exists in S3: {output_vrt_s3}. Skipping creation.")
     vsis3_paths = []
     for s3_path in raw_raster_paths_list_s3:
         vsis3_path = s3_path.replace("s3://", "/vsis3/")
@@ -1991,7 +2050,7 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
     # Use GDAL to build the VRT
     # gdal.BuildVRT(local_vrt, "/vsis3/gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/N00E010_ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0.tif")
     gdal.BuildVRT(local_vrt, vsis3_paths)
-    print(f"Built vrt: {timestr()}")
+    lu.print_and_log(f"Built {local_vrt}: {timestr('time')}", True, logger_worker)
 
     # Various checks that vrt was created and has data in it
     try:
@@ -2004,19 +2063,32 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
         print("VRT has no data or invalid sources.")
         exit()
     else:
-        print("VRT contains data.")
+        lu.print_and_log("VRT contains data.", True, logger_worker)
 
     if vrt_dataset.bounds:
-        print("VRT contains data or has valid metadata.")
+        lu.print_and_log("VRT contains data or has valid metadata.", True, logger_worker)
     else:
         print("VRT has no data or invalid metadata.")
         exit()
 
     vrt_dataset.close()
 
-    print(f"File '{local_vrt}' exists at {os.path.abspath(local_vrt)}.")
+    #Upload to s3
     upload_s3_file(output_vrt_s3, local_vrt)
-    check_s3_file_created(output_vrt_s3)
+
+    #If successfully uploaded, delete local vrt
+    if check_s3_file_created(output_vrt_s3, main_logger):
+        #Delete local VRT file     #TODO create a microservice to do this instead of repeating code in multiple functions
+        try:
+            os.remove(local_vrt)
+            if not os.path.exists(local_vrt):
+                main_logger.info(f"Deleted local VRT file: {local_vrt}")
+            else:
+                main_logger.warning(f"Failed to delete local VRT file: {local_vrt}")
+        except Exception as e:
+            main_logger.warning(f"Error deleting local VRT file: {local_vrt} — {e}")
+
+
 
 
 # Function to read a VRT from S3 using GDAL and vsis3
@@ -2082,29 +2154,27 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
     #Note: If tiled=False, set x_pixel_window=None, y_pixel_window=None
 
     logger_worker = lu.setup_logging_worker()
-
-    source_vrt_path = source_vrt_path.replace("s3://", "/vsis3/")  #VRT has to be accessed using /vsis3/
-
-    lu.print_and_log(f"Creating {filename}: {timestr()}...", False, logger_worker)
+    lu.print_and_log(f"Creating {filename}: {timestr('time')}", False, logger_worker)
 
     # Check that pixel window arguments are given if tiled = True
     if tiled and not (x_pixel_window and y_pixel_window):
         raise ValueError("If tiled = True, x_pixel_window and y_pixel_window must be passed as arguments")
 
     # Open the VRT
+    source_vrt_path = source_vrt_path.replace("s3://", "/vsis3/")
+    print(f"in hansen function, vrt path is {source_vrt_path}")
     dataset = gdal.Open(str(Path(source_vrt_path)))
 
     #Code to run gdal warp using Python API
     if dataset:
         if tiled == True:
-            # Warp the VRT to the new raster
             options = gdal.WarpOptions(
                 dstSRS='EPSG:4326',  # Reproject to WGS84
                 xRes=cn.resolution,  # X resolution (10 degrees)
                 yRes=cn.resolution,  # Y resolution (10 degrees)
                 targetAlignedPixels=True,  # Ensure target aligned pixels (-tap)
                 outputBounds=[xmin, ymin, xmax, ymax],  # Output bounds
-                dstNodata=no_data,  # Set no data to 0
+                dstNodata=no_data,  # Set no data
                 outputType=dt,  # Output data type
                 creationOptions=['COMPRESS=DEFLATE', 'TILED=YES',  # Tiling with user-specified dimensions
                                  f'BLOCKXSIZE={x_pixel_window}',
@@ -2112,7 +2182,6 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
                 format='GTiff'  # Output format
             )
         else:
-            # Warp the VRT to the new raster
             options = gdal.WarpOptions(
                 dstSRS='EPSG:4326',
                 xRes=cn.resolution,
@@ -2126,24 +2195,37 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
             )
 
         gdal.Warp(str(Path(filename)), str(Path(source_vrt_path)), options=options)
-        lu.print_and_log(f"{filename} created: {timestr()}", True, logger_worker)
+        lu.print_and_log(f"{filename} created: {timestr('time')}", True, logger_worker)
 
-        lu.print_and_log(f"Checking if {filename} contains data: {timestr()}", True, logger_worker)
+        #Fixing greyscale colormap in GMWv3 data
+        if "mangrove" in source_vrt_path:
+            ds = gdal.Open(str(Path(filename)), gdal.GA_Update)
+            if ds:
+                band = ds.GetRasterBand(1)
+                if band.GetColorTable():
+                    band.SetColorTable(None)
+                    band.SetRasterColorInterpretation(gdal.GCI_Undefined)
+                    lu.print_and_log(f"Removed color table from {filename}", False, logger_worker)
+                ds.FlushCache()
+                ds = None
+
+        #Checking if tile contains any data
+        lu.print_and_log(f"Checking if {filename} contains data: {timestr('time')}", True, logger_worker)
         if check_geotiff_has_data(filename):
-            lu.print_and_log(f"{filename} contains data. Uploading to s3: {timestr()}", True, logger_worker)
+            lu.print_and_log(f"{filename} contains data. Uploading to s3: {timestr('time')}", True, logger_worker)
+
+            # Uploads tile to s3
+            upload_s3_file(output_raster_s3_path_and_name, filename)
+            lu.print_and_log(f"{filename} uploaded to s3: {timestr('time')}", False, logger_worker)
+
+            # Deletes rasters from cluster after uploading to s3
+            os.remove(str(Path(filename)))
+
+            success_message = f"Success Hansenizing {filename}: {timestr('time')}"
+            return success_message  # Return both the success message and the statistics
         else:
-            lu.print_and_log(f"{filename} is empty or contains only NoData values. Not uploading to s3: {timestr()}", False, logger_worker)
-            return f"{filename} is empty or contains only NoData values. Not uploading to s3: {timestr()}"
-
-        # Uploads tile to s3
-        upload_s3_file(output_raster_s3_path_and_name, filename)
-        lu.print_and_log(f"{filename} uploaded to s3: {timestr()}", True, logger_worker)
-
-        # Deletes rasters from cluster after uploading to s3
-        os.remove(str(Path(filename)))
-
-        success_message = f"Success Hansenizing {filename}: {timestr()}"
-        return success_message  # Return both the success message and the statistics
+            lu.print_and_log(f"{filename} is empty or contains only NoData values. Not uploading to s3: {timestr('time')}", False, logger_worker)
+            return
 
     else:
         raise RuntimeError(f"Failed to open VRT: {source_vrt_path}")
@@ -2164,7 +2246,6 @@ def delete_build_vrt_input_files(raw_raster_paths_list_s3, vrt):
 ###################################################################################################
 def reaggregate_resolution(data, original_res, target_res):
     #Courtesy of ChatGPT
-    #TODO include the ChatGPT conversation link. Useful to come back to it sometimes...
     """
     Reaggregates a numpy array by summing values within the target resolution window.
 
