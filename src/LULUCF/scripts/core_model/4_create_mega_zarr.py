@@ -72,8 +72,6 @@ def build_mega_zarr(output_dir_list, main_logger):
                 da = ds[var_name].expand_dims({'interval': [int(interval[-4:])]})  # interval variable is just the end year
                 data_vars_by_name[base_var_name].append(da)
 
-            print(ds)
-
     if not data_vars_by_name:
         main_logger.error(f"No variables found to combine: {uu.timestr()}")
         return
@@ -89,18 +87,16 @@ def build_mega_zarr(output_dir_list, main_logger):
 
     mega_ds = xr.Dataset(final_vars)
 
-    print("MEGAZARR!!!!!!")
-    print(mega_ds)
-    print("AGC shape:", mega_ds["carbon_density__AGC__MgC_ha"].shape)
-    print("BGC shape:", mega_ds["carbon_density__BGC__MgC_ha"].shape)
-    print("interval values:", mega_ds.coords["interval"].values)
+    main_logger.info("MEGAZARR!!!!!! properties:")
+    main_logger.info(mega_ds)
+    main_logger.info(f"megazarr interval values: {mega_ds.coords["interval"].values}")
 
     output_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/mega_zarr/20250904/all_outputs.zarr"
 
-    main_logger.info(f"Writing mega-Zarr to {output_path}: {uu.timestr()}")
+    main_logger.info(f"Writing megazarr to {output_path}: {uu.timestr()}")
     mega_ds.to_zarr(output_path, mode='w', consolidated=True)
 
-    main_logger.info(f"Mega-Zarr writing complete: {uu.timestr()}")
+    main_logger.info(f"Megazarr writing complete: {uu.timestr()}")
 
 
 def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, no_log=False, no_upload=False,

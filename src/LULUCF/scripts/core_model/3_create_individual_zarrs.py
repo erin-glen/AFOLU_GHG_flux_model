@@ -109,7 +109,7 @@ def build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger):
         main_logger.info(f"Saving {folder} as zarr: {uu.timestr()}")
         original_var_name = list(da.data_vars.keys())[0]
         da = da.rename({original_var_name: out_file})
-        print(da)
+        # print(da)
 
         # Converts dask array to zarr and saves it to s3
         da.to_zarr(out_path_final, mode='w')
