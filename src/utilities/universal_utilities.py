@@ -26,6 +26,8 @@ from io import BytesIO
 from numba import jit
 from osgeo import gdal
 from rasterio.session import AWSSession
+import random
+import rasterio.errors
 
 
 # Turns off a FutureWarning about gdal.UseExceptions() vs. gdal.DontUseExceptions()
@@ -662,58 +664,86 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
     numpy_dtype = map_to_numpy_dtype(data_type)
     expected_shape = (chunk_length_pixels, chunk_length_pixels)
 
+    # Number of retries for submitting requests to s3
+    MAX_RETRIES = 5
+
     # If the uri exists, the relevant window is opened and returned and returned as an array.
     # Note that this chunk could still just have NoData values, which would be downloaded.
-    # And, if the uri exists but the raster just doesn't extend there (e.g., far north), the array has to be padded to
+    # If the uri exists but the raster just doesn't extend there (e.g., far north), the array has to be padded to
     # reach the expected size.
-    try:
-        # Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
-        # The more files in an s3 folder, the longer it takes to access them without this environment variable.
-        # It takes about 9 minutes to access the inputs for a 1x1 deg summative output without this and <1 minute with it.
-        # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
-        with rasterio.Env(aws_session, AWS_REQUEST_PAYER='requester', GDAL_DISABLE_READDIR_ON_OPEN='TRUE'):
-            with rasterio.open(uri) as ds:
-                window = rasterio.windows.from_bounds(*bounds, ds.transform)
-                data = ds.read(1, window=window)
+    # Retries accessing the raster 5 times in case too many requests to s3 are being made.
+    # If too many requests to s3 are being made, the script terminates for safety.
+    # https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68c3235e-a590-832d-bfdc-c1531416c311
+    for attempt in range(MAX_RETRIES):
+        try:
+            # Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
+            # The more files in an s3 folder, the longer it takes to access them without this environment variable.
+            # It takes about 9 minutes to access the inputs for a 1x1 deg summative output without this and <1 minute with it.
+            # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
+            with rasterio.Env(aws_session, AWS_REQUEST_PAYER='requester', GDAL_DISABLE_READDIR_ON_OPEN='TRUE'):
+                with rasterio.open(uri) as ds:
+                    window = rasterio.windows.from_bounds(*bounds, ds.transform)
+                    data = ds.read(1, window=window)
 
-                # Checks if array shape is not what we expect (full chunk size) and pads the array if the array is incomplete.
-                # Per https://chatgpt.com/c/67dcb99b-edb8-800a-abd8-f718de76043c
-                if data.shape != expected_shape:
-                    original_shape = data.shape
+                    # Checks if array shape is not what we expect (full chunk size) and pads the array if the array is incomplete.
+                    # Per https://chatgpt.com/c/67dcb99b-edb8-800a-abd8-f718de76043c
+                    if data.shape != expected_shape:
+                        original_shape = data.shape
+                        padded_data = np.zeros(expected_shape, dtype=numpy_dtype)
 
-                    padded_data = np.zeros(expected_shape, dtype=numpy_dtype)
+                        # Calculates offset in pixels relative to chunk
+                        row_offset = max(0, int(window.row_off))
+                        col_offset = max(0, int(window.col_off))
+                        rows, cols = data.shape
+                        end_row = min(row_offset + rows, chunk_length_pixels)
+                        end_col = min(col_offset + cols, chunk_length_pixels)
 
-                    # Calculates offset in pixels relative to chunk
-                    row_offset = max(0, int(window.row_off))
-                    col_offset = max(0, int(window.col_off))
+                        # Fills the correct slice of the padded array
+                        padded_data[row_offset:end_row, col_offset:end_col] = data[:end_row - row_offset, :end_col - col_offset]
 
-                    rows, cols = data.shape
-                    end_row = min(row_offset + rows, chunk_length_pixels)
-                    end_col = min(col_offset + cols, chunk_length_pixels)
+                        data = padded_data
+                        status = f"padded {bounds_str} chunk from {original_shape} to {expected_shape}"
 
-                    # Fills the correct slice of the padded array
-                    padded_data[row_offset:end_row, col_offset:end_col] = data[:end_row - row_offset, :end_col - col_offset]
+                    else:
+                        status = "success- chunk complete, no padding needed"
 
-                    data = padded_data
-                    status = f"padded {bounds_str} chunk from {original_shape} to {expected_shape}"
+            return data, status
 
+        except rasterio.errors.RasterioIOError as e:
+            # Retry only on SlowDown error
+            if "SlowDown" in str(e):
+                if attempt < MAX_RETRIES - 1:
+                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
+                    print(f"SlowDown from S3 on {uri}. Retrying in {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
                 else:
-                    status = "success- chunk complete, no padding needed"
+                    # Too many retries → fail hard
+                    raise RuntimeError(f"S3 throttling (SlowDown) persisted after {MAX_RETRIES} retries for {uri}")
+            else:
+                # Other RasterioIOError → fallback to array of zeros downloaded
+                data = np.full(expected_shape, 0, dtype=numpy_dtype)
+                status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}"
+                return data, status
 
-    # If the uri doesn't exist, a numpy array of the correct size and datatype populated with 0s is returned.
-    except Exception as e:
-
-        numpy_dtype = map_to_numpy_dtype(data_type)   # Translates the GDAL-style datatype to numpy-style datatype
-        data = np.full((chunk_length_pixels, chunk_length_pixels), 0).astype(numpy_dtype)
-        status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}"
-
-    return data, status
+        except Exception as e:
+            # Non-SlowDown, non-Rasterio error → fallback to array of zeros downloaded
+            data = np.full(expected_shape, 0, dtype=numpy_dtype)
+            status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}"
+            return data, status
 
 
 # Prepares list of chunks to download.
 # Chunks are defined by a bounding box.
 # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
-def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger):
+def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger, stagger_download=False):
+
+    # Only staggers downloads for scripts that require it because they're hitting individual s3 folders a lot, e.g., summative outputs.
+    # Not all scripts hit individual s3 folders beyond s3's request limit.
+    if stagger_download == True:
+        # Staggers worker startup so that not all workers are requesting data from s3 at the same time, to prevent hitting request limit
+        startup_delay = random.uniform(0, 5)
+        time.sleep(startup_delay)
 
     futures = {}
 
@@ -731,15 +761,18 @@ def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_fin
             # When the values are a list with just the file to download, without the datatype
             if len(value)==1:
                 future = executor.submit(get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, 'float32')
-                futures[future] = key  # Stores Future objects (data and status) as keys, layer names as values
 
             # When the values are a list with the file to download and the datatype
             elif len(value)==2:
                 future = executor.submit(get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, value[1])
-                futures[future] = key  # Stores Future objects (data and status) as keys, layer names as values
 
             else:
                 sys.exit("Unexpected number of parameters in download dictionary")
+
+            futures[future] = key  # Stores Future objects (data and status) as keys, layer names as values
+
+            # Staggers submissions to avoid burst traffic to S3
+            time.sleep(random.uniform(0.05, 0.3))
 
     return futures
 

@@ -121,7 +121,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
     # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
-    futures = uu.prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger_worker)
+    futures = uu.prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger_worker, True)
 
     lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
 
@@ -135,10 +135,8 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         data, status = future.result()  # Unpacks the tuple result
         if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
             lu.print_and_log(f"{status}: {uu.timestr()}", False, logger_worker)
-        print(status)
         layers[layer] = data
 
-    sys.quit()
 
     ### Part 2: Creates summative outputs
 
