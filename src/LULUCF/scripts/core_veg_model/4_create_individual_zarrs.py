@@ -1,7 +1,7 @@
 """
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
-Creates a separate zarr for each model output folder
+Creates a separate global zarr for each model output folder
 
 Local test:
 python -m src.LULUCF.scripts.core_veg_model.4_create_individual_zarrs -yr 2000 2024 --first_folders_to_process 2 --first_1x1s_to_process 2 --input_date YYYYMMDD --run_local
@@ -14,7 +14,6 @@ Coiled large area test:
 python -m src.utilities.create_cluster -n 2 -m 32 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_veg_model.4_create_individual_zarrs -cn LULUCF_postprocessing -yr 2000 2024 --first_folders_to_process 2 --input_date YYYYMMDD
 
-
 Full Coiled run:
 python -m src.utilities.create_cluster -n 100 -m 32 -cn LULUCF_postprocessing
 python -m src.LULUCF.scripts.core_veg_model.4_create_individual_zarrs -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD
@@ -26,7 +25,6 @@ import argparse
 import fsspec
 import rasterio
 import re
-import numpy as np
 import os
 import sys
 import time
@@ -34,14 +32,15 @@ import rioxarray
 import warnings
 import xarray as xr
 import zarr
-from numcodecs import Blosc
 from dask.distributed import Client, print
+import dask
 
 
 # Project imports
 from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
+from src.utilities import resize_cluster
 
 # To hide the warning "UserWarning: Consolidated metadata is currently not part in the Zarr format 3 specification. It may not be supported by other zarr implementations and may change in the future."
 warnings.filterwarnings(
@@ -50,6 +49,12 @@ warnings.filterwarnings(
     category=UserWarning,
     module="zarr.api.asynchronous"
 )
+
+def drop_attrs(ds):
+    ds.attrs = {}
+    for v in ds.data_vars:
+        ds[v].attrs = {}
+    return ds.reset_coords(drop=True)
 
 def build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger):
 
@@ -96,14 +101,23 @@ def build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger):
         out_path_final = out_path + out_file
         # print(out_path_final)
 
-        main_logger.info(f"Opening files in {folder}: {uu.timestr()}")
         da = xr.open_mfdataset(
             chunk_list,
             parallel=True,
-            chunks={'x': cn.zarr_pixel_chunks, 'y': cn.zarr_pixel_chunks}  # This doesn't actually rechunk to 10000x10000. It takes it up to 4000x4000.
+            chunks={'x': cn.zarr_pixel_chunks, 'y': cn.zarr_pixel_chunks}, # This doesn't actually rechunk to 10000x10000. It takes it up to 4000x4000.
+            preprocess=drop_attrs,
+            combine='by_coords',
+            engine="rasterio"
         ).astype(data_type)
 
+        main_logger.info(f"Dask array for {folder}: {uu.timestr()}")
+        main_logger.info(da)
+
+        folder_end_time = time.time()
+        main_logger.info(f"Ingesting {folder} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}")
+
         # Explicitly rechunks to 10000x10000
+        main_logger.info(f"Rechunking {folder}: {uu.timestr()}")
         da = da.chunk({'x': cn.zarr_pixel_chunks, 'y': cn.zarr_pixel_chunks})
 
         main_logger.info(f"Saving {folder} as zarr: {uu.timestr()}")
@@ -117,6 +131,148 @@ def build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger):
         folder_end_time = time.time()
         main_logger.info(f"Zarring {folder} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}")
 
+# import numpy as np
+# import rioxarray as rxr
+# import xarray as xr
+# # import zarr
+# from dask.distributed import wait
+# from dask import delayed
+# from dask.distributed import get_client
+#
+# def parse_bounds_from_filename(path):
+#     match = re.search(r'([-]?\d+)_([-]?\d+)_([-]?\d+)_([-]?\d+)', path)
+#     if not match:
+#         raise ValueError(f"Could not parse bounds from {path}")
+#     west, south, east, north = map(int, match.groups())
+#     return west, south, east, north
+#
+# def compute_global_extent(paths, resolution=1/4000):
+#     bounds = [parse_bounds_from_filename(p) for p in paths]
+#     west = min(b[0] for b in bounds)
+#     south = min(b[1] for b in bounds)
+#     east = max(b[2] for b in bounds)
+#     north = max(b[3] for b in bounds)
+#     width = int((east - west) / resolution)
+#     height = int((north - south) / resolution)
+#     return {
+#         "x0": west, "x1": east,
+#         "y0": south, "y1": north,
+#         "width": width,
+#         "height": height,
+#         "resolution": resolution
+#     }
+#
+#
+# def write_tile(path, out_path, extent, res):
+#
+#     west, south, east, north = parse_bounds_from_filename(path)
+#
+#     # Compute destination slice in global array
+#     x0 = int((west - extent["x0"]) / res)
+#     y0 = int((extent["y1"] - north) / res)
+#
+#     # Open global Zarr in append mode
+#     global_zarr = xr.open_zarr(out_path, mode="a")
+#
+#     # Load the tile
+#     tile = rxr.open_rasterio(path).squeeze()
+#
+#     # Assign into global Zarr
+#     global_zarr["band"][y0:y0 + tile.sizes["y"], x0:x0 + tile.sizes["x"]] = tile
+#
+#     # Persist write and cleanup
+#     global_zarr.close()
+#
+# def build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger):
+#
+#     for folder in output_dir_list:
+#         fs = fsspec.filesystem('s3', use_listings_cache=False, anon=False) if folder.startswith('s3://') else fsspec.filesystem('file')
+#         tif_paths = fs.glob(os.path.join(folder, '*.tif'))
+#         if first_1x1s_to_process:
+#             tif_paths = tif_paths[:first_1x1s_to_process]
+#
+#         main_logger.info(f"Computing global extent: {uu.timestr()}")
+#         extent = compute_global_extent(tif_paths)
+#         res = extent['resolution']
+#         y = np.arange(extent['y1'] - res/2, extent['y0'] - res/2, -res)
+#         x = np.arange(extent['x0'] + res/2, extent['x1'] + res/2, res)
+#
+#         extent_dict = {
+#             "x0": extent["x0"],
+#             "y1": extent["y1"]
+#         }
+#
+#         # Prepare output Zarr path
+#         sample_tif = tif_paths[0]
+#
+#         with fs.open(sample_tif, "rb") as fobj:
+#             with rasterio.open(fobj) as src:
+#                 data_type = src.dtypes[0]
+#
+#         layer_pattern = re.search(r"version_\d+_\d+_\d+(?:_[^/]*)?/([^/]+)/", sample_tif).group(1)
+#         layer_date = re.search(r"intervals/([^/]+)", sample_tif).group(1)
+#         layer_unit = re.search(r"([^/]+)/4000", sample_tif).group(1)
+#         out_file = f"{layer_pattern}_{layer_date}.zarr" if layer_unit == layer_date else f"{layer_pattern}{layer_unit}_{layer_date}.zarr"
+#         out_path = folder.replace("4000_pixels", cn.zarr_output_pattern) + out_file
+#
+#         main_logger.info(f"Creating xarray at {out_path}: {uu.timestr()}")
+#
+#         # Create empty xarray DataArray
+#         da = xr.DataArray(
+#             data=np.full((len(y), len(x)), np.nan, dtype=data_type),
+#             dims=("y", "x"),
+#             coords={"y": y, "x": x},
+#             name="band",
+#         )
+#
+#         # Rechunk and write to Zarr
+#         main_logger.info(f"Creating global empty Zarr at {out_path}: {uu.timestr()}")
+#
+#         """
+#         flm: There are 1 folders to convert into global zarrs
+#         flm: Computing global extent: 20250912_10_58_27
+#         flm: Creating xarray at s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__BGC__MgC/standard_model/hybrid_intervals/2010/_ha/global_zarr/20250904/carbon_density__BGC__MgC_ha_2010.zarr: 20250912_10_58_27
+#         flm: Creating global empty Zarr at s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__BGC__MgC/standard_model/hybrid_intervals/2010/_ha/global_zarr/20250904/carbon_density__BGC__MgC_ha_2010.zarr: 20250912_10_58_30
+#         /home/dagibbs22/miniforge3/envs/coiled_20250606/lib/python3.12/site-packages/distributed/client.py:3370: UserWarning: Sending large graph of size 8.94 GiB.
+#         This may cause some slowdown.
+#         Consider loading the data with Dask directly
+#          or using futures or delayed objects to embed the data into the graph without repetition.
+#         See also https://docs.dask.org/en/stable/best-practices.html#load-data-with-dask for more information.
+#           warnings.warn(
+#         2025-09-12 10:58:52,450 - distributed.protocol.core - CRITICAL - Failed to Serialize
+#         Traceback (most recent call last):
+#           File "/home/dagibbs22/miniforge3/envs/coiled_20250606/lib/python3.12/site-packages/distributed/protocol/core.py", line 109, in dumps
+#             frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
+#                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#           File "/home/dagibbs22/miniforge3/envs/coiled_20250606/lib/python3.12/site-packages/msgpack/__init__.py", line 36, in packb
+#             return Packer(**kwargs).pack(o)
+#                    ^^^^^^^^^^^^^^^^^^^^^^^^
+#           File "msgpack/_packer.pyx", line 279, in msgpack._cmsgpack.Packer.pack
+#           File "msgpack/_packer.pyx", line 276, in msgpack._cmsgpack.Packer.pack
+#           File "msgpack/_packer.pyx", line 265, in msgpack._cmsgpack.Packer._pack
+#           File "msgpack/_packer.pyx", line 232, in msgpack._cmsgpack.Packer._pack_inner
+#           File "msgpack/_packer.pyx", line 265, in msgpack._cmsgpack.Packer._pack
+#           File "msgpack/_packer.pyx", line 213, in msgpack._cmsgpack.Packer._pack_inner
+#           File "msgpack/_packer.pyx", line 265, in msgpack._cmsgpack.Packer._pack
+#           File "msgpack/_packer.pyx", line 232, in msgpack._cmsgpack.Packer._pack_inner
+#           File "msgpack/_packer.pyx", line 265, in msgpack._cmsgpack.Packer._pack
+#           File "msgpack/_packer.pyx", line 189, in msgpack._cmsgpack.Packer._pack_inner
+#         ValueError: bytes object is too large
+#         Killed
+#         """
+#
+#         da = da.chunk({"x": cn.zarr_pixel_chunks, "y": cn.zarr_pixel_chunks})
+#         da.to_dataset(name="band").to_zarr(out_path, mode="w")
+#
+#         main_logger.info(f"Writing tiles incrementally: {uu.timestr()}")
+#         client = get_client()
+#         futures = [
+#             client.submit(write_tile, p, out_path, extent_dict, res)
+#             for p in tif_paths
+#         ]
+#         results = client.gather(futures)
+#         print(results)
+#         main_logger.info(f"Finished incremental write: {uu.timestr()}")
 
 def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
          first_folders_to_process=None, first_1x1s_to_process=None, log_note=None):
@@ -158,16 +314,27 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
 
     # Testing list with a variety of inputs: no unit_type, date_range, date
     output_dir_list = [
+        # Testing list
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/AGC_emission_factor_CO2_only__fraction/standard_model/hybrid_intervals/2001_2005/4000_pixels/20250904/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/AGC_emission_factor_CO2_only__fraction/standard_model/hybrid_intervals/2006_2010/4000_pixels/20250904/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2001_2005/_ha_yr/4000_pixels/20250904/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2006_2010/_ha_yr/4000_pixels/20250904/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/"
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__BGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__BGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/"
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__AGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/",
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__BGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__BGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/"
+
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2015_2016/_ha_yr/4000_pixels/20250904",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2016_2017/_ha_yr/4000_pixels/20250904"
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2017_2018/_ha_yr/4000_pixels/20250904"
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2018_2019/_ha_yr/4000_pixels/20250904"
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2019_2020/_ha_yr/4000_pixels/20250904"
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2020_2021/_ha_yr/4000_pixels/20250904"
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2021_2022/_ha_yr/4000_pixels/20250904"
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2022_2023/_ha_yr/4000_pixels/20250904"
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2023_2024/_ha_yr/4000_pixels/20250904"
     ]
 
     # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
@@ -198,13 +365,25 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
         output_dir_list = output_dir_list[:first_folders_to_process]
 
     main_logger.info(f"Directories to zarr: {output_dir_list}")
-    main_logger.info(f"There are {len(output_dir_list)} folders to conert into global zarrs")
+    main_logger.info(f"There are {len(output_dir_list)} folders to convert into global zarrs")
 
     build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
     main_logger.info(f"Zarring complete: {uu.timestr()}")
+
+    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    # cluster, not all the workers.
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
+
+        # Reduces number of workers in the cluster down to 1 if there is more than 10
+        if n_workers > 10:
+            main_logger.info("Resizing cluster to 1 worker")
+
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
     # Sets it so that no worker logs are created if doing a local run
     if not run_local:
