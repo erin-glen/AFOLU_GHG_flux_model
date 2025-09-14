@@ -28,12 +28,14 @@ DATA_TYPES = [
     # "burned_co2_Mg_CO2_ha",
     # "burned_co_Mg_CO2e_ha",
     "burned_total_Mg_CO2e_ha_yr",
+    "burned_total_Mg_CO2e_pixel_yr",
     # "drained_ch4_ditch_Mg_CO2e_ha_yr",
     # "drained_ch4_land_Mg_CO2e_ha_yr",
     # "drained_co2_Mg_CO2_ha_yr",
     # "drained_co2_offsite_Mg_CO2_ha_yr",
     # "drained_n2o_Mg_CO2e_ha_yr",
     "drained_total_Mg_CO2e_ha_yr",
+    "drained_total_Mg_CO2e_pixel_yr",
 ]
 
 INTEGER_DATASETS = {
@@ -49,9 +51,9 @@ INVENTORY_PERIODS = [
 
 BASE_URL = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/"
-    "outputs/version_0_5_0"
+    "outputs/version_0_7_0"
 )
-OUTPUT_DATE = "20250724"
+OUTPUT_DATE = "20250825"
 
 
 def get_input_datasets(
@@ -351,5 +353,5 @@ if __name__ == "__main__":
     )
 
 """
-python -m src.scripts.postprocessing.create_global_4km_maps -cm create_maps --run_name ogh_sensitivity_1km
+python -m src.scripts.postprocessing.create_global_maps -cn create_maps --run_name ogh_standard_model
 """

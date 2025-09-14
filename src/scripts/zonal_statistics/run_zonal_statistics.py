@@ -12,6 +12,11 @@ Key guarantees in this version:
 - Stage Parquet locally per full interval (no Hive partitioning) and upload the
   finished folder for each interval to S3 immediately under .../{interval}/(drained|burned)/.
 - No per-ha densities; sums only; area is m² → ha in post-process.
+
+New in this drop-in:
+- 100% assignment: every emission pixel is assigned to the nearest on-land country.
+- Ocean area is never counted (pixel_area masked to land).
+- Integrity checks: pipeline fails if any flux lands in country_code 0 or remains unassigned.
 """
 
 from __future__ import annotations
@@ -37,6 +42,9 @@ import shutil
 import xarray as xr
 import zarr
 import rasterio
+
+# NEW: nearest-country fill
+from scipy import ndimage as ndi
 
 import flox
 from flox import ReindexArrayType, ReindexStrategy
@@ -218,8 +226,20 @@ def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
 
 
 def safe_crop(ds, ref):
-    """Crop ds to ref's x/y extent (nearest), then force coords equal to ref."""
-    return ds.sel(x=ref.x, y=ref.y, method="nearest").assign_coords(x=ref.x, y=ref.y)
+    """Align ds to ref's x/y; prefer exact index match, else nearest within half a pixel."""
+    if not {"x", "y"}.issubset(ds.dims):
+        return ds
+    # Try exact reindex first
+    out = ds.reindex_like(ref)
+    if out.isnull().all():
+        # Fall back to nearest with half-pixel tolerance
+        tol_x = float(abs(ds.x[1] - ds.x[0])) / 2 if ds.x.size > 1 else None
+        tol_y = float(abs(ds.y[1] - ds.y[0])) / 2 if ds.y.size > 1 else None
+        out = ds.sel(
+            x=ref.x, y=ref.y, method="nearest",
+            tolerance={"x": tol_x, "y": tol_y}
+        )
+    return out.assign_coords(x=ref.x, y=ref.y)
 
 
 def open_zarr_region(path: str, bbox: Optional[List[float]], chunk_size: int) -> xr.DataArray:
@@ -310,6 +330,11 @@ def create_interval_df(coord_dict: dict, flux_type_dict: dict, interval_end_year
     # Tag interval end; convert area m² → ha
     df["interval_end"] = interval_end_year  # kept for downstream analysis
     df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000.0
+
+    # Cast admin codes to integers for output (they arrive as float from flox coords)
+    if "gadm_adm0" in df.columns:
+        df["gadm_adm0"] = df["gadm_adm0"].round().astype("uint32")
+
     return df
 
 
@@ -481,6 +506,56 @@ def _upload_partition_dir(fs_s3: s3fs.S3FileSystem, local_dir: Path, dest_prefix
     return uploaded
 
 
+# ---------------------------- assignment utils ----------------------------
+def fill_country_nearest(adm0_da: xr.DataArray, must_fill: xr.DataArray, *, search_px: int = 128) -> xr.DataArray:
+    """
+    Fill NaN adm0 cells under must_fill with nearest non-NaN adm0 code.
+    Works lazily with Dask via map_overlap; search_px is the overlap radius (pixels).
+    """
+    arr = adm0_da.data  # dask or numpy
+    msk = must_fill.data
+
+    def _fill_block(a, m):
+        # a: float array with NaNs; m: boolean mask of cells that must be assigned
+        miss = np.isnan(a) & m
+        if not np.any(miss):
+            return a
+        valid = ~np.isnan(a)
+        if not np.any(valid):
+            return a
+        # nearest on-land indices for every cell
+        _, (iy, ix) = ndi.distance_transform_edt(~valid, return_indices=True)
+        out = a.copy()
+        out[miss] = a[iy[miss], ix[miss]]
+        return out
+
+    filled = da.map_overlap(
+        _fill_block, arr, msk,
+        depth=(search_px, search_px),
+        boundary="nearest",
+        dtype=arr.dtype
+    )
+    return xr.DataArray(filled, coords=adm0_da.coords, dims=adm0_da.dims, name=adm0_da.name)
+
+
+def _assert_all_assigned(adm0_filled: xr.DataArray, must_assign: xr.DataArray, logger: logging.Logger):
+    unassigned = int(da.sum((must_assign & adm0_filled.isnull()).data).compute())
+    if unassigned > 0:
+        logger.error("Found %d flux/state pixels with no country after fill.", unassigned)
+        raise RuntimeError("Integrity check failed: unassigned flux pixels remain.")
+
+
+def _assert_no_zero_country(df: pd.DataFrame, label: str, logger: logging.Logger) -> None:
+    # Only emissions rows (not area)
+    bad = df[(df["flux_type"].ne("area__ha")) &
+             (df["value"].abs() > 0) &
+             (df.get("gadm_adm0").fillna(0).eq(0))]
+    if not bad.empty:
+        summary = bad.groupby("flux_type")["value"].sum().sort_values(ascending=False)
+        logger.error("Emissions assigned to country_code==0 in %s:\n%s", label, summary)
+        raise RuntimeError("Integrity check failed: emissions with country_code==0 detected.")
+
+
 # --------------------------------- driver ---------------------------------
 def run(args: argparse.Namespace) -> None:
     stage = "zonal_statistics"
@@ -537,11 +612,14 @@ def run(args: argparse.Namespace) -> None:
     ensure_zarr_exists(list_folder_uris(PIXEL_AREA_GTIFF_FOLDER), PIXEL_AREA_ZARR, args.chunk_size)
 
     logger.debug("Opening contextual layers")
-    adm0 = open_zarr_region(ADM0_ZARR, bbox, args.chunk_size).astype("uint32")
+    # IMPORTANT: keep as float with NaNs for ocean/missing
+    adm0 = open_zarr_region(ADM0_ZARR, bbox, args.chunk_size)
+    adm0 = xr.where(adm0 > 0, adm0, np.nan).astype("float32")
     pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).persist()
 
     # Expected groups
-    gadm_adm0_ids = zc.GADM_ADM0_IDS
+    # Exclude 0/ocean; use float dtype to match adm0 (which can be NaN elsewhere)
+    gadm_adm0_ids = np.array([gid for gid in zc.GADM_ADM0_IDS if gid > 0], dtype=np.float32)
     drained_codes_arr = np.array(sorted({0, *map(int, ALL_DRAINED_STATE_CODES)}), dtype=np.uint32)
     burned_codes_arr = np.array(sorted({0, *map(int, ALL_BURNED_STATE_CODES)}), dtype=np.uint32)
 
@@ -600,35 +678,54 @@ def run(args: argparse.Namespace) -> None:
         burned_total_aligned = safe_crop(burned_total, reference)
         burned_state_nodes_aligned = safe_crop(burned_state_nodes, reference)
 
-        adm0_aligned.name = "gadm_adm0"
-        drained_state_nodes.name = "drained_state_nodes"
-        burned_state_nodes_aligned.name = "burned_state_nodes"
-
         # Convert per-ha flux inputs to per-pixel totals lazily (only when needed)
         if paths["drained_total"]["unit"] == "ha":
             drained_total_aligned = drained_total_aligned * (pixel_area_aligned / 10000.0)
         if paths["burned_total"]["unit"] == "ha":
             burned_total_aligned = burned_total_aligned * (pixel_area_aligned / 10000.0)
 
+        # Land-only mask for area (never count ocean area)
+        land_mask = adm0_aligned.notnull()
+        pixel_area_land = pixel_area_aligned.where(land_mask).fillna(0.0)
+
+        # Build a conservative "must-assign" mask: any pixel that contributes signal
+        must_assign = (
+            (drained_total_aligned.fillna(0) != 0) |
+            (burned_total_aligned.fillna(0)  != 0) |
+            (drained_state_nodes != 0) |
+            (burned_state_nodes_aligned != 0)
+        )
+
+        # Fill ADM0 ONLY where we have signal; assign to nearest on-land country
+        adm0_filled = fill_country_nearest(adm0_aligned, must_assign, search_px=args.fill_search_px)
+        adm0_filled.name = "gadm_adm0"
+
+        # Final data used for reduction
+        drained_total_aligned = drained_total_aligned.fillna(0.0)
+        burned_total_aligned  = burned_total_aligned.fillna(0.0)
+
         if args.debug:
             for n, arr in {
                 "drained_total": drained_total_aligned,
                 "burned_total": burned_total_aligned,
-                "pixel_area": pixel_area_aligned,
-                "adm0": adm0_aligned,
+                "pixel_area_land": pixel_area_land,
+                "adm0_filled": adm0_filled,
                 "drained_state_nodes": drained_state_nodes,
                 "burned_state_nodes": burned_state_nodes_aligned,
             }.items():
-                log_array_summary(logger, n, arr, categories=n in {"adm0", "drained_state_nodes", "burned_state_nodes"})
+                log_array_summary(logger, n, arr, categories=n in {"adm0_filled", "drained_state_nodes", "burned_state_nodes"})
+
+        # Integrity: ensure all must-assign pixels have a country
+        _assert_all_assigned(adm0_filled, must_assign, logger)
 
         # -------- Drained aggregation (sum) --------
         with dask.annotate(label=f"reduce:drained:{interval}"):
-            cube_d = xr.concat([drained_total_aligned, pixel_area_aligned], dim="flux_type").assign_coords(
+            cube_d = xr.concat([drained_total_aligned, pixel_area_land], dim="flux_type").assign_coords(
                 flux_type=("flux_type", [0, 2])
             )
             res_d = xarray_reduce(
                 cube_d,
-                adm0_aligned,
+                adm0_filled.astype("float32"),
                 drained_state_nodes,
                 func="sum",
                 expected_groups=(gadm_adm0_ids, drained_codes_arr),
@@ -640,12 +737,12 @@ def run(args: argparse.Namespace) -> None:
 
         # -------- Burned aggregation (sum) --------
         with dask.annotate(label=f"reduce:burned:{interval}"):
-            cube_b = xr.concat([burned_total_aligned, pixel_area_aligned], dim="flux_type").assign_coords(
+            cube_b = xr.concat([burned_total_aligned, pixel_area_land], dim="flux_type").assign_coords(
                 flux_type=("flux_type", [1, 2])
             )
             res_b = xarray_reduce(
                 cube_b,
-                adm0_aligned,
+                adm0_filled.astype("float32"),
                 burned_state_nodes_aligned,
                 func="sum",
                 expected_groups=(gadm_adm0_ids, burned_codes_arr),
@@ -654,6 +751,19 @@ def run(args: argparse.Namespace) -> None:
         dict_b = convert_to_coord_dict(res_b, interval)
         ft_dict_b = {1: "burned_total_Mg_CO2e", 2: "area__ha"}
         df_b = create_interval_df(dict_b, ft_dict_b, interval_end_year)
+
+        # Guard: no country_code 0 emissions
+        _assert_no_zero_country(df_d, f"drained {interval}", logger)
+        _assert_no_zero_country(df_b, f"burned {interval}", logger)
+
+        # Optional consistency checks in debug (raw vs. aggregated totals)
+        if args.debug:
+            raw_d = float(da.nansum(drained_total_aligned.data).compute())
+            agg_d = float(df_d.loc[df_d["flux_type"].eq("drained_total_Mg_CO2e"), "value"].sum())
+            raw_b = float(da.nansum(burned_total_aligned.data).compute())
+            agg_b = float(df_b.loc[df_b["flux_type"].eq("burned_total_Mg_CO2e"), "value"].sum())
+            logger.debug("Consistency (drained): raw=%.6f agg=%.6f Δ=%.6e", raw_d, agg_d, agg_d - raw_d)
+            logger.debug("Consistency (burned):  raw=%.6f agg=%.6f Δ=%.6e", raw_b, agg_b, agg_b - raw_b)
 
         # -------- Local per-interval staging (no Hive) --------
         local_d = (base_dir_drained / interval)
@@ -753,6 +863,8 @@ def main(argv=None):
     parser.add_argument("--run_name", default="ogh_standard_model", help="Model run name")
     parser.add_argument("--combine_zarr", choices=["none", "interval"], default="none",
                         help="Build and use a single Zarr per interval to reduce open/metadata overhead.")
+    parser.add_argument("--fill_search_px", type=int, default=128,
+                        help="Nearest-country fill radius (pixels) for orphan flux/state pixels.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run_local", action="store_true", help="Run locally without Dask/Coiled")
     mode.add_argument("--cluster_name", default="zonal_stats", help="Name of the Coiled cluster to attach to")
@@ -793,7 +905,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
 
 # Multiple intervals filtered by tile IDs
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
-  --interval_end_years 2005  \
+  --interval_end_years 2024  \
   --cluster_name zonal_stats \
   --run_date 20250825 \
   --model_version 0_7_0 \
