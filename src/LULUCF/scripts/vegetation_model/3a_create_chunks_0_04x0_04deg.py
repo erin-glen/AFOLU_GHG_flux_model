@@ -2,19 +2,19 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
-python -m src.LULUCF.scripts.core_veg_model.create_chunks_0_04x0_04deg -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_veg_model.3b_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
 
 Coiled large shapefile test:
 python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_veg_model.3b_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
+python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
 
 Full run:
 python -m src.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_veg_model.3b_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive 0.04x0.04 deg output run."
+python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive 0.04x0.04 deg output run."
 
 """
 
@@ -132,8 +132,9 @@ def create_0_04deg_veg_outputs(bounds, start_year, end_year, interval_type, inte
     # because that has the list of basic output directories which are customized for this run
     out_dict = {}
 
-    # Number of 0.00025 deg pixels per 0.04 deg pixel (0.04/0.00025)
-    block_size = 160
+    # Aggregation factor for 0.00025 deg to 0.04 deg resolution
+    aggregation_factor = int(chunk_length_pixels * 0.04)
+    coarse_chunk_size = int(chunk_length_pixels / aggregation_factor)
 
     # Iterates through all layers to process
     for layer_name, layer_data in layers.items():
@@ -142,17 +143,17 @@ def create_0_04deg_veg_outputs(bounds, start_year, end_year, interval_type, inte
 
         # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
         ny, nx = array_per_pixel.shape
-        ny_trim = (ny // block_size) * block_size
-        nx_trim = (nx // block_size) * block_size
+        ny_trim = (ny // aggregation_factor) * aggregation_factor
+        nx_trim = (nx // aggregation_factor) * aggregation_factor
         arr_trim = array_per_pixel[:ny_trim, :nx_trim]
 
         # Reshape into blocks and sum
         arr_coarse = arr_trim.reshape(
-            ny_trim // block_size, block_size,
-            nx_trim // block_size, block_size
+            ny_trim // aggregation_factor, aggregation_factor,
+            nx_trim // aggregation_factor, aggregation_factor
         ).sum(axis=(1, 3))
 
-        layer_name_out = layer_name + cn.C_density_aggreg_pixel_meaning
+        layer_name_out = layer_name + cn.flux_aggreg_pixel_meaning
 
         out_dict[layer_name_out] = arr_coarse
 
@@ -199,15 +200,19 @@ def create_0_04deg_veg_outputs(bounds, start_year, end_year, interval_type, inte
             s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
             # print("s3_path_without_bucket:", s3_path_without_bucket)
 
+            # Adjusts the output path pixel meaning and chunk pixel counts
             s3_path_without_bucket = s3_path_without_bucket.replace(cn.flux_density_pixel_meaning, cn.flux_aggreg_pixel_meaning)
-            s3_path_without_bucket = s3_path_without_bucket.replace("4000_pixels", f"{block_size}_pixels")
+            s3_path_without_bucket = s3_path_without_bucket.replace("4000_pixels", f"{coarse_chunk_size}_pixels")
             # print("s3_path_without_bucket:", s3_path_without_bucket)
 
             # Dictionary with metadata for each array
             out_dict[key] = [value, data_type, out_pattern, interval_year_range, s3_path_without_bucket]
 
+
+
+
         # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
-        upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
+        upload_tasks = uu.save_and_upload_small_raster_set(bounds, coarse_chunk_size, tile_id, bounds_str,
                                                            out_dict, is_final, logger_worker, out_no_data_val)
 
         lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", False, logger_worker)
@@ -328,15 +333,15 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     #                                                                         interval_year_diff_list, input_date, "per_ha")
 
     outputs_by_interval_dir_list = [
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2015_2016/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2016_2017/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2017_2018/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2018_2019/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2019_2020/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2020_2021/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2021_2022/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2022_2023/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2023_2024/_ha_yr/4000_pixels/20250904/"
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2015_2016/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2016_2017/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2017_2018/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2018_2019/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2019_2020/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2020_2021/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2021_2022/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2022_2023/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2023_2024/_0_04deg_yr/25_pixels/20250904/"
     ]
 
     if is_final:

@@ -4,19 +4,19 @@ Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 Creates a separate global zarr for each model output folder
 
 Local test:
-python -m src.LULUCF.scripts.core_veg_model.4_create_individual_zarrs -yr 2000 2024 --first_folders_to_process 2 --first_1x1s_to_process 2 --input_date YYYYMMDD --run_local
+python -m src.LULUCF.scripts.vegetation_model.4_create_individual_zarrs -yr 2000 2024 --first_folders_to_process 2 --first_1x1s_to_process 2 --input_date YYYYMMDD --run_local
 
 Coiled small test:
 python -m src.utilities.create_cluster -n 2 -m 16 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_veg_model.4_create_individual_zarrs -cn LULUCF_postprocessing -yr 2000 2024 --first_folders_to_process 2 --first_1x1s_to_process 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4_create_individual_zarrs -cn LULUCF_postprocessing -yr 2000 2024 --first_folders_to_process 2 --first_1x1s_to_process 2 --input_date YYYYMMDD
 
 Coiled large area test:
 python -m src.utilities.create_cluster -n 2 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_veg_model.4_create_individual_zarrs -cn LULUCF_postprocessing -yr 2000 2024 --first_folders_to_process 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4_create_individual_zarrs -cn LULUCF_postprocessing -yr 2000 2024 --first_folders_to_process 2 --input_date YYYYMMDD
 
 Full Coiled run:
 python -m src.utilities.create_cluster -n 100 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_veg_model.4_create_individual_zarrs -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4_create_individual_zarrs -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD
 
 Based on discussion with Justin Terry and https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bf3334-a09c-8320-a556-153f43ef9cd0
 """

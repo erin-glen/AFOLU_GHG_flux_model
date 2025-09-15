@@ -2,20 +2,21 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
-python -m src.LULUCF.scripts.core_veg_model.create_chunks_0_04x0_04deg -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3b_create_global_0_04x0_04deg -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_veg_model.create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.3b_vegetation_model.create_global_0_04x0_04deg -cn LULUCF_postprocessing --no_upload -yr 2000 2024 --input_date YYYYMMDD
 
 Coiled large shapefile test:
 python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_veg_model.create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
+python -m src.LULUCF.scripts.3b_vegetation_model.create_global_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
 
 Full run:
 python -m src.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_veg_model.create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive 0.04x0.04 deg output run."
+python -m src.LULUCF.scripts.3b_core_veg_model.create_global_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive global 0.04x0.04 deg output run."
 
+# Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
 """
 
 import argparse
@@ -23,10 +24,12 @@ import sys
 import time
 import psutil
 import rasterio
-from rasterio.merge import merge
+from osgeo import gdal
 import fsspec
 from dask import delayed, compute
 import os
+import re
+import tempfile
 from dask.distributed import print
 
 # Project imports
@@ -41,65 +44,102 @@ from src.utilities import resize_cluster
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
 os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
+def gdal_progress(pct, message, data):
+    """
+    GDAL progress callback.
+    pct: 0.0–1.0
+    message: current operation
+    data: user data (unused here)
+    """
+    pct_int = int(pct * 100)
+    print(f" GDAL VRT build progress: {pct_int}%: {uu.timestr()}", flush=True)
+    return 1  # return 0 would cancel
+
 @delayed
 def mosaic_tiles_to_global(s3_folder, global_out_path):
-
+    """
+    Build a global mosaic using a VRT from a text file of input tiles.
+    """
     process = psutil.Process(os.getpid())
-
     logger_worker = lu.setup_logging_worker()
-
     start_time = time.time()
 
     fs = fsspec.filesystem("s3", anon=False)
 
-    # 1. Collects all S3 tile files
-    tile_files = fs.glob(f"{s3_folder}/*.tif")
+    # 1. Collect all S3 tile files
+    tile_files = fs.glob(f"{s3_folder}*.tif")
     if not tile_files:
-        return f"  No tiles found in {s3_folder}"
+        return f"❌ No tiles found in {s3_folder}"
+    lu.print_and_log(f"{len(tile_files)} tiles found in {s3_folder}: {uu.timestr()}", False, logger_worker)
 
-    # Prefix with s3:// for rasterio
-    tile_files = [f"s3://{fp}" for fp in tile_files]
+    # tile_files = tile_files[0:50]  # For testing
+    tile_files = [f"/vsis3/{fp}" for fp in tile_files]  # Faster than vsis3_streaming, by experiment
 
-    # 2. Opens with rasterio
-    lu.print_and_log(f"Opening files in {s3_folder}: {uu.timestr()}", False, logger_worker)
-    src_files_to_mosaic = [rasterio.open(fp) for fp in tile_files]
+    # 2. Create a temporary working directory for this worker
+    tmpdir = tempfile.mkdtemp(prefix="mosaic_")
+    safe_name = re.sub(r'[^0-9a-zA-Z]+', '_', s3_folder.strip('/'))
 
-    lu.print_and_log(f"After merging 0.04 deg outputs globally: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+    list_path = os.path.join(tmpdir, f"tile_list_{safe_name}.txt")
+    vrt_path = os.path.join(tmpdir, f"mosaic_{safe_name}.vrt")
 
-    # 3. Merges into one array
-    print(f"Merging files in {s3_folder}: {uu.timestr()}")
-    mosaic_arr, mosaic_transform = merge(src_files_to_mosaic)
+    with open(list_path, "w") as f:
+        f.write("\n".join(tile_files))
 
-    # Uses metadata of first tile as base
-    out_meta = src_files_to_mosaic[0].meta.copy()
-    out_meta.update({
-        # "driver": "COG",
-        "height": mosaic_arr.shape[1],
-        "width": mosaic_arr.shape[2],
-        "transform": mosaic_transform,
-        "compress": "deflate",
-        "tiled": True,
-        "blockxsize": 512,
-        "blockysize": 512
-    })
+    # 3. Build VRT
+    lu.print_and_log(f"Building VRT for {s3_folder} into {vrt_path}: {uu.timestr()}", False, logger_worker)
+    # Build VRT directly from list of files
+    vrt = gdal.BuildVRT(vrt_path,
+                        tile_files,
+                        callback=gdal_progress)
+    if vrt is None:
+        raise RuntimeError(f"gdal.BuildVRT failed for {s3_folder}")
 
-    for src in src_files_to_mosaic:
-        src.close()
+    vrt = None  # flush to disk
 
-    # 4. Writes to local temp file
-    lu.print_and_log(f"Saving files in {s3_folder}: {uu.timestr()}", False, logger_worker)
-    local_out = os.path.basename(global_out_path)
-    with rasterio.open(local_out, "w", **out_meta) as dest:
-        dest.write(mosaic_arr)
+    # 3b. Validate VRT
+    try:
+        info = gdal.Info(vrt_path, format="json")
+        size = info.get("size", [])
+        vrt_end_time = time.time()
+        lu.print_and_log(f"{vrt_path} created successfully with size {size}, took {round(vrt_end_time - start_time)} seconds: {uu.timestr()}",False, logger_worker)
+    except Exception as e:
+        lu.print_and_log(f"VRT validation failed: {e}", False, logger_worker)
+        raise RuntimeError(f"VRT validation failed for {vrt_path}")
 
-    # 5. Uploads to S3
-    lu.print_and_log(f"Uploading files in {s3_folder}: {uu.timestr()}", False, logger_worker)
-    fs.put(local_out, global_out_path)
+    # 4. Decide where to write
+    if global_out_path.startswith("s3://"):
+        local_out = os.path.join(tmpdir, os.path.basename(global_out_path))
+        gdal_out_path = local_out
+    else:
+        gdal_out_path = global_out_path
+
+    # 5. Translate VRT → GeoTIFF
+    gtiff_options = gdal.TranslateOptions(
+        format="GTiff",
+        creationOptions=[
+            "COMPRESS=DEFLATE",
+            "TILED=YES",
+            "BLOCKXSIZE=512",
+            "BLOCKYSIZE=512"
+        ]
+    )
+    lu.print_and_log(f"Writing vrt to geotif for {global_out_path}: {uu.timestr()}", False, logger_worker)
+
+    writing_start_time = time.time()
+    gdal.Translate(gdal_out_path, vrt_path, options=gtiff_options)
+    writing_end_time = time.time()
+    lu.print_and_log(f"Wrote vrt to geotif for {global_out_path}, took {round(writing_end_time - writing_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+
+    # Upload if needed
+    if global_out_path.startswith("s3://"):
+        lu.print_and_log(f"Uploading geotif for {global_out_path}: {uu.timestr()}", False, logger_worker)
+        fs.put(gdal_out_path, global_out_path)
+        lu.print_and_log(f"✅ Uploaded mosaic to {global_out_path}: {uu.timestr()}", False, logger_worker)
 
     end_time = time.time()
-    lu.print_and_log(f"{global_out_path} took {round(end_time - start_time)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"{global_out_path} took {round(end_time - start_time)} seconds: {uu.timestr()}",False, logger_worker)
 
-    return f"Global mosaic written to {global_out_path}"
+    return f"✅ Global mosaic written to {global_out_path}"
 
 
 def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
@@ -176,15 +216,15 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     #                                                                        interval_year_diff_list, input_date, "per_ha")
 
     inputs_by_interval_dir_list = [
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2015_2016/_0_04deg_yr/160_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2016_2017/_0_04deg_yr/160_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2017_2018/_0_04deg_yr/160_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2018_2019/_0_04deg_yr/160_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2019_2020/_0_04deg_yr/160_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2020_2021/_0_04deg_yr/160_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2021_2022/_0_04deg_yr/160_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2022_2023/_0_04deg_yr/160_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2023_2024/_0_04deg_yr/160_pixels/20250904/"
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2015_2016/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2016_2017/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2017_2018/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2018_2019/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2019_2020/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2020_2021/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2021_2022/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2022_2023/_0_04deg_yr/25_pixels/20250904/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2023_2024/_0_04deg_yr/25_pixels/20250904/"
     ]
 
     # print(inputs_by_interval_dir_list)
@@ -215,15 +255,15 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
         for item in outputs_by_interval_dir_list:
             main_logger.info(f"  {item}")
 
-    # Makes a txt for each task in the list. These are deleted as tasks are completed.
-    main_logger.info("Creating task txts in s3...")
-    uu.create_s3_task_files(stage, chunk_list)
+    # # Makes a txt for each task in the list. These are deleted as tasks are completed.
+    # main_logger.info("Creating task txts in s3...")
+    # uu.create_s3_task_files(stage, chunk_list)
 
 
     ### Step 2: Creates outputs
 
     # Create one delayed task per mosaic
-    tasks = [mosaic_tiles_to_global(f, o) for f, o in zip(folders, outputs)]
+    tasks = [mosaic_tiles_to_global(f, o) for f, o in zip(inputs_by_interval_dir_list, outputs_by_interval_dir_list)]
 
     # Run them in parallel
     results = compute(*tasks)
@@ -240,8 +280,8 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
         workers = client.scheduler_info()["workers"]
         n_workers = len(workers)
 
-        # Reduces number of workers in the cluster down to 1 if there is more than 10
-        if n_workers > 10:
+        # Reduces number of workers in the cluster down to 1 if there is more than 8
+        if n_workers > 8:
             main_logger.info("Resizing cluster to 1 worker")
 
             resize_cluster.resize_coiled_cluster(cluster_name, 1)

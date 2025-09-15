@@ -25,8 +25,6 @@ small_chunk_pattern = r'__-?\d+_-?\d+_-?\d+_-?\d+__'
 ### m^2 to hectares
 m2_to_ha = 1/10000
 
-resolution = 0.00025
-
 ### Model years in 5-year intervals
 first_model_year_5_years = 2000  # First year of 5-year interval data
 last_model_year_5_years = 2020   # Last year of 5-year interval data
@@ -187,6 +185,10 @@ builtup = 250
 ### Miscellaneous
 
 full_raster_dims = 40000    # Size of a 10x10 deg raster in pixels
+
+resolution = 0.00025  # Decimal degrees
+
+agg_chunk_length_pixels = 4000 * 0.04  # Dimensions for 1x1 deg outputs at 0.04x0.04 deg resolution
 
 # Threshold for height loss to be counted as disturbed (m)
 sig_height_loss_threshold_abs = 5
