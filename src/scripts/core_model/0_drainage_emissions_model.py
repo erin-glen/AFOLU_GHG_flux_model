@@ -184,10 +184,10 @@ def calculate_drainage_and_emissions(
             # A) Drainage classification ----------------------------------
             if peat == 1:
                 node = nu.accrete_node(node, 1)
-                if dadap > 0 or osm_canals > 0:
+                if dadap > 1 or osm_canals > 1:
                     node = nu.accrete_node(node, 1)
                     drained = True
-                elif engert > 0 or grip > 0 or osm_roads > 0:
+                elif engert > 1 or grip > 1 or osm_roads > 1:
                     node = nu.accrete_node(node, 2)
                     drained = True
                 elif land_cover in (cropland_code, settlement_code):
@@ -1175,7 +1175,8 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --end_year 2024 \
   --all_five_year_periods \
   --mark_missing_factors \
-  --count_burned_years
+  --count_burned_years \
+  --run_name ogh_sensitivity_2km
   
   
 python -m src.scripts.core_model.0_drainage_emissions_model \
@@ -1188,7 +1189,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --mark_missing_factors \
   --count_burned_years \
   --peat_dataset gfw \
-  --run_name gfw_standard_model
+  --run_name gfw_standard_model_1km
   
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
