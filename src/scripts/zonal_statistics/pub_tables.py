@@ -742,18 +742,15 @@ Examples
 --------
 
 # Local CSV outputs (long + wide)
-python -m src.scripts.zonal_statistics.publish_tables \
+python -m src.scripts.zonal_statistics.pub_tables \
   --model_version 0_7_0 \
   --run_name ogh_standard_model \
-  --run_date 20250825 \
-  --years 2005 2010 \
-  --aws_region us-east-1 \
-  --out_dir /mnt/c/tmp/pub_tables \
-  --topn 20 \
-  --wide
+  --run_date 20250825_keep \
+  --years 2005 2010 2015 2020 2024 \
+  --out_dir /mnt/c/tmp/pub_tables
 
 # Minimal run (single year, long tables only)
-python -m src.scripts.zonal_statistics.publish_tables \
+python -m src.scripts.zonal_statistics.pub_tables \
   --model_version 0_7_0 \
   --run_name ogh_standard_model \
   --run_date 20250825 \
