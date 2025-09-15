@@ -16,7 +16,8 @@ Key guarantees in this version:
 New in this drop-in:
 - 100% assignment: every emission pixel is assigned to the nearest on-land country.
 - Ocean area is never counted (pixel_area masked to land).
-- Integrity checks: pipeline fails if any flux lands in country_code 0 or remains unassigned.
+- Deterministic grid snapping with pixel tolerance, plus early coverage check.
+- Integrity checks: pipeline fails if any flux lands in country_code==0 or remains unassigned.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ import xarray as xr
 import zarr
 import rasterio
 
-# NEW: nearest-country fill
+# Nearest-country fill
 from scipy import ndimage as ndi
 
 import flox
@@ -151,14 +152,7 @@ def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
 
 
 def build_output_parquet(model_version: str, run_name: str, run_date: str, interval: str) -> str:
-    """Return the S3 prefix for zonal stats, aligned to Zarr layout.
-
-    Zarr caches live under:
-        .../zarr/{run_name}/{run_date}/{interval}/
-
-    We mirror that for Parquet:
-        .../zonal_stats/{run_name}/{run_date}/{interval}/
-    """
+    """Return the S3 prefix for zonal stats, aligned to Zarr layout."""
     base = posixpath.join(
         ROOT,
         f"version_{model_version}",
@@ -225,20 +219,48 @@ def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
     return da_
 
 
-def safe_crop(ds, ref):
-    """Align ds to ref's x/y; prefer exact index match, else nearest within half a pixel."""
+def safe_crop(ds: xr.DataArray, ref: xr.DataArray, snap_tol_px: float = 0.75) -> xr.DataArray:
+    """
+    Align ds to ref.x/ref.y by nearest-neighbor with a tolerance expressed in *pixels*.
+    - Renames lon/lat to x/y if needed.
+    - Rounds coords to 12 dp to avoid tiny float drift.
+    - Applies .sel along x and y separately with scalar tolerances.
+    """
+    # Ensure dims are x/y
+    if "lon" in ds.dims and "x" not in ds.dims:
+        ds = ds.rename({"lon": "x"})
+    if "lat" in ds.dims and "y" not in ds.dims:
+        ds = ds.rename({"lat": "y"})
     if not {"x", "y"}.issubset(ds.dims):
         return ds
-    # Try exact reindex first
-    out = ds.reindex_like(ref)
-    if out.isnull().all():
-        # Fall back to nearest with half-pixel tolerance
-        tol_x = float(abs(ds.x[1] - ds.x[0])) / 2 if ds.x.size > 1 else None
-        tol_y = float(abs(ds.y[1] - ds.y[0])) / 2 if ds.y.size > 1 else None
-        out = ds.sel(
-            x=ref.x, y=ref.y, method="nearest",
-            tolerance={"x": tol_x, "y": tol_y}
-        )
+
+    # Round coordinates to stabilize alignment
+    for axis in ("x", "y"):
+        if axis in ds.coords:
+            ds = ds.assign_coords({axis: np.round(ds[axis].astype(float), 12)})
+
+    # Pixel sizes (deg) and scalar tolerances
+    px_x = float(abs(ds.x[1] - ds.x[0])) if ds.x.size > 1 else None
+    px_y = float(abs(ds.y[1] - ds.y[0])) if ds.y.size > 1 else None
+    tol_x = px_x * snap_tol_px if px_x else None
+    tol_y = px_y * snap_tol_px if px_y else None
+
+    out = ds
+    # Select along x with scalar tolerance
+    if "x" in out.dims:
+        sel_kw = {"method": "nearest"}
+        if tol_x is not None:
+            sel_kw["tolerance"] = tol_x
+        out = out.sel(x=ref.x, **sel_kw)
+
+    # Select along y with scalar tolerance
+    if "y" in out.dims:
+        sel_kw = {"method": "nearest"}
+        if tol_y is not None:
+            sel_kw["tolerance"] = tol_y
+        out = out.sel(y=ref.y, **sel_kw)
+
+    # Force coords to match exactly
     return out.assign_coords(x=ref.x, y=ref.y)
 
 
@@ -372,7 +394,7 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
         )
         filtered = _filter_valid_tiffs(uri_list)
         if filtered.empty:
-            raise FileNotFoundError(f"No valid GeoTIFFs remain after filtering for {zarr_path}")
+            raise FileNotFoundError(f"No valid GeoTIFFs remain after filtering for %s", zarr_path)
         dsx = make_xarray_chunks(filtered, chunk_size)
 
     for axis in ("x", "y"):
@@ -409,7 +431,7 @@ def ensure_combined_interval_zarr(paths: dict, chunk_size: int, combined_path: s
             ds_in = make_xarray_chunks(uris, chunk_size)
         except Exception as e:
             logging.warning(
-                "Combined Zarr: failed opening %d TIFF(s) for %s: %s. Filtering invalid tiles.",
+                "Combined Zarr: failed opening %d TIFFs for %s: %s. Filtering invalid tiles.",
                 len(uris), paths[key]["folder"], e
             )
             filtered = _filter_valid_tiffs(uris)
@@ -556,6 +578,27 @@ def _assert_no_zero_country(df: pd.DataFrame, label: str, logger: logging.Logger
         raise RuntimeError("Integrity check failed: emissions with country_code==0 detected.")
 
 
+def _assert_adm0_coverage(adm0_da: xr.DataArray, logger: logging.Logger, label: str) -> None:
+    """
+    Quick sample-based coverage check: if >99% NaN after snapping, alignment failed.
+    """
+    if not {"x", "y"}.issubset(adm0_da.dims):
+        logger.error("ADM0 coverage check: array missing x/y dims for %s.", label)
+        raise RuntimeError("ADM0 alignment failure: no x/y dims.")
+
+    nan_share = float(
+        adm0_da.isnull().isel(y=slice(None, None, 256), x=slice(None, None, 256)).mean().compute()
+    )
+    logger.debug("ADM0 NaN share after snap (%s): %.3f", label, nan_share)
+    if nan_share >= 0.99:
+        logger.error(
+            "ADM0 alignment produced ~%.2f%% NaN for %s. "
+            "Increase --snap_tolerance_px (e.g., 1.0 or 1.5) or verify ADM0 grid.",
+            nan_share * 100.0, label,
+        )
+        raise RuntimeError("ADM0 alignment failure: nearly all NaN after snap.")
+
+
 # --------------------------------- driver ---------------------------------
 def run(args: argparse.Namespace) -> None:
     stage = "zonal_statistics"
@@ -612,13 +655,12 @@ def run(args: argparse.Namespace) -> None:
     ensure_zarr_exists(list_folder_uris(PIXEL_AREA_GTIFF_FOLDER), PIXEL_AREA_ZARR, args.chunk_size)
 
     logger.debug("Opening contextual layers")
-    # IMPORTANT: keep as float with NaNs for ocean/missing
+    # Keep as float with NaNs for ocean/missing
     adm0 = open_zarr_region(ADM0_ZARR, bbox, args.chunk_size)
     adm0 = xr.where(adm0 > 0, adm0, np.nan).astype("float32")
     pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).persist()
 
-    # Expected groups
-    # Exclude 0/ocean; use float dtype to match adm0 (which can be NaN elsewhere)
+    # Expected groups (exclude 0/ocean)
     gadm_adm0_ids = np.array([gid for gid in zc.GADM_ADM0_IDS if gid > 0], dtype=np.float32)
     drained_codes_arr = np.array(sorted({0, *map(int, ALL_DRAINED_STATE_CODES)}), dtype=np.uint32)
     burned_codes_arr = np.array(sorted({0, *map(int, ALL_BURNED_STATE_CODES)}), dtype=np.uint32)
@@ -670,13 +712,16 @@ def run(args: argparse.Namespace) -> None:
             drained_state_nodes = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
             burned_state_nodes = open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
 
-        # Align everything to drained_state_nodes grid
+        # Align everything to drained_state_nodes grid (with pixel tolerance)
         reference = drained_state_nodes
-        adm0_aligned = safe_crop(adm0, reference)
-        pixel_area_aligned = safe_crop(pixel_area, reference)
-        drained_total_aligned = safe_crop(drained_total, reference)
-        burned_total_aligned = safe_crop(burned_total, reference)
-        burned_state_nodes_aligned = safe_crop(burned_state_nodes, reference)
+        adm0_aligned = safe_crop(adm0, reference, args.snap_tolerance_px)
+        pixel_area_aligned = safe_crop(pixel_area, reference, args.snap_tolerance_px)
+        drained_total_aligned = safe_crop(drained_total, reference, args.snap_tolerance_px)
+        burned_total_aligned = safe_crop(burned_total, reference, args.snap_tolerance_px)
+        burned_state_nodes_aligned = safe_crop(burned_state_nodes, reference, args.snap_tolerance_px)
+
+        # Early sanity: admin coverage after snap
+        _assert_adm0_coverage(adm0_aligned, logger, f"interval {interval}")
 
         # Convert per-ha flux inputs to per-pixel totals lazily (only when needed)
         if paths["drained_total"]["unit"] == "ha":
@@ -688,7 +733,7 @@ def run(args: argparse.Namespace) -> None:
         land_mask = adm0_aligned.notnull()
         pixel_area_land = pixel_area_aligned.where(land_mask).fillna(0.0)
 
-        # Build a conservative "must-assign" mask: any pixel that contributes signal
+        # "Must-assign" = any pixel that contributes signal
         must_assign = (
             (drained_total_aligned.fillna(0) != 0) |
             (burned_total_aligned.fillna(0)  != 0) |
@@ -865,6 +910,9 @@ def main(argv=None):
                         help="Build and use a single Zarr per interval to reduce open/metadata overhead.")
     parser.add_argument("--fill_search_px", type=int, default=128,
                         help="Nearest-country fill radius (pixels) for orphan flux/state pixels.")
+    parser.add_argument("--snap_tolerance_px", type=float, default=0.75,
+                        help="Nearest-neighbor snap tolerance in pixels (default 0.75). "
+                             "Increase (e.g., 1.0–1.5) if ADM0 alignment is too sparse.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run_local", action="store_true", help="Run locally without Dask/Coiled")
     mode.add_argument("--cluster_name", default="zonal_stats", help="Name of the Coiled cluster to attach to")
@@ -905,15 +953,14 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
 
 # Multiple intervals filtered by tile IDs
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
-  --interval_end_years 2024  \
+  --interval_end_years 2005  \
   --cluster_name zonal_stats \
   --run_date 20250825 \
   --model_version 0_7_0 \
   --run_name ogh_standard_model \
   --tile_pixels 4000 \
   --chunk_size 10000 \
-  --combine_zarr none \
-  --tile_ids 00N_110E
+  --combine_zarr none 
 
 # Bounding box run (local smoke test)
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
