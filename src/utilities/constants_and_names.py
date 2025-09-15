@@ -838,3 +838,36 @@ LULUCF_summative_output_dirs = [
     f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
+
+### For output jpeg creation
+
+# Country shapefile, with small islands removed for visual simplicity
+original_shapefile_path = "/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/world-administrative-boundaries_simple__20250102.shp"
+reprojected_shapefile_path = "/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/world-administrative-boundaries_simple__20250102_reproj.shp"
+
+# CRS for jpegs (Robinson equal area)
+Robinson_crs = "ESRI:54030"
+
+# Graphical elements
+land_bkgrnd = (245, 245, 245) # Color for land where no raster data (light gray)
+# land_bkgrnd = (2, 2, 2) # Color for land where no raster data (black: for testing)
+# land_bkgrnd = (245, 245, 220) # Color for land where no raster data (light yellow: for testing)
+ocean_color = (235, 235, 235) # Color for land where no raster data (very light gray)
+# ocean_color = (255, 255, 255) # Color for land where no raster data (white)
+# ocean_color = (50, 50, 50) # Color for land where no raster data (dark gray: for testing)
+boundary_color = (150, 150, 150) # Color for country boundaries (medium gray)
+boundary_width = 0.2 # Width of country boundaries
+panel_dims = (12, 6) # Map panel dimensions (width, height)
+dpi_jpeg = 300 # dpi for output jpegs
+legend_fontsize = 9 # Font size for legend titles and labels
+colorbar_dimensions = [0.14, 0.17, 0.02, 0.13] # [left, bottom, width, height]
+
+pres_text = f"Preliminary land use vegetation fluxes (model v{model_version} subset to 2016-2024)"
+
+# Output global aggregated jpeg names
+removals_jpeg_base = f"gross_removals__4km_aggregation__v{model_version}"
+emissions_jpeg_base = f"gross_emissions__4km_aggregation__v{model_version}"
+net_jpeg_base = f"net_flux__4km_aggregation__v{model_version}"
+three_panel_jpeg_base = f"three_panels__4km_aggregation__v{model_version}"
+
+
