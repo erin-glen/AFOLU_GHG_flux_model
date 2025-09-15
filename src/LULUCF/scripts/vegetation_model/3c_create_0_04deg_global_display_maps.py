@@ -13,6 +13,7 @@ from pathlib import Path
 from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 
 from fiona import path
 from matplotlib.colors import Normalize, TwoSlopeNorm, LinearSegmentedColormap
@@ -295,8 +296,30 @@ def save_pres_non_pres_jpegs(ax, out_jpeg, out_jpeg_for_pres, year):
 
     return out_jpeg_for_pres
 
+# Creates gifs of timeseries (fast and slow)
+def create_gif(net_jpeg_base, out_folder, out_maps_for_gif):
+    # Open all images
+    frames = [Image.open(img) for img in out_maps_for_gif]
+    # Save as GIF
+    frames[0].save(
+        f"{out_folder}/{net_jpeg_base}__{cn.years_annual[1]}_{cn.years_annual[-1]}__fast.gif",
+        save_all=True,
+        append_images=frames[1:],  # add the rest
+        duration=1000,  # ms per frame
+        loop=0  # 0 = infinite loop
+    )
+    frames[0].save(
+        f"{out_folder}/{net_jpeg_base}__{cn.years_annual[1]}_{cn.years_annual[-1]}__slow.gif",
+        save_all=True,
+        append_images=frames[1:],  # add the rest
+        duration=2500,  # ms per frame
+        loop=0  # 0 = infinite loop
+    )
+
 # Makes jpeg of net fluxes
 def map_net_flux(input_date, in_folder, out_folder, colors, percentiles, title_text, net_jpeg_base):
+
+    series_start_time = time.time()
 
     # Reprojects shapefile, if needed
     shapefile = check_and_reproject_shapefile(
@@ -398,20 +421,11 @@ def map_net_flux(input_date, in_folder, out_folder, colors, percentiles, title_t
 
         out_maps_for_gif.append(out_jpeg_for_pres)
 
+    # Creates gifs of timeseries
     create_gif(net_jpeg_base, out_folder, out_maps_for_gif)
 
-
-def create_gif(net_jpeg_base, out_folder, out_maps_for_gif):
-    # Open all images
-    frames = [Image.open(img) for img in out_maps_for_gif]
-    # Save as GIF
-    frames[0].save(
-        f"{out_folder}/{net_jpeg_base}__{cn.years_annual[1]}_{cn.years_annual[-1]}.gif",
-        save_all=True,
-        append_images=frames[1:],  # add the rest
-        duration=1000,  # ms per frame
-        loop=0  # 0 = infinite loop
-    )
+    series_end_time = time.time()
+    print(f"Net flux took {round(series_end_time - series_start_time)} seconds: {uu.timestr()}")
 
 
 # Makes jpeg of gross fluxes
