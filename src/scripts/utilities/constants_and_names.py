@@ -292,6 +292,28 @@ tile_id_list = [
 burned_area_final_pattern = "burned_area_final"
 land_cover_pattern = "land_cover"
 
+# --- Display / cartography constants (for global JPEGs) ---
+
+# Country boundaries (simple) – adjust paths if yours differ
+original_shapefile_path   = "/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/world-administrative-boundaries_simple__20250102.shp"
+reprojected_shapefile_path = "/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/world-administrative-boundaries_simple__20250102_reproj.shp"
+
+# Map projection
+Robinson_crs = "ESRI:54030"
+
+# Styling
+land_bkgrnd        = (245, 245, 245)   # land fill under no-data
+ocean_color        = (235, 235, 235)   # panel background
+boundary_color     = (150, 150, 150)
+boundary_width     = 0.2
+panel_dims         = (12, 6)           # inches
+dpi_jpeg           = 300
+legend_fontsize    = 9
+colorbar_dimensions = [0.14, 0.17, 0.02, 0.13]  # [left, bottom, width, height]
+
+# Optional note on the panel (bottom-right)
+pres_text = f"Preliminary organic soils fluxes (model v{model_version})"
+
 # ---------------------------------------------------
 # 7. Dynamic Download Dictionary Function
 # ---------------------------------------------------
