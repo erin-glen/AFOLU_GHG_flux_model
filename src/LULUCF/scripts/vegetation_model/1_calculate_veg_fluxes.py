@@ -885,7 +885,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 ### Mangrove loss
                 elif mang_loss:
                     node = nu.accrete_node(node, 1)
-                    node = nu.accrete_node(node, 2)             # Loss of mangroves (12)
+                    node = nu.accrete_node(node, 3)             # Loss of mangroves (13)
                     RF_AGC_final = mangrove_AGC_RF
                     RF_BGC_final = RF_AGC_final * r_s_ratio_mang
 
@@ -903,31 +903,31 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
 
                     if (interval_start_year < last_mang_loss_year) and (last_mang_loss_year <= interval_end_year):
                         if water_LC_curr:
-                            state_out = nu.accrete_node(node, 1)    # Permanent loss of mangroves to water (121)
-                            # print(f"Node code is {state_out}, permanent loss of mangroves to water (121)")
+                            state_out = nu.accrete_node(node, 2)    # Permanent loss of mangroves to water (132)
+                            # print(f"Node code is {state_out}, permanent loss of mangroves to water (132)")
 
                         elif LC_curr == cn.cropland:
-                            state_out = nu.accrete_node(node, 2)    # Permanent loss of mangroves to cropland (122)
-                            # print(f"Node code is {state_out}, permanent loss of mangroves to cropland (122)")
+                            state_out = nu.accrete_node(node, 3)    # Permanent loss of mangroves to cropland (133)
+                            # print(f"Node code is {state_out}, permanent loss of mangroves to cropland (133)")
 
                         elif LC_curr == cn.builtup:
-                            state_out = nu.accrete_node(node, 3)    # Permanent loss of mangroves to settlement (123)
-                            # print(f"Node code is {state_out}, permanent loss of mangroves to settlement (123)")
+                            state_out = nu.accrete_node(node, 4)    # Permanent loss of mangroves to settlement (134)
+                            # print(f"Node code is {state_out}, permanent loss of mangroves to settlement (134)")
 
                         elif short_veg_LC_curr:
-                            state_out = nu.accrete_node(node, 4)    # Permanent loss of mangroves to short vegetation (124)
-                            # print(f"Node code is {state_out}, permanent loss of mangroves to short vegetation (124)")
+                            state_out = nu.accrete_node(node, 5)    # Permanent loss of mangroves to short vegetation (135)
+                            # print(f"Node code is {state_out}, permanent loss of mangroves to short vegetation (135)")
 
                         elif tall_veg_LC_curr:
-                            state_out = nu.accrete_node(node, 5)    # Permanent loss of mangroves to tall vegetation (125)
-                            # print(f"Node code is {state_out}, permanent loss of mangroves to tall vegetation (125)")
+                            state_out = nu.accrete_node(node, 6)    # Permanent loss of mangroves to tall vegetation (136)
+                            # print(f"Node code is {state_out}, permanent loss of mangroves to tall vegetation (136)")
 
                         else:
-                            state_out = nu.accrete_node(node, 6)    # Permanent loss of mangroves to anything else (126)
-                            # print(f"Node code is {state_out}, permanent loss of mangroves to anything else (126)")
+                            state_out = nu.accrete_node(node, 7)    # Permanent loss of mangroves to anything else (137)
+                            # print(f"Node code is {state_out}, permanent loss of mangroves to anything else (137)")
                     else:
-                        state_out = nu.accrete_node(node, 0)  # Temporary loss of mangroves (120)
-                        # print(f"Node code is {state_out}, temporary loss of mangroves that emits biomass C pools only (120)")
+                        state_out = nu.accrete_node(node, 1)  # Temporary loss of mangroves (131)
+                        # print(f"Node code is {state_out}, temporary loss of mangroves that emits biomass C pools only (131)")
 
 
                     # print(f"c_dens_in: {c_dens_in}")
@@ -941,26 +941,26 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 ### Mangrove that is mangrove at end of the interval (includes loss with later gain and mangrove remaining mangrove)
                 elif mang_remaining_mang:
                     node = nu.accrete_node(node, 1)
-                    node = nu.accrete_node(node, 3)  # Mangrove remaining mangrove (13)
+                    node = nu.accrete_node(node, 2)  # Mangrove remaining mangrove (12)
                     RF_AGC_final = mangrove_AGC_RF
                     RF_BGC_final = RF_AGC_final * r_s_ratio_mang
 
                     if mang_loss_in_interval:
-                        state_out = nu.accrete_node(node, 1)  # Mangrove loss (temporary) with disturbance that emits biomass C pools only (131)
+                        state_out = nu.accrete_node(node, 1)    # Mangrove remaining mangrove + temp loss in interval (121)
                         mang_c_pools_EF_no_fire = cn.biomass_emissions_only
 
                         (c_gross_emis_out, c_gross_removals_out, c_dens_out, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = (
                             nu.calc_mang_loss(interval_length, first_mang_gain_year, first_mang_loss_year, interval_start_year,
                                 mang_c_pools_EF_no_fire, mang_loss_year_in_interval, mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss,
                                 RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio_mang, litter_c_ratio_mang))
-                        # print(f"Node code is {state_out}, mangrove remaining mangrove with temporary disturbace of mangroves that emits biomass C pools only (131)")
+                        # print(f"Node code is {state_out}, mangrove remaining mangrove with temporary disturbace of mangroves that emits biomass C pools only (121)")
 
                     else:
-                        state_out = nu.accrete_node(node, 2)
+                        state_out = nu.accrete_node(node, 2)    # Mangrove remaining mangrove, no loss in interval (122)
                         (c_gross_emis_out, c_gross_removals_out, c_dens_out, gain_year_count, forest_age_end_of_interval) = (
                             nu.calc_mang(forest_age_start_of_interval, first_mang_gain_year, first_mang_loss_year, interval_end_year,
                                 mang_gain_year_count_pre_loss, RF_AGC_final, RF_BGC_final, c_dens_in, deadwood_c_ratio_mang, litter_c_ratio_mang))
-                        # print(f"Node code is {state_out}, mangrove remaining mangrove (132)")
+                        # print(f"Node code is {state_out}, mangrove remaining mangrove (122)")
 
                     # print(f"c_dens_in: {c_dens_in}")
                     # print(f"c_dens_out: {c_dens_out}")
