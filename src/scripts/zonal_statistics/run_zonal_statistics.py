@@ -123,7 +123,7 @@ ADM0_GTIFF_FOLDER = (
 )
 ADM0_ZARR = (
     "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/"
-    "GADM4_1_adm0_global/20250604/global_GADM41_adm0_20250604.zarr"
+    "GADM4_1_adm0_global/20250917/global_GADM41_adm0_20250604.zarr"
 )
 PIXEL_AREA_GTIFF_FOLDER = (
     "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/"
@@ -541,7 +541,14 @@ def run(args: argparse.Namespace) -> None:
     ensure_zarr_exists(list_folder_uris(PIXEL_AREA_GTIFF_FOLDER), PIXEL_AREA_ZARR, args.chunk_size)
 
     logger.debug("Opening contextual layers")
-    adm0 = open_zarr_region(ADM0_ZARR, bbox, args.chunk_size).astype("uint32")
+    adm0 = open_zarr_region(ADM0_ZARR, bbox, args.chunk_size)
+    # ensure dtype is float so NaNs are preserved through ops
+    if adm0.dtype.kind != "f":
+        adm0 = adm0.astype("float32")
+
+    # If your ADM0 raster uses 0 for ocean, convert 0 → NaN so oceans are excluded
+    adm0 = adm0.where(adm0 > 0)
+
     pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).persist()
 
     # Expected groups (force uint32 to match rasters)
