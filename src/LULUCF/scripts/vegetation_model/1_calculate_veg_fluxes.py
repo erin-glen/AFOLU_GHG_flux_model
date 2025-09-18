@@ -5,9 +5,8 @@ Local test (Dask part does not work):
 python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload -yr 2000 2024 --run_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -bb 10 49.75 10.25 50 -cs 0.25 -yr 2000 2024 --run_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -bb 115.25 -3.75 115.5 -3.5 -cs 0.25 -yr 2000 2024 --run_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model_mangroves
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model_mangroves -bb 116.25 -2.25 116.5 -2 -cs 0.25 -yr 2000 2024 --run_date 20250917
 
 Coiled small tests (1x1 deg chunk needs 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_model
@@ -65,7 +64,7 @@ os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-@jit(nopython=True)
+# @jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, in_dict_float32,
                   primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                   model_start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_final):
@@ -512,13 +511,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 Cf_forest = nu.calc_Cf_forest(climate_domain_cell, drivers_cell, primary_forest_proxy)
 
                 # Sets all mangrove states to false and only initializes mangrove states if is_ever_mang is True below
-                mang_gain = mang_loss = mang_remaining_mang = before_mang = after_mang = False
+                before_mang = mang_gain = mang_loss = mang_remaining_mang = non_mang_remaining_non_mang = after_mang = False
 
                 # Checks whether mangroves are present at all (any year) within the entire timeseries.
                 # If mangroves are ever present, we assume that there was never other terrestrial forest type before mangrove gain
                 # and that there will not be conversion to other terrestrial forest type after mangrove loss.
                 is_ever_mang = np.any(mang_timeseries == 1)
-                print(f"is_ever_mang: {is_ever_mang}")
+                #print(f"is_ever_mang: {is_ever_mang}")
 
                 # Mangrove-specific pre-processing (only if smoothed mangrove was present some year)
                 if is_ever_mang:
