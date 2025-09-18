@@ -1,388 +1,270 @@
-# -*- coding: utf-8 -*-
-"""
-Stage A: Aggregate 10×10° tiles to a global raster at a target angular resolution
-(0.04° by default), with proper per-ha/per-pixel semantics, and upload the global
-mosaics to S3.
+"""Stage A: Aggregate per-region summaries to global totals for a model run.
 
-This is functionally equivalent to the previous "aggregate" stage and safe to
-run against your current outputs. It uses constants from cn when present but
-has safe defaults.
+Key behaviors
+-------------
+- Run-aware directories:
+  * Regional inputs default to ``<project root>/outputs/global/results/<run>``.
+  * Global totals default to ``<project root>/outputs/global/aggregated/<run>``.
+- Input discovery: picks up every file matching ``--input-pattern`` and
+  concatenates them before aggregating.
+- Flexible statistics: ``sum`` (default), ``mean``, or ``median`` across any
+  group-by columns.
+- Outputs: one CSV per invocation written alongside the run, with filenames
+  that include the ``--model-run-name`` unless you supply ``--output-name``.
 
 Examples
 --------
-python -m src.scripts.postprocessing.aggregate_global \
-  -cn create_maps \
-  --run_name ogh_standard_model \
-  --date_tag 20250825 \
-  --target_deg 0.04 \
-  -p 40000_pixels
+
+# --- Aggregate with defaults (sum by scenario and year) ---
+python scripts/aggregate_global.py \
+  --model-run-name ogh_standard_model
+
+# --- Point at a different project checkout (e.g., notebooks directory) ---
+python scripts/aggregate_global.py \
+  --project-root /mnt/efs/repos/AFOLU_GHG_flux_model \
+  --model-run-name ogh_standard_model
+
+# --- Only read parquet tiles and average across scenarios ---
+python scripts/aggregate_global.py \
+  --model-run-name ogh_standard_model \
+  --input-pattern "*.parquet" \
+  --group-by year region \
+  --statistic mean
+
+# --- Customise both input and output directories ---
+python scripts/aggregate_global.py \
+  --model-run-name ogh_standard_model \
+  --input-dir /tmp/results/ogh_standard_model \
+  --output-dir /tmp/aggregated/ogh_standard_model
+
+# --- Override the output filename (``.csv`` will be appended if missing) ---
+python scripts/aggregate_global.py \
+  --model-run-name ogh_standard_model \
+  --output-name ogh_standard_model__global_totals
+
+# --- Dry-run: inspect discovery + aggregation without writing anything ---
+python scripts/aggregate_global.py \
+  --model-run-name ogh_standard_model \
+  --dry-run
 """
 from __future__ import annotations
 
 import argparse
-import math
-import posixpath
-import re
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import List, Optional, Sequence
 
-import boto3
-import dask
-import numpy as np
+import pandas as pd
 
-from src.scripts.utilities import constants_and_names as cn
-from src.scripts.utilities import universal_utilities as uu
-from src.scripts.utilities import log_utilities as lu
+SUPPORTED_STATS = ("sum", "mean", "median")
 
 
-# ---------- safe access to constants ----------
-def _cn(name: str, default):
-    return getattr(cn, name, default)
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    """Parse command line options."""
 
-# ---------- defaults ----------
-DEFAULT_NATIVE_DEG = 0.00025
-DEFAULT_TARGET_DEG = 0.04
+    parser = argparse.ArgumentParser(
+        description="Aggregate per-region model outputs to global totals.",
+    )
+    parser.add_argument(
+        "--model-run-name",
+        required=True,
+        help="Identifier for the model run; controls input/output locations.",
+    )
+    parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=None,
+        help="Optional override for the project root directory.",
+    )
+    parser.add_argument(
+        "--input-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Directory containing per-region outputs. Defaults to "
+            "<project root>/outputs/global/results/<model_run_name>."
+        ),
+    )
+    parser.add_argument(
+        "--input-pattern",
+        default="*.csv",
+        help="Glob pattern used to locate regional results.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Destination for aggregated files. Defaults to "
+            "<project root>/outputs/global/aggregated/<model_run_name>."
+        ),
+    )
+    parser.add_argument(
+        "--output-name",
+        default=None,
+        help="Optional filename for the aggregated dataset.",
+    )
+    parser.add_argument(
+        "--group-by",
+        nargs="+",
+        default=("scenario", "year"),
+        help="Columns that define unique global totals.",
+    )
+    parser.add_argument(
+        "--value-column",
+        default="value",
+        help="Column containing numeric values to aggregate.",
+    )
+    parser.add_argument(
+        "--statistic",
+        choices=SUPPORTED_STATS,
+        default="sum",
+        help="Statistic applied to the value column when aggregating.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Discover inputs and compute aggregates without writing files.",
+    )
+    return parser.parse_args(argv)
 
-DATA_TYPES = [
-    "burned_total_Mg_CO2e_pixel_yr",
-    "drained_total_Mg_CO2e_pixel_yr",
-]
 
-INTEGER_DATASETS: set[str] = set()
-INVENTORY_PERIODS = ["2021_2024"]
+def locate_project_root(project_root: Optional[Path]) -> Path:
+    """Return the absolute project root directory."""
 
-_BASE_URL_FALLBACK = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_7_0"
-BASE_URL = _cn("outputs_path", _BASE_URL_FALLBACK)
-OUTPUTS_BASE = posixpath.dirname(BASE_URL)
-DEFAULT_DATE_TAG = "20250825"
+    if project_root is not None:
+        return project_root.expanduser().resolve()
+    return Path(__file__).resolve().parents[1]
 
-_S3_CLIENT = _cn("s3_client", boto3.client("s3"))
 
-# ---------- helpers ----------
-def deg_to_label(deg: float) -> str:
-    s = f"{deg:.5f}".rstrip("0").rstrip(".")
-    return f"{s.replace('.', '_')}deg"
+def resolve_with_base(base: Path, provided: Optional[Path], default: Path) -> Path:
+    """Resolve ``provided`` relative to ``base`` with a sensible default."""
 
-def assert_grid_divides_world(target_deg: float):
-    rows = round(180 / target_deg); cols = round(360 / target_deg)
-    if not (np.isclose(rows*target_deg, 180.0) and np.isclose(cols*target_deg, 360.0)):
-        raise ValueError("--target_deg must divide 180 and 360 evenly.")
+    if provided is None:
+        return default
 
-def _is_density_name(dataset: str) -> bool:
-    return dataset.endswith("_ha") or dataset.endswith("_ha_yr")
+    candidate = provided.expanduser()
+    return candidate if candidate.is_absolute() else base / candidate
 
-def _is_pixel_name(dataset: str) -> bool:
-    return dataset.endswith("_pixel") or dataset.endswith("_pixel_yr")
 
-def _density_to_pixel_name(dataset: str) -> str:
-    return dataset.replace("_ha_yr", "_pixel_yr").replace("_ha", "_pixel")
+def default_input_dir(project_root: Path, model_run: str) -> Path:
+    return project_root / "outputs" / "global" / "results" / model_run
 
-def _split_s3(url: str) -> Tuple[str, str]:
-    assert url.startswith("s3://")
-    rest = url[len("s3://"):]
-    b, _, k = rest.partition("/")
-    return b, k
 
-def _join_s3(bucket: str, key: str) -> str:
-    return f"s3://{bucket}/{key.lstrip('/')}"
+def default_output_dir(project_root: Path, model_run: str) -> Path:
+    return project_root / "outputs" / "global" / "aggregated" / model_run
 
-def _list_s3_keys(prefix_s3: str) -> Iterable[str]:
-    bucket, prefix = _split_s3(prefix_s3)
-    token = None
-    while True:
-        kw = dict(Bucket=bucket, Prefix=prefix)
-        if token: kw["ContinuationToken"] = token
-        resp = _S3_CLIENT.list_objects_v2(**kw)
-        for obj in resp.get("Contents", []):
-            yield obj["Key"]
-        if not resp.get("IsTruncated"): break
-        token = resp.get("NextContinuationToken")
 
-def _discover_tiles_in_dir(tile_dir: str, tile_regex: str) -> List[str]:
-    pat = re.compile(tile_regex)
-    tiles = set()
-    for key in _list_s3_keys(tile_dir):
-        name = key.rsplit("/", 1)[-1]
-        m = pat.search(name)
-        if m: tiles.add(m.group(0))
-    return sorted(tiles)
+def ensure_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
 
-# ---------- I/O dictionaries ----------
-def build_download_upload_dict(
-    pixel_resolution: str,
-    run_name: str,
-    base_url: str,
-    output_date: str,
-    outputs_base: str,
-    data_types: list[str] | None = None,
-    inventory_periods: list[str] | None = None,
-) -> dict:
-    data_types = data_types or DATA_TYPES
-    inventory_periods = inventory_periods or INVENTORY_PERIODS
-    d = {}
-    for period in inventory_periods:
-        for dataset in data_types:
-            src_dir = (
-                f"{base_url}/{dataset}/{run_name}/"
-                f"five_year_intervals/{period}/{pixel_resolution}/{output_date}/"
-            )
-            out_dir = f"{outputs_base}/{{res_label}}_output_aggregation/{dataset}/{period}/"
-            d[f"{dataset}__{period}"] = {
-                "src_dir": src_dir,
-                "src_pattern": f"__{dataset}__{period}.tif",
-                "global_dir": out_dir,
-            }
-    return d
 
-# ---------- aggregation kernels ----------
-def agg_tile_to_target(
-    tile_id: str,
-    bounds: tuple[float, float, float, float],
-    chunk_length_pixels: int,
-    pixel_area_tile: str | None,
-    src_tile_path: str,
-    per_pixel_output_tile: str | None,
-    per_pixel_output_path: str | None,
-    use_pixel_area: bool,
-    native_deg: float,
-    target_deg: float,
-    dataset_name: str,
-):
-    is_final = False
-    logger = lu.setup_logging()
+def discover_inputs(directory: Path, pattern: str) -> List[Path]:
+    if not directory.exists():
+        raise FileNotFoundError(f"Input directory does not exist: {directory}")
 
-    arr = uu.get_tile_dataset_rio(src_tile_path, "Float32", bounds, chunk_length_pixels, is_final, logger)[0]
+    files = sorted(path for path in directory.glob(pattern) if path.is_file())
+    if not files:
+        raise FileNotFoundError(
+            f"No files matching '{pattern}' were found in {directory}",
+        )
+    return files
 
-    is_integer = dataset_name in INTEGER_DATASETS
-    if is_integer:
-        arr = arr.astype(np.int32)
 
-    is_density = _is_density_name(dataset_name)
-    is_pixel = _is_pixel_name(dataset_name)
+def read_table(path: Path) -> pd.DataFrame:
+    suffix = path.suffix.lower()
+    if suffix in {".csv", ""}:
+        return pd.read_csv(path)
+    if suffix == ".parquet":
+        return pd.read_parquet(path)
+    raise ValueError(f"Unsupported file extension for dataframe input: {path}")
 
-    if is_integer:
-        return uu.reaggregate_mode(arr, native_deg, target_deg)
 
-    if is_density:
-        if use_pixel_area:
-            if pixel_area_tile is None:
-                raise ValueError("Pixel-area conversion requested but pixel_area_tile was not provided.")
-            pa = uu.get_tile_dataset_rio(pixel_area_tile, "Float32", bounds, chunk_length_pixels, is_final, logger)[0]
-            per_pixel = arr * pa * _cn("m2_to_ha", 1.0/10000.0)
-            if per_pixel_output_tile and per_pixel_output_path:
-                uu.save_and_upload_single_raster(bounds, chunk_length_pixels, tile_id,
-                                                 per_pixel, per_pixel.dtype.name,
-                                                 per_pixel_output_tile, per_pixel_output_path,
-                                                 is_final, logger)
-            return uu.reaggregate_resolution(per_pixel, native_deg, target_deg)
-        else:
-            summed = uu.reaggregate_resolution(arr, native_deg, target_deg)
-            factor = target_deg / native_deg
-            if not math.isclose(round(factor), factor):
-                raise ValueError(f"target_deg/native_deg must be integer; got {target_deg}/{native_deg}.")
-            f = int(round(factor))
-            return summed / float(f * f)
+def load_inputs(files: Sequence[Path]) -> pd.DataFrame:
+    frames: List[pd.DataFrame] = []
+    for file in files:
+        frames.append(read_table(file))
+    return pd.concat(frames, ignore_index=True)
 
-    if is_pixel:
-        return uu.reaggregate_resolution(arr, native_deg, target_deg)
 
-    return uu.reaggregate_resolution(arr, native_deg, target_deg)
+def aggregate_frame(
+    frame: pd.DataFrame,
+    group_by: Sequence[str],
+    value_column: str,
+    statistic: str,
+) -> pd.DataFrame:
+    missing = [column for column in (*group_by, value_column) if column not in frame.columns]
+    if missing:
+        joined = ", ".join(missing)
+        raise KeyError(f"Columns required for aggregation were missing: {joined}")
 
-def combine_global_raster(
-    tiles: list[np.ndarray],
-    bounds_list: list[tuple[float, float, float, float]],
-    res_label: str,
-    global_outfile: str,
-    global_output_path: str,
-    target_deg: float,
-):
-    is_final = False
-    logger = lu.setup_logging()
+    grouped = frame.groupby(list(group_by), dropna=False)[value_column]
+    if statistic == "sum":
+        aggregated = grouped.sum()
+    elif statistic == "mean":
+        aggregated = grouped.mean()
+    elif statistic == "median":
+        aggregated = grouped.median()
+    else:  # pragma: no cover - safeguarded by argument parsing
+        raise ValueError(f"Unsupported statistic: {statistic}")
 
-    rows = int(round(180 / target_deg))
-    cols = int(round(360 / target_deg))
-    global_raster = np.full((rows, cols), np.nan, dtype=np.float32)
+    return aggregated.reset_index().sort_values(list(group_by)).reset_index(drop=True)
 
-    for tile, bounds in zip(tiles, bounds_list):
-        min_x, min_y, max_x, max_y = bounds
-        x0 = int(round((min_x + 180) / target_deg))
-        x1 = int(round((max_x + 180) / target_deg))
-        y0 = int(round((90 - max_y) / target_deg))
-        y1 = int(round((90 - min_y) / target_deg))
-        th, tw = tile.shape
-        assert (y1 - y0) == th and (x1 - x0) == tw
-        np.copyto(global_raster[y0:y1, x0:x1], tile, where=~np.isnan(tile))
 
-    global_bounds = (-180, -90, 180, 90)
-    uu.save_and_upload_single_raster(global_bounds, global_raster.shape[1],
-                                     f"{res_label}_global", global_raster, np.float32,
-                                     global_outfile, global_output_path,
-                                     is_final, logger)
-    return "Success"
+def determine_output_path(output_dir: Path, output_name: Optional[str], model_run: str) -> Path:
+    if output_name:
+        destination = output_dir / output_name
+    else:
+        destination = output_dir / f"global_totals_{model_run}.csv"
 
-# ---------- main ----------
-def aggregate_main(
-    cluster_name: str,
-    pixel_resolution: str,
-    run_name: str = "ogh_standard_model",
-    run_local: bool = False,
-    use_pixel_area: bool = True,
-    native_deg: float = DEFAULT_NATIVE_DEG,
-    target_deg: float = DEFAULT_TARGET_DEG,
-    base_url: str = BASE_URL,
-    output_date: str = DEFAULT_DATE_TAG,
-    outputs_base: str = OUTPUTS_BASE,
-):
-    assert_grid_divides_world(target_deg)
-    logger = lu.setup_logging_main()
-    is_final = not run_local
+    if destination.suffix == "":
+        destination = destination.with_suffix(".csv")
+    return destination
 
-    cluster, client, run_local = uu.connect_to_cluster(cluster_name, run_local=run_local)
 
-    d = build_download_upload_dict(pixel_resolution, run_name, base_url, output_date, outputs_base,
-                                   data_types=DATA_TYPES, inventory_periods=INVENTORY_PERIODS)
-    res_label = deg_to_label(target_deg)
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = parse_args(argv)
 
-    for key, items in d.items():
-        dataset, interval = key.split("__")
-        tiles = _discover_tiles_in_dir(items["src_dir"], _cn("tile_id_pattern", r"[0-9]{2}[A-Z][_][0-9]{3}[A-Z]"))
-        if not tiles:
-            raise FileNotFoundError(f"No tiles under {items['src_dir']} using pattern {_cn('tile_id_pattern','N/A')}")
-
-        bounds_list = []
-        delayed = []
-
-        is_density = _is_density_name(dataset)
-        is_integer = dataset in INTEGER_DATASETS
-        dataset_out = _density_to_pixel_name(dataset) if (is_density and use_pixel_area and not is_integer) else dataset
-
-        for tile_id in tiles:
-            lu.print_and_log(f"aggregate {res_label} {key} @ {uu.timestr()}", is_final, logger)
-            src_tile = f"{items['src_dir']}{tile_id}{items['src_pattern']}"
-            pixel_area_tile = (
-                f"{_cn('pixel_area_dir','s3://gfw2-data/analyses/area_28m/')}{_cn('pixel_area_pattern','hanson_2013_area')}_{tile_id}.tif"
-                if (is_density and use_pixel_area and not is_integer) else None
-            )
-            per_pixel_tile_outfile = None
-            per_pixel_output_path = None
-            if is_density and use_pixel_area and not is_integer:
-                per_pixel_tile_outfile = f"{tile_id}__{dataset_out}__{interval}.tif"
-                per_pixel_output_path = f"{base_url}/{dataset_out}/{run_name}/five_year_intervals/{interval}/{pixel_resolution}/{output_date}/"
-
-            bounds = uu.get_10x10_tile_bounds(tile_id)
-            bounds_list.append(bounds)
-            chunk_len = uu.calc_chunk_length_pixels(bounds)
-
-            delayed.append(
-                dask.delayed(agg_tile_to_target)(
-                    tile_id, bounds, chunk_len,
-                    pixel_area_tile, src_tile,
-                    per_pixel_tile_outfile, per_pixel_output_path,
-                    use_pixel_area, native_deg, target_deg, dataset
-                )
-            )
-
-        lu.print_and_log(f"build global {res_label} for {key} @ {uu.timestr()}", is_final, logger)
-        tiles_arrays = dask.compute(*delayed)
-
-        global_outfile = f"{res_label}_global__{dataset_out}_{interval}.tif"
-        global_output_path = items["global_dir"].format(res_label=res_label)
-
-        _ = combine_global_raster(list(tiles_arrays), bounds_list, res_label,
-                                  global_outfile, global_output_path, target_deg)
-        lu.print_and_log(f"Saved global raster under {global_output_path} (base {global_outfile})",
-                         is_final, logger)
-
-    client.close()
-
-def main():
-    p = argparse.ArgumentParser(description="Aggregate tiles to a global raster at target resolution.")
-    p.add_argument("-cn", "--cluster_name", required=True)
-    p.add_argument("-p", "--pixel_resolution", default="40000_pixels")
-    p.add_argument("--run_name", default="ogh_standard_model")
-    p.add_argument("--run_local", action="store_true")
-    p.add_argument("--skip_pixel_area", action="store_true")
-    p.add_argument("--native_deg", type=float, default=DEFAULT_NATIVE_DEG)
-    p.add_argument("--target_deg", type=float, default=DEFAULT_TARGET_DEG)
-    p.add_argument("--base_url", default=BASE_URL)
-    p.add_argument("--date_tag", default=DEFAULT_DATE_TAG)
-    p.add_argument("--outputs_base", default=OUTPUTS_BASE)
-    args = p.parse_args()
-
-    aggregate_main(
-        cluster_name=args.cluster_name,
-        pixel_resolution=args.pixel_resolution,
-        run_name=args.run_name,
-        run_local=args.run_local,
-        use_pixel_area=not args.skip_pixel_area,
-        native_deg=args.native_deg,
-        target_deg=args.target_deg,
-        base_url=args.base_url,
-        output_date=args.date_tag,
-        outputs_base=args.outputs_base,
+    project_root = locate_project_root(args.project_root)
+    input_dir = resolve_with_base(
+        project_root,
+        args.input_dir,
+        default_input_dir(project_root, args.model_run_name),
+    )
+    output_dir = resolve_with_base(
+        project_root,
+        args.output_dir,
+        default_output_dir(project_root, args.model_run_name),
     )
 
-if __name__ == "__main__":
-    main()
+    try:
+        files = discover_inputs(input_dir, args.input_pattern)
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}")
+        return 1
 
-# -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
-"""
-Stage A: Aggregate 10×10° tiles to global rasters at a chosen target angular resolution.
+    frame = load_inputs(files)
 
-Key behaviors
--------------
-- Unit-aware aggregation:
-  * *_pixel or *_pixel_yr inputs → summed into target cells.
-  * *_ha or *_ha_yr inputs:
-      - with pixel-area ON (default): convert to per-pixel totals, then sum.
-      - with pixel-area OFF: average densities within each target cell.
-  * Integer/categorical datasets (listed in INTEGER_DATASETS) → modal aggregation.
-- Tile discovery: finds tile IDs automatically by regex.
-- Outputs: one global GeoTIFF per dataset/interval under
-  .../{res_label}_output_aggregation/{dataset}/{interval}/.
+    try:
+        aggregated = aggregate_frame(
+            frame,
+            tuple(args.group_by),
+            args.value_column,
+            args.statistic,
+        )
+    except KeyError as exc:
+        print(f"Error: {exc}")
+        return 1
 
-Examples
---------
+    if args.dry_run:
+        print("Dry-run complete; aggregated dataframe not written to disk.")
+        return 0
 
-# --- Cluster setup ---
-# Create a Coiled cluster for aggregation (50 workers, 32 GB each):
-python -m src.scripts.utilities.create_cluster -n 50 -m 32 -cn create_maps
+    ensure_directory(output_dir)
+    destination = determine_output_path(output_dir, args.output_name, args.model_run_name)
+    aggregated.to_csv(destination, index=False)
+    print(f"Wrote aggregated results to {destination}")
+    return 0
 
-# --- Aggregation only ---
-# Aggregate at default 0.04° (≈4 km) resolution:
-python -m src.scripts.postprocessing.aggregate_global \
-  -cn create_maps \
-  --run_name ogh_standard_model \
-  --date_tag 20250825
 
-# Aggregate at finer 0.01° (≈1 km):
-python -m src.scripts.postprocessing.aggregate_global \
-  -cn create_maps \
-  --run_name ogh_standard_model \
-  --date_tag 20250825 \
-  --target_deg 0.01
-
-# Aggregate at 0.04° but skip pixel-area conversion (averages per-ha instead of converting):
-python -m src.scripts.postprocessing.aggregate_global \
-  -cn create_maps \
-  --run_name ogh_standard_model \
-  --date_tag 20250825 \
-  --skip_pixel_area
-
-# Run locally (no Coiled); still pass a placeholder cluster name:
-python -m src.scripts.postprocessing.aggregate_global \
-  --run_local \
-  -cn local_dev \
-  --run_name test_run \
-  --date_tag 20250101 \
-  --target_deg 0.04
-
-# Advanced: use alternate input/output roots (e.g., for a newer model version):
-python -m src.scripts.postprocessing.aggregate_global \
-  -cn create_maps \
-  --run_name ogh_standard_model \
-  --date_tag 20250825 \
-  --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_7_1 \
-  --outputs_base s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs
-"""
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    raise SystemExit(main())
