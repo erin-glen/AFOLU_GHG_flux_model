@@ -123,7 +123,7 @@ def create_0_04deg_veg_outputs(bounds, start_year, end_year, interval_type, inte
     pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
 
-    ### Part 2: Creates 0.04x0.04 deg outputs
+    ### Part 2: Creates 0.04x0.04 deg outputs (Mg CO2(e)/0.04x0.04 deg pixel/yr)
 
     lu.print_and_log(f"Summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
