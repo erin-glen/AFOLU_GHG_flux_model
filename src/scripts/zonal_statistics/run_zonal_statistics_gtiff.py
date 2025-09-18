@@ -1,66 +1,91 @@
 # -*- coding: utf-8 -*-
-"""Run organic-soils zonal statistics (GeoTIFF-only; no fill; no halo; warn on GADM=0).
+"""
+Run organic-soils zonal statistics directly from GeoTIFF/COG (VRT + windowed streaming).
 
-- Reads all inputs directly from GeoTIFFs (no Zarr creation).
-- Aligns contextual layers (ADM0, pixel_area) to the *state-node* raster grid
-  with a strict "nearest within 0.5 pixel" rule.
-- Sums flux and area by (gadm_adm0, state_nodes, flux_type). Area is on-land only.
-- Emits warnings (not failures) if some flux lands in gadm_adm0=0 (unassigned/ocean)
-  or if the state-node layer appears to be all zeros in the AOI.
+This script replaces Zarr reads with a COG-native workflow that:
+- Builds in-memory GDAL VRTs for each layer (adm0, pixel_area, drained/burned totals & state nodes).
+- Warps all inputs to a single explicit canonical grid (CRS=EPSG:4326) via rasterio.WarpedVRT.
+- Streams over fixed windows and aggregates with fast 2D bincount histograms.
+- Writes per-interval Parquet locally, then uploads immediately to S3.
+
+Key properties:
+- **Exact alignment**: no floating coordinate matching or "0.5-pixel tolerance".
+- **No Zarr**: avoids metadata/consolidation/version fragility.
+- **Streaming**: bounded memory; robust on large ROIs.
+
+Outputs:
+- S3 layout mirrors your prior `zonal_stats/{run_name}/{run_date}/{interval}/(drained|burned)/`.
+- Columns: for drained → [gadm_adm0, drained_state_nodes, drained_state_meaning, flux_type, value, interval_end]
+           for burned →  [gadm_adm0, burned_state_nodes,  burned_state_meaning,  flux_type, value, interval_end]
+
+Notes:
+- The script reuses your folder structure and auto-detects per-ha vs per-pixel flux inputs.
+- Environment variables such as `GDAL_HTTP_MULTIRANGE=YES` and `CPL_VSIL_CURL_CHUNK_SIZE=16777216` help COG I/O.
+
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import math
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import dask
-import dask.array as da
 import numpy as np
 import pandas as pd
-import posixpath
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.fs as pafs
+import rasterio
 import s3fs
-import shutil
-import xarray as xr
+from affine import Affine
+from osgeo import gdal
+from rasterio.enums import Resampling
+from rasterio.vrt import WarpedVRT
+from rasterio.windows import Window
 
-import flox
-from flox import ReindexArrayType, ReindexStrategy
-from flox.xarray import xarray_reduce
-
-# Project imports
+# Project utilities (absolute imports to allow `python -m ...`)
 import src.scripts.zonal_statistics.zonal_constants as zc
-from src.scripts.zonal_statistics.zonal_constants import (
-    DRAINED_STATE_NODE_MEANINGS,
-    BURNED_STATE_NODE_MEANINGS,
-    ALL_DRAINED_STATE_CODES,
-    ALL_BURNED_STATE_CODES,
-)
 from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.utilities import log_utilities as lu
 
-# ------------------------------ configuration ------------------------------
-SPARSE_DEFAULT = True
+
+# ------------------------------- config --------------------------------
 
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 OUTPUT_BASE = "{root}/version_{model_version}"
 
-# Inputs (same layout you’ve been using)
+# Input folders (depend on tile size to locate inputs)
 FOLDER_TEMPLATE = (
     OUTPUT_BASE
     + "/{folder}/{run_name}/five_year_intervals/{interval}/{tile_pixels}_pixels/{run_date}/"
 )
 
-DATASETS = {
-    "drained_state_nodes": {"folder": "drained_state", "var": "drained_state_nodes"},
-    "burned_state_nodes":  {"folder": "burned_state",  "var": "burned_state_nodes"},
+# Contextual layers (static GeoTIFF folders; we build VRTs at runtime)
+ADM0_GTIFF_FOLDER = (
+    "s3://gfw2-data/gadm_administrative_boundaries/v4.1/"
+    "v4.1.64__from_gfw-data-lake/raster/epsg-4326/10/40000/adm0/gdal-geotiff/"
+)
+PIXEL_AREA_GTIFF_FOLDER = (
+    "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/"
+    "v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
+)
+
+# Dataset manifest (same labels you use downstream)
+DATASETS: Dict[str, Dict[str, Any]] = {
+    "drained_state_nodes": {
+        "folder": "drained_state",
+        "var": "drained_state_nodes",
+    },
+    "burned_state_nodes": {
+        "folder": "burned_state",
+        "var": "burned_state_nodes",
+    },
     "drained_total": {
         "folder_candidates": [
             "drained_total_Mg_CO2e_pixel_yr",
@@ -77,211 +102,395 @@ DATASETS = {
     },
 }
 
-# Contextual (10° / 40000 px @ 0.00025°)
-ADM0_GTIFF_FOLDER = (
-    "s3://gfw2-data/gadm_administrative_boundaries/v4.1/"
-    "v4.1.64__from_gfw-data-lake/raster/epsg-4326/10/40000/adm0/gdal-geotiff/"
-)
-PIXEL_AREA_GTIFF_FOLDER = (
-    "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/"
-    "v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
-)
 
-# ------------------------------ helpers -----------------------------------
-def flox_sparse_kwargs(use_sparse: bool) -> dict:
-    if not use_sparse:
-        return {}
-    try:
-        return {
-            "reindex": ReindexStrategy(blockwise=False, array_type=ReindexArrayType.SPARSE_COO),
-            "fill_value": 0,
-        }
-    except Exception:
-        return {}
+# ------------------------------- helpers --------------------------------
 
 def build_output_parquet(model_version: str, run_name: str, run_date: str, interval: str) -> str:
-    return posixpath.join(
-        ROOT, f"version_{model_version}", "zonal_stats", run_name, run_date, interval, ""
+    """Return the S3 prefix for zonal stats output (mirrors prior conventions)."""
+    base = "/".join(
+        [ROOT.rstrip("/"), f"version_{model_version}", "zonal_stats", run_name, run_date, interval]
     )
+    return base.rstrip("/") + "/"
 
-def list_geotiffs(base_uri: str) -> List[str]:
+
+def s3_exists(prefix: str) -> bool:
     fs = s3fs.S3FileSystem(anon=False)
-    return [f if f.startswith("s3://") else f"s3://{f}" for f in fs.glob(base_uri.rstrip("/") + "/**/*.tif")]
+    try:
+        return any(fs.glob(prefix.rstrip("/") + "/**"))
+    except FileNotFoundError:
+        return False
 
-def uris_for_dataset(
-    interval: str,
-    ds_key: str,
-    *,
-    root: str,
-    tile_pixels: int,
-    run_name: str,
-    run_date: str,
-    model_version: str,
-) -> Tuple[List[str], Optional[str]]:
-    """Return (uris, unit) for dataset in an interval; unit is 'ha' or 'pixel' for flux."""
-    fmt = dict(
-        root=root,
-        model_version=model_version,
-        run_name=run_name,
-        run_date=run_date,
-        tile_pixels=tile_pixels,
-        interval=interval,
-    )
-    spec = DATASETS[ds_key]
-    if "folder_candidates" in spec:
-        ranked = []
-        for name in spec["folder_candidates"]:
-            uri = FOLDER_TEMPLATE.format(folder=name, **fmt)
-            unit = "ha" if "_ha_" in name else "pixel"
-            ranked.append((uri, unit))
-        ranked.sort(key=lambda x: 0 if x[1] == "ha" else 1)
-        for base, unit in ranked:
-            got = list_geotiffs(base)
-            if got:
-                return got, unit
-        raise FileNotFoundError(f"No GeoTIFFs found for {ds_key} in {ranked}")
-    else:
-        base = FOLDER_TEMPLATE.format(folder=spec["folder"], **fmt)
-        got = list_geotiffs(base)
-        if not got:
-            raise FileNotFoundError(f"No GeoTIFFs found for {ds_key} in {base}")
-        return got, None
 
-def filter_uris_by_bbox(uris: List[str], bbox: Optional[List[float]]) -> List[str]:
-    if not bbox:
-        return uris
-    w, s, e, n = bbox
-    out = []
-    import rasterio
+def list_folder_uris(base_uri: str) -> List[str]:
+    """Return list of GeoTIFF URIs within base_uri recursively; error if none."""
+    fs = s3fs.S3FileSystem(anon=False)
+    pattern = base_uri.rstrip("/") + "/**/*.tif"
+    tif_files = [(f if f.startswith("s3://") else f"s3://{f}") for f in fs.glob(pattern)]
+    if not tif_files:
+        raise FileNotFoundError(f"No GeoTIFFs found in {base_uri}")
+    return sorted(tif_files)
+
+
+def _filter_valid_tiffs(uris: List[str], label: str, logger: logging.Logger) -> List[str]:
+    """Keep only TIFFs that rasterio can open; log and skip unreadable tiles."""
+    valid: List[str] = []
+    bad = 0
     for u in uris:
         try:
-            with rasterio.Env(), rasterio.open(u) as src:
-                b = src.bounds
-                if (b.right <= w) or (b.left >= e) or (b.top <= s) or (b.bottom >= n):
-                    continue
-                out.append(u)
-        except Exception:
-            continue
-    return out
+            with rasterio.Env():
+                with rasterio.open(u) as src:
+                    if src.count >= 1 and src.width > 0 and src.height > 0:
+                        valid.append(u)
+                    else:
+                        bad += 1
+        except Exception as e:
+            logger.warning("Skipping unreadable TIFF for %s: %s (%s)", label, u, e)
+            bad += 1
+    if bad:
+        logger.warning("Filtered out %d invalid TIFF(s) for %s; using %d valid.", bad, label, len(valid))
+    if not valid:
+        raise FileNotFoundError(f"No valid GeoTIFFs remain for {label}")
+    return valid
 
-def open_mosaic(uris: List[str], chunk_px: int, bbox: Optional[List[float]]) -> xr.DataArray:
-    """Open many single-band GeoTIFFs as one 2-D mosaic (dask-backed)."""
-    ds = xr.open_mfdataset(
-        uris,
-        engine="rasterio",
-        chunks={"x": chunk_px, "y": chunk_px},
-        combine="by_coords",
-        parallel=True,
-        mask_and_scale=False,
-    )
-    da = next(iter(ds.data_vars.values()))
-    if "band" in da.dims:
-        da = da.isel(band=0, drop=True)
-    da = da.rename({k: {"lon": "x", "latitude": "y", "lat": "y"}.get(k, k) for k in da.dims})
-    if "x" in da.coords:
-        da = da.assign_coords(x=np.round(da.x.astype(float), 12))
-    if "y" in da.coords:
-        da = da.assign_coords(y=np.round(da.y.astype(float), 12))
-    if bbox and {"x","y"}.issubset(da.dims):
-        w, s, e, n = bbox
-        xasc = bool(da.x[0] < da.x[-1])
-        yasc = bool(da.y[0] < da.y[-1])
-        xs = slice(min(w,e), max(w,e)) if xasc else slice(max(e,w), min(e,w))
-        ys = slice(min(s,n), max(s,n)) if yasc else slice(max(n,s), min(n,s))
-        da = da.sel(x=xs, y=ys)
-    return da
 
-def pixel_step(a: xr.DataArray, dim: str) -> float:
-    v = a.coords[dim].values
-    return float(abs(v[1] - v[0])) if v.size > 1 else np.nan
+def _resolve_flux_folder_and_unit(folder_candidates: List[str], interval: str, **fmt_kw) -> Tuple[str, str]:
+    """Return (existing_folder_uri, unit) for flux; prefer per-ha, else per-pixel."""
+    ranked: List[Tuple[str, str]] = []
+    for name in folder_candidates:
+        uri = FOLDER_TEMPLATE.format(folder=name, interval=interval, **fmt_kw)
+        unit = "ha" if "_ha_" in name else "pixel"
+        ranked.append((uri, unit))
+    # Prefer per-ha
+    ranked.sort(key=lambda x: 0 if x[1] == "ha" else 1)
+    for uri, unit in ranked:
+        if s3_exists(uri):
+            return uri, unit
+    raise FileNotFoundError(f"No matching flux folders for interval {interval}: {folder_candidates}")
 
-def align_like(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
-    """Nearest neighbor with 0.5-pixel tolerance per axis; warn if NaNs introduced."""
-    if not {"x","y"}.issubset(ds.dims):
-        return ds
-    for axis in ("x","y"):
-        if axis in ds.coords:
-            ds = ds.assign_coords({axis: np.round(ds[axis].astype(float), 12)})
-    rx, ry = pixel_step(ref,"x"), pixel_step(ref,"y")
-    kwx = {"method": "nearest"}
-    if rx == rx:
-        kwx["tolerance"] = rx/2.0
-    kwy = {"method": "nearest"}
-    if ry == ry:
-        kwy["tolerance"] = ry/2.0
-    out = ds.sel(x=ref.x, **kwx).sel(y=ref.y, **kwy).assign_coords(x=ref.x, y=ref.y)
-    if bool(out.isnull().any().compute().item()):
-        logging.warning("Alignment introduced NaNs; check grids (tolerance=0.5 px).")
-    return out
 
-def log_array_summary(logger: logging.Logger, name: str, arr: xr.DataArray, *, categories=False) -> None:
-    mn, mx, mean = dask.compute(arr.min(), arr.max(), arr.mean())
-    logger.debug("%s stats → min=%s max=%s mean=%s", name, mn, mx, mean)
-    if categories:
-        samp = arr.isel(y=slice(0,None,512), x=slice(0,None,512))
-        uniq = np.array(da.unique(samp.data).compute())
-        logger.debug("%s unique sample (%d): %s", name, uniq.size, uniq.tolist()[:20])
+def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str, Any]]:
+    """Return input folder paths (and unit for flux) for all datasets in *interval*."""
+    paths: Dict[str, Dict[str, Any]] = {}
+    kw2 = dict(kw)
+    kw2["tile_pixels"] = tile_pixels
 
-def build_interval_pairs(end_years: List[int]) -> List[Tuple[int,int]]:
-    mapping = {end: (start, end) for start, end in cn.five_year_inventory_periods}
-    out = []
-    for y in end_years:
-        if y not in mapping:
-            raise ValueError(f"Interval end year {y} not supported. Valid: {sorted(mapping)}")
-        out.append(mapping[y])
-    return out
+    for name, spec in DATASETS.items():
+        if "folder_candidates" in spec:
+            folder_uri, unit = _resolve_flux_folder_and_unit(spec["folder_candidates"], interval, **kw2)
+            paths[name] = {"folder": folder_uri, "unit": unit, "var": spec["var"]}
+        else:
+            folder_uri = FOLDER_TEMPLATE.format(folder=spec["folder"], interval=interval, **kw2)
+            paths[name] = {"folder": folder_uri, "unit": None, "var": spec["var"]}
+    return paths
 
-def make_df_for_reduce(res: xr.DataArray, interval_end: int, flux_type_map: Dict[int,str], state_var: str, adm_field: str) -> pd.DataFrame:
-    arr = res.data
-    if isinstance(arr, da.Array):
-        arr = arr.compute()
-    if hasattr(arr, "coords") and hasattr(arr, "data"):  # sparse.COO
-        indices, values = arr.coords, arr.data
-        coord_vals = {dim: res.coords[dim].values[indices[i]] for i, dim in enumerate(res.dims)}
-        coord_vals["value"] = values
-    else:
-        grid = np.indices(arr.shape)
-        coord_vals = {dim: res.coords[dim].values[grid[i].ravel()] for i, dim in enumerate(res.dims)}
-        coord_vals["value"] = arr.ravel()
-    df = pd.DataFrame(coord_vals)
-    df["flux_type"] = df["flux_type"].replace(flux_type_map)
-    df["interval_end"] = interval_end
-    if adm_field in df.columns:
-        df[adm_field] = df[adm_field].round().astype("uint32")
-    if state_var == "drained_state_nodes" and "drained_state_nodes" in df.columns:
-        df["drained_state_meaning"] = df["drained_state_nodes"].astype("string").str.zfill(8).map(DRAINED_STATE_NODE_MEANINGS)
-    if state_var == "burned_state_nodes" and "burned_state_nodes" in df.columns:
-        df["burned_state_meaning"] = df["burned_state_nodes"].astype("string").str.zfill(8).map(BURNED_STATE_NODE_MEANINGS)
-    df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000.0
-    return df
 
-def warn_share_to_gadm0(res: xr.DataArray, flux_value: int, label: str, logger: logging.Logger) -> None:
+@dataclass
+class GridSpec:
+    crs: str
+    transform: Affine
+    width: int
+    height: int
+    bounds: Tuple[float, float, float, float]  # (W, S, E, N)
+
+
+def _compute_pixel_size_deg(tile_pixels: int) -> float:
+    """Return pixel size in degrees, consistent with 1×1° @ 4000px and 10×10° @ 40000px."""
+    deg_per_tile = 10.0 if tile_pixels >= 40000 else 1.0
+    return deg_per_tile / float(tile_pixels)
+
+
+def make_grid(bbox: List[float], pixel_size_deg: float) -> GridSpec:
+    """Create a canonical north-up grid for bbox, snapped to pixel boundaries deterministically."""
+    west, south, east, north = bbox
+    px = float(pixel_size_deg)
+    w = math.floor(west / px) * px
+    n = math.ceil(north / px) * px
+    width = int(round((east - w) / px))
+    height = int(round((n - south) / px))
+    transform = Affine.translation(w, n) * Affine.scale(px, -px)  # from_origin(w, n, px, px)
+    return GridSpec("EPSG:4326", transform, width, height, (w, south, east, n))
+
+
+def build_vrt_from_uris(uris: List[str], vrt_name: str, logger: logging.Logger) -> str:
+    """Build an in-memory GDAL VRT from a list of (COG) URIs; return the /vsimem/ path."""
+    vrt_path = f"/vsimem/{vrt_name}.vrt"
     try:
-        arr = res.sel(flux_type=flux_value)
+        gdal.Unlink(vrt_path)
     except Exception:
-        return
-    if 0 not in arr.coords["gadm_adm0"].values:
-        return
-    total = float(arr.sum().compute())
-    ocean = float(arr.sel(gadm_adm0=0).sum().compute())
-    pct = (ocean / total * 100.0) if total else 0.0
-    if pct > 0:
-        logger.warning("Unassigned (gadm_adm0=0) share for %s: %.4f%% of sum.", label, pct)
+        pass
+    # Options: use highest resolution, no alpha; nodata taken from sources
+    opts = gdal.BuildVRTOptions(resolution="highest", addAlpha=False)
+    ds = gdal.BuildVRT(vrt_path, uris, options=opts)
+    if ds is None:
+        raise RuntimeError(f"gdal.BuildVRT failed for {vrt_name}")
+    ds = None  # close
+    logger.debug("Built VRT: %s (%d sources)", vrt_path, len(uris))
+    return vrt_path
 
-# ------------------------------ main runner --------------------------------
-def run(args: argparse.Namespace) -> None:
-    stage = "zonal_statistics_gtiff_simple"
-    start_ts = uu.timestr()
 
-    cluster, client, run_local = uu.connect_to_cluster(
-        cluster_name=args.cluster_name, run_local=args.run_local
+def open_aligned_reader(vrt_path: str, grid: GridSpec, resampling: Resampling) -> Tuple[WarpedVRT, rasterio.io.DatasetReader]:
+    """Open a VRT and return a WarpedVRT aligned exactly to *grid* (plus base dataset for cleanup)."""
+    base = rasterio.open(vrt_path)
+    vrt = WarpedVRT(
+        base,
+        crs=grid.crs,
+        transform=grid.transform,
+        width=grid.width,
+        height=grid.height,
+        resampling=resampling,
+        src_nodata=base.nodata,
     )
+    return vrt, base
+
+
+def iter_windows(width: int, height: int, block: int = 1024) -> List[Window]:
+    """Yield deterministic windows over the canonical grid."""
+    for row_off in range(0, height, block):
+        h = min(block, height - row_off)
+        for col_off in range(0, width, block):
+            w = min(block, width - col_off)
+            yield Window(col_off, row_off, w, h)
+
+
+# -------------------------- aggregation kernel --------------------------
+
+def _build_luts() -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Prepare LUTs for category → index mapping."""
+    gadm_ids = zc.GADM_ADM0_IDS.astype("uint16")  # NG
+    drained_codes = np.array(sorted({0, *map(int, zc.ALL_DRAINED_STATE_CODES)}), dtype=np.uint32)  # ND
+    burned_codes = np.array(sorted({0, *map(int, zc.ALL_BURNED_STATE_CODES)}), dtype=np.uint32)   # NB
+
+    # GADM lookup: direct array index (O(1))
+    g_max = int(gadm_ids.max()) if gadm_ids.size else 0
+    g_lut = np.full(g_max + 1, -1, dtype=np.int32)
+    g_lut[gadm_ids.astype(np.int64)] = np.arange(gadm_ids.size, dtype=np.int32)
+    return gadm_ids, drained_codes, burned_codes, g_lut
+
+
+def _map_to_index(values_uint32: np.ndarray, code_vec: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Map raw codes → sorted index space; returns (idx, ok_mask)."""
+    idx = np.searchsorted(code_vec, values_uint32)
+    ok = (idx < code_vec.size) & (code_vec[idx] == values_uint32)
+    out = np.full(values_uint32.size, -1, dtype=np.int64)
+    out[ok] = idx[ok]
+    return out, ok
+
+
+def _bincount_2d_sum(g_idx: np.ndarray, s_idx: np.ndarray, weight: np.ndarray, nG: int, nS: int) -> np.ndarray:
+    """Compute sum(weight) by (g_idx, s_idx) in flattened O(N) time."""
+    valid = (g_idx >= 0) & (s_idx >= 0) & np.isfinite(weight)
+    if not valid.any():
+        return np.zeros((nG, nS), dtype=np.float64)
+    key = (g_idx[valid].astype(np.int64) * nS) + s_idx[valid].astype(np.int64)
+    flat = np.bincount(key, weights=weight[valid].astype(np.float64), minlength=nG * nS)
+    return flat.reshape(nG, nS)
+
+
+def _share_to_gadm0(mat: np.ndarray, g_lut: np.ndarray, logger: logging.Logger, label: str) -> None:
+    """QA log: percent of sum going to GADM=0."""
+    total = float(mat.sum())
+    ocean = float(mat[g_lut[0], :].sum()) if g_lut.size > 0 and g_lut[0] >= 0 else 0.0
+    pct = (ocean / total * 100.0) if total else 0.0
+    logger.info("QA: share to GADM=0 for %s = %.4f%%", label, pct)
+    if pct > 0.5:
+        logger.warning("QA: High share to GADM=0 for %s (%.2f%%). Check alignment.", label, pct)
+
+
+def aggregate_interval(
+    *,
+    interval: str,
+    interval_end_year: int,
+    grid: GridSpec,
+    paths: Dict[str, Dict[str, Any]],
+    logger: logging.Logger,
+    window_block: int = 1024,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Run drained & burned zonal statistics for *interval* on the canonical *grid*."""
+
+    # --- 1) Build VRTs for each layer ---
+    vrt_paths: Dict[str, str] = {}
+    temp_vrts: List[str] = []
+
+    # Contextual
+    adm0_uris = _filter_valid_tiffs(list_folder_uris(ADM0_GTIFF_FOLDER), "adm0", logger)
+    pix_uris = _filter_valid_tiffs(list_folder_uris(PIXEL_AREA_GTIFF_FOLDER), "pixel_area", logger)
+    vrt_paths["adm0"] = build_vrt_from_uris(adm0_uris, f"adm0_{interval}", logger); temp_vrts.append(vrt_paths["adm0"])
+    vrt_paths["pixel_area"] = build_vrt_from_uris(pix_uris, f"pixel_area_{interval}", logger); temp_vrts.append(vrt_paths["pixel_area"])
+
+    # Interval inputs
+    # State nodes
+    for key in ("drained_state_nodes", "burned_state_nodes"):
+        uris = _filter_valid_tiffs(list_folder_uris(paths[key]["folder"]), key, logger)
+        vrt_paths[key] = build_vrt_from_uris(uris, f"{key}_{interval}", logger); temp_vrts.append(vrt_paths[key])
+
+    # Totals
+    for key in ("drained_total", "burned_total"):
+        uris = _filter_valid_tiffs(list_folder_uris(paths[key]["folder"]), key, logger)
+        vrt_paths[key] = build_vrt_from_uris(uris, f"{key}_{interval}", logger); temp_vrts.append(vrt_paths[key])
+
+    # --- 2) Open aligned readers (exact same grid) ---
+    adm0_r, adm0_base = open_aligned_reader(vrt_paths["adm0"], grid, Resampling.nearest)
+    pix_r,  pix_base  = open_aligned_reader(vrt_paths["pixel_area"], grid, Resampling.nearest)
+    d_tot_r, d_tot_base = open_aligned_reader(vrt_paths["drained_total"], grid, Resampling.nearest)
+    b_tot_r, b_tot_base = open_aligned_reader(vrt_paths["burned_total"],  grid, Resampling.nearest)
+    d_st_r,  d_st_base  = open_aligned_reader(vrt_paths["drained_state_nodes"], grid, Resampling.nearest)
+    b_st_r,  b_st_base  = open_aligned_reader(vrt_paths["burned_state_nodes"],  grid, Resampling.nearest)
+
+    # Units: convert per-ha flux inputs to per-pixel totals using pixel_area
+    per_ha = {
+        "drained_total": (paths["drained_total"]["unit"] == "ha"),
+        "burned_total":  (paths["burned_total"]["unit"] == "ha"),
+    }
+    logger.info(
+        "Interval %s units: drained_total=%s, burned_total=%s",
+        interval, "ha" if per_ha["drained_total"] else "pixel", "ha" if per_ha["burned_total"] else "pixel"
+    )
+
+    # --- 3) Prepare LUTs and accumulators ---
+    gadm_ids, drained_codes, burned_codes, g_lut = _build_luts()
+    NG, ND, NB = gadm_ids.size, drained_codes.size, burned_codes.size
+
+    agg_d_total   = np.zeros((NG, ND), dtype=np.float64)
+    agg_d_area_ha = np.zeros((NG, ND), dtype=np.float64)
+    agg_b_total   = np.zeros((NG, NB), dtype=np.float64)
+    agg_b_area_ha = np.zeros((NG, NB), dtype=np.float64)
+
+    # --- 4) Stream windows across the canonical grid ---
+    logger.info("Aggregating %s across %dx%d grid in %dx%d windows", interval, grid.width, grid.height, window_block, window_block)
+    for win in iter_windows(grid.width, grid.height, block=window_block):
+        # Read as masked arrays; fill with 0 for counting/summing in bins
+        gadm = adm0_r.read(1, window=win, masked=True).filled(0).astype(np.uint16)
+        px_m2 = pix_r.read(1, window=win, masked=True).filled(0).astype(np.float64)
+
+        d_tot = d_tot_r.read(1, window=win, masked=True).filled(0).astype(np.float64)
+        b_tot = b_tot_r.read(1, window=win, masked=True).filled(0).astype(np.float64)
+
+        d_st  = d_st_r.read(1, window=win, masked=True).filled(0).astype(np.uint32)
+        b_st  = b_st_r.read(1, window=win, masked=True).filled(0).astype(np.uint32)
+
+        if per_ha["drained_total"]:
+            d_tot *= (px_m2 / 10000.0)
+        if per_ha["burned_total"]:
+            b_tot *= (px_m2 / 10000.0)
+
+        # Flatten
+        gadm_flat = gadm.ravel()
+        d_tot_flat = d_tot.ravel()
+        b_tot_flat = b_tot.ravel()
+        d_st_flat = d_st.ravel()
+        b_st_flat = b_st.ravel()
+        px_ha_flat = (px_m2.ravel() / 10000.0)
+
+        # Map to category indices
+        g_idx = g_lut[gadm_flat.astype(np.int64)].astype(np.int64)
+        d_idx, d_ok = _map_to_index(d_st_flat, drained_codes)
+        b_idx, b_ok = _map_to_index(b_st_flat, burned_codes)
+
+        # Totals
+        agg_d_total += _bincount_2d_sum(g_idx, d_idx, d_tot_flat, NG, ND)
+        agg_b_total += _bincount_2d_sum(g_idx, b_idx, b_tot_flat, NG, NB)
+
+        # Areas only for valid class pixels
+        area_d = np.zeros_like(px_ha_flat)
+        area_b = np.zeros_like(px_ha_flat)
+        if d_ok.any():
+            area_d[d_ok] = px_ha_flat[d_ok]
+        if b_ok.any():
+            area_b[b_ok] = px_ha_flat[b_ok]
+        agg_d_area_ha += _bincount_2d_sum(g_idx, d_idx, area_d, NG, ND)
+        agg_b_area_ha += _bincount_2d_sum(g_idx, b_idx, area_b, NG, NB)
+
+    # --- 5) QA: share to GADM=0 ---
+    _share_to_gadm0(agg_d_total, g_lut, logger, f"drained_total {interval}")
+    _share_to_gadm0(agg_b_total, g_lut, logger, f"burned_total {interval}")
+
+    # --- 6) Build DataFrames matching your schema ---
+    rows_d: List[Tuple[float, int, str, float]] = []
+    for gi, gval in enumerate(gadm_ids.tolist()):
+        for si, sval in enumerate(drained_codes.tolist()):
+            rows_d.append((float(gval), int(sval), "drained_total_Mg_CO2e", float(agg_d_total[gi, si])))
+            rows_d.append((float(gval), int(sval), "area__ha",              float(agg_d_area_ha[gi, si])))
+    df_d = pd.DataFrame(rows_d, columns=["gadm_adm0", "drained_state_nodes", "flux_type", "value"])
+    df_d["drained_state_meaning"] = (
+        df_d["drained_state_nodes"].astype("string").str.zfill(8).map(zc.DRAINED_STATE_NODE_MEANINGS)
+    )
+    df_d["interval_end"] = interval_end_year
+
+    rows_b: List[Tuple[float, int, str, float]] = []
+    for gi, gval in enumerate(gadm_ids.tolist()):
+        for si, sval in enumerate(burned_codes.tolist()):
+            rows_b.append((float(gval), int(sval), "burned_total_Mg_CO2e", float(agg_b_total[gi, si])))
+            rows_b.append((float(gval), int(sval), "area__ha",             float(agg_b_area_ha[gi, si])))
+    df_b = pd.DataFrame(rows_b, columns=["gadm_adm0", "burned_state_nodes", "flux_type", "value"])
+    df_b["burned_state_meaning"] = (
+        df_b["burned_state_nodes"].astype("string").str.zfill(8).map(zc.BURNED_STATE_NODE_MEANINGS)
+    )
+    df_b["interval_end"] = interval_end_year
+
+    # --- 7) Cleanup VRTs/readers ---
+    for ds in (adm0_r, pix_r, d_tot_r, b_tot_r, d_st_r, b_st_r):
+        try:
+            ds.close()
+        except Exception:
+            pass
+    for ds in (adm0_base, pix_base, d_tot_base, b_tot_base, d_st_base, b_st_base):
+        try:
+            ds.close()
+        except Exception:
+            pass
+    for p in temp_vrts:
+        try:
+            gdal.Unlink(p)
+        except Exception:
+            pass
+
+    return df_d, df_b
+
+
+# ------------------------------- driver ---------------------------------
+
+def build_interval_pairs(end_years: List[int]) -> List[Tuple[int, int]]:
+    mapping = {end: (start, end) for start, end in cn.five_year_inventory_periods}
+    pairs = []
+    for year in end_years:
+        if year not in mapping:
+            raise ValueError(
+                f"Interval end year {year} not supported. Valid options: {sorted(mapping)}"
+            )
+        pairs.append(mapping[year])
+    return pairs
+
+
+def run(args: argparse.Namespace) -> None:
+    stage = "zonal_statistics_tiff"
+    start_ts = uu.timestr()
+    cluster, client, run_local = uu.connect_to_cluster(
+        cluster_name=args.cluster_name,
+        run_local=args.run_local,
+    )
+
+    # ROI as bbox or union of tiles
+    bbox = None
+    if args.bounding_box:
+        bbox = [float(x) for x in args.bounding_box]
+    elif args.tile_ids:
+        tiles: List[str] = []
+        for item in args.tile_ids:
+            tiles.extend(t.strip() for t in item.split(",") if t.strip())
+        if tiles:
+            bounds = [uu.get_10x10_tile_bounds(t) for t in tiles]
+            west = min(b[0] for b in bounds)
+            south = min(b[1] for b in bounds)
+            east = max(b[2] for b in bounds)
+            north = max(b[3] for b in bounds)
+            bbox = [west, south, east, north]
+
     logger, _ = lu.populate_main_log_header(
-        bounding_box=args.bounding_box,
+        bounding_box=bbox,
         use_shapefile=False,
         client=client,
         cluster=cluster,
-        log_note="Organic soils zonal statistics (GeoTIFF-only, no fill, no halo)",
+        log_note="Organic soils zonal statistics (GeoTIFF/COG)",
         run_local=run_local,
         model_type="organic_soils",
         stage=stage,
@@ -289,228 +498,216 @@ def run(args: argparse.Namespace) -> None:
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
-    bbox = [float(x) for x in args.bounding_box] if args.bounding_box else None
-    logger.debug("Starting GeoTIFF-only (simple) with args: %s", args)
+    logger.debug("Starting run with args: %s", args)
+    logger.info("Connected to cluster %s", cluster.name if cluster else "local-threaded")
 
-    # Output + local staging
+    if not bbox:
+        raise ValueError("A bounding box or tile_ids is required.")
+
+    # Canonical grid for this ROI
+    px_deg = _compute_pixel_size_deg(args.tile_pixels)
+    grid = make_grid(bbox, px_deg)
+    logger.info(
+        "Canonical grid: CRS=%s, px=%.10f°, size=%dx%d, bounds=(%.6f, %.6f, %.6f, %.6f)",
+        grid.crs, px_deg, grid.width, grid.height, *grid.bounds
+    )
+
+    # Placeholders for path formatting
     OUTPUT_KW = dict(root=ROOT, model_version=args.model_version, run_date=args.run_date, run_name=args.run_name)
-    fs_s3 = s3fs.S3FileSystem(anon=False)
-    local_fs = pafs.LocalFileSystem()
+
+    # Local staging (always write locally first), no Hive partitioning
+    local_arrow = pafs.LocalFileSystem()
     base_dir_root = Path(args.local_output).expanduser().resolve()
     base_dir_root.mkdir(parents=True, exist_ok=True)
-    local_d = base_dir_root / "drained"
-    local_b = base_dir_root / "burned"
-    for p in (local_d, local_b):
-        if p.exists():
-            shutil.rmtree(p, ignore_errors=True)
-        p.mkdir(parents=True, exist_ok=True)
+    base_dir_drained = base_dir_root / "drained"
+    base_dir_burned = base_dir_root / "burned"
 
-    # Contextual mosaics (filter to AOI tiles)
-    adm0_uris = filter_uris_by_bbox(list_geotiffs(ADM0_GTIFF_FOLDER), bbox)
-    area_uris = filter_uris_by_bbox(list_geotiffs(PIXEL_AREA_GTIFF_FOLDER), bbox)
-    logger.info("Contextual tiles selected: ADM0=%d, pixel_area=%d", len(adm0_uris), len(area_uris))
+    fs_s3 = s3fs.S3FileSystem(anon=False)
 
-    gadm_adm0_ids = np.array(zc.GADM_ADM0_IDS, dtype=np.float32)
-    drained_codes_arr = np.array(sorted({0, *map(int, ALL_DRAINED_STATE_CODES)}), dtype=np.uint32)
-    burned_codes_arr  = np.array(sorted({0, *map(int, ALL_BURNED_STATE_CODES)}), dtype=np.uint32)
-
-    for start_y, end_y in build_interval_pairs(args.interval_end_years):
-        interval = f"{start_y}_{end_y}"
+    # Process each interval
+    interval_pairs = build_interval_pairs(args.interval_end_years)
+    for interval_start_year, interval_end_year in interval_pairs:
+        interval = f"{interval_start_year}_{interval_end_year}"
         logger.info("Processing interval %s : %s", interval, timestr())
 
-        # Flux + state URIs
-        drained_total_uris, drained_unit = uris_for_dataset(interval, "drained_total",
-                                                            tile_pixels=args.tile_pixels, **OUTPUT_KW)
-        burned_total_uris, burned_unit   = uris_for_dataset(interval, "burned_total",
-                                                            tile_pixels=args.tile_pixels, **OUTPUT_KW)
-        drained_state_uris, _ = uris_for_dataset(interval, "drained_state_nodes",
-                                                 tile_pixels=args.tile_pixels, **OUTPUT_KW)
-        burned_state_uris,  _ = uris_for_dataset(interval, "burned_state_nodes",
-                                                 tile_pixels=args.tile_pixels, **OUTPUT_KW)
+        # Build dataset folders & units with the requested tile size
+        paths = build_paths(interval, tile_pixels=args.tile_pixels, **OUTPUT_KW)
+        logger.info(
+            "Interval %s inputs: drained_total=%s (unit=%s), burned_total=%s (unit=%s), drained_state=%s, burned_state=%s",
+            interval,
+            paths["drained_total"]["folder"], paths["drained_total"]["unit"],
+            paths["burned_total"]["folder"], paths["burned_total"]["unit"],
+            paths["drained_state_nodes"]["folder"], paths["burned_state_nodes"]["folder"],
+        )
 
-        # Filter to AOI and log counts
-        drained_total_uris = filter_uris_by_bbox(drained_total_uris, bbox)
-        burned_total_uris  = filter_uris_by_bbox(burned_total_uris,  bbox)
-        drained_state_uris = filter_uris_by_bbox(drained_state_uris, bbox)
-        burned_state_uris  = filter_uris_by_bbox(burned_state_uris,  bbox)
-        logger.info("URIs in AOI — drained_total=%d, burned_total=%d, drained_state=%d, burned_state=%d",
-                    len(drained_total_uris), len(burned_total_uris), len(drained_state_uris), len(burned_state_uris))
-        if args.debug:
-            for lbl, lst in [("drained_state (sample)", drained_state_uris),
-                             ("drained_total (sample)", drained_total_uris),
-                             ("burned_state (sample)", burned_state_uris),
-                             ("burned_total (sample)", burned_total_uris)]:
-                if lst:
-                    logging.debug("%s: %s", lbl, lst[:3])
+        # Aggregate (windowed on VRT)
+        df_d, df_b = aggregate_interval(
+            interval=interval,
+            interval_end_year=interval_end_year,
+            grid=grid,
+            paths=paths,
+            logger=logger,
+            window_block=args.chunk_size,  # reuse CLI name; acts as read block/window
+        )
 
-        # Hard guard: we need state rasters present in AOI
-        if not drained_state_uris:
-            raise FileNotFoundError(f"No drained_state_nodes GeoTIFFs overlap AOI for {interval}.")
-        if not burned_state_uris:
-            logging.warning("No burned_state_nodes GeoTIFFs overlap AOI for %s — burned totals may be empty.", interval)
+        # -------- Local per-interval staging (no Hive) --------
+        local_d = (base_dir_drained / interval)
+        local_b = (base_dir_burned / interval)
+        for pth in (local_d, local_b):
+            if pth.exists():
+                import shutil
+                shutil.rmtree(pth, ignore_errors=True)
+            pth.mkdir(parents=True, exist_ok=True)
 
-        # Open mosaics (dask-backed)
-        drained_state = open_mosaic(drained_state_uris, args.chunk_size, bbox).astype("uint32")
-        burned_state  = open_mosaic(burned_state_uris,  args.chunk_size, bbox).astype("uint32") if burned_state_uris else xr.zeros_like(drained_state, dtype="uint32")
+        ds.write_dataset(
+            pa.Table.from_pandas(df_d, preserve_index=False),
+            base_dir=str(local_d),
+            filesystem=local_arrow,
+            format="parquet",
+            existing_data_behavior="overwrite_or_ignore",
+        )
+        logger.info("Wrote %s rows (drained) for %s → %s", len(df_d), interval, local_d)
 
-        reference = drained_state  # define canonical grid
+        ds.write_dataset(
+            pa.Table.from_pandas(df_b, preserve_index=False),
+            base_dir=str(local_b),
+            filesystem=local_arrow,
+            format="parquet",
+            existing_data_behavior="overwrite_or_ignore",
+        )
+        logger.info("Wrote %s rows (burned) for %s → %s", len(df_b), interval, local_b)
 
-        drained_total = open_mosaic(drained_total_uris, args.chunk_size, bbox)
-        burned_total  = open_mosaic(burned_total_uris,  args.chunk_size, bbox)
-
-        adm0         = open_mosaic(adm0_uris,        args.chunk_size, bbox)
-        pixel_area   = open_mosaic(area_uris,        args.chunk_size, bbox)
-
-        # Align contextual + flux to the state grid
-        adm0_aligned       = align_like(adm0, reference).fillna(0.0)
-        pixel_area_aligned = align_like(pixel_area, reference).fillna(0.0)
-        drained_total      = align_like(drained_total, reference).fillna(0.0)
-        burned_total       = align_like(burned_total, reference).fillna(0.0)
-        burned_state       = align_like(burned_state, reference).fillna(0).astype("uint32")
-
-        # Convert per-ha → per-pixel totals if needed
-        if drained_unit == "ha":
-            drained_total = drained_total * (pixel_area_aligned / 10000.0)
-        if burned_unit == "ha":
-            burned_total = burned_total * (pixel_area_aligned / 10000.0)
-
-        # Land-only area (but do NOT zero-out flux; we only zero area on ocean)
-        pixel_area_land = xr.where(adm0_aligned > 0, pixel_area_aligned, 0.0)
-
-        # QC: prove we actually have signal + state codes > 0 in the AOI
-        if args.debug:
-            log_array_summary(logger, "drained_total", drained_total)
-            log_array_summary(logger, "burned_total",  burned_total)
-            log_array_summary(logger, "pixel_area_land", pixel_area_land)
-            log_array_summary(logger, "adm0_aligned", adm0_aligned, categories=True)
-            log_array_summary(logger, "drained_state", drained_state, categories=True)
-            log_array_summary(logger, "burned_state",  burned_state,  categories=True)
-
-        try:
-            samp = drained_state.isel(y=slice(0,None,512), x=slice(0,None,512))
-            has_nonzero_state = bool((samp.data > 0).any().compute().item())
-        except Exception:
-            has_nonzero_state = True
-        if not has_nonzero_state:
-            logger.warning(
-                "AOI %s: drained_state_nodes look all zeros after alignment. "
-                "This will push everything into state=0 bins. Check inputs and alignment.",
-                interval
-            )
-
-        # --- Reduce: drained ---
-        with dask.annotate(label=f"reduce:drained:{interval}"):
-            cube_d = xr.concat([drained_total, pixel_area_land], dim="flux_type").assign_coords(
-                flux_type=("flux_type", [0, 2])
-            )
-            res_d = xarray_reduce(
-                cube_d,
-                adm0_aligned.astype("float32"),
-                drained_state,
-                func="sum",
-                expected_groups=(gadm_adm0_ids, drained_codes_arr),
-                **flox_sparse_kwargs(not args.no_sparse),
-            ).compute()
-
-        warn_share_to_gadm0(res_d, flux_value=0, label=f"drained_total {interval}", logger=logger)
-        df_d = make_df_for_reduce(res_d, end_y, {0: "drained_total_Mg_CO2e", 2: "area__ha"},
-                                  "drained_state_nodes", "gadm_adm0")
-
-        # --- Reduce: burned ---
-        with dask.annotate(label=f"reduce:burned:{interval}"):
-            cube_b = xr.concat([burned_total, pixel_area_land], dim="flux_type").assign_coords(
-                flux_type=("flux_type", [1, 2])
-            )
-            res_b = xarray_reduce(
-                cube_b,
-                adm0_aligned.astype("float32"),
-                burned_state,
-                func="sum",
-                expected_groups=(gadm_adm0_ids, burned_codes_arr),
-                **flox_sparse_kwargs(not args.no_sparse),
-            ).compute()
-
-        warn_share_to_gadm0(res_b, flux_value=1, label=f"burned_total {interval}", logger=logger)
-        df_b = make_df_for_reduce(res_b, end_y, {1: "burned_total_Mg_CO2e", 2: "area__ha"},
-                                  "burned_state_nodes", "gadm_adm0")
-
-        # --- Write locally (per-interval, single file each) ---
-        out_d = (local_d / f"{interval}.parquet")
-        out_b = (local_b / f"{interval}.parquet")
-        ds.write_dataset(pa.Table.from_pandas(df_d, preserve_index=False),
-                         base_dir=str(out_d), filesystem=local_fs, format="parquet",
-                         existing_data_behavior="overwrite_or_ignore")
-        ds.write_dataset(pa.Table.from_pandas(df_b, preserve_index=False),
-                         base_dir=str(out_b), filesystem=local_fs, format="parquet",
-                         existing_data_behavior="overwrite_or_ignore")
-
-        # --- Upload (replace interval folders) ---
+        # -------- Upload to S3 under full-interval directory --------
         dest_root = build_output_parquet(args.model_version, args.run_name, args.run_date, interval)
-        dest_d = posixpath.join(dest_root, "drained")
-        dest_b = posixpath.join(dest_root, "burned")
-        try: fs_s3.rm(dest_d + "/", recursive=True)
-        except Exception: pass
-        try: fs_s3.rm(dest_b + "/", recursive=True)
-        except Exception: pass
-        for pth, dest in [(out_d, dest_d), (out_b, dest_b)]:
-            for f in Path(pth).rglob("*.parquet"):
-                fs_s3.put(str(f), posixpath.join(dest, f.name))
-        logger.info("Uploaded drained → %s", dest_d)
-        logger.info("Uploaded burned  → %s", dest_b)
+        dest_d = "/".join([dest_root.rstrip("/"), "drained"])
+        dest_b = "/".join([dest_root.rstrip("/"), "burned"])
+        logger.info("Uploading interval %s → %s{drained,burned}", interval, dest_root)
 
-    # Cleanup
+        # Clear any previous content to avoid mixing runs
+        try:
+            fs_s3.rm(dest_d.rstrip("/") + "/", recursive=True)
+        except Exception:
+            pass
+        try:
+            fs_s3.rm(dest_b.rstrip("/") + "/", recursive=True)
+        except Exception:
+            pass
+
+        # Upload
+        uploaded = 0
+        for p in local_d.rglob("*.parquet"):
+            rel = p.relative_to(local_d)
+            remote_path = "/".join([dest_d.rstrip("/"), *rel.parts])
+            fs_s3.put(str(p), remote_path); uploaded += 1
+        logger.info("Drained upload: %d file(s) at %s/*.parquet", uploaded, dest_d)
+
+        uploaded = 0
+        for p in local_b.rglob("*.parquet"):
+            rel = p.relative_to(local_b)
+            remote_path = "/".join([dest_b.rstrip("/"), *rel.parts])
+            fs_s3.put(str(p), remote_path); uploaded += 1
+        logger.info("Burned  upload: %d file(s) at %s/*.parquet", uploaded, dest_b)
+
+        if not args.keep_local:
+            import shutil
+            shutil.rmtree(local_d, ignore_errors=True)
+            shutil.rmtree(local_b, ignore_errors=True)
+
+    # Optional cleanup after all intervals
     if not args.keep_local:
+        import shutil
+        logger.debug("Removing local staging directory %s", base_dir_root)
         shutil.rmtree(base_dir_root, ignore_errors=True)
 
-    if client: client.close()
-    if cluster: cluster.close()
+    # Teardown
+    if client:
+        logger.debug("Closing Dask client")
+        client.close()
+    if cluster:
+        logger.debug("Closing cluster")
+        cluster.close()
     uu.stage_duration(start_ts, uu.timestr(), stage)
 
 
 def main(argv=None):
+    """Parse CLI args and dispatch to :func:`run`.
+
+    If no args are provided, runs a 1×1-degree local smoke test (Borneo snippet).
+    """
     argv = sys.argv[1:] if argv is None else argv
-    parser = argparse.ArgumentParser(description="Run organic-soils zonal statistics (GeoTIFF-only; no fill/halo)")
-    parser.add_argument("--model_version", required=True)
-    parser.add_argument("--run_date", required=True)
-    parser.add_argument("--interval_end_years", nargs="+", type=int, required=True)
-    parser.add_argument("--tile_pixels", type=int, default=4000)
-    parser.add_argument("--chunk_size", type=int, default=10000, help="Dask chunk size in pixels")
-    parser.add_argument("--local_output", default="/tmp/zonal_stats_gtiff")
-    parser.add_argument("--keep_local", action="store_true")
-    parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--no_sparse", action="store_true", default=not SPARSE_DEFAULT)
-    parser.add_argument("--run_name", default="ogh_standard_model")
+    if not argv:
+        print("No CLI args: running 1×1-degree local smoke test")
+        argv = [
+            "--model_version", "test",
+            "--run_date", "20250101",
+            "--interval_end_years", "2020",
+            "--run_local",
+            "--bounding_box", "112", "-2", "113", "-1",
+            "--tile_pixels", "4000",
+            "--chunk_size", "1024",
+            "--run_name", "smoke",
+        ]
+
+    parser = argparse.ArgumentParser(description="Run organic-soils zonal statistics directly on GeoTIFF/COG (VRT streaming)")
+    parser.add_argument("--model_version", required=True, help="Model version string")
+    parser.add_argument("--run_date", required=True, help="Run date (YYYYMMDD)")
+    parser.add_argument("--interval_end_years", nargs="+", type=int, required=True, help="Interval end years (e.g., 2010 2015 2020 2024)")
+    parser.add_argument("--chunk_size", type=int, default=1024, help="Window block size in pixels for streaming reads (e.g., 1024)")
+    parser.add_argument(
+        "--tile_pixels",
+        type=int,
+        default=4000,  # 4000 for 1×1°, 40000 for 10×10° (both give 1/4000° resolution)
+        help="Input tile size in pixels used by the source outputs (4000 for 1×1°, 40000 for 10×10°).",
+    )
+    parser.add_argument("--local_output", default="/tmp/zonal_stats", help="Local staging directory for Parquet output")
+    parser.add_argument("--keep_local", action="store_true", help="Keep staged files after upload")
+    parser.add_argument("--debug", action="store_true", help="Verbose logging")
+    parser.add_argument("--run_name", default="ogh_standard_model", help="Model run name")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--run_local", action="store_true")
-    mode.add_argument("--cluster_name", default="zonal_stats")
+    mode.add_argument("--run_local", action="store_true", help="Run locally without Dask/Coiled")
+    mode.add_argument("--cluster_name", default="zonal_stats", help="Name of the Coiled cluster to attach to")
     parser.add_argument("-bb", "--bounding_box", nargs=4, type=float, help="W S E N")
+    parser.add_argument("--tile_ids", action="append", help="Comma separated 10×10 tile IDs (e.g., 00N_110E)")
+
     args = parser.parse_args(argv)
     run(args)
+
 
 if __name__ == "__main__":
     main()
 
 """
-python -m src.scripts.zonal_statistics.run_zonal_statistics_gtiff \
+Examples:
+
+# Single interval (GeoTIFF/COG; COG-native; per-interval upload)
+python -m src.scripts.zonal_statistics.run_zonal_statistics_tiff \
   --interval_end_years 2005 \
   --cluster_name zonal_stats \
   --run_date 20250825 \
   --model_version 0_7_0 \
   --run_name ogh_standard_model \
   --tile_pixels 4000 \
-  --chunk_size 10000 \
-  --bounding_box 95 -9 120 4 \
-  --debug
+  --chunk_size 4000 \
+  --tile_ids 00N_110E
 
-python -m src.scripts.zonal_statistics.run_zonal_statistics_gtiff \
-  --interval_end_years 2005 \
+# Multiple intervals (no Zarr; immediate per-interval uploads)
+python -m src.scripts.zonal_statistics.run_zonal_statistics_tiff \
+  --interval_end_years 2010 2015 2020 2024 \
   --cluster_name zonal_stats \
   --run_date 20250825 \
   --model_version 0_7_0 \
   --run_name ogh_standard_model \
   --tile_pixels 4000 \
-  --chunk_size 10000 \
-  --tile_id 00N_110E \
-  --debug
+  --chunk_size 1024
 
+# Bounding box run (local smoke test)
+python -m src.scripts.zonal_statistics.run_zonal_statistics_tiff \
+  --interval_end_years 2020 \
+  --run_local \
+  --bounding_box 112 -2 113 -1 \
+  --run_date 20250101 \
+  --model_version test \
+  --run_name smoke \
+  --tile_pixels 4000 \
+  --chunk_size 1024
 """
