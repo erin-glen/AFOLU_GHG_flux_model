@@ -467,7 +467,6 @@ def mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year
         # Mangrove loss if it was mangrove at the end of the previous interval, but not mangrove at the end of the current interval or
         # if it was not mangrove at the end of the previous interval but there was gain and loss before the end of the current interval
         mang_loss = ((mang_prev == 1) and (mang_last == 0)) or ((mang_prev == 0) and mang_present and (mang_last == 0))
-        # TODO check that this works for places where there is gain and loss in the same 5-year interval
 
     if (not before_mang) and (not after_mang) and (not mang_loss):
         # Mangrove gain if it was not mangrove at the end of the previous interval, but there was mangrove gain remaining mangrove by the end of the interval
