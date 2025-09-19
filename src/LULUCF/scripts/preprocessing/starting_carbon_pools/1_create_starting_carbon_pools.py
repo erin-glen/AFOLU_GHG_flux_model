@@ -15,26 +15,12 @@ python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
 
 Full run 2000:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn LULUCF_preprocessing
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
-Peak memory per worker: ~2.8 GB
-Time for numba processing for each task: ~1 second (based on scanning the console)
-Time for total processing for each task: 15-25 seconds (based on scanning the console)
-Time until chunk stats: 24:26 (no non-soil C sum), 25:43 (with non-soil C sum)
-Time after chunk stats: 25:56 (no non-soil C sum), 27:06 (with non-soil C sum)
-Coiled credits: 92 (no non-soil C sum), 99 (with non-soil C sum) (200/hr for 200 m8g.medium workers, according to dashboard)
-AWS cost: $4.10 (no non-soil C sum), $4.50 (with non-soil C sum)
 
 Full run 2015:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn LULUCF_preprocessing
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
-Peak memory per worker: ~2.8 GB
-Time for numba processing for each task: ~1 second (based on scanning the console)
-Time for total processing for each task: 15-25 seconds (based on scanning the console)
-Time until chunk stats: 24:53 (with non-soil C sum)
-Time after chunk stats: 26:11 (with non-soil C sum)
-Coiled credits: 91.5 (with non-soil C sum) (200/hr for 200 m8g.medium workers, according to dashboard)
-AWS cost: $4.21 (with non-soil C sum)
 
 
 To create a vrt of the 10x10 deg outputs, do:
@@ -326,7 +312,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
     # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
-    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
+    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker, False)
     # print(futures)
 
     lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)

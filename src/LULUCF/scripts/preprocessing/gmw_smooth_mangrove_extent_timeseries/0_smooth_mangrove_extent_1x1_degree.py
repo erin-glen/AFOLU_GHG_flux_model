@@ -216,7 +216,7 @@ def preprocess_and_upload_1x1_deg_smoothed_mangrove_data(bounds, download_dict_w
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
 
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
-    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
+    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker, False)
     #print(f"futures: {futures}")
 
     lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
@@ -274,7 +274,7 @@ def preprocess_and_upload_1x1_deg_smoothed_mangrove_data(bounds, download_dict_w
         updated_area_dict = uu.replace_tile_id_in_dict(area_dict_with_data_types, tile_id)
 
         # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
-        area_futures = uu.prepare_to_download_chunk(bounds, updated_area_dict, chunk_length_pixels, is_final, logger_worker)
+        area_futures = uu.prepare_to_download_chunk(bounds, updated_area_dict, chunk_length_pixels, is_final, logger_worker, False)
         # print(f"area_futures: {area_futures}")
 
         lu.print_and_log(f"Waiting for requests for pixel area in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)

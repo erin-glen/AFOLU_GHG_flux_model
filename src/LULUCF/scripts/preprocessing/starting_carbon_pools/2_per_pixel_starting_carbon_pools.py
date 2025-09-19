@@ -20,7 +20,7 @@ python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn LULUCF_preprocessing
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp
 
 Full run 2000:
-python -m src.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_preprocessing
+python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global per-pixel run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
 Peak memory per worker: ~2.3 GB
 Time for total processing for each task: 30-45 seconds (based on scanning the console)
@@ -119,7 +119,7 @@ def create_per_pixel_starting_carbon_pools(bounds, year, is_final, no_upload,
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
     # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
-    futures = uu.prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger_worker)
+    futures = uu.prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger_worker, True)
 
     lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
 

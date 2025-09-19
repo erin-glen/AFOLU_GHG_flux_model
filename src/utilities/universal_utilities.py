@@ -720,6 +720,15 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
                 else:
                     # Too many retries → fail hard
                     raise RuntimeError(f"S3 throttling (SlowDown) persisted after {MAX_RETRIES} retries for {uri}")
+            elif "Please reduce" in str(e):
+                if attempt < MAX_RETRIES - 1:
+                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
+                    print(f"'Please reduce your request rate' for {uri}. Retrying in {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
+                else:
+                    # Too many retries → fail hard
+                    raise RuntimeError(f"'Please reduce your request rate' persisted after {MAX_RETRIES} retries for {uri}")
             else:
                 # Other RasterioIOError → fallback to array of zeros downloaded
                 data = np.full(expected_shape, 0, dtype=numpy_dtype)
@@ -736,7 +745,7 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
 # Prepares list of chunks to download.
 # Chunks are defined by a bounding box.
 # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
-def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger, stagger_download=False):
+def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger, stagger_download):
 
     # Only staggers downloads for scripts that require it because they're hitting individual s3 folders a lot, e.g., summative outputs.
     # Not all scripts hit individual s3 folders beyond s3's request limit.
