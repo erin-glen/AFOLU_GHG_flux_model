@@ -193,7 +193,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             # Estimation of carbon stocks and change in carbon stocks in dead wood and litter in A/R CDM project activities version 03.0"
             # Tables on pages 18 (deadwood) and 19 (litter).
             # They depend on the climate domain, elevation, and precipitation.
-            elif (agb_non_mang_cell > 0):  # Non-mangrove
+            elif agb_non_mang_cell > 0:  # Non-mangrove
 
                 # If no mapped R:S (=0), uses the global default value instead
                 if r_s_ratio == 0:
@@ -240,15 +240,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             short_veg_AGC, short_veg_BGC = nu.calc_short_veg_removals(climate_zone_cell)
 
             # Assigns carbon densities based on vegetation height and composite landcover.
-            # Tall vegetation and/or mangrove (i.e. mangrove AGB pixels without tall vegetation keep all C pools)
-            #TODO Need to include GMWv3 1996 extent as another condition for keeping raw carbon pool outputs.
-            # Otherwise, pixels that are treated as mangrove in the model because they have GMWv3 but don't have
-            # mangrove AGB or tall vegetation get assigned other C pool values.
-            # e.g., 114.41835E, 3.4814S (in 00N_110E) has WHRC AGC of 47.47, mangrove AGC of 0, and a
-            # LC-masked AGC of 2.914 because the composite LC is short veg (code 124). However, there is GMW in 1996/2000,
-            # so this pixel should maintain the tree-relevant C-pools rather then be reclassified as short veg.
-            # This requires adding GMWv3 1996 as another input to this script and adding another or statement here.
-            # It can be tested as the coordinate mentioned above.
+            # Tall vegetation and/or mangrove (i.e. mangrove pixels without tall vegetation keep all C pools)
             if (veg_height_cell >= cn.tree_threshold) or (mangrove_pixel == True):
                 agc_LC_masked_out_cell = agc_raw_out_cell
                 bgc_LC_masked_out_cell = bgc_raw_out_cell
