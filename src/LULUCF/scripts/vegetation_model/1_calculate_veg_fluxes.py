@@ -5,12 +5,12 @@ Local test (Dask part does not work):
 python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload -yr 2000 2024 --run_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model_mangroves
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model_mangroves -bb 116.25 -2.25 116.5 -2 -cs 0.25 -yr 2000 2024 --run_date 20250917
+python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_model
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -bb -64.5 -22.5 -63.5 -21.5 -cs 1 -yr 2015 2024 --run_date 20250919
 
 Coiled small tests (1x1 deg chunk needs 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -bb -64.5 -22.5 -63.5 -21.5 -cs 1 -yr 2015 2024 --run_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn LULUCF_model
@@ -132,8 +132,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     oil_palm_2000_extent_block = in_dict_uint8[cn.oil_palm_2000_extent_pattern]
     oil_palm_first_year_block = in_dict_int16[cn.oil_palm_first_year_pattern]
 
-    # TODO: Remove merged logic once we output the merged ifl_2016 + primary_2015 tile set and
-    #  handle the model_start_year logic in the download dictionary part of the code
+    # TODO: Remove merge logic once we output the merged ifl_2016 + primary_2015 tile set and
+    #  handle the model_start_year logic only in the download dictionary part of the code
     if model_start_year == 2000:
         ifl_primary_block = in_dict_uint8[cn.ifl_primary_pattern]
     elif model_start_year == 2015:
@@ -145,15 +145,13 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
         pre_2015_tcl_mask_block = ((tcl_block > 0) & (tcl_block < 15)).astype(np.uint8)
 
         #Mask out any primary forest where TCL occured before 2015
-        primary_2015_block = primary_2001_block.copy()
-        primary_2015_block[pre_2015_tcl_mask_block == 1] = 0
+        primary_2015_block = (primary_2001_block * (1 - pre_2015_tcl_mask_block)).astype(np.uint8)
 
         #Merge together IFL 2016 and primary 2015 so that if either is 1, it will be in the merged block
-        ifl_primary_block = ((ifl_2016_block == 1) | (primary_2015_block == 1)).astype(np.uint8)
-
+        ifl_primary_block = np.maximum(ifl_2016_block, primary_2015_block).astype(np.uint8)
     else:
-        sys.exit('interval_type not found')
-    #TODO: haven't added in forest age > 100 logic yet
+        raise ValueError("invalid start year: must be 2000 or 2015")
+    #TODO: @David - I haven't added in forest age > 100 logic yet
 
     drivers_block = in_dict_uint8[cn.drivers_pattern]
     continent_ecozone_block = in_dict_int16[cn.continent_ecozone_pattern]
@@ -2000,6 +1998,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
             # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
             s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
             # print("s3_path_without_bucket:", s3_path_without_bucket)
+            #TODO: @David - upload step need to be updated for ifl_primary_block (when start year is 2015) here
 
             # Dictionary with metadata for each array
             out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
