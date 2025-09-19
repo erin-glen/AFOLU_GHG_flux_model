@@ -323,7 +323,7 @@ def save_and_upload_raster_10x10(bounds, tile_length_pixels, tile_id,
                 with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=tile_length_pixels,
                                    height=tile_length_pixels, count=1,
                                    dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                                   tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
+                                   tiled=True, blockxsize=4000, blockysize=4000, nodata=no_data_val) as dst:
                     dst.write(data_array, 1)
 
             # No NoData value in output raster
@@ -331,7 +331,7 @@ def save_and_upload_raster_10x10(bounds, tile_length_pixels, tile_id,
                 with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=tile_length_pixels,
                                    height=tile_length_pixels, count=1,
                                    dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                                   tiled=True, blockxsize=400, blockysize=400) as dst:
+                                   tiled=True, blockxsize=4000, blockysize=4000) as dst:
                     dst.write(data_array, 1)
 
             upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
@@ -1083,8 +1083,7 @@ def create_list_for_aggregation(s3_in_folders, main_logger):
 def flatten_list(nested_list):
     return [x for xs in nested_list for x in xs]
 
-#TODO @David Note that I added 2 optional inputs to his function (output_dir and stat_type). This shouldn't affect your uses.
-#TODO @Mel Changed back to David's original code. Update and test in mangrove processing scripts. 
+
 # Merges rasters that are <10x10 degrees into 10x10 degree rasters in the standard grid.
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
 # Commented out COG creation; it just outputs basic geotifs for now.
@@ -1093,6 +1092,10 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, s
     process = psutil.Process(os.getpid())
 
     chunk_start_time = time.time()
+
+    # Retry parameters in case of failure the first time
+    max_retries = 3
+    retry_delay = 5  # seconds between retries
 
     ### Part 1: Merges 1x1 deg rasters to 10x10 deg
 
@@ -1126,14 +1129,26 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, s
     min_x, min_y, max_x, max_y = get_10x10_tile_bounds(tile_id)
 
     # Dynamically sets the datatype for the merged raster based on the input rasters (courtesy of https://chatgpt.com/share/e/a91c4c98-b2b1-4680-a4a7-453f1a878052)
-    # Determines the data type of the first raster
+    # Determines the data type of the first raster.
+    # Retries in case of failure (likely because of too many simultaneous requests to s3)
     first_raster_path = tile_paths[0]
-    ds = gdal.Open(first_raster_path)
-    raster_datatype = ds.GetRasterBand(1).DataType
-    raster_nodata_value = ds.GetRasterBand(1).GetNoDataValue()
-    if raster_nodata_value == None:  # In case no NoData value is assigned
-        raster_nodata_value = 0
-    ds = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            startup_delay = random.uniform(0, 1.5)  # Slight delay before s3 is accessed so that request quota isn't exceeded
+            time.sleep(startup_delay)
+            ds = gdal.Open(first_raster_path)
+            raster_datatype = ds.GetRasterBand(1).DataType
+            raster_nodata_value = ds.GetRasterBand(1).GetNoDataValue()
+            if raster_nodata_value == None:  # In case no NoData value is assigned
+                raster_nodata_value = 0
+            ds = None
+        except RuntimeError as e:
+            lu.print_and_log(f"Error accessing {first_raster_path} for data type extraction (attempt {attempt}/{max_retries}): {e}: {timestr()}", False, logger_worker)
+            if attempt < max_retries:
+                lu.print_and_log(f"Retrying accessing {first_raster_path} for data type extraction (attempt {attempt}/{max_retries}): {timestr()}", False, logger_worker)
+                time.sleep(retry_delay)
+            else:
+                return f"Error: failure accessing {first_raster_path} after {max_retries} attempts: {timestr()}"
 
     # Defaults to Float32 if not found
     dtype_str = gdal_to_string_dtype_mapping.get(raster_datatype, 'Float32')
@@ -1159,13 +1174,19 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, s
     # Add the input tile paths
     merge_command.extend(tile_paths)
 
-    try:
-        subprocess.check_call(merge_command)
-        lu.print_and_log(f"Successfully merged rasters into {merged_file}: {timestr()}", is_final, logger_worker)
-        lu.print_and_log(f"After creating geotif for {merged_file}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
-    except subprocess.CalledProcessError as e:
-        lu.print_and_log(f"Error merging rasters: {e}: {timestr()}", False, logger_worker)
-        return f"failure merging {s3_name_dict}"
+    for attempt in range(1, max_retries + 1):
+        try:
+            subprocess.check_call(merge_command)
+            lu.print_and_log(f"Successfully merged rasters into {merged_file} on attempt {attempt}: {timestr()}", is_final, logger_worker)
+            lu.print_and_log(f"After creating geotif for {merged_file}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+            break  # exit loop if successful
+        except subprocess.CalledProcessError as e:
+            lu.print_and_log(f"Error merging rasters (attempt {attempt}/{max_retries}): {e}: {timestr()}", False, logger_worker)
+            if attempt < max_retries:
+                lu.print_and_log(f"Retrying {merged_file} for attempt {attempt}: {timestr()}", False, logger_worker)
+                time.sleep(retry_delay)
+            else:
+                return f"Error: failure merging {s3_name_dict} after {max_retries} attempts: {timestr()}"
 
     chunk_non_cog_end_time = time.time()
     lu.print_and_log(f"Merging {merged_file} took {round(chunk_non_cog_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
@@ -1389,7 +1410,7 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
             success_count += 1
         elif "Skipped chunk" in return_message:
             skipping_chunk_count += 1
-        elif "Error" in return_message:
+        elif ("Error" in return_message) or ("failure" in return_message):
             error_chunk_count += 1
         else:
             other_message_count += 1
