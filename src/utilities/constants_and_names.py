@@ -575,6 +575,24 @@ drivers_non_soil_C = (permanent_agriculture, hard_commodities, shifting_cultivat
 
 ifl_primary_dir = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged/processed/20200724/"
 ifl_primary_pattern = "ifl_2000_primary_2001_merged"
+#TODO: @David - Refactor to ifl_primary_2000_dir and ifl_primary_2000 pattern?
+
+ifl_primary_2015_dir = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged_2015/processed/20250922/"
+ifl_primary_2015_chunk_dir = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged_2015/chunks/20250922/"
+ifl_primary_2015_pattern = "ifl_2016_primary_2015_merged"
+
+#TODO: can delete primary_2001, ifl_2016, and loss information after creating the merged tile set
+# Copied from s3://gfw-data-lake/umd_regional_primary_forest_2001/v201901/raster/epsg-4326/10/40000/is/geotiff
+primary_2001_dir = f"{full_bucket_prefix}/forest_cover/primary_forest/umd_regional_primary_forest_2001/"
+primary_2001_pattern = "primary_2001"
+
+ifl_2016_dir = f"{full_bucket_prefix}/forest_cover/IFL_2016/20250918/raw/"
+ifl_2016_pattern = "ifl_2016"
+#TODO: @David - Should we copy over the ones from Engineering (s3://gfw-data-lake/ifl_intact_forest_landscapes_2016/v2021/) instead of using Peter's?
+
+# Annual Hansen loss tiles (2001-2024)
+loss_dir = f"{full_bucket_prefix}/forest_change/hansen_2024/"
+loss_pattern = 'GFW2024'
 
 planted_forest_type_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/plantation_type/SDPTv2/20230911/"
 planted_forest_type_pattern = "plantation_type_oilpalm_woodfiber_other"
