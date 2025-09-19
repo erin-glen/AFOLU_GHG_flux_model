@@ -8,7 +8,7 @@ Needs 4GB Coiled workers with 1 thread for 1x1 deg chunks; 2GB workers are too s
 
 Coiled small test:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --year YYYY
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing -bb 114 -4 115 -3 -cs 1  --year YYYY
 
 Coiled shapefile test:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
@@ -65,7 +65,7 @@ from src.utilities import resize_cluster
 
 # Function to create initial (year 2000) non-soil carbon pool densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-# @jit(nopython=True)
+@jit(nopython=True)
 def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                                 in_dict_int32, in_dict_float32, mangrove_C_ratio_array, year):
 
@@ -74,7 +74,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     # just like inputs to the function.
     out_dict_float32 = {}
 
-    print(in_dict_uint8)
+    # print(in_dict_uint8)
     # print(in_dict_uint16)
     # print(in_dict_int16)
     # print(in_dict_int32)
@@ -97,7 +97,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     if year == 2000:
         agb_non_mang_block = in_dict_int16[cn.agb_2000_pattern].astype(np.int16)
         mangrove_agb_block = in_dict_float32[cn.mangrove_agb_2000_pattern]
-    elif year == 2015: # No mangrove-specific AGB for 2015, so just using 0s. Need to supply something for completeness.
+    elif year == 2015: # No mangrove-specific AGB for 2015. Need to supply something for mangroves for completeness.
         agb_non_mang_block = in_dict_uint16[cn.agb_2015_pattern].astype(np.int16)
         mangrove_agb_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
     else:
@@ -108,11 +108,14 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     agb_non_mang_in_chunk = True  # Flag for whether chunk has non-mangrove AGB in it
 
     # Checks if the chunk has various inputs by seeing if the max value is 0.
-    # If the max value is 0, it assumed that input doesn't exist.
+    # If the max value is 0, it assumes that input doesn't exist.
     if agb_non_mang_block.max() == 0:
         agb_non_mang_in_chunk = False
-    if mangrove_agb_block.max() == 0:
+    if (mangrove_agb_block.max() == 0) and (mangrove_extent_block.max() == 0):
         mangrove_in_chunk = False
+
+    # print("agb_non_mang_in_chunk:", agb_non_mang_in_chunk)
+    # print("mangrove_in_chunk:", mangrove_in_chunk)
 
     # Output blocks
     # Need to specify the output datatype or it will default to float32
@@ -152,6 +155,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             climate_zone_cell = climate_zone_block[row, col]
             LC_composite_cell = LC_composite_block[row, col]
             veg_height_cell = veg_height_block[row, col]
+            mangrove_extent_cell = mangrove_extent_block[row, col]
 
             # Applies the continent_ecozne fallback value when there isn't a value for the pixel
             if continent_ecozone_cell == 0:
@@ -161,15 +165,25 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             if climate_zone_cell == 0:
                 climate_zone_cell = climate_zone_fallback
 
+            # Criteria for classifying pixels as mangrove pixels: If mangrove AGB or GMWv3 is present
+            # mangrove_pixel = (mangrove_in_chunk) and ((mangrove_agb_cell > 0) or (mangrove_extent_cell > 0))
+            mangrove_pixel = (mangrove_agb_cell > 0) or (mangrove_extent_cell > 0)
+
 
             ### Part 2: Calculation of raw carbon density outputs (not masked by veg height/land cover)
 
-            # If mangrove AGB is present, AGC is calculated from it, overwriting any AGC that is based on non-mang AGB that is already there
-            if (mangrove_in_chunk) and (mangrove_agb_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
-                agc_raw_out_cell = mangrove_agb_cell * cn.biomass_to_carbon_mangrove
+            # If mangrove pixel, AGC is calculated from it, overwriting any AGC that is based on non-mang AGB that is already there
+            if mangrove_pixel == True:  # Only uses AGB if chunk exists and there is a value in that pixel
+                if year == 2000:
+                    agc_raw_out_cell = mangrove_agb_cell * cn.biomass_to_carbon_mangrove
+                elif year == 2015:
+                    agc_raw_out_cell = agb_non_mang_cell * cn.biomass_to_carbon_mangrove
+                else:
+                    raise ValueError("start_year not valid: must be 2000 or 2015")
 
             # If non-mang AGB is present, AGC is calculated from it
-            elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
+            # elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
+            elif (agb_non_mang_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
                 agc_raw_out_cell = agb_non_mang_cell * cn.biomass_to_carbon_non_mangrove
 
             else:
@@ -180,7 +194,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
             # Mangrove carbon pool ratio branch
             # From IPCC 2013 Wetland Supplement
-            if (mangrove_in_chunk) and (mangrove_agb_cell > 0):  # Only replaces non-mangrove AGB if mangrove chunk exists and if mangrove value in that pixel
+            if mangrove_pixel == True:  # Only replaces non-mangrove AGB if mangrove chunk exists and if mangrove value in that pixel
 
                 bgc_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 1]
                 deadwood_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 2]
@@ -194,7 +208,8 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             # Estimation of carbon stocks and change in carbon stocks in dead wood and litter in A/R CDM project activities version 03.0"
             # Tables on pages 18 (deadwood) and 19 (litter).
             # They depend on the climate domain, elevation, and precipitation.
-            elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Non-mangrove
+            # elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Non-mangrove
+            elif (agb_non_mang_cell > 0):  # Non-mangrove
 
                 # If no mapped R:S (=0), uses the global default value instead
                 if r_s_ratio == 0:
@@ -250,7 +265,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             # so this pixel should maintain the tree-relevant C-pools rather then be reclassified as short veg.
             # This requires adding GMWv3 1996 as another input to this script and adding another or statement here.
             # It can be tested as the coordinate mentioned above.
-            if (veg_height_cell >= cn.tree_threshold) or ((mangrove_in_chunk) and (mangrove_agb_cell > 0)):
+            if (veg_height_cell >= cn.tree_threshold) or (mangrove_pixel == True):
                 agc_LC_masked_out_cell = agc_raw_out_cell
                 bgc_LC_masked_out_cell = bgc_raw_out_cell
                 deadwood_c_LC_masked_out_cell = deadwood_c_raw_out_cell
@@ -270,7 +285,6 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                 bgc_LC_masked_out_cell = 0
                 deadwood_c_LC_masked_out_cell = 0
                 litter_c_LC_masked_out_cell = 0
-
 
             # Assigns cell outputs to blocks
             agc_raw_out_block[row, col] = agc_raw_out_cell
