@@ -104,19 +104,6 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
         out_dict_float32[f"{cn.agc_raw_dens_pattern}_{year}"] = np.full(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape, 9999).astype('float32')
         return out_dict_float32
 
-    mangrove_in_chunk = True  # Flag for whether chunk has mangrove in it
-    agb_non_mang_in_chunk = True  # Flag for whether chunk has non-mangrove AGB in it
-
-    # Checks if the chunk has various inputs by seeing if the max value is 0.
-    # If the max value is 0, it assumes that input doesn't exist.
-    if agb_non_mang_block.max() == 0:
-        agb_non_mang_in_chunk = False
-    if (mangrove_agb_block.max() == 0) and (mangrove_extent_block.max() == 0):
-        mangrove_in_chunk = False
-
-    # print("agb_non_mang_in_chunk:", agb_non_mang_in_chunk)
-    # print("mangrove_in_chunk:", mangrove_in_chunk)
-
     # Output blocks
     # Need to specify the output datatype or it will default to float32
     agc_raw_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
@@ -166,24 +153,22 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                 climate_zone_cell = climate_zone_fallback
 
             # Criteria for classifying pixels as mangrove pixels: If mangrove AGB or GMWv3 is present
-            # mangrove_pixel = (mangrove_in_chunk) and ((mangrove_agb_cell > 0) or (mangrove_extent_cell > 0))
             mangrove_pixel = (mangrove_agb_cell > 0) or (mangrove_extent_cell > 0)
 
 
             ### Part 2: Calculation of raw carbon density outputs (not masked by veg height/land cover)
 
             # If mangrove pixel, AGC is calculated from it, overwriting any AGC that is based on non-mang AGB that is already there
-            if mangrove_pixel == True:  # Only uses AGB if chunk exists and there is a value in that pixel
-                if year == 2000:
+            if mangrove_pixel == True:  # Checks if it's a mangrove pixel
+                if year == 2000:  # For 2000, uses mangrove AGB and converts to carbon with mangrove ratio
                     agc_raw_out_cell = mangrove_agb_cell * cn.biomass_to_carbon_mangrove
-                elif year == 2015:
+                elif year == 2015:  # For 2015, uses ESA AGB (because no mangrove-specific carbon) and converts to carbon with mangrove ratio
                     agc_raw_out_cell = agb_non_mang_cell * cn.biomass_to_carbon_mangrove
                 else:
                     raise ValueError("start_year not valid: must be 2000 or 2015")
 
             # If non-mang AGB is present, AGC is calculated from it
-            # elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
-            elif (agb_non_mang_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
+            elif agb_non_mang_cell > 0:  # Only uses AGB if chunk exists and there is a value in that pixel
                 agc_raw_out_cell = agb_non_mang_cell * cn.biomass_to_carbon_non_mangrove
 
             else:
@@ -208,7 +193,6 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             # Estimation of carbon stocks and change in carbon stocks in dead wood and litter in A/R CDM project activities version 03.0"
             # Tables on pages 18 (deadwood) and 19 (litter).
             # They depend on the climate domain, elevation, and precipitation.
-            # elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Non-mangrove
             elif (agb_non_mang_cell > 0):  # Non-mangrove
 
                 # If no mapped R:S (=0), uses the global default value instead
