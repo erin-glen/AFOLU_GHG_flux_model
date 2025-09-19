@@ -6,7 +6,7 @@ python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -bb 10 49.7
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -bb -64.5 -22.5 -63.5 -21.5 -cs 1 -yr 2015 2024 --run_date 20250919
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -bb 116.25 -2.25 116.5 -2 -cs 0.25 -yr 2000 2024 --run_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_model
