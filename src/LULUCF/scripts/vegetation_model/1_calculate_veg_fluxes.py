@@ -5,12 +5,12 @@ Local test (Dask part does not work):
 python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload -yr 2000 2024 --run_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model_mangroves
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model_mangroves -bb 116.25 -2.25 116.5 -2 -cs 0.25 -yr 2000 2024 --run_date 20250917
+python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_model
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -bb 116.25 -2.25 116.5 -2 -cs 0.25 -yr 2000 2024 --run_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -bb -64.5 -22.5 -63.5 -21.5 -cs 1 -yr 2015 2024 --run_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn LULUCF_model
@@ -132,7 +132,27 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     oil_palm_2000_extent_block = in_dict_uint8[cn.oil_palm_2000_extent_pattern]
     oil_palm_first_year_block = in_dict_int16[cn.oil_palm_first_year_pattern]
 
-    ifl_primary_block = in_dict_uint8[cn.ifl_primary_pattern]
+    # TODO: Remove merge logic once we output the merged ifl_2016 + primary_2015 tile set and
+    #  handle the model_start_year logic only in the download dictionary part of the code
+    if model_start_year == 2000:
+        ifl_primary_block = in_dict_uint8[cn.ifl_primary_pattern]
+    elif model_start_year == 2015:
+        primary_2001_block = in_dict_uint8[cn.primary_2001_pattern]
+        ifl_2016_block = in_dict_uint8[cn.ifl_2016_pattern]
+        tcl_block = in_dict_uint8[cn.loss_pattern]
+
+        #Filter tcl_block to only where tcl occured before 2015 (ignoring 0s)
+        pre_2015_tcl_mask_block = ((tcl_block > 0) & (tcl_block < 15)).astype(np.uint8)
+
+        #Mask out any primary forest where TCL occured before 2015
+        primary_2015_block = (primary_2001_block * (1 - pre_2015_tcl_mask_block)).astype(np.uint8)
+
+        #Merge together IFL 2016 and primary 2015 so that if either is 1, it will be in the merged block
+        ifl_primary_block = np.maximum(ifl_2016_block, primary_2015_block).astype(np.uint8)
+    else:
+        raise ValueError("invalid start year: must be 2000 or 2015")
+    #TODO: @David - I haven't added in forest age > 100 logic yet
+
     drivers_block = in_dict_uint8[cn.drivers_pattern]
     continent_ecozone_block = in_dict_int16[cn.continent_ecozone_pattern]
     climate_zone_block = in_dict_uint8[cn.climate_zone_pattern]
@@ -517,7 +537,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # If mangroves are ever present, we assume that there was never other terrestrial forest type before mangrove gain
                 # and that there will not be conversion to other terrestrial forest type after mangrove loss.
                 is_ever_mang = np.any(mang_timeseries == 1)
-                #print(f"is_ever_mang: {is_ever_mang}")
 
                 # Mangrove-specific pre-processing (only if smoothed mangrove was present some year)
                 if is_ever_mang:
@@ -1772,6 +1791,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
         out_dict_uint8[f"{cn.times_burned_in_interval}_{year_range}"] = times_burned_in_interval_block.copy()
         out_dict_float32[f"{cn.agc_emission_factor}_{year_range}"] = agc_ef_out_block.copy()
 
+    #TODO: Delete after uploading the ifl_2016_primary_2015 merged tile set
+    #TODO: @David - Where do you want to upload chunks? Add ifl_2016_primary_2015 to chunk aggregation step? Where else?
+    # One time output
+    if model_start_year == 2015:
+        out_dict_uint8[f"{cn.ifl_primary_2015_chunk_dir}"] = ifl_primary_block.copy()
+
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
 
@@ -1973,6 +1998,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
             # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
             s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
             # print("s3_path_without_bucket:", s3_path_without_bucket)
+            #TODO: @David - upload step need to be updated for ifl_primary_block (when start year is 2015) here
 
             # Dictionary with metadata for each array
             out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
@@ -2092,7 +2118,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         cn.climate_zone_pattern: f"{cn.climate_zone_processed_dir}{sample_tile_id}_{cn.climate_zone_pattern}.tif",
         cn.precipitation_pattern: f"{cn.precipitation_dir}{sample_tile_id}_{cn.precipitation_pattern}.tif",
         # "ecozone": f"s3://gfw2-data/fao_ecozones/v2000/raster/epsg-4326/10/40000/class/gdal-geotiff/{sample_tile_id}.tif",   # Originally from gfw-data-lake, so it's in 400x400 windows
-        cn.ifl_primary_pattern: f"{cn.ifl_primary_dir}{sample_tile_id}_{cn.ifl_primary_pattern}.tif",
         cn.continent_ecozone_pattern: f"{cn.continent_ecozone_dir}{sample_tile_id}_{cn.continent_ecozone_pattern}.tif",
         cn.pixel_area_pattern: f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{sample_tile_id}.tif"
     }
@@ -2128,6 +2153,16 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         download_dict[f"{cn.forest_age_start_year_pattern}"] = f"{cn.forest_age_2000_gap_filled_dir}{sample_tile_id}__{cn.forest_age_2000_gap_filled_pattern}.tif"
     elif start_year == 2015:
         download_dict[f"{cn.forest_age_start_year_pattern}"] = f"{cn.forest_age_2015_gap_filled_dir}{sample_tile_id}__{cn.forest_age_2015_gap_filled_pattern}.tif"
+    else:
+        sys.exit('interval_type not found')
+
+    # Intact/ primary forests depend on the starting year of the model
+    if start_year == 2000:
+        download_dict[f"{cn.ifl_primary_pattern}"] = f"{cn.ifl_primary_dir}{sample_tile_id}_{cn.ifl_primary_pattern}.tif"
+    elif start_year == 2015:
+        download_dict[f"{cn.primary_2001_pattern}"] = f"{cn.primary_2001_dir}{sample_tile_id}.tif"
+        download_dict[f"{cn.ifl_2016_pattern}"] = f"{cn.ifl_2016_dir}{sample_tile_id}.tif"
+        download_dict[f"{cn.loss_pattern}"] = f"{cn.loss_dir}{cn.loss_pattern}_{sample_tile_id}.tif"
     else:
         sys.exit('interval_type not found')
 
