@@ -154,7 +154,9 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
         composite_primary_block = np.where((ifl_2016_block > 0) | (primary_2015_block > 0) | (forest_age_start_year_block >=100), 1, 0).astype(np.uint8)
     else:
         raise ValueError("invalid start year: must be 2000 or 2015")
-    #TODO: @David - I haven't added in forest age > 100 logic yet
+
+    # Saves the starting year composite primary forest to the output dictionary
+    out_dict_uint8[f"{cn.composite_primary_forest}_{model_start_year}"] = composite_primary_block.copy()
 
     drivers_block = in_dict_uint8[cn.drivers_pattern]
     continent_ecozone_block = in_dict_int16[cn.continent_ecozone_pattern]
@@ -1893,7 +1895,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     lu.print_and_log(f"Memory usage after numba calculations completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
     lu.print_and_log(f"Calculated LULUCF fluxes and carbon densities in {bounds_str} in {tile_id} in {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
 
-    # print("out_dict_uint8:", out_dict_uint8)
+    print("out_dict_uint8:", out_dict_uint8)
     # print("out_dict_uint32:", out_dict_uint32)
     # print("out_dict_float32:", out_dict_float32)
     # print(f"Average of {list(out_dict_uint32.keys())[0]} is: {list(out_dict_uint32.values())[0].mean()}")
@@ -1963,7 +1965,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
         for key, value in out_dict_all_dtypes.items():
             data_type = value.dtype.name
             # print("key", key)
-            # print(data_type)
+            # print("data_type:", data_type)
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
             out_pattern, year_range = uu.strip_and_extract_years(key)
@@ -1978,6 +1980,15 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
             # First, finds the output folders for all intervals with the relevant patterns
             matched_output_s3_folders = [item for item in output_folders if out_pattern_without_pixel_meaning in item]
             # print("matched_output_s3_folders:", matched_output_s3_folders)
+
+            # Adds the starting composite primary forest extent as an output to the upload s3 folder list
+            if out_pattern == cn.composite_primary_forest:
+
+                # Creates the starting year composite primary forest s3 folder name; replaces existing year with start year
+                starting_composite_primary_forest_s3_folder = matched_output_s3_folders[0].replace(str(start_year+interval_length_list[0]), str(start_year))
+                # print("starting_composite_primary_forest_s3_folder:", starting_composite_primary_forest_s3_folder)
+                matched_output_s3_folders.append(starting_composite_primary_forest_s3_folder)  # Adds starting year composite primary forest to list
+                # print("matched_output_s3_folders with starting one:", matched_output_s3_folders)
 
             # Second, finds the output folder with the right interval for that pattern
             matched_output_s3_folder_list = [item for item in matched_output_s3_folders if year_range in item]
