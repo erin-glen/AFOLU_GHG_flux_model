@@ -573,26 +573,29 @@ other_natural_disturbances = 7
 drivers_biomass_C_only = (forest_management, wildfire, other_natural_disturbances)
 drivers_non_soil_C = (permanent_agriculture, hard_commodities, shifting_cultivation, settlements_and_infrastruct)
 
-ifl_primary_dir = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged/processed/20200724/"
-ifl_primary_pattern = "ifl_2000_primary_2001_merged"
-#TODO: @David - Refactor to ifl_primary_2000_dir and ifl_primary_2000 pattern?
+# Humid tropical primary forest in 2001
+# Copied from s3://gfw-data-lake/umd_regional_primary_forest_2001/v201901/raster/epsg-4326/10/40000/is/geotiff
+primary_2001_dir = f"{full_bucket_prefix}/forest_cover/primary_forest/umd_regional_primary_forest_2001_from_gfw-data-lake/v201901/raster/epsg-4326/10/40000/is/geotiff/"
+primary_2001_pattern = "primary_2001"
 
+# IFL 2016 (from Peter Potapov 9/18/25). Not using IFL2016 geotifs from data-lake because they don't match Peter's.
+# I think there are NoData issues in the gfw-data-lake version.
+ifl_2016_dir = f"{full_bucket_prefix}/forest_cover/IFL_2016/20250918/raw/"
+ifl_2016_pattern = "ifl_2016"
+
+# Annual Hansen tree cover loss tiles (2001-2024) (used to mask out loss from primary forest before 2015)
+tree_cover_loss_dir = f"{full_bucket_prefix}/forest_change/hansen_2024/"
+tree_cover_loss_pattern = 'GFW2024'
+
+#TODO rename with >100 yr old forest
 ifl_primary_2015_dir = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged_2015/processed/20250922/"
 ifl_primary_2015_chunk_dir = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged_2015/chunks/20250922/"
 ifl_primary_2015_pattern = "ifl_2016_primary_2015_merged"
 
-#TODO: can delete primary_2001, ifl_2016, and loss information after creating the merged tile set
-# Copied from s3://gfw-data-lake/umd_regional_primary_forest_2001/v201901/raster/epsg-4326/10/40000/is/geotiff
-primary_2001_dir = f"{full_bucket_prefix}/forest_cover/primary_forest/umd_regional_primary_forest_2001/"
-primary_2001_pattern = "primary_2001"
-
-ifl_2016_dir = f"{full_bucket_prefix}/forest_cover/IFL_2016/20250918/raw/"
-ifl_2016_pattern = "ifl_2016"
-#TODO: @David - Should we copy over the ones from Engineering (s3://gfw-data-lake/ifl_intact_forest_landscapes_2016/v2021/) instead of using Peter's?
-
-# Annual Hansen loss tiles (2001-2024)
-loss_dir = f"{full_bucket_prefix}/forest_change/hansen_2024/"
-loss_pattern = 'GFW2024'
+# Composite of humid tropical primary forest for 20001 and IFL for 2000, created for the forest carbon flux model.
+# Used for LULUCF vegetation model starting in 2000.
+ifl_primary_2000_dir = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged/processed/20200724/"
+ifl_primary_2000_pattern = "ifl_2000_primary_2001_merged"
 
 planted_forest_type_dir = f"{full_bucket_prefix}/climate/carbon_model/other_emissions_inputs/plantation_type/SDPTv2/20230911/"
 planted_forest_type_pattern = "plantation_type_oilpalm_woodfiber_other"
@@ -789,14 +792,15 @@ part_or_full_dist_in_earlier_intervals = "partial_or_full_dist_in_earlier_interv
 part_or_full_dist_in_curr_interval = "partial_or_full_dist_in_current_interval"
 times_burned_in_interval = "times_burned_in_current_interval"
 agc_emission_factor = "AGC_emission_factor_CO2_only__fraction"
+composite_primary_forest = "composite_primary_forest"
 
 model_type_placholder = "MODEL_TYPE"
 
 zarr_output_pattern = "global_zarr"
 zarr_pixel_chunks = 10000
 
-# List of output directories with placeholders for parts of the directory
-LULUCF_core_output_dirs = [
+# List of output directories from vegetation model with placeholders for parts of the directory
+veg_core_output_dirs = [
     f"{outputs_path}{agc_modeled_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{bgc_modeled_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{deadwood_c_modeled_dens_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
@@ -815,8 +819,8 @@ LULUCF_core_output_dirs = [
     f"{outputs_path}{agc_rf_pre_dist_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
-# Intermediate outputs from core model
-LULUCF_intermediate_output_dirs = [
+# Intermediate outputs from vegetation model
+veg_intermediate_output_dirs = [
     f"{outputs_path}{forest_age_output_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{gain_year_count_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{most_recent_year_not_tall_veg}/{model_type_placholder}/RUNSTART_END/CHUNK_SIZE_pixels/RUN_DATE/", # Years represent from model start to current interval end
@@ -825,7 +829,8 @@ LULUCF_intermediate_output_dirs = [
     f"{outputs_path}{part_or_full_dist_in_earlier_intervals}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{part_or_full_dist_in_curr_interval}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{times_burned_in_interval}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{outputs_path}{agc_emission_factor}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/"
+    f"{outputs_path}{agc_emission_factor}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{outputs_path}{composite_primary_forest}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
 # Summative outputs from core model
@@ -857,7 +862,10 @@ LULUCF_summative_output_dirs = [
     f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
-### For output jpeg creation
+
+#######
+### Output jpeg creation
+#######
 
 # Country shapefile, with small islands removed for visual simplicity
 original_shapefile_path = "/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/world-administrative-boundaries_simple__20250102.shp"

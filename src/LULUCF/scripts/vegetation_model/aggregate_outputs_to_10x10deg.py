@@ -104,7 +104,7 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
                                                      model_type, interval_end_years, interval_year_diff, input_date, "per_pixel")
 
     # Also need to aggregate the land state nodes
-    land_state_node_list = [s for s in cn.LULUCF_core_output_dirs if cn.land_state_pattern in s]
+    land_state_node_list = [s for s in cn.veg_core_output_dirs if cn.land_state_pattern in s]
     land_state_node_list = uu.create_output_dir_name_list(land_state_node_list, interval_type, start_year,'4000',
                                                      model_type, interval_end_years, interval_year_diff, input_date)
 

@@ -2,27 +2,27 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work):
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload -yr 2000 2024 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload -yr 2015 2024 --run_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn LULUCF_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -bb 116.25 -2.25 116.5 -2 -cs 0.25 -yr 2000 2024 --run_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_model
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -bb 116.25 -2.25 116.5 -2 -cs 0.25 -yr 2015 2024 --run_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs 32GB worker):
-python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -bb -64.5 -22.5 -63.5 -21.5 -cs 1 -yr 2015 2024 --run_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -bb -64.5 -22.5 -63.5 -21.5 -cs 1 -yr 2015 2024 --run_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
-python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn LULUCF_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp -yr 2000 2024 --run_date YYYYMMDD
+python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn vegetation_model
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp -yr 2000 2024 --run_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
-python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --run_date YYYYMMDD
+python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn vegetation_model
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --run_date YYYYMMDD
 
 Full run:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn LULUCF_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --run_date YYYYMMDD  --log_note "This is a full run."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_model
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --run_date YYYYMMDD  --log_note "This is a full run."
 
 To download all outputs locally:
 python src/utilities/download_outputs_local.py v1 23_-4_24_-3
@@ -132,23 +132,26 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     oil_palm_2000_extent_block = in_dict_uint8[cn.oil_palm_2000_extent_pattern]
     oil_palm_first_year_block = in_dict_int16[cn.oil_palm_first_year_pattern]
 
-    # TODO: Remove merge logic once we output the merged ifl_2016 + primary_2015 tile set and
-    #  handle the model_start_year logic only in the download dictionary part of the code
+    forest_age_start_year_block = in_dict_uint16[cn.forest_age_start_year_pattern]
+
+    # Determines the composite primary forest extent based on the model starting year
     if model_start_year == 2000:
-        ifl_primary_block = in_dict_uint8[cn.ifl_primary_pattern]
+        ifl_primary_2000_block = in_dict_uint8[cn.ifl_primary_2000_pattern]
+        composite_primary_block = np.where((ifl_primary_2000_block > 0) | (forest_age_start_year_block >=100), 1, 0).astype(np.uint8)
     elif model_start_year == 2015:
         primary_2001_block = in_dict_uint8[cn.primary_2001_pattern]
         ifl_2016_block = in_dict_uint8[cn.ifl_2016_pattern]
-        tcl_block = in_dict_uint8[cn.loss_pattern]
+        tcl_block = in_dict_uint8[cn.tree_cover_loss_pattern]
 
-        #Filter tcl_block to only where tcl occured before 2015 (ignoring 0s)
+        # Filters tcl_block to only where tcl occurred before 2015 (ignoring 0s)
         pre_2015_tcl_mask_block = ((tcl_block > 0) & (tcl_block < 15)).astype(np.uint8)
 
-        #Mask out any primary forest where TCL occured before 2015
+        # Masks out any primary forest where TCL occurred before 2015
         primary_2015_block = (primary_2001_block * (1 - pre_2015_tcl_mask_block)).astype(np.uint8)
 
-        #Merge together IFL 2016 and primary 2015 so that if either is 1, it will be in the merged block
-        ifl_primary_block = np.maximum(ifl_2016_block, primary_2015_block).astype(np.uint8)
+        # Merges together IFL 2016 and primary 2015 so that if either is 1, it will be in the merged block
+        # composite_primary_block = np.maximum(ifl_2016_block, primary_2015_block).astype(np.uint8)
+        composite_primary_block = np.where((ifl_2016_block > 0) | (primary_2015_block > 0) | (forest_age_start_year_block >=100), 1, 0).astype(np.uint8)
     else:
         raise ValueError("invalid start year: must be 2000 or 2015")
     #TODO: @David - I haven't added in forest age > 100 logic yet
@@ -159,8 +162,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     elevation_block = in_dict_int16[cn.elevation_pattern]
     climate_domain_block = in_dict_int16[cn.climate_domain_pattern]
     precipitation_block = in_dict_int32[cn.precipitation_pattern]
-
-    forest_age_start_year_block = in_dict_uint16[cn.forest_age_start_year_pattern]
 
 
     # Sets a fallback value for continent_ecozone for the chunk in case any pixels fall outside the continent-ecozone boundary.
@@ -406,7 +407,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 oil_palm_2000_extent_cell = oil_palm_2000_extent_block[row, col]
                 oil_palm_first_year_cell = oil_palm_first_year_block[row, col]
 
-                ifl_primary_cell = ifl_primary_block[row, col]
+                composite_primary_cell = composite_primary_block[row, col]
                 drivers_cell = drivers_block[row, col]
                 continent_ecozone_cell = continent_ecozone_block[row, col]
                 climate_zone_cell = climate_zone_block[row, col]
@@ -508,27 +509,18 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 else:  # Use the primary forest/IFL RF for forest >100 years old
                     natrl_forest_age_dependent_agc_rf = primary_forest_AGC_RF
 
-                # Assigns pixel to primary_forest_proxy.
-                # Its definition depends on model starting year.
-                if model_start_year == 2000:  # For model starting in 2000, primary forest proxy uses primary forest/IFL map and age (>=100 years)
-                    if (forest_age_start_of_interval >= 100) or (ifl_primary_cell == 1):
-                        primary_forest_proxy = 1
-                    else:
-                        primary_forest_proxy = 0
-                elif model_start_year == 2015:  # For model starting in 2015, primary forest proxy is just age (>= 100 years)
-                    if forest_age_start_of_interval >= 100:
-                        primary_forest_proxy = 1
-                    else:
-                        primary_forest_proxy = 0
+                # Updates whether the cell is primary forest
+                if (forest_age_start_of_interval >= 100) or (composite_primary_cell == 1):
+                    composite_primary_cell = 1
                 else:
-                    raise ValueError("invalid start year: must be 2000 or 2015")
+                    composite_primary_cell = 0
 
                 # Gef for fire emissions for different gases for forests specifically (grams respective gas/kg dry matter)
                 Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest = nu.calc_Gef_forest(climate_domain_cell)
 
                 # Cf for fire emissions for all gases for forests specifically (unitless).
                 # Based on driver of loss, not the interval-end land cover.
-                Cf_forest = nu.calc_Cf_forest(climate_domain_cell, drivers_cell, primary_forest_proxy)
+                Cf_forest = nu.calc_Cf_forest(climate_domain_cell, drivers_cell, composite_primary_cell)
 
                 # Sets all mangrove states to false and only initializes mangrove states if is_ever_mang is True below
                 before_mang = mang_gain = mang_loss = mang_remaining_mang = non_mang_remaining_non_mang = after_mang = False
@@ -1550,7 +1542,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             deadwood_c_ratio=deadwood_c_ratio_non_mang, litter_c_ratio=litter_c_ratio_non_mang)
                                     else:  # Natural forest undisturbed since model start (422212)
                                         node = nu.accrete_node(node, 2)
-                                        if primary_forest_proxy:  # Primary forest undisturbed since model start (4222121->42221219/42221212)
+                                        if composite_primary_cell:  # Primary forest undisturbed since model start (4222121->42221219/42221212)
                                             node = nu.accrete_node(node, 1)
                                             RF_AGC_final = primary_forest_AGC_RF
                                             RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang
@@ -1743,6 +1735,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 part_or_full_dist_in_curr_interval_block[row, col] = part_or_full_dist_in_curr_interval
                 times_burned_in_interval_block[row, col] = times_burned_in_interval
                 agc_ef_out_block[row, col] = agc_ef_out_cell
+                composite_primary_block[row, col] = composite_primary_cell
 
         # os.quit()   # For testing the first interval
 
@@ -1790,12 +1783,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
         out_dict_uint8[f"{cn.part_or_full_dist_in_curr_interval}_{year_range}"] = part_or_full_dist_in_curr_interval_block.copy()
         out_dict_uint8[f"{cn.times_burned_in_interval}_{year_range}"] = times_burned_in_interval_block.copy()
         out_dict_float32[f"{cn.agc_emission_factor}_{year_range}"] = agc_ef_out_block.copy()
-
-    #TODO: Delete after uploading the ifl_2016_primary_2015 merged tile set
-    #TODO: @David - Where do you want to upload chunks? Add ifl_2016_primary_2015 to chunk aggregation step? Where else?
-    # One time output
-    if model_start_year == 2015:
-        out_dict_uint8[f"{cn.ifl_primary_2015_chunk_dir}"] = ifl_primary_block.copy()
+        out_dict_uint8[f"{cn.composite_primary_forest}_{interval_end_year}"] = composite_primary_block.copy()
 
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
@@ -1905,8 +1893,9 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     lu.print_and_log(f"Memory usage after numba calculations completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
     lu.print_and_log(f"Calculated LULUCF fluxes and carbon densities in {bounds_str} in {tile_id} in {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
 
-    # print(out_dict_uint32)
-    # print(out_dict_float32)
+    # print("out_dict_uint8:", out_dict_uint8)
+    # print("out_dict_uint32:", out_dict_uint32)
+    # print("out_dict_float32:", out_dict_float32)
     # print(f"Average of {list(out_dict_uint32.keys())[0]} is: {list(out_dict_uint32.values())[0].mean()}")
 
     # Fresh non-Numba-constrained dictionary that stores all numpy arrays.
@@ -1998,7 +1987,6 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
             # Needs [0] because matched_output_s3_folder_list is a list of all intervals.
             s3_path_without_bucket = f"{matched_output_s3_folder_list[0][cn.full_bucket_prefix_length:]}"
             # print("s3_path_without_bucket:", s3_path_without_bucket)
-            #TODO: @David - upload step need to be updated for ifl_primary_block (when start year is 2015) here
 
             # Dictionary with metadata for each array
             out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
@@ -2109,15 +2097,12 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         cn.planted_forest_AGC_BGC_removal_factor_pattern: f"{cn.planted_forest_AGC_BGC_removal_factor_dir}{sample_tile_id}_{cn.planted_forest_AGC_BGC_removal_factor_pattern}.tif",
         cn.oil_palm_2000_extent_pattern: f"{cn.oil_palm_2000_extent_dir}{sample_tile_id}_{cn.oil_palm_2000_extent_pattern}.tif",
         cn.oil_palm_first_year_pattern: f"{cn.oil_palm_first_year_dir}{cn.oil_palm_first_year_pattern}_{sample_tile_id}.tif",   # Pattern is before tile_id for this input
-        # Originally from gfw-data-lake, so it's in 400x400 windows
         cn.planted_forest_tree_crop_pattern: f"{cn.planted_forest_tree_crop_dir}{sample_tile_id}.tif",
 
-        # Originally from gfw-data-lake, so it's in 400x400 windows
         cn.elevation_pattern: f"{cn.elevation_dir}{sample_tile_id}_{cn.elevation_pattern}.tif",
         cn.climate_domain_pattern: f"{cn.climate_domain_dir}{sample_tile_id}_{cn.climate_domain_pattern}.tif",
         cn.climate_zone_pattern: f"{cn.climate_zone_processed_dir}{sample_tile_id}_{cn.climate_zone_pattern}.tif",
         cn.precipitation_pattern: f"{cn.precipitation_dir}{sample_tile_id}_{cn.precipitation_pattern}.tif",
-        # "ecozone": f"s3://gfw2-data/fao_ecozones/v2000/raster/epsg-4326/10/40000/class/gdal-geotiff/{sample_tile_id}.tif",   # Originally from gfw-data-lake, so it's in 400x400 windows
         cn.continent_ecozone_pattern: f"{cn.continent_ecozone_dir}{sample_tile_id}_{cn.continent_ecozone_pattern}.tif",
         cn.pixel_area_pattern: f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{sample_tile_id}.tif"
     }
@@ -2156,13 +2141,13 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     else:
         sys.exit('interval_type not found')
 
-    # Intact/ primary forests depend on the starting year of the model
+    # Source for assigning composite primary forests depend on the starting year of the model
     if start_year == 2000:
-        download_dict[f"{cn.ifl_primary_pattern}"] = f"{cn.ifl_primary_dir}{sample_tile_id}_{cn.ifl_primary_pattern}.tif"
+        download_dict[f"{cn.ifl_primary_2000_pattern}"] = f"{cn.ifl_primary_2000_dir}{sample_tile_id}_{cn.ifl_primary_2000_pattern}.tif"
     elif start_year == 2015:
         download_dict[f"{cn.primary_2001_pattern}"] = f"{cn.primary_2001_dir}{sample_tile_id}.tif"
         download_dict[f"{cn.ifl_2016_pattern}"] = f"{cn.ifl_2016_dir}{sample_tile_id}.tif"
-        download_dict[f"{cn.loss_pattern}"] = f"{cn.loss_dir}{cn.loss_pattern}_{sample_tile_id}.tif"
+        download_dict[f"{cn.tree_cover_loss_pattern}"] = f"{cn.tree_cover_loss_dir}{cn.tree_cover_loss_pattern}_{sample_tile_id}.tif"
     else:
         sys.exit('interval_type not found')
 
@@ -2237,7 +2222,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
             main_logger.info(f"  {key}: {value}")
 
     # Creates a list of output directories (core and intermediates) for all outputs and intervals based on specifics of the model run
-    output_dir_list_core_intermediate = cn.LULUCF_core_output_dirs + cn.LULUCF_intermediate_output_dirs
+    output_dir_list_core_intermediate = cn.veg_core_output_dirs + cn.veg_intermediate_output_dirs
     output_dir_list = uu.create_output_dir_name_list(output_dir_list_core_intermediate, interval_type, start_year,
                                                      chunk_size_pixels, model_type, interval_end_years,
                                                      interval_year_diff_list, run_date, "per_ha")
