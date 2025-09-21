@@ -7,7 +7,6 @@ import numpy as np
 ########
 
 ### Model version
-# model_version = "0.4.3"
 model_version = "1.0.0"
 model_version_underscore = model_version.replace(".", "_")
 
@@ -182,6 +181,7 @@ water_max_code = 208
 cropland = 244
 builtup = 250
 
+
 ### Miscellaneous
 
 full_raster_dims = 40000    # Size of a 10x10 deg raster in pixels
@@ -217,6 +217,9 @@ no_carbon_pools = np.array([0, 0, 0, 0]).astype('uint8')  # None
 SDPT_oil_palm_code = 1
 SDPT_wood_fiber_code = 2
 SDPT_other_code = 3
+
+# Threshold for including GAMI v2.1 in primary forest composite (inclusive, >=)
+primary_age_threshold = 100
 
 
 
