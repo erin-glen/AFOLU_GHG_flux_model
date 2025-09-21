@@ -17,10 +17,19 @@ import os
 import sys
 from botocore.exceptions import ClientError
 
+import constants_and_names as cn
+
+
 # Constants
 BUCKET = "gfw2-data"
-PREFIX = "climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/"
-BASE_DEST = "/mnt/c/GIS/AFOLU_flux_model/test_data/output/v0_4_3/"
+PREFIX = f"climate/AFOLU_flux_model/LULUCF/outputs/version_{cn.model_version_underscore}/"
+BASE_DEST = f"/mnt/c/GIS/AFOLU_flux_model/test_data/output/v{cn.model_version_underscore}/"
+
+# Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
+# The more files in an s3 folder, the longer it takes to access them without this environment variable.
+# It takes about 9 minutes to access the inputs for a 1x1 deg summative output without this and <1 minute with it.
+# Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
+os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
 def main():
     if len(sys.argv) < 2:

@@ -437,7 +437,7 @@ def connect_to_Coiled_cluster(cluster_name, run_local, fallback_to_local_on_fail
             return None, None, True
         else:
             raise
-#TODO raise error from coiled, test with previous worksace
+
 
 # Chunk bounds as a string
 def boundstr(bounds):

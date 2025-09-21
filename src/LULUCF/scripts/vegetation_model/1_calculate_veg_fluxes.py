@@ -1039,6 +1039,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 ### Tree loss
                 elif tree_loss:  # Trees converted to non-trees (3)
                     node = nu.accrete_node(node, 3)
+                    composite_primary_cell = 0   # Sets composite primary forest value to 0 for this entire branch because loss has occurred
                     if all_planted_trees:  # Full loss of planted trees (31)
                         node = nu.accrete_node(node, 1)
                         if all_oil_palm:  # Full loss of oil palm (incl. SDPT) (311->3119/3112)
@@ -1342,10 +1343,12 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                             c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
                             rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest,
                             Gef_n2o_forest, deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
+                        composite_primary_cell = 0  # Sets composite primary forest value to 0 for this entire branch because loss has occurred
                     else:  # Trees remaining trees- no conversion to oil palm (42)
                         node = nu.accrete_node(node, 2)
                         if part_or_full_dist_in_curr_interval:  # Trees partially disturbed in the current interval (421)
                             node = nu.accrete_node(node, 1)
+                            composite_primary_cell = 0  # Sets composite primary forest value to 0 for this entire branch because disturbance has occurred
                             if all_planted_trees:   # Planted trees partially disturbed in the current interval (4211)
                                 node = nu.accrete_node(node, 1)
                                 if sig_height_gain_prev_curr_abs:  # Oil palm/planted trees partially disturbed in the current interval with signif. height increase after (42111)
@@ -1544,7 +1547,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                             deadwood_c_ratio=deadwood_c_ratio_non_mang, litter_c_ratio=litter_c_ratio_non_mang)
                                     else:  # Natural forest undisturbed since model start (422212)
                                         node = nu.accrete_node(node, 2)
-                                        if composite_primary_cell:  # Primary forest undisturbed since model start (4222121->42221219/42221212)
+                                        if composite_primary_cell == 1:  # Primary forest undisturbed since model start (4222121->42221219/42221212)
                                             node = nu.accrete_node(node, 1)
                                             RF_AGC_final = primary_forest_AGC_RF
                                             RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang

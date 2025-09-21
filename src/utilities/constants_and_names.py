@@ -587,11 +587,6 @@ ifl_2016_pattern = "ifl_2016"
 tree_cover_loss_dir = f"{full_bucket_prefix}/forest_change/hansen_2024/"
 tree_cover_loss_pattern = 'GFW2024'
 
-#TODO rename with >100 yr old forest
-ifl_primary_2015_dir = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged_2015/processed/20250922/"
-ifl_primary_2015_chunk_dir = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged_2015/chunks/20250922/"
-ifl_primary_2015_pattern = "ifl_2016_primary_2015_merged"
-
 # Composite of humid tropical primary forest for 20001 and IFL for 2000, created for the forest carbon flux model.
 # Used for LULUCF vegetation model starting in 2000.
 ifl_primary_2000_dir = f"{full_bucket_prefix}/climate/carbon_model/ifl_primary_merged/processed/20200724/"

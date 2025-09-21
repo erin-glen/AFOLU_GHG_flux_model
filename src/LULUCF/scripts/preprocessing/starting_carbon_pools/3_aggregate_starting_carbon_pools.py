@@ -94,9 +94,9 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
 
     ### Step 2: Aggregates 1x1 degree outputs to 10x10 degree outputs
 
-    # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name.
+    # Creates the list of aggregated 10x10 rasters that will be created (list of dictionaries of input s3 folder and output aggregated raster name).
     # These are the basis for the aggregation tasks.
-    list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger) #TODO this is different
+    list_of_s3_name_dicts_total = uu.create_list_for_aggregation(output_dir_list, main_logger)
 
     # For testing. Limits the number of output rasters to that given in the command line
     if first_10x10s_to_process:
