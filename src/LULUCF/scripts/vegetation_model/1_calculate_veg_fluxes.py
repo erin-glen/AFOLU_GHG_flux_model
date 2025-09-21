@@ -22,10 +22,10 @@ python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetat
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --run_date YYYYMMDD  --log_note "This is a full run."
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --run_date 20250921 --log_note "This is a global run for model v1.0.0 (2016-2024)."
 
 To download all outputs locally:
-python src/utilities/download_outputs_local.py v1 23_-4_24_-3
+python src/utilities/download_outputs_local.py v1_test_name 23_-4_24_-3
 
 Using more than 1 thread/worker slows down processing a lot when there are more tasks than workers for the core LULUCF model,
 which is the situation for large analyses, obviously.
