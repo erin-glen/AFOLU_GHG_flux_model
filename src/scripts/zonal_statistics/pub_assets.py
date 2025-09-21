@@ -21,8 +21,16 @@ Tables (CSV via DuckDB COPY):
 Figures + Flourish-ready datasets:
   - figures/global_drained_climate_column.{png,svg}
   - figures/data/global_drained_climate_{long,wide}.csv
-  - figures/global_burn_climate_bar.{png,svg}
+  - figures/global_burn_climate_column.{png,svg}
   - figures/data/global_burn_climate_{long,wide}.csv
+  - figures/drained_landuse_climate_bar.{png,svg}
+  - figures/data/drained_landuse_climate_{long,wide}.csv
+  - figures/burned_landuse_climate_bar.{png,svg}
+  - figures/data/burned_landuse_climate_{long,wide}.csv
+  - figures/top_10_country_peat_area_bar.{png,svg}
+  - figures/data/top_10_country_peat_area.csv
+  - figures/top_10_country_total_emissions_bar.{png,svg}
+  - figures/data/top_10_country_total_emissions.csv
 
 Notes
 -----
@@ -65,6 +73,7 @@ from __future__ import annotations
 import argparse
 import os
 import posixpath
+import re
 import uuid
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -80,8 +89,7 @@ from src.scripts.zonal_statistics.run_zonal_stats import (  # existing helpers
 from src.scripts.zonal_statistics import zonal_constants as zc  # node meanings & GADM IDs
 
 # ----------------------------- config -----------------------------
-# Hardcoded output directory (edit if needed)
-OUT_DIR = "/mnt/c/tmp/pub_assets"
+OUT_DIR = "/mnt/c/tmp/pub_assets"  # hardcoded output root
 
 # ----------------------------- path helpers -----------------------------
 
@@ -89,19 +97,16 @@ def _is_s3(path: str) -> bool:
     return str(path).startswith("s3://")
 
 def _join(base: str, *parts: str) -> str:
-    """Join respecting s3 vs local semantics."""
     if _is_s3(base):
         return posixpath.join(base, *parts)
     return os.path.join(base, *parts)
 
 def _ensure_parent_dir_local(path: str):
-    """Create local parent directories if needed (no-op for s3)."""
     if _is_s3(path):
         return
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 def _to_duckdb_path(path: str) -> str:
-    """DuckDB handles forward slashes on Windows; normalize locals to POSIX."""
     if _is_s3(path):
         return path
     return Path(path).as_posix()
@@ -158,7 +163,6 @@ def _make_component_view(
     flux_type_expr = "flux_type" if "flux_type" in cols else "CAST(NULL AS VARCHAR)"
     gadm_expr      = "gadm_adm0" if "gadm_adm0" in cols else "CAST(NULL AS INTEGER)"
 
-    # Prefer embedded interval_end; fallback to parsing from filename path {start}_{end}/(drained|burned)
     if "interval_end" in cols:
         interval_expr = "interval_end"
     else:
@@ -230,11 +234,6 @@ def _register_all(
 # --------------------------- GADM lookup logic ----------------------------
 
 def _auto_register_iso_lookup(con: duckdb.DuckDBPyConnection) -> bool:
-    """
-    Auto-build an adm0 lookup in-memory from zc.GADM_ADM0_IDS using ISO numerics.
-    Uses pycountry if available; otherwise leaves iso3/country as None.
-    Registers a DuckDB view named 'adm0_lookup'.
-    """
     try:
         import pycountry  # optional
     except Exception:
@@ -264,10 +263,6 @@ def _auto_register_iso_lookup(con: duckdb.DuckDBPyConnection) -> bool:
     return True
 
 def _maybe_register_lookup(con: duckdb.DuckDBPyConnection, adm0_lookup: Optional[str]) -> bool:
-    """
-    If adm0_lookup CSV is provided, register it. Otherwise, auto-build from ISO numerics.
-    Returns True if a view named 'adm0_lookup' is available.
-    """
     if adm0_lookup:
         con.execute(f"""
             CREATE OR REPLACE VIEW adm0_lookup AS
@@ -282,7 +277,6 @@ def _maybe_register_lookup(con: duckdb.DuckDBPyConnection, adm0_lookup: Optional
     return _auto_register_iso_lookup(con)
 
 def _make_period_labels_from_years(end_years: Sequence[int]) -> dict[int, str]:
-    """Map interval_end → 'start-end' using your build_interval_pairs logic."""
     pairs = build_interval_pairs(list(end_years))  # [(start, end), ...]
     return {e: f"{s}-{e}" for (s, e) in pairs}
 
@@ -347,9 +341,8 @@ def _register_state_context_views(con: duckdb.DuckDBPyConnection):
 # ------------------------------- Tables: SQL -------------------------------
 
 def _copy_sql(con: duckdb.DuckDBPyConnection, sql: str, out_path: str):
-    """Write CSV to local or s3 via DuckDB COPY."""
     _ensure_parent_dir_local(out_path)
-    out_path_escaped = _to_duckdb_path(out_path).replace("'", "''")
+    out_path_escaped = _to_duckdb_path(path=out_path).replace("'", "''")
     con.execute(f"COPY ({sql}) TO '{out_path_escaped}' (FORMAT CSV, HEADER TRUE)")
 
 def table_by_country_period_sql(with_lookup: bool) -> str:
@@ -554,12 +547,24 @@ def table_topn_country_sql(component: str, topn: int, with_lookup: bool) -> str:
 
 CLIMATE_ORDER = ["Boreal", "Temperate", "Tropical"]
 
-# Color mapping
 CLIMATE_COLORS = {
     "Boreal":    "#4575B4",  # deep blue
     "Temperate": "#FDB863",  # warm amber
     "Tropical":  "#1A9850",  # rich green
 }
+
+# Aggregated land-use order for charts
+LU_AGG_ORDER = [
+    "Other plantation",
+    "Oil Palm",
+    "Cropland",
+    "Forest",
+    "Grassland",
+    "Settlement",
+    "Otherland",
+    "Wetland",
+    "Extraction",
+]
 
 def sql_drained_by_climate() -> str:
     return """
@@ -597,6 +602,126 @@ def sql_burned_by_climate() -> str:
     ORDER BY interval_end, climate_domain;
     """
 
+# Totals across all selected intervals (no interval_end in GROUP BY)
+def sql_drained_landuse_climate_totals() -> str:
+    return """
+    WITH joined AS (
+      SELECT
+        COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
+        COALESCE(ctx.emissions_state, 'Unspecified') AS emissions_state,
+        SUM(CASE WHEN z.flux_type = 'drained_total_Mg_CO2e' THEN z.value ELSE 0 END) AS drained_MgCO2e
+      FROM zs_drained z
+      LEFT JOIN drained_state_ctx AS ctx
+        ON (z.drained_state_meaning = ctx.meaning)
+        OR (RPAD(CAST(z.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+      GROUP BY 1,2
+    )
+    SELECT climate_domain, emissions_state, drained_MgCO2e / 1e9 AS drained_GtCO2e
+    FROM joined;
+    """
+
+def sql_burned_landuse_climate_totals() -> str:
+    return """
+    WITH joined AS (
+      SELECT
+        COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
+        COALESCE(ctx.emissions_state, 'Unspecified') AS emissions_state,
+        SUM(CASE WHEN z.flux_type = 'burned_total_Mg_CO2e' THEN z.value ELSE 0 END) AS burned_MgCO2e
+      FROM zs_burned z
+      LEFT JOIN burned_state_ctx AS ctx
+        ON (z.burned_state_meaning = ctx.meaning)
+        OR (RPAD(CAST(z.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+      GROUP BY 1,2
+    )
+    SELECT climate_domain, emissions_state, burned_MgCO2e / 1e9 AS burned_GtCO2e
+    FROM joined;
+    """
+
+# Top-N peat area composition for latest interval (drained vs undrained)
+def sql_topn_peat_area_comp_latest(latest_year: int, topn: int, with_lookup: bool) -> str:
+    select_l = ", l.country, l.iso3" if with_lookup else ""
+    join_l   = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = r.gadm_adm0" if with_lookup else ""
+    return f"""
+    WITH base AS (
+      SELECT
+        gadm_adm0,
+        CASE
+          WHEN drained_state_meaning LIKE 'peat_drained%%'   THEN 'drained'
+          WHEN drained_state_meaning LIKE 'peat_undrained%%' THEN 'undrained'
+          ELSE 'other'
+        END AS peat_state,
+        SUM(value) AS area_ha
+      FROM zs_drained
+      WHERE flux_type = 'area__ha' AND interval_end = {latest_year}
+      GROUP BY 1, 2
+    ),
+    agg AS (
+      SELECT
+        gadm_adm0,
+        SUM(CASE WHEN peat_state='drained'   THEN area_ha ELSE 0 END) AS drained_ha,
+        SUM(CASE WHEN peat_state='undrained' THEN area_ha ELSE 0 END) AS undrained_ha
+      FROM base
+      GROUP BY 1
+    ),
+    r AS (
+      SELECT
+        gadm_adm0,
+        drained_ha,
+        undrained_ha,
+        (drained_ha + undrained_ha) AS total_peat_ha
+      FROM agg
+      WHERE (drained_ha + undrained_ha) > 0
+    )
+    SELECT
+      r.gadm_adm0
+      {select_l},
+      drained_ha   / 1e6 AS drained_area_mha,
+      undrained_ha / 1e6 AS undrained_area_mha,
+      total_peat_ha/ 1e6 AS total_area_mha
+    FROM r
+    {join_l}
+    ORDER BY total_area_mha DESC
+    LIMIT {topn};
+    """
+
+# Top-N combined emissions (drained + burned), totals across selected intervals
+def sql_topn_total_emissions_split(topn: int, with_lookup: bool) -> str:
+    select_l = ", l.country, l.iso3" if with_lookup else ""
+    join_l   = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = f.gadm_adm0" if with_lookup else ""
+    return f"""
+    WITH d AS (
+      SELECT gadm_adm0, SUM(value) AS drained_MgCO2e
+      FROM zs_drained
+      WHERE flux_type = 'drained_total_Mg_CO2e'
+      GROUP BY 1
+    ),
+    b AS (
+      SELECT gadm_adm0, SUM(value) AS burned_MgCO2e
+      FROM zs_burned
+      WHERE flux_type = 'burned_total_Mg_CO2e'
+      GROUP BY 1
+    ),
+    f AS (
+      SELECT
+        COALESCE(d.gadm_adm0, b.gadm_adm0) AS gadm_adm0,
+        COALESCE(d.drained_MgCO2e, 0) AS drained_MgCO2e,
+        COALESCE(b.burned_MgCO2e, 0) AS burned_MgCO2e,
+        COALESCE(d.drained_MgCO2e, 0) + COALESCE(b.burned_MgCO2e, 0) AS total_MgCO2e
+      FROM d FULL OUTER JOIN b
+      ON d.gadm_adm0 = b.gadm_adm0
+    )
+    SELECT
+      f.gadm_adm0
+      {select_l},
+      burned_MgCO2e / 1e9  AS burned_GtCO2e,
+      drained_MgCO2e / 1e9 AS drained_GtCO2e,
+      total_MgCO2e / 1e9   AS total_GtCO2e
+    FROM f
+    {join_l}
+    ORDER BY total_GtCO2e DESC
+    LIMIT {topn};
+    """
+
 def _titlecase_domain(s: str | None) -> str:
     if s is None:
         return "Unspecified"
@@ -616,7 +741,6 @@ def _pivot_wide(df_long: pd.DataFrame, value_col: str, index_col: str = "Year") 
     return wide
 
 def _write_csv_df(con: duckdb.DuckDBPyConnection, df: pd.DataFrame, path: str):
-    """Write CSV using DuckDB so s3:// works without s3fs."""
     _ensure_parent_dir_local(path)
     tmp_name = f"df_{uuid.uuid4().hex}"
     con.register(tmp_name, df)
@@ -629,7 +753,6 @@ def _write_csv_df(con: duckdb.DuckDBPyConnection, df: pd.DataFrame, path: str):
 
 def _save_binary(fig: plt.Figure, path: str, fmt: str, dpi: int | None = None,
                  width: float | None = None, height: float | None = None):
-    """Save PNG/SVG to local; if s3://, upload via boto3 if present."""
     if width and height:
         fig.set_size_inches(width, height)
     if _is_s3(path):
@@ -670,7 +793,10 @@ def _stacked_bar(
     x_vals = list(x_order) if x_order is not None else sorted(df_long[index_col].unique())
     wide = _pivot_wide(df_long, value_col, index_col=index_col).set_index(index_col).reindex(index=x_vals)
 
-    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    totals = wide.sum(axis=1).values
+    y_max = float(max(totals)) * 1.12 if len(totals) else 1.0
+
+    fig, ax = plt.subplots(figsize=(7.5, 4.5))
     bottom = None
     for climate in CLIMATE_ORDER:
         vals = wide[climate].values
@@ -688,7 +814,6 @@ def _stacked_bar(
     if title:
         ax.set_title(title, pad=10)
 
-    # Left-aligned legend above the plot
     ax.legend(
         ncol=3,
         loc="upper left",
@@ -698,7 +823,154 @@ def _stacked_bar(
         columnspacing=1.2,
     )
 
+    ax.set_ylim(0, y_max)
+    pad = y_max * 0.015
+    for xpos, total in zip(range(len(totals)), totals):
+        ax.text(xpos, total + pad, f"{total:.2f}", ha="center", va="bottom", fontsize=9)
+
     ax.margins(x=0.02)
+    fig.tight_layout(rect=(0, 0, 1, 0.88))
+    return fig
+
+# --- Land-use reclass + horizontal stacked bar ---
+
+_LU_RECLASS_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"^(oil[_\- ]?palm|oilpalm)$"), "Oil Palm"),
+    (re.compile(r"^(short[_\- ]?rotation|long[_\- ]?rotation|plantation.*|planted.*|tree[_\- ]?crop.*)$"),
+     "Other plantation"),
+    (re.compile(r"^cropland.*$"), "Cropland"),
+    (re.compile(r"^forest.*$"), "Forest"),
+    (re.compile(r"^(grassland|pasture|rangeland).*$"), "Grassland"),
+    (re.compile(r"^(settlement|built[_\- ]?up|urban).*$"), "Settlement"),
+    (re.compile(r"^wetland.*$"), "Wetland"),
+    (re.compile(r"^(extraction|peat[_\- ]?extraction|cutover).*$"), "Extraction"),
+    (re.compile(r"^(otherland|other)$"), "Otherland"),
+]
+
+def _normalize_emissions_state(s: Optional[str]) -> str:
+    if s is None:
+        return "other"
+    return re.sub(r"[\s\-]+", "_", s.strip().lower())
+
+def _reclass_emissions_state(s: Optional[str]) -> str:
+    key = _normalize_emissions_state(s)
+    for pat, lbl in _LU_RECLASS_PATTERNS:
+        if pat.match(key):
+            return lbl
+    return (s.strip().replace("_", " ").title() if s else "Otherland")
+
+def _aggregate_landuse(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    df = df.copy()
+    df["Climate"] = df["climate_domain"].apply(_titlecase_domain)
+    df = df[df["Climate"].isin(CLIMATE_ORDER)]
+    df["LandUse"] = df["emissions_state"].apply(_reclass_emissions_state)
+    df["LandUse"] = df["LandUse"].str.replace("_", " ", regex=False)
+    out = (
+        df.groupby(["LandUse", "Climate"], as_index=False)[value_col]
+          .sum()
+          .sort_values([value_col], ascending=False)
+    )
+    totals = out.groupby("LandUse")[value_col].sum().sort_values(ascending=False).index.tolist()
+    order = [lu for lu in LU_AGG_ORDER if lu in totals] + [lu for lu in totals if lu not in LU_AGG_ORDER]
+    out["LandUse"] = pd.Categorical(out["LandUse"], order, ordered=True)
+    out = out.sort_values(["LandUse", "Climate"])
+    return out
+
+def _pivot_wide_lu(df_long: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    wide = (
+        df_long
+        .pivot_table(index="LandUse", columns="Climate", values=value_col, aggfunc="sum", fill_value=0.0)
+        .reindex(columns=CLIMATE_ORDER, fill_value=0.0)
+        .reset_index()
+    )
+    return wide
+
+def _stacked_hbar(df_long: pd.DataFrame, value_col: str, xlabel: str) -> plt.Figure:
+    df_long = df_long.copy()
+    df_long["Climate"] = pd.Categorical(df_long["Climate"], CLIMATE_ORDER, ordered=True)
+    order = (
+        df_long.groupby("LandUse")[value_col]
+               .sum()
+               .sort_values(ascending=False)
+               .index.tolist()
+    )
+    wide = _pivot_wide_lu(df_long, value_col).set_index("LandUse").reindex(order)
+
+    totals = wide.sum(axis=1).values
+    x_max = float(max(totals)) if len(totals) else 1.0
+    right_pad = x_max * 0.08
+
+    height = max(3.2, 0.55 * len(order) + 1.0)
+    fig, ax = plt.subplots(figsize=(7.5, height))
+
+    left = None
+    for climate in CLIMATE_ORDER:
+        vals = wide[climate].values
+        ax.barh(
+            wide.index.astype(str),
+            vals,
+            left=left,
+            label=climate,
+            color=CLIMATE_COLORS.get(climate),
+        )
+        left = vals if left is None else left + vals
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Land Use")
+
+    ax.legend(
+        ncol=3,
+        loc="upper left",
+        bbox_to_anchor=(0.0, 1.12),
+        frameon=False,
+        handlelength=1.6,
+        columnspacing=1.2,
+    )
+
+    ax.set_xlim(0, x_max + right_pad)
+    for y, total in zip(range(len(totals)), totals):
+        ax.text(total + (x_max * 0.01), y, f"{total:.2f}", ha="left", va="center", fontsize=9)
+
+    fig.tight_layout(rect=(0, 0, 1, 0.88))
+    return fig
+
+def _hbar_stacked_two_series(
+    labels: list[str],
+    left_vals: list[float],     # series A
+    right_vals: list[float],    # series B (stacked to the right)
+    xlabel: str,
+    legend_labels: tuple[str, str],
+    colors: tuple[str, str],
+) -> plt.Figure:
+    totals = [lv + rv for lv, rv in zip(left_vals, right_vals)]
+    order = sorted(range(len(labels)), key=lambda i: totals[i], reverse=True)
+    labs   = [labels[i] for i in order]
+    lvals  = [left_vals[i] for i in order]
+    rvals  = [right_vals[i] for i in order]
+    tots   = [totals[i] for i in order]
+    y = list(range(len(labs)))
+
+    x_max = max(tots) if tots else 1.0
+    height = max(3.0, 0.5 * len(labs) + 1.0)
+    fig, ax = plt.subplots(figsize=(7.5, height))
+
+    ax.barh(y, lvals, color=colors[0], label=legend_labels[0])
+    ax.barh(y, rvals, left=lvals, color=colors[1], label=legend_labels[1])
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(labs)
+    ax.invert_yaxis()
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("")
+
+    ax.legend(ncol=2, loc="upper left", bbox_to_anchor=(0.0, 1.10),
+              frameon=False, handlelength=1.6, columnspacing=1.2)
+
+    right_pad = x_max * 0.08
+    ax.set_xlim(0, x_max + right_pad)
+    for yy, tot in zip(y, tots):
+        ax.text(tot + (x_max * 0.01), yy, f"{tot:.2f}", ha="left", va="center", fontsize=9)
+
     fig.tight_layout(rect=(0, 0, 1, 0.88))
     return fig
 
@@ -734,7 +1006,7 @@ def main(argv=None):
 
     # Build shared labels for Inventory Period axis
     period_labels = _make_period_labels_from_years(years)   # {2005: "2000-2005", ...}
-    x_order = [period_labels[y] for y in years]             # keep user-specified order
+    x_order = [period_labels[y] for y in years]
     inv_col = "Inventory Period"
 
     # -------------------- Tables --------------------
@@ -763,14 +1035,13 @@ def main(argv=None):
 
     # -------------------- Figures --------------------
     if args.do_figures:
-        # ---------- drained ----------
+        # ---------- drained (by climate over time) ----------
         df_d = con.execute(sql_drained_by_climate()).df()
         df_d["Climate"] = df_d["climate_domain"].apply(_titlecase_domain)
         df_d = df_d[["interval_end", "Climate", "drained_GtCO2e"]].rename(columns={"interval_end": "Year"})
         df_d = df_d[df_d["Climate"].isin(CLIMATE_ORDER)]
         df_d[inv_col] = df_d["Year"].map(period_labels)
 
-        # CSVs
         drained_long_csv = _join(OUT_DIR, "figures", "data", "global_drained_climate_long.csv")
         drained_wide_csv = _join(OUT_DIR, "figures", "data", "global_drained_climate_wide.csv")
 
@@ -781,28 +1052,23 @@ def main(argv=None):
 
         if not args.data_only:
             fig_d = _stacked_bar(
-                d_long,
-                "drained_GtCO2e",
-                title=None,
-                index_col=inv_col,
-                x_order=x_order,
-                xlabel="Inventory Period",
+                d_long, "drained_GtCO2e",
+                title=None, index_col=inv_col, x_order=x_order, xlabel="Inventory Period"
             )
             if not args.no_png:
                 _save_binary(fig_d, _join(OUT_DIR, "figures", "global_drained_climate_column.png"),
-                             fmt="png", dpi=300, width=6.5, height=4.5)
+                             fmt="png", dpi=300, width=7.5, height=4.5)
             if not args.no_svg:
                 _save_binary(fig_d, _join(OUT_DIR, "figures", "global_drained_climate_column.svg"),
-                             fmt="svg", width=6.5, height=4.5)
+                             fmt="svg", width=7.5, height=4.5)
 
-        # ---------- burned ----------
+        # ---------- burned (by climate over time) ----------
         df_b = con.execute(sql_burned_by_climate()).df()
         df_b["Climate"] = df_b["climate_domain"].apply(_titlecase_domain)
         df_b = df_b[["interval_end", "Climate", "burned_GtCO2e"]].rename(columns={"interval_end": "Year"})
         df_b = df_b[df_b["Climate"].isin(CLIMATE_ORDER)]
         df_b[inv_col] = df_b["Year"].map(period_labels)
 
-        # CSVs
         burned_long_csv = _join(OUT_DIR, "figures", "data", "global_burn_climate_long.csv")
         burned_wide_csv = _join(OUT_DIR, "figures", "data", "global_burn_climate_wide.csv")
 
@@ -813,19 +1079,113 @@ def main(argv=None):
 
         if not args.data_only:
             fig_b = _stacked_bar(
-                b_long,
-                "burned_GtCO2e",
-                title=None,
-                index_col=inv_col,
-                x_order=x_order,
-                xlabel="Inventory Period",
+                b_long, "burned_GtCO2e",
+                title=None, index_col=inv_col, x_order=x_order, xlabel="Inventory Period"
             )
             if not args.no_png:
-                _save_binary(fig_b, _join(OUT_DIR, "figures", "global_burn_climate_bar.png"),
-                             fmt="png", dpi=300, width=6.5, height=4.5)
+                _save_binary(fig_b, _join(OUT_DIR, "figures", "global_burn_climate_column.png"),
+                             fmt="png", dpi=300, width=7.5, height=4.5)
             if not args.no_svg:
-                _save_binary(fig_b, _join(OUT_DIR, "figures", "global_burn_climate_bar.svg"),
-                             fmt="svg", width=6.5, height=4.5)
+                _save_binary(fig_b, _join(OUT_DIR, "figures", "global_burn_climate_column.svg"),
+                             fmt="svg", width=7.5, height=4.5)
+
+        # ---------- drained: Land Use × Climate (totals across all periods) ----------
+        d_lu_raw = con.execute(sql_drained_landuse_climate_totals()).df()
+        d_lu_long = _aggregate_landuse(d_lu_raw, "drained_GtCO2e")
+        d_lu_long_csv = _join(OUT_DIR, "figures", "data", "drained_landuse_climate_long.csv")
+        d_lu_wide_csv = _join(OUT_DIR, "figures", "data", "drained_landuse_climate_wide.csv")
+        _write_csv_df(con, d_lu_long[["LandUse", "Climate", "drained_GtCO2e"]], d_lu_long_csv)
+        _write_csv_df(con, _pivot_wide_lu(d_lu_long, "drained_GtCO2e"), d_lu_wide_csv)
+
+        if not args.data_only:
+            fig_dlu = _stacked_hbar(d_lu_long, "drained_GtCO2e", xlabel="Total Emissions (Gt CO₂e)")
+            if not args.no_png:
+                _save_binary(fig_dlu, _join(OUT_DIR, "figures", "drained_landuse_climate_bar.png"),
+                             fmt="png", dpi=300)
+            if not args.no_svg:
+                _save_binary(fig_dlu, _join(OUT_DIR, "figures", "drained_landuse_climate_bar.svg"),
+                             fmt="svg")
+
+        # ---------- burned: Land Use × Climate (totals across all periods) ----------
+        b_lu_raw = con.execute(sql_burned_landuse_climate_totals()).df()
+        b_lu_long = _aggregate_landuse(b_lu_raw, "burned_GtCO2e")
+        b_lu_long_csv = _join(OUT_DIR, "figures", "data", "burned_landuse_climate_long.csv")
+        b_lu_wide_csv = _join(OUT_DIR, "figures", "data", "burned_landuse_climate_wide.csv")
+        _write_csv_df(con, b_lu_long[["LandUse", "Climate", "burned_GtCO2e"]], b_lu_long_csv)
+        _write_csv_df(con, _pivot_wide_lu(b_lu_long, "burned_GtCO2e"), b_lu_wide_csv)
+
+        if not args.data_only:
+            fig_blu = _stacked_hbar(b_lu_long, "burned_GtCO2e", xlabel="Total Emissions (Gt CO₂e)")
+            if not args.no_png:
+                _save_binary(fig_blu, _join(OUT_DIR, "figures", "burned_landuse_climate_bar.png"),
+                             fmt="png", dpi=300)
+            if not args.no_svg:
+                _save_binary(fig_blu, _join(OUT_DIR, "figures", "burned_landuse_climate_bar.svg"),
+                             fmt="svg")
+
+        # ---------- Top-N by country: PEAT AREA split (latest interval only) ----------
+        latest_year = max(years)
+        df_area = con.execute(sql_topn_peat_area_comp_latest(latest_year, args.topn, have_lookup)).df()
+        if "iso3" in df_area.columns:
+            df_area["label"] = df_area["iso3"].fillna(df_area["gadm_adm0"].astype(str))
+        else:
+            df_area["label"] = df_area["gadm_adm0"].astype(str)
+
+        area_csv = _join(OUT_DIR, "figures", "data", "top_10_country_peat_area.csv")
+        _write_csv_df(
+            con,
+            df_area[["label", "drained_area_mha", "undrained_area_mha", "total_area_mha"]]
+                  .rename(columns={"label": "iso3_or_code"}),
+            area_csv,
+        )
+
+        if not args.data_only:
+            fig_area = _hbar_stacked_two_series(
+                labels=df_area["label"].tolist(),
+                left_vals=df_area["drained_area_mha"].tolist(),
+                right_vals=df_area["undrained_area_mha"].tolist(),
+                xlabel="Total Area (million ha)",
+                legend_labels=("Drained peat area", "Undrained peat area"),
+                colors=("#FB6A29", "#3E3753"),
+            )
+            if not args.no_png:
+                _save_binary(fig_area, _join(OUT_DIR, "figures", "top_10_country_peat_area_bar.png"),
+                             fmt="png", dpi=300)
+            if not args.no_svg:
+                _save_binary(fig_area, _join(OUT_DIR, "figures", "top_10_country_peat_area_bar.svg"),
+                             fmt="svg")
+
+        # ---------- Top-N by country: TOTAL EMISSIONS split (drained + burned) ----------
+        df_emsplit = con.execute(sql_topn_total_emissions_split(args.topn, have_lookup)).df()
+        if "iso3" in df_emsplit.columns:
+            df_emsplit["label"] = df_emsplit["iso3"].fillna(df_emsplit["gadm_adm0"].astype(str))
+        else:
+            df_emsplit["label"] = df_emsplit["gadm_adm0"].astype(str)
+
+        em_split_csv = _join(OUT_DIR, "figures", "data", "top_10_country_total_emissions.csv")
+        _write_csv_df(
+            con,
+            df_emsplit[["label", "burned_GtCO2e", "drained_GtCO2e", "total_GtCO2e"]]
+                     .rename(columns={"label": "iso3_or_code"}),
+            em_split_csv,
+        )
+
+        if not args.data_only:
+            # Orange for burned (left), purple for drained (right) to match earlier examples
+            fig_emsplit = _hbar_stacked_two_series(
+                labels=df_emsplit["label"].tolist(),
+                left_vals=df_emsplit["burned_GtCO2e"].tolist(),
+                right_vals=df_emsplit["drained_GtCO2e"].tolist(),
+                xlabel="Total Emissions (Gt CO₂e)",
+                legend_labels=("Total burned emissions", "Total drained emissions"),
+                colors=("#FB6A29", "#3E3753"),
+            )
+            if not args.no_png:
+                _save_binary(fig_emsplit, _join(OUT_DIR, "figures", "top_10_country_total_emissions_bar.png"),
+                             fmt="png", dpi=300)
+            if not args.no_svg:
+                _save_binary(fig_emsplit, _join(OUT_DIR, "figures", "top_10_country_total_emissions_bar.svg"),
+                             fmt="svg")
 
     print("Assets written to:", OUT_DIR)
 
