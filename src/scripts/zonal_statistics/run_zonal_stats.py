@@ -566,8 +566,8 @@ if __name__ == "__main__":
 Examples:
 
 # Single interval (per-variable Zarrs; corrupt tiles auto-filtered)
-python -m src.scripts.zonal_statistics.run_zonal_statistics \
-  --interval_end_years 2024 \
+python -m src.scripts.zonal_statistics.run_zonal_stats \
+  --interval_end_years 2015 \
   --cluster_name zonal_stats \
   --run_date 20250914 \
   --model_version 0_7_5 \
