@@ -2,17 +2,8 @@
 """
 Utilities for building publication tables & figures from organic-soils zonal statistics.
 
-This module is intentionally *pure*: no DuckDB setup, no registration, no file I/O.
-It provides:
-  - Plotting constants & reusable chart helpers (matplotlib)
-  - Lightweight reclass helpers for land use aggregation
-  - All SQL builder functions (tables + figure datasets)
-
-Assumptions (for SQL builders):
-  The driver will create the DuckDB views these queries reference:
-    - zs_drained, zs_burned
-    - drained_state_ctx, burned_state_ctx   (lookup views from zonal_constants)
-    - adm0_lookup (optional; enables country/iso3 joins when available)
+Pure utilities: plotting helpers, constants, SQL string builders.
+No DuckDB setup or registration; the driver wires everything.
 """
 
 from __future__ import annotations
@@ -100,7 +91,6 @@ def aggregate_landuse(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
         df.groupby(["LandUse", "Climate"], as_index=False, observed=False)[value_col]
           .sum()
     )
-    # Order land-uses by total descending for nicer charts
     totals = out.groupby("LandUse", observed=False)[value_col].sum().sort_values(ascending=False).index.tolist()
     out["LandUse"] = pd.Categorical(out["LandUse"], totals, ordered=True)
     return out.sort_values(["LandUse", "Climate"])
@@ -120,7 +110,6 @@ def stacked_column_by_category(
     height: float = 4.5,
     legend_above: bool = False,
 ) -> plt.Figure:
-    """Generic stacked column chart across a categorical dimension."""
     df = df_long.copy()
     df[category_col] = pd.Categorical(df[category_col], category_order, ordered=True)
     x_vals = list(dict.fromkeys(df[index_col].tolist()))
@@ -150,13 +139,11 @@ def stacked_column_by_category(
         fig.tight_layout(rect=(0, 0, 1, 0.88))
 
     ax.set_ylim(0, y_max)
-    pad = y_max * 0.015
     for xpos, total in zip(range(len(totals)), totals):
-        ax.text(xpos, total + pad, f"{total:.2f}", ha="center", va="bottom", fontsize=9)
+        ax.text(xpos, total + (y_max * 0.015), f"{total:.2f}", ha="center", va="bottom", fontsize=9)
     return fig
 
 def stacked_hbar(df_long: pd.DataFrame, value_col: str, xlabel: str) -> plt.Figure:
-    """Horizontal stacked bars for LandUse × Climate (value_col determines totals)."""
     df = df_long.copy()
     df["Climate"] = pd.Categorical(df["Climate"], CLIMATE_ORDER, ordered=True)
     wide = (
@@ -169,7 +156,6 @@ def stacked_hbar(df_long: pd.DataFrame, value_col: str, xlabel: str) -> plt.Figu
 
     totals = wide.sum(axis=1).values
     x_max = float(max(totals)) if len(totals) else 1.0
-    right_pad = x_max * 0.08
     height = max(3.2, 0.55 * len(order) + 1.0)
     fig, ax = plt.subplots(figsize=(7.5, height))
 
@@ -182,7 +168,6 @@ def stacked_hbar(df_long: pd.DataFrame, value_col: str, xlabel: str) -> plt.Figu
     ax.set_xlabel(xlabel); ax.set_ylabel("Land Use")
     ax.legend(ncol=3, loc="upper left", bbox_to_anchor=(0.0, 1.12),
               frameon=False, handlelength=1.6, columnspacing=1.2)
-    ax.set_xlim(0, x_max + right_pad)
     for y, total in zip(range(len(totals)), totals):
         ax.text(total + (x_max * 0.01), y, f"{total:.2f}", ha="left", va="center", fontsize=9)
     fig.tight_layout(rect=(0, 0, 1, 0.88))
@@ -190,7 +175,6 @@ def stacked_hbar(df_long: pd.DataFrame, value_col: str, xlabel: str) -> plt.Figu
 
 def hbar_two_series(labels: List[str], left_vals: List[float], right_vals: List[float],
                     xlabel: str, legends: tuple[str, str], colors: tuple[str, str]) -> plt.Figure:
-    """Two-series stacked horizontal bars (left+right) with totals ordering."""
     totals = [lv + rv for lv, rv in zip(left_vals, right_vals)]
     order = sorted(range(len(labels)), key=lambda i: totals[i], reverse=True)
     labs   = [labels[i] for i in order]
@@ -205,17 +189,14 @@ def hbar_two_series(labels: List[str], left_vals: List[float], right_vals: List[
     ax.barh(y, lvals, color=colors[0], label=legends[0])
     ax.barh(y, rvals, left=lvals, color=colors[1], label=legends[1])
     ax.set_yticks(y); ax.set_yticklabels(labs); ax.invert_yaxis()
-    ax.set_xlabel(xlabel); ax.set_ylabel("")
-    ax.legend(ncol=2, loc="upper left", bbox_to_anchor=(0.0, 1.10),
-              frameon=False, handlelength=1.6, columnspacing=1.2)
-    right_pad = x_max * 0.08; ax.set_xlim(0, x_max + right_pad)
+    ax.set_xlabel(xlabel)
+    ax.legend(ncol=2, loc="upper left", bbox_to_anchor=(0.0, 1.10), frameon=False)
     for yy, tot in zip(y, tots):
         ax.text(tot + (x_max * 0.01), yy, f"{tot:.2f}", ha="left", va="center", fontsize=9)
     fig.tight_layout(rect=(0, 0, 1, 0.88))
     return fig
 
 def barh_single(labels: List[str], values: List[float], xlabel: str, color: str) -> plt.Figure:
-    """Single-series descending horizontal bars with value labels."""
     order = sorted(range(len(labels)), key=lambda i: values[i], reverse=True)
     labs  = [labels[i] for i in order]
     vals  = [values[i] for i in order]
@@ -224,9 +205,8 @@ def barh_single(labels: List[str], values: List[float], xlabel: str, color: str)
     fig, ax = plt.subplots(figsize=(7.5, height))
     ax.barh(y, vals, color=color)
     ax.set_yticks(y); ax.set_yticklabels(labs); ax.invert_yaxis()
-    ax.set_xlabel(xlabel); ax.set_ylabel("")
+    ax.set_xlabel(xlabel)
     x_max = max(vals) if vals else 1.0
-    right_pad = x_max * 0.08; ax.set_xlim(0, x_max + right_pad)
     for yy, v in zip(y, vals):
         ax.text(v + (x_max * 0.01), yy, f"{v:.2f}", ha="left", va="center", fontsize=9)
     fig.tight_layout(rect=(0, 0, 1, 0.88))
