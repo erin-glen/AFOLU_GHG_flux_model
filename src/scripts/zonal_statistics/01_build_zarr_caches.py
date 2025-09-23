@@ -126,7 +126,7 @@ def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
         tile_uris.values.tolist(),
         engine="rasterio",
         combine="by_coords",
-        parallel=False,
+        parallel=True,
         chunks={"x": chunk_size, "y": chunk_size},
     ).squeeze()
 
