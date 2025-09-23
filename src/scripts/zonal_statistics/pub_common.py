@@ -1,108 +1,238 @@
 # -*- coding: utf-8 -*-
 """
-Public helpers for building publication tables & figures from organic-soils zonal statistics.
+Utilities for building publication tables & figures from organic-soils zonal statistics.
 
-This module intentionally exposes only PUBLIC functions:
-- register_state_context_views(con): creates 'drained_state_ctx' and 'burned_state_ctx'
-- table_* SQL builders
-- sql_* SQL builders (for figure datasets)
+This module is intentionally *pure*: no DuckDB setup, no registration, no file I/O.
+It provides:
+  - Plotting constants & reusable chart helpers (matplotlib)
+  - Lightweight reclass helpers for land use aggregation
+  - All SQL builder functions (tables + figure datasets)
 
-Assumptions (created by the driver before using these SQLs):
-  - DuckDB views:
-      * zs_drained (columns incl. interval_end, flux_type, value, gadm_adm0,
-                    drained_state_meaning, drained_state_nodes)
-      * zs_burned  (columns incl. interval_end, flux_type, value, gadm_adm0,
-                    burned_state_meaning,  burned_state_nodes)
-  - Optional DuckDB view 'adm0_lookup' with columns: gadm_adm0, country, iso3
+Assumptions (for SQL builders):
+  The driver will create the DuckDB views these queries reference:
+    - zs_drained, zs_burned
+    - drained_state_ctx, burned_state_ctx   (lookup views from zonal_constants)
+    - adm0_lookup (optional; enables country/iso3 joins when available)
 """
 
 from __future__ import annotations
 
-from typing import Optional
+import re
+from typing import Optional, Sequence, List
 
 import pandas as pd
+import matplotlib.pyplot as plt
 
-from src.scripts.zonal_statistics import zonal_constants as zc
+# ----------------------------- Plot constants -----------------------------
 
+CLIMATE_ORDER = ["Boreal", "Temperate", "Tropical"]
 
-# ---------------------------------------------------------------------------
-# Public: register_state_context_views
-# ---------------------------------------------------------------------------
+CLIMATE_COLORS = {
+    "Boreal":    "#4575B4",  # deep blue
+    "Temperate": "#FDB863",  # warm amber
+    "Tropical":  "#1A9850",  # rich green
+}
 
-def register_state_context_views(con) -> None:
-    """
-    Register state-context lookup views used by the SQL builders below.
+PROCESS_ORDER = ["Drained", "Burned"]
+PROCESS_COLORS = {"Drained": "#3E3753", "Burned": "#FB6A29"}
 
-    Creates two DuckDB views by registering in-memory DataFrames:
-      - drained_state_ctx (key, meaning, climate_domain, drained_state, emissions_state)
-      - burned_state_ctx  (key, meaning, climate_domain, burned_state,  emissions_state)
-    """
-    # ----- Build drained context from zonal_constants -----
-    d_rows = []
-    for key, meaning in zc.DRAINED_STATE_NODE_MEANINGS.items():
-        # Meaning encodes domain and state as e.g. "peat_drained__tropical_oil_palm"
-        climate_domain = None
-        drained_state = None
-        emissions_state = None
+# ----------------------------- Small helpers ------------------------------
 
-        if "__" in meaning:
-            left, right = meaning.split("__", 1)
-            drained_state = left
-            # pull domain if present at the start of 'right'
-            if "_" in right:
-                dom, rest = right.split("_", 1)
-                if dom in {"boreal", "temperate", "tropical"}:
-                    climate_domain = dom
-                    emissions_state = rest
-                else:
-                    emissions_state = right
-            else:
-                emissions_state = right
-        else:
-            drained_state = meaning
+def titlecase_domain(s: Optional[str]) -> str:
+    if s is None:
+        return "Unspecified"
+    t = s.strip().title()
+    if t.startswith("Boreal"): return "Boreal"
+    if t.startswith("Temperate"): return "Temperate"
+    if t.startswith("Tropical"): return "Tropical"
+    return t or "Unspecified"
 
-        d_rows.append({
-            "key": f"{key}",
-            "meaning": f"{meaning}",
-            "climate_domain": climate_domain,
-            "drained_state": drained_state,
-            "emissions_state": emissions_state,
-        })
-    d_df = pd.DataFrame(d_rows)
+def country_label(df: pd.DataFrame) -> pd.Series:
+    """Prefer iso3 if present/non-empty, else fallback to numeric code."""
+    if "iso3" in df.columns:
+        iso = df["iso3"].astype("string")
+        return iso.where(iso.str.len().fillna(0) > 0, df["gadm_adm0"].astype(str))
+    return df["gadm_adm0"].astype(str)
 
-    # ----- Build burned context from zonal_constants -----
-    b_rows = []
-    for key, meaning in zc.BURNED_STATE_NODE_MEANINGS.items():
-        climate_domain = None
-        burned_state = None
-        emissions_state = None
+def pivot_wide(df_long: pd.DataFrame, value_col: str, index_col: str) -> pd.DataFrame:
+    return (
+        df_long
+        .pivot_table(index=index_col, columns="Climate", values=value_col,
+                     aggfunc="sum", fill_value=0.0, observed=False)
+        .reindex(columns=CLIMATE_ORDER, fill_value=0.0)
+        .reset_index()
+    )
 
-        if "__" in meaning:
-            dom, state = meaning.split("__", 1)
-            climate_domain = dom
-            burned_state = state
-            emissions_state = state
-        else:
-            burned_state = meaning
-            emissions_state = meaning
+# ----------------------------- Land-use reclass ---------------------------
 
-        b_rows.append({
-            "key": f"{key}",
-            "meaning": f"{meaning}",
-            "climate_domain": climate_domain,
-            "burned_state": burned_state,
-            "emissions_state": emissions_state,
-        })
-    b_df = pd.DataFrame(b_rows)
+_LU_RECLASS_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"^(oil[_\- ]?palm|oilpalm)$"), "Oil Palm"),
+    (re.compile(r"^(short[_\- ]?rotation|long[_\- ]?rotation|plantation.*|planted.*|tree[_\- ]?crop.*)$"),
+     "Other plantation"),
+    (re.compile(r"^cropland.*$"), "Cropland"),
+    (re.compile(r"^forest.*$"), "Forest"),
+    (re.compile(r"^(grassland|pasture|rangeland).*$"), "Grassland"),
+    (re.compile(r"^(settlement|built[_\- ]?up|urban).*$"), "Settlement"),
+    (re.compile(r"^wetland.*$"), "Wetland"),
+    (re.compile(r"^(extraction|peat[_\- ]?extraction|cutover).*$"), "Extraction"),
+    (re.compile(r"^(otherland|other)$"), "Otherland"),
+]
 
-    # Register as DuckDB relations (temp)
-    con.register("drained_state_ctx", d_df)
-    con.register("burned_state_ctx",  b_df)
+def _normalize_emissions_state(s: Optional[str]) -> str:
+    if s is None:
+        return "other"
+    return re.sub(r"[\s\-]+", "_", s.strip().lower())
 
+def _reclass_emissions_state(s: Optional[str]) -> str:
+    key = _normalize_emissions_state(s)
+    for pat, lbl in _LU_RECLASS_PATTERNS:
+        if pat.match(key):
+            return lbl
+    return (s.strip().replace("_", " ").title() if s else "Otherland")
 
-# ---------------------------------------------------------------------------
-# Public: TABLE SQL builders
-# ---------------------------------------------------------------------------
+def aggregate_landuse(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    """Reclass emissions_state to coarse land-uses and aggregate by (LandUse × Climate)."""
+    df = df.copy()
+    df["Climate"] = df["climate_domain"].apply(titlecase_domain)
+    df = df[df["Climate"].isin(CLIMATE_ORDER)]
+    df["LandUse"] = df["emissions_state"].apply(_reclass_emissions_state).str.replace("_", " ", regex=False)
+    out = (
+        df.groupby(["LandUse", "Climate"], as_index=False, observed=False)[value_col]
+          .sum()
+    )
+    # Order land-uses by total descending for nicer charts
+    totals = out.groupby("LandUse", observed=False)[value_col].sum().sort_values(ascending=False).index.tolist()
+    out["LandUse"] = pd.Categorical(out["LandUse"], totals, ordered=True)
+    return out.sort_values(["LandUse", "Climate"])
+
+# ----------------------------- Plot helpers -------------------------------
+
+def stacked_column_by_category(
+    df_long: pd.DataFrame,
+    index_col: str,
+    category_col: str,
+    value_col: str,
+    category_order: Sequence[str],
+    color_map: dict[str, str],
+    xlabel: str,
+    ylabel: str,
+    width: float = 7.5,
+    height: float = 4.5,
+    legend_above: bool = False,
+) -> plt.Figure:
+    """Generic stacked column chart across a categorical dimension."""
+    df = df_long.copy()
+    df[category_col] = pd.Categorical(df[category_col], category_order, ordered=True)
+    x_vals = list(dict.fromkeys(df[index_col].tolist()))
+    wide = (
+        df.pivot_table(index=index_col, columns=category_col, values=value_col,
+                       aggfunc="sum", fill_value=0.0, observed=False)
+          .reindex(index=x_vals)
+          .reindex(columns=category_order, fill_value=0.0)
+    )
+    totals = wide.sum(axis=1).values
+    y_max = float(max(totals)) * 1.12 if len(totals) else 1.0
+
+    fig, ax = plt.subplots(figsize=(width, height))
+    bottom = None
+    for cat in category_order:
+        vals = wide[cat].values
+        ax.bar([str(x) for x in wide.index], vals, bottom=bottom, label=cat, color=color_map.get(cat))
+        bottom = vals if bottom is None else bottom + vals
+    ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
+    if legend_above:
+        ax.legend(ncol=min(len(category_order), 5), loc="upper center",
+                  bbox_to_anchor=(0.5, 1.18), frameon=False, handlelength=1.6, columnspacing=1.2)
+        fig.tight_layout(rect=(0, 0, 1, 0.86))
+    else:
+        ax.legend(ncol=min(len(category_order), 4), loc="upper left",
+                  bbox_to_anchor=(0.0, 1.10), frameon=False, handlelength=1.6, columnspacing=1.2)
+        fig.tight_layout(rect=(0, 0, 1, 0.88))
+
+    ax.set_ylim(0, y_max)
+    pad = y_max * 0.015
+    for xpos, total in zip(range(len(totals)), totals):
+        ax.text(xpos, total + pad, f"{total:.2f}", ha="center", va="bottom", fontsize=9)
+    return fig
+
+def stacked_hbar(df_long: pd.DataFrame, value_col: str, xlabel: str) -> plt.Figure:
+    """Horizontal stacked bars for LandUse × Climate (value_col determines totals)."""
+    df = df_long.copy()
+    df["Climate"] = pd.Categorical(df["Climate"], CLIMATE_ORDER, ordered=True)
+    wide = (
+        df.pivot_table(index="LandUse", columns="Climate", values=value_col,
+                       aggfunc="sum", fill_value=0.0, observed=False)
+          .reindex(columns=CLIMATE_ORDER, fill_value=0.0)
+    )
+    order = list(wide.sum(axis=1).sort_values(ascending=False).index)
+    wide = wide.reindex(order)
+
+    totals = wide.sum(axis=1).values
+    x_max = float(max(totals)) if len(totals) else 1.0
+    right_pad = x_max * 0.08
+    height = max(3.2, 0.55 * len(order) + 1.0)
+    fig, ax = plt.subplots(figsize=(7.5, height))
+
+    left = None
+    for climate in CLIMATE_ORDER:
+        vals = wide[climate].values
+        ax.barh(wide.index.astype(str), vals, left=left, color=CLIMATE_COLORS.get(climate), label=climate)
+        left = vals if left is None else left + vals
+
+    ax.set_xlabel(xlabel); ax.set_ylabel("Land Use")
+    ax.legend(ncol=3, loc="upper left", bbox_to_anchor=(0.0, 1.12),
+              frameon=False, handlelength=1.6, columnspacing=1.2)
+    ax.set_xlim(0, x_max + right_pad)
+    for y, total in zip(range(len(totals)), totals):
+        ax.text(total + (x_max * 0.01), y, f"{total:.2f}", ha="left", va="center", fontsize=9)
+    fig.tight_layout(rect=(0, 0, 1, 0.88))
+    return fig
+
+def hbar_two_series(labels: List[str], left_vals: List[float], right_vals: List[float],
+                    xlabel: str, legends: tuple[str, str], colors: tuple[str, str]) -> plt.Figure:
+    """Two-series stacked horizontal bars (left+right) with totals ordering."""
+    totals = [lv + rv for lv, rv in zip(left_vals, right_vals)]
+    order = sorted(range(len(labels)), key=lambda i: totals[i], reverse=True)
+    labs   = [labels[i] for i in order]
+    lvals  = [left_vals[i] for i in order]
+    rvals  = [right_vals[i] for i in order]
+    tots   = [totals[i] for i in order]
+    y = list(range(len(labs)))
+
+    x_max = max(tots) if tots else 1.0
+    height = max(3.0, 0.5 * len(labs) + 1.0)
+    fig, ax = plt.subplots(figsize=(7.5, height))
+    ax.barh(y, lvals, color=colors[0], label=legends[0])
+    ax.barh(y, rvals, left=lvals, color=colors[1], label=legends[1])
+    ax.set_yticks(y); ax.set_yticklabels(labs); ax.invert_yaxis()
+    ax.set_xlabel(xlabel); ax.set_ylabel("")
+    ax.legend(ncol=2, loc="upper left", bbox_to_anchor=(0.0, 1.10),
+              frameon=False, handlelength=1.6, columnspacing=1.2)
+    right_pad = x_max * 0.08; ax.set_xlim(0, x_max + right_pad)
+    for yy, tot in zip(y, tots):
+        ax.text(tot + (x_max * 0.01), yy, f"{tot:.2f}", ha="left", va="center", fontsize=9)
+    fig.tight_layout(rect=(0, 0, 1, 0.88))
+    return fig
+
+def barh_single(labels: List[str], values: List[float], xlabel: str, color: str) -> plt.Figure:
+    """Single-series descending horizontal bars with value labels."""
+    order = sorted(range(len(labels)), key=lambda i: values[i], reverse=True)
+    labs  = [labels[i] for i in order]
+    vals  = [values[i] for i in order]
+    y = list(range(len(labs)))
+    height = max(3.0, 0.5 * len(labs) + 1.0)
+    fig, ax = plt.subplots(figsize=(7.5, height))
+    ax.barh(y, vals, color=color)
+    ax.set_yticks(y); ax.set_yticklabels(labs); ax.invert_yaxis()
+    ax.set_xlabel(xlabel); ax.set_ylabel("")
+    x_max = max(vals) if vals else 1.0
+    right_pad = x_max * 0.08; ax.set_xlim(0, x_max + right_pad)
+    for yy, v in zip(y, vals):
+        ax.text(v + (x_max * 0.01), yy, f"{v:.2f}", ha="left", va="center", fontsize=9)
+    fig.tight_layout(rect=(0, 0, 1, 0.88))
+    return fig
+
+# ----------------------------- SQL builders -------------------------------
 
 def table_by_country_period_sql(with_lookup: bool) -> str:
     select_l = ", l.country, l.iso3" if with_lookup else ""
@@ -142,7 +272,6 @@ def table_by_country_period_sql(with_lookup: bool) -> str:
     ORDER BY f.interval_end, total_MgCO2e DESC
     """
 
-
 def table_by_drained_state_sql() -> str:
     return """
     WITH base AS (
@@ -171,7 +300,6 @@ def table_by_drained_state_sql() -> str:
     ORDER BY base.interval_end, base.drained_MgCO2e DESC
     """
 
-
 def table_by_burned_state_sql() -> str:
     return """
     WITH base AS (
@@ -199,7 +327,6 @@ def table_by_burned_state_sql() -> str:
       OR (RPAD(CAST(base.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
     ORDER BY base.interval_end, base.burned_MgCO2e DESC
     """
-
 
 def table_by_country_drained_state_sql(with_lookup: bool) -> str:
     select_l = ", l.country, l.iso3" if with_lookup else ""
@@ -235,7 +362,6 @@ def table_by_country_drained_state_sql(with_lookup: bool) -> str:
     ORDER BY base.interval_end, base.drained_MgCO2e DESC
     """
 
-
 def table_by_country_burned_state_sql(with_lookup: bool) -> str:
     select_l = ", l.country, l.iso3" if with_lookup else ""
     join_l   = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = base.gadm_adm0" if with_lookup else ""
@@ -269,7 +395,6 @@ def table_by_country_burned_state_sql(with_lookup: bool) -> str:
       OR (RPAD(CAST(base.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
     ORDER BY base.interval_end, base.burned_MgCO2e DESC
     """
-
 
 def table_topn_country_sql(component: str, topn: int, with_lookup: bool) -> str:
     assert component in {"drained", "burned"}
@@ -307,10 +432,7 @@ def table_topn_country_sql(component: str, topn: int, with_lookup: bool) -> str:
     ORDER BY ranked.interval_end, rank
     """
 
-
-# ---------------------------------------------------------------------------
-# Public: FIGURE SQL builders
-# ---------------------------------------------------------------------------
+# ----------------------------- Figure SQL -------------------------------
 
 def sql_drained_by_climate() -> str:
     return """
@@ -330,7 +452,6 @@ def sql_drained_by_climate() -> str:
     ORDER BY interval_end, climate_domain;
     """
 
-
 def sql_burned_by_climate() -> str:
     return """
     WITH joined AS (
@@ -348,7 +469,6 @@ def sql_burned_by_climate() -> str:
     FROM joined
     ORDER BY interval_end, climate_domain;
     """
-
 
 def sql_drained_landuse_climate_avgs(n_periods: int) -> str:
     return f"""
@@ -370,7 +490,6 @@ def sql_drained_landuse_climate_avgs(n_periods: int) -> str:
     FROM joined;
     """
 
-
 def sql_burned_landuse_climate_avgs(n_periods: int) -> str:
     return f"""
     WITH joined AS (
@@ -390,7 +509,6 @@ def sql_burned_landuse_climate_avgs(n_periods: int) -> str:
       (burned_MgCO2e / {n_periods}) / 1e9 AS burned_avg_GtCO2e_per_yr
     FROM joined;
     """
-
 
 def sql_topn_total_emissions_split_avg(topn: int, with_lookup: bool, n_periods: int) -> str:
     select_l = ", l.country, l.iso3" if with_lookup else ""
@@ -446,7 +564,6 @@ def sql_topn_total_emissions_split_avg(topn: int, with_lookup: bool, n_periods: 
     ORDER BY rnk;
     """
 
-
 def sql_topn_peat_area_comp_latest(latest_year: int, topn: int, with_lookup: bool) -> str:
     select_l = ", l.country, l.iso3" if with_lookup else ""
     join_l   = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = r.gadm_adm0" if with_lookup else ""
@@ -493,12 +610,7 @@ def sql_topn_peat_area_comp_latest(latest_year: int, topn: int, with_lookup: boo
     LIMIT {topn};
     """
 
-
 def sql_global_totals_by_period_long() -> str:
-    """
-    Long-format global totals by inventory period and component.
-    Columns: interval_end, component ('Drained'|'Burned'), GtCO2e
-    """
     return """
     WITH d AS (
       SELECT interval_end, SUM(value) AS Mg
@@ -518,12 +630,7 @@ def sql_global_totals_by_period_long() -> str:
     ORDER BY interval_end, component;
     """
 
-
 def sql_topn_avg_component_emissions(component: str, topn: int, with_lookup: bool, n_periods: int) -> str:
-    """
-    Top-N by average annual emissions for a single component ('drained' or 'burned').
-    Returns: gadm_adm0[, country, iso3], <comp>_avg_GtCO2e_per_yr
-    """
     assert component in {"drained", "burned"}
     base   = "zs_drained" if component == "drained" else "zs_burned"
     ftype  = "drained_total_Mg_CO2e" if component == "drained" else "burned_total_Mg_CO2e"
@@ -553,20 +660,13 @@ def sql_topn_avg_component_emissions(component: str, topn: int, with_lookup: boo
     ORDER BY rnk;
     """
 
-
 def sql_country_emissions_intensity_avg(
     n_periods: int,
     with_lookup: bool,
     topn: Optional[int] = None,
     min_area_ha: float = 10000.0
 ) -> str:
-    """
-    Drained emissions intensity = (avg annual drained emissions) / (latest drained peat area).
-    Returns: gadm_adm0[, country, iso3], intensity_tCO2e_per_ha_yr,
-             total_avg_GtCO2e_per_yr, latest_drained_area_mha
-    """
     select_l = ", l.country, l.iso3" if with_lookup else ""
-    # IMPORTANT: join ISO to alias 'e' (final SELECT source)
     join_l   = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = e.gadm_adm0" if with_lookup else ""
     limit    = f"LIMIT {int(topn)}" if topn is not None else ""
     return f"""
@@ -606,12 +706,7 @@ def sql_country_emissions_intensity_avg(
     {limit};
     """
 
-
 def sql_country_emissions_vs_area_avg(n_periods: int, with_lookup: bool) -> str:
-    """
-    Scatter-ready dataset: average-annual total emissions vs average drained area by country.
-    Returns: gadm_adm0[, country, iso3], total_avg_GtCO2e_per_yr, avg_drained_area_mha
-    """
     select_l = ", l.country, l.iso3" if with_lookup else ""
     join_l   = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = f.gadm_adm0" if with_lookup else ""
     return f"""
