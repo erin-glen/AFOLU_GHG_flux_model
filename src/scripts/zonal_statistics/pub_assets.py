@@ -209,14 +209,20 @@ def _register_state_context_views(con: duckdb.DuckDBPyConnection):
         })
     con.register("burned_state_ctx", pd.DataFrame(b_rows))
 
-def _register_adm0_lookup_if_csv(con: duckdb.DuckDBPyConnection, csv_path: Optional[str]) -> bool:
-    """Register adm0_lookup only when a CSV is provided. Returns True if view is available."""
-    if not csv_path:
+def _ensure_adm0_lookup(con: duckdb.DuckDBPyConnection, csv_path: Optional[str]) -> bool:
+    """Register adm0_lookup view from CSV (if provided) or pycountry fallbacks."""
+
+    if csv_path:
+        con.execute(f"""
+            CREATE OR REPLACE VIEW adm0_lookup AS
+            SELECT * FROM read_csv_auto('{csv_path}', header=1);
+        """)
+        return True
+
+    df = pc.build_adm0_lookup_df()
+    if df.empty:
         return False
-    con.execute(f"""
-        CREATE OR REPLACE VIEW adm0_lookup AS
-        SELECT * FROM read_csv_auto('{csv_path}', header=1);
-    """)
+    con.register("adm0_lookup", df)
     return True
 
 # ----------------------------- Writers -----------------------------
@@ -351,7 +357,7 @@ def main(argv=None):
     con = duckdb.connect()
     _register_components(con, drained_globs, burned_globs, aws_region=args.aws_region)
     _register_state_context_views(con)
-    have_lookup = _register_adm0_lookup_if_csv(con, args.adm0_lookup)
+    have_lookup = _ensure_adm0_lookup(con, args.adm0_lookup)
 
     # Inventory period labels
     pairs = build_interval_pairs(list(years))

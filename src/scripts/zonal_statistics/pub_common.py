@@ -9,10 +9,18 @@ No DuckDB setup or registration; the driver wires everything.
 from __future__ import annotations
 
 import re
-from typing import Optional, Sequence, List
+from typing import Optional, Sequence, List, Dict
 
 import pandas as pd
 import matplotlib.pyplot as plt
+
+# Attempt to import pycountry lazily for ISO lookups. The dependency is optional and
+# the rest of the module works without it, so we swallow any import-time errors and
+# simply operate without country names/ISO codes when unavailable.
+try:  # pragma: no cover - import guard is environment dependent
+    import pycountry  # type: ignore
+except Exception:  # pragma: no cover - best effort optional dependency
+    pycountry = None  # type: ignore
 
 # ----------------------------- Plot constants -----------------------------
 
@@ -44,6 +52,63 @@ def country_label(df: pd.DataFrame) -> pd.Series:
         iso = df["iso3"].astype("string")
         return iso.where(iso.str.len().fillna(0) > 0, df["gadm_adm0"].astype(str))
     return df["gadm_adm0"].astype(str)
+
+
+def build_adm0_lookup_df(manual_overrides: Optional[Dict[int, Dict[str, Optional[str]]]] = None) -> pd.DataFrame:
+    """Return a DataFrame with gadm_adm0 → (iso3, country) best-effort mappings."""
+
+    from src.scripts.zonal_statistics import zonal_constants as zc
+
+    overrides: Dict[int, Dict[str, Optional[str]]] = manual_overrides or {}
+
+    rows: list[dict[str, Optional[str] | int]] = []
+    seen: set[int] = set()
+
+    for raw_code in zc.GADM_ADM0_IDS.tolist():
+        code = int(raw_code)
+        if code in seen:
+            continue
+        seen.add(code)
+
+        if code == 0:
+            rows.append({"gadm_adm0": 0, "iso3": None, "country": "NoData"})
+            continue
+
+        if code in overrides:
+            entry = overrides[code]
+            rows.append({
+                "gadm_adm0": code,
+                "iso3": entry.get("iso3"),
+                "country": entry.get("country"),
+            })
+            continue
+
+        iso3: Optional[str] = None
+        country: Optional[str] = None
+
+        if pycountry is not None:
+            lookup_code = f"{code:03d}"
+            record = pycountry.countries.get(numeric=lookup_code)
+            if record is None:
+                # Fallback to historic countries (e.g., defunct ISO assignments)
+                record = getattr(pycountry, "historic_countries", None)
+                if record is not None:
+                    record = record.get(numeric=lookup_code)  # type: ignore[assignment]
+
+            if record is not None:
+                iso3 = getattr(record, "alpha_3", None)
+                country = (
+                    getattr(record, "common_name", None)
+                    or getattr(record, "official_name", None)
+                    or getattr(record, "name", None)
+                )
+
+        rows.append({"gadm_adm0": code, "iso3": iso3, "country": country})
+
+    df = pd.DataFrame(rows, columns=["gadm_adm0", "iso3", "country"])
+    if not df.empty:
+        df = df.astype({"gadm_adm0": "int32"})
+    return df
 
 def pivot_wide(df_long: pd.DataFrame, value_col: str, index_col: str) -> pd.DataFrame:
     return (
