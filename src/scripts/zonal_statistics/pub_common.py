@@ -261,8 +261,29 @@ def hbar_two_series(labels: List[str], left_vals: List[float], right_vals: List[
     fig.tight_layout(rect=(0, 0, 1, 0.88))
     return fig
 
-def barh_single(labels: List[str], values: List[float], xlabel: str, color: str) -> plt.Figure:
-    order = sorted(range(len(labels)), key=lambda i: values[i], reverse=True)
+def barh_single(labels: List[str], values: List[float], xlabel: str, color: str,
+                *, sort_desc: bool = True) -> plt.Figure:
+    """Horizontal bar chart for a single series.
+
+    Parameters
+    ----------
+    labels
+        Category labels corresponding to ``values``.
+    values
+        Numeric values to plot.
+    xlabel
+        Label for the X axis.
+    color
+        Bar color (all bars use the same color).
+    sort_desc
+        Whether to sort bars descending by value (default) or preserve the
+        original order provided by ``labels`` and ``values``.
+    """
+
+    if sort_desc:
+        order = sorted(range(len(labels)), key=lambda i: values[i], reverse=True)
+    else:
+        order = list(range(len(labels)))
     labs  = [labels[i] for i in order]
     vals  = [values[i] for i in order]
     y = list(range(len(labs)))
@@ -653,6 +674,64 @@ def sql_topn_peat_area_comp_latest(latest_year: int, topn: int, with_lookup: boo
     {join_l}
     ORDER BY total_area_mha DESC
     LIMIT {topn};
+    """
+
+def sql_global_peat_area_split(latest_year: int) -> str:
+    return f"""
+    WITH base AS (
+      SELECT
+        CASE
+          WHEN drained_state_meaning LIKE 'peat_drained%%'   THEN 'drained'
+          WHEN drained_state_meaning LIKE 'peat_undrained%%' THEN 'undrained'
+          ELSE 'other'
+        END AS peat_state,
+        SUM(value) AS area_ha
+      FROM zs_drained
+      WHERE flux_type = 'area__ha' AND interval_end = {latest_year}
+      GROUP BY 1
+    ),
+    agg AS (
+      SELECT peat_state, SUM(area_ha) AS area_ha
+      FROM base
+      GROUP BY 1
+    ),
+    states AS (
+      SELECT * FROM (VALUES ('drained'), ('undrained')) AS s(peat_state)
+    )
+    SELECT
+      s.peat_state,
+      COALESCE(a.area_ha, 0) / 1e6 AS area_mha
+    FROM states s
+    LEFT JOIN agg a ON a.peat_state = s.peat_state
+    ORDER BY s.peat_state;
+    """
+
+def sql_global_component_emissions_avg(n_periods: int) -> str:
+    return f"""
+    WITH d AS (
+      SELECT 'Drained' AS component, SUM(value) AS total_Mg
+      FROM zs_drained
+      WHERE flux_type = 'drained_total_Mg_CO2e'
+    ),
+    b AS (
+      SELECT 'Burned' AS component, SUM(value) AS total_Mg
+      FROM zs_burned
+      WHERE flux_type = 'burned_total_Mg_CO2e'
+    ),
+    unioned AS (
+      SELECT * FROM d
+      UNION ALL
+      SELECT * FROM b
+    ),
+    components AS (
+      SELECT * FROM (VALUES ('Drained'), ('Burned')) AS t(component)
+    )
+    SELECT
+      c.component,
+      COALESCE(u.total_Mg, 0) / NULLIF({n_periods}, 0) / 1e9 AS avg_GtCO2e_per_yr
+    FROM components c
+    LEFT JOIN unioned u ON u.component = c.component
+    ORDER BY c.component;
     """
 
 def sql_global_totals_by_period_long() -> str:
