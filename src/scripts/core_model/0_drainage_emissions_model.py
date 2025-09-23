@@ -1172,12 +1172,12 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --full_model \
   --chunk_size 1 \
-  --start_year 2001 \
+  --start_year 2020 \
   --end_year 2024 \
   --all_five_year_periods \
   --mark_missing_factors \
   --count_burned_years \
-  --run_name ogh_sensitivity_2km
+  --run_name ogh_sensitivity_1km
   
   
 python -m src.scripts.core_model.0_drainage_emissions_model \
