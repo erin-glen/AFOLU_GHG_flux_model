@@ -7,10 +7,8 @@ Key guarantees:
 - Zarr caches under .../zarr/{run_name}/{run_date}/{interval}/ (no tile-size suffix).
 - Only build Zarrs if missing/invalid (supports Zarr v2/v3).
 - Stage Parquet locally per interval (no Hive), then upload to .../{interval}/(drained|burned)/.
-- No per-ha densities in outputs; sums only; area is m² → ha in post-process.
-
-Trimmed in this version:
-- Removed all combined-Zarr code-paths.
+- Area is m² → ha in post-process.
+- **Per-pixel only** for flux totals; all per-ha fallback/convert code removed.
 """
 
 from __future__ import annotations
@@ -75,26 +73,15 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         "zarr": "burned_state_node_{interval}.zarr",
         "var": "burned_state_nodes",
     },
+    # --- per-pixel only ---
     "drained_total": {
-        "folder_candidates": [
-            "drained_total_Mg_CO2e_pixel_yr",
-            "drained_total_Mg_CO2e_ha_yr",
-        ],
-        "zarr_by_unit": {
-            "pixel": "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
-            "ha": "drained_total_Mg_CO2e_ha_yr_{interval}.zarr",
-        },
+        "folder": "drained_total_Mg_CO2e_pixel_yr",
+        "zarr": "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
         "var": "drained_total",
     },
     "burned_total": {
-        "folder_candidates": [
-            "burned_total_Mg_CO2e_pixel_yr",
-            "burned_total_Mg_CO2e_ha_yr",
-        ],
-        "zarr_by_unit": {
-            "pixel": "burned_total_Mg_CO2e_pixel_yr_{interval}.zarr",
-            "ha": "burned_total_Mg_CO2e_ha_yr_{interval}.zarr",
-        },
+        "folder": "burned_total_Mg_CO2e_pixel_yr",
+        "zarr": "burned_total_Mg_CO2e_pixel_yr_{interval}.zarr",
         "var": "burned_total",
     },
 }
@@ -256,7 +243,7 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
         except Exception:
             pass
     if uri_list.empty:
-        raise FileNotFoundError(f"No GeoTIFFs found for {zarr_path}")
+        raise FileNotFoundError(f"No GeoTIFFs found in {zarr_path}")
     # fast path
     try:
         dsx = make_xarray_chunks(uri_list, chunk_size)
@@ -265,7 +252,7 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
     for axis in ("x", "y"):
         if axis in dsx.coords:
             dsx = dsx.assign_coords({axis: np.round(dsx[axis].astype(float), 12)})
-    dsx = dsx.chunk({"x": chunk_size, "y": chunk_size})
+    dsx = dsx.chunk({"x": chunk_size, "y": "auto"})
     try:
         dsx.to_zarr(zarr_path, mode="w")
     except Exception:
@@ -273,7 +260,7 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
         for axis in ("x", "y"):
             if axis in dsx.coords:
                 dsx = dsx.assign_coords({axis: np.round(dsx[axis].astype(float), 12)})
-        dsx = dsx.chunk({"x": chunk_size, "y": chunk_size})
+        dsx = dsx.chunk({"x": chunk_size, "y": "auto"})
         dsx.to_zarr(zarr_path, mode="w")
     if Version(zarr.__version__).major < 3:
         has_zgroup, has_zmeta, _ = _zarr_store_exists(fs, inner)
@@ -296,31 +283,16 @@ def s3_exists(prefix: str) -> bool:
     except FileNotFoundError:
         return False
 
-def _resolve_flux_folder_and_unit(folder_candidates: List[str], interval: str, **fmt_kw) -> Tuple[str, str]:
-    ranked: List[Tuple[str, str]] = []
-    for name in folder_candidates:
-        uri = FOLDER_TEMPLATE.format(folder=name, interval=interval, **fmt_kw)
-        unit = "ha" if "_ha_" in name else "pixel"
-        ranked.append((uri, unit))
-    ranked.sort(key=lambda x: 0 if x[1] == "ha" else 1)
-    for uri, unit in ranked:
-        if s3_exists(uri):
-            return uri, unit
-    raise FileNotFoundError(f"No matching flux folders for interval {interval}: {folder_candidates}")
-
 def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str, Any]]:
     zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
     paths: Dict[str, Dict[str, Any]] = {}
     kw2 = dict(kw); kw2["tile_pixels"] = tile_pixels
     for name, spec in DATASETS.items():
-        if "folder_candidates" in spec:
-            folder_uri, unit = _resolve_flux_folder_and_unit(spec["folder_candidates"], interval, **kw2)
-            zarr_name = spec["zarr_by_unit"][unit].format(interval=interval)
-            paths[name] = {"folder": folder_uri, "zarr": zarr_base + zarr_name, "unit": unit, "var": spec["var"]}
-        else:
-            folder_uri = FOLDER_TEMPLATE.format(folder=spec["folder"], interval=interval, **kw2)
-            paths[name] = {"folder": folder_uri, "zarr": zarr_base + spec["zarr"].format(interval=interval),
-                           "unit": None, "var": spec["var"]}
+        folder_uri = FOLDER_TEMPLATE.format(folder=spec["folder"], interval=interval, **kw2)
+        paths[name] = {"folder": folder_uri,
+                       "zarr": zarr_base + spec["zarr"].format(interval=interval),
+                       "unit": "pixel",
+                       "var": spec["var"]}
     return paths
 
 def _upload_partition_dir(fs_s3: s3fs.S3FileSystem, local_dir: Path, dest_prefix: str, logger: logging.Logger) -> int:
@@ -438,10 +410,7 @@ def run(args: argparse.Namespace) -> None:
         drained_state_nodes.name = "drained_state_nodes"
         burned_state_nodes_aligned.name = "burned_state_nodes"
 
-        if paths["drained_total"]["unit"] == "ha":
-            drained_total_aligned = drained_total_aligned * (pixel_area_aligned / 10000.0)
-        if paths["burned_total"]["unit"] == "ha":
-            burned_total_aligned = burned_total_aligned * (pixel_area_aligned / 10000.0)
+        # (per-ha conversion removed entirely)
 
         if args.debug:
             for n, arr in {
@@ -576,7 +545,7 @@ python -m src.scripts.zonal_statistics.run_zonal_stats \
   --chunk_size 10000
 
 # Multiple intervals
-python -m src.scripts.zonal_statistics.run_zonal_statistics \
+python -m src.scripts.zonal_statistics.run_zonal_stats \
   --interval_end_years 2010 2015 2020 2024 \
   --cluster_name zonal_stats \
   --run_date 20250825 \
@@ -586,7 +555,7 @@ python -m src.scripts.zonal_statistics.run_zonal_statistics \
   --chunk_size 10000
 
 # Bounding box local smoke test
-python -m src.scripts.zonal_statistics.run_zonal_statistics \
+python -m src.scripts.zonal_statistics.run_zonal_stats \
   --interval_end_years 2020 \
   --run_local \
   --bounding_box 112 -2 113 -1 \
