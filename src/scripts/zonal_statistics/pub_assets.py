@@ -26,8 +26,9 @@ from __future__ import annotations
 import argparse
 import os
 import posixpath
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple, Optional
+from typing import Iterable, List, Sequence, Tuple, Optional, Callable, Mapping
 
 import duckdb
 import pandas as pd
@@ -242,6 +243,74 @@ def _save_png(fig: plt.Figure, path: str, dpi: int = 300, width: float | None = 
     _ensure_parent_dir_local(path)
     fig.savefig(path, dpi=dpi, bbox_inches="tight")
 
+# ----------------------------- Plot metadata & helpers -----------------------------
+
+@dataclass(frozen=True)
+class ComponentPlotMeta:
+    component: str
+    sql_builder: Callable[[], str]
+    value_column: str
+    color_set: Mapping[str, str]
+    file_stub: str
+
+
+CLIMATE_COMPONENT_PLOTS: tuple[ComponentPlotMeta, ...] = (
+    ComponentPlotMeta(
+        component="drained",
+        sql_builder=pc.sql_drained_by_climate,
+        value_column="drained_GtCO2e",
+        color_set=pc.CLIMATE_COLORS,
+        file_stub="global_drained_climate",
+    ),
+    ComponentPlotMeta(
+        component="burned",
+        sql_builder=pc.sql_burned_by_climate,
+        value_column="burned_GtCO2e",
+        color_set=pc.CLIMATE_COLORS,
+        file_stub="global_burn_climate",
+    ),
+)
+
+
+def _build_component_climate_plot(
+    con: duckdb.DuckDBPyConnection,
+    meta: ComponentPlotMeta,
+    inventory_col: str,
+    period_labels: Mapping[int, str],
+    data_only: bool,
+):
+    df = con.execute(meta.sql_builder()).df()
+    df["Climate"] = df["climate_domain"].apply(pc.titlecase_domain)
+    df = df[df["Climate"].isin(pc.CLIMATE_ORDER)]
+    df = df.rename(columns={"interval_end": "Year"})
+    df[inventory_col] = df["Year"].map(period_labels)
+    long_df = df[[inventory_col, "Climate", meta.value_column]]
+
+    data_dir = _join(OUT_DIR, "figures", "data")
+    _write_csv_df(con, long_df, _join(data_dir, f"{meta.file_stub}_long.csv"))
+    _write_csv_df(
+        con,
+        pc.pivot_wide(long_df, meta.value_column, inventory_col),
+        _join(data_dir, f"{meta.file_stub}_wide.csv"),
+    )
+
+    if data_only:
+        return
+
+    fig = pc.stacked_column_by_category(
+        long_df,
+        inventory_col,
+        "Climate",
+        meta.value_column,
+        pc.CLIMATE_ORDER,
+        meta.color_set,
+        xlabel="Inventory Period",
+        ylabel="Annual Emissions (Gt CO₂e/year)",
+        width=7.5,
+        height=4.5,
+    )
+    _save_png(fig, _join(OUT_DIR, "figures", f"{meta.file_stub}_column.png"), dpi=300)
+
 # ----------------------------- Parquet path builders -----------------------------
 
 def _interval_folder_strings(years: Iterable[int]) -> List[str]:
@@ -287,7 +356,6 @@ def main(argv=None):
     # Inventory period labels
     pairs = build_interval_pairs(list(years))
     period_labels = {e: f"{s}-{e}" for (s, e) in pairs}
-    x_order = [period_labels[y] for y in years]
     inv_col = "Inventory Period"
     n_periods = len(years)
 
@@ -312,45 +380,11 @@ def main(argv=None):
     # -------------------- Figures --------------------
     if args.do_figures:
 
-        # 1) Drained by climate (per period)
-        df_d = con.execute(pc.sql_drained_by_climate()).df()
-        df_d["Climate"] = df_d["climate_domain"].apply(pc.titlecase_domain)
-        df_d = df_d[df_d["Climate"].isin(pc.CLIMATE_ORDER)]
-        df_d = df_d.rename(columns={"interval_end": "Year"})
-        df_d[inv_col] = df_d["Year"].map(period_labels)
-        d_long = df_d[[inv_col, "Climate", "drained_GtCO2e"]]
-        _write_csv_df(con, d_long, _join(OUT_DIR, "figures", "data", "global_drained_climate_long.csv"))
-        _write_csv_df(con, pc.pivot_wide(d_long, "drained_GtCO2e", inv_col),
-                      _join(OUT_DIR, "figures", "data", "global_drained_climate_wide.csv"))
-        if not args.data_only:
-            fig = pc.stacked_column_by_category(
-                d_long, inv_col, "Climate", "drained_GtCO2e",
-                pc.CLIMATE_ORDER, pc.CLIMATE_COLORS,
-                xlabel="Inventory Period", ylabel="Annual Emissions (Gt CO₂e/year)"
-            )
-            _save_png(fig, _join(OUT_DIR, "figures", "global_drained_climate_column.png"),
-                      dpi=300, width=7.5, height=4.5)
+        # 1) Drained & burned by climate (per period)
+        for meta in CLIMATE_COMPONENT_PLOTS:
+            _build_component_climate_plot(con, meta, inv_col, period_labels, args.data_only)
 
-        # 2) Burned by climate (per period)
-        df_b = con.execute(pc.sql_burned_by_climate()).df()
-        df_b["Climate"] = df_b["climate_domain"].apply(pc.titlecase_domain)
-        df_b = df_b[df_b["Climate"].isin(pc.CLIMATE_ORDER)]
-        df_b = df_b.rename(columns={"interval_end": "Year"})
-        df_b[inv_col] = df_b["Year"].map(period_labels)
-        b_long = df_b[[inv_col, "Climate", "burned_GtCO2e"]]
-        _write_csv_df(con, b_long, _join(OUT_DIR, "figures", "data", "global_burn_climate_long.csv"))
-        _write_csv_df(con, pc.pivot_wide(b_long, "burned_GtCO2e", inv_col),
-                      _join(OUT_DIR, "figures", "data", "global_burn_climate_wide.csv"))
-        if not args.data_only:
-            fig = pc.stacked_column_by_category(
-                b_long, inv_col, "Climate", "burned_GtCO2e",
-                pc.CLIMATE_ORDER, pc.CLIMATE_COLORS,
-                xlabel="Inventory Period", ylabel="Annual Emissions (Gt CO₂e/year)"
-            )
-            _save_png(fig, _join(OUT_DIR, "figures", "global_burn_climate_column.png"),
-                      dpi=300, width=7.5, height=4.5)
-
-        # 3) Drained: Land Use × Climate (avg annual across selected periods)
+        # 2) Drained: Land Use × Climate (avg annual across selected periods)
         d_lu_raw = con.execute(pc.sql_drained_landuse_climate_avgs(n_periods)).df()
         d_lu = pc.aggregate_landuse(d_lu_raw, "drained_avg_GtCO2e_per_yr")
         _write_csv_df(con, d_lu[["LandUse", "Climate", "drained_avg_GtCO2e_per_yr"]],
@@ -366,7 +400,7 @@ def main(argv=None):
                                   xlabel="Average Annual Emissions (Gt CO₂e/year)")
             _save_png(fig, _join(OUT_DIR, "figures", "drained_landuse_climate_bar.png"), dpi=300)
 
-        # 4) Burned: Land Use × Climate (avg annual across selected periods)
+        # 3) Burned: Land Use × Climate (avg annual across selected periods)
         b_lu_raw = con.execute(pc.sql_burned_landuse_climate_avgs(n_periods)).df()
         b_lu = pc.aggregate_landuse(b_lu_raw, "burned_avg_GtCO2e_per_yr")
         _write_csv_df(con, b_lu[["LandUse", "Climate", "burned_avg_GtCO2e_per_yr"]],
@@ -382,7 +416,7 @@ def main(argv=None):
                                   xlabel="Average Annual Emissions (Gt CO₂e/year)")
             _save_png(fig, _join(OUT_DIR, "figures", "burned_landuse_climate_bar.png"), dpi=300)
 
-        # 5) Top-N by country: PEAT AREA split (latest interval only)
+        # 4) Top-N by country: PEAT AREA split (latest interval only)
         latest_year = max(years)
         df_area = con.execute(pc.sql_topn_peat_area_comp_latest(latest_year, args.topn, have_lookup)).df()
         df_area["label"] = pc.country_label(df_area)
@@ -401,7 +435,7 @@ def main(argv=None):
             )
             _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_peat_area_bar.png"), dpi=300)
 
-        # 6) Top-N by country: AVERAGE annual TOTAL EMISSIONS split (drained + burned)
+        # 5) Top-N by country: AVERAGE annual TOTAL EMISSIONS split (drained + burned)
         df_emsplit = con.execute(pc.sql_topn_total_emissions_split_avg(args.topn, have_lookup, n_periods)).df()
         df_emsplit["label"] = pc.country_label(df_emsplit)
         _write_csv_df(con,
@@ -419,7 +453,7 @@ def main(argv=None):
             )
             _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_total_emissions_bar.png"), dpi=300)
 
-        # 7) Global totals over time (stacked drained+burned)
+        # 6) Global totals over time (stacked drained+burned)
         df_gt = con.execute(pc.sql_global_totals_by_period_long()).df()
         df_gt[inv_col] = df_gt["interval_end"].map(period_labels)
         gt_long = df_gt[[inv_col, "component", "GtCO2e"]].rename(columns={"component": "Component"})
@@ -438,7 +472,7 @@ def main(argv=None):
             )
             _save_png(fig, _join(OUT_DIR, "figures", "global_total_emissions_column.png"), dpi=300)
 
-        # 8) Top-N average-annual by component (separate charts)
+        # 7) Top-N average-annual by component (separate charts)
         df_topd = con.execute(pc.sql_topn_avg_component_emissions("drained", args.topn, have_lookup, n_periods)).df()
         df_topd["label"] = pc.country_label(df_topd)
         _write_csv_df(con,
@@ -467,7 +501,7 @@ def main(argv=None):
             )
             _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_burned_avg_emissions_bar.png"), dpi=300)
 
-        # 9) Emissions intensity (drained-only): t CO₂e/ha/yr, Top-N
+        # 8) Emissions intensity (drained-only): t CO₂e/ha/yr, Top-N
         df_int = con.execute(pc.sql_country_emissions_intensity_avg(n_periods, have_lookup, args.topn, 10000.0)).df()
         df_int["label"] = pc.country_label(df_int)
         _write_csv_df(con,
@@ -483,7 +517,7 @@ def main(argv=None):
             )
             _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_emissions_intensity_bar.png"), dpi=300)
 
-        # 10) Share of global avg-annual emissions by Land-Use (100% stacked, drained only)
+        # 9) Share of global avg-annual emissions by Land-Use (100% stacked, drained only)
         d_share_src = con.execute(pc.sql_drained_landuse_climate_avgs(n_periods)).df()
         d_share_src["Climate"] = d_share_src["climate_domain"].apply(pc.titlecase_domain)
         d_share_src = d_share_src[d_share_src["Climate"].isin(pc.CLIMATE_ORDER)]
@@ -505,7 +539,7 @@ def main(argv=None):
             )
             _save_png(fig, _join(OUT_DIR, "figures", "drained_landuse_share_by_climate_100pct.png"), dpi=300)
 
-        # 11) Country scatter: Avg-annual emissions vs Avg drained area
+        # 10) Country scatter: Avg-annual emissions vs Avg drained area
         df_sc = con.execute(pc.sql_country_emissions_vs_area_avg(n_periods, have_lookup)).df()
         df_sc["label"] = pc.country_label(df_sc)
         _write_csv_df(con,
