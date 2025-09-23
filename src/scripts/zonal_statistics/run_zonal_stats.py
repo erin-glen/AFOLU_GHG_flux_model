@@ -77,7 +77,6 @@ DATASETS: Dict[str, Dict[str, Any]] = {
     },
     "drained_total": {
         "folder_candidates": [
-            "drained_total_Mg_CO2e_pixel_yr",
             "drained_total_Mg_CO2e_ha_yr",
         ],
         "zarr_by_unit": {
@@ -88,7 +87,6 @@ DATASETS: Dict[str, Dict[str, Any]] = {
     },
     "burned_total": {
         "folder_candidates": [
-            "burned_total_Mg_CO2e_pixel_yr",
             "burned_total_Mg_CO2e_ha_yr",
         ],
         "zarr_by_unit": {
@@ -567,13 +565,13 @@ Examples:
 
 # Single interval (per-variable Zarrs; corrupt tiles auto-filtered)
 python -m src.scripts.zonal_statistics.run_zonal_stats \
-  --interval_end_years 2015 \
+  --interval_end_years 2024 \
   --cluster_name zonal_stats \
-  --run_date 20250914 \
-  --model_version 0_7_5 \
+  --run_date 20250922 \
+  --model_version 0_8_0 \
   --run_name ogh_sensitivity_1km \
   --tile_pixels 4000 \
-  --chunk_size 10000
+  --chunk_size 4000
 
 # Multiple intervals
 python -m src.scripts.zonal_statistics.run_zonal_statistics \
