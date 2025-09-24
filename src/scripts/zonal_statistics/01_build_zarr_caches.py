@@ -5,7 +5,7 @@ What this does
 --------------
 - For each requested dataset and interval:
   * Scans the source GeoTIFF folder on S3
-  * Opens TIFFs with a safe strategy (rasterio engine; parallel=False)
+  * Opens TIFFs with a safe strategy (rasterio engine; parallel=True)
   * Writes a Zarr store under .../zarr/{run_name}/{run_date}/{interval}/
 - Per-pixel only for flux totals (no per-ha support in this builder).
 - Symmetric chunking on both axes: {"x": chunk_size, "y": chunk_size}.
@@ -36,7 +36,7 @@ python -m src.scripts.zonal_statistics.01_build_zarr_caches \
   --tile_pixels 4000 \
   --chunk_size 10000
 
-# Local smoke build (1×1° area not supported here; builder always runs global)
+# Local smoke build (global cache build, no reductions)
 python -m src.scripts.zonal_statistics.01_build_zarr_caches \
   --interval_end_years 2020 \
   --run_local \
@@ -113,15 +113,35 @@ def s3_exists(prefix: str) -> bool:
         return False
 
 def list_folder_uris(base_uri: str) -> pd.Series:
+    """Glob TIFFs, de-dup + stable sort, and hard-verify existence to drop stale keys."""
+    log = logging.getLogger(__name__)
     fs = s3fs.S3FileSystem(anon=False)
     pattern = base_uri.rstrip("/") + "/**/*.tif"
-    tifs = [(f if f.startswith("s3://") else f"s3://{f}") for f in fs.glob(pattern)]
-    if not tifs:
+    listed = [(f if f.startswith("s3://") else f"s3://{f}") for f in fs.glob(pattern)]
+    if not listed:
         raise FileNotFoundError(f"No GeoTIFFs found in {base_uri}")
-    return pd.Series(tifs, dtype="string")
+    listed = sorted(set(listed))
+    log.info("  • Listed %d TIFF(s) under %s", len(listed), base_uri)
+
+    verified: List[str] = []
+    dropped = 0
+    for u in listed:
+        key = u.replace("s3://", "")
+        try:
+            if fs.exists(key):
+                verified.append(u)
+            else:
+                dropped += 1
+        except Exception:
+            dropped += 1
+    if dropped:
+        log.warning("  • Dropped %d stale/missing TIFF(s) after existence check", dropped)
+    if not verified:
+        raise FileNotFoundError(f"No existing GeoTIFFs after verification in {base_uri}")
+    return pd.Series(verified, dtype="string")
 
 def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
-    # Limit concurrency at open-time to avoid S3 stampede; compute still parallelizes.
+    # Safe open: avoid an S3 "thundering herd" at open time; compute still parallelizes.
     return xr.open_mfdataset(
         tile_uris.values.tolist(),
         engine="rasterio",
@@ -131,28 +151,35 @@ def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
     ).squeeze()
 
 def _filter_valid_tiffs(uri_series: pd.Series) -> pd.Series:
+    """Open-verify TIFFs with rasterio; drop any unreadable files."""
     if uri_series.empty:
         return uri_series
+    log = logging.getLogger(__name__)
     valid: List[str] = []
+    bad = 0
     for u in uri_series.tolist():
         try:
             with rasterio.Env():
                 with rasterio.open(u) as src:
                     if src.count >= 1 and src.width > 0 and src.height > 0:
                         valid.append(u)
+                    else:
+                        bad += 1
         except Exception:
-            # skip unreadable tiles
-            pass
+            bad += 1
+    if bad:
+        log.warning("  • Filtered out %d unreadable TIFF(s) (rasterio open check)", bad)
     return pd.Series(valid, dtype="string")
 
 def _zarr_store_exists(fs, path: str) -> Tuple[bool, bool, bool]:
-    return fs.exists(f"{path}/.zgroup"), fs.exists(f"{path}/.zmetadata"), fs.exists(f"{path}/zarr.json")
+    return fs.exists(f"{path}/.zgroup"), fs.exists(f"{path}/.metadata"), fs.exists(f"{path}/zarr.json") or fs.exists(f"{path}/.zmetadata")
 
 def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int, logger: logging.Logger) -> None:
     logger.debug("Ensuring Zarr store %s", zarr_path)
     fs, inner = fsspec.core.url_to_fs(zarr_path)
-    has_zgroup, has_zmeta, has_v3json = _zarr_store_exists(fs, inner)
-    if (has_v3json or (has_zgroup and has_zmeta)):
+    has_zgroup, _, has_v3_or_meta = _zarr_store_exists(fs, inner)
+
+    if (has_v3_or_meta or has_zgroup):
         try:
             dsx = xr.open_zarr(zarr_path, consolidated=None, storage_options=getattr(fs, "storage_options", {"anon": False}))
             if {"x", "y"}.issubset(dsx.dims):
@@ -164,24 +191,32 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int, log
     if uri_list.empty:
         raise FileNotFoundError(f"No GeoTIFFs found for {zarr_path}")
 
+    logger.info("  • Opening %d TIFF(s) into Xarray (chunk=%d)", len(uri_list), chunk_size)
     try:
         dsx = make_xarray_chunks(uri_list, chunk_size)
     except Exception as e:
-        logger.warning("open_mfdataset failed (%s). Filtering invalid tiles and retrying.", e)
-        dsx = make_xarray_chunks(_filter_valid_tiffs(uri_list), chunk_size)
+        logger.warning("open_mfdataset failed (%s). Re-verifying keys and filtering invalid tiles…", e)
+        # Hard re-verify + rasterio-open filter to remove disappearing/bad files
+        uris_checked = _filter_valid_tiffs(uri_list)
+        if uris_checked.empty:
+            raise FileNotFoundError("All candidate TIFFs failed verification; cannot build Zarr.")
+        logger.info("  • Retrying open with %d verified TIFF(s)", len(uris_checked))
+        dsx = make_xarray_chunks(uris_checked, chunk_size)
 
     for axis in ("x", "y"):
         if axis in dsx.coords:
             dsx = dsx.assign_coords({axis: np.round(dsx[axis].astype(float), 12)})
 
     dsx = dsx.chunk({"x": chunk_size, "y": chunk_size})
+    logger.info("  • Writing Zarr -> %s", zarr_path)
     dsx.to_zarr(zarr_path, mode="w")
 
     if Version(zarr.__version__).major < 3:
-        has_zgroup, has_zmeta, _ = _zarr_store_exists(fs, inner)
-        if has_zgroup and not has_zmeta:
+        # Consolidate metadata for zarr v2 (if needed)
+        has_zgroup, _, _ = _zarr_store_exists(fs, inner)
+        if has_zgroup and not fs.exists(f"{inner}/.zmetadata"):
             zarr.convenience.consolidate_metadata(fs.get_mapper(inner))
-    logger.info("Built Zarr: %s", zarr_path)
+    logger.info("  • Done: %s", zarr_path)
 
 def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str, Any]]:
     zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
@@ -225,6 +260,7 @@ def run(args: argparse.Namespace) -> None:
             zpath = paths[ds_name]["zarr"]
             logger.info("Building %s → %s", folder, zpath)
             uris = list_folder_uris(folder)
+            logger.info("  • %d TIFF(s) after hard existence check", len(uris))
             ensure_zarr_exists(uris, zpath, args.chunk_size, logger)
 
     if client: client.close()
