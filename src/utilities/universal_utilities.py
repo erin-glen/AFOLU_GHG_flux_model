@@ -729,16 +729,31 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
                 else:
                     # Too many retries → fail hard
                     raise RuntimeError(f"'Please reduce your request rate' persisted after {MAX_RETRIES} retries for {uri}")
+            elif "503" in str(e):
+                if attempt < MAX_RETRIES - 1:
+                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
+                    print(f"'503 error' for {uri}. Retrying in {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
+                else:
+                    # Too many retries → fail hard
+                    raise RuntimeError(f"'503 error' persisted after {MAX_RETRIES} retries for {uri}")
             else:
                 # Other RasterioIOError → fallback to array of zeros downloaded
-                data = np.full(expected_shape, 0, dtype=numpy_dtype)
-                status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}"
-                return data, status
+                if attempt < MAX_RETRIES - 1:
+                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
+                    print(f"'Please reduce your request rate' for {uri}. Retrying in {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
+                else:
+                    data = np.full(expected_shape, 0, dtype=numpy_dtype)
+                    status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}"
+                    return data, status
 
         except Exception as e:
             # Non-SlowDown, non-Rasterio error → fallback to array of zeros downloaded
             data = np.full(expected_shape, 0, dtype=numpy_dtype)
-            status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}"
+            status = f"Other dataset issue for {uri} in {bounds_str}. Returning array of all 0s: {e}"
             return data, status
 
 
@@ -751,7 +766,7 @@ def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_fin
     # Not all scripts hit individual s3 folders beyond s3's request limit.
     if stagger_download == True:
         # Staggers worker startup so that not all workers are requesting data from s3 at the same time, to prevent hitting request limit
-        startup_delay = random.uniform(0, 5)
+        startup_delay = random.uniform(0, 2)
         time.sleep(startup_delay)
 
     futures = {}
@@ -780,8 +795,9 @@ def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_fin
 
             futures[future] = key  # Stores Future objects (data and status) as keys, layer names as values
 
-            # Staggers submissions to avoid burst traffic to S3
-            time.sleep(random.uniform(0.05, 0.3))
+            if stagger_download:
+                # Staggers submissions to avoid burst traffic to S3
+                time.sleep(random.uniform(0.05, 0.3))
 
     return futures
 
@@ -847,11 +863,15 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
         if "density" in basic_output:  # Changes C density outputs
             if pixel_meaning == "per_ha":
                 updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning)
+            elif pixel_meaning == cn.C_density_aggreg_pixel_meaning:
+                updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_density_aggreg_pixel_meaning)
             else:
                 updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_per_pixel_pixel_meaning)
         else:  # Changes flux outputs and removal factors
             if pixel_meaning == "per_ha":
                 updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_density_pixel_meaning)
+            elif pixel_meaning == cn.flux_aggreg_pixel_meaning:
+                updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_aggreg_pixel_meaning)
             else:
                 updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_per_pixel_pixel_meaning)
 
