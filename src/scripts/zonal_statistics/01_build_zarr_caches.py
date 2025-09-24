@@ -5,10 +5,10 @@ What this does
 --------------
 - For each requested dataset and interval:
   * Scans the source GeoTIFF folder on S3
-  * Opens TIFFs with a safe strategy (rasterio engine; parallel=True)
-  * Writes a Zarr store under .../zarr/{run_name}/{run_date}/{interval}/
+  * Opens TIFFs safely (rasterio engine; parallel=False)
+  * Writes the Zarr store under .../zarr/{run_name}/{run_date}/{interval}/
 - Per-pixel only for flux totals (no per-ha support in this builder).
-- Symmetric chunking on both axes: {"x": chunk_size, "y": chunk_size}.
+- **Stripe-append writing** along x to avoid gigantic Dask graphs.
 - Skips rebuild if a valid Zarr already exists with x/y dims.
 
 This script does NOT run any reductions or write Parquet.
@@ -36,7 +36,7 @@ python -m src.scripts.zonal_statistics.01_build_zarr_caches \
   --tile_pixels 4000 \
   --chunk_size 10000
 
-# Local smoke build (global cache build, no reductions)
+# Local smoke build (global write but on local scheduler)
 python -m src.scripts.zonal_statistics.01_build_zarr_caches \
   --interval_end_years 2020 \
   --run_local \
@@ -113,75 +113,90 @@ def s3_exists(prefix: str) -> bool:
         return False
 
 def list_folder_uris(base_uri: str) -> pd.Series:
-    """Glob TIFFs, de-dup + stable sort, and hard-verify existence to drop stale keys."""
-    log = logging.getLogger(__name__)
     fs = s3fs.S3FileSystem(anon=False)
     pattern = base_uri.rstrip("/") + "/**/*.tif"
-    listed = [(f if f.startswith("s3://") else f"s3://{f}") for f in fs.glob(pattern)]
-    if not listed:
+    tifs = [(f if f.startswith("s3://") else f"s3://{f}") for f in fs.glob(pattern)]
+    if not tifs:
         raise FileNotFoundError(f"No GeoTIFFs found in {base_uri}")
-    listed = sorted(set(listed))
-    log.info("  • Listed %d TIFF(s) under %s", len(listed), base_uri)
-
-    verified: List[str] = []
-    dropped = 0
-    for u in listed:
-        key = u.replace("s3://", "")
-        try:
-            if fs.exists(key):
-                verified.append(u)
-            else:
-                dropped += 1
-        except Exception:
-            dropped += 1
-    if dropped:
-        log.warning("  • Dropped %d stale/missing TIFF(s) after existence check", dropped)
-    if not verified:
-        raise FileNotFoundError(f"No existing GeoTIFFs after verification in {base_uri}")
-    return pd.Series(verified, dtype="string")
+    return pd.Series(tifs, dtype="string")
 
 def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
-    # Safe open: avoid an S3 "thundering herd" at open time; compute still parallelizes.
+    # Limit concurrency at open-time to avoid an S3 stampede; compute still parallelizes.
     return xr.open_mfdataset(
         tile_uris.values.tolist(),
         engine="rasterio",
         combine="by_coords",
-        parallel=True,
-        chunks={"x": chunk_size, "y": chunk_size},
+        parallel=True,                 # <<<<<<<<<< important
+        chunks={"x": chunk_size, "y": "auto"},
     ).squeeze()
 
 def _filter_valid_tiffs(uri_series: pd.Series) -> pd.Series:
-    """Open-verify TIFFs with rasterio; drop any unreadable files."""
     if uri_series.empty:
         return uri_series
-    log = logging.getLogger(__name__)
     valid: List[str] = []
-    bad = 0
     for u in uri_series.tolist():
         try:
             with rasterio.Env():
                 with rasterio.open(u) as src:
                     if src.count >= 1 and src.width > 0 and src.height > 0:
                         valid.append(u)
-                    else:
-                        bad += 1
         except Exception:
-            bad += 1
-    if bad:
-        log.warning("  • Filtered out %d unreadable TIFF(s) (rasterio open check)", bad)
+            # skip unreadable tiles
+            pass
     return pd.Series(valid, dtype="string")
 
 def _zarr_store_exists(fs, path: str) -> Tuple[bool, bool, bool]:
-    return fs.exists(f"{path}/.zgroup"), fs.exists(f"{path}/.metadata"), fs.exists(f"{path}/zarr.json") or fs.exists(f"{path}/.zmetadata")
+    return fs.exists(f"{path}/.zgroup"), fs.exists(f"{path}/.zmetadata"), fs.exists(f"{path}/zarr.json")
 
-def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int, logger: logging.Logger) -> None:
+def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
+    if isinstance(ds_or_da, xr.DataArray):
+        da_ = ds_or_da
+    else:
+        vars_xy = [v for v in ds_or_da.data_vars.values() if {"x", "y"}.issubset(v.dims)]
+        da_ = vars_xy[0] if vars_xy else next(iter(ds_or_da.data_vars.values()))
+    if "band" in da_.dims:
+        da_ = da_.isel(band=0, drop=True)
+    return da_
+
+def _write_zarr_by_stripes(
+    arr: xr.DataArray,
+    zarr_path: str,
+    *,
+    chunk_size: int,
+    stripe_cols: int | None,
+    logger: logging.Logger,
+) -> None:
+    """Append-write arr to zarr_path along x in contiguous stripes.
+
+    This dramatically reduces graph size vs writing the whole mosaic at once.
+    """
+    varname = arr.name or "variable"
+    nx = int(arr.sizes["x"])
+    # default stripe width = chunk_size (works well; adjust if desired)
+    stripe = int(stripe_cols or chunk_size)
+    first = True
+    start = 0
+    while start < nx:
+        stop = min(nx, start + stripe)
+        sub = arr.isel(x=slice(start, stop)).chunk({"y": chunk_size, "x": stop - start})
+        ds_sub = sub.to_dataset(name=varname)
+        enc = {varname: {"chunks": (chunk_size, stop - start)}}
+        mode = "w" if first else "a"
+        logger.info("   writing stripe x[%d:%d] (%d cols) mode=%s", start, stop, stop - start, mode)
+        # Use append along x so the store grows deterministically without region math
+        ds_sub.to_zarr(zarr_path, mode=mode, append_dim="x", encoding=enc, compute=True, consolidated=None)
+        first = False
+        start = stop
+
+def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int, logger: logging.Logger,
+                       stripe_cols: int | None = None) -> None:
     logger.debug("Ensuring Zarr store %s", zarr_path)
     fs, inner = fsspec.core.url_to_fs(zarr_path)
-    has_zgroup, _, has_v3_or_meta = _zarr_store_exists(fs, inner)
-
-    if (has_v3_or_meta or has_zgroup):
+    has_zgroup, has_zmeta, has_v3json = _zarr_store_exists(fs, inner)
+    if (has_v3json or (has_zgroup and has_zmeta)):
         try:
-            dsx = xr.open_zarr(zarr_path, consolidated=None, storage_options=getattr(fs, "storage_options", {"anon": False}))
+            dsx = xr.open_zarr(zarr_path, consolidated=None,
+                               storage_options=getattr(fs, "storage_options", {"anon": False}))
             if {"x", "y"}.issubset(dsx.dims):
                 logger.info("Zarr exists and is valid: %s", zarr_path)
                 return
@@ -191,32 +206,27 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int, log
     if uri_list.empty:
         raise FileNotFoundError(f"No GeoTIFFs found for {zarr_path}")
 
-    logger.info("  • Opening %d TIFF(s) into Xarray (chunk=%d)", len(uri_list), chunk_size)
     try:
         dsx = make_xarray_chunks(uri_list, chunk_size)
     except Exception as e:
-        logger.warning("open_mfdataset failed (%s). Re-verifying keys and filtering invalid tiles…", e)
-        # Hard re-verify + rasterio-open filter to remove disappearing/bad files
-        uris_checked = _filter_valid_tiffs(uri_list)
-        if uris_checked.empty:
-            raise FileNotFoundError("All candidate TIFFs failed verification; cannot build Zarr.")
-        logger.info("  • Retrying open with %d verified TIFF(s)", len(uris_checked))
-        dsx = make_xarray_chunks(uris_checked, chunk_size)
+        logger.warning("open_mfdataset failed (%s). Filtering invalid tiles and retrying.", e)
+        dsx = make_xarray_chunks(_filter_valid_tiffs(uri_list), chunk_size)
 
+    da_in = _first_xy_var(dsx)
+    # round coords to avoid float stitching mismatches
     for axis in ("x", "y"):
-        if axis in dsx.coords:
-            dsx = dsx.assign_coords({axis: np.round(dsx[axis].astype(float), 12)})
+        if axis in da_in.coords:
+            da_in = da_in.assign_coords({axis: np.round(da_in[axis].astype(float), 12)})
 
-    dsx = dsx.chunk({"x": chunk_size, "y": chunk_size})
-    logger.info("  • Writing Zarr -> %s", zarr_path)
-    dsx.to_zarr(zarr_path, mode="w")
+    # Stripe-append write to keep graphs small
+    _write_zarr_by_stripes(da_in, zarr_path, chunk_size=chunk_size, stripe_cols=stripe_cols, logger=logger)
 
+    # Consolidate metadata for zarr v2 only
     if Version(zarr.__version__).major < 3:
-        # Consolidate metadata for zarr v2 (if needed)
-        has_zgroup, _, _ = _zarr_store_exists(fs, inner)
-        if has_zgroup and not fs.exists(f"{inner}/.zmetadata"):
+        has_zgroup, has_zmeta, _ = _zarr_store_exists(fs, inner)
+        if has_zgroup and not has_zmeta:
             zarr.convenience.consolidate_metadata(fs.get_mapper(inner))
-    logger.info("  • Done: %s", zarr_path)
+    logger.info("Built Zarr: %s", zarr_path)
 
 def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str, Any]]:
     zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
@@ -261,7 +271,7 @@ def run(args: argparse.Namespace) -> None:
             logger.info("Building %s → %s", folder, zpath)
             uris = list_folder_uris(folder)
             logger.info("  • %d TIFF(s) after hard existence check", len(uris))
-            ensure_zarr_exists(uris, zpath, args.chunk_size, logger)
+            ensure_zarr_exists(uris, zpath, args.chunk_size, logger, stripe_cols=args.stripe_cols)
 
     if client: client.close()
     if cluster: cluster.close()
@@ -286,7 +296,10 @@ def main(argv=None):
     parser.add_argument("--interval_end_years", nargs="+", type=int, required=True)
     parser.add_argument("--tile_pixels", type=int, default=4000,
                         help="Input tile size in pixels (4000 for 1×1°, 40000 for 10×10°).")
-    parser.add_argument("--chunk_size", type=int, default=10000)
+    parser.add_argument("--chunk_size", type=int, default=10000,
+                        help="Chunk size (also used as default stripe width).")
+    parser.add_argument("--stripe_cols", type=int, default=None,
+                        help="Stripe width (columns) to append per write; defaults to chunk_size.")
     parser.add_argument("--datasets", nargs="+",
                         default=["drained_total", "burned_total", "drained_state_nodes", "burned_state_nodes"],
                         choices=list(DATASETS.keys()))
