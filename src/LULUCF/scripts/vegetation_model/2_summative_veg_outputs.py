@@ -6,20 +6,20 @@ The way this builds the input file names, it can't handle filenames with the run
 It also can't handle chunks smaller than 1x1 degree.
 
 Local test:
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -bb 10 49 11 50 -cs 1 --no_upload --input_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 -yr 2000 2024 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 --input_date YYYYMMDD
 
 Coiled large shapefile test (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --input_date YYYYMMDD -ln "Summative outputs for 1884-feature shapefile for model v0.4.0."
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "Summative outputs for 1884-feature shapefile for model v0.4.0."
 
 Full run (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
 
 Optimization notes: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210788116876878?focus=true
 
@@ -135,6 +135,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
         data, status = future.result()  # Unpacks the tuple result
         if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
             lu.print_and_log(f"{status}: {uu.timestr()}", False, logger_worker)
+            raise ValueError(f"Expected input folders not found for {bounds_str}. Check inputs.")  # Quits if s3 folder not found. All input folders should be found for this stage.
         layers[layer] = data
 
 

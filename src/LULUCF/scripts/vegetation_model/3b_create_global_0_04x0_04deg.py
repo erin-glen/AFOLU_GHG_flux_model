@@ -69,7 +69,7 @@ def mosaic_tiles_to_global(s3_folder, global_out_path):
     # 1. Collect all S3 tile files
     tile_files = fs.glob(f"{s3_folder}*.tif")
     if not tile_files:
-        return f"❌ No tiles found in {s3_folder}"
+        return f"No tiles found in {s3_folder}"
     lu.print_and_log(f"{len(tile_files)} tiles found in {s3_folder}: {uu.timestr()}", False, logger_worker)
 
     # tile_files = tile_files[0:50]  # For testing

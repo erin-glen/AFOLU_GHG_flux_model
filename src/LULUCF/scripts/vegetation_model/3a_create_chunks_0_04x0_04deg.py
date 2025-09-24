@@ -2,19 +2,19 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
-python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -bb 10 49 11 50 -cs 1 --no_upload --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload  --input_date YYYYMMDD
 
 Coiled large shapefile test:
 python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
+python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp  --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
 
 Full run:
 python -m src.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive 0.04x0.04 deg output run."
+python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp  --input_date YYYYMMDD -ln "This is intended to be the definitive 0.04x0.04 deg output run."
 
 """
 
@@ -113,6 +113,7 @@ def create_0_04deg_veg_outputs(bounds, start_year, end_year, interval_type, inte
         data, status = future.result()  # Unpacks the tuple result
         if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
             lu.print_and_log(f"{status}: {uu.timestr()}", False, logger_worker)
+            raise ValueError(f"Expected input folders not found for {bounds_str}. Check inputs.")  # Quits if s3 folder not found. All input folders should be found for this stage.
         layers[layer] = data
 
     # The relevant pixel area (m^2) file in s3
@@ -299,27 +300,25 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
         main_logger.info("Running as final model.")
 
 
-    # # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
-    # # Instead, it creates a list of input folders, from which a download dictionary is created for each chunk (in the chunk-level function).
-    # # It's a little simpler this way. Since the datatypes of the inputs don't need to be specified in advance for this script
-    # # (since it's not using numba), there's no need to centrally create a download dictionary with each input's datatype
-    # # just once on the scheduler, as is more efficient for scripts that use numba.
-    # # Creates a list of input directories used in output creation based on specifics of the model run
-    # inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
-    #                                                                        chunk_size_pixels, model_type, interval_end_years_list,
-    #                                                                        interval_year_diff_list, input_date, "per_ha")
+    # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
+    # Instead, it creates a list of input folders, from which a download dictionary is created for each chunk (in the chunk-level function).
+    # It's a little simpler this way. Since the datatypes of the inputs don't need to be specified in advance for this script
+    # (since it's not using numba), there's no need to centrally create a download dictionary with each input's datatype
+    # just once on the scheduler, as is more efficient for scripts that use numba.
+    # Creates a list of input directories used in output creation based on specifics of the model run
 
-    inputs_by_interval_dir_list = [
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2015_2016/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2016_2017/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2017_2018/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2018_2019/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2019_2020/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2020_2021/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2021_2022/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2022_2023/_ha_yr/4000_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2023_2024/_ha_yr/4000_pixels/20250904/"
+    basic_dirs_to_expand = [
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
     ]
+
+    inputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, interval_type, start_year,
+                                                                           chunk_size_pixels, model_type, interval_end_years_list,
+                                                                           interval_year_diff_list, input_date, "per_ha")
 
     # print(inputs_by_interval_dir_list)
     if is_final:
@@ -327,25 +326,16 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
         for item in inputs_by_interval_dir_list:
             main_logger.info(f"  {item}")
 
-    # # Creates a list of output directories for all outputs and intervals based on specifics of the model run
-    # outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
-    #                                                                         chunk_size_pixels, model_type, interval_end_years_list,
-    #                                                                         interval_year_diff_list, input_date, "per_ha")
+    outputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, interval_type, start_year,
+                                                                           25, model_type, interval_end_years_list,
+                                                                           interval_year_diff_list, input_date, cn.flux_aggreg_pixel_meaning)
 
-    outputs_by_interval_dir_list = [
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2015_2016/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2016_2017/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2017_2018/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2018_2019/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2019_2020/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2020_2021/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2021_2022/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2022_2023/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2023_2024/_0_04deg_yr/25_pixels/20250904/"
-    ]
+    print(inputs_by_interval_dir_list)
+    print(outputs_by_interval_dir_list)
+    sys.quit()
 
     if is_final:
-        main_logger.info(f"outputs_dir_list:")
+        main_logger.info(f"outputs_by_interval_dir_list:")
         for item in outputs_by_interval_dir_list:
             main_logger.info(f"  {item}")
 
