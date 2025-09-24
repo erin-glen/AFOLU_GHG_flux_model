@@ -204,7 +204,7 @@ def calculate_drainage_and_emissions(
 
                 soil_block[row, col] = 2 if drained else 1
             else:
-                node = nu.accrete_node(node, 0)
+                node = nu.accrete_node(node, 2)
                 soil_block[row, col] = 0  # not peat
 
 
