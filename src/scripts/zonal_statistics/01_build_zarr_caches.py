@@ -132,7 +132,7 @@ def make_xarray_chunks(
 ) -> xr.Dataset:
     """Open multiple GeoTIFFs into a chunked Xarray dataset.
 
-    `open_parallel=False` by default (stability at global scale).
+    `open_parallel=True` by default (stability at global scale).
     """
     return xr.open_mfdataset(
         tile_uris.values.tolist(),
@@ -255,7 +255,7 @@ def ensure_zarr_exists(
     logger: logging.Logger,
     *,
     stripe_cols: int | None = None,
-    open_parallel: bool = False,
+    open_parallel: bool = True,
 ) -> None:
     """Ensure a Zarr with x/y dims exists at zarr_path; build if missing/invalid."""
     logger.debug("Ensuring Zarr store %s", zarr_path)
