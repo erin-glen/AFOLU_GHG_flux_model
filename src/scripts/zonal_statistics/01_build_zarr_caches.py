@@ -5,7 +5,7 @@ What this does
 --------------
 - For each requested dataset and interval:
   * Scans the source GeoTIFF folder on S3
-  * Opens TIFFs safely (rasterio engine; parallel controlled by --open-parallel)
+  * Opens TIFFs safely (rasterio engine; **parallel=True by default**; disable with --no-open-parallel)
   * Writes the Zarr store under .../zarr/{run_name}/{run_date}/{interval}/
 - Per-pixel only for flux totals (no per-ha support in this builder).
 - **Stripe-append writing** along x to avoid gigantic Dask graphs.
@@ -16,7 +16,7 @@ This script does NOT run any reductions or write Parquet.
 
 Examples
 --------
-# Build all datasets for one interval (cluster)
+# Build all datasets for one interval (cluster) — parallel open is default
 python -m src.scripts.zonal_statistics.01_build_zarr_caches \
   --interval_end_years 2024 \
   --cluster_name zonal_stats \
@@ -26,11 +26,11 @@ python -m src.scripts.zonal_statistics.01_build_zarr_caches \
   --tile_pixels 4000 \
   --chunk_size 10000
 
-# Build a subset (just totals) for multiple intervals (cluster), with parallel open
+# Build a subset (just totals) for multiple intervals (cluster), explicitly disabling parallel open
 python -m src.scripts.zonal_statistics.01_build_zarr_caches \
   --interval_end_years 2015 2020 2024 \
   --datasets drained_total burned_total \
-  --open-parallel \
+  --no-open-parallel \
   --cluster_name zonal_stats \
   --run_date 20250923 \
   --model_version 0_8_0 \
@@ -132,7 +132,7 @@ def make_xarray_chunks(
 ) -> xr.Dataset:
     """Open multiple GeoTIFFs into a chunked Xarray dataset.
 
-    `open_parallel=True` by default (stability at global scale).
+    parallel=True by default; disable with --no-open-parallel.
     """
     return xr.open_mfdataset(
         tile_uris.values.tolist(),
@@ -155,7 +155,6 @@ def _filter_valid_tiffs_strict(uri_series: pd.Series) -> pd.Series:
             key = u.replace("s3://", "")
             try:
                 info = fs.info(key)
-                # Skip trivially small objects; adjust threshold if needed
                 if info.get("Size", 0) < 512:
                     bad += 1
                     continue
@@ -167,7 +166,6 @@ def _filter_valid_tiffs_strict(uri_series: pd.Series) -> pd.Series:
                     if src.count < 1 or src.width == 0 or src.height == 0:
                         bad += 1
                         continue
-                    # 1-pixel read to force data access
                     _ = src.read(1, window=((0, 1), (0, 1)), boundless=True)
             valid.append(u)
         except Exception:
@@ -213,8 +211,8 @@ def _write_zarr_by_stripes(
 ) -> None:
     """Append-write arr to zarr_path along x in contiguous stripes.
 
-    - First stripe uses mode=None with append_dim='x' (create-or-append)
-    - Subsequent stripes use mode='a' (append)
+    - First stripe uses mode='w' (no append_dim) to create dataset and establish dims
+    - Subsequent stripes use mode='a' with append_dim='x' to append columns
     - Encoding sets chunks to (y=chunk_size, x=stripe_width)
     """
     varname = arr.name or "variable"
@@ -227,24 +225,35 @@ def _write_zarr_by_stripes(
             stripe, chunk_size,
         )
 
-    first = True
     start = 0
+    first = True
     while start < nx:
         stop = min(nx, start + stripe)
         sub = arr.isel(x=slice(start, stop)).chunk({"y": chunk_size, "x": stop - start})
         ds_sub = sub.to_dataset(name=varname)
         enc = {varname: {"chunks": (chunk_size, stop - start)}}
-        mode = None if first else "a"
-        logger.info("   writing stripe x[%d:%d] (%d cols) mode=%s", start, stop, stop - start, "create/append" if first else "append")
-        ds_sub.to_zarr(
-            zarr_path,
-            mode=mode,
-            append_dim="x",
-            encoding=enc,
-            compute=True,
-            consolidated=None,
-        )
-        first = False
+
+        if first:
+            logger.info("   writing stripe x[%d:%d] (%d cols) mode=create", start, stop, stop - start)
+            # Create store and establish dims without append_dim
+            ds_sub.to_zarr(
+                zarr_path,
+                mode="w",
+                encoding=enc,
+                compute=True,
+                consolidated=None,
+            )
+            first = False
+        else:
+            logger.info("   writing stripe x[%d:%d] (%d cols) mode=append", start, stop, stop - start)
+            ds_sub.to_zarr(
+                zarr_path,
+                mode="a",
+                append_dim="x",
+                encoding=enc,
+                compute=True,
+                consolidated=None,
+            )
         start = stop
 
 
@@ -397,8 +406,12 @@ def main(argv=None):
     parser.add_argument("--datasets", nargs="+",
                         default=["drained_total", "burned_total", "drained_state_nodes", "burned_state_nodes"],
                         choices=list(DATASETS.keys()))
-    parser.add_argument("--open-parallel", action="store_true",
-                        help="Use open_mfdataset(parallel=True). Default: False (safer for large mosaics).")
+    # Default to parallel; allow disabling with --no-open-parallel
+    parser.add_argument("--open-parallel", dest="open_parallel", action="store_true",
+                        help="Use open_mfdataset(parallel=True). Default: True.")
+    parser.add_argument("--no-open-parallel", dest="open_parallel", action="store_false",
+                        help="Disable parallel opening (open_mfdataset parallel=False).")
+    parser.set_defaults(open_parallel=True)
     parser.add_argument("--debug", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run_local", action="store_true")
