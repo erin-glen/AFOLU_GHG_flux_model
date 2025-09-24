@@ -668,6 +668,20 @@ def calculate_and_upload_drainage(
     )
     outputs = {**out_u32, **out_f32}
 
+    drained_state = outputs.get("drained_state")
+    if drained_state is not None:
+        # Node roots (first one or two digits) distinguish peat vs non-peat states.
+        # Keep tiles containing any drained peat (11–15) or undrained peat (16) and
+        # drop tiles that are entirely non-peat (root code 20 after padding).
+        roots = np.unique(drained_state // 1_000_000)
+        meaningful_roots = {11, 12, 13, 14, 15, 16}
+        if not any(int(root) in meaningful_roots for root in roots):
+            outputs.pop("drained_state")
+
+    burned_state = outputs.get("burned_state")
+    if burned_state is not None and not np.any(burned_state):
+        outputs.pop("burned_state")
+
     # burned-area emissions are totals for the whole inventory period; convert
     # to annual values based on the number of years in the period
     interval_length = iv_end - iv_start + 1
