@@ -52,14 +52,12 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from functools import lru_cache
 
 import fsspec
 import numpy as np
 import pandas as pd
-import posixpath
 import s3fs
 import xarray as xr
 import zarr
@@ -112,6 +110,7 @@ def s3_exists(prefix: str) -> bool:
     except FileNotFoundError:
         return False
 
+
 def list_folder_uris(base_uri: str) -> pd.Series:
     fs = s3fs.S3FileSystem(anon=False)
     pattern = base_uri.rstrip("/") + "/**/*.tif"
@@ -120,15 +119,17 @@ def list_folder_uris(base_uri: str) -> pd.Series:
         raise FileNotFoundError(f"No GeoTIFFs found in {base_uri}")
     return pd.Series(tifs, dtype="string")
 
+
 def make_xarray_chunks(tile_uris: pd.Series, chunk_size: int) -> xr.Dataset:
-    # Limit concurrency at open-time to avoid an S3 stampede; compute still parallelizes.
+    # Limit concurrency at open-time to avoid S3 metadata thrash; compute still parallelizes.
     return xr.open_mfdataset(
         tile_uris.values.tolist(),
         engine="rasterio",
         combine="by_coords",
-        parallel=True,                 # <<<<<<<<<< important
-        chunks={"x": chunk_size, "y": "auto"},
+        parallel=False,  # important: avoid giant open-time graphs and S3 stampede
+        chunks={"x": chunk_size, "y": chunk_size},
     ).squeeze()
+
 
 def _filter_valid_tiffs(uri_series: pd.Series) -> pd.Series:
     if uri_series.empty:
@@ -145,8 +146,10 @@ def _filter_valid_tiffs(uri_series: pd.Series) -> pd.Series:
             pass
     return pd.Series(valid, dtype="string")
 
+
 def _zarr_store_exists(fs, path: str) -> Tuple[bool, bool, bool]:
     return fs.exists(f"{path}/.zgroup"), fs.exists(f"{path}/.zmetadata"), fs.exists(f"{path}/zarr.json")
+
 
 def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
     if isinstance(ds_or_da, xr.DataArray):
@@ -157,6 +160,7 @@ def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
     if "band" in da_.dims:
         da_ = da_.isel(band=0, drop=True)
     return da_
+
 
 def _write_zarr_by_stripes(
     arr: xr.DataArray,
@@ -172,31 +176,50 @@ def _write_zarr_by_stripes(
     """
     varname = arr.name or "variable"
     nx = int(arr.sizes["x"])
-    # default stripe width = chunk_size (works well; adjust if desired)
     stripe = int(stripe_cols or chunk_size)
     first = True
     start = 0
     while start < nx:
         stop = min(nx, start + stripe)
+        # Chunk per stripe to keep task graphs small
         sub = arr.isel(x=slice(start, stop)).chunk({"y": chunk_size, "x": stop - start})
         ds_sub = sub.to_dataset(name=varname)
+        # Chunk encoding follows (y, x) dimension order
         enc = {varname: {"chunks": (chunk_size, stop - start)}}
-        mode = "w" if first else "a"
+        # First call with append_dim must not use mode="w"
+        mode = None if first else "a"
         logger.info("   writing stripe x[%d:%d] (%d cols) mode=%s", start, stop, stop - start, mode)
-        # Use append along x so the store grows deterministically without region math
-        ds_sub.to_zarr(zarr_path, mode=mode, append_dim="x", encoding=enc, compute=True, consolidated=None)
+        ds_sub.to_zarr(
+            zarr_path,
+            mode=mode,
+            append_dim="x",
+            encoding=enc,
+            compute=True,
+            consolidated=None,
+        )
         first = False
         start = stop
 
-def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int, logger: logging.Logger,
-                       stripe_cols: int | None = None) -> None:
+
+def ensure_zarr_exists(
+    uri_list: pd.Series,
+    zarr_path: str,
+    chunk_size: int,
+    logger: logging.Logger,
+    stripe_cols: int | None = None,
+) -> None:
     logger.debug("Ensuring Zarr store %s", zarr_path)
     fs, inner = fsspec.core.url_to_fs(zarr_path)
     has_zgroup, has_zmeta, has_v3json = _zarr_store_exists(fs, inner)
+
+    # If a valid store already exists, do nothing.
     if (has_v3json or (has_zgroup and has_zmeta)):
         try:
-            dsx = xr.open_zarr(zarr_path, consolidated=None,
-                               storage_options=getattr(fs, "storage_options", {"anon": False}))
+            dsx = xr.open_zarr(
+                zarr_path,
+                consolidated=None,
+                storage_options=getattr(fs, "storage_options", {"anon": False}),
+            )
             if {"x", "y"}.issubset(dsx.dims):
                 logger.info("Zarr exists and is valid: %s", zarr_path)
                 return
@@ -206,17 +229,27 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int, log
     if uri_list.empty:
         raise FileNotFoundError(f"No GeoTIFFs found for {zarr_path}")
 
+    # Build from GeoTIFFs; if open_mfdataset fails, filter unreadable TIFFs and retry
     try:
         dsx = make_xarray_chunks(uri_list, chunk_size)
     except Exception as e:
         logger.warning("open_mfdataset failed (%s). Filtering invalid tiles and retrying.", e)
-        dsx = make_xarray_chunks(_filter_valid_tiffs(uri_list), chunk_size)
+        filtered = _filter_valid_tiffs(uri_list)
+        if filtered.empty:
+            raise FileNotFoundError(f"No valid GeoTIFFs remain after filtering for {zarr_path}")
+        dsx = make_xarray_chunks(filtered, chunk_size)
 
     da_in = _first_xy_var(dsx)
-    # round coords to avoid float stitching mismatches
+    # Round coords to avoid float stitching mismatches
     for axis in ("x", "y"):
         if axis in da_in.coords:
             da_in = da_in.assign_coords({axis: np.round(da_in[axis].astype(float), 12)})
+
+    # If rebuilding, remove any partial/old store so appends don't duplicate data
+    try:
+        fs.rm(inner.rstrip("/") + "/", recursive=True)
+    except Exception:
+        pass
 
     # Stripe-append write to keep graphs small
     _write_zarr_by_stripes(da_in, zarr_path, chunk_size=chunk_size, stripe_cols=stripe_cols, logger=logger)
@@ -228,13 +261,19 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int, log
             zarr.convenience.consolidate_metadata(fs.get_mapper(inner))
     logger.info("Built Zarr: %s", zarr_path)
 
+
 def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str, Any]]:
     zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
     paths: Dict[str, Dict[str, Any]] = {}
-    kw2 = dict(kw); kw2["tile_pixels"] = tile_pixels
+    kw2 = dict(kw)
+    kw2["tile_pixels"] = tile_pixels
     for name, spec in DATASETS.items():
         folder_uri = FOLDER_TEMPLATE.format(folder=spec["folder"], interval=interval, **kw2)
-        paths[name] = {"folder": folder_uri, "zarr": zarr_base + spec["zarr"].format(interval=interval), "var": spec["var"]}
+        paths[name] = {
+            "folder": folder_uri,
+            "zarr": zarr_base + spec["zarr"].format(interval=interval),
+            "var": spec["var"],
+        }
     return paths
 
 # -------------------------------- driver --------------------------------
@@ -277,6 +316,7 @@ def run(args: argparse.Namespace) -> None:
     if cluster: cluster.close()
     uu.stage_duration(start_ts, uu.timestr(), stage)
 
+
 def _parse_interval_pairs(end_years: List[int]) -> List[Tuple[int, int]]:
     from src.scripts.utilities import constants_and_names as cn
     mapping = {end: (start, end) for start, end in cn.five_year_inventory_periods}
@@ -286,6 +326,7 @@ def _parse_interval_pairs(end_years: List[int]) -> List[Tuple[int, int]]:
             raise ValueError(f"Interval end year {y} not supported. Valid: {sorted(mapping)}")
         pairs.append(mapping[y])
     return pairs
+
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
@@ -311,6 +352,7 @@ def main(argv=None):
 
     args.interval_pairs = _parse_interval_pairs(args.interval_end_years)
     run(args)
+
 
 if __name__ == "__main__":
     main()
