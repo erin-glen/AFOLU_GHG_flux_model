@@ -211,9 +211,8 @@ def _write_zarr_by_stripes(
 ) -> None:
     """Append-write arr to zarr_path along x in contiguous stripes.
 
-    - First stripe uses mode='w' (no append_dim) to create dataset and establish dims
-    - Subsequent stripes use mode='a' with append_dim='x' to append columns
-    - Encoding sets chunks to (y=chunk_size, x=stripe_width)
+    - First stripe: create the store with encoding (defines chunks/dtype/attrs)
+    - Subsequent stripes: append without encoding (xarray disallows it)
     """
     varname = arr.name or "variable"
     nx = int(arr.sizes["x"])
@@ -229,32 +228,36 @@ def _write_zarr_by_stripes(
     first = True
     while start < nx:
         stop = min(nx, start + stripe)
+
+        # Chunk the stripe so that Dask chunks match the written stripe width
         sub = arr.isel(x=slice(start, stop)).chunk({"y": chunk_size, "x": stop - start})
         ds_sub = sub.to_dataset(name=varname)
-        enc = {varname: {"chunks": (chunk_size, stop - start)}}
+
+        # Only provide encoding on the first write to define chunking on disk
+        enc = {varname: {"chunks": (chunk_size, stop - start)}} if first else None
 
         if first:
             logger.info("   writing stripe x[%d:%d] (%d cols) mode=create", start, stop, stop - start)
-            # Create store and establish dims without append_dim
             ds_sub.to_zarr(
                 zarr_path,
-                mode="w",
-                encoding=enc,
+                mode="w",               # create
+                encoding=enc,           # define chunks ONLY once
                 compute=True,
                 consolidated=None,
             )
             first = False
         else:
             logger.info("   writing stripe x[%d:%d] (%d cols) mode=append", start, stop, stop - start)
+            # IMPORTANT: do not pass encoding here; xarray will raise
             ds_sub.to_zarr(
                 zarr_path,
-                mode="a",
+                mode="a",               # append
                 append_dim="x",
-                encoding=enc,
                 compute=True,
                 consolidated=None,
             )
         start = stop
+
 
 
 def ensure_zarr_exists(
