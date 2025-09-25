@@ -1,21 +1,30 @@
 """
+Creates 1x1 deg outputs at 0.04x0.04 deg resolution (approximately 4x4 km at the equator) for specified inputs.
+Units are Mg CO2(e)/0.04x0.04 deg pixel/year for interval-level outputs and
+Mg CO2(e)/0.04x0.04 deg pixel/full model period for the aggregations over the entire model period (currently 2016-ENDYEAR).
+These are then used to make timeseries global ~4x4 km maps for presentations and other static displays.
+They are not to be used for calculations or statistics.
+
+Can only run on 1x1 degree chunks that do not have the run timestamp in the file name.
+The way this builds the input file names, it can't handle filenames with the run timestamp.
+It also can't handle chunks smaller than 1x1 degree.
+
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
 python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -bb 10 49 11 50 -cs 1 --no_upload --input_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_postprocessing    (Needs 8GB/worker for 6 output sets)
 python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn vegetation_postprocessing -bb 10 49 11 50 -cs 1 --no_upload  --input_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.utilities.create_cluster -n 50 -t 1 -m 8 -cn vegetation_postprocessing   (Needs 8GB/worker for 6 output sets)
 python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp  --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
 
 Full run:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn vegetation_postprocessing  (Needs 8GB/worker for 6 output sets)
 python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp  --input_date YYYYMMDD -ln "This is intended to be the definitive 0.04x0.04 deg output run for model v1.0.0 (2016-2024)."
-
 """
 
 import argparse
@@ -44,8 +53,7 @@ os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
 def create_0_04deg_veg_outputs(bounds, start_year, end_year, interval_type, interval_year_diff_list, interval_length_list,
                                interval_end_years, is_final, no_upload,
-                               inputs_by_interval_dir_list, outputs_by_interval_dir_list,
-                               stage):
+                               inputs_by_interval_dir_list, outputs_by_interval_dir_list, stage):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []

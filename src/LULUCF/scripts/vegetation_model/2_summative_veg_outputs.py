@@ -1,9 +1,13 @@
 """
-Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
+Creates 1x1 deg summative vegetation flux and stock outputs: net fluxes, emissions all gases and/or all pools,
+removals all pools, carbon density all non-soil pools.
+In addition to do this for each interval, it also sums fluxes across all intervals (currently 2016-ENDYEAR).
 
 Can only run on 1x1 degree chunks that do not have the run timestamp in the file name.
 The way this builds the input file names, it can't handle filenames with the run timestamp.
 It also can't handle chunks smaller than 1x1 degree.
+
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
 python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -bb 10 49 11 50 -cs 1 --no_upload --input_date YYYYMMDD
