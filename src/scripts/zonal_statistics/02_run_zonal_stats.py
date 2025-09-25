@@ -105,13 +105,24 @@ DATASETS: Dict[str, Dict[str, Any]] = {
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_name}/{run_date}/{interval}/"
 
 # Contextual layers (Zarrs built separately)
-ADM0_ZARR = (
-    "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/"
-    "GADM4_1_adm0_global/20250604/global_GADM41_adm0_20250604.zarr"
+CONTEXTUAL_ZARR_ROOT = (
+    "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/global_contextual_zarrs"
 )
-PIXEL_AREA_ZARR = (
-    "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/"
-    "pixel_area/20250730/global_pixel_area_20250730.zarr"
+ADM0_DATASET = "GADM4_1_adm0_global"
+ADM0_DATE = "20250604"
+ADM0_ZARR = posixpath.join(
+    CONTEXTUAL_ZARR_ROOT,
+    ADM0_DATASET,
+    ADM0_DATE,
+    f"global_GADM41_adm0_{ADM0_DATE}.zarr",
+)
+PIXEL_AREA_DATASET = "pixel_area"
+PIXEL_AREA_DATE = "20250730"
+PIXEL_AREA_ZARR = posixpath.join(
+    CONTEXTUAL_ZARR_ROOT,
+    PIXEL_AREA_DATASET,
+    PIXEL_AREA_DATE,
+    f"global_pixel_area_{PIXEL_AREA_DATE}.zarr",
 )
 
 # ------------------------------ utils ----------------------------------

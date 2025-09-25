@@ -109,9 +109,16 @@ FOLDER_TEMPLATE = (
 )
 
 # Canonical reference grid (pixel_area)
-PIXEL_AREA_ZARR = (
-    "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/"
-    "pixel_area/20250730/global_pixel_area_20250730.zarr"
+CONTEXTUAL_ZARR_ROOT = (
+    "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/global_contextual_zarrs"
+)
+PIXEL_AREA_DATASET = "pixel_area"
+PIXEL_AREA_DATE = "20250730"
+PIXEL_AREA_ZARR = posixpath.join(
+    CONTEXTUAL_ZARR_ROOT,
+    PIXEL_AREA_DATASET,
+    PIXEL_AREA_DATE,
+    f"global_pixel_area_{PIXEL_AREA_DATE}.zarr",
 )
 
 # ------------------------------ helpers --------------------------------
