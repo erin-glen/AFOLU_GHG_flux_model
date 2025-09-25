@@ -1,14 +1,9 @@
 # -*- coding: utf-8 -*-
 """Run organic-soils zonal statistics (per-pixel only; robust alignment; per-interval upload).
 
-
-python -m src.scripts.zonal_statistics.02_run_zonal_stats \
-  --interval_end_years 2024 \
-  --cluster_name zonal_stats \
-  --run_date 20250923 \
-  --model_version 0_8_0 \
-  --run_name ogh_sensitivity_1km \
-  --chunk_size 10000
+Production-lean defaults:
+- Diagnostics OFF by default (skip flux-over-ocean full scan).
+- Smart alignment: skip reindex_like if coords already equal to pixel_area.
 """
 
 from __future__ import annotations
@@ -133,6 +128,26 @@ def pixel_step(arr: xr.DataArray) -> float:
 def align_like_nearest_tol(arr: xr.DataArray, ref: xr.DataArray, tol: float) -> xr.DataArray:
     return arr.reindex_like(ref, method="nearest", tolerance=tol)
 
+def coords_match(a: xr.DataArray, b: xr.DataArray) -> bool:
+    """True if x/y sizes AND coordinate values match exactly."""
+    if not {"x", "y"}.issubset(a.dims) or not {"x", "y"}.issubset(b.dims):
+        return False
+    try:
+        return (
+            a.sizes.get("x") == b.sizes.get("x")
+            and a.sizes.get("y") == b.sizes.get("y")
+            and np.array_equal(a["x"].values, b["x"].values)
+            and np.array_equal(a["y"].values, b["y"].values)
+        )
+    except Exception:
+        return False
+
+def align_auto(arr: xr.DataArray, ref: xr.DataArray, tol: float, force_align: bool) -> xr.DataArray:
+    """Skip reindex if coords already match; otherwise reindex with tolerance."""
+    if not force_align and coords_match(arr, ref):
+        return arr
+    return align_like_nearest_tol(arr, ref, tol)
+
 def _upload_dir(fs_s3: s3fs.S3FileSystem, local_dir: Path, dest_prefix: str) -> int:
     uploaded = 0
     for p in local_dir.rglob("*"):
@@ -177,6 +192,39 @@ def build_zarr_paths(interval: str, **fmt_kw) -> Dict[str, Dict[str, Any]]:
     return {name: {"zarr": zarr_base + spec["zarr"].format(interval=interval), "var": spec["var"]}
             for name, spec in DATASETS.items()}
 
+def leak_ratio_check(drained: xr.DataArray, burned: xr.DataArray, adm0: xr.DataArray,
+                     mode: str, threshold: float, logger: logging.Logger) -> None:
+    """Compute flux-over-ocean leak ratio with selectable cost."""
+    if mode == "off":
+        return
+
+    dt, bt, am = drained, burned, adm0
+    if mode == "basic":
+        # Strided sampling to approximate ratio cheaply (~0.5–1% of pixels)
+        # Target ~5k samples along each axis.
+        nx = dt.sizes.get("x", 0); ny = dt.sizes.get("y", 0)
+        sx = max(1, int(round(nx / 5000))) if nx else 1
+        sy = max(1, int(round(ny / 5000))) if ny else 1
+        dt = dt.isel(x=slice(0, None, sx), y=slice(0, None, sy))
+        bt = bt.isel(x=slice(0, None, sx), y=slice(0, None, sy))
+        am = am.isel(x=slice(0, None, sx), y=slice(0, None, sy))
+
+    # mode == "full" computes at full resolution
+    flux_mask = ((dt > 0) | (bt > 0))
+    ocean_mask = (am == 0)
+    leak = (flux_mask & ocean_mask).sum().compute()
+    denom = flux_mask.sum().compute()
+    ratio = float(leak) / float(denom) if denom else 0.0
+
+    if ratio > threshold:
+        logger.warning(
+            "Flux-over-ocean (adm0==0) ratio is %.4f (> %.4f). "
+            "This typically indicates grid misalignment or missing tiles.",
+            ratio, threshold
+        )
+    else:
+        logger.info("Flux-over-ocean (adm0==0) ratio: %.4f", ratio)
+
 # -------------------------------- driver --------------------------------
 def run(args: argparse.Namespace) -> None:
     stage = "zonal_statistics"
@@ -205,6 +253,7 @@ def run(args: argparse.Namespace) -> None:
     if args.debug:
         logger.setLevel(logging.DEBUG)
     logger.debug("Starting run with args: %s", args)
+    logger.info("Diagnostics mode: %s | Force align: %s", args.diagnostics, args.force_align)
 
     OUTPUT_KW = dict(root=ROOT, model_version=args.model_version, run_date=args.run_date, run_name=args.run_name)
 
@@ -256,30 +305,16 @@ def run(args: argparse.Namespace) -> None:
         drained_nodes_raw = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
         burned_nodes_raw  = open_zarr_region(paths["burned_state_nodes"]["zarr"],  bbox, args.chunk_size).astype("uint32")
 
-        # Align to canonical grid (should be no-ops if Step 1 was used; keep as guardrails)
-        adm0_aligned          = align_like_nearest_tol(adm0,            ref, tol)
-        drained_total_aligned = align_like_nearest_tol(drained_total_raw, ref, tol)
-        burned_total_aligned  = align_like_nearest_tol(burned_total_raw,  ref, tol)
-        drained_nodes_aligned = align_like_nearest_tol(drained_nodes_raw, ref, tol)
-        burned_nodes_aligned  = align_like_nearest_tol(burned_nodes_raw,  ref, tol)
+        # Smart alignment (skip if coords already match)
+        adm0_aligned          = align_auto(adm0,             ref, tol, args.force_align)
+        drained_total_aligned = align_auto(drained_total_raw, ref, tol, args.force_align)
+        burned_total_aligned  = align_auto(burned_total_raw,  ref, tol, args.force_align)
+        drained_nodes_aligned = align_auto(drained_nodes_raw, ref, tol, args.force_align)
+        burned_nodes_aligned  = align_auto(burned_nodes_raw,  ref, tol, args.force_align)
 
-        # Diagnose flux on ocean
-        try:
-            flux_mask = ((drained_total_aligned > 0) | (burned_total_aligned > 0))
-            ocean_mask = (adm0_aligned == 0)
-            leak = (flux_mask & ocean_mask).sum().compute()
-            denom = flux_mask.sum().compute()
-            leak_ratio = float(leak) / float(denom) if denom else 0.0
-            if leak_ratio > args.leak_warn_threshold:
-                logger.warning(
-                    "Flux-over-ocean (adm0==0) ratio is %.4f (> %.4f). "
-                    "This typically indicates grid misalignment or missing tiles.",
-                    leak_ratio, args.leak_warn_threshold
-                )
-            else:
-                logger.info("Flux-over-ocean (adm0==0) ratio: %.4f", leak_ratio)
-        except Exception:
-            pass
+        # Optional flux-over-ocean diagnostic (off by default)
+        leak_ratio_check(drained_total_aligned, burned_total_aligned, adm0_aligned,
+                         args.diagnostics, args.leak_warn_threshold, logger)
 
         where_mask = (adm0_aligned > 0)
 
@@ -309,7 +344,6 @@ def run(args: argparse.Namespace) -> None:
 
         # Write local Parquet (per interval)
         import shutil
-        local_arrow = pafs.LocalFileSystem()
         local_d = (base_dir_drained / interval); local_b = (base_dir_burned / interval)
         for pth in (local_d, local_b):
             if pth.exists():
@@ -357,6 +391,11 @@ def main(argv=None):
                         help="Fraction of one pixel for nearest reindex tolerance (default 0.49).")
     parser.add_argument("--leak_warn_threshold", type=float, default=0.002,
                         help="Warn if fraction of flux where adm0==0 exceeds this (default 0.002 = 0.2%).")
+    # New: diagnostics & alignment behavior
+    parser.add_argument("--diagnostics", choices=["off", "basic", "full"], default="off",
+                        help="Flux-over-ocean QA: 'off' (fast, default), 'basic' (sampled), 'full' (slow).")
+    parser.add_argument("--force_align", action="store_true",
+                        help="Always reindex to pixel_area even if coords already match.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run_local", action="store_true")
     mode.add_argument("--cluster_name", default="zonal_stats")
