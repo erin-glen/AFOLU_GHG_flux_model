@@ -21,6 +21,9 @@ Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 Local test:
 python -m src.LULUCF.scripts.preprocessing.SDPTv3.1_rasterize_SDPTv3 --run_local
 
+python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn SDPTv3
+python -m src.LULUCF.scripts.preprocessing.SDPTv3.1_rasterize_SDPTv3 -cn SDPTv3
+
 """
 
 import os
@@ -261,8 +264,8 @@ def main(cluster_name, run_local):
 
     # TODO: Update in constants and names
     gdb_s3_path = "s3://gfw2-data/plantations/sdpt_v3/sdpt_v3_final.gdb.zip"
-    out_vrt_s3_path = "s3://gfw2-data/plantations/sdpt_v3/SDPTv3.vrt"
-    local_vrt_path = "/tmp/SDPTv3.vrt"
+    out_vrt_s3_path = "s3://gfw2-data/plantations/sdpt_v3/sdpt_v3.vrt"
+    local_vrt_path = "/tmp/sdpt_v3.vrt"
 
 
     #STEP 1: Create VRT of unionized polygons for SDPTv3
