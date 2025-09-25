@@ -15,6 +15,8 @@ Important
 ---------
 - **Per-pixel only** for flux totals; no per-ha fallback or conversion exists here.
 - If a required Zarr is missing, the script fails with a clear message.
+- The GADM adm0 contextual Zarr date is controlled by the ``ADM0_DATE`` constant
+  near the top of this script for easy updates.
 
 Examples
 --------
@@ -108,14 +110,22 @@ ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_name}/{run_date}/{interval}/"
 CONTEXTUAL_ZARR_ROOT = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/global_contextual_zarrs"
 )
+
+# Update these dates when refreshed contextual layers are published.
 ADM0_DATASET = "GADM4_1_adm0_global"
-ADM0_DATE = "20250604"
-ADM0_ZARR = posixpath.join(
-    CONTEXTUAL_ZARR_ROOT,
-    ADM0_DATASET,
-    ADM0_DATE,
-    f"global_GADM41_adm0_{ADM0_DATE}.zarr",
-)
+ADM0_DATE = "20250604"  # Update this when a new GADM contextual Zarr is available.
+ADM0_FILENAME_TEMPLATE = "global_GADM41_adm0_{date}.zarr"
+
+
+def adm0_zarr_path(date: str = ADM0_DATE) -> str:
+    return posixpath.join(
+        CONTEXTUAL_ZARR_ROOT,
+        ADM0_DATASET,
+        date,
+        ADM0_FILENAME_TEMPLATE.format(date=date),
+    )
+
+
 PIXEL_AREA_DATASET = "pixel_area"
 PIXEL_AREA_DATE = "20250730"
 PIXEL_AREA_ZARR = posixpath.join(
@@ -280,8 +290,8 @@ def run(args: argparse.Namespace) -> None:
 
     OUTPUT_KW = dict(root=ROOT, model_version=args.model_version, run_date=args.run_date, run_name=args.run_name)
 
-    # Open contextual layers (canonical grid comes from pixel_area)
-    adm0 = open_zarr_region(ADM0_ZARR, bbox, args.chunk_size).astype("uint32")
+    adm0_zarr = adm0_zarr_path()
+    adm0 = open_zarr_region(adm0_zarr, bbox, args.chunk_size).astype("uint32")
     pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).persist()
 
     # Expected groups (exclude 0 to avoid ocean bookkeeping)

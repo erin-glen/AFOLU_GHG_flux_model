@@ -19,6 +19,8 @@ Key design choices
 - Tolerance defaults to 0.49 * pixel_width (in degrees) to prevent far "nearest"
   snapping. If your grid has minor floating-point jitter, this captures
   the intended neighbors but won't leap across larger gaps.
+- The GADM adm0 contextual Zarr date is controlled by the ``ADM0_DATE`` constant
+  near the top of this script for easy updates.
 
 Examples
 --------
@@ -49,9 +51,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-import math
 import sys
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
@@ -59,7 +59,6 @@ import dask
 import dask.array as da
 import fsspec
 import numpy as np
-import pandas as pd
 import posixpath
 import s3fs
 import xarray as xr
@@ -112,6 +111,8 @@ FOLDER_TEMPLATE = (
 CONTEXTUAL_ZARR_ROOT = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/global_contextual_zarrs"
 )
+
+# Update these dates when refreshed contextual layers are published.
 PIXEL_AREA_DATASET = "pixel_area"
 PIXEL_AREA_DATE = "20250730"
 PIXEL_AREA_ZARR = posixpath.join(
@@ -120,6 +121,24 @@ PIXEL_AREA_ZARR = posixpath.join(
     PIXEL_AREA_DATE,
     f"global_pixel_area_{PIXEL_AREA_DATE}.zarr",
 )
+
+ADM0_DATASET = "GADM4_1_adm0_global"
+ADM0_DATE = "20250604"  # Update this when a new GADM contextual Zarr is available.
+ADM0_FILENAME_TEMPLATE = "global_GADM41_adm0_{date}.zarr"
+ADM0_VAR_NAME = "gadm_adm0"
+ADM0_GTIF_FOLDER = (
+    "s3://gfw2-data/gadm_administrative_boundaries/v4.1/"
+    "v4.1.64__from_gfw-data-lake/raster/epsg-4326/10/40000/adm0/gdal-geotiff/"
+)
+
+
+def adm0_zarr_path(date: str = ADM0_DATE) -> str:
+    return posixpath.join(
+        CONTEXTUAL_ZARR_ROOT,
+        ADM0_DATASET,
+        date,
+        ADM0_FILENAME_TEMPLATE.format(date=date),
+    )
 
 # ------------------------------ helpers --------------------------------
 def _split_s3(path: str) -> tuple[str, str]:
@@ -290,6 +309,77 @@ def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str,
         }
     return out
 
+def ensure_adm0_contextual_zarr(
+    *,
+    ref: xr.DataArray,
+    tol: float,
+    chunk_size: int,
+    logger: logging.Logger,
+    date: str = ADM0_DATE,
+) -> str:
+    """Ensure the GADM adm0 contextual layer exists on S3 for ``date``.
+
+    If the Zarr store is missing (or fails validation), rebuild it from the
+    authoritative GeoTIFF tiles, align it to ``ref`` using the provided
+    tolerance, and write a consolidated store. Returns the final Zarr URI.
+    """
+
+    zarr_path = adm0_zarr_path(date)
+
+    if zarr_exists(zarr_path):
+        try:
+            validate_zarr(zarr_path, ref, logger=logger)
+            logger.info("flm: Using existing adm0 contextual Zarr: %s", zarr_path)
+            return zarr_path
+        except Exception as exc:
+            logger.warning("flm: adm0 Zarr validation failed (%s); rebuilding.", exc)
+            try:
+                remove_store_recursively(zarr_path)
+            except Exception:
+                pass
+
+    logger.info(
+        "flm: Building adm0 contextual Zarr for date %s from GeoTIFF tiles.",
+        date,
+    )
+
+    if not ADM0_GTIF_FOLDER:
+        raise ValueError("adm0 GeoTIFF source folder is not configured")
+
+    tiffs = list_folder_uris(ADM0_GTIF_FOLDER)
+    if not tiffs:
+        raise FileNotFoundError(
+            f"No GeoTIFFs found under {ADM0_GTIF_FOLDER} to build adm0"
+        )
+
+    try:
+        da_in = make_xarray_chunks_from_tiffs(tiffs, chunk_size)
+    except Exception as exc:
+        logger.error("flm: Failed to open adm0 GeoTIFF tiles: %s", exc)
+        raise
+
+    da_aligned = align_like_nearest_tol(da_in, ref, tol)
+    da_uint = da_aligned.fillna(0).astype("uint32")
+    da_uint = da_uint.chunk({d: chunk_size for d in ("x", "y") if d in da_uint.dims})
+
+    ds_out = xr.Dataset({ADM0_VAR_NAME: da_uint})
+
+    try:
+        remove_store_recursively(zarr_path)
+    except Exception:
+        pass
+
+    with dask.annotate(label="to_zarr:adm0"):
+        ds_out.to_zarr(zarr_path, mode="w")
+
+    if Version(zarr.__version__).major < 3:
+        ensure_consolidated_v2(zarr_path)
+
+    validate_zarr(zarr_path, ref, logger=logger)
+    logger.info("flm: Built adm0 contextual Zarr ✅ %s", zarr_path)
+    return zarr_path
+
+
 def run(args: argparse.Namespace) -> None:
     stage = "zarr_build"
     start_ts = uu.timestr()
@@ -310,18 +400,29 @@ def run(args: argparse.Namespace) -> None:
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
-    OUTPUT_KW = dict(root=ROOT, model_version=args.model_version,
-                     run_date=args.run_date, run_name=args.run_name)
+    OUTPUT_KW = dict(
+        root=ROOT,
+        model_version=args.model_version,
+        run_date=args.run_date,
+        run_name=args.run_name,
+    )
 
-    # Canonical reference grid (pixel_area), optionally cropped for smoke tests
-    ref = open_zarr_region(PIXEL_AREA_ZARR, None, args.chunk_size)  # always open full for shape
+    pixel_area_full = open_zarr_region(PIXEL_AREA_ZARR, None, args.chunk_size)
+    ref = pixel_area_full
     if args.bounding_box:
         west, south, east, north = [float(x) for x in args.bounding_box]
         ref = ref.sel(x=slice(west, east), y=slice(south, north))
 
-    # Tolerance in degrees
-    dx = pixel_step(ref)
+    # Tolerance in degrees (derive from full reference grid spacing)
+    dx = pixel_step(pixel_area_full)
     tol = float(args.align_tolerance_fraction) * dx
+
+    ensure_adm0_contextual_zarr(
+        ref=pixel_area_full,
+        tol=tol,
+        chunk_size=args.chunk_size,
+        logger=logger,
+    )
 
     logger.info("flm: Model version: %s", args.model_version)
     if client:
