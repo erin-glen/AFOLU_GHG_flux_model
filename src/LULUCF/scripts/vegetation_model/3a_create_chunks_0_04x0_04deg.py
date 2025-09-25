@@ -5,16 +5,16 @@ Local test:
 python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -bb 10 49 11 50 -cs 1 --no_upload --input_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --no_upload  --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn vegetation_postprocessing -bb 10 49 11 50 -cs 1 --no_upload  --input_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp  --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
+python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp  --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
 
 Full run:
-python -m src.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp  --input_date YYYYMMDD -ln "This is intended to be the definitive 0.04x0.04 deg output run."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.3a_create_chunks_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp  --input_date YYYYMMDD -ln "This is intended to be the definitive 0.04x0.04 deg output run for model v1.0.0 (2016-2024)."
 
 """
 
@@ -46,6 +46,9 @@ def create_0_04deg_veg_outputs(bounds, start_year, end_year, interval_type, inte
                                interval_end_years, is_final, no_upload,
                                inputs_by_interval_dir_list, outputs_by_interval_dir_list,
                                stage):
+
+    # Stores the min, mean, and max chunks for inputs and outputs for the chunk
+    chunk_stats = []
 
     process = psutil.Process(os.getpid())
 
@@ -80,8 +83,12 @@ def create_0_04deg_veg_outputs(bounds, start_year, end_year, interval_type, inte
         interval_idx = parts.index(f"{interval_type}_intervals")
         interval_segment = parts[interval_idx + 1]
 
-        # Gets the segment for the pixel meaning. Different possibilities for carbon pools, fluxes, and everything else.
-        if "_ha_yr" in parts:
+        # Gets the segment for the pixel meaning.
+        # Pixel meaning for the full model period (fluxes only) uses _ha instead of _ha_yr.
+        if interval_segment == f"{cn.first_model_year_annual}_{cn.last_model_year_annual}":
+            pix_meaning_segment = "_ha"
+        # Different possibilities for carbon pools, fluxes, and everything else.
+        elif "_ha_yr" in parts:
             pix_meaning_idx = parts.index("_ha_yr")
             pix_meaning_segment = parts[pix_meaning_idx]
         elif "_ha" in parts:
@@ -93,7 +100,6 @@ def create_0_04deg_veg_outputs(bounds, start_year, end_year, interval_type, inte
         # Constructs the dictionary entry.
         # Value has to be a list because prepare_to_download_chunk expects the download dictionary keys to be lists.
         download_dict[f"{pattern_segment}_{interval_segment}"] = [f"{input_by_interval}{tile_id}__{bounds_str}__{pattern_segment}{pix_meaning_segment}_{interval_segment}.tif"]
-
 
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
     # Thus, this returns a complete set of inputs (missing chunks filled).
@@ -162,7 +168,19 @@ def create_0_04deg_veg_outputs(bounds, start_year, end_year, interval_type, inte
     lu.print_and_log(f"After creating 0.04 deg outputs for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
 
 
-    ### Part 3: Saves numpy arrays as rasters and uploads to s3
+    ### Part 3: Calculates 0.04x0.04 deg aggregated chunk min, mean, max, and max for each output chunk.
+    ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
+    ### Does not do per-pixel calculations because this aggregated resolution is already value per 0.04x0.04 deg pixel.
+
+    lu.print_and_log(f"Populating chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+
+    # Calculates stats for the output layers as a dictionary with chunk attributes
+    for key, array_aggreg in out_dict.items():
+
+        chunk_stats.append(uu.calculate_stats(array_aggreg, key, bounds_str, tile_id, 'output_layer'))
+
+
+    ### Part 4: Saves numpy arrays as rasters and uploads to s3
 
     uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
 
@@ -210,8 +228,6 @@ def create_0_04deg_veg_outputs(bounds, start_year, end_year, interval_type, inte
             out_dict[key] = [value, data_type, out_pattern, interval_year_range, s3_path_without_bucket]
 
 
-
-
         # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
         upload_tasks = uu.save_and_upload_small_raster_set(bounds, coarse_chunk_size, tile_id, bounds_str,
                                                            out_dict, is_final, logger_worker, out_no_data_val)
@@ -233,7 +249,7 @@ def create_0_04deg_veg_outputs(bounds, start_year, end_year, interval_type, inte
     # Removes task tracking file from S3 once task is successful
     uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
 
-    return return_message  # Return both the success message and the statistics
+    return return_message, chunk_stats  # Return both the success message and the statistics
 
 
 def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
@@ -318,9 +334,8 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     inputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, interval_type, start_year,
                                                                            chunk_size_pixels, model_type, interval_end_years_list,
-                                                                           interval_year_diff_list, input_date, "per_ha")
+                                                                           interval_year_diff_list, input_date, True, "per_ha")
 
-    # print(inputs_by_interval_dir_list)
     if is_final:
         main_logger.info(f"inputs_by_interval_dir_list:")
         for item in inputs_by_interval_dir_list:
@@ -328,11 +343,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     outputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, interval_type, start_year,
                                                                            25, model_type, interval_end_years_list,
-                                                                           interval_year_diff_list, input_date, cn.flux_aggreg_pixel_meaning)
-
-    print(inputs_by_interval_dir_list)
-    print(outputs_by_interval_dir_list)
-    sys.quit()
+                                                                           interval_year_diff_list, input_date, True, cn.flux_aggreg_pixel_meaning)
 
     if is_final:
         main_logger.info(f"outputs_by_interval_dir_list:")
@@ -342,6 +353,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
+
 
     ### Step 2: Create 1x1 degree outputs
 
@@ -354,8 +366,8 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Runs analysis and gathers results
     output_results = dask.compute(*output_tasks)
 
-    # success_count, all_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, output_results)
-    #
+    success_count, all_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, output_results)
+
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
@@ -380,13 +392,13 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
             main_logger.info(f"Output rasters in {output_folder}: {file_count}")
             # print(geotiff_files)
 
-    # # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
-    # # and min and max values across all chunks for all inputs and outputs
-    # # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
-    # if (not no_stats) and (success_count > 0):
-    #     uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
-    #
-    # uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+    # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
+    # and min and max values across all chunks for all inputs and outputs
+    # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
+    if (not no_stats) and (success_count > 0):
+        uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
     # Sets it so that no worker logs are created if doing a local run
     if not run_local:

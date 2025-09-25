@@ -9,17 +9,17 @@ Local test:
 python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -bb 10 49 11 50 -cs 1 --no_upload --input_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs a 32GB worker):
-python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn LULUCF_postprocessing -bb 10 49 11 50 -cs 1 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn LULUCF_postprocessing -bb 20 -1 21 0 -cs 1 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn vegetation_postprocessing -bb 10 49 11 50 -cs 1 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn vegetation_postprocessing -bb 20 -1 21 0 -cs 1 --input_date YYYYMMDD
 
 Coiled large shapefile test (1x1 deg chunk needs a 32GB worker):
-python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "Summative outputs for 1884-feature shapefile for model v0.4.0."
+python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "Summative outputs for 1884-feature shapefile for model v0.4.0."
 
 Full run (1x1 deg chunk needs a 32GB worker):
-python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
 
 Optimization notes: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210788116876878?focus=true
 
@@ -60,7 +60,7 @@ from src.utilities import resize_cluster
 os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
 
-def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type, interval_year_diff_list, interval_length_list,
+def create_summative_vegetation_outputs(bounds, start_year, end_year, interval_type, interval_year_diff_list, interval_length_list,
                                     interval_end_years, is_final, no_upload,
                                     summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list,
                                     stage):
@@ -340,7 +340,7 @@ def create_summative_LULUCF_outputs(bounds, start_year, end_year, interval_type,
     pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, bounds, chunk_length_pixels, 'Float32')
     pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
-    # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
+    # Calculates stats for the output layers as a dictionary with chunk attributes
     # NOTE: The full-interval chunk sums don't exactly match the sums of the individual intervals' chunk sums
     # because of float32 rounding errors. However the output full-model rasters are definitely close enough
     # at the pixel level, so I'm fine with this slight difference.
@@ -428,7 +428,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = 'LULUCF_summative_output_calculation'
+    stage = 'vegetation_summative_output_calculation'
     model_type = 'standard_model'
 
     # Determines if arguments for start and end year are valid
@@ -493,7 +493,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Creates a list of input directories used in summative output creation based on specifics of the model run
     summative_inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.veg_core_output_dirs, interval_type, start_year,
                                                                            chunk_size_pixels, model_type, interval_end_years_list,
-                                                                           interval_year_diff_list, input_date, "per_ha")
+                                                                           interval_year_diff_list, input_date, True, "per_ha")
     # print(summative_inputs_by_interval_dir_list)
     if is_final:
         main_logger.info(f"summative_inputs_by_interval_dir_list:")
@@ -501,9 +501,9 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
             main_logger.info(f"  {item}")
 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
-    summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
+    summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, interval_type, start_year,
                                                                             chunk_size_pixels, model_type, interval_end_years_list,
-                                                                            interval_year_diff_list, input_date, "per_ha")
+                                                                            interval_year_diff_list, input_date, True, "per_ha")
 
     if is_final:
         main_logger.info(f"outputs_dir_list:")
@@ -516,7 +516,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     ### Step 2: Create 1x1 degree outputs
 
-    summative_output_tasks = [dask.delayed(create_summative_LULUCF_outputs)
+    summative_output_tasks = [dask.delayed(create_summative_vegetation_outputs)
                        (chunk, start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years_list,
                         is_final, no_upload,
                         summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list, stage)
@@ -575,7 +575,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Calculate summative outputs of core LULUCF model.")
+    parser = argparse.ArgumentParser(description="Calculate summative outputs of core vegetation model.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-id', '--input_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')

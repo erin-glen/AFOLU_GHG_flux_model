@@ -649,6 +649,7 @@ def stage_duration(start_time_str, end_time_str, stage, logger, format="full"):
 
     logger.info(f"Elapsed time for {stage}: {end_time - start_time}" + "\n")
 
+
 # Lazily opens tile within provided bounds (i.e. one chunk) and returns as a numpy array.
 # If it can't open the uri for the chunk (tile does not exist), it creates a numpy array of all 0s
 # of the correct datatype for that input.
@@ -781,6 +782,7 @@ def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_fin
         lu.print_and_log(f"Requesting data in chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
 
         for key, value in download_dict.items():
+            # print(key, value)
 
             # When the values are a list with just the file to download, without the datatype
             if len(value)==1:
@@ -843,7 +845,7 @@ def check_for_tile(download_dict, is_final, logger):
 
 # Turns a list of basic output directory names into a list of fully specified directories based on output chunk size, run date, model type, and output years
 def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_pixels,
-                                model_type, output_years, interval_duration, run_date, pixel_meaning=None):
+                                model_type, output_years, interval_duration, run_date, include_full_period_totals, pixel_meaning=None):
 
     # List of directories for outputs
     output_full_dirs = []
@@ -880,6 +882,10 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
 
     # Iterates through the list of core output directories and adds the correct output years (stocks) or year ranges (fluxes) to each.
     for basic_output in dir_list:
+
+        # Sample output directory (given year) for each set of outputs, that will be used to create the path for the full model period output
+        sample_output_dir = None
+
         for count, output_year in enumerate(output_years):
 
             # For outputs that are a specific year (stocks)
@@ -897,14 +903,16 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
                 else:  # Hybrid model (2000-2024)
                     output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
 
+            sample_output_dir = basic_output
             output_full_dirs.append(output_dir)
 
-    # Because outputs that are sums across the entire model period are re-created for every interval in the
-    # above for loop, we need to remove the duplication in the output list.
-    # This returns the outputs that are sums across the entire model period back to one element per output type.
-    output_full_dirs_unique = list(set(output_full_dirs))
+        # Creates the full model period path (2015-ENDYEAR) and adds it to the list of paths.
+        # Only used for select outputs.
+        if include_full_period_totals:
+            full_model_period_dir = sample_output_dir.replace('START_END', f"{cn.first_model_year_annual}_{cn.last_model_year_annual}")
+            output_full_dirs.append(full_model_period_dir)
 
-    return output_full_dirs_unique
+    return output_full_dirs
 
 
 # Checks if a geotif has data in it.

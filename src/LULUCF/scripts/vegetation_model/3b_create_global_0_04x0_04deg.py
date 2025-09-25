@@ -213,7 +213,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # # Creates a list of input directories used in output creation based on specifics of the model run
     # inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
     #                                                                        chunk_size_pixels, model_type, interval_end_years_list,
-    #                                                                        interval_year_diff_list, input_date, "per_ha")
+    #                                                                        interval_year_diff_list, input_date, True, "per_ha")
 
     inputs_by_interval_dir_list = [
         "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2015_2016/_0_04deg_yr/25_pixels/20250904/",
@@ -236,7 +236,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # # Creates a list of output directories for all outputs and intervals based on specifics of the model run
     # outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
     #                                                                         chunk_size_pixels, model_type, interval_end_years_list,
-    #                                                                         interval_year_diff_list, input_date, "per_ha")
+    #                                                                         interval_year_diff_list, input_date, True, "per_ha")
 
     outputs_by_interval_dir_list = [
         "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2015_2016/_0_04deg_yr/global/20250904/net_flux__all_C_pools__all_gases__MgCO2e_2015_2016_0_04deg_yr.tif",

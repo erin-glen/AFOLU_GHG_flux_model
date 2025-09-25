@@ -303,18 +303,18 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # (since it's not using numba), there's no need to centrally create a download dictionary with each input's datatype
     # just once on the scheduler, as is more efficient for scripts that use numba.
     # Creates a list of input directories used in summative output creation based on specifics of the model run
-    summative_inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
+    summative_inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, interval_type, start_year,
                                                                            chunk_size_pixels, model_type, interval_end_years,
-                                                                           interval_year_diff, input_date, "per_ha")
+                                                                           interval_year_diff, input_date, True, "per_ha")
     # print(summative_inputs_by_interval_dir_list)
     if is_final:
         main_logger.info(f"summative_inputs_by_interval_dir_list")
         for item in summative_inputs_by_interval_dir_list:
             main_logger.info(f"  {item}")
 
-    summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
-                                                                           chunk_size_pixels, model_type, interval_end_years,
-                                                                           interval_year_diff, input_date, "per_pixel")
+    summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, interval_type, start_year,
+                                                                            chunk_size_pixels, model_type, interval_end_years,
+                                                                            interval_year_diff, input_date, True, "per_pixel")
     # print(summative_outputs_by_interval_dir_list)
     if is_final:
         main_logger.info(f"summative_outputs_by_interval_dir_list")

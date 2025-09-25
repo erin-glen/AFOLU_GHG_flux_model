@@ -2239,7 +2239,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     output_dir_list_core_intermediate = cn.veg_core_output_dirs + cn.veg_intermediate_output_dirs
     output_dir_list = uu.create_output_dir_name_list(output_dir_list_core_intermediate, interval_type, start_year,
                                                      chunk_size_pixels, model_type, interval_end_years,
-                                                     interval_year_diff_list, run_date, "per_ha")
+                                                     interval_year_diff_list, run_date, False, "per_ha")
     output_dir_list.sort()  # Alphabetically order the outputs (modifies output_dir_list)
     if is_final:
         main_logger.info(f"output_dir_list for {stage}:")
