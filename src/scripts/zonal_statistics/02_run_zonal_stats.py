@@ -4,6 +4,7 @@
 Production-lean defaults:
 - Diagnostics OFF by default (skip flux-over-ocean full scan).
 - Smart alignment: skip reindex_like if coords already equal to pixel_area.
+
 """
 
 from __future__ import annotations
