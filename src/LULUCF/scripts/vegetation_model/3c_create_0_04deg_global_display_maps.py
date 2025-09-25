@@ -37,33 +37,28 @@ def rgb_to_mpl(rgb):
     """
     return tuple(val / 255 for val in rgb)
 
-def reproject_raster(reprojected_tif, tif_unproj):
+def reproject_raster(tif_unproj_s3, tif_reproj_local):
     """
-    Reprojects raster to specified projection if it doesn't already exist
-    :param reprojected_tif: Name of projected (output) tif
-    :param tif_unproj: Name of unprojected (input) tif
-    :return: Nothing
+    Reprojects raster to Robinson projection if the output doesn't already exist.
+    Only supports local output; input can be S3.
     """
-
-    # Checks if the reprojected raster already exists
-    if not os.path.exists(reprojected_tif):
+    if not os.path.exists(tif_reproj_local):
         print("  Reprojected raster does not exist. Reprojecting now...")
-        with rasterio.open(tif_unproj) as src:
+        with rasterio.open(tif_unproj_s3) as src:
             transform, width, height = calculate_default_transform(
                 src.crs, cn.Robinson_crs, src.width, src.height, *src.bounds
             )
             kwargs = src.meta.copy()
-            compression = src.profile.get('compress', 'none')  # Gets compression from the original raster
             kwargs.update({
                 'crs': cn.Robinson_crs,
                 'transform': transform,
                 'width': width,
                 'height': height,
                 'nodata': 0,
-                'compress': compression
+                'compress': 'lzw'  # Optional: add compression
             })
 
-            with rasterio.open(reprojected_tif, 'w', **kwargs) as dst:
+            with rasterio.open(tif_reproj_local, 'w', **kwargs) as dst:
                 reproject(
                     source=rasterio.band(src, 1),
                     destination=rasterio.band(dst, 1),
@@ -74,7 +69,7 @@ def reproject_raster(reprojected_tif, tif_unproj):
                     resampling=Resampling.nearest
                 )
     else:
-        print("  Reprojected raster already exists. Skipping reprojection.")
+        print("  Reprojected raster already exists locally. Skipping reprojection.")
 
 def check_and_reproject_shapefile(shapefile_path, target_crs, reprojected_shapefile_path):
     """
@@ -317,7 +312,7 @@ def create_gif(net_jpeg_base, out_folder, out_maps_for_gif):
     )
 
 # Makes jpeg of net fluxes
-def map_net_flux(input_date, in_folder, out_folder, colors, percentiles, title_text, net_jpeg_base):
+def map_net_flux(input_date, s3_folder, local_reproj_folder, local_jpeg_folder, colors, percentiles, title_text):
 
     series_start_time = time.time()
 
@@ -330,22 +325,32 @@ def map_net_flux(input_date, in_folder, out_folder, colors, percentiles, title_t
 
     out_maps_for_gif = []
 
-    for year in cn.years_annual[1:]:
-    # for year in cn.years_annual[1:3]: # For testing the first year
+    # for year in cn.years_annual[1:]:
+    for year in cn.years_annual[2:3]: # For testing a specific year
 
-        net_year_file = f"{in_folder}net_flux__all_C_pools__all_gases__MgCO2e_{year - 1}_{year}_0_04deg_yr"
+        # All the components of the input s3 path
+        parts = s3_folder.strip('/').split('/')
 
-        print(f"---Mapping net flux for {year} from {net_year_file}")
+        # Gets the segment for the input pattern
+        pattern_idx = parts.index(f"version_{cn.model_version_underscore}")
+        pattern_segment = parts[pattern_idx + 1]
 
-        # Raster name before and after projection
-        tif_unproj = f"{net_year_file}.tif"
-        reprojected_tif = f"{net_year_file}_reproj.tif"
+        # Gets the segment for the input interval
+        interval_idx = parts.index(f"annual_intervals")
+        interval_segment = parts[interval_idx + 1]
+
+        # Names before and after reprojection
+        year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{interval_segment}_global"
+        year_path_unproj = f"{s3_folder}net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_{year - 1}_{year}_global.tif"
+        year_path_reproj = f"{local_reproj_folder}/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_{year - 1}_{year}_global_reproj.tif"
+
+        print(f"---Mapping net flux for {year} from {year_file}")
 
         # Reprojects raster, if needed
-        reproject_raster(reprojected_tif, tif_unproj)
+        reproject_raster(year_path_unproj, year_path_reproj)
 
         # Reads raster data
-        with rasterio.open(reprojected_tif) as src:
+        with rasterio.open(year_path_reproj) as src:
             data = src.read(1)  # Read the first band
             raster_extent = src.bounds
 
@@ -412,24 +417,27 @@ def map_net_flux(input_date, in_folder, out_folder, colors, percentiles, title_t
         # Removes axis ticks and labels
         remove_ticks(ax)
 
-        net_jpeg_name = f"{out_folder}/{net_jpeg_base}__{year}.jpeg"
-        net_jpeg_for_pres_name = f"{out_folder}/{net_jpeg_base}__{year}__for_pres.jpeg"
+        pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
+        core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.model_version_underscore}"  #
+        jpeg_path = f"{local_jpeg_folder}/{core_jpeg_name}.jpeg"
+        jpeg_for_pres_path = f"{local_jpeg_folder}/{core_jpeg_name}__for_pres.jpeg"
 
         # Saves two versions of the map: without and with a source note in the bottom right
-        out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, net_jpeg_name, net_jpeg_for_pres_name, year)
-        print(out_jpeg_for_pres)
+        out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, year)
 
         out_maps_for_gif.append(out_jpeg_for_pres)
 
     # Creates gifs of timeseries
-    create_gif(net_jpeg_base, out_folder, out_maps_for_gif)
+    create_gif(pattern_segment_revised, local_jpeg_folder, out_maps_for_gif)
 
     series_end_time = time.time()
     print(f"Net flux took {round(series_end_time - series_start_time)} seconds: {uu.timestr()}")
 
 
 # Makes jpeg of gross fluxes
-def map_gross(base_tif, colors, percentiles, title_text, out_jpeg):
+def map_gross(input_date, s3_folder, local_reproj_folder, local_jpeg_folder, colors, percentiles, title_text):
+
+    series_start_time = time.time()
 
     # Reprojects shapefile, if needed
     shapefile = check_and_reproject_shapefile(
@@ -438,7 +446,16 @@ def map_gross(base_tif, colors, percentiles, title_text, out_jpeg):
         reprojected_shapefile_path=cn.reprojected_shapefile_path
     )
 
-    for year in cn.years_annual[1:]:
+    out_maps_for_gif = []
+
+    # for year in cn.years_annual[1:]:
+    for year in cn.years_annual[1:2]: # For testing a specific year
+
+        # Names before and after reprojection
+        year_file = f"net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_{year - 1}_{year}_global"
+        year_path_unproj = f"{s3_folder}net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_{year - 1}_{year}_global.tif"
+        year_path_reproj = f"{local_reproj_folder}/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_{year - 1}_{year}_global_reproj.tif"
+
 
         print(f"---Mapping {base_tif}")
 
@@ -597,15 +614,59 @@ if __name__ == '__main__':
     removals_title = f"Gross land CO$_2$ removals\nkt CO$_2$ yr$^{{-1}}$"
     net_title = f"Net land greenhouse gas flux (all gases)\nkt CO$_2$e yr$^{{-1}}$"
 
-    in_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v0_4_3_2001_2024_global/"
+    local_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v1_0_0_2016_2024_global/"
 
-    out_folder = Path(f"{in_folder}output_jpegs")
-    out_folder.mkdir(parents=True, exist_ok=True)
+    basic_dirs_to_expand = [
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+    ]
+
+    # Creates a list of output directories for all outputs and intervals based on specifics of the model run
+    inputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, "annual", cn.first_model_year_annual,
+                                                                  "global", "standard_model", cn.interval_end_years_annual,
+                                                                 [1, 1, 1, 1, 1, 1, 1, 1, 1], input_date,
+                                                                 True, cn.flux_aggreg_pixel_meaning)
+
+    gross_emis_input_folders_s3 = []
+    gross_removals_input_folders_s3 = []
+    net_input_folders_s3 = []
+    other_input_folders_s3 = []
+
+    for input in inputs_by_interval_dir_list:
+        if "emis" in input:
+            gross_emis_input_folders_s3.append(input)
+        elif "removals" in input:
+            gross_removals_input_folders_s3.append(input)
+        elif "net" in input:
+            net_input_folders_s3.append(input)
+        else:
+            other_input_folders_s3.append(input)
+
+    local_reproj_folder = Path(local_folder)
+    local_reproj_folder.mkdir(parents=True, exist_ok=True)
+    local_jpeg_folder = Path(f"{local_folder}output_jpegs")
+    local_jpeg_folder.mkdir(parents=True, exist_ok=True)
 
     # Generates jpegs for gross emissions, removals and net flux
     # map_gross(cn.emissions_base, emissions_colors, emissions_percentiles, emissions_title, cn.emissions_jpeg)
     # map_gross(cn.removals_base, removals_colors, removals_percentiles, removals_title, cn.removals_jpeg)
-    map_net_flux(input_date, in_folder, out_folder, net_color_palette, net_percentiles, net_title, cn.net_jpeg_base)
+    # for gross_emis_s3 in gross_emis_input_folders_s3:
+    #     map_gross(input_date, gross_emis_s3, local_reproj_folder, local_jpeg_folder,
+    #                  net_color_palette, emissions_percentiles, emissions_title, cn.emissions_jpeg_base)
+
+    # gross_removals_input_folders_s3 = gross_removals_input_folders_s3[0:1]
+    # for gross_remv_s3 in gross_removals_input_folders_s3:
+    #     map_gross(input_date, gross_remv_s3, local_reproj_folder, local_jpeg_folder,
+    #                  net_color_palette, removals_percentiles, removals_title, cn.removals_jpeg_base)
+
+    net_input_folders_s3 = net_input_folders_s3[1:2]
+    for net_input_s3 in net_input_folders_s3:
+        map_net_flux(input_date, net_input_s3, local_reproj_folder, local_jpeg_folder,
+                     net_color_palette, net_percentiles, net_title)
 
     # # Generates three-panel map
     # create_three_panel_map()

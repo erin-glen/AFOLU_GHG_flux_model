@@ -1,25 +1,36 @@
 """
+Creates global outputs at 0.04x0.04 deg resolution (approximately 4x4 km at the equator) for specified inputs.
+Units are Mg CO2(e)/0.04x0.04 deg pixel/year for interval-level outputs and
+Mg CO2(e)/0.04x0.04 deg pixel/full model period for the aggregations over the entire model period (currently 2016-ENDYEAR).
+These are for presentations and other static displays.
+They are not to be used for calculations or statistics.
+
+Can only run on 1x1 degree chunks that do not have the run timestamp in the file name.
+The way this builds the input file names, it can't handle filenames with the run timestamp.
+It also can't handle chunks smaller than 1x1 degree.
+
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
-python -m src.LULUCF.scripts.vegetation_model.3b_create_global_0_04x0_04deg -bb 10 49 11 50 -cs 1 --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3b_create_global_0_04x0_04deg -bb 10 49 11 50 -cs 1 --no_upload --input_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.3b_vegetation_model.create_global_0_04x0_04deg -cn LULUCF_postprocessing --no_upload -yr 2000 2024 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.3b_vegetation_model.create_global_0_04x0_04deg -cn vegetation_postprocessing --no_upload --input_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.3b_vegetation_model.create_global_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
+python -m src.utilities.create_cluster -n 65 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.3b_vegetation_model.create_global_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
 
 Full run:
-python -m src.utilities.create_cluster -n 100 -t 1 -m 4 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.3b_core_veg_model.create_global_0_04x0_04deg -cn LULUCF_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -yr 2000 2024 --input_date YYYYMMDD -ln "This is intended to be the definitive global 0.04x0.04 deg output run."
+python -m src.utilities.create_cluster -n 65 -t 1 -m 4 -cn vegetation_postprocessing  (because running 6 outputs with 10 years each (including full model total)=60 maps, plus a few workers for safety)
+python -m src.LULUCF.scripts.3b_core_veg_model.create_global_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is intended to be the definitive global 0.04x0.04 deg output run for model v1.0.0 (2016-2024)."
 
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
 """
 
 import argparse
+import random
 import sys
 import time
 import psutil
@@ -44,6 +55,11 @@ from src.utilities import resize_cluster
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
 os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
+# Enables GDAL retries in case of failures
+# https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d58192-0ea0-8322-b07a-cda128731e32
+gdal.SetConfigOption("GDAL_HTTP_MAX_RETRY", "5")
+gdal.SetConfigOption("GDAL_HTTP_RETRY_DELAY", "5")
+
 def gdal_progress(pct, message, data):
     """
     GDAL progress callback.
@@ -56,7 +72,7 @@ def gdal_progress(pct, message, data):
     return 1  # return 0 would cancel
 
 @delayed
-def mosaic_tiles_to_global(s3_folder, global_out_path):
+def mosaic_tiles_to_global(input_folder, output_folder):
     """
     Build a global mosaic using a VRT from a text file of input tiles.
     """
@@ -67,17 +83,17 @@ def mosaic_tiles_to_global(s3_folder, global_out_path):
     fs = fsspec.filesystem("s3", anon=False)
 
     # 1. Collect all S3 tile files
-    tile_files = fs.glob(f"{s3_folder}*.tif")
+    tile_files = fs.glob(f"{input_folder}*.tif")
     if not tile_files:
-        return f"No tiles found in {s3_folder}"
-    lu.print_and_log(f"{len(tile_files)} tiles found in {s3_folder}: {uu.timestr()}", False, logger_worker)
+        return f"No tiles found in {input_folder}"
+    lu.print_and_log(f"{len(tile_files)} tiles found in {input_folder}: {uu.timestr()}", False, logger_worker)
 
     # tile_files = tile_files[0:50]  # For testing
     tile_files = [f"/vsis3/{fp}" for fp in tile_files]  # Faster than vsis3_streaming, by experiment
 
     # 2. Create a temporary working directory for this worker
     tmpdir = tempfile.mkdtemp(prefix="mosaic_")
-    safe_name = re.sub(r'[^0-9a-zA-Z]+', '_', s3_folder.strip('/'))
+    safe_name = re.sub(r'[^0-9a-zA-Z]+', '_', input_folder.strip('/'))
 
     list_path = os.path.join(tmpdir, f"tile_list_{safe_name}.txt")
     vrt_path = os.path.join(tmpdir, f"mosaic_{safe_name}.vrt")
@@ -86,13 +102,13 @@ def mosaic_tiles_to_global(s3_folder, global_out_path):
         f.write("\n".join(tile_files))
 
     # 3. Build VRT
-    lu.print_and_log(f"Building VRT for {s3_folder} into {vrt_path}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Building VRT for {input_folder} into {vrt_path}: {uu.timestr()}", False, logger_worker)
     # Build VRT directly from list of files
     vrt = gdal.BuildVRT(vrt_path,
                         tile_files,
                         callback=gdal_progress)
     if vrt is None:
-        raise RuntimeError(f"gdal.BuildVRT failed for {s3_folder}")
+        raise RuntimeError(f"gdal.BuildVRT failed for {input_folder}")
 
     vrt = None  # flush to disk
 
@@ -106,12 +122,24 @@ def mosaic_tiles_to_global(s3_folder, global_out_path):
         lu.print_and_log(f"VRT validation failed: {e}", False, logger_worker)
         raise RuntimeError(f"VRT validation failed for {vrt_path}")
 
-    # 4. Decide where to write
-    if global_out_path.startswith("s3://"):
-        local_out = os.path.join(tmpdir, os.path.basename(global_out_path))
-        gdal_out_path = local_out
-    else:
-        gdal_out_path = global_out_path
+
+    # 4. Create output file name
+
+    # All the components of the input path
+    parts = input_folder.strip('/').split('/')
+
+    # Gets the segment for the input pattern
+    pattern_idx = parts.index(f"version_{cn.model_version_underscore}")
+    pattern_segment = parts[pattern_idx + 1]
+
+    # Gets the segment for the input interval
+    interval_idx = parts.index(f"annual_intervals")
+    interval_segment = parts[interval_idx + 1]
+
+    output_name = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{interval_segment}_global.tif"
+
+    local_out = os.path.join(tmpdir, output_name)
+
 
     # 5. Translate VRT → GeoTIFF
     gtiff_options = gdal.TranslateOptions(
@@ -123,27 +151,43 @@ def mosaic_tiles_to_global(s3_folder, global_out_path):
             "BLOCKYSIZE=512"
         ]
     )
-    lu.print_and_log(f"Writing vrt to geotif for {global_out_path}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Writing vrt to geotif for {output_folder}: {uu.timestr()}", False, logger_worker)
 
     writing_start_time = time.time()
-    gdal.Translate(gdal_out_path, vrt_path, options=gtiff_options)
+
+    # Adds retries for gdal_translate because this failed randomly during a large (60-input) run
+    # https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d58192-0ea0-8322-b07a-cda128731e32
+    for attempt in range(1, 4):
+        try:
+            gdal.Translate(local_out, vrt_path, options=gtiff_options)
+            return  # success
+        except RuntimeError as e:
+            if attempt == 4:
+                raise  # re-raise final error
+            wait = 60 * attempt + random.randint(0, 30)  # jitter helps avoid thundering herd
+            print(f"gdal.Translate failed (attempt {attempt}/{4}): {e}")
+            print(f"Retrying in {wait} seconds...")
+            time.sleep(wait)
+
+    # gdal.Translate(local_out, vrt_path, options=gtiff_options)
     writing_end_time = time.time()
-    lu.print_and_log(f"Wrote vrt to geotif for {global_out_path}, took {round(writing_end_time - writing_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Wrote vrt to geotif for {output_folder}, took {round(writing_end_time - writing_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
     # Upload if needed
-    if global_out_path.startswith("s3://"):
-        lu.print_and_log(f"Uploading geotif for {global_out_path}: {uu.timestr()}", False, logger_worker)
-        fs.put(gdal_out_path, global_out_path)
-        lu.print_and_log(f"✅ Uploaded mosaic to {global_out_path}: {uu.timestr()}", False, logger_worker)
+    if output_folder.startswith("s3://"):
+        lu.print_and_log(f"Uploading geotif for {output_folder}: {uu.timestr()}", False, logger_worker)
+        fs.put(local_out, output_folder)
+        lu.print_and_log(f"Uploaded mosaic to {output_folder}: {uu.timestr()}", False, logger_worker)
 
     end_time = time.time()
-    lu.print_and_log(f"{global_out_path} took {round(end_time - start_time)} seconds: {uu.timestr()}",False, logger_worker)
+    lu.print_and_log(f"{output_folder} took {round(end_time - start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
-    return f"✅ Global mosaic written to {global_out_path}"
+    return f"Global mosaic written to {output_folder}"
 
 
 def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
-         chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
+         chunk_shapefile_uri=False, first_folders_to_process=None,
+         bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     ### Step 1: Preparation
 
@@ -200,32 +244,33 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Determines if the output file names for final versions of outputs should be used
     is_final = False
     # is_final = True  # For simulating a large run
-    if len(chunk_list) > 20:
+    if len(chunk_list) > 8:
         is_final = True
         main_logger.info("Running as final model.")
 
 
-    # # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
-    # # Instead, it creates a list of input folders, from which a download dictionary is created for each chunk (in the chunk-level function).
-    # # It's a little simpler this way. Since the datatypes of the inputs don't need to be specified in advance for this script
-    # # (since it's not using numba), there's no need to centrally create a download dictionary with each input's datatype
-    # # just once on the scheduler, as is more efficient for scripts that use numba.
-    # # Creates a list of input directories used in output creation based on specifics of the model run
-    # inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
-    #                                                                        chunk_size_pixels, model_type, interval_end_years_list,
-    #                                                                        interval_year_diff_list, input_date, True, "per_ha")
+    # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
+    # Instead, it creates a list of input folders, from which a download dictionary is created for each chunk (in the chunk-level function).
+    # It's a little simpler this way. Since the datatypes of the inputs don't need to be specified in advance for this script
+    # (since it's not using numba), there's no need to centrally create a download dictionary with each input's datatype
+    # just once on the scheduler, as is more efficient for scripts that use numba.
+    # Creates a list of input directories used in output creation based on specifics of the model run
 
-    inputs_by_interval_dir_list = [
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2015_2016/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2016_2017/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2017_2018/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2018_2019/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2019_2020/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2020_2021/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2021_2022/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2022_2023/_0_04deg_yr/25_pixels/20250904/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2023_2024/_0_04deg_yr/25_pixels/20250904/"
+    basic_dirs_to_expand = [
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
     ]
+
+    inputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, interval_type, start_year,
+                                                                           25, model_type, interval_end_years_list,
+                                                                           interval_year_diff_list, input_date, True, cn.flux_aggreg_pixel_meaning)
+    # Limits folders to process (for testing)
+    if first_folders_to_process:
+        inputs_by_interval_dir_list = inputs_by_interval_dir_list[:first_folders_to_process]
 
     # print(inputs_by_interval_dir_list)
     if is_final:
@@ -233,31 +278,18 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
         for item in inputs_by_interval_dir_list:
             main_logger.info(f"  {item}")
 
-    # # Creates a list of output directories for all outputs and intervals based on specifics of the model run
-    # outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,
-    #                                                                         chunk_size_pixels, model_type, interval_end_years_list,
-    #                                                                         interval_year_diff_list, input_date, True, "per_ha")
-
-    outputs_by_interval_dir_list = [
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2015_2016/_0_04deg_yr/global/20250904/net_flux__all_C_pools__all_gases__MgCO2e_2015_2016_0_04deg_yr.tif",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2016_2017/_0_04deg_yr/global/20250904/net_flux__all_C_pools__all_gases__MgCO2e_2016_2017_0_04deg_yr.tif",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2017_2018/_0_04deg_yr/global/20250904/net_flux__all_C_pools__all_gases__MgCO2e_2017_2018_0_04deg_yr.tif",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2018_2019/_0_04deg_yr/global/20250904/net_flux__all_C_pools__all_gases__MgCO2e_2018_2019_0_04deg_yr.tif",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2019_2020/_0_04deg_yr/global/20250904/net_flux__all_C_pools__all_gases__MgCO2e_2019_2020_0_04deg_yr.tif",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2020_2021/_0_04deg_yr/global/20250904/net_flux__all_C_pools__all_gases__MgCO2e_2020_2021_0_04deg_yr.tif",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2021_2022/_0_04deg_yr/global/20250904/net_flux__all_C_pools__all_gases__MgCO2e_2021_2022_0_04deg_yr.tif",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2022_2023/_0_04deg_yr/global/20250904/net_flux__all_C_pools__all_gases__MgCO2e_2022_2023_0_04deg_yr.tif",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2023_2024/_0_04deg_yr/global/20250904/net_flux__all_C_pools__all_gases__MgCO2e_2023_2024_0_04deg_yr.tif"
-    ]
+    # Creates a list of output directories for all outputs and intervals based on specifics of the model run
+    outputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, interval_type, start_year,
+                                                                            "global", model_type, interval_end_years_list,
+                                                                            interval_year_diff_list, input_date, True, cn.flux_aggreg_pixel_meaning)
+    # Limits folders to process (for testing)
+    if first_folders_to_process:
+        outputs_by_interval_dir_list = outputs_by_interval_dir_list[:first_folders_to_process]
 
     if is_final:
         main_logger.info(f"outputs_dir_list:")
         for item in outputs_by_interval_dir_list:
             main_logger.info(f"  {item}")
-
-    # # Makes a txt for each task in the list. These are deleted as tasks are completed.
-    # main_logger.info("Creating task txts in s3...")
-    # uu.create_s3_task_files(stage, chunk_list)
 
 
     ### Step 2: Creates outputs
@@ -324,6 +356,7 @@ if __name__ == "__main__":
     parser.add_argument('-cs', '--chunk_size', type=float, help='Chunk size (degrees)')
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
+    parser.add_argument('-ffol', '--first_folders_to_process', type=int, help='Number of folders to process from input list')
     parser.add_argument('-yr', '--year_range', nargs=2, type=int, default=[cn.first_model_year_annual, cn.last_model_year_annual],
                         help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2024.')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
@@ -342,6 +375,7 @@ if __name__ == "__main__":
     chunk_shapefile_uri = args.chunk_shapefile_uri
     first_chunks = args.first_chunks
     year_range = args.year_range
+    first_folders_to_process = args.first_folders_to_process
     log_note = args.log_note
 
     run_local = args.run_local
@@ -350,7 +384,8 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, input_date, year_range, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
+    main(cluster_name, input_date, year_range, run_local, no_stats, no_log, no_upload,
+         chunk_shapefile_uri, first_folders_to_process=first_folders_to_process,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)
 

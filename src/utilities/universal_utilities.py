@@ -853,11 +853,16 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
     # Replaces placeholders in paths with values specific to the run
     dir_list = [path.replace(cn.model_type_placholder, model_type) for path in dir_list]
     dir_list = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in dir_list]
-    dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in dir_list]
     dir_list = [path.replace("RUN_DATE", run_date) for path in dir_list]
 
-    # Any entry that covers the entire model period, from start year to end of last interval
-    dir_list = [path.replace("FULL_MODEL", f"{start_year}_{output_years[-1]}") for path in dir_list]
+    # Replaces the chunk_size part of the path with global if this is a global aggregation
+    if chunk_size_pixels == "global":
+        dir_list = [path.replace("CHUNK_SIZE_pixels", chunk_size_pixels) for path in dir_list]
+    else:
+        dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in dir_list]
+
+    # # Any entry that covers the entire model period, from start year to end of last interval
+    # dir_list = [path.replace("FULL_MODEL", f"{start_year}_{output_years[-1]}") for path in dir_list]
 
     # Replaces the pixel meaning placeholder with the per-ha or per-pixel meanings.
     # Pixel meanings are formulated slightly differently depending on whether the output is C density or flux.
