@@ -1,52 +1,19 @@
 # -*- coding: utf-8 -*-
-"""
-Build per-variable Zarr caches for organic-soils zonal statistics (per-pixel only).
+"""Build per-variable Zarr caches for organic-soils zonal statistics (per-pixel only).
 
 What this does
 --------------
 - For each requested dataset and interval:
-  * Lists source GeoTIFFs on S3 via boto3 (no s3fs globbing)
-  * Opens TIFFs with xarray+rasterio (parallel=True by default; disable with --no-open-parallel)
-  * Writes a single Zarr per variable under .../zarr/{run_name}/{run_date}/{interval}/
+  * Scans the source GeoTIFF folder on S3
+  * Opens TIFFs safely (rasterio engine; **parallel=True by default**; disable with --no-open-parallel)
+  * Writes the Zarr store under .../zarr/{run_name}/{run_date}/{interval}/
 - Per-pixel only for flux totals (no per-ha support in this builder).
+- **Stripe-append writing** along x to avoid gigantic Dask graphs.
 - **Symmetric chunking** by default: {"y": chunk_size, "x": chunk_size}.
 - Skips rebuild if a valid Zarr already exists with x/y dims.
+- **NEW**: Validates every Zarr (existing or newly written) with light-weight read checks.
 
 This script does NOT run any reductions or write Parquet.
-
-Examples
---------
-# Build all datasets for one interval (cluster)
-python -m src.scripts.zonal_statistics.01_build_zarr_caches \
-  --interval_end_years 2024 \
-  --cluster_name zonal_stats \
-  --run_date 20250923 \
-  --model_version 0_8_0 \
-  --run_name ogh_sensitivity_1km \
-  --tile_pixels 4000 \
-  --chunk_size 10000
-
-# Build a subset for multiple intervals (cluster), explicitly disabling parallel open
-python -m src.scripts.zonal_statistics.01_build_zarr_caches \
-  --interval_end_years 2015 2020 2024 \
-  --datasets drained_total burned_total \
-  --no-open-parallel \
-  --cluster_name zonal_stats \
-  --run_date 20250923 \
-  --model_version 0_8_0 \
-  --run_name ogh_sensitivity_1km \
-  --tile_pixels 4000 \
-  --chunk_size 10000
-
-# Local smoke build (global write but on local scheduler)
-python -m src.scripts.zonal_statistics.01_build_zarr_caches \
-  --interval_end_years 2020 \
-  --run_local \
-  --run_date 20250101 \
-  --model_version test \
-  --run_name smoke \
-  --tile_pixels 4000 \
-  --chunk_size 10000
 """
 
 from __future__ import annotations
@@ -62,7 +29,7 @@ import fsspec
 import numpy as np
 import pandas as pd
 import posixpath
-import s3fs  # required for fsspec S3 mapping when writing Zarr
+import s3fs
 import xarray as xr
 import zarr
 import rasterio
@@ -108,20 +75,20 @@ FOLDER_TEMPLATE = (
 # ------------------------------ utils ----------------------------------
 @lru_cache(maxsize=None)
 def s3_exists(prefix: str) -> bool:
-    """Fast existence check using uu.list_raster_full_paths_in_s3_folder_and_count (boto3)."""
+    fs = s3fs.S3FileSystem(anon=False)
     try:
-        files, n = uu.list_raster_full_paths_in_s3_folder_and_count(prefix)
-        return n > 0
-    except Exception:
+        return any(fs.glob(prefix.rstrip("/") + "/**"))
+    except FileNotFoundError:
         return False
 
 
 def list_folder_uris(base_uri: str) -> pd.Series:
-    """List TIFFs with boto3 (through uu.* helper). No pre-validation reads."""
-    files, n = uu.list_raster_full_paths_in_s3_folder_and_count(base_uri)
-    if n == 0:
+    fs = s3fs.S3FileSystem(anon=False)
+    pattern = base_uri.rstrip("/") + "/**/*.tif"
+    tifs = [(f if f.startswith("s3://") else f"s3://{f}") for f in fs.glob(pattern)]
+    if not tifs:
         raise FileNotFoundError(f"No GeoTIFFs found in {base_uri}")
-    return pd.Series(files, dtype="string")
+    return pd.Series(tifs, dtype="string")
 
 
 def make_xarray_chunks(
@@ -130,7 +97,10 @@ def make_xarray_chunks(
     *,
     open_parallel: bool,
 ) -> xr.Dataset:
-    """Open multiple GeoTIFFs into a chunked Xarray dataset."""
+    """Open multiple GeoTIFFs into a chunked Xarray dataset.
+
+    parallel=True by default; disable with --no-open-parallel.
+    """
     return xr.open_mfdataset(
         tile_uris.values.tolist(),
         engine="rasterio",
@@ -138,30 +108,6 @@ def make_xarray_chunks(
         parallel=bool(open_parallel),
         chunks={"x": chunk_size, "y": chunk_size},
     ).squeeze()
-
-
-def _filter_valid_tiffs(uri_series: pd.Series) -> pd.Series:
-    """
-    Recovery-only filter: try to open each TIFF once and keep ones that succeed.
-    (Used *only if* open_mfdataset fails; this is not a pre-open step.)
-    """
-    if uri_series.empty:
-        return uri_series
-    valid: List[str] = []
-    bad = 0
-    for u in uri_series.tolist():
-        try:
-            with rasterio.Env():
-                with rasterio.open(u) as src:
-                    if src.count >= 1 and src.width > 0 and src.height > 0:
-                        valid.append(u)
-                    else:
-                        bad += 1
-        except Exception:
-            bad += 1
-    if bad:
-        logging.warning("Filtered %d TIFF(s) after open_mfdataset failure; proceeding with %d valid.", bad, len(valid))
-    return pd.Series(valid, dtype="string")
 
 
 def _zarr_store_exists(fs, path: str) -> Tuple[bool, bool, bool]:
@@ -180,23 +126,204 @@ def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
 
 
 def _clear_store_if_exists(zarr_path: str, logger: logging.Logger) -> None:
-    """Remove an existing Zarr store recursively (for invalid/partial stores)."""
+    """Remove an existing Zarr store recursively (for invalid stores)."""
     fs, inner = fsspec.core.url_to_fs(zarr_path)
     if fs.exists(inner):
-        logger.warning("Removing existing Zarr store before rebuild: %s", zarr_path)
+        logger.warning("Removing existing (invalid) Zarr store: %s", zarr_path)
         try:
             fs.rm(inner.rstrip("/") + "/", recursive=True)
         except Exception as e:
-            logger.warning("Failed to remove %s; proceeding with overwrite may fail (%s).", zarr_path, e)
+            logger.warning("Failed to remove %s before rebuild (%s); attempting overwrite via append.", zarr_path, e)
 
 
+def _write_zarr_by_stripes(
+    arr: xr.DataArray,
+    zarr_path: str,
+    *,
+    chunk_size: int,
+    stripe_cols: int | None,
+    logger: logging.Logger,
+) -> None:
+    """Append-write arr to zarr_path along x in contiguous stripes.
+
+    - First stripe: create the store with encoding (defines chunks/dtype/attrs)
+    - Subsequent stripes: append without encoding (xarray disallows it)
+    """
+    varname = arr.name or "variable"
+    nx = int(arr.sizes["x"])
+
+    stripe = int(stripe_cols or chunk_size)
+    if stripe != chunk_size:
+        logger.warning(
+            "Stripe width (%d) != chunk_size (%d). Resulting Zarr chunks will not be symmetric.",
+            stripe, chunk_size,
+        )
+
+    start = 0
+    first = True
+    while start < nx:
+        stop = min(nx, start + stripe)
+
+        # Chunk the stripe so that Dask chunks match the written stripe width
+        sub = arr.isel(x=slice(start, stop)).chunk({"y": chunk_size, "x": stop - start})
+        ds_sub = sub.to_dataset(name=varname)
+
+        # Only provide encoding on the first write to define chunking on disk
+        enc = {varname: {"chunks": (chunk_size, stop - start)}} if first else None
+
+        if first:
+            logger.info("   writing stripe x[%d:%d] (%d cols) mode=create", start, stop, stop - start)
+            ds_sub.to_zarr(
+                zarr_path,
+                mode="w",               # create
+                encoding=enc,           # define chunks ONLY once
+                compute=True,
+                consolidated=None,
+            )
+            first = False
+        else:
+            logger.info("   writing stripe x[%d:%d] (%d cols) mode=append", start, stop, stop - start)
+            # IMPORTANT: do not pass encoding here; xarray will raise
+            ds_sub.to_zarr(
+                zarr_path,
+                mode="a",               # append
+                append_dim="x",
+                compute=True,
+                consolidated=None,
+            )
+        start = stop
+
+
+# ----------------------- NEW: Zarr validation helpers -----------------------
+def _chunksizes_of(da: xr.DataArray) -> Dict[str, Tuple[int, ...]]:
+    """Return chunk sizes per dim as small tuples of ints (best-effort)."""
+    out: Dict[str, Tuple[int, ...]] = {}
+    try:
+        # xarray>=2023 provides .chunksizes (dict of lists/tuples)
+        for dim, seq in getattr(da, "chunksizes", {}).items():
+            out[dim] = tuple(int(c) for c in seq)
+        if out:
+            return out
+    except Exception:
+        pass
+    # Fallback via dask array
+    try:
+        if hasattr(da.data, "chunks") and hasattr(da, "dims"):
+            for dim, chunks in zip(da.dims, da.data.chunks):
+                out[dim] = tuple(int(c) for c in chunks)
+    except Exception:
+        pass
+    return out
+
+
+def _sum_store_bytes(fs, inner: str) -> Tuple[int, int]:
+    """Return (n_objects, total_bytes) for all keys under *inner*; best-effort."""
+    n = 0
+    total = 0
+    try:
+        for p in fs.find(inner):
+            try:
+                info = fs.info(p)
+                size = info.get("Size", info.get("size", 0)) or 0
+                total += int(size)
+                n += 1
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return n, total
+
+
+def validate_zarr_store(
+    zarr_path: str,
+    *,
+    logger: logging.Logger,
+    expected_chunk: int | None = None,
+    sample_px: int = 128,
+) -> None:
+    """
+    Open a Zarr, verify x/y exist and are non-empty, sanity-check chunking, and
+    read a few small windows to prove data are readable.
+
+    Raises ValueError/RuntimeError if validation fails. Logs a compact summary on success.
+    """
+    fs, inner = fsspec.core.url_to_fs(zarr_path)
+
+    try:
+        dsx = xr.open_zarr(
+            zarr_path,
+            consolidated=None,
+            storage_options=getattr(fs, "storage_options", {"anon": False}),
+        )
+    except Exception as e:
+        raise RuntimeError(f"Validation: failed to open {zarr_path}: {e}")
+
+    da = _first_xy_var(dsx)
+    if not {"x", "y"}.issubset(da.dims):
+        raise ValueError(f"Validation: {zarr_path} missing x/y dims; got {da.dims}")
+
+    nx = int(da.sizes["x"])
+    ny = int(da.sizes["y"])
+    if nx <= 0 or ny <= 0:
+        raise ValueError(f"Validation: {zarr_path} has empty x/y (x={nx}, y={ny})")
+
+    # Chunk sanity
+    ch = _chunksizes_of(da)
+    cx = ch.get("x")
+    cy = ch.get("y")
+    if expected_chunk:
+        # Allow the final trailing chunk to be smaller
+        for label, seq in (("x", cx), ("y", cy)):
+            if seq and any(c > expected_chunk for c in seq[:-1]):
+                raise ValueError(
+                    f"Validation: {zarr_path} has {label}-chunks {seq} exceeding expected {expected_chunk}"
+                )
+
+    # Light sample reads: NW / center / SE windows (bounded to domain)
+    wx = max(1, min(sample_px, nx))
+    wy = max(1, min(sample_px, ny))
+    xs = [0, max(0, nx // 2 - wx // 2), max(0, nx - wx)]
+    ys = [0, max(0, ny // 2 - wy // 2), max(0, ny - wy)]
+    try:
+        samples = []
+        for xi, yi in zip(xs, ys):
+            sub = da.isel(x=slice(xi, xi + wx), y=slice(yi, yi + wy))
+            arr = sub.data
+            if hasattr(arr, "compute"):
+                arr = arr.compute()
+            samples.append((arr.shape, float(np.nanmax(arr)) if arr.size else np.nan))
+        # A store of only metadata (no chunks) would tend to fail here
+        if any(s[0][0] == 0 or s[0][1] == 0 for s in samples):
+            raise ValueError(f"Validation: sample windows are empty in {zarr_path}")
+    except Exception as e:
+        raise RuntimeError(f"Validation: sample read failed for {zarr_path}: {e}")
+
+    nobj, nbytes = _sum_store_bytes(fs, inner)
+    size_gb = (nbytes / (1024 ** 3)) if nbytes else 0.0
+    logger.info(
+        "Validated Zarr ✅ %s | shape=(y:%d, x:%d) chunk_x=%s chunk_y=%s | objects=%d size=%.2f GB | samples=%s",
+        zarr_path,
+        ny,
+        nx,
+        cx,
+        cy,
+        nobj,
+        size_gb,
+        [s[0] for s in samples],
+    )
+
+
+# ------------------------- build / ensure functions -------------------------
 def ensure_zarr_exists(
     uri_list: pd.Series,
     zarr_path: str,
     chunk_size: int,
     logger: logging.Logger,
     *,
+    stripe_cols: int | None = None,
     open_parallel: bool = True,
+    run_validate: bool = True,
+    validate_sample_px: int = 128,
 ) -> None:
     """Ensure a Zarr with x/y dims exists at zarr_path; build if missing/invalid."""
     logger.debug("Ensuring Zarr store %s", zarr_path)
@@ -208,6 +335,13 @@ def ensure_zarr_exists(
             dsx = xr.open_zarr(zarr_path, consolidated=None, storage_options=getattr(fs, "storage_options", {"anon": False}))
             if {"x", "y"}.issubset(dsx.dims):
                 logger.info("Zarr exists and is valid: %s", zarr_path)
+                if run_validate:
+                    validate_zarr_store(
+                        zarr_path,
+                        logger=logger,
+                        expected_chunk=chunk_size,
+                        sample_px=validate_sample_px,
+                    )
                 return
             else:
                 logger.warning("Existing Zarr missing x/y dims; rebuilding: %s", zarr_path)
@@ -219,25 +353,20 @@ def ensure_zarr_exists(
     if uri_list.empty:
         raise FileNotFoundError(f"No GeoTIFFs found for {zarr_path}")
 
-    # Fast path: trust listing; open all TIFFs
-    try:
-        dsx = make_xarray_chunks(uri_list, chunk_size, open_parallel=open_parallel)
-    except Exception as e:
-        logger.warning("open_mfdataset failed (%s). Filtering unreadable tiles and retrying.", e)
-        filtered = _filter_valid_tiffs(uri_list)
-        if filtered.empty:
-            raise FileNotFoundError(f"No valid GeoTIFFs remain after filtering for {zarr_path}")
-        dsx = make_xarray_chunks(filtered, chunk_size, open_parallel=open_parallel)
-
-    # Use first x/y variable; round coords to avoid float stitching mismatches
+    # Build from GeoTIFFs (no pre-open filtering)
+    dsx = make_xarray_chunks(uri_list, chunk_size, open_parallel=open_parallel)
     da_in = _first_xy_var(dsx)
+
+    # Round coords to avoid float stitching mismatches
     for axis in ("x", "y"):
         if axis in da_in.coords:
             da_in = da_in.assign_coords({axis: np.round(da_in[axis].astype(float), 12)})
 
-    # Write a single Zarr in one shot, like the older version
-    ds_out = da_in.to_dataset(name=da_in.name or "variable").chunk({"x": chunk_size, "y": chunk_size})
-    ds_out.to_zarr(zarr_path, mode="w", consolidated=None)
+    # If an invalid store is still on disk (race), clear it before writing stripes
+    _clear_store_if_exists(zarr_path, logger)
+
+    # Stripe-append write to keep graphs small
+    _write_zarr_by_stripes(da_in, zarr_path, chunk_size=chunk_size, stripe_cols=stripe_cols, logger=logger)
 
     # Consolidate metadata for zarr v2 only
     if Version(zarr.__version__).major < 3:
@@ -246,6 +375,15 @@ def ensure_zarr_exists(
             zarr.convenience.consolidate_metadata(fs.get_mapper(inner))
 
     logger.info("Built Zarr: %s", zarr_path)
+
+    # Final validation after build
+    if run_validate:
+        validate_zarr_store(
+            zarr_path,
+            logger=logger,
+            expected_chunk=chunk_size,
+            sample_px=validate_sample_px,
+        )
 
 
 def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str, Any]]:
@@ -297,8 +435,14 @@ def run(args: argparse.Namespace) -> None:
             uris = list_folder_uris(folder)
             logger.info("  • %d TIFF(s) found", len(uris))
             ensure_zarr_exists(
-                uris, zpath, args.chunk_size, logger,
-                open_parallel=args.open_parallel
+                uris,
+                zpath,
+                args.chunk_size,
+                logger,
+                stripe_cols=args.stripe_cols,
+                open_parallel=args.open_parallel,
+                run_validate=not args.skip_validate,
+                validate_sample_px=args.validate_sample_px,
             )
 
     if client:
@@ -329,7 +473,9 @@ def main(argv=None):
     parser.add_argument("--tile_pixels", type=int, default=4000,
                         help="Input tile size in pixels (4000 for 1×1°, 40000 for 10×10°).")
     parser.add_argument("--chunk_size", type=int, default=10000,
-                        help="Chunk size for x/y; default symmetric chunking.")
+                        help="Chunk size; default stripe width also uses this value.")
+    parser.add_argument("--stripe_cols", type=int, default=None,
+                        help="Stripe width (columns) appended per write; defaults to chunk_size (symmetric chunks).")
     parser.add_argument("--datasets", nargs="+",
                         default=["drained_total", "burned_total", "drained_state_nodes", "burned_state_nodes"],
                         choices=list(DATASETS.keys()))
@@ -339,6 +485,13 @@ def main(argv=None):
     parser.add_argument("--no-open-parallel", dest="open_parallel", action="store_false",
                         help="Disable parallel opening (open_mfdataset parallel=False).")
     parser.set_defaults(open_parallel=True)
+
+    # NEW: validation toggles
+    parser.add_argument("--skip-validate", action="store_true",
+                        help="Skip post-build Zarr validation (default: validate).")
+    parser.add_argument("--validate-sample-px", type=int, default=128,
+                        help="Sample window size (pixels) used by validation reads (default: 128).")
+
     parser.add_argument("--debug", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run_local", action="store_true")
