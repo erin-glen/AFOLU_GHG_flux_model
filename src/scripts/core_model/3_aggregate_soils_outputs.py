@@ -37,7 +37,7 @@ INVENTORY_PERIODS = [
 
 version = cn.model_version_underscore
 BASE_URL = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_{version}"
-OUTPUT_DATE = "20250914"
+OUTPUT_DATE = "20250923"
 
 
 def get_input_datasets(
