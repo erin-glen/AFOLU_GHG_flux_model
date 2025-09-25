@@ -15,6 +15,12 @@ Behavior:
     - Opens .gdb with OGR and creates a single OGR VRT using <OGRVRTUnionLayer>.
     - Validates the VRT by opening it with OGR and ensuring it has features.
     - Uploads the VRT to S3 and removes the local temp file.
+
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
+
+Local test:
+python -m src.LULUCF.scripts.preprocessing.SDPTv3.1_rasterize_SDPTv3 --run_local
+
 """
 
 import os
@@ -28,15 +34,30 @@ from src.utilities import universal_utilities as uu
 from src.utilities import log_utilities as lu
 
 
-def geom_name(gtype):
+try:
+    FLATTEN = ogr.wkbFlatten        # some builds expose this
+except AttributeError:
+    FLATTEN = ogr.GT_Flatten        # Python API alias
+
+# optional: guard constants that might not exist on older GDALs
+WKB_CURVEPOLYGON    = getattr(ogr, "wkbCurvePolygon", None)
+WKB_MULTISURFACE    = getattr(ogr, "wkbMultiSurface", None)
+
+def geom_name(gtype: int) -> str:
     try:
         return ogr.GeometryTypeToName(gtype)
     except Exception:
         return str(gtype)
 
-def is_polygon(gtype):
-    base = ogr.wkbFlatten(gtype)
-    return base in (ogr.wkbPolygon, ogr.wkbMultiPolygon)
+def is_polygonish(gtype: int) -> bool:
+    base = FLATTEN(gtype)
+    if base in (ogr.wkbPolygon, ogr.wkbMultiPolygon):
+        return True
+    if WKB_CURVEPOLYGON is not None and base == WKB_CURVEPOLYGON:
+        return True
+    if WKB_MULTISURFACE is not None and base == WKB_MULTISURFACE:
+        return True
+    return False
 
 def build_global_union_vrt_from_gdb(gdb_s3_path, output_vrt_s3_path, local_vrt_path, main_logger,
                                     require_polygons = True, layer_name_prefix = None, include_layers = None, exclude_layers = None):
@@ -57,39 +78,54 @@ def build_global_union_vrt_from_gdb(gdb_s3_path, output_vrt_s3_path, local_vrt_p
     # Example: s3://gfw2-data/plantations/sdpt_v3/sdpt_v3_final.gdb.zip -> /vsizip//vsis3/gfw2-data/plantations/sdpt_v3/sdpt_v3_final.gdb.zip
     # Note: OGR can only open the zip root if it contains a single .gdb
     if gdb_s3_path.lower().endswith(".zip"):
-        vsi_path = f"/vsizip/{vsis3_path}"
+        vsi_zip_root = f"/vsizip/{vsis3_path}"
+        print(f"vsi_zip_root: {vsi_zip_root}")
 
-        # Check read access
-        if not gdal.ReadDir(vsi_path):
-            raise RuntimeError(f"Could not access zipped SDPTv3 gdb via VSI: {vsi_path}")
+        SDPTv3 = None
+        vsi_path = None
 
-        # Get a list of gdb dirs inside the ZIP
-        entries = gdal.ReadDirRecursive(vsi_path) or []
-        gdb_dirs = [e for e in entries if e.lower().endswith(".gdb")]
-        if not gdb_dirs:
-            raise RuntimeError("No .gdb directory found inside the ZIP.")
+        # 1) Try opening the ZIP root directly (works if it contains a single .gdb)
+        ds_try = ogr.Open(vsi_zip_root)
+        if ds_try is not None:
+            SDPTv3 = ds_try
+            vsi_path = vsi_zip_root
 
-        # ReadDirRecursive returns the relative path, so build the full VSI path to the .gdb directory
-        if len(gdb_dirs) == 1:
-            gdb_dir = gdb_dirs[0].lstrip("/")
-            vsi_path = vsi_path.rstrip("/") + "/" + gdb_dir
-        else:
-            raise RuntimeError(" Multiple .gdb directory found inside the ZIP.")
+        # 2) If that failed, guess the inner .gdb directory from the zip filename
+        if SDPTv3 is None:
+            base_no_zip = os.path.basename(gdb_s3_path)[:-4]  # strip ".zip", e.g. "sdpt_v3_final.gdb"
+            vsi_guess = f"{vsi_zip_root.rstrip('/')}/{base_no_zip}"
+            print(f"vsi_guess_inner: {vsi_guess}")
+            ds_try = ogr.Open(vsi_guess)
+            if ds_try is not None:
+                SDPTv3 = ds_try
+                vsi_path = vsi_guess
 
+        # 3) Final fallback: list the ZIP root once (non-recursive) and try the first *.gdb entry
+        if SDPTv3 is None:
+            root_entries = gdal.ReadDir(vsi_zip_root) or []
+            gdb_candidates = [e for e in root_entries if e.lower().endswith(".gdb")]
+            print(f"zip root entries: {root_entries}")
+            print(f"gdb_candidates: {gdb_candidates}")
+            if not gdb_candidates:
+                raise RuntimeError("No .gdb directory found inside the ZIP (couldn’t auto-detect).")
+            vsi_path = f"{vsi_zip_root.rstrip('/')}/{gdb_candidates[0]}"
+            SDPTv3 = ogr.Open(vsi_path)
+            if SDPTv3 is None:
+                raise RuntimeError(f"Found inner GDB '{gdb_candidates[0]}' but could not open it at {vsi_path}")
 
     # Otherwise, use only vsis3 if global SDPTv3 geodatabase is uncompressed on s3
     # Example: s3://gfw2-data/plantations/sdpt_v3/sdpt_v3_final.gdb -> /vsis3/gfw2-data/plantations/sdpt_v3/sdpt_v3_final.gdb
     elif gdb_s3_path.lower().endswith(".gdb"):
         vsi_path = vsis3_path
+        SDPTv3 = ogr.Open(vsi_path)
+        if SDPTv3 is None:
+            raise RuntimeError(f"Could not open FileGDB at {vsi_path}")
     else:
         raise ValueError("gdb_s3_path must end with '.gdb' (directory) or '.zip' (zip containing a .gdb).")
 
-    # Step 2: Open the GDB
-    SDPTv3 = ogr.Open(vsi_path)
-    if SDPTv3 is None:
-        raise RuntimeError(f"Could not open FileGDB at {vsi_path}")
+    print(f"Opened datasource at {vsi_path}; driver={SDPTv3.GetDriver().GetName()} layers={SDPTv3.GetLayerCount()}")
 
-    # Step 3: Inspect the GDB to list all layers and polygon types
+# Step 3: Inspect the GDB to list all layers and polygon types
     layers_info = []
     unique_geom_type_names = set()
     unique_polygon_type_names = set()
@@ -123,10 +159,9 @@ def build_global_union_vrt_from_gdb(gdb_s3_path, output_vrt_s3_path, local_vrt_p
         layers_info.append({"name": layer_name, "geom_type": gname})
         unique_geom_type_names.add(gname)
 
-        if is_polygon(gtype):
-            # keep both base-type (2D) and the exact reported name (incl. 25D) for clarity
-            unique_polygon_type_names.add(geom_name(ogr.wkbFlatten(gtype)))  # e.g., "Polygon" / "MultiPolygon"
-            unique_polygon_type_names.add(gname)                              # e.g., "Polygon25D" if present
+        if is_polygonish(gtype):
+            unique_polygon_type_names.add(geom_name(FLATTEN(gtype)))
+            unique_polygon_type_names.add(geom_name(gtype))
         # TODO: ... to here
 
         # Name filters
@@ -140,7 +175,7 @@ def build_global_union_vrt_from_gdb(gdb_s3_path, output_vrt_s3_path, local_vrt_p
         # Geometry filter
         if require_polygons:
             gtype = layer.GetGeomType()
-            if gtype not in polygon_types:
+            if not is_polygonish(gtype):
                 continue
         sources.append((vsi_path, layer_name))
         total_added += 1
@@ -230,9 +265,11 @@ def main(cluster_name, run_local):
 
     #STEP 1: Create VRT of unionized polygons for SDPTv3
     main_logger.info(f"Submitting VRT build for SDPTv3: {uu.timestr('time')}\n")
-    vrt_future = client.submit(build_global_union_vrt_from_gdb, gdb_s3_path, out_vrt_s3_path, local_vrt_path, main_logger, require_polygons=True)
-    vrt_future.result()
-    main_logger.info(f"SDPTv3: {uu.timestr('time')}\n")
+    if not run_local:
+        vrt_future = client.submit(build_global_union_vrt_from_gdb, gdb_s3_path, out_vrt_s3_path, local_vrt_path, main_logger, require_polygons=True)
+        vrt_future.result()
+    else:
+        build_global_union_vrt_from_gdb(gdb_s3_path, out_vrt_s3_path, local_vrt_path, main_logger, require_polygons = True)
 
     # Closes the client if not running locally
     if not run_local:
@@ -254,9 +291,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
-    run_date = args.run_date
-    bounding_box = args.bounding_box
-    fishnet_path = args.cshp
+    #run_date = args.run_date
+    #bounding_box = args.bounding_box
+    #fishnet_path = args.cshp
 
     tile_id_field = "chunk_id"
 
