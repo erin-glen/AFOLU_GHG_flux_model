@@ -1,30 +1,6 @@
 # -*- coding: utf-8 -*-
 """Build aligned Zarr caches for organic-soils zonal statistics (canonical grid = pixel_area).
 
-What this does
---------------
-- Lists input GeoTIFFs per dataset/interval under:
-  .../version_{model_version}/{folder}/{run_name}/five_year_intervals/{interval}/{tile_pixels}_pixels/{run_date}/
-- Opens them with xarray/dask, coerces coords to float, rounds, and
-  **reindexes to the pixel_area Zarr grid using nearest-with-tolerance**.
-- Writes per-variable Zarrs under:
-  .../version_{model_version}/zarr/{run_name}/{run_date}/{interval}/
-- Validates that each Zarr matches the pixel_area grid (shape/chunks),
-  prints quick stats (object count and total size), and samples a few blocks.
-
-Key design choices
-------------------
-- Alignment is done at build time (Step 1), so Step 2 aggregation doesn't
-  need to correct for misalignment (which led to adm0==0 leakage).
-- Tolerance defaults to 0.49 * pixel_width (in degrees) to prevent far "nearest"
-  snapping. If your grid has minor floating-point jitter, this captures
-  the intended neighbors but won't leap across larger gaps.
-- The GADM adm0 contextual Zarr date is controlled by the ``ADM0_DATE`` constant
-  near the top of this script for easy updates.
-
-Examples
---------
-# Global 10x10° inputs (40000 px/10°), overwrite existing, moderate chunks
 python -m src.scripts.zonal_statistics.01_build_zarr_caches \
   --interval_end_years 2024 \
   --cluster_name zonal_stats \
@@ -32,19 +8,7 @@ python -m src.scripts.zonal_statistics.01_build_zarr_caches \
   --model_version 0_8_0 \
   --run_name ogh_sensitivity_1km \
   --tile_pixels 40000 \
-  --chunk_size 8000 \
-  --write_mode w
-
-# Skip if exists (validate only)
-python -m src.scripts.zonal_statistics.01_build_zarr_caches \
-  --interval_end_years 2024 \
-  --cluster_name zonal_stats \
-  --run_date 20250923 \
-  --model_version 0_8_0 \
-  --run_name ogh_sensitivity_1km \
-  --tile_pixels 40000 \
-  --chunk_size 8000 \
-  --write_mode w-
+  --chunk_size 8000
 """
 
 from __future__ import annotations
@@ -63,7 +27,6 @@ import posixpath
 import s3fs
 import xarray as xr
 import zarr
-
 from packaging.version import Version
 
 from src.scripts.utilities import constants_and_names as cn
@@ -107,12 +70,12 @@ FOLDER_TEMPLATE = (
     + "/{folder}/{run_name}/five_year_intervals/{interval}/{tile_pixels}_pixels/{run_date}/"
 )
 
-# Canonical reference grid (pixel_area)
+# ---- Contextual Zarrs (canonical reference grid = pixel_area) ----
 CONTEXTUAL_ZARR_ROOT = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/global_contextual_zarrs"
 )
 
-# Update these dates when refreshed contextual layers are published.
+# Update when refreshed contextual layers are published.
 PIXEL_AREA_DATASET = "pixel_area"
 PIXEL_AREA_DATE = "20250925"
 PIXEL_AREA_ZARR = posixpath.join(
@@ -122,15 +85,20 @@ PIXEL_AREA_ZARR = posixpath.join(
     f"global_pixel_area_{PIXEL_AREA_DATE}.zarr",
 )
 
+# Authoritative pixel-area GeoTIFF tiles (10×10°, 40000 px per 10°)
+PIXEL_AREA_GTIF_FOLDER = (
+    "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/"
+    "v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
+)
+
 ADM0_DATASET = "GADM4_1_adm0_global"
-ADM0_DATE = "20250925"  # Update this when a new GADM contextual Zarr is available.
+ADM0_DATE = "20250925"  # keep in sync with Step 2
 ADM0_FILENAME_TEMPLATE = "global_GADM41_adm0_{date}.zarr"
 ADM0_VAR_NAME = "gadm_adm0"
 ADM0_GTIF_FOLDER = (
     "s3://gfw2-data/gadm_administrative_boundaries/v4.1/"
     "v4.1.64__from_gfw-data-lake/raster/epsg-4326/10/40000/adm0/gdal-geotiff/"
 )
-
 
 def adm0_zarr_path(date: str = ADM0_DATE) -> str:
     return posixpath.join(
@@ -206,14 +174,11 @@ def round_xy(arr: xr.DataArray, ndig: int = 12) -> xr.DataArray:
     return out
 
 def align_like_nearest_tol(arr: xr.DataArray, ref: xr.DataArray, tol_deg: float) -> xr.DataArray:
-    """Reindex to ref coords with nearest+bounded tolerance; yields NaN where too far."""
-    # ensure numeric, rounded coords (reduces FP jitter issues)
     arr2 = round_xy(arr)
     ref2 = round_xy(ref)
     return arr2.reindex_like(ref2, method="nearest", tolerance=tol_deg)
 
 def make_xarray_chunks_from_tiffs(tiffs: List[str], chunk_size: int) -> xr.DataArray:
-    """Open TIFFs → Dataset → first xy var → chunk."""
     if not tiffs:
         raise FileNotFoundError("No GeoTIFFs found for dataset.")
     with dask.annotate(label="open_mfdataset"):
@@ -233,8 +198,6 @@ def _dtype_cast(arr: xr.DataArray, dtype_str: str) -> xr.DataArray:
     return arr
 
 def ensure_consolidated_v2(store_path: str) -> None:
-    """Consolidate metadata only for Zarr v2 stores."""
-    # Try to detect v2 by presence of .zgroup and absence of zarr.json
     fs, inner = fsspec.core.url_to_fs(store_path)
     has_zgroup = fs.exists(posixpath.join(inner, ".zgroup"))
     has_v3json = fs.exists(posixpath.join(inner, "zarr.json"))
@@ -244,24 +207,7 @@ def ensure_consolidated_v2(store_path: str) -> None:
         except Exception:
             pass
 
-def validate_zarr(zarr_path: str, ref: xr.DataArray, *, logger: logging.Logger) -> None:
-    """Open and report: shape, chunking, object count/size, sample a few blocks; assert shape==ref."""
-    arr = _first_xy_var(xr.open_zarr(zarr_path, consolidated=None, storage_options={"anon": False}))
-    # Shape check
-    if arr.sizes.get("x") != ref.sizes.get("x") or arr.sizes.get("y") != ref.sizes.get("y"):
-        raise ValueError(
-            f"Zarr grid mismatch for {zarr_path} "
-            f"(got (y:{arr.sizes.get('y')}, x:{arr.sizes.get('x')}), "
-            f"expected (y:{ref.sizes.get('y')}, x:{ref.sizes.get('x')}))"
-        )
-    # Chunk info
-    try:
-        cx = arr.data.chunks[1] if isinstance(arr.data, da.Array) else ()
-        cy = arr.data.chunks[0] if isinstance(arr.data, da.Array) else ()
-    except Exception:
-        cx, cy = (), ()
-
-    # S3 object stats
+def _s3_object_stats(zarr_path: str) -> Tuple[int, float]:
     fs = s3fs.S3FileSystem(anon=False)
     b, k = _split_s3(zarr_path.rstrip("/"))
     objs = fs.find(f"{b}/{k}")
@@ -273,8 +219,23 @@ def validate_zarr(zarr_path: str, ref: xr.DataArray, *, logger: logging.Logger) 
         except Exception:
             pass
     size_gb = size_bytes / (1024 ** 3)
+    return nobj, size_gb
 
-    # Sample a few small slices to ensure there is real data
+def validate_zarr(zarr_path: str, ref: xr.DataArray, *, logger: logging.Logger) -> None:
+    arr = _first_xy_var(xr.open_zarr(zarr_path, consolidated=None, storage_options={"anon": False}))
+    if arr.sizes.get("x") != ref.sizes.get("x") or arr.sizes.get("y") != ref.sizes.get("y"):
+        raise ValueError(
+            f"Zarr grid mismatch for {zarr_path} "
+            f"(got (y:{arr.sizes.get('y')}, x:{arr.sizes.get('x')}), "
+            f"expected (y:{ref.sizes.get('y')}, x:{ref.sizes.get('x')}))"
+        )
+    try:
+        cx = arr.data.chunks[1] if isinstance(arr.data, da.Array) else ()
+        cy = arr.data.chunks[0] if isinstance(arr.data, da.Array) else ()
+    except Exception:
+        cx, cy = (), ()
+    nobj, size_gb = _s3_object_stats(zarr_path)
+    # sample a few blocks
     samples: List[Tuple[Tuple[int, int], float]] = []
     try:
         for i in (0, max(0, arr.sizes["y"] // 2), max(0, arr.sizes["y"] - 128)):
@@ -287,45 +248,69 @@ def validate_zarr(zarr_path: str, ref: xr.DataArray, *, logger: logging.Logger) 
                 samples.append((sli.shape, float(np.nanmax(data)) if data.size else float("nan")))
     except Exception as e:
         logger.warning("Sampling warning for %s: %s", zarr_path, e)
-
     logger.info(
         "flm: Validated Zarr ✅ %s | shape=(y:%d, x:%d) chunk_x=%s chunk_y=%s | objects=%d size=%.2f GB | samples=%s",
         zarr_path, arr.sizes["y"], arr.sizes["x"], cx, cy, nobj, size_gb, samples
     )
 
-# ------------------------------ pipeline --------------------------------
-def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str, Any]]:
-    """Return input folder and output zarr path for each dataset."""
-    zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
-    kw2 = dict(kw); kw2["tile_pixels"] = tile_pixels
-    out: Dict[str, Dict[str, Any]] = {}
-    for name, spec in DATASETS.items():
-        folder_uri = FOLDER_TEMPLATE.format(folder=spec["folder"], interval=interval, **kw2)
-        out[name] = {
-            "folder": folder_uri,
-            "zarr":   zarr_base + spec["zarr"].format(interval=interval),
-            "var":    spec["var"],
-            "dtype":  spec["dtype"],
-        }
-    return out
+def validate_zarr_basic(zarr_path: str, *, logger: logging.Logger) -> xr.DataArray:
+    """Open and log basic info (no reference grid check). Returns the opened array."""
+    arr = _first_xy_var(xr.open_zarr(zarr_path, consolidated=None, storage_options={"anon": False}))
+    try:
+        cx = arr.data.chunks[1] if isinstance(arr.data, da.Array) else ()
+        cy = arr.data.chunks[0] if isinstance(arr.data, da.Array) else ()
+    except Exception:
+        cx, cy = (), ()
+    nobj, size_gb = _s3_object_stats(zarr_path)
+    logger.info(
+        "flm: Contextual Zarr OK %s | shape=(y:%d, x:%d) chunk_x=%s chunk_y=%s | objects=%d size=%.2f GB",
+        zarr_path, arr.sizes["y"], arr.sizes["x"], cx, cy, nobj, size_gb
+    )
+    return arr
+
+# -------------------------- contextual builders --------------------------
+def ensure_pixel_area_contextual_zarr(*, chunk_size: int, logger: logging.Logger) -> str:
+    """Ensure the global pixel-area contextual Zarr exists (build from GeoTIFFs if missing)."""
+    zarr_path = PIXEL_AREA_ZARR
+    if zarr_exists(zarr_path):
+        try:
+            validate_zarr_basic(zarr_path, logger=logger)
+            logger.info("flm: Using existing pixel_area contextual Zarr: %s", zarr_path)
+            return zarr_path
+        except Exception as exc:
+            logger.warning("flm: pixel_area Zarr validation failed (%s); rebuilding.", exc)
+            try:
+                remove_store_recursively(zarr_path)
+            except Exception:
+                pass
+
+    logger.info("flm: Building pixel_area contextual Zarr from GeoTIFF tiles.")
+    tiffs = list_folder_uris(PIXEL_AREA_GTIF_FOLDER)
+    if not tiffs:
+        raise FileNotFoundError(f"No GeoTIFFs found under {PIXEL_AREA_GTIF_FOLDER} for pixel_area")
+
+    da_in = make_xarray_chunks_from_tiffs(tiffs, chunk_size)
+    da_out = _dtype_cast(da_in, "float32").chunk({d: chunk_size for d in ("x", "y") if d in da_in.dims})
+    ds_out = xr.Dataset({"pixel_area": da_out})
+
+    try:
+        remove_store_recursively(zarr_path)
+    except Exception:
+        pass
+
+    with dask.annotate(label="to_zarr:pixel_area"):
+        ds_out.to_zarr(zarr_path, mode="w")
+    if Version(zarr.__version__).major < 3:
+        ensure_consolidated_v2(zarr_path)
+
+    validate_zarr_basic(zarr_path, logger=logger)
+    logger.info("flm: Built pixel_area contextual Zarr ✅ %s", zarr_path)
+    return zarr_path
 
 def ensure_adm0_contextual_zarr(
-    *,
-    ref: xr.DataArray,
-    tol: float,
-    chunk_size: int,
-    logger: logging.Logger,
-    date: str = ADM0_DATE,
+    *, ref: xr.DataArray, tol: float, chunk_size: int, logger: logging.Logger, date: str = ADM0_DATE
 ) -> str:
-    """Ensure the GADM adm0 contextual layer exists on S3 for ``date``.
-
-    If the Zarr store is missing (or fails validation), rebuild it from the
-    authoritative GeoTIFF tiles, align it to ``ref`` using the provided
-    tolerance, and write a consolidated store. Returns the final Zarr URI.
-    """
-
     zarr_path = adm0_zarr_path(date)
-
     if zarr_exists(zarr_path):
         try:
             validate_zarr(zarr_path, ref, logger=logger)
@@ -338,30 +323,14 @@ def ensure_adm0_contextual_zarr(
             except Exception:
                 pass
 
-    logger.info(
-        "flm: Building adm0 contextual Zarr for date %s from GeoTIFF tiles.",
-        date,
-    )
-
-    if not ADM0_GTIF_FOLDER:
-        raise ValueError("adm0 GeoTIFF source folder is not configured")
-
+    logger.info("flm: Building adm0 contextual Zarr for date %s from GeoTIFF tiles.", date)
     tiffs = list_folder_uris(ADM0_GTIF_FOLDER)
     if not tiffs:
-        raise FileNotFoundError(
-            f"No GeoTIFFs found under {ADM0_GTIF_FOLDER} to build adm0"
-        )
+        raise FileNotFoundError(f"No GeoTIFFs found under {ADM0_GTIF_FOLDER} to build adm0")
 
-    try:
-        da_in = make_xarray_chunks_from_tiffs(tiffs, chunk_size)
-    except Exception as exc:
-        logger.error("flm: Failed to open adm0 GeoTIFF tiles: %s", exc)
-        raise
-
+    da_in = make_xarray_chunks_from_tiffs(tiffs, chunk_size)
     da_aligned = align_like_nearest_tol(da_in, ref, tol)
-    da_uint = da_aligned.fillna(0).astype("uint32")
-    da_uint = da_uint.chunk({d: chunk_size for d in ("x", "y") if d in da_uint.dims})
-
+    da_uint = da_aligned.fillna(0).astype("uint32").chunk({d: chunk_size for d in ("x", "y") if d in da_aligned.dims})
     ds_out = xr.Dataset({ADM0_VAR_NAME: da_uint})
 
     try:
@@ -371,7 +340,6 @@ def ensure_adm0_contextual_zarr(
 
     with dask.annotate(label="to_zarr:adm0"):
         ds_out.to_zarr(zarr_path, mode="w")
-
     if Version(zarr.__version__).major < 3:
         ensure_consolidated_v2(zarr_path)
 
@@ -379,110 +347,95 @@ def ensure_adm0_contextual_zarr(
     logger.info("flm: Built adm0 contextual Zarr ✅ %s", zarr_path)
     return zarr_path
 
+# ------------------------------ pipeline --------------------------------
+def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str, Any]]:
+    zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
+    kw2 = dict(kw); kw2["tile_pixels"] = tile_pixels
+    out: Dict[str, Dict[str, Any]] = {}
+    for name, spec in DATASETS.items():
+        folder_uri = FOLDER_TEMPLATE.format(folder=spec["folder"], interval=interval, **kw2)
+        out[name] = {"folder": folder_uri, "zarr": zarr_base + spec["zarr"].format(interval=interval),
+                     "var": spec["var"], "dtype": spec["dtype"]}
+    return out
 
 def run(args: argparse.Namespace) -> None:
     stage = "zarr_build"
     start_ts = uu.timestr()
-    cluster, client, run_local = uu.connect_to_cluster(
-        cluster_name=args.cluster_name, run_local=args.run_local
-    )
+    cluster, client, run_local = uu.connect_to_cluster(cluster_name=args.cluster_name, run_local=args.run_local)
 
     logger, _ = lu.populate_main_log_header(
-        bounding_box=None,
-        use_shapefile=False,
-        client=client,
-        cluster=cluster,
-        log_note="Organic soils Zarr build",
-        run_local=run_local,
-        model_type="organic_soils",
-        stage=stage,
+        bounding_box=None, use_shapefile=False, client=client, cluster=cluster,
+        log_note="Organic soils Zarr build", run_local=run_local, model_type="organic_soils", stage=stage,
     )
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
-    OUTPUT_KW = dict(
-        root=ROOT,
-        model_version=args.model_version,
-        run_date=args.run_date,
-        run_name=args.run_name,
-    )
+    OUTPUT_KW = dict(root=ROOT, model_version=args.model_version, run_date=args.run_date, run_name=args.run_name)
 
+    # 0) Ensure canonical reference grid exists, then open it
+    ensure_pixel_area_contextual_zarr(chunk_size=args.chunk_size, logger=logger)
     pixel_area_full = open_zarr_region(PIXEL_AREA_ZARR, None, args.chunk_size)
     ref = pixel_area_full
     if args.bounding_box:
         west, south, east, north = [float(x) for x in args.bounding_box]
         ref = ref.sel(x=slice(west, east), y=slice(south, north))
 
-    # Tolerance in degrees (derive from full reference grid spacing)
+    # 1) Alignment tolerance in degrees (from reference dx)
     dx = pixel_step(pixel_area_full)
     tol = float(args.align_tolerance_fraction) * dx
 
-    ensure_adm0_contextual_zarr(
-        ref=pixel_area_full,
-        tol=tol,
-        chunk_size=args.chunk_size,
-        logger=logger,
-    )
+    # 2) Ensure adm0 contextual grid exists and matches ref
+    ensure_adm0_contextual_zarr(ref=pixel_area_full, tol=tol, chunk_size=args.chunk_size, logger=logger)
 
     logger.info("flm: Model version: %s", args.model_version)
     if client:
         try:
-            mem, n_workers, nth = uu.get_cluster_info(client, cluster)  # coiled convenience
+            mem, n_workers, nth = uu.get_cluster_info(client, cluster)
             logger.info("flm: Number of workers: %s", n_workers)
             logger.info("flm: Memory per worker: %s", mem)
             logger.info("flm: Threads per worker: %s", nth)
         except Exception:
             pass
 
-    # Map end years → (start, end) intervals
+    # 3) Build per-variable aligned Zarrs
     mapping = {end: (start, end) for start, end in cn.five_year_inventory_periods}
     interval_pairs = [mapping[y] for y in args.interval_end_years if y in mapping]
 
     for iv_start, iv_end in interval_pairs:
         interval = f"{iv_start}_{iv_end}"
         logger.info("flm: Interval %s", interval)
-
         paths = build_paths(interval, tile_pixels=args.tile_pixels, **OUTPUT_KW)
 
         for key in ("drained_total", "burned_total", "drained_state_nodes", "burned_state_nodes"):
             spec = paths[key]
-            folder = spec["folder"]
-            zpath  = spec["zarr"]
-            var    = spec["var"]
-            dtype  = spec["dtype"]
+            folder = spec["folder"]; zpath = spec["zarr"]; var = spec["var"]; dtype = spec["dtype"]
 
-            logger.info(
-                "flm: Building %s → %s",
-                folder, zpath
-            )
+            logger.info("flm: Building %s → %s", folder, zpath)
 
-            # Handle write mode
             exists = zarr_exists(zpath)
             if exists and args.write_mode == "w-":
-                logger.info("flm: Zarr exists and write_mode is 'w-': %s", zpath)
-                # Validate existing store
-                validate_zarr(zpath, ref, logger=logger)
+                logger.info("flm: Zarr exists and write_mode is 'w-': %s (validate only)", zpath)
+                # validate against full reference grid
+                validate_zarr(zpath, pixel_area_full, logger=logger)
                 continue
             if exists and args.write_mode == "w":
                 logger.info("flm: Removing existing store (write_mode='w'): %s", zpath)
                 remove_store_recursively(zpath)
 
-            # List input TIFFs
+            # Open inputs
             tiffs = list_folder_uris(folder)
             if not tiffs:
                 raise FileNotFoundError(f"No GeoTIFFs found under {folder}")
             logger.info("flm:   • %d TIFF(s) found", len(tiffs))
 
-            # Build → align → cast
             try:
                 da_in = make_xarray_chunks_from_tiffs(tiffs, args.chunk_size)
             except Exception as e:
-                # Fallback: try to filter unreadable TIFFs (rare)
                 logger.warning("open_mfdataset failed: %s. Attempting to filter unreadable tiles.", e)
                 valid: List[str] = []
                 for u in tiffs:
                     try:
-                        with xr.open_dataset(u) as _:
+                        with xr.open_dataset(u):
                             valid.append(u)
                     except Exception:
                         logger.warning("Skipping unreadable TIFF: %s", u)
@@ -490,30 +443,22 @@ def run(args: argparse.Namespace) -> None:
                     raise RuntimeError(f"All tiles failed for {folder}")
                 da_in = make_xarray_chunks_from_tiffs(valid, args.chunk_size)
 
-            # Align to the canonical reference grid
+            # Align to canonical grid
             da_aligned = align_like_nearest_tol(da_in, ref, tol)
-
-            # Type and chunk normalization
-            da_aligned = _dtype_cast(da_aligned, dtype)
-            da_aligned = da_aligned.chunk({d: args.chunk_size for d in ("x", "y") if d in da_aligned.dims})
-
-            # Write Zarr
+            da_aligned = _dtype_cast(da_aligned, dtype).chunk({d: args.chunk_size for d in ("x", "y") if d in da_aligned.dims})
             ds_out = xr.Dataset({var: da_aligned})
+
             with dask.annotate(label=f"to_zarr:{key}:{interval}"):
                 ds_out.to_zarr(zpath, mode="w")
-
-            # Consolidate for zarr v2 only
             if Version(zarr.__version__).major < 3:
                 ensure_consolidated_v2(zpath)
 
-            # Validate
-            validate_zarr(zpath, ref, logger=logger)
+            # Validate against full reference
+            validate_zarr(zpath, pixel_area_full, logger=logger)
 
     uu.stage_duration(start_ts, uu.timestr(), stage)
-    if client:
-        client.close()
-    if cluster:
-        cluster.close()
+    if client: client.close()
+    if cluster: cluster.close()
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
@@ -533,7 +478,6 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run_local", action="store_true")
     mode.add_argument("--cluster_name", default="zarr_build")
-    # Optional: crop pixel_area during dev smoke tests
     parser.add_argument("-bb", "--bounding_box", nargs=4, type=float, help="W S E N (optional, dev only)")
     args = parser.parse_args(argv)
     run(args)
