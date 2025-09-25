@@ -114,7 +114,7 @@ CONTEXTUAL_ZARR_ROOT = (
 
 # Update these dates when refreshed contextual layers are published.
 PIXEL_AREA_DATASET = "pixel_area"
-PIXEL_AREA_DATE = "20250730"
+PIXEL_AREA_DATE = "20250925"
 PIXEL_AREA_ZARR = posixpath.join(
     CONTEXTUAL_ZARR_ROOT,
     PIXEL_AREA_DATASET,
@@ -123,7 +123,7 @@ PIXEL_AREA_ZARR = posixpath.join(
 )
 
 ADM0_DATASET = "GADM4_1_adm0_global"
-ADM0_DATE = "20250604"  # Update this when a new GADM contextual Zarr is available.
+ADM0_DATE = "20250925"  # Update this when a new GADM contextual Zarr is available.
 ADM0_FILENAME_TEMPLATE = "global_GADM41_adm0_{date}.zarr"
 ADM0_VAR_NAME = "gadm_adm0"
 ADM0_GTIF_FOLDER = (
