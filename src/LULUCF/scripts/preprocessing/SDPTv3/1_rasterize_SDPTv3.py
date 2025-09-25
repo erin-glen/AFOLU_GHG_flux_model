@@ -219,21 +219,23 @@ def build_global_union_vrt_from_gdb(gdb_s3_path, output_vrt_s3_path, local_vrt_p
     tree.write(local_vrt_path, encoding="UTF-8", xml_declaration=True)
     lu.print_and_log(f"Wrote union VRT: {local_vrt_path} — {uu.timestr('time')}", True, logger_worker)
 
-    # Step 6: Validate by opening VRT
-    vrt_check = ogr.Open(local_vrt_path)
-    if vrt_check is None:
-        raise RuntimeError("Generated VRT could not be opened.")
-    vlayer = vrt_check.GetLayerByName("global_union_polygons")
-    if vlayer is None:
-        raise RuntimeError("Union layer 'global_union_polygons' missing in VRT.")
-    try:
-        _ = vlayer.GetFeatureCount()  # may trigger remote IO
-    except Exception:
-        main_logger.warning("Could not count features on the VRT; continuing.")
+    # Step 6: Open the VRT and confirm the union layer and schema exists
+    # vrt_check = ogr.Open(local_vrt_path)
+    # if vrt_check is None:
+    #     raise RuntimeError("Generated VRT could not be opened.")
+    #
+    # vlayer = vrt_check.GetLayerByName("global_union_polygons")
+    # if vlayer is None:
+    #     raise RuntimeError("Union layer 'global_union_polygons' missing in VRT.")
+    #
+    # # Check that a schema exists
+    # defn = vlayer.GetLayerDefn()
+    # if defn is None:
+    #     raise RuntimeError("Union layer has no layer definition (unexpected).")
+    #
+    # vrt_check = None
 
-    vrt_check = None
-
-    # Step 7: Upload + cleanup
+# Step 7: Upload + cleanup
     uu.upload_s3_file(output_vrt_s3_path, local_vrt_path)
     if uu.check_s3_file_created(output_vrt_s3_path, main_logger):
         try:
