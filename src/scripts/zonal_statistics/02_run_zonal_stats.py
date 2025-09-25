@@ -13,7 +13,7 @@ Important
 ---------
 - **Per-pixel only** for flux totals; no per-ha fallback or conversion exists here.
 - If a required Zarr is missing, the script fails with a clear message.
-  Build Zarrs first with `build_zarr_caches.py`.
+  Build Zarrs first with `01_build_zarr_caches.py`.
 
 Examples
 --------
@@ -24,7 +24,6 @@ python -m src.scripts.zonal_statistics.02_run_zonal_stats \
   --run_date 20250923 \
   --model_version 0_8_0 \
   --run_name ogh_sensitivity_1km \
-  --tile_pixels 4000 \
   --chunk_size 10000
 
 # Multiple intervals (cluster)
@@ -34,7 +33,6 @@ python -m src.scripts.zonal_statistics.02_run_zonal_stats \
   --run_date 20250825 \
   --model_version 0_7_0 \
   --run_name ogh_standard_model \
-  --tile_pixels 4000 \
   --chunk_size 10000
 
 # Local smoke test (1×1° ROI)
@@ -45,7 +43,6 @@ python -m src.scripts.zonal_statistics.02_run_zonal_stats \
   --run_date 20250101 \
   --model_version test \
   --run_name smoke \
-  --tile_pixels 4000 \
   --chunk_size 10000
 """
 
@@ -55,9 +52,9 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, List, Tuple
-from functools import lru_cache
+from typing import Any, Dict, Optional, List
 
+import boto3
 import dask
 import dask.array as da
 import numpy as np
@@ -84,34 +81,28 @@ SPARSE_DEFAULT = True
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 OUTPUT_BASE = "{root}/version_{model_version}"
 
+# Per-variable Zarr names (under .../zarr/{run_name}/{run_date}/{interval}/)
 DATASETS: Dict[str, Dict[str, Any]] = {
     "drained_state_nodes": {
         "zarr": "drained_state_node_{interval}.zarr",
         "var": "drained_state_nodes",
-        "folder": "drained_state",
     },
     "burned_state_nodes": {
         "zarr": "burned_state_node_{interval}.zarr",
         "var": "burned_state_nodes",
-        "folder": "burned_state",
     },
     "drained_total": {
         "zarr": "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr",
         "var": "drained_total",
-        "folder": "drained_total_Mg_CO2e_pixel_yr",
     },
     "burned_total": {
         "zarr": "burned_total_Mg_CO2e_pixel_yr_{interval}.zarr",
         "var": "burned_total",
-        "folder": "burned_total_Mg_CO2e_pixel_yr",
     },
 }
 
+# Zarr caches live here; note: NO tile-size suffix
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_name}/{run_date}/{interval}/"
-FOLDER_TEMPLATE = (
-    OUTPUT_BASE
-    + "/{folder}/{run_name}/five_year_intervals/{interval}/{tile_pixels}_pixels/{run_date}/"
-)
 
 # Contextual layer Zarrs (built separately)
 ADM0_ZARR = (
@@ -136,13 +127,23 @@ def build_output_parquet(model_version: str, run_name: str, run_date: str, inter
     base = posixpath.join(ROOT, f"version_{model_version}", "zonal_stats", run_name, run_date, interval)
     return base.rstrip("/") + "/"
 
-@lru_cache(maxsize=None)
+def _split_s3(path: str) -> tuple[str, str]:
+    if not path.startswith("s3://"):
+        raise ValueError(f"Expected s3:// path, got {path}")
+    bucket, key = path[5:].split("/", 1)
+    return bucket, key
+
 def zarr_exists(zarr_path: str) -> bool:
-    fs, inner = s3fs.S3FileSystem(anon=False), zarr_path.replace("s3://", "")
-    try:
-        return fs.exists(posixpath.join(inner, "zarr.json")) or fs.exists(posixpath.join(inner, ".zgroup"))
-    except Exception:
-        return False
+    """True if a Zarr v2 (.zgroup) or v3 (zarr.json) root exists."""
+    b, k = _split_s3(zarr_path.rstrip("/"))
+    s3 = boto3.client("s3")
+    for probe in ("zarr.json", ".zgroup"):
+        try:
+            s3.head_object(Bucket=b, Key=f"{k}/{probe}")
+            return True
+        except Exception:
+            continue
+    return False
 
 def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
     if isinstance(ds_or_da, xr.DataArray):
@@ -174,30 +175,58 @@ def open_zarr_region(path: str, bbox: Optional[List[float]], chunk_size: int) ->
         data_arr = data_arr.chunk(chunk_dict)
     return data_arr
 
-def safe_crop(ds, ref):
+def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
     return ds.sel(x=ref.x, y=ref.y, method="nearest").assign_coords(x=ref.x, y=ref.y)
 
-def convert_to_coord_dict(flox_result: xr.DataArray, interval: str) -> dict:
-    logging.info("   Post-processing %s : %s", interval, timestr())
+def convert_to_coord_dict(flox_result: xr.DataArray) -> dict:
     arr = flox_result.data
     if isinstance(arr, da.Array):
         arr = arr.compute()
     dims = flox_result.dims
-    if hasattr(arr, "coords") and hasattr(arr, "data"):
-        indices, values = arr.coords, arr.data  # sparse.COO
+    if hasattr(arr, "coords") and hasattr(arr, "data"):   # sparse.COO
+        indices, values = arr.coords, arr.data
     else:
-        grid = np.indices(arr.shape); indices = grid.reshape(len(arr.shape), -1); values = arr.ravel()
+        grid = np.indices(arr.shape)
+        indices = grid.reshape(len(arr.shape), -1)
+        values = arr.ravel()
     return {dim: flox_result.coords[dim].values[indices[i]] for i, dim in enumerate(dims)} | {"value": values}
 
-def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str, Any]]:
-    zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
-    paths: Dict[str, Dict[str, Any]] = {}
-    kw2 = dict(kw); kw2["tile_pixels"] = tile_pixels
+def build_zarr_paths(interval: str, **fmt_kw) -> Dict[str, Dict[str, Any]]:
+    zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **fmt_kw)
+    out: Dict[str, Dict[str, Any]] = {}
     for name, spec in DATASETS.items():
-        folder_uri = FOLDER_TEMPLATE.format(folder=spec["folder"], interval=interval, **kw2)
-        paths[name] = {"folder": folder_uri, "zarr": zarr_base + spec["zarr"].format(interval=interval),
-                       "unit": "pixel", "var": spec["var"]}
-    return paths
+        out[name] = {"zarr": zarr_base + spec["zarr"].format(interval=interval),
+                     "var": spec["var"]}
+    return out
+
+def _upload_dir(fs_s3: s3fs.S3FileSystem, local_dir: Path, dest_prefix: str) -> int:
+    uploaded = 0
+    for p in local_dir.rglob("*"):
+        if p.is_file():
+            rel = p.relative_to(local_dir)
+            remote_path = posixpath.join(dest_prefix.rstrip("/"), *rel.parts)
+            fs_s3.put(str(p), remote_path)
+            uploaded += 1
+    return uploaded
+
+def _df_from_result(res: xr.DataArray, flux_map: Dict[int, str], interval_end: int) -> pd.DataFrame:
+    coord_dict = convert_to_coord_dict(res)
+    df = pd.DataFrame(coord_dict)
+    df["flux_type"] = df["flux_type"].replace(flux_map)
+
+    if "drained_state_nodes" in df.columns:
+        df["drained_state_meaning"] = (
+            df["drained_state_nodes"].astype("string").str.zfill(8).map(zc.DRAINED_STATE_NODE_MEANINGS)
+        )
+    if "burned_state_nodes" in df.columns:
+        df["burned_state_meaning"] = (
+            df["burned_state_nodes"].astype("string").str.zfill(8).map(zc.BURNED_STATE_NODE_MEANINGS)
+        )
+
+    df["interval_end"] = interval_end
+    # Convert area m² → ha
+    df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000.0
+    return df
 
 # -------------------------------- driver --------------------------------
 def run(args: argparse.Namespace) -> None:
@@ -207,7 +236,8 @@ def run(args: argparse.Namespace) -> None:
         cluster_name=args.cluster_name, run_local=args.run_local,
     )
 
-    bbox = None
+    # ROI from bbox or union of tile_ids
+    bbox: Optional[List[float]] = None
     if args.bounding_box:
         bbox = [float(x) for x in args.bounding_box]
     elif args.tile_ids:
@@ -231,14 +261,16 @@ def run(args: argparse.Namespace) -> None:
 
     OUTPUT_KW = dict(root=ROOT, model_version=args.model_version, run_date=args.run_date, run_name=args.run_name)
 
-    # Open contextual layers
+    # Open contextual layers (these Zarrs must exist separately)
     adm0 = open_zarr_region(ADM0_ZARR, bbox, args.chunk_size).astype("uint32")
     pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).persist()
 
+    # Expected groups
     gadm_adm0_ids = np.array(zc.GADM_ADM0_IDS, dtype=np.uint32)
     drained_codes_arr = np.array(sorted({0, *map(int, zc.ALL_DRAINED_STATE_CODES)}), dtype=np.uint32)
     burned_codes_arr  = np.array(sorted({0, *map(int, zc.ALL_BURNED_STATE_CODES)}),  dtype=np.uint32)
 
+    # Local staging
     local_arrow = pafs.LocalFileSystem()
     base_dir_root = Path(args.local_output).expanduser().resolve()
     base_dir_root.mkdir(parents=True, exist_ok=True)
@@ -254,22 +286,26 @@ def run(args: argparse.Namespace) -> None:
         interval = f"{interval_start_year}_{interval_end_year}"
         logger.info("Processing interval %s : %s", interval, timestr())
 
-        paths = build_paths(interval, tile_pixels=args.tile_pixels, **OUTPUT_KW)
-        # Ensure required Zarrs exist (error if missing)
+        # Build Zarr paths and assert existence
+        paths = build_zarr_paths(interval, **OUTPUT_KW)
         for key in ("drained_total", "burned_total", "drained_state_nodes", "burned_state_nodes"):
             zpath = paths[key]["zarr"]
             if not zarr_exists(zpath):
-                raise FileNotFoundError(f"Missing Zarr for {key}: {zpath}\n"
-                                        f"Build with: python -m src.scripts.zonal_statistics.build_zarr_caches "
-                                        f"--interval_end_years {interval_end_year} --run_date {args.run_date} "
-                                        f"--model_version {args.model_version} --run_name {args.run_name} "
-                                        f"--tile_pixels {args.tile_pixels} --chunk_size {args.chunk_size}")
+                raise FileNotFoundError(
+                    f"Missing Zarr for {key}: {zpath}\n"
+                    f"Build with: python -m src.scripts.zonal_statistics.01_build_zarr_caches "
+                    f"--interval_end_years {interval_end_year} --run_date {args.run_date} "
+                    f"--model_version {args.model_version} --run_name {args.run_name} "
+                    f"--chunk_size {args.chunk_size}"
+                )
 
+        # Open variables
         drained_total = open_zarr_region(paths["drained_total"]["zarr"], bbox, args.chunk_size)
         burned_total = open_zarr_region(paths["burned_total"]["zarr"], bbox, args.chunk_size)
         drained_state_nodes = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
         burned_state_nodes = open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
 
+        # Align everything to the drained_state grid
         reference = drained_state_nodes
         adm0_aligned = safe_crop(adm0, reference)
         pixel_area_aligned = safe_crop(pixel_area, reference)
@@ -284,7 +320,7 @@ def run(args: argparse.Namespace) -> None:
         if args.debug:
             logger.debug("Running reductions for %s", interval)
 
-        # Drained
+        # ------ Drained aggregation (sum) ------
         with dask.annotate(label=f"reduce:drained:{interval}"):
             cube_d = xr.concat([drained_total_aligned, pixel_area_aligned], dim="flux_type").assign_coords(
                 flux_type=("flux_type", [0, 2])
@@ -296,7 +332,7 @@ def run(args: argparse.Namespace) -> None:
             ).compute()
         df_d = _df_from_result(res_d, {0: "drained_total_Mg_CO2e", 2: "area__ha"}, interval_end_year)
 
-        # Burned
+        # ------ Burned aggregation (sum) ------
         with dask.annotate(label=f"reduce:burned:{interval}"):
             cube_b = xr.concat([burned_total_aligned, pixel_area_aligned], dim="flux_type").assign_coords(
                 flux_type=("flux_type", [1, 2])
@@ -308,12 +344,13 @@ def run(args: argparse.Namespace) -> None:
             ).compute()
         df_b = _df_from_result(res_b, {1: "burned_total_Mg_CO2e", 2: "area__ha"}, interval_end_year)
 
-        # Write local Parquet (per interval)
+        # ------ Write local Parquet (per interval) ------
+        import shutil
         local_d = base_dir_drained / interval
         local_b = base_dir_burned / interval
         for pth in (local_d, local_b):
             if pth.exists():
-                import shutil; shutil.rmtree(pth, ignore_errors=True)
+                shutil.rmtree(pth, ignore_errors=True)
             pth.mkdir(parents=True, exist_ok=True)
 
         ds.write_dataset(pa.Table.from_pandas(df_d, preserve_index=False), base_dir=str(local_d),
@@ -322,7 +359,7 @@ def run(args: argparse.Namespace) -> None:
                          filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
         logger.info("Wrote %s rows (drained) and %s rows (burned) for %s", len(df_d), len(df_b), interval)
 
-        # Upload to S3
+        # ------ Upload to S3 ------
         dest_root = build_output_parquet(args.model_version, args.run_name, args.run_date, interval)
         dest_d = posixpath.join(dest_root.rstrip("/"), "drained")
         dest_b = posixpath.join(dest_root.rstrip("/"), "burned")
@@ -330,35 +367,17 @@ def run(args: argparse.Namespace) -> None:
         _upload_dir(fs_s3, local_b, dest_b)
         logger.info("Uploaded interval %s → %s{drained,burned}", interval, dest_root)
 
+        if not args.keep_local:
+            shutil.rmtree(local_d, ignore_errors=True)
+            shutil.rmtree(local_b, ignore_errors=True)
+
+    if not args.keep_local:
+        import shutil
+        shutil.rmtree(base_dir_root, ignore_errors=True)
+
     if client: client.close()
     if cluster: cluster.close()
     uu.stage_duration(start_ts, uu.timestr(), stage)
-
-def _upload_dir(fs_s3: s3fs.S3FileSystem, local_dir: Path, dest_prefix: str) -> int:
-    uploaded = 0
-    for p in local_dir.rglob("*"):
-        if p.is_file():
-            rel = p.relative_to(local_dir)
-            remote_path = posixpath.join(dest_prefix.rstrip("/"), *rel.parts)
-            fs_s3.put(str(p), remote_path)
-            uploaded += 1
-    return uploaded
-
-def _df_from_result(res: xr.DataArray, flux_map: Dict[int, str], interval_end: int) -> pd.DataFrame:
-    coord_dict = convert_to_coord_dict(res, str(interval_end))
-    df = pd.DataFrame(coord_dict)
-    df["flux_type"] = df["flux_type"].replace(flux_map)
-    if "drained_state_nodes" in df.columns:
-        df["drained_state_meaning"] = (
-            df["drained_state_nodes"].astype("string").str.zfill(8).map(zc.DRAINED_STATE_NODE_MEANINGS)
-        )
-    if "burned_state_nodes" in df.columns:
-        df["burned_state_meaning"] = (
-            df["burned_state_nodes"].astype("string").str.zfill(8).map(zc.BURNED_STATE_NODE_MEANINGS)
-        )
-    df["interval_end"] = interval_end
-    df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000.0
-    return df
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
@@ -367,10 +386,8 @@ def main(argv=None):
     parser.add_argument("--run_date", required=True)
     parser.add_argument("--interval_end_years", nargs="+", type=int, required=True)
     parser.add_argument("--chunk_size", type=int, default=10000)
-    parser.add_argument("--tile_pixels", type=int, default=4000,
-                        help="Input tile size in pixels (4000 for 1×1°, 40000 for 10×10°).")
     parser.add_argument("--local_output", default="/tmp/zonal_stats")
-    parser.add_argument("--keep-local", action="store_true")
+    parser.add_argument("--keep_local", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--no_sparse", action="store_true", default=not SPARSE_DEFAULT)
     parser.add_argument("--run_name", default="ogh_standard_model")
