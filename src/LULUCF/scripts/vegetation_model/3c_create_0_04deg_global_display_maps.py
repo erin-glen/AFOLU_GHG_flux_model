@@ -312,7 +312,7 @@ def create_gif(net_jpeg_base, out_folder, out_maps_for_gif):
     )
 
 # Makes jpeg of net fluxes
-def map_net_flux(input_date, s3_folder, local_reproj_folder, local_jpeg_folder, colors, percentiles, title_text):
+def map_net_flux(input_date, s3_folder, local_reproj_folder, local_jpeg_folder, colors, percentiles):
 
     series_start_time = time.time()
 
@@ -341,8 +341,8 @@ def map_net_flux(input_date, s3_folder, local_reproj_folder, local_jpeg_folder, 
 
         # Names before and after reprojection
         year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{interval_segment}_global"
-        year_path_unproj = f"{s3_folder}net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_{year - 1}_{year}_global.tif"
-        year_path_reproj = f"{local_reproj_folder}/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_{year - 1}_{year}_global_reproj.tif"
+        year_path_unproj = f"{s3_folder}{year_file}.tif"
+        year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
 
         print(f"---Mapping net flux for {year} from {year_file}")
 
@@ -405,13 +405,20 @@ def map_net_flux(input_date, s3_folder, local_reproj_folder, local_jpeg_folder, 
         # Plots the country boundaries on top
         plot_country_boundaries(ax, shapefile)
 
-        # Creates the legend in kt CO2e (converts legend units from Mg (t) to kt-- data doesn't change)
-        # Rounds data_min down to the nearest 0.01 and data_max up to the nearest 0.01 for legend
+        # Creates the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
+        # Rounds data_min down and data_max up for legend.
         rounded_min = math.ceil(data_min/10**3 * 100) / 100  # Rounds up
         rounded_max = math.floor(data_max/10**3 * 100) / 100  # Rounds down
         tick_labels = [f"< {rounded_min:.0f}  (sink)",   # Spaces are to horizontally align the text explanations
                         "0           (neutral)",
                        f"> {rounded_max:.0f}  (source)"]
+
+        # Modifies the legend title based on the input.
+        if "all_gases" in pattern_segment:
+            title_text = f"Net greenhouse gas flux\nAll vegetation pools, all gases\nkt CO$_2$e yr$^{{-1}}$"
+        else:
+            title_text = f"Net greenhouse gas flux\nAll vegetation pools, CO2 only\nkt CO$_2$e yr$^{{-1}}$"
+
         create_divergent_legend(fig, img, vmin, vcenter, vmax, title_text, tick_labels, year)
 
         # Removes axis ticks and labels
@@ -450,6 +457,23 @@ def map_gross(input_date, s3_folder, local_reproj_folder, local_jpeg_folder, col
 
     # for year in cn.years_annual[1:]:
     for year in cn.years_annual[1:2]: # For testing a specific year
+
+        # All the components of the input s3 path
+        parts = s3_folder.strip('/').split('/')
+
+        # Gets the segment for the input pattern
+        pattern_idx = parts.index(f"version_{cn.model_version_underscore}")
+        pattern_segment = parts[pattern_idx + 1]
+
+        # Gets the segment for the input interval
+        interval_idx = parts.index(f"annual_intervals")
+        interval_segment = parts[interval_idx + 1]
+
+        # Names before and after reprojection
+        year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{interval_segment}_global"
+        year_path_unproj = f"{s3_folder}net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_{year - 1}_{year}_global.tif"
+        year_path_reproj = f"{local_reproj_folder}/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_{year - 1}_{year}_global_reproj.tif"
+
 
         # Names before and after reprojection
         year_file = f"net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_{year - 1}_{year}_global"
@@ -610,9 +634,8 @@ if __name__ == '__main__':
     emissions_colors = net_color_palette[5:]
 
     # Legend titles
-    emissions_title = f"Gross land greenhouse gas emissions\nkt CO$_2$e yr$^{{-1}}$"
-    removals_title = f"Gross land CO$_2$ removals\nkt CO$_2$ yr$^{{-1}}$"
-    net_title = f"Net land greenhouse gas flux (all gases)\nkt CO$_2$e yr$^{{-1}}$"
+    emissions_title = f"Gross greenhouse gas emissions\nkt CO$_2$e yr$^{{-1}}$"
+    removals_title = f"Gross CO$_2$ removals\nkt CO$_2$ yr$^{{-1}}$"
 
     local_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v1_0_0_2016_2024_global/"
 
@@ -666,7 +689,7 @@ if __name__ == '__main__':
     net_input_folders_s3 = net_input_folders_s3[1:2]
     for net_input_s3 in net_input_folders_s3:
         map_net_flux(input_date, net_input_s3, local_reproj_folder, local_jpeg_folder,
-                     net_color_palette, net_percentiles, net_title)
+                     net_color_palette, net_percentiles)
 
     # # Generates three-panel map
     # create_three_panel_map()
