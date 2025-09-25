@@ -1,19 +1,20 @@
 # -*- coding: utf-8 -*-
-"""Run organic-soils zonal statistics (per-pixel only; no combined-Zarr; per-interval upload).
+"""Run organic-soils zonal statistics (per-pixel only; robust alignment; per-interval upload).
 
 What this does
 --------------
 - Assumes per-variable Zarr caches already exist under:
   .../zarr/{run_name}/{run_date}/{interval}/
 - Opens Zarrs for adm0, pixel_area, drained_total, burned_total, and state nodes
-- Runs flox-based grouped sums (adm0 × state) and writes local Parquet per interval
-- Uploads to .../zonal_stats/{run_name}/{run_date}/{interval}/{drained|burned}/
+- Aligns all variables to the pixel_area grid using nearest-with-tolerance
+- Runs flox-based grouped sums (adm0 × state) with a mask (adm0 > 0)
+- Writes local Parquet per interval and uploads to:
+  .../zonal_stats/{run_name}/{run_date}/{interval}/{drained|burned}/
 
 Important
 ---------
 - **Per-pixel only** for flux totals; no per-ha fallback or conversion exists here.
 - If a required Zarr is missing, the script fails with a clear message.
-  Build Zarrs first with `01_build_zarr_caches.py`.
 
 Examples
 --------
@@ -81,7 +82,6 @@ SPARSE_DEFAULT = True
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 OUTPUT_BASE = "{root}/version_{model_version}"
 
-# Per-variable Zarr names (under .../zarr/{run_name}/{run_date}/{interval}/)
 DATASETS: Dict[str, Dict[str, Any]] = {
     "drained_state_nodes": {
         "zarr": "drained_state_node_{interval}.zarr",
@@ -101,10 +101,10 @@ DATASETS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# Zarr caches live here; note: NO tile-size suffix
+# Zarr caches (NO tile-size suffix in path)
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_name}/{run_date}/{interval}/"
 
-# Contextual layer Zarrs (built separately)
+# Contextual layers (Zarrs built separately)
 ADM0_ZARR = (
     "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/"
     "GADM4_1_adm0_global/20250604/global_GADM41_adm0_20250604.zarr"
@@ -155,28 +155,46 @@ def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
         da_ = da_.isel(band=0, drop=True)
     return da_
 
-def _axis_order(data_arr: xr.DataArray) -> tuple[bool, bool]:
-    x0 = float(data_arr.x.values[0]); x1 = float(data_arr.x.values[-1])
-    y0 = float(data_arr.y.values[0]); y1 = float(data_arr.y.values[-1])
-    return (x0 < x1, y0 < y1)
-
 def open_zarr_region(path: str, bbox: Optional[List[float]], chunk_size: int) -> xr.DataArray:
-    s3_opts = {"anon": False}
-    dsx = xr.open_zarr(path, consolidated=None, storage_options=s3_opts)
+    dsx = xr.open_zarr(path, consolidated=None, storage_options={"anon": False})
     data_arr = _first_xy_var(dsx)
     if bbox is not None and {"x", "y"}.issubset(data_arr.dims):
         west, south, east, north = bbox
-        x_asc, y_asc = _axis_order(data_arr)
-        x_slice = slice(min(west, east), max(west, east)) if x_asc else slice(max(east, west), min(east, west))
-        y_slice = slice(min(south, north), max(south, north)) if y_asc else slice(max(north, south), min(north, south))
+        x0, x1 = float(data_arr.x.values[0]), float(data_arr.x.values[-1])
+        y0, y1 = float(data_arr.y.values[0]), float(data_arr.y.values[-1])
+        x_slice = slice(min(west, east), max(west, east)) if x0 < x1 else slice(max(east, west), min(east, west))
+        y_slice = slice(min(south, north), max(south, north)) if y0 < y1 else slice(max(north, south), min(north, south))
         data_arr = data_arr.sel(x=x_slice, y=y_slice)
     chunk_dict = {d: chunk_size for d in ("x", "y") if d in data_arr.dims}
     if chunk_dict:
         data_arr = data_arr.chunk(chunk_dict)
     return data_arr
 
-def safe_crop(ds: xr.DataArray, ref: xr.DataArray) -> xr.DataArray:
-    return ds.sel(x=ref.x, y=ref.y, method="nearest").assign_coords(x=ref.x, y=ref.y)
+def pixel_step(arr: xr.DataArray) -> float:
+    """Return approximate pixel size in degrees along x (absolute value)."""
+    xvals = arr.x.values
+    if xvals.size >= 2:
+        return float(abs(xvals[1] - xvals[0]))
+    # fallback for very small test windows
+    return 1.0 / 4000.0  # 0.00025°
+
+def align_like_nearest_tol(arr: xr.DataArray, ref: xr.DataArray, tol: float) -> xr.DataArray:
+    """
+    Align arr to ref's x/y using nearest-neighbor with a tolerance in degrees.
+    If the nearest coordinate is farther than tol, NaN is produced (no far snapping).
+    """
+    # reindex_like preserves ref shape and coords
+    return arr.reindex_like(ref, method="nearest", tolerance=tol)
+
+def _upload_dir(fs_s3: s3fs.S3FileSystem, local_dir: Path, dest_prefix: str) -> int:
+    uploaded = 0
+    for p in local_dir.rglob("*"):
+        if p.is_file():
+            rel = p.relative_to(local_dir)
+            remote_path = posixpath.join(dest_prefix.rstrip("/"), *rel.parts)
+            fs_s3.put(str(p), remote_path)
+            uploaded += 1
+    return uploaded
 
 def convert_to_coord_dict(flox_result: xr.DataArray) -> dict:
     arr = flox_result.data
@@ -190,24 +208,6 @@ def convert_to_coord_dict(flox_result: xr.DataArray) -> dict:
         indices = grid.reshape(len(arr.shape), -1)
         values = arr.ravel()
     return {dim: flox_result.coords[dim].values[indices[i]] for i, dim in enumerate(dims)} | {"value": values}
-
-def build_zarr_paths(interval: str, **fmt_kw) -> Dict[str, Dict[str, Any]]:
-    zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **fmt_kw)
-    out: Dict[str, Dict[str, Any]] = {}
-    for name, spec in DATASETS.items():
-        out[name] = {"zarr": zarr_base + spec["zarr"].format(interval=interval),
-                     "var": spec["var"]}
-    return out
-
-def _upload_dir(fs_s3: s3fs.S3FileSystem, local_dir: Path, dest_prefix: str) -> int:
-    uploaded = 0
-    for p in local_dir.rglob("*"):
-        if p.is_file():
-            rel = p.relative_to(local_dir)
-            remote_path = posixpath.join(dest_prefix.rstrip("/"), *rel.parts)
-            fs_s3.put(str(p), remote_path)
-            uploaded += 1
-    return uploaded
 
 def _df_from_result(res: xr.DataArray, flux_map: Dict[int, str], interval_end: int) -> pd.DataFrame:
     coord_dict = convert_to_coord_dict(res)
@@ -227,6 +227,14 @@ def _df_from_result(res: xr.DataArray, flux_map: Dict[int, str], interval_end: i
     # Convert area m² → ha
     df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000.0
     return df
+
+def build_zarr_paths(interval: str, **fmt_kw) -> Dict[str, Dict[str, Any]]:
+    zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **fmt_kw)
+    out: Dict[str, Dict[str, Any]] = {}
+    for name, spec in DATASETS.items():
+        out[name] = {"zarr": zarr_base + spec["zarr"].format(interval=interval),
+                     "var": spec["var"]}
+    return out
 
 # -------------------------------- driver --------------------------------
 def run(args: argparse.Namespace) -> None:
@@ -252,7 +260,7 @@ def run(args: argparse.Namespace) -> None:
 
     logger, _ = lu.populate_main_log_header(
         bounding_box=bbox, use_shapefile=False, client=client, cluster=cluster,
-        log_note="Organic soils zonal statistics (per-pixel only)", run_local=run_local,
+        log_note="Organic soils zonal statistics (per-pixel; robust alignment)", run_local=run_local,
         model_type="organic_soils", stage=stage,
     )
     if args.debug:
@@ -261,12 +269,12 @@ def run(args: argparse.Namespace) -> None:
 
     OUTPUT_KW = dict(root=ROOT, model_version=args.model_version, run_date=args.run_date, run_name=args.run_name)
 
-    # Open contextual layers (these Zarrs must exist separately)
+    # Open contextual layers (canonical grid comes from pixel_area)
     adm0 = open_zarr_region(ADM0_ZARR, bbox, args.chunk_size).astype("uint32")
     pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).persist()
 
-    # Expected groups
-    gadm_adm0_ids = np.array(zc.GADM_ADM0_IDS, dtype=np.uint32)
+    # Expected groups (exclude 0 to avoid ocean bookkeeping)
+    gadm_adm0_ids = np.array([i for i in zc.GADM_ADM0_IDS if i > 0], dtype=np.uint32)
     drained_codes_arr = np.array(sorted({0, *map(int, zc.ALL_DRAINED_STATE_CODES)}), dtype=np.uint32)
     burned_codes_arr  = np.array(sorted({0, *map(int, zc.ALL_BURNED_STATE_CODES)}),  dtype=np.uint32)
 
@@ -277,6 +285,11 @@ def run(args: argparse.Namespace) -> None:
     base_dir_drained = base_dir_root / "drained"
     base_dir_burned = base_dir_root / "burned"
     fs_s3 = s3fs.S3FileSystem(anon=False)
+
+    # Canonical reference grid = pixel_area
+    ref = pixel_area
+    dx = pixel_step(ref)
+    tol = float(args.align_tolerance_fraction) * dx  # e.g., 0.49 * pixel width
 
     # Intervals
     mapping = {end: (start, end) for start, end in cn.five_year_inventory_periods}
@@ -299,47 +312,72 @@ def run(args: argparse.Namespace) -> None:
                     f"--chunk_size {args.chunk_size}"
                 )
 
-        # Open variables
-        drained_total = open_zarr_region(paths["drained_total"]["zarr"], bbox, args.chunk_size)
-        burned_total = open_zarr_region(paths["burned_total"]["zarr"], bbox, args.chunk_size)
-        drained_state_nodes = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
-        burned_state_nodes = open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
+        # Open variables (raw)
+        drained_total_raw = open_zarr_region(paths["drained_total"]["zarr"], bbox, args.chunk_size)
+        burned_total_raw  = open_zarr_region(paths["burned_total"]["zarr"],  bbox, args.chunk_size)
+        drained_nodes_raw = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
+        burned_nodes_raw  = open_zarr_region(paths["burned_state_nodes"]["zarr"],  bbox, args.chunk_size).astype("uint32")
 
-        # Align everything to the drained_state grid
-        reference = drained_state_nodes
-        adm0_aligned = safe_crop(adm0, reference)
-        pixel_area_aligned = safe_crop(pixel_area, reference)
-        drained_total_aligned = safe_crop(drained_total, reference)
-        burned_total_aligned = safe_crop(burned_total, reference)
-        burned_state_nodes_aligned = safe_crop(burned_state_nodes, reference)
+        # Align all to canonical ref (pixel_area) with nearest + tolerance
+        adm0_aligned         = align_like_nearest_tol(adm0,         ref, tol)
+        drained_total_aligned= align_like_nearest_tol(drained_total_raw, ref, tol)
+        burned_total_aligned = align_like_nearest_tol(burned_total_raw,  ref, tol)
+        drained_nodes_aligned= align_like_nearest_tol(drained_nodes_raw, ref, tol)
+        burned_nodes_aligned = align_like_nearest_tol(burned_nodes_raw,  ref, tol)
 
-        adm0_aligned.name = "gadm_adm0"
-        drained_state_nodes.name = "drained_state_nodes"
-        burned_state_nodes_aligned.name = "burned_state_nodes"
+        # Diagnostics: how much flux lies where adm0 == 0 (before masking)?
+        try:
+            flux_mask = ((drained_total_aligned > 0) | (burned_total_aligned > 0))
+            ocean_mask = (adm0_aligned == 0)
+            leak = (flux_mask & ocean_mask).sum().compute()
+            denom = flux_mask.sum().compute()
+            leak_ratio = float(leak) / float(denom) if denom else 0.0
+            if leak_ratio > args.leak_warn_threshold:
+                logger.warning(
+                    "Flux-over-ocean (adm0==0) ratio is %.4f (> %.4f). "
+                    "This typically indicates grid misalignment or missing tiles.",
+                    leak_ratio, args.leak_warn_threshold
+                )
+            else:
+                logger.info("Flux-over-ocean (adm0==0) ratio: %.4f", leak_ratio)
+        except Exception:
+            # Non-fatal; continue
+            pass
 
-        if args.debug:
-            logger.debug("Running reductions for %s", interval)
+        # Labels & mask for flox
+        where_mask = (adm0_aligned > 0)
+        adm0_labels = adm0_aligned
+        drained_nodes_aligned = drained_nodes_aligned
+        burned_nodes_aligned  = burned_nodes_aligned
 
         # ------ Drained aggregation (sum) ------
         with dask.annotate(label=f"reduce:drained:{interval}"):
-            cube_d = xr.concat([drained_total_aligned, pixel_area_aligned], dim="flux_type").assign_coords(
+            cube_d = xr.concat([drained_total_aligned, ref], dim="flux_type").assign_coords(
                 flux_type=("flux_type", [0, 2])
             )
             res_d = xarray_reduce(
-                cube_d, adm0_aligned, drained_state_nodes, func="sum",
+                cube_d,
+                adm0_labels,
+                drained_nodes_aligned,
+                func="sum",
                 expected_groups=(gadm_adm0_ids, drained_codes_arr),
+                where=where_mask,
                 **flox_sparse_reindex_kwargs(not args.no_sparse),
             ).compute()
         df_d = _df_from_result(res_d, {0: "drained_total_Mg_CO2e", 2: "area__ha"}, interval_end_year)
 
         # ------ Burned aggregation (sum) ------
         with dask.annotate(label=f"reduce:burned:{interval}"):
-            cube_b = xr.concat([burned_total_aligned, pixel_area_aligned], dim="flux_type").assign_coords(
+            cube_b = xr.concat([burned_total_aligned, ref], dim="flux_type").assign_coords(
                 flux_type=("flux_type", [1, 2])
             )
             res_b = xarray_reduce(
-                cube_b, adm0_aligned, burned_state_nodes_aligned, func="sum",
+                cube_b,
+                adm0_labels,
+                burned_nodes_aligned,
+                func="sum",
                 expected_groups=(gadm_adm0_ids, burned_codes_arr),
+                where=where_mask,
                 **flox_sparse_reindex_kwargs(not args.no_sparse),
             ).compute()
         df_b = _df_from_result(res_b, {1: "burned_total_Mg_CO2e", 2: "area__ha"}, interval_end_year)
@@ -381,7 +419,7 @@ def run(args: argparse.Namespace) -> None:
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    parser = argparse.ArgumentParser(description="Run organic-soils zonal statistics (per-pixel only)")
+    parser = argparse.ArgumentParser(description="Run organic-soils zonal statistics (per-pixel; robust alignment)")
     parser.add_argument("--model_version", required=True)
     parser.add_argument("--run_date", required=True)
     parser.add_argument("--interval_end_years", nargs="+", type=int, required=True)
@@ -391,6 +429,11 @@ def main(argv=None):
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--no_sparse", action="store_true", default=not SPARSE_DEFAULT)
     parser.add_argument("--run_name", default="ogh_standard_model")
+    # Alignment controls
+    parser.add_argument("--align_tolerance_fraction", type=float, default=0.49,
+                        help="Fraction of one pixel for nearest reindex tolerance (default 0.49).")
+    parser.add_argument("--leak_warn_threshold", type=float, default=0.002,
+                        help="Warn if fraction of flux where adm0==0 exceeds this (default 0.002 = 0.2%).")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run_local", action="store_true")
     mode.add_argument("--cluster_name", default="zonal_stats")
