@@ -2063,28 +2063,28 @@ def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
 # Function to build a VRT using GDAL with vsis3 paths
     # raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
     # output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is created
-def build_vrt_gdal_local(raw_raster_paths_list_s3, output_vrt_s3):
-    # Set the environment variable to enable random writes for S3 using vsis3
-    os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
+# def build_vrt_gdal_local(raw_raster_paths_list_s3, output_vrt_s3):
+#     # Set the environment variable to enable random writes for S3 using vsis3
+#     os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
+#
+#     # Convert S3 paths to vsis3 format
+#     raw_raster_paths_list_vsis3 = [path.replace("s3://", "/vsis3/") for path in raw_raster_paths_list_s3]
+#     output_vrt_vsis3 = output_vrt_s3.replace("s3://", "/vsis3/")
+#
+#     # Use GDAL to build the VRT
+#     gdal.BuildVRT(output_vrt_vsis3, raw_raster_paths_list_vsis3)
+#
+#     #Check that s3 file exists
+#     check_s3_file_created(output_vrt_s3)
 
-    # Convert S3 paths to vsis3 format
-    raw_raster_paths_list_vsis3 = [path.replace("s3://", "/vsis3/") for path in raw_raster_paths_list_s3]
-    output_vrt_vsis3 = output_vrt_s3.replace("s3://", "/vsis3/")
-
-    # Use GDAL to build the VRT
-    gdal.BuildVRT(output_vrt_vsis3, raw_raster_paths_list_vsis3)
-
-    #Check that s3 file exists
-    check_s3_file_created(output_vrt_s3)
-
-# Checks if a VRT already exists in s3
+# Checks if a file already exists in s3
 # https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67dc3f96-40f0-800a-9c89-2895c332bd01
-def vrt_exists_in_s3(output_vrt_s3):
+def exists_in_s3(s3_path):
 
     s3 = boto3.client("s3")
 
     # Parse the S3 path
-    s3_path_parts = output_vrt_s3.replace("s3://", "").split("/", 1)
+    s3_path_parts = s3_path.replace("s3://", "").split("/", 1)
     bucket_name = s3_path_parts[0]
     object_key = s3_path_parts[1]
 
@@ -2107,7 +2107,7 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt, ma
     logger_worker = lu.setup_logging_worker()
 
     # Check if the VRT file already exists in S3
-    if vrt_exists_in_s3(output_vrt_s3):
+    if exists_in_s3(output_vrt_s3):
         return main_logger.info(f"VRT file already exists in S3: {output_vrt_s3}. Skipping creation.")
     vsis3_paths = []
     for s3_path in raw_raster_paths_list_s3:
