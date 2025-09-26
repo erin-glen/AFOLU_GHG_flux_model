@@ -60,6 +60,7 @@ os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 gdal.SetConfigOption("GDAL_HTTP_MAX_RETRY", "5")
 gdal.SetConfigOption("GDAL_HTTP_RETRY_DELAY", "5")
 
+# Speed suggestions from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d58192-0ea0-8322-b07a-cda128731e32
 # Fewer, larger range requests (default is 16 KB → too small for S3)
 gdal.SetConfigOption("CPL_VSIL_CURL_CHUNK_SIZE", "10485760")  # 16 MB
 # Enable HTTP/2 for more efficient connections (if available)
@@ -75,7 +76,6 @@ def gdal_vrt_progress(pct, message, data):
     GDAL progress callback.
     pct: 0.0–1.0
     message: current operation
-    data: user data (unused here)
     """
     pct_int = int(pct * 100)
     print(f" GDAL VRT build progress for {data}: {pct_int}%: {uu.timestr()}", flush=True)
@@ -86,7 +86,6 @@ def gdal_translate_progress(pct, message, data):
     GDAL progress callback.
     pct: 0.0–1.0
     message: current operation
-    data: user data (unused here)
     """
     pct_int = int(pct * 100)
     print(f" GDAL.translate progress for {data}: {pct_int}%: {uu.timestr()}", flush=True)
@@ -112,6 +111,18 @@ def mosaic_tiles_to_global(input_folder, output_folder):
     # tile_files = tile_files[0:50]  # For testing
     tile_files = [f"/vsis3/{fp}" for fp in tile_files]  # Faster than vsis3_streaming, by experiment
 
+    # All the components of the input path
+    parts = input_folder.strip('/').split('/')
+
+    # Gets the segment for the input pattern
+    pattern_idx = parts.index(f"version_{cn.model_version_underscore}")
+    pattern_segment = parts[pattern_idx + 1]
+
+    # Gets the segment for the input interval
+    interval_idx = parts.index(f"annual_intervals")
+    interval_segment = parts[interval_idx + 1]
+
+
     # 2. Create a temporary working directory for this worker
     tmpdir = tempfile.mkdtemp(prefix="mosaic_")
     safe_name = re.sub(r'[^0-9a-zA-Z]+', '_', input_folder.strip('/'))
@@ -129,7 +140,7 @@ def mosaic_tiles_to_global(input_folder, output_folder):
     vrt = gdal.BuildVRT(vrt_path,
                         tile_files,
                         callback=gdal_vrt_progress,
-                        callback_data = os.path.basename(vrt_path))
+                        callback_data = os.path.basename(pattern_segment))
     if vrt is None:
         raise RuntimeError(f"gdal.BuildVRT failed for {input_folder}")
 
@@ -146,25 +157,11 @@ def mosaic_tiles_to_global(input_folder, output_folder):
         raise RuntimeError(f"VRT validation failed for {vrt_path}")
 
 
-    # 4. Create output file name
-
-    # All the components of the input path
-    parts = input_folder.strip('/').split('/')
-
-    # Gets the segment for the input pattern
-    pattern_idx = parts.index(f"version_{cn.model_version_underscore}")
-    pattern_segment = parts[pattern_idx + 1]
-
-    # Gets the segment for the input interval
-    interval_idx = parts.index(f"annual_intervals")
-    interval_segment = parts[interval_idx + 1]
+    # 4. Translate VRT → GeoTIFF
 
     output_name = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{interval_segment}_global.tif"
-
     local_out = os.path.join(tmpdir, output_name)
 
-
-    # 5. Translate VRT → GeoTIFF
     gtiff_options = gdal.TranslateOptions(
         format="GTiff",
         creationOptions=[
@@ -174,7 +171,7 @@ def mosaic_tiles_to_global(input_folder, output_folder):
             "BLOCKYSIZE=512"
         ],
         callback=gdal_translate_progress,
-        callback_data=os.path.basename(local_out)
+        callback_data=os.path.basename(pattern_segment)
     )
     lu.print_and_log(f"Writing vrt to geotif for {output_folder}: {uu.timestr()}", False, logger_worker)
 
@@ -196,7 +193,7 @@ def mosaic_tiles_to_global(input_folder, output_folder):
     writing_end_time = time.time()
     lu.print_and_log(f"Wrote vrt to geotif for {output_folder}, took {round(writing_end_time - writing_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
-    # Upload if needed
+    # Upload
     lu.print_and_log(f"Uploading geotif for {output_folder}: {uu.timestr()}", False, logger_worker)
     fs.put(local_out, output_folder)
     lu.print_and_log(f"Uploaded mosaic to {output_folder}: {uu.timestr()}", False, logger_worker)
