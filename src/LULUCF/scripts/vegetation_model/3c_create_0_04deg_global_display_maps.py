@@ -335,7 +335,7 @@ def create_gif(gif_base_name, out_folder, out_maps_for_gif):
         loop=0  # 0 = infinite loop
     )
 
-# Makes jpeg of net fluxes
+# Makes jpegs and gifs of net fluxes
 def map_net_flux(input_date, s3_folders,
                  local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
                  colors, percentiles):
@@ -466,7 +466,9 @@ def map_net_flux(input_date, s3_folders,
 
 
 # Makes jpeg of gross fluxes
-def map_gross(input_date, s3_folders, local_reproj_folder, local_jpeg_folder, colors, percentiles):
+def map_gross(input_date, s3_folders,
+                 local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                 colors, percentiles):
 
     series_start_time = time.time()
 
@@ -474,7 +476,7 @@ def map_gross(input_date, s3_folders, local_reproj_folder, local_jpeg_folder, co
 
     # Iterates through modeled years
     for i, year in enumerate(cn.years_annual[1:]):
-    # for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
+    # for i, year in enumerate(cn.years_annual[1:2]): # For testing a specific year
 
         # The s3 folder to process for this year
         s3_folder = s3_folders[i]
@@ -495,12 +497,10 @@ def map_gross(input_date, s3_folders, local_reproj_folder, local_jpeg_folder, co
         year_path_unproj = f"{s3_folder}{year_file}.tif"
         year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
 
-        print(f"\n\n ---Mapping {pattern_segment} for {year} from {year_file}")
+        print(f"\n\n---Mapping {pattern_segment} for {year} from {year_file}")
 
         # Reprojects raster, if needed
         reproject_raster(year_path_unproj, year_path_reproj)
-
-        continue
 
         # Reads raster data
         with rasterio.open(year_path_reproj) as src:
@@ -577,12 +577,12 @@ def map_gross(input_date, s3_folders, local_reproj_folder, local_jpeg_folder, co
         elif "all_gases" in pattern_segment:
             tick_labels = [0, f"> {rounded_max:.0f}"]
             title_text = f"Gross emissions\nAll vegetation pools, all gases\nkt CO$_2$e yr$^{{-1}}$"
+        elif "non_CO2_only" in pattern_segment:
+            tick_labels = [0, f"> {rounded_max:.0f}"]
+            title_text = f"Gross emissions\nAll vegetation pools, non-CO$_2$ only\nkt CO$_2$e yr$^{{-1}}$"
         elif "CO2_only" in pattern_segment:
             tick_labels = [0, f"> {rounded_max:.0f}"]
             title_text = f"Gross emissions\nAll vegetation pools, CO$_2$ only\nkt CO$_2$ yr$^{{-1}}$"
-        elif "non_CO2" in pattern_segment:
-            tick_labels = [0, f"> {rounded_max:.0f}"]
-            title_text = f"Gross emissions\nAll vegetation pools, non-CO$_2$ only\nkt CO$_2$e yr$^{{-1}}$"
         else:
             tick_labels = ["N/A", "N/A"]
             title_text = ""
@@ -595,8 +595,8 @@ def map_gross(input_date, s3_folders, local_reproj_folder, local_jpeg_folder, co
 
         pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
         core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.model_version_underscore}"  #
-        jpeg_path = f"{local_jpeg_folder}/{core_jpeg_name}.jpeg"
-        jpeg_for_pres_path = f"{local_jpeg_folder}/{core_jpeg_name}__for_pres.jpeg"
+        jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
+        jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
         # Saves two versions of the map: without and with a source note in the bottom right
         out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, year)
@@ -605,7 +605,7 @@ def map_gross(input_date, s3_folders, local_reproj_folder, local_jpeg_folder, co
 
     # Creates gifs of timeseries
     gif_base_name = f"veg_{pattern_segment_revised}__{cn.years_annual[1]}_{cn.years_annual[-1]}__v{cn.model_version_underscore}"
-    create_gif(gif_base_name, local_jpeg_folder, out_maps_for_gif)
+    create_gif(gif_base_name, local_gif_folder, out_maps_for_gif)
 
     series_end_time = time.time()
     print(f"{pattern_segment} took {round(series_end_time - series_start_time)} seconds: {uu.timestr()}")
@@ -726,7 +726,7 @@ if __name__ == '__main__':
     local_reproj_folder.mkdir(parents=True, exist_ok=True)
     local_jpeg_non_pres_folder = Path(f"{local_folder}output_jpegs_and_gifs/jpegs_non_pres")
     local_jpeg_non_pres_folder.mkdir(parents=True, exist_ok=True)
-    local_jpeg_pres_folder = Path(f"{local_folder}output_jpegs_and_gifs/jpegs_non_pres")
+    local_jpeg_pres_folder = Path(f"{local_folder}output_jpegs_and_gifs/jpegs_pres")
     local_jpeg_pres_folder.mkdir(parents=True, exist_ok=True)
     local_gif_folder = Path(f"{local_folder}output_jpegs_and_gifs/gifs")
     local_gif_folder.mkdir(parents=True, exist_ok=True)
@@ -740,20 +740,34 @@ if __name__ == '__main__':
 
     # Generates jpegs for gross emissions, removals and net flux
 
-    # map_gross(input_date, gross_emis_CO2_only_input_folders_s3, local_reproj_folder, local_jpeg_folder,
-    #                  net_color_palette, emissions_percentiles)
+    # Error at 2017
+    # map_gross(input_date, gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
+    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #                  emissions_colors, emissions_percentiles)
 
-    # gross_removals_input_folders_s3 = gross_removals_input_folders_s3[0:1]
-    # for gross_remv_s3 in gross_removals_input_folders_s3:
-    #     map_gross(input_date, gross_remv_s3, local_reproj_folder, local_jpeg_folder,
-    #                  net_color_palette, removals_percentiles)
-    #
-    map_net_flux(input_date, net_CO2_only_input_folders_s3, local_reproj_folder,
-                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_color_palette, net_percentiles)
-    map_net_flux(input_date, net_all_gases_input_folders_s3, local_reproj_folder,
-                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_color_palette, net_percentiles)
+    map_gross(input_date, gross_emis_non_CO2_input_folders_s3, local_reproj_folder,
+                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                     emissions_colors, emissions_percentiles)
+
+    # # Ran fine
+    # map_gross(input_date, gross_emis_all_gases_input_folders_s3, local_reproj_folder,
+    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #                  emissions_colors, emissions_percentiles)
+
+    # # Error at 2018
+    # map_gross(input_date, gross_removals_input_folders_s3, local_reproj_folder,
+    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #              removals_colors, emissions_percentiles)
+
+    # # Ran fine
+    # map_net_flux(input_date, net_CO2_only_input_folders_s3, local_reproj_folder,
+    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #              net_color_palette, net_percentiles)
+
+    # # Ran fine
+    # map_net_flux(input_date, net_all_gases_input_folders_s3, local_reproj_folder,
+    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #              net_color_palette, net_percentiles)
 
     # # Generates three-panel map
     # create_three_panel_map()
