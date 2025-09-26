@@ -495,7 +495,14 @@ def map_gross(input_date, s3_folders,
         # Names before and after reprojection
         year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{interval_segment}_global"
         year_path_unproj = f"{s3_folder}{year_file}.tif"
-        year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
+
+        # For reasons I couldn't figure out, gross removals and CO2-only emissions just wouldn't work for some files
+        # using the reprojected file names I wanted. So, these two need special reprojected file names.
+        # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
+        if ("removals" in pattern_segment) or ("all_C_pools__CO2_only" in pattern_segment):
+            year_path_reproj = f"{local_reproj_folder}/{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{year}_reproj.tif"
+        else:
+            year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
 
         print(f"\n\n---Mapping {pattern_segment} for {year} from {year_file}")
 
@@ -741,23 +748,24 @@ if __name__ == '__main__':
     # Generates jpegs for gross emissions, removals and net flux
 
     # Error at 2017
-    # map_gross(input_date, gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
-    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles)
-
-    map_gross(input_date, gross_emis_non_CO2_input_folders_s3, local_reproj_folder,
+    map_gross(input_date, gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
                      local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
                      emissions_colors, emissions_percentiles)
+
+    # # Ran fine
+    # map_gross(input_date, gross_emis_non_CO2_input_folders_s3, local_reproj_folder,
+    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #                  emissions_colors, emissions_percentiles)
 
     # # Ran fine
     # map_gross(input_date, gross_emis_all_gases_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
     #                  emissions_colors, emissions_percentiles)
 
-    # # Error at 2018
+    # # Ran fine after adjusting reproj file name for 2018 for unclear reasons
     # map_gross(input_date, gross_removals_input_folders_s3, local_reproj_folder,
     #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              removals_colors, emissions_percentiles)
+    #              removals_colors, removals_percentiles)
 
     # # Ran fine
     # map_net_flux(input_date, net_CO2_only_input_folders_s3, local_reproj_folder,
