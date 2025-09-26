@@ -890,9 +890,6 @@ colorbar_dimensions = [0.14, 0.17, 0.02, 0.13] # [left, bottom, width, height]
 pres_text = f"Land use vegetation fluxes (model v{model_version}, 2016-2024)"
 
 # Output global aggregated jpeg names
-removals_jpeg_base = f"gross_removals__4km_aggregation__v{model_version}"
-emissions_jpeg_base = f"gross_emissions__4km_aggregation__v{model_version}"
-net_jpeg_base = f"net_flux__4km_aggregation__v{model_version}"
 three_panel_jpeg_base = f"three_panels__4km_aggregation__v{model_version}"
 
 

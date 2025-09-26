@@ -16,15 +16,15 @@ python -m src.LULUCF.scripts.vegetation_model.3b_create_global_0_04x0_04deg -bb 
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.3b_vegetation_model.create_global_0_04x0_04deg -cn vegetation_postprocessing --no_upload --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3b_create_global_0_04x0_04deg -cn vegetation_postprocessing --input_date YYYYMMDD -ffol 1
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 65 -t 1 -m 4 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.3b_vegetation_model.create_global_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
+python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing  (running 60 simultaneously made everything slow down a whole lot, so trying a much smaller parallelization)
+python -m src.LULUCF.scripts.vegetation_model.3b_create_global_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
 
 Full run:
-python -m src.utilities.create_cluster -n 65 -t 1 -m 4 -cn vegetation_postprocessing  (because running 6 outputs with 10 years each (including full model total)=60 maps, plus a few workers for safety)
-python -m src.LULUCF.scripts.3b_core_veg_model.create_global_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is intended to be the definitive global 0.04x0.04 deg output run for model v1.0.0 (2016-2024)."
+python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing  (running 60 simultaneously made everything slow down a whole lot, so trying a much smaller parallelization)
+python -m src.LULUCF.scripts.core_veg_model.3b_create_global_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is intended to be the definitive global 0.04x0.04 deg output run for model v1.0.0 (2016-2024)."
 
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
 """
@@ -60,7 +60,17 @@ os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 gdal.SetConfigOption("GDAL_HTTP_MAX_RETRY", "5")
 gdal.SetConfigOption("GDAL_HTTP_RETRY_DELAY", "5")
 
-def gdal_progress(pct, message, data):
+# Fewer, larger range requests (default is 16 KB → too small for S3)
+gdal.SetConfigOption("CPL_VSIL_CURL_CHUNK_SIZE", "10485760")  # 16 MB
+# Enable HTTP/2 for more efficient connections (if available)
+gdal.SetConfigOption("GDAL_HTTP_VERSION", "2")
+# Increase max connections per thread
+gdal.SetConfigOption("GDAL_MAX_CONNECTIONS", "20")
+# Keep connections alive
+gdal.SetConfigOption("GDAL_HTTP_MULTIRANGE", "YES")
+
+
+def gdal_vrt_progress(pct, message, data):
     """
     GDAL progress callback.
     pct: 0.0–1.0
@@ -68,7 +78,18 @@ def gdal_progress(pct, message, data):
     data: user data (unused here)
     """
     pct_int = int(pct * 100)
-    print(f" GDAL VRT build progress: {pct_int}%: {uu.timestr()}", flush=True)
+    print(f" GDAL VRT build progress for {data}: {pct_int}%: {uu.timestr()}", flush=True)
+    return 1  # return 0 would cancel
+
+def gdal_translate_progress(pct, message, data):
+    """
+    GDAL progress callback.
+    pct: 0.0–1.0
+    message: current operation
+    data: user data (unused here)
+    """
+    pct_int = int(pct * 100)
+    print(f" GDAL.translate progress for {data}: {pct_int}%: {uu.timestr()}", flush=True)
     return 1  # return 0 would cancel
 
 @delayed
@@ -104,9 +125,11 @@ def mosaic_tiles_to_global(input_folder, output_folder):
     # 3. Build VRT
     lu.print_and_log(f"Building VRT for {input_folder} into {vrt_path}: {uu.timestr()}", False, logger_worker)
     # Build VRT directly from list of files
+    # Progress logging using callbacks from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d58192-0ea0-8322-b07a-cda128731e32
     vrt = gdal.BuildVRT(vrt_path,
                         tile_files,
-                        callback=gdal_progress)
+                        callback=gdal_vrt_progress,
+                        callback_data = os.path.basename(vrt_path))
     if vrt is None:
         raise RuntimeError(f"gdal.BuildVRT failed for {input_folder}")
 
@@ -145,11 +168,13 @@ def mosaic_tiles_to_global(input_folder, output_folder):
     gtiff_options = gdal.TranslateOptions(
         format="GTiff",
         creationOptions=[
-            "COMPRESS=DEFLATE",
+            "COMPRESS=LZW",
             "TILED=YES",
             "BLOCKXSIZE=512",
             "BLOCKYSIZE=512"
-        ]
+        ],
+        callback=gdal_translate_progress,
+        callback_data=os.path.basename(local_out)
     )
     lu.print_and_log(f"Writing vrt to geotif for {output_folder}: {uu.timestr()}", False, logger_worker)
 
@@ -160,24 +185,21 @@ def mosaic_tiles_to_global(input_folder, output_folder):
     for attempt in range(1, 4):
         try:
             gdal.Translate(local_out, vrt_path, options=gtiff_options)
-            return  # success
         except RuntimeError as e:
             if attempt == 4:
                 raise  # re-raise final error
-            wait = 60 * attempt + random.randint(0, 30)  # jitter helps avoid thundering herd
-            print(f"gdal.Translate failed (attempt {attempt}/{4}): {e}")
-            print(f"Retrying in {wait} seconds...")
+            wait = 60 * attempt + random.randint(0, 30)  # jitter helps avoid sending too many requests to s3
+            lu.print_and_log(f"gdal.Translate for {output_folder}failed (attempt {attempt}/{4}): {e}: {uu.timestr()}", False, logger_worker)
+            lu.print_and_log(f"Retrying {output_folder} in {wait} seconds...: {uu.timestr()}", False, logger_worker)
             time.sleep(wait)
 
-    # gdal.Translate(local_out, vrt_path, options=gtiff_options)
     writing_end_time = time.time()
     lu.print_and_log(f"Wrote vrt to geotif for {output_folder}, took {round(writing_end_time - writing_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
     # Upload if needed
-    if output_folder.startswith("s3://"):
-        lu.print_and_log(f"Uploading geotif for {output_folder}: {uu.timestr()}", False, logger_worker)
-        fs.put(local_out, output_folder)
-        lu.print_and_log(f"Uploaded mosaic to {output_folder}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Uploading geotif for {output_folder}: {uu.timestr()}", False, logger_worker)
+    fs.put(local_out, output_folder)
+    lu.print_and_log(f"Uploaded mosaic to {output_folder}: {uu.timestr()}", False, logger_worker)
 
     end_time = time.time()
     lu.print_and_log(f"{output_folder} took {round(end_time - start_time)} seconds: {uu.timestr()}", False, logger_worker)
