@@ -1,17 +1,4 @@
 """
-Builds a global OGR VRT that unions (concatenates) polygon feature classes from a zipped global .gdb file on S3.
-
-Args:
-    gdb_s3_path: S3 URI to the ZIP that contains multiple country .gdb directories (e.g., "s3://bucket/path/world_gdb.zip")
-    output_vrt_s3_path: S3 URI where the resulting .vrt should be uploaded (e.g., "s3://bucket/path/global_union.vrt")
-    local_vrt_path: Local temp path to write the VRT before upload (e.g., "/tmp/global_union.vrt")
-    main_logger: your pipeline logger
-
-Returns:
-    str: Success message
-
-Behavior:
-
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
@@ -37,15 +24,13 @@ from src.utilities import log_utilities as lu
 
 os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
 os.environ.setdefault("CPL_VSIL_CURL_ALLOWED_EXTENSIONS",".gdb,.gdbtable,.gdbtablx,.gdbindexes,.spx,.freelist,.zip,.vrt,.gpkg,.shp,.dbf,.shx,.prj,.cpg")
-os.environ.setdefault("CPL_VSIL_CURL_CHUNK_SIZE", "16777216")  # 16 MB (8–32MB is a good range, larger reads reduce round trips)
+os.environ.setdefault("CPL_VSIL_CURL_CHUNK_SIZE", "10485760")  # 16 MB (8–32MB is a good range, larger reads reduce round trips)
+
+#TODO: When running locally -> Warning 1: Invalid value for CPL_VSIL_CURL_CHUNK_SIZE. Allowed range is [1024, 10485760]. Using CPL_VSIL_CURL_CHUNK_SIZE=16384 instead
 
 ########################################################################################################################
 # Helper Utilities
 ########################################################################################################################
-#Create vsis3 path from s3 path
-def vsis3_from_s3(path: str) -> str:
-    return path.replace("s3://", "/vsis3/")
-
 #Checks to see if tile has at least one feature. Uses fast count when available, otherwise finds a single feature.
 def layer_has_any_feature(layer):
     try:
@@ -53,16 +38,15 @@ def layer_has_any_feature(layer):
             return layer.GetFeatureCount() > 0
     except Exception:
         pass
+
+    # Look for a single feature (stops after 1 feature is found)
     layer.ResetReading()
     f = layer.GetNextFeature()
-    layer.ResetReading()
-    return f is not None
+    if f:
+        f = None
+        return True
+    return False
 
-#Creates bounding box for tile clip
-def bbox_wkt(w, s, e, n):
-    return f"POLYGON(({w} {s}, {w} {n}, {e} {n}, {e} {s}, {w} {s}))"
-
-# Cleans up all lical files from shp tile creation
 def clean_local_shp_tmp(shp_dir, tmp_dir, main_logger):
     try:
         shutil.rmtree(shp_dir, ignore_errors=True)
@@ -94,7 +78,6 @@ def build_global_union_vrt_from_gdb(gdb_s3_path, output_vrt_s3_path, main_logger
 
     # Use vsizip and vsis3 to access the compressed (.zip) SDPTv3 .gdb in s3
     # Note: OGR can only open the zip root if it contains a single .gdb
-    #TODO: Only keep which step worked for zip
     SDPTv3 = None
     vsi_path = None
     if gdb_s3_path.lower().endswith(".zip"):
@@ -169,7 +152,7 @@ def build_global_union_vrt_from_gdb(gdb_s3_path, output_vrt_s3_path, main_logger
 
 # Function to create either 1 x 1 degree or 10 x 10 degree shapefiles from the SDPTv3 union VRT. Because all country
 # layers have already been unioned togehter, all polygons (regardless of country) will be included in the output tile.
-def clip_vrt_to_bbox_shapefile(vrt_s3_path, tile_id, west, south, east, north, out_s3_prefix, main_logger, overwrite = True, keep_fields=None):
+def clip_vrt_to_bbox_shapefile(vrt_s3_path, tile_id, west, south, east, north, out_s3_prefix, main_logger, overwrite = True):
     
     logger_worker = lu.setup_logging_worker()
     lu.print_and_log(f"Starting SDPTv3 shapefile creation for {tile_id}: [{west}, {south}, {east}, {north}]: {uu.timestr('time')}", False, logger_worker)
@@ -213,25 +196,14 @@ def clip_vrt_to_bbox_shapefile(vrt_s3_path, tile_id, west, south, east, north, o
 
     # Step 4: Clip vectors to counding box
     clip_wkt = f"POLYGON(({west} {south}, {west} {north}, {east} {north}, {east} {south}, {west} {south}))"
-
-    select_fields = None
-    if keep_fields:
-        src_ds = ogr.Open(vsi_vrt)
-        lyr = src_ds.GetLayerByName(layer_name)
-        have = {lyr.GetLayerDefn().GetFieldDefn(i).GetName()
-                for i in range(lyr.GetLayerDefn().GetFieldCount())}
-        select_fields = [f for f in keep_fields if f in have]
-        src_ds = None
-
     opts = gdal.VectorTranslateOptions(
         format="ESRI Shapefile",
         spatSRS="EPSG:4326",
-        spatFilter=[west, south, east, north],  # fast preselect
+        spatFilter=[west, south, east, north],
         dstSRS="EPSG:4326",
         reproject=True,
-        clipDst=clip_wkt,  # geometric clip
-        layers=["global_union_polygons"],
-        selectFields=select_fields,  # <— keep only what you need
+        clipDst=clip_wkt,
+        layers=[layer_name],
         layerCreationOptions=["ENCODING=UTF-8"],
     )
     out_ds = gdal.VectorTranslate(shp_path, vsi_vrt, options=opts)
@@ -271,7 +243,7 @@ def clip_vrt_to_bbox_shapefile(vrt_s3_path, tile_id, west, south, east, north, o
 
     # Step 6: Cleanup local files
     clean_local_shp_tmp(shp_dir, tmp_dir, main_logger)
-    lu.print_and_log(f"Uploaded shapefile for {tile_id} ({len(uploaded)} files) to {out_s3_prefix}: {uu.timestr('time')}", True, logger_worker)
+    lu.print_and_log(f"Uploaded shapefile for {tile_id} ({len(uploaded)} files) to {out_s3_prefix}: {uu.timestr('time')}", False, logger_worker)
     return
 
 
@@ -285,15 +257,15 @@ def main(cluster_name, bounding_box = None, chunk_size = None, run_local = False
     main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, f"Rasterizing SDPTv3",
                                                         run_local,'standard', f'Rasterizing SDPTv3')
     # TODO: Update in constants and names
-    gdb_s3_path = "s3://gfw2-data/plantations/sdpt_v3/sdpt_v3_final.gdb.zip" #TODO: Point to .dgb instead of .zip to help speed things up
-    out_vrt_s3_path = "s3://gfw2-data/plantations/sdpt_v3/vrt/sdpt_v3.vrt" #TODO: CHANGE BACK
+    gdb_s3_path = "s3://gfw2-data/plantations/sdpt_v3/sdpt_v3_final.gdb/sdpt_v3_final.gdb"
+    out_vrt_s3_path = "s3://gfw2-data/plantations/sdpt_v3/sdpt_v3.vrt"
     out_shp_s3_path = "s3://gfw2-data/plantations/sdpt_v3/sdpt_v3_vector_tiles/tiles_10x10/"
 
-    tile_id = '-71_-55_-70_-54'
-    west = -71
-    south = -54
-    east = -70
-    north = -55
+    tile_id = '40N_120E'
+    west = 120
+    south = 30
+    east = 130
+    north = 40
     #TODO: Remove after fishnet logic
 
     #STEP 1: Create a global VRT of unionized polygons for SDPTv3
@@ -310,11 +282,11 @@ def main(cluster_name, bounding_box = None, chunk_size = None, run_local = False
     #     chunk_shapefile_uri = cn.fishnet_1x1deg_uri
     #     tile_id_field = "chunk_id"
     # elif chunk_size == 10:
-    #     #chunk_shapefile_uri = hansen_tile_footprint
-    #     tile_id_field = "Name"
-    #     tile_id =
-    #     #grab only the last 8 chars --> Hansen_GFC2014_treecover2000_00N_000E
+    #     #chunk_shapefile_uri = cn.fishnet_10x10deg_uri
+    #     tile_id_field = "tile_id"
     #     #west, south, east, north = uu.get_10x10_tile_bounds(tile_id)
+    #TODO: Update with fishnet based on the chunk size, filter to tiles that intersect with the bounding box coordinate
+    # (if provided by the user), and loop through the tile creation step for all selected tiles.
 
     overwrite = True
 
@@ -323,7 +295,6 @@ def main(cluster_name, bounding_box = None, chunk_size = None, run_local = False
         shp_future.result()
     else:
         clip_vrt_to_bbox_shapefile(out_vrt_s3_path, tile_id, west, south, east, north, out_shp_s3_path, main_logger, overwrite)
-
 
 
     # Closes the client if not running locally
@@ -347,9 +318,6 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     #bounding_box = args.bounding_box
     #fishnet_path = args.cshp
-
-
-
 
     run_local = args.run_local
     no_stats = args.no_stats
