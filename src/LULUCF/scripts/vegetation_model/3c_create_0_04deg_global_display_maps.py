@@ -2,11 +2,13 @@
 python -m src.LULUCF.scripts.vegetation_model.3c_create_0_04deg_global_display_maps --input_date YYYYMMDD
 
 With https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67634e63-bbcc-800a-8267-004e88ced2e4
+Continued at https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d6d26f-b054-8323-98bb-731a86582e74
 """
 
 import argparse
 import math
 import os
+import boto3
 import rasterio
 import geopandas as gpd
 from pathlib import Path
@@ -15,7 +17,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 
-from fiona import path
 from matplotlib.colors import Normalize, TwoSlopeNorm, LinearSegmentedColormap
 from rasterio.warp import calculate_default_transform, reproject, Resampling
 from shapely.geometry import Polygon, MultiPolygon
@@ -25,8 +26,6 @@ from scipy.stats import percentileofscore
 from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
-from src.utilities import resize_cluster
-from src.utilities.constants_and_names import years_annual
 
 
 def rgb_to_mpl(rgb):
@@ -37,6 +36,29 @@ def rgb_to_mpl(rgb):
     """
     return tuple(val / 255 for val in rgb)
 
+def download_s3_file(s3_uri, local_path):
+    """
+    Downloads a file from S3 to a local path.
+
+    Parameters:
+    - s3_uri (str): The full S3 URI, e.g., 's3://bucket/key/file.tif'
+    - local_path (str or Path): Local path to save the file
+    """
+    print(f"  Downloading {s3_uri} to {local_path}")
+
+    # Parse S3 URI
+    assert s3_uri.startswith("s3://"), f"Invalid S3 URI: {s3_uri}"
+    parts = s3_uri[5:].split("/", 1)
+    bucket = parts[0]
+    key = parts[1]
+
+    # Ensure local directory exists
+    Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+
+    # Use boto3 to download
+    s3 = boto3.client("s3")
+    s3.download_file(bucket, key, str(local_path))
+
 def reproject_raster(tif_unproj_s3, tif_reproj_local):
     """
     Reprojects raster to Robinson projection if the output doesn't already exist.
@@ -45,6 +67,7 @@ def reproject_raster(tif_unproj_s3, tif_reproj_local):
 
     if not os.path.exists(tif_reproj_local):
         print("  Reprojected raster does not exist. Reprojecting now...")
+
         with rasterio.open(tif_unproj_s3) as src:
             transform, width, height = calculate_default_transform(
                 src.crs, cn.Robinson_crs, src.width, src.height, *src.bounds
@@ -313,14 +336,20 @@ def create_gif(gif_base_name, out_folder, out_maps_for_gif):
     )
 
 # Makes jpeg of net fluxes
-def map_net_flux(input_date, s3_folder, local_reproj_folder, local_jpeg_folder, colors, percentiles):
+def map_net_flux(input_date, s3_folders,
+                 local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                 colors, percentiles):
 
     series_start_time = time.time()
 
     out_maps_for_gif = []
 
-    # for year in cn.years_annual[1:]:
-    for year in cn.years_annual[1:2]: # For testing a specific year
+    # Iterates through modeled years
+    for i, year in enumerate(cn.years_annual[1:]):
+    # for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
+
+        # The s3 folder to process for this year
+        s3_folder = s3_folders[i]
 
         # All the components of the input s3 path
         parts = s3_folder.strip('/').split('/')
@@ -338,7 +367,7 @@ def map_net_flux(input_date, s3_folder, local_reproj_folder, local_jpeg_folder, 
         year_path_unproj = f"{s3_folder}{year_file}.tif"
         year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
 
-        print(f"---Mapping {pattern_segment} for {year} from {year_file}")
+        print(f"\n\n---Mapping {pattern_segment} for {year} from {year_file}")
 
         # Reprojects raster, if needed
         reproject_raster(year_path_unproj, year_path_reproj)
@@ -420,6 +449,152 @@ def map_net_flux(input_date, s3_folder, local_reproj_folder, local_jpeg_folder, 
 
         pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
         core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.model_version_underscore}"  #
+        jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
+        jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
+
+        # Saves two versions of the map: without and with a source note in the bottom right
+        out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, year)
+
+        out_maps_for_gif.append(out_jpeg_for_pres)
+
+    # Creates gifs of timeseries
+    gif_base_name = f"veg_{pattern_segment_revised}__{cn.years_annual[1]}_{cn.years_annual[-1]}__v{cn.model_version_underscore}"
+    create_gif(gif_base_name, local_gif_folder, out_maps_for_gif)
+
+    series_end_time = time.time()
+    print(f"{pattern_segment} took {round(series_end_time - series_start_time)} seconds: {uu.timestr()}")
+
+
+# Makes jpeg of gross fluxes
+def map_gross(input_date, s3_folders, local_reproj_folder, local_jpeg_folder, colors, percentiles):
+
+    series_start_time = time.time()
+
+    out_maps_for_gif = []
+
+    # Iterates through modeled years
+    for i, year in enumerate(cn.years_annual[1:]):
+    # for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
+
+        # The s3 folder to process for this year
+        s3_folder = s3_folders[i]
+
+        # All the components of the input s3 path
+        parts = s3_folder.strip('/').split('/')
+
+        # Gets the segment for the input pattern
+        pattern_idx = parts.index(f"version_{cn.model_version_underscore}")
+        pattern_segment = parts[pattern_idx + 1]
+
+        # Gets the segment for the input interval
+        interval_idx = parts.index(f"annual_intervals")
+        interval_segment = parts[interval_idx + 1]
+
+        # Names before and after reprojection
+        year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{interval_segment}_global"
+        year_path_unproj = f"{s3_folder}{year_file}.tif"
+        year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
+
+        print(f"\n\n ---Mapping {pattern_segment} for {year} from {year_file}")
+
+        # Reprojects raster, if needed
+        reproject_raster(year_path_unproj, year_path_reproj)
+
+        continue
+
+        # Reads raster data
+        with rasterio.open(year_path_reproj) as src:
+            data = src.read(1)  # Read the first band
+            raster_extent = src.bounds
+
+        # Matches percentile breaks with colors.
+        # Normalizes percentiles to a 0-1 scale.
+        print(f"  Calculating percentiles and breaks for {year}")
+
+        # Converts RGB color palette to matplotlib color palette
+        colors_matplotlib = rgb_to_mpl_palette(colors)
+
+        # Makes percentiles for the breakpoints and prepares colormap
+        percentiles_normalized = np.linspace(0, 1, len(percentiles))
+        cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
+
+        # Calculates breaks in the data based on the percentiles
+        breaks = np.percentile(data[data != 0], percentiles)  # Ignores NoData values
+        print("  Breaks:", breaks)
+
+        # Min and max values for the colormap (not the min and max values for the raster)
+        vmin, vmax = breaks[0], breaks[-1]
+        print(f"  vmin: {vmin}, vmax: {vmax}")
+
+        print(f"  Masking raster to non-0 values for {year}")
+        if "removals" in year_path_reproj:
+            masked_data = np.ma.masked_where(data >= 0, data)
+
+            # This colors all 0-value pixels, leaving non-0s white.
+            # It clearly shows that more of Australia is non-0, but I just can't get it to be symbolized in any masking.
+            # masked_data = np.ma.masked_where(data < 0, data)
+        elif "emis" in year_path_reproj:
+            masked_data = np.ma.masked_where(data <= 0, data)
+        else:
+            masked_data = np.ma.masked_where(data == 0, data)
+            print("Not using either emissions or removals")
+        data_min = masked_data.min()  # Minimum of the valid data
+        data_max = masked_data.max()  # Maximum of the valid data
+
+        print(f"  Normalizing for {year}")
+        # Normalizes the data for the colormap
+        norm = Normalize(vmin=vmin, vmax=vmax)
+
+        print(f"  Plotting map for {year}")
+        ax, fig = create_plot()
+
+        # Sets the ocean color
+        set_ocean_color(ax)
+
+        # Plots the country polygons first
+        plot_country_polygons(ax, shapefile)
+
+        # Raster extent
+        extent = [raster_extent.left, raster_extent.right, raster_extent.bottom, raster_extent.top]
+
+        # Plots the raster next
+        img = plot_raster(ax, cmap, extent, masked_data, norm)
+
+        # Plots the country boundaries on top
+        plot_country_boundaries(ax, shapefile)
+
+        # Creates the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
+        # Rounds data_min down and data_max up for legend.
+        rounded_min = math.floor(data_min/10**3 * 100) / 100  # Round down
+        rounded_max = math.ceil(data_max/10**3 * 100) / 100  # Round up
+        # print(data_min, rounded_min)
+        # print(data_max, rounded_max)
+
+        # Legend labels depend on what exact input is displayed
+        if "removals" in pattern_segment:
+            tick_labels = [f"< {rounded_min:.0f}", 0]
+            title_text = f"Gross removals\nAll vegetation pools\nkt CO$_2$ yr$^{{-1}}$"
+        elif "all_gases" in pattern_segment:
+            tick_labels = [0, f"> {rounded_max:.0f}"]
+            title_text = f"Gross emissions\nAll vegetation pools, all gases\nkt CO$_2$e yr$^{{-1}}$"
+        elif "CO2_only" in pattern_segment:
+            tick_labels = [0, f"> {rounded_max:.0f}"]
+            title_text = f"Gross emissions\nAll vegetation pools, CO$_2$ only\nkt CO$_2$ yr$^{{-1}}$"
+        elif "non_CO2" in pattern_segment:
+            tick_labels = [0, f"> {rounded_max:.0f}"]
+            title_text = f"Gross emissions\nAll vegetation pools, non-CO$_2$ only\nkt CO$_2$e yr$^{{-1}}$"
+        else:
+            tick_labels = ["N/A", "N/A"]
+            title_text = ""
+            print("Can't generate tick labels")
+
+        create_unidirection_legend(fig, img, vmin, vmax, title_text, tick_labels, year)
+
+        # Removes axis ticks and labels
+        remove_ticks(ax)
+
+        pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
+        core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.model_version_underscore}"  #
         jpeg_path = f"{local_jpeg_folder}/{core_jpeg_name}.jpeg"
         jpeg_for_pres_path = f"{local_jpeg_folder}/{core_jpeg_name}__for_pres.jpeg"
 
@@ -431,144 +606,6 @@ def map_net_flux(input_date, s3_folder, local_reproj_folder, local_jpeg_folder, 
     # Creates gifs of timeseries
     gif_base_name = f"veg_{pattern_segment_revised}__{cn.years_annual[1]}_{cn.years_annual[-1]}__v{cn.model_version_underscore}"
     create_gif(gif_base_name, local_jpeg_folder, out_maps_for_gif)
-
-    series_end_time = time.time()
-    print(f"{pattern_segment} took {round(series_end_time - series_start_time)} seconds: {uu.timestr()}")
-
-
-# Makes jpeg of gross fluxes
-def map_gross(input_date, s3_folder, local_reproj_folder, local_jpeg_folder, colors, percentiles):
-
-    series_start_time = time.time()
-
-    out_maps_for_gif = []
-
-    # All the components of the input s3 path
-    parts = s3_folder.strip('/').split('/')
-
-    # Gets the segment for the input pattern
-    pattern_idx = parts.index(f"version_{cn.model_version_underscore}")
-    pattern_segment = parts[pattern_idx + 1]
-
-    # Gets the segment for the input interval
-    interval_idx = parts.index(f"annual_intervals")
-    interval_segment = parts[interval_idx + 1]
-    year = interval_segment[-4:]
-
-    # Names before and after reprojection
-    year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{interval_segment}_global"
-    year_path_unproj = f"{s3_folder}{year_file}.tif"
-    year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
-
-    print(f"\n\n ---Mapping {pattern_segment} for {year} from {year_file}")
-
-    # Reprojects raster, if needed
-    reproject_raster(year_path_unproj, year_path_reproj)
-
-    # Reads raster data
-    with rasterio.open(year_path_reproj) as src:
-        data = src.read(1)  # Read the first band
-        raster_extent = src.bounds
-
-    # Matches percentile breaks with colors.
-    # Normalizes percentiles to a 0-1 scale.
-    print("Calculating percentiles and breaks")
-
-    # Converts RGB color palette to matplotlib color palette
-    colors_matplotlib = rgb_to_mpl_palette(colors)
-
-    # Makes percentiles for the breakpoints and prepares colormap
-    percentiles_normalized = np.linspace(0, 1, len(percentiles))
-    cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
-
-    # Calculates breaks in the data based on the percentiles
-    breaks = np.percentile(data[data != 0], percentiles)  # Ignores NoData values
-    print("Breaks:", breaks)
-
-    # Min and max values for the colormap (not the min and max values for the raster)
-    vmin, vmax = breaks[0], breaks[-1]
-    print(f"vmin: {vmin}, vmax: {vmax}")
-
-    print("Masking raster to non-0 values")
-    if "removals" in year_path_reproj:
-        masked_data = np.ma.masked_where(data >= 0, data)
-
-        # This colors all 0-value pixels, leaving non-0s white.
-        # It clearly shows that more of Australia is non-0, but I just can't get it to be symbolized in any masking.
-        # masked_data = np.ma.masked_where(data < 0, data)
-    elif "emis" in year_path_reproj:
-        masked_data = np.ma.masked_where(data <= 0, data)
-    else:
-        masked_data = np.ma.masked_where(data == 0, data)
-        print("Not using either emissions or removals")
-    data_min = masked_data.min()  # Minimum of the valid data
-    data_max = masked_data.max()  # Maximum of the valid data
-
-    print("Normalizing")
-    # Normalizes the data for the colormap
-    norm = Normalize(vmin=vmin, vmax=vmax)
-
-    print("Plotting map")
-    ax, fig = create_plot()
-
-    # Sets the ocean color
-    set_ocean_color(ax)
-
-    # Plots the country polygons first
-    plot_country_polygons(ax, shapefile)
-
-    # Raster extent
-    extent = [raster_extent.left, raster_extent.right, raster_extent.bottom, raster_extent.top]
-
-    # Plots the raster next
-    img = plot_raster(ax, cmap, extent, masked_data, norm)
-
-    # Plots the country boundaries on top
-    plot_country_boundaries(ax, shapefile)
-
-    # Creates the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
-    # Rounds data_min down and data_max up for legend.
-    rounded_min = math.floor(data_min/10**3 * 100) / 100  # Round down
-    rounded_max = math.ceil(data_max/10**3 * 100) / 100  # Round up
-    # print(data_min, rounded_min)
-    # print(data_max, rounded_max)
-
-    # Legend labels depend on what exact input is displayed
-    if "removals" in pattern_segment:
-        tick_labels = [f"< {rounded_min:.0f}", 0]
-        title_text = f"Gross removals\nAll vegetation pools\nkt CO$_2$ yr$^{{-1}}$"
-    elif "all_gases" in pattern_segment:
-        tick_labels = [0, f"> {rounded_max:.0f}"]
-        title_text = f"Gross emissions\nAll vegetation pools, all gases\nkt CO$_2$e yr$^{{-1}}$"
-    elif "CO2_only" in pattern_segment:
-        tick_labels = [0, f"> {rounded_max:.0f}"]
-        title_text = f"Gross emissions\nAll vegetation pools, CO$_2$ only\nkt CO$_2$ yr$^{{-1}}$"
-    elif "non_CO2" in pattern_segment:
-        tick_labels = [0, f"> {rounded_max:.0f}"]
-        title_text = f"Gross emissions\nAll vegetation pools, non-CO$_2$ only\nkt CO$_2$e yr$^{{-1}}$"
-    else:
-        tick_labels = ["N/A", "N/A"]
-        title_text = ""
-        print("Can't generate tick labels")
-
-    create_unidirection_legend(fig, img, vmin, vmax, title_text, tick_labels, year)
-
-    # Removes axis ticks and labels
-    remove_ticks(ax)
-
-    pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
-    core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.model_version_underscore}"  #
-    jpeg_path = f"{local_jpeg_folder}/{core_jpeg_name}.jpeg"
-    jpeg_for_pres_path = f"{local_jpeg_folder}/{core_jpeg_name}__for_pres.jpeg"
-
-    # Saves two versions of the map: without and with a source note in the bottom right
-    out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, year)
-
-    out_maps_for_gif.append(out_jpeg_for_pres)
-
-    # # Creates gifs of timeseries
-    # gif_base_name = f"veg_{pattern_segment_revised}__{cn.years_annual[1]}_{cn.years_annual[-1]}__v{cn.model_version_underscore}"
-    # create_gif(gif_base_name, local_jpeg_folder, out_maps_for_gif)
 
     series_end_time = time.time()
     print(f"{pattern_segment} took {round(series_end_time - series_start_time)} seconds: {uu.timestr()}")
@@ -654,25 +691,45 @@ if __name__ == '__main__':
                                                                  [1, 1, 1, 1, 1, 1, 1, 1, 1], input_date,
                                                                  True, cn.flux_aggreg_pixel_meaning)
 
-    gross_emis_input_folders_s3 = []
+    gross_emis_CO2_only_input_folders_s3 = []
+    gross_emis_non_CO2_input_folders_s3 = []
+    gross_emis_all_gases_input_folders_s3 = []
     gross_removals_input_folders_s3 = []
-    net_input_folders_s3 = []
+    net_CO2_only_input_folders_s3 = []
+    net_all_gases_input_folders_s3 = []
     other_input_folders_s3 = []
 
     for input in inputs_by_interval_dir_list:
-        if "emis" in input:
-            gross_emis_input_folders_s3.append(input)
-        elif "removals" in input:
+        if cn.gross_emis_all_C_pools_CO2_only_pattern in input:
+            gross_emis_CO2_only_input_folders_s3.append(input)
+        elif cn.gross_emis_all_C_pools_non_CO2_only_pattern in input:
+            gross_emis_non_CO2_input_folders_s3.append(input)
+        elif cn.gross_emis_all_C_pools_all_gases_pattern in input:
+            gross_emis_all_gases_input_folders_s3.append(input)
+        elif cn.gross_removals_all_C_pools_pattern in input:
             gross_removals_input_folders_s3.append(input)
-        elif "net" in input:
-            net_input_folders_s3.append(input)
+        elif cn.net_flux_all_C_pools_CO2_only_pattern in input:
+            net_CO2_only_input_folders_s3.append(input)
+        elif cn.net_flux_all_C_pools_all_gases_pattern in input:
+            net_all_gases_input_folders_s3.append(input)
         else:
             other_input_folders_s3.append(input)
 
+    # print(gross_emis_CO2_only_input_folders_s3)
+    # print(gross_emis_non_CO2_input_folders_s3)
+    # print(gross_emis_all_gases_input_folders_s3)
+    # print(gross_removals_input_folders_s3)
+    # print(net_CO2_only_input_folders_s3)
+    # print(net_all_gases_input_folders_s3)
+
     local_reproj_folder = Path(local_folder)
     local_reproj_folder.mkdir(parents=True, exist_ok=True)
-    local_jpeg_folder = Path(f"{local_folder}output_jpegs")
-    local_jpeg_folder.mkdir(parents=True, exist_ok=True)
+    local_jpeg_non_pres_folder = Path(f"{local_folder}output_jpegs_and_gifs/jpegs_non_pres")
+    local_jpeg_non_pres_folder.mkdir(parents=True, exist_ok=True)
+    local_jpeg_pres_folder = Path(f"{local_folder}output_jpegs_and_gifs/jpegs_non_pres")
+    local_jpeg_pres_folder.mkdir(parents=True, exist_ok=True)
+    local_gif_folder = Path(f"{local_folder}output_jpegs_and_gifs/gifs")
+    local_gif_folder.mkdir(parents=True, exist_ok=True)
 
     # Reprojects shapefile, if needed
     shapefile = check_and_reproject_shapefile(
@@ -683,20 +740,20 @@ if __name__ == '__main__':
 
     # Generates jpegs for gross emissions, removals and net flux
 
-    gross_emis_input_folders_s3 = gross_emis_input_folders_s3[0:2]
-    for gross_emis_s3 in gross_emis_input_folders_s3:
-        map_gross(input_date, gross_emis_s3, local_reproj_folder, local_jpeg_folder,
-                     net_color_palette, emissions_percentiles)
+    # map_gross(input_date, gross_emis_CO2_only_input_folders_s3, local_reproj_folder, local_jpeg_folder,
+    #                  net_color_palette, emissions_percentiles)
 
     # gross_removals_input_folders_s3 = gross_removals_input_folders_s3[0:1]
     # for gross_remv_s3 in gross_removals_input_folders_s3:
     #     map_gross(input_date, gross_remv_s3, local_reproj_folder, local_jpeg_folder,
     #                  net_color_palette, removals_percentiles)
     #
-    # net_input_folders_s3 = net_input_folders_s3[0:1]
-    # for net_input_s3 in net_input_folders_s3:
-    #     map_net_flux(input_date, net_input_s3, local_reproj_folder, local_jpeg_folder,
-    #                  net_color_palette, net_percentiles)
+    map_net_flux(input_date, net_CO2_only_input_folders_s3, local_reproj_folder,
+                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                 net_color_palette, net_percentiles)
+    map_net_flux(input_date, net_all_gases_input_folders_s3, local_reproj_folder,
+                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                 net_color_palette, net_percentiles)
 
     # # Generates three-panel map
     # create_three_panel_map()
