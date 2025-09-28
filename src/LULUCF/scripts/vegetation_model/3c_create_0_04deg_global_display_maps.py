@@ -747,35 +747,29 @@ if __name__ == '__main__':
 
     # Generates jpegs for gross emissions, removals and net flux
 
-    # Error at 2017
     map_gross(input_date, gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
                      local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
                      emissions_colors, emissions_percentiles)
 
-    # # Ran fine
-    # map_gross(input_date, gross_emis_non_CO2_input_folders_s3, local_reproj_folder,
-    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles)
+    map_gross(input_date, gross_emis_non_CO2_input_folders_s3, local_reproj_folder,
+                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                     emissions_colors, emissions_percentiles)
 
-    # # Ran fine
-    # map_gross(input_date, gross_emis_all_gases_input_folders_s3, local_reproj_folder,
-    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles)
+    map_gross(input_date, gross_emis_all_gases_input_folders_s3, local_reproj_folder,
+                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                     emissions_colors, emissions_percentiles)
 
-    # # Ran fine after adjusting reproj file name for 2018 for unclear reasons
-    # map_gross(input_date, gross_removals_input_folders_s3, local_reproj_folder,
-    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              removals_colors, removals_percentiles)
+    map_gross(input_date, gross_removals_input_folders_s3, local_reproj_folder,
+                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                 removals_colors, removals_percentiles)
 
-    # # Ran fine
-    # map_net_flux(input_date, net_CO2_only_input_folders_s3, local_reproj_folder,
-    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              net_color_palette, net_percentiles)
+    map_net_flux(input_date, net_CO2_only_input_folders_s3, local_reproj_folder,
+                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                 net_color_palette, net_percentiles)
 
-    # # Ran fine
-    # map_net_flux(input_date, net_all_gases_input_folders_s3, local_reproj_folder,
-    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              net_color_palette, net_percentiles)
+    map_net_flux(input_date, net_all_gases_input_folders_s3, local_reproj_folder,
+                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                 net_color_palette, net_percentiles)
 
     # # Generates three-panel map
     # create_three_panel_map()
