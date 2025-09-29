@@ -13,11 +13,11 @@ Design:
 
 Usage examples:
   cd /mnt/c/gis/git/AFOLU_GHG_flux_model
-  export PYTHONPATH=/mnt/c/gis/git/AFOLU_GHG_flux_model
+
   python -m src.scripts.zonal_statistics.pub_assets \
-    --model_version 0_7_5 \
+    --model_version 0_8_0 \
     --run_name ogh_sensitivity_1km \
-    --run_date 20250914 \
+    --run_date 20250923 \
     --years 2005 2010 2015 2020 2024
 """
 

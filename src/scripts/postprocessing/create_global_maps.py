@@ -24,22 +24,22 @@ Examples
 # Aggregate only (0.04° by default):
 python -m src.scripts.postprocessing.create_global_maps \
   aggregate -cn create_maps --run_name ogh_standard_model \
-  --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_7_5
+  --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0
 
 # Aggregate at 0.01°:
 python -m src.scripts.postprocessing.create_global_maps \
   aggregate -cn create_maps --run_name ogh_standard_model --target_deg 0.01 \
-  --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_7_5
+  --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0
 
 # Display only (read global rasters directly in S3 via GDAL /vsis3/):
 python -m src.scripts.postprocessing.create_global_maps \
-  display --date_tag 20250914 --read_from_s3 --run_name ogh_standard_model \
-  --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_7_5
+  display --date_tag 20250923 --read_from_s3 --run_name ogh_standard_model \
+  --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0
 
 # End-to-end (aggregate then display) at 0.04°:
 python -m src.scripts.postprocessing.create_global_maps \
-  all -cn create_maps --date_tag 20250914 --run_name ogh_standard_model \
-  --read_from_s3 --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_7_5
+  all -cn create_maps --date_tag 20250923 --run_name ogh_standard_model \
+  --read_from_s3 --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0
 
 # After display-only or end-to-end runs, publish displays to S3 (optional):
 aws s3 sync /tmp/create_global_maps/display \
@@ -89,10 +89,10 @@ INTEGER_DATASETS: set[str] = set()  # modal aggregation for these dataset names
 INVENTORY_PERIODS = ["2021_2024"]
 
 # Keep default aligned to latest runs in your logs; can be overridden via CLI
-BASE_URL = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_7_5"
+BASE_URL = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0"
 OUTPUTS_BASE = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 
-DEFAULT_DATE_TAG = "20250914"  # used within input dataset paths unless overridden
+DEFAULT_DATE_TAG = "20250923"  # used within input dataset paths unless overridden
 
 # Local root for display outputs (mirrors the S3 tree below this root)
 DISPLAY_OUT_ROOT = os.environ.get("DISPLAY_OUT_ROOT", "/tmp/create_global_maps/display")

@@ -102,7 +102,7 @@ datasets = {
                                      'plantation_type', 'SDPTv2', '20230911')
     },
     'sdpt': {
-        's3_raw': pp.join(raw_dir, 'plantations', 'sdpt'),
+        's3_raw': pp.join('plantations', 'sdpt_v3','sdpt_v3_vector_tiles','tiles_10d'),
         's3_processed_base': pp.join(processed_dir, 'sdpt'),
         's3_processed_small': pp.join(processed_dir, 'sdpt', 'chunks', today_date),
         's3_processed': pp.join(processed_dir, 'sdpt', today_date),
@@ -110,7 +110,7 @@ datasets = {
     },
     'extraction': {
         'finland': {
-            's3_raw': f'{raw_dir}/extraction/Finland/Finland_turvetuotantoalueet/'
+            's3_raw': f'{raw_dir}/extracion/Finland/Finland_turvetuotantoalueet/'
                       f'turvetuotantoalueet_jalkikaytto',
             's3_processed_base': f'{processed_dir}/extraction/',
             's3_processed': f'{processed_dir}/extraction/{today_date}/',
