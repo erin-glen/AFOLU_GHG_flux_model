@@ -276,7 +276,7 @@ def calc_deadwood_litter_ratios(elevation, climate_domain, precipitation):
     return float(deadwood_c_ratio), float(litter_c_ratio)
 
 
-# Returns AGC and BGC one-time removal factors for the gain of short-height vegetation (Mg C/ha)
+# Returns AGC and BGC one-time removal factors for the gain of short-height vegetation (hard-coded values are Mg AGB/ha, but returned as Mg C/ha)
 # RF values are from IPCC 2006, V4, Ch. 6, Table 6.4- DEFAULT BIOMASS STOCKS PRESENT ON GRASSLAND, AFTER CONVERSION FROM OTHER LAND USE (no 2019 update).
 # short_veg_AGB_RF is from the "peak above-ground biomass" columns.
 # short_veg_BGB_RF is the difference between short_veg_AGB_RF and the "total (above-ground and below-ground) non-woody biomass" column.

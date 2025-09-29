@@ -677,10 +677,6 @@ if __name__ == '__main__':
     removals_colors = net_color_palette[0:5]
     emissions_colors = net_color_palette[5:]
 
-    # Legend titles
-    emissions_title = f"Gross greenhouse gas emissions\nkt CO$_2$e yr$^{{-1}}$"
-    removals_title = f"Gross CO$_2$ removals\nkt CO$_2$ yr$^{{-1}}$"
-
     local_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v1_0_0_2016_2024_global/"
 
     basic_dirs_to_expand = [

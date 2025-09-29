@@ -767,7 +767,7 @@ def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_fin
     # Not all scripts hit individual s3 folders beyond s3's request limit.
     if stagger_download == True:
         # Staggers worker startup so that not all workers are requesting data from s3 at the same time, to prevent hitting request limit
-        startup_delay = random.uniform(0, 2)
+        startup_delay = random.uniform(0, 3.5)
         time.sleep(startup_delay)
 
     futures = {}

@@ -112,13 +112,6 @@ cropland_rf = 4.7
 # Cropland aboveground carbon density (global constant, static value) (Mg C/ha)
 cropland_agc_dens = cropland_rf
 
-# One-time annual short/medium vegetation removal factor (Mg C/ha) (IPCC 2019 V4, Ch. 2 Table 2.4-- all savanna grassland mid/late dry season burns)
-# IPCC value is 10 Mg AGB/ha, so 4.7 Mg AGC/ha
-short_veg_rf = 4.7
-
-# Short/medium vegetation carbon density (global constant, static value) (Mg C/ha)
-short_veg_dens = short_veg_rf
-
 # Aboveground carbon removal factor for trees outside forests (Mg C/ha/yr), assuming that the entire hectare is ToF
 # (IPCC 2019 Settlements Section 8.2.1.2 (p. 8.5))
 trees_outside_forests_agc_rf_max = 2.8

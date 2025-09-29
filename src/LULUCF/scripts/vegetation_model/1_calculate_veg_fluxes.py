@@ -2035,7 +2035,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = 'LULUCF_fluxes'
+    stage = 'vegetation_fluxes'
     model_type = 'standard_model'
 
     # Runs chunks in batches of specified size.
