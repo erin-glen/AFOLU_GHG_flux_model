@@ -295,8 +295,10 @@ land_cover_pattern = "land_cover"
 # --- Display / cartography constants (for global JPEGs) ---
 
 # Country boundaries (simple) – adjust paths if yours differ
-original_shapefile_path   = "/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/world-administrative-boundaries_simple__20250102.shp"
-reprojected_shapefile_path = "/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/world-administrative-boundaries_simple__20250102_reproj.shp"
+# The cartography pipeline now expects the simplified administrative boundaries to
+# live under the shared `tmp/viz/world_boundaries` directory.
+original_shapefile_path   = "/mnt/c/tmp/viz/world_boundaries/admin0_simp_dis.shp"
+reprojected_shapefile_path = "/mnt/c/tmp/viz/world_boundaries/admin0_simp_dis.shp"
 
 # Map projection
 Robinson_crs = "ESRI:54030"
