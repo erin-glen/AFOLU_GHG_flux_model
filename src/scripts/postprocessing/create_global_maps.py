@@ -23,22 +23,22 @@ Examples
 --------
 # Aggregate only (0.04° by default):
 python -m src.scripts.postprocessing.create_global_maps \
-  aggregate -cn create_maps --run_name ogh_standard_model \
+  aggregate -cn create_maps --run_name ogh_sensitivity_1km \
   --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0
 
 # Aggregate at 0.01°:
 python -m src.scripts.postprocessing.create_global_maps \
-  aggregate -cn create_maps --run_name ogh_standard_model --target_deg 0.01 \
+  aggregate -cn create_maps --run_name ogh_sensitivity_1km --target_deg 0.01 \
   --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0
 
 # Display only (read global rasters directly in S3 via GDAL /vsis3/):
 python -m src.scripts.postprocessing.create_global_maps \
-  display --date_tag 20250923 --read_from_s3 --run_name ogh_standard_model \
+  display --date_tag 20250923 --read_from_s3 --run_name ogh_sensitivity_1km \
   --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0
 
 # End-to-end (aggregate then display) at 0.04°:
 python -m src.scripts.postprocessing.create_global_maps \
-  all -cn create_maps --date_tag 20250923 --run_name ogh_standard_model \
+  all -cn create_maps --date_tag 20250923 --run_name ogh_sensitivity_1km \
   --read_from_s3 --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0
 
 # After display-only or end-to-end runs, publish displays to S3 (optional):
@@ -156,7 +156,7 @@ def get_input_datasets(
     pixel_resolution: str,
     data_types: Optional[List[str]] = None,
     inventory_periods: Optional[List[str]] = None,
-    run_name: str = "ogh_standard_model",
+    run_name: str = "ogh_sensitivity_1km",
     base_url: str = BASE_URL,
     output_date: str = DEFAULT_DATE_TAG,
 ) -> List[str]:
@@ -373,7 +373,7 @@ def build_download_upload_dict(
 def aggregate_main(
     cluster_name: str,
     pixel_resolution: str,
-    run_name: str = "ogh_standard_model",
+    run_name: str = "ogh_sensitivity_1km",
     run_local: bool = False,
     use_pixel_area: bool = True,
     native_deg: float = DEFAULT_NATIVE_DEG,
@@ -887,7 +887,7 @@ def main():
     p_agg = sub.add_parser("aggregate", help="Run Stage A (aggregation) only.")
     p_agg.add_argument("-cn", "--cluster_name", required=True)
     p_agg.add_argument("-p", "--pixel_resolution", default="40000_pixels")
-    p_agg.add_argument("--run_name", default="ogh_standard_model")
+    p_agg.add_argument("--run_name", default="ogh_sensitivity_1km")
     p_agg.add_argument("--run_local", action="store_true")
     p_agg.add_argument("--skip_pixel_area", action="store_true")
     p_agg.add_argument("--native_deg", type=float, default=DEFAULT_NATIVE_DEG)
@@ -899,7 +899,7 @@ def main():
     p_disp = sub.add_parser("display", help="Run Stage B (display) only.")
     p_disp.add_argument("--date_tag", required=True, help="Date tag used in input paths (YYYYMMDD).")
     p_disp.add_argument("--read_from_s3", action="store_true", help="Use GDAL /vsis3/ to read rasters in place.")
-    p_disp.add_argument("--run_name", default="ogh_standard_model")
+    p_disp.add_argument("--run_name", default="ogh_sensitivity_1km")
     p_disp.add_argument("-p", "--pixel_resolution", default="40000_pixels")
     p_disp.add_argument("--target_deg", type=float, default=DEFAULT_TARGET_DEG)
     p_disp.add_argument("--base_url", default=BASE_URL)
@@ -908,7 +908,7 @@ def main():
     p_all.add_argument("-cn", "--cluster_name", required=True)
     p_all.add_argument("--date_tag", required=True)
     p_all.add_argument("-p", "--pixel_resolution", default="40000_pixels")
-    p_all.add_argument("--run_name", default="ogh_standard_model")
+    p_all.add_argument("--run_name", default="ogh_sensitivity_1km")
     p_all.add_argument("--run_local", action="store_true")
     p_all.add_argument("--skip_pixel_area", action="store_true")
     p_all.add_argument("--native_deg", type=float, default=DEFAULT_NATIVE_DEG)
