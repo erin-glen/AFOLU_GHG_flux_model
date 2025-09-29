@@ -216,7 +216,7 @@ def preprocess_and_upload_1x1_deg_smoothed_mangrove_data(bounds, download_dict_w
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
 
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
-    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
+    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker, False)
     #print(f"futures: {futures}")
 
     lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
@@ -229,7 +229,7 @@ def preprocess_and_upload_1x1_deg_smoothed_mangrove_data(bounds, download_dict_w
         layer = futures[future]
         data, status = future.result()
         if 'success' not in status: # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
-            lu.print_and_log(f"{status}", is_final, logger_worker)
+            lu.print_and_log(f"{status}", False, logger_worker)
         layers[layer] = data
     #print(f"layers: {layers}")
 
@@ -274,7 +274,7 @@ def preprocess_and_upload_1x1_deg_smoothed_mangrove_data(bounds, download_dict_w
         updated_area_dict = uu.replace_tile_id_in_dict(area_dict_with_data_types, tile_id)
 
         # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
-        area_futures = uu.prepare_to_download_chunk(bounds, updated_area_dict, chunk_length_pixels, is_final, logger_worker)
+        area_futures = uu.prepare_to_download_chunk(bounds, updated_area_dict, chunk_length_pixels, is_final, logger_worker, False)
         # print(f"area_futures: {area_futures}")
 
         lu.print_and_log(f"Waiting for requests for pixel area in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
@@ -287,7 +287,7 @@ def preprocess_and_upload_1x1_deg_smoothed_mangrove_data(bounds, download_dict_w
             area_layer = area_futures[area_future]
             data, status = area_future.result()
             if 'success' not in status:  # Prints and logs any inputs that couldn't be accessed and are downloaded as all 0s
-                lu.print_and_log(f"{status}", is_final, logger_worker)
+                lu.print_and_log(f"{status}", False, logger_worker)
             area_layers[area_layer] = data
         #print(f"area_layers: {area_layers}")
         #print(f"maximum pixel area: {area_layers['pixel_area_m2'].max()}")

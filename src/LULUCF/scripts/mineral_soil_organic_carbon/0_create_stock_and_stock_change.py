@@ -82,7 +82,7 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, n
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
     # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
-    futures = uu.prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger_worker)
+    futures = uu.prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger_worker, False)
 
     lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
 
@@ -100,7 +100,7 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, n
         layer = futures[future]  # Gets the corresponding key
         data, status = future.result()  # Unpacks the tuple result
         if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
-            lu.print_and_log(f"{status}: {uu.timestr()}", is_final, logger_worker)
+            lu.print_and_log(f"{status}: {uu.timestr()}", False, logger_worker)
         layers[layer] = data
 
     organic_soil_mask_uri = f"{cn.organic_soil_extent_dir}{tile_id}_{cn.organic_soil_extent_pattern}.tif"

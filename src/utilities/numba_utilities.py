@@ -276,7 +276,7 @@ def calc_deadwood_litter_ratios(elevation, climate_domain, precipitation):
     return float(deadwood_c_ratio), float(litter_c_ratio)
 
 
-# Returns AGC and BGC one-time removal factors for the gain of short-height vegetation (Mg C/ha)
+# Returns AGC and BGC one-time removal factors for the gain of short-height vegetation (hard-coded values are Mg AGB/ha, but returned as Mg C/ha)
 # RF values are from IPCC 2006, V4, Ch. 6, Table 6.4- DEFAULT BIOMASS STOCKS PRESENT ON GRASSLAND, AFTER CONVERSION FROM OTHER LAND USE (no 2019 update).
 # short_veg_AGB_RF is from the "peak above-ground biomass" columns.
 # short_veg_BGB_RF is the difference between short_veg_AGB_RF and the "total (above-ground and below-ground) non-woody biomass" column.
@@ -436,40 +436,59 @@ def mangrove_first_gain_last_loss_years(data_array, year_array):
     return first_gain, first_loss, last_loss
 
 
-# Function to get whether the interval is mangrove gain, loss, or maintenance or before gain or after loss.
-# Note: This function assumes mangrove is in the interval because we've already checked that condition in the LULUCF code
+# Function to get whether the interval is mangrove gain, loss, maintenance, before gain or after loss.
 @jit(nopython=True)
-def mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year, last_mang_loss_year):
-    mang_loss = False
-    mang_gain = False
-    mang_remaining_mang = False
-    before_mang_gain = False
-    after_mang_loss = False
+def mangrove_states(interval_start_year, interval_end_year, first_mang_gain_year, last_mang_loss_year, mang_interval_timeseries):
+    mang_loss = mang_gain = mang_remaining_mang = non_mang_remaining_non_mang = before_mang = after_mang = False
 
-    # Mangrove state hierarchy is mang_loss > mang_gain > mang_remaining_mang
-    mang_loss = (last_mang_loss_year > interval_start_year) and (last_mang_loss_year <= interval_end_year)
+    # Get previous and current mangrove states
+    mang_prev = mang_interval_timeseries[0]
+    mang_last = mang_interval_timeseries[-1]
+    mang_inter = mang_interval_timeseries[1:]
 
-    if not mang_loss:
-        mang_gain = (first_mang_gain_year > interval_start_year) and (first_mang_gain_year <= interval_end_year)
+    # Checks whether there are mangroves present at all in this interval (not including the previous interval's end year)
+    mang_present = np.any(mang_inter == 1)
+    mang_absent = np.all(mang_inter == 0)
 
-    if (not mang_loss) and (not mang_gain):
-        mang_remaining_mang = (first_mang_gain_year <= interval_start_year) and ((last_mang_loss_year == 0) or (last_mang_loss_year > interval_end_year))
+    # Mangrove state hierarchy before_mang > after_mang > mang_loss > mang_gain > mang_remaining_mang > non_mang_remaining_non_mang
 
-    if (not mang_loss) and (not mang_gain) and (not mang_remaining_mang):
-        before_mang_gain = (first_mang_gain_year != 0) and (first_mang_gain_year > interval_end_year)
+    # Checks if the end of the current interval is before the first time there is mangrove in this pixel
+    # This could be part of non_mang_remaining_non_mang, but keeping separate for zonal stats purposes and to allow for conversion from other classes to mangroves.
+    # Note: first_mang_gain_year only exists (is not 0) if there was no mangrove extent in 1996 and there is gain later on in the timeseries.
+    before_mang = (first_mang_gain_year != 0) and (first_mang_gain_year > interval_end_year)
 
-    if (not mang_loss) and (not mang_gain) and (not mang_remaining_mang) and (not before_mang_gain):
-        after_mang_loss = (last_mang_loss_year != 0) and (last_mang_loss_year <= interval_start_year)
+    if not before_mang:
+        # Checks if the start of the current interval is after the permanent mangrove loss year
+        # This could be part of non_mang_remaining_non_mang, but keeping separate for zonal stats and to allow for conversion from mangroves to other classes.
+        # Note: last_mang_loss_year only exists (is not 0) if there is no mangrove recovery after loss by the end of the timeseries (2020).
+        after_mang = (last_mang_loss_year != 0) and (last_mang_loss_year <= interval_start_year)
+
+    if (not before_mang) and (not after_mang):
+        # Mangrove loss if it was mangrove at the end of the previous interval, but not mangrove at the end of the current interval or
+        # if it was not mangrove at the end of the previous interval but there was gain and loss before the end of the current interval
+        mang_loss = ((mang_prev == 1) and (mang_last == 0)) or ((mang_prev == 0) and mang_present and (mang_last == 0))
+
+    if (not before_mang) and (not after_mang) and (not mang_loss):
+        # Mangrove gain if it was not mangrove at the end of the previous interval, but there was mangrove gain remaining mangrove by the end of the interval
+        mang_gain = (mang_prev == 0) and (mang_present) and (mang_last == 1)
+
+    if (not before_mang) and (not after_mang) and (not mang_loss) and (not mang_gain):
+        # Mangrove remaining mangrove if it was mangrove at the end of the previous interval and mangrove at the end of the current interval.
+        mang_remaining_mang = (mang_prev == 1) and (mang_last == 1)
+
+    if (not before_mang) and (not after_mang) and (not mang_loss) and (not mang_gain) and (not mang_remaining_mang):
+        # Non-mangrove remaining non-mangrove if it was not mangrove at the end of the previous interval and there is no mangrove presence during time period
+        non_mang_remaining_non_mang = (mang_prev == 0) and (mang_absent)
 
    # Checks that only 1 mangrove state is true
-    true_count = int(mang_loss) + int(mang_gain) + int(mang_remaining_mang) + int(before_mang_gain) + int(after_mang_loss)
+    true_count = int(before_mang) + int(after_mang) + int(mang_loss) + int(mang_gain) + int(mang_remaining_mang) + int(non_mang_remaining_non_mang)
     if true_count != 1:
         raise ValueError(
             f"Invalid classification. Only 1 of the following should be True: "
-            f"loss={mang_loss}, gain={mang_gain}, remaining={mang_remaining_mang}, before_gain={before_mang_gain}, after_loss={after_mang_loss}"
+            f"loss={mang_loss}, gain={mang_gain}, remaining={mang_remaining_mang}, not_remaining = {non_mang_remaining_non_mang}, before_gain={before_mang}, after_loss={after_mang}"
         )
 
-    return mang_loss, mang_gain, mang_remaining_mang, before_mang_gain, after_mang_loss
+    return mang_loss, mang_gain, mang_remaining_mang, non_mang_remaining_non_mang, before_mang, after_mang
 
 
 # Returns whether there was mangrove extent loss (1->0), and if so the year of loss

@@ -2,39 +2,25 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
 
 Local:
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_createstarting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
 
 Needs 4GB Coiled workers with 1 thread for 1x1 deg chunks; 2GB workers are too small.
 
 Coiled small test:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_createstarting_carbon_pools -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --year YYYY
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing -bb 114 -4 115 -3 -cs 1  --year YYYY
 
 Coiled shapefile test:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_createstarting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
 
 Full run 2000:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_createstarting_carbon_pools -cn LULUCF_preprocessing --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
-Peak memory per worker: ~2.8 GB
-Time for numba processing for each task: ~1 second (based on scanning the console)
-Time for total processing for each task: 15-25 seconds (based on scanning the console)
-Time until chunk stats: 24:26 (no non-soil C sum), 25:43 (with non-soil C sum)
-Time after chunk stats: 25:56 (no non-soil C sum), 27:06 (with non-soil C sum)
-Coiled credits: 92 (no non-soil C sum), 99 (with non-soil C sum) (200/hr for 200 m8g.medium workers, according to dashboard)
-AWS cost: $4.10 (no non-soil C sum), $4.50 (with non-soil C sum)
+python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
 
 Full run 2015:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_createstarting_carbon_pools -cn LULUCF_preprocessing --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
-Peak memory per worker: ~2.8 GB
-Time for numba processing for each task: ~1 second (based on scanning the console)
-Time for total processing for each task: 15-25 seconds (based on scanning the console)
-Time until chunk stats: 24:53 (with non-soil C sum)
-Time after chunk stats: 26:11 (with non-soil C sum)
-Coiled credits: 91.5 (with non-soil C sum) (200/hr for 200 m8g.medium workers, according to dashboard)
-AWS cost: $4.21 (with non-soil C sum)
+python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn LULUCF_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
 
 
 To create a vrt of the 10x10 deg outputs, do:
@@ -89,6 +75,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     climate_zone_block = in_dict_uint8[cn.climate_zone_pattern]
     LC_composite_block = in_dict_uint8[cn.land_cover_pattern]  # LC composite of the year being processed. Pattern is the same regardless of starting year.
     veg_height_block = in_dict_uint8[cn.vegetation_height_pattern]  # Veg height of the year being processed. Pattern is the same regardless of starting year.
+    mangrove_extent_block = in_dict_uint8[cn.mangrove_extent_processed_pattern]  # Veg height of the year being processed. Pattern is the same regardless of starting year.
 
     # AGB block sources (mangrove and non-mangrove) depend on the starting year
     # Numba can't handle two different possible datatypes for agb_non_mang_block,
@@ -96,22 +83,12 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     if year == 2000:
         agb_non_mang_block = in_dict_int16[cn.agb_2000_pattern].astype(np.int16)
         mangrove_agb_block = in_dict_float32[cn.mangrove_agb_2000_pattern]
-    elif year == 2015:
+    elif year == 2015: # No mangrove-specific AGB for 2015. Need to supply something for mangroves for completeness.
         agb_non_mang_block = in_dict_uint16[cn.agb_2015_pattern].astype(np.int16)
-        mangrove_agb_block = in_dict_float32[cn.mangrove_agb_2000_pattern]
+        mangrove_agb_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
     else:
         out_dict_float32[f"{cn.agc_raw_dens_pattern}_{year}"] = np.full(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape, 9999).astype('float32')
         return out_dict_float32
-
-    mangrove_in_chunk = True  # Flag for whether chunk has mangrove in it
-    agb_non_mang_in_chunk = True  # Flag for whether chunk has non-mangrove AGB in it
-
-    # Checks if the chunk has various inputs by seeing if the max value is 0.
-    # If the max value is 0, it assumed that input doesn't exist.
-    if agb_non_mang_block.max() == 0:
-        agb_non_mang_in_chunk = False
-    if mangrove_agb_block.max() == 0:
-        mangrove_in_chunk = False
 
     # Output blocks
     # Need to specify the output datatype or it will default to float32
@@ -151,6 +128,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             climate_zone_cell = climate_zone_block[row, col]
             LC_composite_cell = LC_composite_block[row, col]
             veg_height_cell = veg_height_block[row, col]
+            mangrove_extent_cell = mangrove_extent_block[row, col]
 
             # Applies the continent_ecozne fallback value when there isn't a value for the pixel
             if continent_ecozone_cell == 0:
@@ -160,15 +138,23 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             if climate_zone_cell == 0:
                 climate_zone_cell = climate_zone_fallback
 
+            # Criteria for classifying pixels as mangrove pixels: If mangrove AGB or GMWv3 is present
+            mangrove_pixel = (mangrove_agb_cell > 0) or (mangrove_extent_cell > 0)
+
 
             ### Part 2: Calculation of raw carbon density outputs (not masked by veg height/land cover)
 
-            # If mangrove AGB is present, AGC is calculated from it, overwriting any AGC that is based on non-mang AGB that is already there
-            if (mangrove_in_chunk) and (mangrove_agb_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
-                agc_raw_out_cell = mangrove_agb_cell * cn.biomass_to_carbon_mangrove
+            # If mangrove pixel, AGC is calculated from it, overwriting any AGC that is based on non-mang AGB that is already there
+            if mangrove_pixel == True:  # Checks if it's a mangrove pixel
+                if year == 2000:  # For 2000, uses mangrove AGB and converts to carbon with mangrove ratio
+                    agc_raw_out_cell = mangrove_agb_cell * cn.biomass_to_carbon_mangrove
+                elif year == 2015:  # For 2015, uses ESA AGB (because no mangrove-specific carbon) and converts to carbon with mangrove ratio
+                    agc_raw_out_cell = agb_non_mang_cell * cn.biomass_to_carbon_mangrove
+                else:
+                    raise ValueError("start_year not valid: must be 2000 or 2015")
 
             # If non-mang AGB is present, AGC is calculated from it
-            elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Only uses AGB if chunk exists and there is a value in that pixel
+            elif agb_non_mang_cell > 0:  # Only uses AGB if chunk exists and there is a value in that pixel
                 agc_raw_out_cell = agb_non_mang_cell * cn.biomass_to_carbon_non_mangrove
 
             else:
@@ -179,7 +165,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
             # Mangrove carbon pool ratio branch
             # From IPCC 2013 Wetland Supplement
-            if (mangrove_in_chunk) and (mangrove_agb_cell > 0):  # Only replaces non-mangrove AGB if mangrove chunk exists and if mangrove value in that pixel
+            if mangrove_pixel == True:  # Only replaces non-mangrove AGB if mangrove chunk exists and if mangrove value in that pixel
 
                 bgc_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 1]
                 deadwood_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 2]
@@ -193,7 +179,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             # Estimation of carbon stocks and change in carbon stocks in dead wood and litter in A/R CDM project activities version 03.0"
             # Tables on pages 18 (deadwood) and 19 (litter).
             # They depend on the climate domain, elevation, and precipitation.
-            elif (agb_non_mang_in_chunk) and (agb_non_mang_cell > 0):  # Non-mangrove
+            elif agb_non_mang_cell > 0:  # Non-mangrove
 
                 # If no mapped R:S (=0), uses the global default value instead
                 if r_s_ratio == 0:
@@ -240,16 +226,8 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             short_veg_AGC, short_veg_BGC = nu.calc_short_veg_removals(climate_zone_cell)
 
             # Assigns carbon densities based on vegetation height and composite landcover.
-            # Tall vegetation and/or mangrove (i.e. mangrove AGB pixels without tall vegetation keep all C pools)
-            #TODO Need to include GMWv3 1996 extent as another condition for keeping raw carbon pool outputs.
-            # Otherwise, pixels that are treated as mangrove in the model because they have GMWv3 but don't have
-            # mangrove AGB or tall vegetation get assigned other C pool values.
-            # e.g., 114.41835E, 3.4814S (in 00N_110E) has WHRC AGC of 47.47, mangrove AGC of 0, and a
-            # LC-masked AGC of 2.914 because the composite LC is short veg (code 124). However, there is GMW in 1996/2000,
-            # so this pixel should maintain the tree-relevant C-pools rather then be reclassified as short veg.
-            # This requires adding GMWv3 1996 as another input to this script and adding another or statement here.
-            # It can be tested as the coordinate mentioned above.
-            if (veg_height_cell >= cn.tree_threshold) or ((mangrove_in_chunk) and (mangrove_agb_cell > 0)):
+            # Tall vegetation and/or mangrove (i.e. mangrove pixels without tall vegetation keep all C pools)
+            if (veg_height_cell >= cn.tree_threshold) or (mangrove_pixel == True):
                 agc_LC_masked_out_cell = agc_raw_out_cell
                 bgc_LC_masked_out_cell = bgc_raw_out_cell
                 deadwood_c_LC_masked_out_cell = deadwood_c_raw_out_cell
@@ -269,7 +247,6 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                 bgc_LC_masked_out_cell = 0
                 deadwood_c_LC_masked_out_cell = 0
                 litter_c_LC_masked_out_cell = 0
-
 
             # Assigns cell outputs to blocks
             agc_raw_out_block[row, col] = agc_raw_out_cell
@@ -335,7 +312,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
     # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
-    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker)
+    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker, False)
     # print(futures)
 
     lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
@@ -349,7 +326,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         layer = futures[future]  # Gets the corresponding key
         data, status = future.result()  # Unpacks the tuple result
         if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
-            lu.print_and_log(f"{status}", is_final, logger_worker)
+            lu.print_and_log(f"{status}: {uu.timestr()}", False, logger_worker)
         layers[layer] = data
 
     # # Test prints
@@ -577,16 +554,16 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
         download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_dir}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
         download_dict[cn.land_cover_pattern] = f"{cn.land_cover_5_year_path}2000/{sample_tile_id}.tif"
         download_dict[cn.vegetation_height_pattern] = f"{cn.vegetation_height_5_year_path}2000/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_2000.tif"
+        download_dict[cn.mangrove_extent_processed_pattern] = f"{cn.mangrove_extent_processed_dir}1996/{sample_tile_id}__{cn.mangrove_extent_processed_pattern}_1996.tif"
 
         output_dir_list = [cn.agc_2000_raw_dir, cn.bgc_2000_raw_dir, cn.deadwood_c_2000_raw_dir, cn.litter_c_2000_raw_dir, cn.non_soil_c_2000_raw_dir,
                            cn.agc_2000_LC_masked_dir, cn.bgc_2000_LC_masked_dir, cn.deadwood_c_2000_LC_masked_dir, cn.litter_c_2000_LC_masked_dir, cn.non_soil_c_2000_LC_masked_dir]
 
-    elif year == 2015:
+    elif year == 2015:   # No mangrove-specific AGB for 2015
         download_dict[cn.agb_2015_pattern] = f"{cn.agb_2015_dir_processed}{sample_tile_id}_{cn.agb_2015_pattern}.tif"
-        ##TODO Using mangrove AGB2000 for 2015 model start! Need to use something else for 2015!!!!!!
-        download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_dir}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
         download_dict[cn.land_cover_pattern] = f"{cn.land_cover_annual_path}2015/{sample_tile_id}.tif"
         download_dict[cn.vegetation_height_pattern] = f"{cn.vegetation_height_annual_path}2015/{sample_tile_id}.tif"
+        download_dict[cn.mangrove_extent_processed_pattern] = f"{cn.mangrove_extent_processed_dir}2015/{sample_tile_id}__{cn.mangrove_extent_processed_pattern}_2015.tif"
 
         output_dir_list = [cn.agc_2015_raw_dir, cn.bgc_2015_raw_dir, cn.deadwood_c_2015_raw_dir, cn.litter_c_2015_raw_dir, cn.non_soil_c_2015_raw_dir,
                            cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir, cn.non_soil_c_2015_LC_masked_dir]

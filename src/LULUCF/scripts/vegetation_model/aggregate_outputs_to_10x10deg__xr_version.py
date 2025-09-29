@@ -9,19 +9,19 @@ and so having batches allows easier restarting. The tasks are in a pre-determine
 so each batch should have the same contents for any given set of inputs.
 
 Local test:
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs_xr_version -yr 2000 2024 --first_folders_to_process 2 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_LULUCF_outputs_xr_version -yr 2000 2024 --first_folders_to_process 2 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
 
 Coiled small test:
 python -m src.utilities.create_cluster -n 2 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs_xr_version -cn LULUCF_postprocessing -yr 2000 2024 --first_folders_to_process 2 --first_10x10s_to_process 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_LULUCF_outputs_xr_version -cn LULUCF_postprocessing -yr 2000 2024 --first_folders_to_process 2 --first_10x10s_to_process 2 --input_date YYYYMMDD
 
 Coiled large shapefile test (create a cluster with 1 worker, then resize it to 100 workers after local processing is done):
 python -m src.utilities.create_cluster -n 2 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs_xr_version -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD -nw 100 -ln "This is the aggregation of the 1884-chunk run."
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_LULUCF_outputs_xr_version -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD -nw 100 -ln "This is the aggregation of the 1884-chunk run."
 
 Full Coiled run (create a cluster with 1 worker, then resize it to 200 workers after local processing is done):
 python -m src.utilities.create_cluster -n 2 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.core_model.3_aggregate_LULUCF_outputs_xr_version -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD -nw 200 -ln "This is intended to be the definitive global run."
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_LULUCF_outputs_xr_version -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD -nw 200 -ln "This is intended to be the definitive global run."
 
 Notes on optimizing memory/worker and threads/worker: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1211174775511287?focus=true
 Tests showed that 16GB/worker is simply not large enough and that not specifying the number of threads/worker is faster.
@@ -277,13 +277,13 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
 
     # Only make 10x10s of the summative outputs. It keeps the workload smaller and these are the only ones that
     # have per-pixel outputs, which also need to be aggregated into 10x10s.
-    output_dir_list_per_ha = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,'4000',
-                                                     model_type, interval_end_years, interval_year_diff, input_date, "per_ha")
-    output_dir_list_per_pixel = uu.create_output_dir_name_list(cn.LULUCF_summative_output_dirs, interval_type, start_year,'4000',
-                                                     model_type, interval_end_years, interval_year_diff, input_date, "per_pixel")
+    output_dir_list_per_ha = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, interval_type, start_year, '4000',
+                                                            model_type, interval_end_years, interval_year_diff, input_date, "per_ha")
+    output_dir_list_per_pixel = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, interval_type, start_year, '4000',
+                                                               model_type, interval_end_years, interval_year_diff, input_date, "per_pixel")
 
     # Also need to aggregate the land state nodes
-    land_state_node_list = [s for s in cn.LULUCF_core_output_dirs if cn.land_state_pattern in s]
+    land_state_node_list = [s for s in cn.veg_core_output_dirs if cn.land_state_pattern in s]
     land_state_node_list = uu.create_output_dir_name_list(land_state_node_list, interval_type, start_year,'4000',
                                                      model_type, interval_end_years, interval_year_diff, input_date)
 

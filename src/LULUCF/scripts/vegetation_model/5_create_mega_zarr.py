@@ -4,7 +4,7 @@ Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 
 Local test:
-python -m src.LULUCF.scripts.core_model.3_create_individual_zarrs -yr 2000 2024 --first_folders_to_process 2 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
+python -m src.LULUCF.scripts.vegetation_model.5_create_mega_zarr -yr 2000 2024 --first_folders_to_process 2 --first_10x10s_to_process 2 --input_date YYYYMMDD --run_local
 
 Coiled small test:
 python -m src.utilities.create_cluster -n 2 -m 32 -cn LULUCF_postprocessing

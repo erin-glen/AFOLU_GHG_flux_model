@@ -25,10 +25,16 @@ from datetime import datetime
 from io import BytesIO
 from numba import jit
 from osgeo import gdal
-import gc
+from rasterio.session import AWSSession
+import random
+import rasterio.errors
+
 
 # Turns off a FutureWarning about gdal.UseExceptions() vs. gdal.DontUseExceptions()
 gdal.UseExceptions()
+
+session = boto3.Session()
+aws_session = AWSSession(session)
 
 # Project imports
 from src.utilities import constants_and_names as cn, log_utilities as lu
@@ -317,7 +323,7 @@ def save_and_upload_raster_10x10(bounds, tile_length_pixels, tile_id,
                 with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=tile_length_pixels,
                                    height=tile_length_pixels, count=1,
                                    dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                                   tiled=True, blockxsize=400, blockysize=400, nodata=no_data_val) as dst:
+                                   tiled=True, blockxsize=4000, blockysize=4000, nodata=no_data_val) as dst:
                     dst.write(data_array, 1)
 
             # No NoData value in output raster
@@ -325,7 +331,7 @@ def save_and_upload_raster_10x10(bounds, tile_length_pixels, tile_id,
                 with rasterio.open(f"/tmp/{file_name}", 'w', driver='GTiff', width=tile_length_pixels,
                                    height=tile_length_pixels, count=1,
                                    dtype=data_type, crs='EPSG:4326', transform=transform, compress='lzw',
-                                   tiled=True, blockxsize=400, blockysize=400) as dst:
+                                   tiled=True, blockxsize=4000, blockysize=4000) as dst:
                     dst.write(data_array, 1)
 
             upload_tasks.append((f"/tmp/{file_name}", "gfw2-data", f"{full_s3_path}{file_name}"))
@@ -431,7 +437,7 @@ def connect_to_Coiled_cluster(cluster_name, run_local, fallback_to_local_on_fail
             return None, None, True
         else:
             raise
-#TODO raise error from coiled, test with previous worksace
+
 
 # Chunk bounds as a string
 def boundstr(bounds):
@@ -643,9 +649,6 @@ def stage_duration(start_time_str, end_time_str, stage, logger, format="full"):
 
     logger.info(f"Elapsed time for {stage}: {end_time - start_time}" + "\n")
 
-from rasterio.session import AWSSession
-session = boto3.Session()
-aws_session = AWSSession(session)
 
 # Lazily opens tile within provided bounds (i.e. one chunk) and returns as a numpy array.
 # If it can't open the uri for the chunk (tile does not exist), it creates a numpy array of all 0s
@@ -659,57 +662,113 @@ aws_session = AWSSession(session)
 def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
 
     bounds_str = boundstr(bounds)
+    numpy_dtype = map_to_numpy_dtype(data_type)
+    expected_shape = (chunk_length_pixels, chunk_length_pixels)
+
+    # Number of retries for submitting requests to s3
+    MAX_RETRIES = 5
 
     # If the uri exists, the relevant window is opened and returned and returned as an array.
     # Note that this chunk could still just have NoData values, which would be downloaded.
-    # And, if the uri exists but the raster just doesn't extend there (e.g., far north), the array has to be padded to
+    # If the uri exists but the raster just doesn't extend there (e.g., far north), the array has to be padded to
     # reach the expected size.
-    try:
-        with rasterio.Env(aws_session, AWS_REQUEST_PAYER='requester', GDAL_DISABLE_READDIR_ON_OPEN='TRUE'):
-            with rasterio.open(uri) as ds:
-                window = rasterio.windows.from_bounds(*bounds, ds.transform)
-                data = ds.read(1, window=window)
+    # Retries accessing the raster 5 times in case too many requests to s3 are being made.
+    # If too many requests to s3 are being made, the script terminates for safety.
+    # https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68c3235e-a590-832d-bfdc-c1531416c311
+    for attempt in range(MAX_RETRIES):
+        try:
+            # Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
+            # The more files in an s3 folder, the longer it takes to access them without this environment variable.
+            # It takes about 9 minutes to access the inputs for a 1x1 deg summative output without this and <1 minute with it.
+            # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
+            with rasterio.Env(aws_session, AWS_REQUEST_PAYER='requester', GDAL_DISABLE_READDIR_ON_OPEN='TRUE'):
+                with rasterio.open(uri) as ds:
+                    window = rasterio.windows.from_bounds(*bounds, ds.transform)
+                    data = ds.read(1, window=window)
 
-                # Checks if array shape is not what we expect (full chunk size) and pads the array if the array is incomplete.
-                # Per https://chatgpt.com/c/67dcb99b-edb8-800a-abd8-f718de76043c
+                    # Checks if array shape is not what we expect (full chunk size) and pads the array if the array is incomplete.
+                    # Per https://chatgpt.com/c/67dcb99b-edb8-800a-abd8-f718de76043c
+                    if data.shape != expected_shape:
+                        original_shape = data.shape
+                        padded_data = np.zeros(expected_shape, dtype=numpy_dtype)
 
-                expected_shape = (chunk_length_pixels, chunk_length_pixels)
-                if data.shape != expected_shape:
-                    original_shape = data.shape
-                    numpy_dtype = map_to_numpy_dtype(data_type)
-                    padded_data = np.zeros(expected_shape, dtype=numpy_dtype)
+                        # Calculates offset in pixels relative to chunk
+                        row_offset = max(0, int(window.row_off))
+                        col_offset = max(0, int(window.col_off))
+                        rows, cols = data.shape
+                        end_row = min(row_offset + rows, chunk_length_pixels)
+                        end_col = min(col_offset + cols, chunk_length_pixels)
 
-                    # Calculates offset in pixels relative to chunk
-                    row_offset = max(0, int(window.row_off))
-                    col_offset = max(0, int(window.col_off))
+                        # Fills the correct slice of the padded array
+                        padded_data[row_offset:end_row, col_offset:end_col] = data[:end_row - row_offset, :end_col - col_offset]
 
-                    rows, cols = data.shape
-                    end_row = min(row_offset + rows, chunk_length_pixels)
-                    end_col = min(col_offset + cols, chunk_length_pixels)
+                        data = padded_data
+                        status = f"padded {bounds_str} chunk from {original_shape} to {expected_shape}"
 
-                    # Fills the correct slice of the padded array
-                    padded_data[row_offset:end_row, col_offset:end_col] = data[:end_row - row_offset, :end_col - col_offset]
+                    else:
+                        status = "success- chunk complete, no padding needed"
 
-                    data = padded_data
-                    status = f"padded {bounds_str} chunk from {original_shape} to {expected_shape}"
+            return data, status
 
+        except rasterio.errors.RasterioIOError as e:
+            # Retry only on SlowDown error
+            if "SlowDown" in str(e):
+                if attempt < MAX_RETRIES - 1:
+                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
+                    print(f"SlowDown from S3 on {uri}. Retrying in {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
                 else:
-                    status = "success- chunk complete, no padding needed"
+                    # Too many retries → fail hard
+                    raise RuntimeError(f"S3 throttling (SlowDown) persisted after {MAX_RETRIES} retries for {uri}")
+            elif "Please reduce" in str(e):
+                if attempt < MAX_RETRIES - 1:
+                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
+                    print(f"'Please reduce your request rate' for {uri}. Retrying in {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
+                else:
+                    # Too many retries → fail hard
+                    raise RuntimeError(f"'Please reduce your request rate' persisted after {MAX_RETRIES} retries for {uri}")
+            elif "503" in str(e):
+                if attempt < MAX_RETRIES - 1:
+                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
+                    print(f"'503 error' for {uri}. Retrying in {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
+                else:
+                    # Too many retries → fail hard
+                    raise RuntimeError(f"'503 error' persisted after {MAX_RETRIES} retries for {uri}")
+            else:
+                # Other RasterioIOError → fallback to array of zeros downloaded
+                if attempt < MAX_RETRIES - 1:
+                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
+                    print(f"'Please reduce your request rate' for {uri}. Retrying in {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
+                else:
+                    data = np.full(expected_shape, 0, dtype=numpy_dtype)
+                    status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}"
+                    return data, status
 
-    # If the uri doesn't exist, a numpy array of the correct size and datatype populated with 0s is returned.
-    except Exception as e:
-
-        numpy_dtype = map_to_numpy_dtype(data_type)   # Translates the GDAL-style datatype to numpy-style datatype
-        data = np.full((chunk_length_pixels, chunk_length_pixels), 0).astype(numpy_dtype)
-        status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}"
-
-    return data, status
+        except Exception as e:
+            # Non-SlowDown, non-Rasterio error → fallback to array of zeros downloaded
+            data = np.full(expected_shape, 0, dtype=numpy_dtype)
+            status = f"Other dataset issue for {uri} in {bounds_str}. Returning array of all 0s: {e}"
+            return data, status
 
 
 # Prepares list of chunks to download.
 # Chunks are defined by a bounding box.
 # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
-def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger):
+def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger, stagger_download):
+
+    # Only staggers downloads for scripts that require it because they're hitting individual s3 folders a lot, e.g., summative outputs.
+    # Not all scripts hit individual s3 folders beyond s3's request limit.
+    if stagger_download == True:
+        # Staggers worker startup so that not all workers are requesting data from s3 at the same time, to prevent hitting request limit
+        startup_delay = random.uniform(0, 3.5)
+        time.sleep(startup_delay)
 
     futures = {}
 
@@ -723,19 +782,24 @@ def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_fin
         lu.print_and_log(f"Requesting data in chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
 
         for key, value in download_dict.items():
+            # print(key, value)
 
             # When the values are a list with just the file to download, without the datatype
             if len(value)==1:
                 future = executor.submit(get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, 'float32')
-                futures[future] = key  # Stores Future objects (data and status) as keys, layer names as values
 
             # When the values are a list with the file to download and the datatype
             elif len(value)==2:
                 future = executor.submit(get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, value[1])
-                futures[future] = key  # Stores Future objects (data and status) as keys, layer names as values
 
             else:
                 sys.exit("Unexpected number of parameters in download dictionary")
+
+            futures[future] = key  # Stores Future objects (data and status) as keys, layer names as values
+
+            if stagger_download:
+                # Staggers submissions to avoid burst traffic to S3
+                time.sleep(random.uniform(0.05, 0.3))
 
     return futures
 
@@ -781,7 +845,7 @@ def check_for_tile(download_dict, is_final, logger):
 
 # Turns a list of basic output directory names into a list of fully specified directories based on output chunk size, run date, model type, and output years
 def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_pixels,
-                                model_type, output_years, interval_duration, run_date, pixel_meaning=None):
+                                model_type, output_years, interval_duration, run_date, include_full_period_totals, pixel_meaning=None):
 
     # List of directories for outputs
     output_full_dirs = []
@@ -789,11 +853,16 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
     # Replaces placeholders in paths with values specific to the run
     dir_list = [path.replace(cn.model_type_placholder, model_type) for path in dir_list]
     dir_list = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in dir_list]
-    dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in dir_list]
     dir_list = [path.replace("RUN_DATE", run_date) for path in dir_list]
 
-    # Any entry that covers the entire model period, from start year to end of last interval
-    dir_list = [path.replace("FULL_MODEL", f"{start_year}_{output_years[-1]}") for path in dir_list]
+    # Replaces the chunk_size part of the path with global if this is a global aggregation
+    if chunk_size_pixels == "global":
+        dir_list = [path.replace("CHUNK_SIZE_pixels", chunk_size_pixels) for path in dir_list]
+    else:
+        dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in dir_list]
+
+    # # Any entry that covers the entire model period, from start year to end of last interval
+    # dir_list = [path.replace("FULL_MODEL", f"{start_year}_{output_years[-1]}") for path in dir_list]
 
     # Replaces the pixel meaning placeholder with the per-ha or per-pixel meanings.
     # Pixel meanings are formulated slightly differently depending on whether the output is C density or flux.
@@ -801,11 +870,15 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
         if "density" in basic_output:  # Changes C density outputs
             if pixel_meaning == "per_ha":
                 updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning)
+            elif pixel_meaning == cn.C_density_aggreg_pixel_meaning:
+                updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_density_aggreg_pixel_meaning)
             else:
                 updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.C_per_pixel_pixel_meaning)
         else:  # Changes flux outputs and removal factors
             if pixel_meaning == "per_ha":
                 updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_density_pixel_meaning)
+            elif pixel_meaning == cn.flux_aggreg_pixel_meaning:
+                updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_aggreg_pixel_meaning)
             else:
                 updated_path = basic_output.replace("PER_HA_OR_PIXEL", cn.flux_per_pixel_pixel_meaning)
 
@@ -814,6 +887,10 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
 
     # Iterates through the list of core output directories and adds the correct output years (stocks) or year ranges (fluxes) to each.
     for basic_output in dir_list:
+
+        # Sample output directory (given year) for each set of outputs, that will be used to create the path for the full model period output
+        sample_output_dir = None
+
         for count, output_year in enumerate(output_years):
 
             # For outputs that are a specific year (stocks)
@@ -831,14 +908,16 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
                 else:  # Hybrid model (2000-2024)
                     output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
 
+            sample_output_dir = basic_output
             output_full_dirs.append(output_dir)
 
-    # Because outputs that are sums across the entire model period are re-created for every interval in the
-    # above for loop, we need to remove the duplication in the output list.
-    # This returns the outputs that are sums across the entire model period back to one element per output type.
-    output_full_dirs_unique = list(set(output_full_dirs))
+        # Creates the full model period path (2015-ENDYEAR) and adds it to the list of paths.
+        # Only used for select outputs.
+        if include_full_period_totals:
+            full_model_period_dir = sample_output_dir.replace('START_END', f"{cn.first_model_year_annual}_{cn.last_model_year_annual}")
+            output_full_dirs.append(full_model_period_dir)
 
-    return output_full_dirs_unique
+    return output_full_dirs
 
 
 # Checks if a geotif has data in it.
@@ -1037,8 +1116,7 @@ def create_list_for_aggregation(s3_in_folders, main_logger):
 def flatten_list(nested_list):
     return [x for xs in nested_list for x in xs]
 
-#TODO @David Note that I added 2 optional inputs to his function (output_dir and stat_type). This shouldn't affect your uses.
-#TODO @Mel Changed back to David's original code. Update and test in mangrove processing scripts. 
+
 # Merges rasters that are <10x10 degrees into 10x10 degree rasters in the standard grid.
 # Approach is to merge rasters with gdal.Warp and then upload them to s3.
 # Commented out COG creation; it just outputs basic geotifs for now.
@@ -1047,6 +1125,10 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, s
     process = psutil.Process(os.getpid())
 
     chunk_start_time = time.time()
+
+    # Retry parameters in case of failure the first time
+    max_retries = 3
+    retry_delay = 5  # seconds between retries
 
     ### Part 1: Merges 1x1 deg rasters to 10x10 deg
 
@@ -1080,14 +1162,26 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, s
     min_x, min_y, max_x, max_y = get_10x10_tile_bounds(tile_id)
 
     # Dynamically sets the datatype for the merged raster based on the input rasters (courtesy of https://chatgpt.com/share/e/a91c4c98-b2b1-4680-a4a7-453f1a878052)
-    # Determines the data type of the first raster
+    # Determines the data type of the first raster.
+    # Retries in case of failure (likely because of too many simultaneous requests to s3)
     first_raster_path = tile_paths[0]
-    ds = gdal.Open(first_raster_path)
-    raster_datatype = ds.GetRasterBand(1).DataType
-    raster_nodata_value = ds.GetRasterBand(1).GetNoDataValue()
-    if raster_nodata_value == None:  # In case no NoData value is assigned
-        raster_nodata_value = 0
-    ds = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            startup_delay = random.uniform(0, 1.5)  # Slight delay before s3 is accessed so that request quota isn't exceeded
+            time.sleep(startup_delay)
+            ds = gdal.Open(first_raster_path)
+            raster_datatype = ds.GetRasterBand(1).DataType
+            raster_nodata_value = ds.GetRasterBand(1).GetNoDataValue()
+            if raster_nodata_value == None:  # In case no NoData value is assigned
+                raster_nodata_value = 0
+            ds = None
+        except RuntimeError as e:
+            lu.print_and_log(f"Error accessing {first_raster_path} for data type extraction (attempt {attempt}/{max_retries}): {e}: {timestr()}", False, logger_worker)
+            if attempt < max_retries:
+                lu.print_and_log(f"Retrying accessing {first_raster_path} for data type extraction (attempt {attempt}/{max_retries}): {timestr()}", False, logger_worker)
+                time.sleep(retry_delay)
+            else:
+                return f"Error: failure accessing {first_raster_path} after {max_retries} attempts: {timestr()}"
 
     # Defaults to Float32 if not found
     dtype_str = gdal_to_string_dtype_mapping.get(raster_datatype, 'Float32')
@@ -1113,13 +1207,19 @@ def merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, output_dir=None, s
     # Add the input tile paths
     merge_command.extend(tile_paths)
 
-    try:
-        subprocess.check_call(merge_command)
-        lu.print_and_log(f"Successfully merged rasters into {merged_file}: {timestr()}", is_final, logger_worker)
-        lu.print_and_log(f"After creating geotif for {merged_file}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
-    except subprocess.CalledProcessError as e:
-        lu.print_and_log(f"Error merging rasters: {e}: {timestr()}", False, logger_worker)
-        return f"failure merging {s3_name_dict}"
+    for attempt in range(1, max_retries + 1):
+        try:
+            subprocess.check_call(merge_command)
+            lu.print_and_log(f"Successfully merged rasters into {merged_file} on attempt {attempt}: {timestr()}", is_final, logger_worker)
+            lu.print_and_log(f"After creating geotif for {merged_file}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+            break  # exit loop if successful
+        except subprocess.CalledProcessError as e:
+            lu.print_and_log(f"Error merging rasters (attempt {attempt}/{max_retries}): {e}: {timestr()}", False, logger_worker)
+            if attempt < max_retries:
+                lu.print_and_log(f"Retrying {merged_file} for attempt {attempt}: {timestr()}", False, logger_worker)
+                time.sleep(retry_delay)
+            else:
+                return f"Error: failure merging {s3_name_dict} after {max_retries} attempts: {timestr()}"
 
     chunk_non_cog_end_time = time.time()
     lu.print_and_log(f"Merging {merged_file} took {round(chunk_non_cog_end_time - chunk_start_time)} seconds: {timestr()}", False, logger_worker)
@@ -1343,7 +1443,7 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
             success_count += 1
         elif "Skipped chunk" in return_message:
             skipping_chunk_count += 1
-        elif "Error" in return_message:
+        elif ("Error" in return_message) or ("failure" in return_message):
             error_chunk_count += 1
         else:
             other_message_count += 1
