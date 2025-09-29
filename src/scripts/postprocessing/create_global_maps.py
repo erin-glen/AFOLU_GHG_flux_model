@@ -983,7 +983,7 @@ def display_main(
 
         # 2) Fallback: a versioned directory “global” (if present in versioned structure)
         versioned_noext = posixpath.join(
-            base_url.rstrip("/"),
+            resolved_base_url.rstrip("/"),
             dataset,
             run_name,
             "five_year_intervals",
