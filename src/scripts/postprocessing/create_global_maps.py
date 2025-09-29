@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List
 
 import dask
+from dask.distributed import as_completed
 import numpy as np
 import rasterio
 from rasterio.warp import calculate_default_transform, reproject, Resampling
@@ -315,6 +316,52 @@ def agg_tile_to_target(
     return summed / float(factor * factor)
 
 
+def _compute_tiles(
+    delayed_results: List,
+    client,
+    logger,
+    stage_desc: str,
+    tile_ids: List[str],
+) -> List[np.ndarray]:
+    """Compute tile aggregation tasks, streaming from the Dask cluster when available."""
+
+    if not delayed_results:
+        return []
+
+    if client is None:
+        return list(dask.compute(*delayed_results))
+
+    futures = client.compute(delayed_results, sync=False)
+    future_to_index = {future: idx for idx, future in enumerate(futures)}
+    tiles: List[Optional[np.ndarray]] = [None] * len(futures)
+    completed = 0
+    total = len(futures)
+
+    for future in as_completed(list(future_to_index.keys())):
+        idx = future_to_index[future]
+        tile_id = tile_ids[idx]
+        try:
+            result = future.result()
+        except Exception:
+            logger.exception("Tile %s failed during %s", tile_id, stage_desc)
+            raise
+
+        tiles[idx] = result
+        completed += 1
+        if completed % 10 == 0 or completed == total:
+            logger.info(
+                "Completed %d/%d tiles for %s", completed, total, stage_desc
+            )
+
+    missing = [tile_ids[idx] for idx, tile in enumerate(tiles) if tile is None]
+    if missing:
+        raise RuntimeError(
+            f"Missing {len(missing)} tile results for {stage_desc}: {', '.join(missing)}"
+        )
+
+    return [tile for tile in tiles if tile is not None]
+
+
 def combine_global_raster(
     tiles: List[np.ndarray],
     bounds_list: List[Tuple[float, float, float, float]],
@@ -480,17 +527,18 @@ def aggregate_main(
     for key, items in download_upload_dictionary.items():
         bounds_list: List[Tuple[float, float, float, float]] = []
         delayed_results: List = []
+        tile_ids: List[str] = []
 
         dataset_name = items["dataset"]
         is_integer = dataset_name in INTEGER_DATASETS
 
-        for tile_id in cn.tile_id_list:
-            stage = f"aggregate tiles to {res_label} for {key}"
-            start_time = uu.timestr()
-            lu.print_and_log(
-                f"Stage {stage} started at: {start_time}", is_final, logger
-            )
+        stage = f"aggregate tiles to {res_label} for {key}"
+        start_time = uu.timestr()
+        lu.print_and_log(
+            f"Stage {stage} started at: {start_time}", is_final, logger
+        )
 
+        for tile_id in cn.tile_id_list:
             mg_ha_yr_tile = f"{items['mg_ha_yr_dir']}{tile_id}{items['mg_ha_yr_pattern']}"
             pixel_area_tile = (
                 f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
@@ -507,6 +555,7 @@ def aggregate_main(
             bounds = uu.get_10x10_tile_bounds(tile_id)
             bounds_list.append(bounds)
             chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
+            tile_ids.append(tile_id)
 
             delayed_results.append(
                 dask.delayed(agg_tile_to_target)(
@@ -524,13 +573,20 @@ def aggregate_main(
                 )
             )
 
+        stage_desc = f"{res_label} aggregation for {key}"
+        tiles = _compute_tiles(
+            delayed_results=delayed_results,
+            client=None if run_local else client,
+            logger=logger,
+            stage_desc=stage_desc,
+            tile_ids=tile_ids,
+        )
+
         stage = f"build {res_label} global mosaic for {key}"
         start_time = uu.timestr()
         lu.print_and_log(
             f"Stage {stage} started at: {start_time}", is_final, logger
         )
-
-        tiles = dask.compute(*delayed_results)
 
         # Decide global filename
         if use_pixel_area and not is_integer and items["dataset"].endswith(("_ha", "_ha_yr")):
@@ -555,7 +611,8 @@ def aggregate_main(
             logger,
         )
 
-    client.close()
+    if client is not None:
+        client.close()
 
 
 # ---------------------------------------------------------------------------
