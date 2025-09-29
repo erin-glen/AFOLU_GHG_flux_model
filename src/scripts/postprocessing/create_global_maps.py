@@ -8,9 +8,9 @@ Two-stage pipeline:
   Stage B: Render Robinson-projected JPEGs (and GIFs for time series).
 
 Option A (this script):
-  • Stage B never writes to /vsis3/. It reads from S3 via /vsis3/, reprojects to a
-    local cache, and writes all JPEG/GIF outputs to a local mirror path.
-  • To publish displays to S3, sync the local mirror (see examples).
+  • Stage B reads from S3 via /vsis3/, reprojects to a local cache, and writes
+    all JPEG/GIF outputs to a local mirror path before uploading to S3.
+  • Use ``--local_display_only`` to skip the S3 upload and keep results local.
   • Stage A uploads canonical TIFFs when not run in local mode.
 
 Environment variables
@@ -24,27 +24,22 @@ Examples
 # Aggregate only (0.04° by default):
 python -m src.scripts.postprocessing.create_global_maps \
   aggregate -cn create_maps --run_name ogh_sensitivity_1km \
-  --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0
+  --model_version 0_8_0 --date_tag 20250923
 
 # Aggregate at 0.01°:
 python -m src.scripts.postprocessing.create_global_maps \
   aggregate -cn create_maps --run_name ogh_sensitivity_1km --target_deg 0.01 \
-  --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0
+  --model_version 0_8_0 --date_tag 20250923
 
 # Display only (read global rasters directly in S3 via GDAL /vsis3/):
 python -m src.scripts.postprocessing.create_global_maps \
   display --date_tag 20250923 --read_from_s3 --run_name ogh_sensitivity_1km \
-  --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0
+  --model_version 0_8_0
 
 # End-to-end (aggregate then display) at 0.04°:
 python -m src.scripts.postprocessing.create_global_maps \
   all -cn create_maps --date_tag 20250923 --run_name ogh_sensitivity_1km \
-  --read_from_s3 --base_url s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0
-
-# After display-only or end-to-end runs, publish displays to S3 (optional):
-aws s3 sync /tmp/create_global_maps/display \
-  s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/ \
-  --exclude "*" --include "*.jpeg" --include "*.gif"
+  --read_from_s3 --model_version 0_8_0
 """
 
 from __future__ import annotations
@@ -89,8 +84,11 @@ INTEGER_DATASETS: set[str] = set()  # modal aggregation for these dataset names
 INVENTORY_PERIODS = ["2021_2024"]
 
 # Keep default aligned to latest runs in your logs; can be overridden via CLI
-BASE_URL = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_8_0"
-OUTPUTS_BASE = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
+OUTPUT_ROOT = posixpath.join(cn.full_bucket_prefix, cn.project_dir, "outputs")
+DEFAULT_MODEL_VERSION = getattr(cn, "model_version_underscore", cn.model_version.replace(".", "_"))
+
+BASE_URL = posixpath.join(OUTPUT_ROOT, f"version_{DEFAULT_MODEL_VERSION}")
+OUTPUTS_BASE = BASE_URL
 
 DEFAULT_DATE_TAG = "20250923"  # used within input dataset paths unless overridden
 
@@ -147,6 +145,69 @@ def _to_local_mirror(path_like: str) -> str:
 
     local = posixpath.join(DISPLAY_OUT_ROOT.rstrip("/"), rel)
     return local
+
+
+def build_versioned_outputs_root(model_version: str, outputs_root: str = OUTPUT_ROOT) -> str:
+    root = outputs_root.rstrip("/")
+    return posixpath.join(root, f"version_{model_version}")
+
+
+def resolve_versioned_paths(
+    model_version: str,
+    outputs_root: str,
+    base_url: Optional[str] = None,
+    outputs_base: Optional[str] = None,
+) -> Tuple[str, str]:
+    """Return (base_url, outputs_base) with sensible defaults."""
+
+    versioned_root = build_versioned_outputs_root(model_version, outputs_root)
+    resolved_base = (base_url or versioned_root).rstrip("/")
+    resolved_outputs = (outputs_base or versioned_root).rstrip("/")
+    return resolved_base, resolved_outputs
+
+
+def _split_s3_url(s3_url: str) -> Tuple[str, str]:
+    if not s3_url.startswith("s3://"):
+        raise ValueError(f"Expected s3:// URL, received: {s3_url}")
+    bucket_key = s3_url[len("s3://") :]
+    parts = bucket_key.split("/", 1)
+    bucket = parts[0]
+    key_prefix = parts[1] if len(parts) > 1 else ""
+    return bucket, key_prefix
+
+
+def _upload_display_outputs(
+    created_files: List[Path],
+    out_dir_local: Path,
+    dest_s3_dir: str,
+    logger,
+) -> None:
+    if not created_files:
+        return
+
+    if not dest_s3_dir.startswith("s3://"):
+        logger.warning(
+            "Display output directory is not an S3 path; skipping upload: %s", dest_s3_dir
+        )
+        return
+
+    bucket, prefix = _split_s3_url(dest_s3_dir.rstrip("/") + "/")
+    prefix = prefix.rstrip("/")
+
+    for local_path in created_files:
+        try:
+            rel_path = local_path.relative_to(out_dir_local)
+        except ValueError:
+            logger.warning(
+                "Skipping upload for %s because it is outside %s", local_path, out_dir_local
+            )
+            continue
+
+        rel_key = "/".join(rel_path.parts)
+        key = f"{prefix}/{rel_key}" if prefix else rel_key
+
+        uu.upload_file_to_s3(str(local_path), bucket, key)
+        logger.info("Uploaded %s to s3://%s/%s", local_path, bucket, key)
 
 
 # ---------------------------------------------------------------------------
@@ -378,9 +439,11 @@ def aggregate_main(
     use_pixel_area: bool = True,
     native_deg: float = DEFAULT_NATIVE_DEG,
     target_deg: float = DEFAULT_TARGET_DEG,
-    base_url: str = BASE_URL,
     output_date: str = DEFAULT_DATE_TAG,
-    outputs_base: str = OUTPUTS_BASE,
+    model_version: str = DEFAULT_MODEL_VERSION,
+    outputs_root: str = OUTPUT_ROOT,
+    base_url: Optional[str] = None,
+    outputs_base: Optional[str] = None,
 ):
     """
     Drive Stage A: aggregation to target_deg and global mosaic.
@@ -396,13 +459,20 @@ def aggregate_main(
     # Recompute is_final if connect_to_cluster forces local
     is_final = not run_local
 
+    resolved_base_url, resolved_outputs_base = resolve_versioned_paths(
+        model_version=model_version,
+        outputs_root=outputs_root,
+        base_url=base_url,
+        outputs_base=outputs_base,
+    )
+
     download_upload_dictionary = build_download_upload_dict(
         pixel_resolution=pixel_resolution,
         run_name=run_name,
         target_deg=target_deg,
-        base_url=base_url,
+        base_url=resolved_base_url,
         output_date=output_date,
-        outputs_base=outputs_base,
+        outputs_base=resolved_outputs_base,
     )
 
     res_label = deg_to_label(target_deg)
@@ -636,9 +706,9 @@ def _draw_frame(ax, extent, masked, cmap, norm, ocean_rgb):
     return img
 
 
-def _save_two_versions(ax, base_out: Path, year_label: str | int):
-    base_no_note = f"{base_out}__{year_label}.jpeg"
-    base_with_note = f"{base_out}__{year_label}__for_pres.jpeg"
+def _save_two_versions(ax, base_out: Path, year_label: str | int) -> Tuple[Path, Path]:
+    base_no_note = Path(f"{base_out}__{year_label}.jpeg")
+    base_with_note = Path(f"{base_out}__{year_label}__for_pres.jpeg")
 
     ax.text(0.5, 0.07, str(year_label), transform=ax.transAxes, ha="center", va="top",
             fontsize=18, weight="bold", color="black")
@@ -649,17 +719,25 @@ def _save_two_versions(ax, base_out: Path, year_label: str | int):
             ha="right", va="top", color="black")
     plt.savefig(base_with_note, dpi=cn.dpi_jpeg, bbox_inches="tight", pad_inches=0)
     plt.close()
-    return base_with_note
+    return base_with_note, base_no_note
 
 
-def _gif_from_frames(base_out: Path, first_label, last_label, frames: List[str]):
+def _gif_from_frames(base_out: Path, first_label, last_label, frames: List[str]) -> List[Path]:
     if not frames:
-        return
+        return []
+
     imgs = [Image.open(p) for p in frames]
-    out_fast = f"{base_out}__{first_label}_{last_label}__fast.gif"
-    out_slow = f"{base_out}__{first_label}_{last_label}__slow.gif"
-    imgs[0].save(out_fast, save_all=True, append_images=imgs[1:], duration=1000, loop=0)
-    imgs[0].save(out_slow, save_all=True, append_images=imgs[1:], duration=2500, loop=0)
+    out_fast = Path(f"{base_out}__{first_label}_{last_label}__fast.gif")
+    out_slow = Path(f"{base_out}__{first_label}_{last_label}__slow.gif")
+
+    try:
+        imgs[0].save(str(out_fast), save_all=True, append_images=imgs[1:], duration=1000, loop=0)
+        imgs[0].save(str(out_slow), save_all=True, append_images=imgs[1:], duration=2500, loop=0)
+    finally:
+        for img in imgs:
+            img.close()
+
+    return [out_fast, out_slow]
 
 
 def _load_or_project_raster(base_tif_noext: str, target_crs: str, work_dir: Path) -> str:
@@ -740,6 +818,7 @@ def make_displays_for_dataset(
     mode = "diverging" if diverging_if_zero_center else recipe_mode
 
     frames_for_gif: List[str] = []
+    created_files: List[Path] = []
     labels = years or [interval]
 
     # Reproject once per (dataset/interval or year)
@@ -771,18 +850,22 @@ def make_displays_for_dataset(
         _legend(fig, img, mode, vtuple, legend_title, dmin, dmax)
 
         base_out = Path(out_dir_local) / out_name_base
-        frame = _save_two_versions(ax, base_out, label)
-        frames_for_gif.append(frame)
+        frame_with_note, frame_no_note = _save_two_versions(ax, base_out, label)
+        frames_for_gif.append(str(frame_with_note))
+        created_files.extend([frame_with_note, frame_no_note])
 
     try:
         if len(frames_for_gif) > 1 and isinstance(labels[0], int):
-            _gif_from_frames(Path(out_dir_local) / out_name_base, labels[0], labels[-1], frames_for_gif)
+            gif_paths = _gif_from_frames(Path(out_dir_local) / out_name_base, labels[0], labels[-1], frames_for_gif)
+            created_files.extend(gif_paths)
     except Exception as e:
         logger.warning(f"GIF creation failed: {e}")
 
     logger.info(
         f"Rendered {dataset_name} {interval} in {round(time.time()-t0)} s → {posixpath.join(out_dir_local, out_name_base)}"
     )
+
+    return created_files
 
 
 def display_main(
@@ -791,7 +874,11 @@ def display_main(
     run_name: str,
     pixel_resolution: str,
     target_deg: float = DEFAULT_TARGET_DEG,
-    base_url: str = BASE_URL,
+    model_version: str = DEFAULT_MODEL_VERSION,
+    outputs_root: str = OUTPUT_ROOT,
+    base_url: Optional[str] = None,
+    outputs_base: Optional[str] = None,
+    upload_to_s3: bool = True,
 ):
     """
     Drive Stage B: create display images for the specified target resolution.
@@ -800,13 +887,20 @@ def display_main(
     res_label = deg_to_label(target_deg)
 
     logger = lu.setup_logging_main()
+    resolved_base_url, resolved_outputs_base = resolve_versioned_paths(
+        model_version=model_version,
+        outputs_root=outputs_root,
+        base_url=base_url,
+        outputs_base=outputs_base,
+    )
+
     d = build_download_upload_dict(
         pixel_resolution=pixel_resolution,
         run_name=run_name,
         target_deg=target_deg,
-        base_url=base_url,
+        base_url=resolved_base_url,
         output_date=date_tag,
-        outputs_base=OUTPUTS_BASE,
+        outputs_base=resolved_outputs_base,
     )
 
     shp = _maybe_load_world_boundaries(logger)
@@ -861,7 +955,7 @@ def display_main(
 
         out_base = f"{dataset}__{interval}"
 
-        make_displays_for_dataset(
+        created_files = make_displays_for_dataset(
             dataset_name=dataset,
             interval=interval,
             tif_path_noext_candidates=candidates,
@@ -875,6 +969,9 @@ def display_main(
             target_crs=cn.Robinson_crs,
             logger=logger,
         )
+
+        if upload_to_s3:
+            _upload_display_outputs(created_files, Path(out_jpeg_dir_local), out_jpeg_dir_base, logger)
 
 
 # ---------------------------------------------------------------------------
@@ -892,9 +989,27 @@ def main():
     p_agg.add_argument("--skip_pixel_area", action="store_true")
     p_agg.add_argument("--native_deg", type=float, default=DEFAULT_NATIVE_DEG)
     p_agg.add_argument("--target_deg", type=float, default=DEFAULT_TARGET_DEG)
-    p_agg.add_argument("--base_url", default=BASE_URL)
+    p_agg.add_argument(
+        "--model_version",
+        default=DEFAULT_MODEL_VERSION,
+        help="Model version string (underscore separated) used to build S3 paths.",
+    )
     p_agg.add_argument("--date_tag", default=DEFAULT_DATE_TAG)
-    p_agg.add_argument("--outputs_base", default=OUTPUTS_BASE)
+    p_agg.add_argument(
+        "--outputs_root",
+        default=OUTPUT_ROOT,
+        help="Root S3 directory for model outputs.",
+    )
+    p_agg.add_argument(
+        "--base_url",
+        default=None,
+        help="Optional override for the versioned base URL containing per-tile rasters.",
+    )
+    p_agg.add_argument(
+        "--outputs_base",
+        default=None,
+        help="Optional override for the destination of aggregated rasters.",
+    )
 
     p_disp = sub.add_parser("display", help="Run Stage B (display) only.")
     p_disp.add_argument("--date_tag", required=True, help="Date tag used in input paths (YYYYMMDD).")
@@ -902,7 +1017,31 @@ def main():
     p_disp.add_argument("--run_name", default="ogh_sensitivity_1km")
     p_disp.add_argument("-p", "--pixel_resolution", default="40000_pixels")
     p_disp.add_argument("--target_deg", type=float, default=DEFAULT_TARGET_DEG)
-    p_disp.add_argument("--base_url", default=BASE_URL)
+    p_disp.add_argument(
+        "--model_version",
+        default=DEFAULT_MODEL_VERSION,
+        help="Model version string (underscore separated) used to build S3 paths.",
+    )
+    p_disp.add_argument(
+        "--outputs_root",
+        default=OUTPUT_ROOT,
+        help="Root S3 directory for model outputs.",
+    )
+    p_disp.add_argument(
+        "--base_url",
+        default=None,
+        help="Optional override for the versioned base URL containing per-tile rasters.",
+    )
+    p_disp.add_argument(
+        "--outputs_base",
+        default=None,
+        help="Optional override for the destination of aggregated rasters.",
+    )
+    p_disp.add_argument(
+        "--local_display_only",
+        action="store_true",
+        help="Skip uploading rendered displays to S3 (local mirror only).",
+    )
 
     p_all = sub.add_parser("all", help="Run Stage A then Stage B.")
     p_all.add_argument("-cn", "--cluster_name", required=True)
@@ -913,14 +1052,40 @@ def main():
     p_all.add_argument("--skip_pixel_area", action="store_true")
     p_all.add_argument("--native_deg", type=float, default=DEFAULT_NATIVE_DEG)
     p_all.add_argument("--target_deg", type=float, default=DEFAULT_TARGET_DEG)
-    p_all.add_argument("--base_url", default=BASE_URL)
-    p_all.add_argument("--outputs_base", default=OUTPUTS_BASE)
+    p_all.add_argument(
+        "--model_version",
+        default=DEFAULT_MODEL_VERSION,
+        help="Model version string (underscore separated) used to build S3 paths.",
+    )
+    p_all.add_argument(
+        "--outputs_root",
+        default=OUTPUT_ROOT,
+        help="Root S3 directory for model outputs.",
+    )
+    p_all.add_argument(
+        "--base_url",
+        default=None,
+        help="Optional override for the versioned base URL containing per-tile rasters.",
+    )
+    p_all.add_argument(
+        "--outputs_base",
+        default=None,
+        help="Optional override for the destination of aggregated rasters.",
+    )
     p_all.add_argument("--read_from_s3", action="store_true")
+    p_all.add_argument(
+        "--local_display_only",
+        action="store_true",
+        help="Skip uploading rendered displays to S3 (local mirror only).",
+    )
 
     args = parser.parse_args()
 
-    # Use a local variable, don't reassign the module-level constant (avoids SyntaxError).
-    selected_base_url = getattr(args, "base_url", None) or BASE_URL
+    selected_model_version = getattr(args, "model_version", DEFAULT_MODEL_VERSION)
+    selected_outputs_root = getattr(args, "outputs_root", OUTPUT_ROOT)
+    selected_base_url = getattr(args, "base_url", None)
+    selected_outputs_base = getattr(args, "outputs_base", None)
+    upload_displays = not getattr(args, "local_display_only", False)
 
     if args.cmd == "aggregate":
         aggregate_main(
@@ -931,9 +1096,11 @@ def main():
             use_pixel_area=not args.skip_pixel_area,
             native_deg=args.native_deg,
             target_deg=args.target_deg,
-            base_url=selected_base_url,
             output_date=args.date_tag,
-            outputs_base=args.outputs_base,
+            model_version=selected_model_version,
+            outputs_root=selected_outputs_root,
+            base_url=selected_base_url,
+            outputs_base=selected_outputs_base,
         )
     elif args.cmd == "display":
         display_main(
@@ -942,7 +1109,11 @@ def main():
             run_name=args.run_name,
             pixel_resolution=args.pixel_resolution,
             target_deg=args.target_deg,
+            model_version=selected_model_version,
+            outputs_root=selected_outputs_root,
             base_url=selected_base_url,
+            outputs_base=selected_outputs_base,
+            upload_to_s3=upload_displays,
         )
     else:  # all
         aggregate_main(
@@ -953,9 +1124,11 @@ def main():
             use_pixel_area=not args.skip_pixel_area,
             native_deg=args.native_deg,
             target_deg=args.target_deg,
-            base_url=selected_base_url,
             output_date=args.date_tag,
-            outputs_base=args.outputs_base,
+            model_version=selected_model_version,
+            outputs_root=selected_outputs_root,
+            base_url=selected_base_url,
+            outputs_base=selected_outputs_base,
         )
         display_main(
             date_tag=args.date_tag,
@@ -963,7 +1136,11 @@ def main():
             run_name=args.run_name,
             pixel_resolution=args.pixel_resolution,
             target_deg=args.target_deg,
+            model_version=selected_model_version,
+            outputs_root=selected_outputs_root,
             base_url=selected_base_url,
+            outputs_base=selected_outputs_base,
+            upload_to_s3=upload_displays,
         )
 
 
