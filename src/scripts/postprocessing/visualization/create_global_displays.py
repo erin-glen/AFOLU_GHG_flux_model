@@ -1,4 +1,18 @@
-"""Stage 02: render Robinson-projected JPEGs and GIFs from aggregated global rasters."""
+"""Stage 02: render Robinson-projected JPEGs and GIFs from aggregated global rasters.
+
+
+# Read mosaics directly from S3 and upload rendered assets back to S3:
+python -m src.scripts.postprocessing.visualization.create_global_displays \
+  --date_tag 20250923 --read_from_s3 --run_name ogh_sensitivity_1km \
+  --model_version 0_8_0
+
+# Render locally only (no S3 download/upload) into DISPLAY_OUT_ROOT:
+python -m src.scripts.postprocessing.visualization.create_global_displays \
+  --date_tag 20250923 --run_name ogh_sensitivity_1km --model_version 0_8_0 \
+  --local_display_only
+
+"""
+
 
 from __future__ import annotations
 

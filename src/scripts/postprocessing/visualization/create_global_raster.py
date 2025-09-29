@@ -1,4 +1,23 @@
-"""Stage 01: aggregate 10×10° tiles into global rasters at a coarser resolution."""
+"""Stage 01: aggregate 10×10° tiles into global rasters at a coarser resolution.
+
+Examples
+--------
+# Aggregate to the default 0.04° target grid (uploads canonical TIFFs):
+python -m src.scripts.postprocessing.visualization.create_global_raster \
+  -cn create_maps --run_name ogh_sensitivity_1km \
+  --model_version 0_8_0 --date_tag 20250923
+
+# Aggregate at 0.01° and skip per-pixel outputs:
+python -m src.scripts.postprocessing.visualization.create_global_raster \
+  -cn create_maps --run_name ogh_sensitivity_1km --target_deg 0.01 \
+  --model_version 0_8_0 --date_tag 20250923 --skip_pixel_area
+
+# Use a local Dask cluster instead of AWS Batch / ECS:
+python -m src.scripts.postprocessing.visualization.create_global_raster \
+  -cn local --run_name ogh_sensitivity_1km --run_local \
+  --model_version 0_8_0 --date_tag 20250923
+
+"""
 
 from __future__ import annotations
 
