@@ -40,6 +40,7 @@ from matplotlib.colors import (
     Normalize,
     BoundaryNorm,
     FuncNorm,
+    ListedColormap,
 )
 try:
     # mpl >= 3.6
@@ -132,6 +133,68 @@ def _rgb_palette_to_mpl(rgb_palette):
     return [_rgb_to_mpl(rgb) for rgb in rgb_palette]
 
 
+def _build_categorical_config() -> Dict[str, Dict[str, object]]:
+    base: Dict[str, Dict[str, object]] = {
+        "drained_state": {
+            "legend_title": "Drainage state",
+            "code_to_label": {},
+            "order": [
+                "peat_drained_primary_infra",
+                "peat_drained_secondary_infra",
+                "peat_drained_cropland_settlement",
+                "peat_drained_plantation",
+                "peat_drained_extraction",
+                "peat_undrained",
+                "non_peat",
+            ],
+            "cmap": "tab20",
+            "nodata": 0,
+        },
+        "burned_state": {
+            "legend_title": "Burned state",
+            "code_to_label": {},
+            "order": [
+                "boreal__drained",
+                "boreal__undrained",
+                "temperate__drained",
+                "temperate__undrained",
+                "tropical__drained_crop_or_plantation",
+                "tropical__drained_other",
+                "tropical__undrained",
+                "other_domain__other",
+            ],
+            "cmap": "tab20",
+            "nodata": 0,
+        },
+    }
+
+    try:
+        from src.scripts.zonal_statistics import zonal_constants as zc  # type: ignore
+
+        drained_lookup: Dict[int, str] = {}
+        for code, meaning in zc.DRAINED_STATE_NODE_MEANINGS.items():
+            try:
+                drained_lookup[int(code)] = meaning.split("__")[0]
+            except ValueError:
+                continue
+        base["drained_state"]["code_to_label"] = drained_lookup
+
+        burned_lookup: Dict[int, str] = {}
+        for code, meaning in zc.BURNED_STATE_NODE_MEANINGS.items():
+            try:
+                burned_lookup[int(code)] = meaning
+            except ValueError:
+                continue
+        base["burned_state"]["code_to_label"] = burned_lookup
+    except Exception:
+        pass
+
+    return base
+
+
+CATEGORICAL_DATASET_CONFIG = _build_categorical_config()
+
+
 def _reproject_if_needed(out_tif: str, in_tif: str, target_crs: str):
     """Reproject to ``target_crs`` if ``out_tif`` does not exist; set nodata=0."""
     if Path(out_tif).exists():
@@ -209,6 +272,87 @@ def _legend(fig_or_ax, img, title_text: str, steps_levels: Optional[np.ndarray] 
     cb.ax.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
     cb.ax.tick_params(labelsize=cn.legend_fontsize)
 
+    cax.text(
+        0,
+        1.1,
+        title_text,
+        fontsize=cn.legend_fontsize,
+        ha="left",
+        va="bottom",
+        transform=cax.transAxes,
+    )
+
+
+def _format_category_label(label: str) -> str:
+    pretty = label.replace("__", " / ")
+    pretty = pretty.replace("_", " ")
+    return pretty.title()
+
+
+def _map_categorical_values(
+    data: np.ndarray,
+    config: Dict[str, object],
+    nodata: Optional[int | float],
+) -> Tuple[np.ma.MaskedArray, List[str]]:
+    mapping = config.get("code_to_label", {})
+    nodata_value = config.get("nodata", nodata)
+
+    valid_mask = np.ones(data.shape, dtype=bool)
+    if nodata_value is not None:
+        valid_mask &= data != nodata_value
+
+    if not np.any(valid_mask):
+        return np.ma.masked_all(data.shape), []
+
+    unique_codes = np.unique(data[valid_mask])
+    labels_for_code: Dict[int, str] = {}
+    for code in unique_codes:
+        code_int = int(code)
+        label = None
+        if isinstance(mapping, dict):
+            label = mapping.get(code_int)
+            if label is None:
+                label = mapping.get(str(code_int))  # type: ignore[index]
+        if label is None:
+            label = str(code_int)
+        labels_for_code[code_int] = label
+
+    if not labels_for_code:
+        return np.ma.masked_all(data.shape), []
+
+    order = config.get("order")
+    ordered_labels: List[str] = []
+    if isinstance(order, list):
+        for label in order:
+            if label in labels_for_code.values() and label not in ordered_labels:
+                ordered_labels.append(label)
+
+    for label in sorted(set(labels_for_code.values()) - set(ordered_labels)):
+        ordered_labels.append(label)
+
+    label_to_index = {label: idx for idx, label in enumerate(ordered_labels)}
+    mapped = np.full(data.shape, -1, dtype=np.int16)
+    for code_int, label in labels_for_code.items():
+        idx = label_to_index[label]
+        mapped[data == code_int] = idx
+
+    masked = np.ma.masked_equal(mapped, -1)
+    return masked, ordered_labels
+
+
+def _categorical_legend(fig_or_ax, img, labels: List[str], title_text: str):
+    fig = fig_or_ax.figure if hasattr(fig_or_ax, "figure") else fig_or_ax
+    cax = fig.add_axes(cn.colorbar_dimensions)
+    ticks = np.arange(len(labels)) if labels else np.array([0])
+    cb = plt.colorbar(
+        img,
+        cax=cax,
+        orientation="vertical",
+        ticks=ticks,
+    )
+    if labels:
+        cb.ax.set_yticklabels(labels)
+    cb.ax.tick_params(labelsize=cn.legend_fontsize - 1)
     cax.text(
         0,
         1.1,
@@ -395,6 +539,97 @@ def _norm_for(stretch: str, vmin: float, vmax: float, steps_levels: Optional[np.
 # ----------------------------
 # Core rendering
 # ----------------------------
+
+def make_categorical_displays_for_dataset(
+    *,
+    dataset_name: str,
+    interval: str,
+    tif_path_noext_candidates: List[str],
+    out_dir_local: str,
+    shapefile_gdf: Optional[gpd.GeoDataFrame],
+    out_name_base: str,
+    target_crs: str,
+    config: Dict[str, object],
+    logger=None,
+) -> List[Path]:
+    """Render a single categorical map for ``dataset_name`` using discrete colors."""
+
+    logger = logger or lu.setup_logging()
+    ensure_dir(out_dir_local)
+    work_dir = Path(out_dir_local) / "_reproj_cache"
+    ensure_dir(work_dir)
+
+    created_files: List[Path] = []
+
+    try:
+        tif_proj, kind = _try_open_first(tif_path_noext_candidates, target_crs, work_dir)
+        logger.info(
+            "Opened categorical raster (%s) for dataset=%s interval=%s",
+            kind,
+            dataset_name,
+            interval,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to open categorical raster for dataset=%s interval=%s",
+            dataset_name,
+            interval,
+        )
+        return created_files
+
+    with rasterio.open(tif_proj) as src:
+        data = src.read(1)
+        bounds = src.bounds
+        nodata_val = src.nodata
+
+    mapped, raw_labels = _map_categorical_values(data, config, nodata_val)
+    if not raw_labels:
+        logger.warning(
+            "No valid categories found for dataset=%s interval=%s; skipping",
+            dataset_name,
+            interval,
+        )
+        return created_files
+
+    formatter = config.get("label_formatter")
+    if not callable(formatter):
+        formatter = _format_category_label
+
+    display_labels = [formatter(label) for label in raw_labels]
+    cmap_name = str(config.get("cmap", "tab20"))
+    base_cmap = cm.get_cmap(cmap_name, max(len(display_labels), 1))
+    colors = base_cmap(np.linspace(0, 1, base_cmap.N))
+    cmap = ListedColormap(colors)
+    boundaries = np.arange(-0.5, len(display_labels) + 0.5, 1)
+    norm = BoundaryNorm(boundaries, cmap.N)
+
+    fig, ax = plt.subplots(figsize=cn.panel_dims)
+    _plot_country_layers(ax, shapefile_gdf)
+    img = _draw_frame(
+        ax,
+        [bounds.left, bounds.right, bounds.bottom, bounds.top],
+        mapped,
+        cmap,
+        norm,
+        cn.ocean_color,
+        interpolation="nearest",
+    )
+
+    legend_title = str(config.get("legend_title", dataset_name.replace("_", " ").title()))
+    _categorical_legend(fig, img, display_labels, legend_title)
+
+    base_out = Path(out_dir_local) / out_name_base
+    out_img = _save_single(ax, base_out, interval, "prof-categorical")
+    created_files.append(out_img)
+
+    logger.info(
+        "Rendered categorical dataset=%s interval=%s (categories=%d)",
+        dataset_name,
+        interval,
+        len(display_labels),
+    )
+    return created_files
+
 
 def make_displays_for_dataset(
     *,
@@ -686,34 +921,53 @@ def display_main(
         out_jpeg_dir_local = to_local_mirror(out_jpeg_dir_base, DISPLAY_OUT_ROOT)
         ensure_dir(out_jpeg_dir_local)
 
+        if dataset in CATEGORICAL_DATASET_CONFIG:
+            profile_desc = "categorical"
+        else:
+            profile_desc = ",".join([p["name"] for p in profile_cfgs])
+
         logger.info(
             "[Stage 02] Rendering dataset=%s interval=%s | candidates=%s | profiles=%s",
             dataset,
             interval,
             candidates,
-            ",".join([p["name"] for p in profile_cfgs]),
+            profile_desc,
         )
 
         out_base = f"{dataset}__{interval}"
 
-        created_files = make_displays_for_dataset(
-            dataset_name=dataset,
-            interval=interval,
-            tif_path_noext_candidates=candidates,
-            out_dir_local=out_jpeg_dir_local,
-            palette_rgb=emissions_palette,
-            shapefile_gdf=shp,
-            out_name_base=out_base,
-            years=None,
-            target_crs=cn.Robinson_crs,
-            profiles=profile_cfgs,
-            interpolation=interpolation,
-            stats_scope=stats_scope,
-            min_cluster_pixels=min_cluster_pixels,
-            smooth_sigma=smooth_sigma,
-            cmap_choice=cmap_choice,
-            logger=logger,
-        )
+        categorical_config = CATEGORICAL_DATASET_CONFIG.get(dataset)
+        if categorical_config:
+            created_files = make_categorical_displays_for_dataset(
+                dataset_name=dataset,
+                interval=interval,
+                tif_path_noext_candidates=candidates,
+                out_dir_local=out_jpeg_dir_local,
+                shapefile_gdf=shp,
+                out_name_base=out_base,
+                target_crs=cn.Robinson_crs,
+                config=categorical_config,
+                logger=logger,
+            )
+        else:
+            created_files = make_displays_for_dataset(
+                dataset_name=dataset,
+                interval=interval,
+                tif_path_noext_candidates=candidates,
+                out_dir_local=out_jpeg_dir_local,
+                palette_rgb=emissions_palette,
+                shapefile_gdf=shp,
+                out_name_base=out_base,
+                years=None,
+                target_crs=cn.Robinson_crs,
+                profiles=profile_cfgs,
+                interpolation=interpolation,
+                stats_scope=stats_scope,
+                min_cluster_pixels=min_cluster_pixels,
+                smooth_sigma=smooth_sigma,
+                cmap_choice=cmap_choice,
+                logger=logger,
+            )
 
         if upload_to_s3:
             _upload_display_outputs(

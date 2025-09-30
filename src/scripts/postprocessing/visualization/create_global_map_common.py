@@ -18,9 +18,11 @@ DEFAULT_TARGET_DEG = 0.04
 DATA_TYPES = [
     "burned_total_Mg_CO2e_pixel_yr",
     "drained_total_Mg_CO2e_pixel_yr",
+    "burned_state",
+    "drained_state",
 ]
 
-INTEGER_DATASETS: set[str] = set()
+INTEGER_DATASETS: set[str] = {"burned_state", "drained_state"}
 
 INVENTORY_PERIODS = ["2021_2024"]
 
