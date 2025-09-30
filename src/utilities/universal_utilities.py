@@ -710,52 +710,29 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
 
             return data, status
 
+        # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68c3235e-a590-832d-bfdc-c1531416c311
         except rasterio.errors.RasterioIOError as e:
-            # Retry only on SlowDown error
-            if "SlowDown" in str(e):
-                if attempt < MAX_RETRIES - 1:
-                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
-                    print(f"SlowDown from S3 on {uri}. Retrying in {sleep_time:.2f}s...")
-                    time.sleep(sleep_time)
-                    continue
-                else:
-                    # Too many retries → fail hard
-                    raise RuntimeError(f"S3 throttling (SlowDown) persisted after {MAX_RETRIES} retries for {uri}")
-            elif "Please reduce" in str(e):
-                if attempt < MAX_RETRIES - 1:
-                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
-                    print(f"'Please reduce your request rate' for {uri}. Retrying in {sleep_time:.2f}s...")
-                    time.sleep(sleep_time)
-                    continue
-                else:
-                    # Too many retries → fail hard
-                    raise RuntimeError(f"'Please reduce your request rate' persisted after {MAX_RETRIES} retries for {uri}")
-            elif "503" in str(e):
-                if attempt < MAX_RETRIES - 1:
-                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
-                    print(f"'503 error' for {uri}. Retrying in {sleep_time:.2f}s...")
-                    time.sleep(sleep_time)
-                    continue
-                else:
-                    # Too many retries → fail hard
-                    raise RuntimeError(f"'503 error' persisted after {MAX_RETRIES} retries for {uri}")
-            else:
-                # Other RasterioIOError → fallback to array of zeros downloaded
-                if attempt < MAX_RETRIES - 1:
-                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
-                    print(f"'Please reduce your request rate' for {uri}. Retrying in {sleep_time:.2f}s...")
-                    time.sleep(sleep_time)
-                    continue
-                else:
-                    data = np.full(expected_shape, 0, dtype=numpy_dtype)
-                    status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {e}"
-                    return data, status
+            err_msg = str(e)
 
-        except Exception as e:
-            # Non-SlowDown, non-Rasterio error → fallback to array of zeros downloaded
-            data = np.full(expected_shape, 0, dtype=numpy_dtype)
-            status = f"Other dataset issue for {uri} in {bounds_str}. Returning array of all 0s: {e}"
-            return data, status
+            # Retryable errors-- these mean that the input exists but it's not being successfully accessed,
+            # perhaps because of too many simultaneous requests to s3
+            if any(keyword in err_msg for keyword in ["SlowDown", "Please reduce", "503", "Read failed"]):
+                if attempt < MAX_RETRIES - 1:
+                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
+                    print(f"Retryable S3 error '{err_msg}' for {uri}. Retrying in {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
+                else:
+                    # Too many retries → fail hard
+                    raise RuntimeError(
+                        f"Retryable S3 error ('{err_msg}') persisted after {MAX_RETRIES} retries for {uri}"
+                    )
+
+            # Non-retryable: missing key or other rasterio I/O issue
+            else:
+                data = np.full(expected_shape, 0, dtype=numpy_dtype)
+                status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {err_msg}"
+                return data, status
 
 
 # Prepares list of chunks to download.
@@ -767,7 +744,7 @@ def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_fin
     # Not all scripts hit individual s3 folders beyond s3's request limit.
     if stagger_download == True:
         # Staggers worker startup so that not all workers are requesting data from s3 at the same time, to prevent hitting request limit
-        startup_delay = random.uniform(0, 3.5)
+        startup_delay = random.uniform(0, 3)
         time.sleep(startup_delay)
 
     futures = {}
@@ -799,7 +776,7 @@ def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_fin
 
             if stagger_download:
                 # Staggers submissions to avoid burst traffic to S3
-                time.sleep(random.uniform(0.05, 0.3))
+                time.sleep(random.uniform(0.05, 0.5))
 
     return futures
 

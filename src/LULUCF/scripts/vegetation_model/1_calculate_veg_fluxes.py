@@ -464,15 +464,29 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # Ratios of deadwood C:AGC and litter C:AGC (for deadwood C and litter C removal factors) for non-mangrove forests
                 deadwood_c_ratio_non_mang, litter_c_ratio_non_mang = nu.calc_deadwood_litter_ratios(elevation_cell, climate_domain_cell, precipitation_cell)
 
-                # One-time removal factor for gain of short vegetation (Mg C/ha) based on climate zone
-                short_veg_AGC_RF, short_veg_BGC_RF = nu.calc_short_veg_removals(climate_zone_cell)
-
-                # Short veg aboveground and belowground carbon removal factors as a numpy array
-                short_veg_AGC_BGC_RF = np.array([short_veg_AGC_RF, short_veg_BGC_RF, 0.0, 0.0]).astype('float32')
-
                 # Replaces pixel without R:S (0) with the global non-mangrove R:S default
                 if r_s_ratio_non_mang == 0:
                     r_s_ratio_non_mang = cn.default_r_s_non_mang
+
+                # One-time removal factor for gain of short vegetation (Mg C/ha) based on climate zone
+                short_veg_AGC_RF_raw, short_veg_BGC_RF_raw = nu.calc_short_veg_removals(climate_zone_cell)
+
+                # Need the LC_curr GLAD code between 0 and 100 to calculate the short vegetation fraction (0-100).
+                # This gets the "wet short veg" GLAD code between 0 and 100 so it can be converted to vegetation fraction.
+                # Empirically, the relationship between the GLAD LC composite and vegetation fraction is (class*4 + 3)
+                # from https://docs.google.com/spreadsheets/d/1UwZNcfXJpQHLwrSLHYyH3Zcahh0GIjcsu7D0F0SncvU/edit?pli=1&gid=0#gid=0
+                # for the short veg classes (5-24).
+                if LC_curr >= 100:
+                    veg_fraction = np.float32((((LC_curr - 100) * 4 + 3)/100))
+                else:
+                    veg_fraction = np.float32(((LC_curr * 4 + 3)/100))
+
+                # Adjusts the short veg removal factor based on the vegetation fraction in the year of short veg gain
+                short_veg_AGC_RF_adj = np.float32((short_veg_AGC_RF_raw * veg_fraction))
+                short_veg_BGC_RF_adj = np.float32((short_veg_BGC_RF_raw * veg_fraction))
+
+                # Short veg aboveground and belowground carbon removal factors as a numpy array
+                short_veg_AGC_BGC_RF_adj = np.array([short_veg_AGC_RF_adj, short_veg_BGC_RF_adj, 0.0, 0.0]).astype('float32')
 
                 # Sets stating carbon pools under special circumstances:
                 # Need to force the pools to float32 because of numba.
@@ -1097,7 +1111,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                     c_pools_EF_fire_CO2 = cn.biomass_emissions_only
                                     c_pools_EF_fire_non_CO2 = cn.biomass_emissions_only
                                     c_pools_EF_no_fire = cn.biomass_emissions_only
-                                    rf_post_dist = short_veg_AGC_BGC_RF
+                                    rf_post_dist = short_veg_AGC_BGC_RF_adj
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
                                         node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
@@ -1111,7 +1125,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                     c_pools_EF_fire_CO2 = cn.biomass_emissions_only
                                     c_pools_EF_fire_non_CO2 = cn.all_non_soil_pools
                                     c_pools_EF_no_fire = cn.biomass_emissions_only
-                                    rf_post_dist = short_veg_AGC_BGC_RF
+                                    rf_post_dist = short_veg_AGC_BGC_RF_adj
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
                                         node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
@@ -1127,7 +1141,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                     c_pools_EF_fire_CO2 = cn.biomass_emissions_only
                                     c_pools_EF_fire_non_CO2 = cn.biomass_emissions_only
                                     c_pools_EF_no_fire = cn.biomass_emissions_only
-                                    rf_post_dist = short_veg_AGC_BGC_RF
+                                    rf_post_dist = np.array([0, 0, 0, 0]).astype('float32')
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
                                         node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
@@ -1207,7 +1221,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                     c_pools_EF_fire_CO2 = cn.all_non_soil_pools
                                     c_pools_EF_fire_non_CO2 = cn.all_non_soil_pools
                                     c_pools_EF_no_fire = cn.all_non_soil_pools
-                                    rf_post_dist = short_veg_AGC_BGC_RF
+                                    rf_post_dist = short_veg_AGC_BGC_RF_adj
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
                                         node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
@@ -1221,7 +1235,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                     c_pools_EF_fire_CO2 = cn.agc_emissions_only
                                     c_pools_EF_fire_non_CO2 = cn.all_but_bgc_emissions
                                     c_pools_EF_no_fire = cn.biomass_emissions_only
-                                    rf_post_dist = short_veg_AGC_BGC_RF
+                                    rf_post_dist = short_veg_AGC_BGC_RF_adj
                                     (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                      RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
                                         node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
@@ -1280,7 +1294,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                                 c_pools_EF_fire_CO2 = cn.agc_emissions_only
                                 c_pools_EF_fire_non_CO2 = cn.agc_emissions_only
                                 c_pools_EF_no_fire = cn.biomass_emissions_only
-                                rf_post_dist = short_veg_AGC_BGC_RF
+                                rf_post_dist = short_veg_AGC_BGC_RF_adj
                                 (state_out, c_gross_emis_out, c_gross_removals_out, non_co2_flux_out, c_dens_out,
                                  RF_AGC_final, RF_BGC_final, agc_ef_out_cell, gain_year_count, forest_age_end_of_interval) = nu.calc_T_NT(
                                     node, interval_length, burned_in_curr_interval, agc_rf_in, bgc_rf_in, c_pools_EF_fire_CO2, c_pools_EF_fire_non_CO2,
@@ -1603,9 +1617,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     if short_veg_LC_curr:
                         node = nu.accrete_node(node, 1)  # Annual cropland converted to short vegetation (521->5219/5212)
                         c_pools_EF_no_fire = cn.agc_emissions_only  # There should only be AGC in cropland anyway
+                        RF_AGC_final = short_veg_AGC_BGC_RF_adj[0]  # Sets the output RF to use the AGC short veg gain RF
                         c_dens_in = [cn.cropland_agc_dens, 0.0, 0.0, 0.0]  # Forces input AGC to cropland default; there shouldn't be any other C pools at this point anyhow.
                         agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
-                        rf_post_dist = short_veg_AGC_BGC_RF  # Post conversion removals to short veg
+                        rf_post_dist = short_veg_AGC_BGC_RF_adj  # Post conversion removals to short veg
                         forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                         (state_out, c_gross_emis_out, c_gross_removals_out,
                          c_dens_out, non_co2_flux_out) = nu.calc_cropland_non_cropland(node, c_dens_in, c_pools_EF_no_fire, times_burned_in_interval, rf_post_dist)
@@ -1614,7 +1629,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                         c_pools_EF_no_fire = cn.agc_emissions_only  # There should only be AGC in cropland anyway
                         c_dens_in = [cn.cropland_agc_dens, 0.0, 0.0, 0.0]  # Forces input AGC to cropland default; there shouldn't be any other C pools at this point anyhow.
                         agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
-                        rf_post_dist = short_veg_AGC_BGC_RF  # Post conversion removals to short veg
+                        rf_post_dist = np.array([0.0, 0.0, 0.0, 0.0]).astype('float32')  # No post-conversion removals
                         forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                         # No fire emissions when cropland is converted to water. Simplest way is to just overwrite the burned count.
                         (state_out, c_gross_emis_out, c_gross_removals_out,
@@ -1641,7 +1656,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 elif (not short_veg_LC_prev) and (short_veg_LC_curr):
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     state_out = nu.accrete_node(node, 1)  # Short vegetation gain (61)
-                    rf_array = short_veg_AGC_BGC_RF
+                    rf_array = short_veg_AGC_BGC_RF_adj
+                    RF_AGC_final = short_veg_AGC_BGC_RF_adj[0]   # Sets the output RF to the short veg gain RF
                     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                     c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_short_veg_gain(rf_array)
                 ### Short vegetation converted to non-short vegetation, non-forest or non-cropland
@@ -1650,7 +1666,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                     node = nu.accrete_node(node, 2)  # Short vegetation loss (62)
                     if water_LC_curr:
                         node = nu.accrete_node(node, 1)  # Short vegetation loss converted to water (621->6212) (no fire option)
-                        c_dens_in = [short_veg_AGC_RF, short_veg_BGC_RF, 0.0, 0.0]  # Forces input carbon densities to short veg default; other pools forced to 0, regardless of existing value.
+                        c_dens_in = [short_veg_AGC_RF_adj, short_veg_BGC_RF_raw, 0.0, 0.0]  # Forces input carbon densities to short veg default; other pools forced to 0, regardless of existing value.
                         c_pools_EF_no_fire = cn.biomass_emissions_only
                         agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
                         forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
@@ -1659,7 +1675,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                          c_dens_out, non_co2_flux_out) = nu.calc_short_veg_loss(node, c_dens_in, c_pools_EF_no_fire, 0)
                     else:
                         node = nu.accrete_node(node, 2)  # Short vegetation loss converted to non-water (622->6229/6222)
-                        c_dens_in = [short_veg_AGC_RF, short_veg_BGC_RF, 0.0, 0.0]  # Forces input carbon densities to short veg default; other pools forced to 0, regardless of existing value.
+                        c_dens_in = [short_veg_AGC_RF_adj, short_veg_BGC_RF_raw, 0.0, 0.0]  # Forces input carbon densities to short veg default; other pools forced to 0, regardless of existing value.
                         c_pools_EF_no_fire = cn.biomass_emissions_only
                         agc_ef_out_cell = c_pools_EF_no_fire[0]  # Emission factor used for output geotif
                         forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
@@ -1669,7 +1685,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 elif short_veg_LC_prev and short_veg_LC_curr:
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     node = nu.accrete_node(node, 3)  # Short vegetation remaining short vegetation (63->639/632)
-                    c_dens_in = [short_veg_AGC_RF, short_veg_BGC_RF, 0.0, 0.0]  # Forces input carbon densities to short veg default; other pools forced to 0, regardless of existing value.
+                    c_dens_in = [short_veg_AGC_RF_adj, short_veg_BGC_RF_raw, 0.0, 0.0]  # Forces input carbon densities to short veg default; other pools forced to 0, regardless of existing value.
                     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                     (state_out, c_gross_emis_out, c_gross_removals_out,
                      c_dens_out, non_co2_flux_out) = nu.calc_short_veg_short_veg(node, c_dens_in, times_burned_in_interval)

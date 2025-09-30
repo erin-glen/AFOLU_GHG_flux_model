@@ -148,7 +148,6 @@ def create_typed_dicts(layers):
 
 
 # Classifies GLCLU as short (<5 m) or tall (>= 5 m) vegetation
-# No medium-height vegetation used as it's not available from annual GLCLU data.
 @jit(nopython=True)
 def classify_veg_height(LC):
     short_veg = (((LC >= cn.short_veg_dry_min_code) and (LC <= cn.short_veg_dry_max_code)) or
@@ -1036,11 +1035,15 @@ def calc_T_NT(node, interval_length, burned_in_curr_interval, RF_AGC_in, RF_BGC_
 
 
     # Step 6: Updates gross removals to include one-time post-disturbance regrowth,
-    # if applicable (medium height veg and cropland) (Mg C/ha/interval).
-    # Regrowth of medium height veg and cropland is a one-time value, not annual, so no multiplication by gain year count.
+    # if applicable (short veg and cropland) (Mg C/ha/interval).
+    # Regrowth of short veg and cropland is a one-time value, not annual, so no multiplication by gain year count.
     # Post-disturbance regrowth can occur for 5-year and annual intervals because either can have an ending land cover
     # with aboveground carbon.
-    c_gross_removals_out = c_gross_removals_out - post_dist_regrowth
+    if post_dist_regrowth[0] > 0:
+        c_gross_removals_out = c_gross_removals_out - post_dist_regrowth
+
+        RF_AGC_out = post_dist_regrowth[0]
+        RF_BGC_out = post_dist_regrowth[1]
 
 
     # Step 7: Calculates ending carbon densities by carbon pool (Mg C/ha).
