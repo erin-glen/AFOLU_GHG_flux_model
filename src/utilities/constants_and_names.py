@@ -332,7 +332,7 @@ non_soil_c_modeled_dens_pattern = "carbon_density__non_soil__MgC"
 ### Carbon pools in starting year (2000/2015)
 
 ## 2000
-carbon_2000_creation_date = '20250918'
+carbon_2000_creation_date = '20250930'
 
 # Raw carbon density, not masked by landcover composite
 agc_2000_raw_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC_V4/year_2000_derived_carbon_pools/{agc_raw_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2000_creation_date}/"
@@ -367,7 +367,7 @@ non_soil_c_2000_LC_masked_dir = f"{full_bucket_prefix}/climate/WHRC_biomass/WHRC
 non_soil_c_2000_LC_masked_pattern = f"{non_soil_c_LC_masked_dens_pattern}_2000"
 
 ## 2015
-carbon_2015_creation_date = '20250918'
+carbon_2015_creation_date = '20250930'
 
 agc_2015_raw_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/{agc_raw_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
 agc_2015_raw_pattern = f"{agc_raw_dens_pattern}_2015"

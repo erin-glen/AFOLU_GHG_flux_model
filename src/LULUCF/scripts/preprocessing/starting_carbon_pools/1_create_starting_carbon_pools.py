@@ -4,23 +4,23 @@ Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
 Local:
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
 
-Needs 4GB Coiled workers with 1 thread for 1x1 deg chunks; 2GB workers are too small.
+Needs 8GB Coiled workers with 1 thread for 1x1 deg chunks; 4GB workers are too small.
 
 Coiled small test:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing -bb 114 -4 115 -3 -cs 1  --year YYYY
+python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn vegetation_preprocessing -bb 114 -4 115 -3 -cs 1  --year YYYY
 
 Coiled shapefile test:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
+python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn vegetation_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
 
 Full run 2000:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn vegetation_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn vegetation_preprocessing --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
 
 Full run 2015:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn LULUCF_preprocessing --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn vegetation_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn vegetation_preprocessing --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
 
 
 To create a vrt of the 10x10 deg outputs, do:
@@ -223,7 +223,8 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             short_veg_LC, tall_veg_LC = nu.classify_veg_height(LC_composite_cell)
 
             # Carbon density for short vegetation (Mg C/ha) based on climate zone (IPCC default)
-            short_veg_AGC, short_veg_BGC = nu.calc_short_veg_removals(climate_zone_cell)
+            # and adjusted for vegetation cover fraction
+            short_veg_AGC_adj, short_veg_BGC_adj = nu.calc_short_veg_removals(climate_zone_cell, LC_composite_cell)
 
             # Assigns carbon densities based on vegetation height and composite landcover.
             # Tall vegetation and/or mangrove (i.e. mangrove pixels without tall vegetation keep all C pools)
@@ -233,8 +234,8 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                 deadwood_c_LC_masked_out_cell = deadwood_c_raw_out_cell
                 litter_c_LC_masked_out_cell = litter_c_raw_out_cell
             elif short_veg_LC:  # Short vegetation
-                agc_LC_masked_out_cell = short_veg_AGC
-                bgc_LC_masked_out_cell = short_veg_BGC
+                agc_LC_masked_out_cell = short_veg_AGC_adj
+                bgc_LC_masked_out_cell = short_veg_BGC_adj
                 deadwood_c_LC_masked_out_cell = 0
                 litter_c_LC_masked_out_cell = 0
             elif LC_composite_cell == cn.cropland:  # Cropland

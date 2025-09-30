@@ -11,21 +11,21 @@ python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_sta
 Needs 4GB Coiled workers with 1 thread for 1x1 deg chunks; 2GB workers are too small.
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing -bb 10 49 11 50 -cs 1 --no_upload --year 2000 --input_date 20250626
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_starting_carbon_pools -cn vegetation_preprocessing -bb 10 49 11 50 -cs 1 --no_upload --year 2000 --input_date 20250626
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_starting_carbon_pools -cn vegetation_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp
+python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_starting_carbon_pools -cn vegetation_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp
 
 Full run 2000:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global per-pixel run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn vegetation_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_starting_carbon_pools -cn vegetation_preprocessing --input_date 20250626 --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global per-pixel run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
 
 Full run 2015:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn LULUCF_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_starting_carbon_pools -cn LULUCF_preprocessing --input_date 20250626 --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global per-pixel run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn vegetation_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.2_per_pixel_starting_carbon_pools -cn vegetation_preprocessing --input_date 20250626 --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global per-pixel run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
 """
 
 import argparse
