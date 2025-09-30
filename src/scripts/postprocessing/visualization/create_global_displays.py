@@ -1,11 +1,11 @@
 """
 Stage 02: Render Robinson-projected JPEGs for aggregated global rasters (gross emissions only),
-and automatically produce multiple visualization profiles per layer.
+and automatically produce a visualization profile per layer.
 
 This version:
   - Assumes layers are GROSS EMISSIONS (positive-only signal; <=0 masked).
   - Removes duplicate exports (no "for_pres" variant).
-  - Automatically renders THREE profiles per layer: asinh, linear, and steps (no log/sqrt).
+  - Automatically renders a single profile per layer (default: asinh).
   - Uses land-only percentile statistics by default for more stable scaling on sparse globals.
   - Optional speckle cleanup (min connected pixels) and gentle Gaussian smoothing.
 
@@ -461,10 +461,11 @@ def _select_profiles(
     override_clip_hi: Optional[float],
     override_floor: Optional[float],
     override_steps: Optional[List[float]],
-) -> List[Dict]:
-    """
-    Build the list of profile configs. If overrides are provided, they apply to ALL selected profiles.
-    (Only 'asinh', 'linear', and 'steps' are supported.)
+) -> Tuple[List[Dict], str, List[str]]:
+    """Choose a single rendering profile for the run.
+
+    Returns the selected profile (wrapped in a list for downstream compatibility),
+    the canonical profile name, and any additional requested profiles that were ignored.
     """
     default_profiles = [
         {"name": "asinh",  "stretch": "asinh",  "clip_lo": 5.0, "clip_hi": 99.97, "floor": None, "steps": None},
@@ -474,19 +475,31 @@ def _select_profiles(
     ]
     available = {p["name"]: p for p in default_profiles}
 
-    if not profiles_arg or "all" in [p.lower() for p in profiles_arg]:
-        selected = [available[k] for k in ("asinh", "linear", "steps")]
-    else:
-        selected = []
-        for name in profiles_arg:
-            key = name.lower()
-            if key in available:
-                selected.append(available[key])
+    normalized = [p.lower() for p in profiles_arg] if profiles_arg else []
+    invalid = [n for n in normalized if n not in available and n != "all"]
+    if invalid:
+        raise ValueError(
+            "Unsupported profile name(s): " + ", ".join(sorted(set(invalid)))
+        )
 
-    # Apply overrides
-    out = []
+    chosen_name = "asinh"
+    ignored: List[str] = []
+
+    if normalized:
+        if "all" in normalized:
+            ignored = [n for n in normalized if n not in ("all", chosen_name) and n in available]
+        else:
+            requested = [n for n in normalized if n in available]
+            if requested:
+                chosen_name = requested[0]
+                ignored = requested[1:]
+
+    selected = [available[chosen_name]]
+
+    # Apply overrides to the single selected profile
+    out: List[Dict] = []
     for p in selected:
-        pc = dict(p)  # copy
+        pc = dict(p)
         if override_clip_lo is not None:
             pc["clip_lo"] = float(override_clip_lo)
         if override_clip_hi is not None:
@@ -496,7 +509,8 @@ def _select_profiles(
         if override_steps is not None and pc["name"] == "steps":
             pc["steps"] = list(override_steps)
         out.append(pc)
-    return out
+
+    return out, chosen_name, ignored
 
 
 def _land_stats_mask_from_shp(shp_gdf: Optional[gpd.GeoDataFrame], out_shape: Tuple[int, int], transform):
@@ -651,7 +665,7 @@ def make_displays_for_dataset(
     logger=None,
 ):
     """
-    Render **multiple profiles** (asinh, linear, steps) for a single dataset/interval.
+    Render emissions displays for a single dataset/interval using the supplied profile configuration(s).
     Assumes **gross emissions**: masks data <= 0 (transparent).
     """
     logger = logger or lu.setup_logging()
@@ -804,11 +818,12 @@ def make_displays_for_dataset(
                 name, vmin, vmax, pos_count, 100.0 * hi_clipped / max(1, pos_count)
             )
 
+    profile_names = ",".join([p["name"] for p in profiles]) if profiles else "none"
     logger.info(
-        "Rendered %s %s (%d profiles) in %s s → %s",
+        "Rendered %s %s (profile=%s) in %s s → %s",
         dataset_name,
         interval,
-        len(profiles),
+        profile_names,
         round(time.time() - t0),
         posixpath.join(out_dir_local, out_name_base),
     )
@@ -881,13 +896,25 @@ def display_main(
     emissions_palette = net_palette[5:]  # warm half
 
     # Select which profiles to render (asinh/linear/steps only)
-    profile_cfgs = _select_profiles(
+    profile_cfgs, selected_profile_name, ignored_profiles = _select_profiles(
         profiles_arg=profiles_arg,
         override_clip_lo=clip_lo,
         override_clip_hi=clip_hi,
         override_floor=floor,
         override_steps=steps,
     )
+
+    if ignored_profiles:
+        logger.info(
+            "Additional profile requests %s were ignored; using '%s' for all emissions displays.",
+            ", ".join(ignored_profiles),
+            selected_profile_name,
+        )
+    else:
+        logger.info(
+            "Using '%s' rendering profile for all emissions displays.",
+            selected_profile_name,
+        )
 
     for key, items in d.items():
         dataset = items["dataset"]
@@ -924,7 +951,7 @@ def display_main(
         if dataset in CATEGORICAL_DATASET_CONFIG:
             profile_desc = "categorical"
         else:
-            profile_desc = ",".join([p["name"] for p in profile_cfgs])
+            profile_desc = selected_profile_name
 
         logger.info(
             "[Stage 02] Rendering dataset=%s interval=%s | candidates=%s | profiles=%s",
@@ -1020,8 +1047,11 @@ def main() -> None:
     parser.add_argument(
         "--profiles",
         nargs="+",
-        default=["all"],
-        help="Which profiles to render: any of {asinh, linear, steps} or 'all'. Default: all.",
+        default=["asinh"],
+        help=(
+            "Select the rendering profile to use for all emissions outputs (choose from asinh, "
+            "linear, steps). If multiple values are provided, only the first recognized option is used."
+        ),
     )
     parser.add_argument(
         "--clip_lo",
