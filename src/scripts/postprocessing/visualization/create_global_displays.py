@@ -1,5 +1,15 @@
-"""Stage 02: render Robinson-projected JPEGs and GIFs from aggregated global rasters.
+"""
+Stage 02: Render Robinson-projected JPEGs for aggregated global rasters (gross emissions only),
+and automatically produce multiple visualization profiles per layer.
 
+This version:
+  - Assumes layers are GROSS EMISSIONS (positive-only signal; <=0 masked).
+  - Removes duplicate exports (no "for_pres" variant).
+  - Automatically renders THREE profiles per layer: asinh, linear, and steps (no log/sqrt).
+  - Uses land-only percentile statistics by default for more stable scaling on sparse globals.
+  - Optional speckle cleanup (min connected pixels) and gentle Gaussian smoothing.
+
+Example usage:
 
 # Read mosaics directly from S3 and upload rendered assets back to S3:
 python -m src.scripts.postprocessing.visualization.create_global_displays \
@@ -10,26 +20,42 @@ python -m src.scripts.postprocessing.visualization.create_global_displays \
 python -m src.scripts.postprocessing.visualization.create_global_displays \
   --date_tag 20250923 --run_name ogh_sensitivity_1km --model_version 0_8_0 \
   --local_display_only
-
 """
-
 
 from __future__ import annotations
 
 import argparse
-import math
 import posixpath
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import rasterio
 from rasterio.warp import Resampling, calculate_default_transform, reproject
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap, Normalize, TwoSlopeNorm
-from PIL import Image
+from matplotlib import cm
+from matplotlib.colors import (
+    LinearSegmentedColormap,
+    Normalize,
+    BoundaryNorm,
+    FuncNorm,
+)
+try:
+    # mpl >= 3.6
+    from matplotlib.colors import AsinhNorm  # type: ignore
+except Exception:  # pragma: no cover
+    AsinhNorm = None
+from matplotlib.ticker import ScalarFormatter
 import geopandas as gpd
+from rasterio.features import rasterize
+from shapely.geometry import mapping
+
+# Optional smoothing/cleanup (graceful fallback if SciPy missing)
+try:
+    from scipy.ndimage import gaussian_filter, label
+except Exception:  # pragma: no cover
+    gaussian_filter, label = None, None
 
 from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import log_utilities as lu
@@ -50,6 +76,9 @@ from src.scripts.postprocessing.visualization.create_global_map_common import (
     to_local_mirror,
 )
 
+# ----------------------------
+# Utility helpers
+# ----------------------------
 
 def _split_s3_url(s3_url: str) -> Tuple[str, str]:
     if not s3_url.startswith("s3://"):
@@ -105,7 +134,6 @@ def _rgb_palette_to_mpl(rgb_palette):
 
 def _reproject_if_needed(out_tif: str, in_tif: str, target_crs: str):
     """Reproject to ``target_crs`` if ``out_tif`` does not exist; set nodata=0."""
-
     if Path(out_tif).exists():
         return out_tif
     with rasterio.open(in_tif) as src:
@@ -135,49 +163,11 @@ def _reproject_if_needed(out_tif: str, in_tif: str, target_crs: str):
                 dst_transform=transform,
                 dst_crs=target_crs,
                 resampling=Resampling.nearest,
+                src_nodata=0,
+                dst_nodata=0,
+                init_dest_nodata=True,
             )
     return out_tif
-
-
-def _compute_percentile_breaks(data, percentiles, ignore_zero=True):
-    d = data[data != 0] if ignore_zero else data
-    if d.size == 0:
-        return np.array([0.0 for _ in percentiles], dtype=float)
-    return np.percentile(d, percentiles)
-
-
-def _mask_and_norm(data: np.ndarray, mode: str, breaks: np.ndarray):
-    """Return masked array, normaliser, and legend tuple for ``mode``."""
-
-    if mode == "diverging":
-        vmin, vcenter, vmax = breaks[0], 0.0, breaks[-1]
-        masked = np.ma.masked_where(data == 0, data)
-        norm = TwoSlopeNorm(vmin=vmin, vcenter=vcenter, vmax=vmax)
-        return masked, norm, (vmin, vcenter, vmax)
-    if mode == "emissions":
-        vmin, vmax = breaks[0], breaks[-1]
-        masked = np.ma.masked_where(data <= 0, data)
-        norm = Normalize(vmin=vmin, vmax=vmax)
-        return masked, norm, (vmin, vmax)
-    if mode == "removals":
-        vmin, vmax = breaks[0], breaks[-1]
-        masked = np.ma.masked_where(data >= 0, data)
-        norm = Normalize(vmin=vmin, vmax=vmax)
-        return masked, norm, (vmin, vmax)
-
-    vmin, vmax = breaks[0], breaks[-1]
-    masked = np.ma.masked_where(data == 0, data)
-    norm = Normalize(vmin=vmin, vmax=vmax)
-    return masked, norm, (vmin, vmax)
-
-
-def _choose_recipe(dataset_name: str):
-    lower = dataset_name.lower()
-    if "net" in lower:
-        return "diverging", "Net greenhouse gas flux\nkt CO$_2$e yr$^{-1}$"
-    if "removal" in lower or "sink" in lower:
-        return "removals", "Gross CO$_2$ removals\nkt CO$_2$ yr$^{-1}$"
-    return "emissions", "Gross greenhouse gas emissions\nkt CO$_2$e yr$^{-1}$"
 
 
 def _plot_country_layers(ax, shp_gdf):
@@ -205,24 +195,19 @@ def _plot_country_layers(ax, shp_gdf):
         pass
 
 
-def _legend(ax_or_fig, img, mode, vtuple, title_text, data_min, data_max):
-    fig = ax_or_fig.figure if hasattr(ax_or_fig, "figure") else ax_or_fig
+def _legend(fig_or_ax, img, title_text: str, steps_levels: Optional[np.ndarray] = None):
+    """Norm-aware legend that works for Linear/Boundary norms (and AsinhNorm/FuncNorm)."""
+    fig = fig_or_ax.figure if hasattr(fig_or_ax, "figure") else fig_or_ax
     cax = fig.add_axes(cn.colorbar_dimensions)
-    cb = plt.colorbar(img, cax=cax, orientation="vertical")
 
-    if mode == "diverging":
-        vmin, vcenter, vmax = vtuple
-        tick_labels = [
-            f"< {math.ceil((data_min/1e3)*100)/100:.0f}  (sink)",
-            "0           (neutral)",
-            f"> {math.floor((data_max/1e3)*100)/100:.0f}  (source)",
-        ]
-        cb.set_ticks([vmin, vcenter, vmax])
-        cb.set_ticklabels(tick_labels, fontsize=cn.legend_fontsize)
+    if steps_levels is not None and steps_levels.size >= 2:
+        cb = plt.colorbar(img, cax=cax, orientation="vertical",
+                          boundaries=steps_levels, ticks=steps_levels)
     else:
-        vmin, vmax = vtuple
-        cb.set_ticks([vmin, vmax])
-        cb.set_ticklabels([f"{vmin:.2f}", f"{vmax:.2f}"], fontsize=cn.legend_fontsize)
+        cb = plt.colorbar(img, cax=cax, orientation="vertical")
+
+    cb.ax.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    cb.ax.tick_params(labelsize=cn.legend_fontsize)
 
     cax.text(
         0,
@@ -235,7 +220,7 @@ def _legend(ax_or_fig, img, mode, vtuple, title_text, data_min, data_max):
     )
 
 
-def _draw_frame(ax, extent, masked, cmap, norm, ocean_rgb):
+def _draw_frame(ax, extent, masked, cmap, norm, ocean_rgb, interpolation: str):
     ax.set_facecolor(_rgb_to_mpl(ocean_rgb))
     ax.set_xticks([])
     ax.set_yticks([])
@@ -247,15 +232,14 @@ def _draw_frame(ax, extent, masked, cmap, norm, ocean_rgb):
         norm=norm,
         extent=extent,
         origin="upper",
+        interpolation=interpolation,
         zorder=2,
     )
     return img
 
 
-def _save_two_versions(ax, base_out: Path, year_label: str | int) -> Tuple[Path, Path]:
-    base_no_note = Path(f"{base_out}__{year_label}.jpeg")
-    base_with_note = Path(f"{base_out}__{year_label}__for_pres.jpeg")
-
+def _save_single(ax, base_out: Path, year_label: str | int, profile_suffix: str) -> Path:
+    out_path = Path(f"{base_out}__{year_label}__{profile_suffix}.jpeg")
     ax.text(
         0.5,
         0.07,
@@ -267,52 +251,9 @@ def _save_two_versions(ax, base_out: Path, year_label: str | int) -> Tuple[Path,
         weight="bold",
         color="black",
     )
-
-    plt.savefig(base_no_note, dpi=cn.dpi_jpeg, bbox_inches="tight", pad_inches=0)
-
-    ax.text(
-        0.98,
-        0.04,
-        cn.pres_text,
-        transform=ax.transAxes,
-        fontsize=7,
-        ha="right",
-        va="top",
-        color="black",
-    )
-    plt.savefig(base_with_note, dpi=cn.dpi_jpeg, bbox_inches="tight", pad_inches=0)
+    plt.savefig(out_path, dpi=cn.dpi_jpeg, bbox_inches="tight", pad_inches=0)
     plt.close()
-    return base_with_note, base_no_note
-
-
-def _gif_from_frames(base_out: Path, first_label, last_label, frames: List[str]) -> List[Path]:
-    if not frames:
-        return []
-
-    imgs = [Image.open(p) for p in frames]
-    out_fast = Path(f"{base_out}__{first_label}_{last_label}__fast.gif")
-    out_slow = Path(f"{base_out}__{first_label}_{last_label}__slow.gif")
-
-    try:
-        imgs[0].save(
-            str(out_fast),
-            save_all=True,
-            append_images=imgs[1:],
-            duration=1000,
-            loop=0,
-        )
-        imgs[0].save(
-            str(out_slow),
-            save_all=True,
-            append_images=imgs[1:],
-            duration=2500,
-            loop=0,
-        )
-    finally:
-        for img in imgs:
-            img.close()
-
-    return [out_fast, out_slow]
+    return out_path
 
 
 def _load_or_project_raster(base_tif_noext: str, target_crs: str, work_dir: Path) -> str:
@@ -352,21 +293,132 @@ def _try_open_first(paths_noext: List[str], target_crs: str, work_dir: Path) -> 
         f"Could not open any candidate raster: {paths_noext}. Last error: {last_error}"
     )
 
+# ----------------------------
+# Emissions-specific helpers
+# ----------------------------
+
+def _profile_suffix(name: str, clip_lo: float, clip_hi: float, steps: Optional[List[float]] = None):
+    def fmt_p(p):
+        # 99.5 -> 99p5 for filenames
+        s = str(p).replace(".", "p")
+        return s
+    if name == "steps":
+        if not steps:
+            return "prof-steps"
+        parts = [("q" + fmt_p(v)) for v in steps]
+        return "prof-steps__" + "-".join(parts)
+    else:
+        return f"prof-{name}__p{fmt_p(clip_lo)}-{fmt_p(clip_hi)}"
+
+
+def _select_profiles(
+    profiles_arg: Optional[List[str]],
+    override_clip_lo: Optional[float],
+    override_clip_hi: Optional[float],
+    override_floor: Optional[float],
+    override_steps: Optional[List[float]],
+) -> List[Dict]:
+    """
+    Build the list of profile configs. If overrides are provided, they apply to ALL selected profiles.
+    (Only 'asinh', 'linear', and 'steps' are supported.)
+    """
+    default_profiles = [
+        {"name": "asinh",  "stretch": "asinh",  "clip_lo": 5.0, "clip_hi": 99.97, "floor": None, "steps": None},
+        {"name": "linear", "stretch": "linear", "clip_lo": 5.0, "clip_hi": 95.0,  "floor": None, "steps": None},
+        {"name": "steps",  "stretch": "steps",  "clip_lo": 5.0, "clip_hi": 99.97, "floor": None,
+         "steps": [60, 80, 90, 95, 98, 99, 99.5, 99.9]},
+    ]
+    available = {p["name"]: p for p in default_profiles}
+
+    if not profiles_arg or "all" in [p.lower() for p in profiles_arg]:
+        selected = [available[k] for k in ("asinh", "linear", "steps")]
+    else:
+        selected = []
+        for name in profiles_arg:
+            key = name.lower()
+            if key in available:
+                selected.append(available[key])
+
+    # Apply overrides
+    out = []
+    for p in selected:
+        pc = dict(p)  # copy
+        if override_clip_lo is not None:
+            pc["clip_lo"] = float(override_clip_lo)
+        if override_clip_hi is not None:
+            pc["clip_hi"] = float(override_clip_hi)
+        if override_floor is not None:
+            pc["floor"] = float(override_floor)
+        if override_steps is not None and pc["name"] == "steps":
+            pc["steps"] = list(override_steps)
+        out.append(pc)
+    return out
+
+
+def _land_stats_mask_from_shp(shp_gdf: Optional[gpd.GeoDataFrame], out_shape: Tuple[int, int], transform):
+    """Rasterize land polygons to a boolean mask aligned to the raster grid (True on land)."""
+    if shp_gdf is None or shp_gdf.empty:
+        return None
+    shapes = [(mapping(geom), 1) for geom in shp_gdf.geometry if geom is not None]
+    if not shapes:
+        return None
+    mask = rasterize(
+        shapes=shapes,
+        out_shape=out_shape,
+        transform=transform,
+        all_touched=False,
+        fill=0,
+        dtype="uint8",
+    )
+    return mask.astype(bool)
+
+
+def _asinh_norm(vmin: float, vmax: float):
+    if AsinhNorm is not None:  # mpl >= 3.6
+        return AsinhNorm(vmin=max(vmin, 0.0), vmax=vmax)
+    # Fallback: emulate asinh with FuncNorm
+    def fwd(x): return np.arcsinh(x)
+    def inv(y): return np.sinh(y)
+    return FuncNorm((fwd, inv), vmin=max(vmin, 0.0), vmax=vmax)
+
+
+def _norm_for(stretch: str, vmin: float, vmax: float, steps_levels: Optional[np.ndarray] = None):
+    if stretch == "asinh":
+        return _asinh_norm(vmin, vmax)
+    if stretch == "steps":
+        if steps_levels is None or steps_levels.size < 2:
+            return Normalize(vmin=vmin, vmax=vmax)
+        return BoundaryNorm(steps_levels, ncolors=256, clip=True)
+    # linear
+    return Normalize(vmin=vmin, vmax=vmax)
+
+# ----------------------------
+# Core rendering
+# ----------------------------
 
 def make_displays_for_dataset(
+    *,
     dataset_name: str,
     interval: str,
     tif_path_noext_candidates: List[str],
     out_dir_local: str,
     palette_rgb: List[Tuple[int, int, int]],
-    percentiles: List[int],
     shapefile_gdf: Optional[gpd.GeoDataFrame],
     out_name_base: str,
     years: Optional[List[int]] = None,
-    diverging_if_zero_center: bool = False,
     target_crs: str = cn.Robinson_crs,
+    profiles: List[Dict],
+    interpolation: str,
+    stats_scope: str,
+    min_cluster_pixels: int,
+    smooth_sigma: float,
+    cmap_choice: str,
     logger=None,
 ):
+    """
+    Render **multiple profiles** (asinh, linear, steps) for a single dataset/interval.
+    Assumes **gross emissions**: masks data <= 0 (transparent).
+    """
     logger = logger or lu.setup_logging()
     t0 = time.time()
 
@@ -374,77 +426,165 @@ def make_displays_for_dataset(
     work_dir = Path(out_dir_local) / "_reproj_cache"
     ensure_dir(work_dir)
 
-    colors_mpl = _rgb_palette_to_mpl(palette_rgb)
-    cmap = LinearSegmentedColormap.from_list("custom", colors_mpl)
+    # Colormap: custom warm ramp, or a perceptual sequential ramp
+    if cmap_choice.lower() == "custom":
+        colors_mpl = _rgb_palette_to_mpl(palette_rgb)
+        cmap = LinearSegmentedColormap.from_list("custom", colors_mpl)
+    else:
+        try:
+            cmap = cm.get_cmap(cmap_choice)
+        except Exception:
+            cmap = cm.get_cmap("inferno")
 
-    recipe_mode, legend_title = _choose_recipe(dataset_name)
-    mode = "diverging" if diverging_if_zero_center else recipe_mode
+    # Sparse-friendly: transparent masked; subtle under/over
+    try:
+        cmap = cmap.with_extremes(
+            under=_rgb_to_mpl(cn.ocean_color) + (0.15,),
+            over=_rgb_to_mpl(cn.ocean_color) + (0.15,),
+        )
+    except Exception:
+        # Older Matplotlib
+        cmap.set_under(_rgb_to_mpl(cn.ocean_color))
+        cmap.set_over(_rgb_to_mpl(cn.ocean_color))
+    cmap.set_bad((0, 0, 0, 0))
 
-    frames_for_gif: List[str] = []
     created_files: List[Path] = []
     labels = years or [interval]
 
+    # Legend title
+    legend_title = (
+        "Gross greenhouse gas emissions\nkt CO$_2$e yr$^{-1}$"
+        if "co2" not in dataset_name.lower()
+        else "Gross CO$_2$ emissions\nkt CO$_2$ yr$^{-1}$"
+    )
+
+    # Load / reproject once
+    tif_proj, _ = _try_open_first(tif_path_noext_candidates, target_crs, work_dir)
+    with rasterio.open(tif_proj) as src:
+        data_full = src.read(1)
+        bounds = src.bounds
+        transform = src.transform
+
+    # Prepare data once
+    data_full = np.nan_to_num(data_full, nan=0.0)
+    masked_positive = np.ma.masked_where(data_full <= 0, data_full)
+
+    # Land mask for STATS (not for rendering)
+    land_stats_mask = _land_stats_mask_from_shp(shapefile_gdf, masked_positive.shape, transform)
+
     for label in labels:
-        tif_proj, _ = _try_open_first(
-            tif_path_noext_candidates, target_crs, work_dir
-        )
+        for p in profiles:
+            name = p["name"]
+            stretch = p["stretch"]
+            clip_lo = float(p["clip_lo"])
+            clip_hi = float(p["clip_hi"])
+            floor = p.get("floor", None)
+            steps = p.get("steps", None)
 
-        with rasterio.open(tif_proj) as src:
-            data = src.read(1)
-            bounds = src.bounds
+            # Values used for percentile statistics
+            if land_stats_mask is not None and stats_scope == "land":
+                stats_values = masked_positive[land_stats_mask].compressed()
+            else:
+                stats_values = masked_positive.compressed()
 
-        data = np.nan_to_num(data, nan=0.0)
+            # Compute domain (vmin/vmax) from stats_values
+            if stats_values.size == 0:
+                vmin, vmax = 1.0, 1.0
+            else:
+                lo = float(np.percentile(stats_values, clip_lo))
+                hi = float(np.percentile(stats_values, clip_hi))
+                hi = max(hi, lo * 1.01)  # ensure span
+                if stretch in ("asinh",):  # needs positive floor
+                    floor_eff = (0.01 * hi) if floor is None else float(floor)
+                    vmin = max(lo, floor_eff, 1e-12)
+                else:  # linear/steps
+                    vmin = max(lo, 0.0)
+                vmax = max(hi, vmin * 1.01)
 
-        breaks = _compute_percentile_breaks(data, percentiles, ignore_zero=True)
-        masked, norm, vtuple = _mask_and_norm(data, mode, breaks)
+            # Steps: compute boundaries from percentiles in LOG domain (spreads top tail)
+            steps_levels = None
+            if stretch == "steps" and stats_values.size > 0:
+                pp = np.unique(np.clip(np.array(steps or [], dtype=float), 0, 100))
+                if pp.size > 0:
+                    ld = np.log10(stats_values)
+                    q = np.percentile(ld, pp)
+                    steps_levels = np.unique(np.concatenate(([np.log10(vmin)], q, [np.log10(vmax)])))
+                    steps_levels = np.power(10.0, steps_levels)
+                    steps_levels = steps_levels[(steps_levels >= vmin) & (steps_levels <= vmax)]
+                    if steps_levels.size < 2:
+                        steps_levels = None
 
-        fig, ax = plt.subplots(figsize=cn.panel_dims)
-        _plot_country_layers(ax, shapefile_gdf)
-        img = _draw_frame(
-            ax,
-            [bounds.left, bounds.right, bounds.bottom, bounds.top],
-            masked,
-            cmap,
-            norm,
-            cn.ocean_color,
-        )
+            norm = _norm_for(stretch, vmin, vmax, steps_levels)
 
-        comp = masked.compressed()
-        if comp.size == 0:
-            dmin, dmax = 0.0, 0.0
-        else:
-            dmin, dmax = float(comp.min()), float(comp.max())
-        _legend(fig, img, mode, vtuple, legend_title, dmin, dmax)
+            # Build plotting array with optional cleanup/smoothing
+            plot_array = masked_positive
 
-        base_out = Path(out_dir_local) / out_name_base
-        frame_with_note, frame_no_note = _save_two_versions(ax, base_out, label)
-        frames_for_gif.append(str(frame_with_note))
-        created_files.extend([frame_with_note, frame_no_note])
+            # (a) remove tiny isolated blobs on the positive mask
+            if min_cluster_pixels and label is not None and min_cluster_pixels > 1 and label is not None:
+                if label is not None and "np" in globals() and label is not None:
+                    pass  # placeholder to satisfy static analyzers
+            if min_cluster_pixels and label is not None and min_cluster_pixels > 1 and globals().get("label", None):
+                pos_mask = (~plot_array.mask).astype(np.uint8)
+                lab, nlab = label(pos_mask)  # type: ignore
+                if nlab and nlab > 0:
+                    counts = np.bincount(lab.ravel())
+                    small_ids = np.where(counts < min_cluster_pixels)[0]
+                    if small_ids.size > 0:
+                        small_mask = np.isin(lab, small_ids)
+                        plot_array = np.ma.masked_where(small_mask | (data_full <= 0), data_full)
 
-    try:
-        if len(frames_for_gif) > 1 and isinstance(labels[0], int):
-            gif_paths = _gif_from_frames(
-                Path(out_dir_local) / out_name_base,
-                labels[0],
-                labels[-1],
-                frames_for_gif,
+            # (b) gentle Gaussian that respects mask (normalized)
+            if smooth_sigma and globals().get("gaussian_filter", None) and smooth_sigma > 0:
+                data = plot_array.filled(0.0)
+                w = (~plot_array.mask).astype(float)
+                num = gaussian_filter(data, smooth_sigma)  # type: ignore
+                den = gaussian_filter(w,    smooth_sigma)  # type: ignore
+                sm = num / np.maximum(den, 1e-9)
+                plot_array = np.ma.array(sm, mask=(w == 0))
+
+            # Draw
+            fig, ax = plt.subplots(figsize=cn.panel_dims)
+            _plot_country_layers(ax, shapefile_gdf)
+            img = _draw_frame(
+                ax,
+                [bounds.left, bounds.right, bounds.bottom, bounds.top],
+                plot_array,
+                cmap,
+                norm,
+                cn.ocean_color,
+                interpolation=interpolation,
             )
-            created_files.extend(gif_paths)
-    except Exception as e:
-        logger.warning(f"GIF creation failed: {e}")
+            _legend(fig, img, legend_title, steps_levels=steps_levels)
+
+            base_out = Path(out_dir_local) / out_name_base
+            suffix = _profile_suffix(name, clip_lo, clip_hi, steps)
+            out_img = _save_single(ax, base_out, label, suffix)
+            created_files.append(out_img)
+
+            # Tiny diagnostic in logs
+            pos_count = int(masked_positive.count())
+            hi_clipped = int((masked_positive > vmax).sum())
+            logger.info(
+                "Profile=%s | vmin=%.3g vmax=%.3g | positives=%d | clipped_hi=%.2f%%",
+                name, vmin, vmax, pos_count, 100.0 * hi_clipped / max(1, pos_count)
+            )
 
     logger.info(
-        "Rendered %s %s in %s s → %s",
+        "Rendered %s %s (%d profiles) in %s s → %s",
         dataset_name,
         interval,
+        len(profiles),
         round(time.time() - t0),
         posixpath.join(out_dir_local, out_name_base),
     )
-
     return created_files
 
+# ----------------------------
+# Orchestration
+# ----------------------------
 
 def display_main(
+    *,
     date_tag: str,
     read_from_s3: bool,
     run_name: str,
@@ -455,6 +595,17 @@ def display_main(
     base_url: Optional[str] = None,
     outputs_base: Optional[str] = None,
     upload_to_s3: bool = True,
+    # new controls
+    profiles_arg: Optional[List[str]] = None,
+    clip_lo: Optional[float] = None,
+    clip_hi: Optional[float] = None,
+    floor: Optional[float] = None,
+    steps: Optional[List[float]] = None,
+    interpolation: str = "nearest",
+    stats_scope: str = "land",
+    min_cluster_pixels: int = 0,
+    smooth_sigma: float = 0.0,
+    cmap_choice: str = "custom",
 ):
     assert_grid_divides_world(target_deg)
     res_label = deg_to_label(target_deg)
@@ -467,6 +618,7 @@ def display_main(
         outputs_base=outputs_base,
     )
 
+    # Build job list
     d = build_download_upload_dict(
         pixel_resolution=pixel_resolution,
         run_name=run_name,
@@ -478,6 +630,7 @@ def display_main(
 
     shp = _maybe_load_world_boundaries(logger)
 
+    # Palettes (sequential ramp from your net palette) for "custom" option
     net_palette = [
         (0, 60, 48),
         (1, 102, 94),
@@ -490,15 +643,25 @@ def display_main(
         (140, 81, 10),
         (84, 48, 5),
     ]
-    removals_palette = net_palette[0:5]
-    emissions_palette = net_palette[5:]
+    emissions_palette = net_palette[5:]  # warm half
 
-    net_percentiles = [5, 25, 50, 75, 89, 91, 92, 93, 94, 99]
-    gross_percentiles = [5, 25, 50, 75, 99]
+    # Select which profiles to render (asinh/linear/steps only)
+    profile_cfgs = _select_profiles(
+        profiles_arg=profiles_arg,
+        override_clip_lo=clip_lo,
+        override_clip_hi=clip_hi,
+        override_floor=floor,
+        override_steps=steps,
+    )
 
     for key, items in d.items():
         dataset = items["dataset"]
         interval = items["interval"]
+
+        # Only gross emissions in this version; skip others if present
+        if ("net" in dataset.lower()) or ("removal" in dataset.lower()) or ("sink" in dataset.lower()):
+            logger.info("Skipping non-emissions dataset: %s", dataset)
+            continue
 
         canonical_noext = posixpath.join(
             items["global_dir"], items["global_pattern"][:-4]
@@ -513,9 +676,7 @@ def display_main(
             date_tag,
             f"{res_label}_global__{dataset}__{interval}",
         )
-
         candidates: List[str] = [canonical_noext, versioned_noext]
-
         if read_from_s3:
             candidates = [gdalize_s3_url(p) for p in candidates]
 
@@ -526,19 +687,12 @@ def display_main(
         ensure_dir(out_jpeg_dir_local)
 
         logger.info(
-            "[Stage 02] Rendering dataset=%s interval=%s | candidates=%s",
+            "[Stage 02] Rendering dataset=%s interval=%s | candidates=%s | profiles=%s",
             dataset,
             interval,
             candidates,
+            ",".join([p["name"] for p in profile_cfgs]),
         )
-
-        mode, _ = _choose_recipe(dataset)
-        palette = (
-            net_palette
-            if mode == "diverging"
-            else (emissions_palette if mode == "emissions" else removals_palette)
-        )
-        ptiles = net_percentiles if mode == "diverging" else gross_percentiles
 
         out_base = f"{dataset}__{interval}"
 
@@ -547,13 +701,17 @@ def display_main(
             interval=interval,
             tif_path_noext_candidates=candidates,
             out_dir_local=out_jpeg_dir_local,
-            palette_rgb=palette,
-            percentiles=list(ptiles),
+            palette_rgb=emissions_palette,
             shapefile_gdf=shp,
             out_name_base=out_base,
             years=None,
-            diverging_if_zero_center=("net" in dataset.lower()),
             target_crs=cn.Robinson_crs,
+            profiles=profile_cfgs,
+            interpolation=interpolation,
+            stats_scope=stats_scope,
+            min_cluster_pixels=min_cluster_pixels,
+            smooth_sigma=smooth_sigma,
+            cmap_choice=cmap_choice,
             logger=logger,
         )
 
@@ -565,10 +723,13 @@ def display_main(
                 logger,
             )
 
+# ----------------------------
+# CLI
+# ----------------------------
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Render global display assets from aggregated rasters."
+        description="Render global display assets (gross emissions) from aggregated rasters."
     )
     parser.add_argument("--date_tag", required=True)
     parser.add_argument("--run_name", default="ogh_sensitivity_1km")
@@ -601,6 +762,71 @@ def main() -> None:
         help="Skip uploading rendered displays to S3 (local mirror only).",
     )
 
+    # Profile selection & overrides (only asinh, linear, steps)
+    parser.add_argument(
+        "--profiles",
+        nargs="+",
+        default=["all"],
+        help="Which profiles to render: any of {asinh, linear, steps} or 'all'. Default: all.",
+    )
+    parser.add_argument(
+        "--clip_lo",
+        type=float,
+        default=None,
+        help="Override lower percentile for ALL profiles (0–100). If omitted, profile defaults are used.",
+    )
+    parser.add_argument(
+        "--clip_hi",
+        type=float,
+        default=None,
+        help="Override upper percentile for ALL profiles (0–100). If omitted, profile defaults are used.",
+    )
+    parser.add_argument(
+        "--floor",
+        type=float,
+        default=None,
+        help="Absolute minimum vmin for 'asinh' (data units). If omitted, uses 1%% of vmax.",
+    )
+    parser.add_argument(
+        "--steps",
+        type=float,
+        nargs="+",
+        default=None,
+        help="Percentile breakpoints for the 'steps' profile (e.g., 60 80 90 95 98 99 99.5 99.9).",
+    )
+    parser.add_argument(
+        "--interpolation",
+        choices=["nearest", "bilinear", "none"],
+        default="nearest",
+        help="imshow interpolation (visual smoothing only).",
+    )
+
+    # New quality controls
+    parser.add_argument(
+        "--stats_scope",
+        choices=["land", "all"],
+        default="land",
+        help="Use only land pixels for percentile statistics (recommended).",
+    )
+    parser.add_argument(
+        "--min_cluster_pixels",
+        type=int,
+        default=0,
+        help="Remove connected components smaller than this many pixels (0=off).",
+    )
+    parser.add_argument(
+        "--smooth_sigma",
+        type=float,
+        default=0.0,
+        help="Gaussian sigma in pixels for gentle smoothing (0=off).",
+    )
+    parser.add_argument(
+        "--cmap",
+        choices=["custom", "inferno", "magma", "plasma", "viridis", "cividis"],
+        default="custom",
+        help="Colormap choice. 'custom' uses the warm ramp from your code; others are perceptual ramps.",
+    )
+
     args = parser.parse_args()
     upload_displays = not args.local_display_only
 
@@ -615,6 +841,16 @@ def main() -> None:
         base_url=args.base_url,
         outputs_base=args.outputs_base,
         upload_to_s3=upload_displays,
+        profiles_arg=args.profiles,
+        clip_lo=args.clip_lo,
+        clip_hi=args.clip_hi,
+        floor=args.floor,
+        steps=args.steps,
+        interpolation=args.interpolation,
+        stats_scope=args.stats_scope,
+        min_cluster_pixels=args.min_cluster_pixels,
+        smooth_sigma=args.smooth_sigma,
+        cmap_choice=args.cmap,
     )
 
 
