@@ -48,6 +48,52 @@ from src.scripts.postprocessing.visualization.create_global_map_common import (
     resolve_versioned_paths,
 )
 
+# --------------------------------------------------------------------
+# Helpers
+# --------------------------------------------------------------------
+
+def _reaggregate_sum(arr: np.ndarray, native_deg: float, target_deg: float) -> np.ndarray:
+    """
+    Downsample by summing factor×factor blocks (preserve NaNs).
+    If a block has 0 valid cells, output is NaN.
+    """
+    factor_f = target_deg / native_deg
+    if not np.isclose(round(factor_f), factor_f):
+        raise ValueError(f"target_deg/native_deg must be an integer; got {target_deg}/{native_deg}.")
+    f = int(round(factor_f))
+
+    h, w = arr.shape
+    H = (h // f) * f
+    W = (w // f) * w  # NOTE: fixed typo below (should be W = (w // f) * f)
+    W = (w // f) * f  # correct width trim
+
+    a = arr[:H, :W]
+    a4 = a.reshape(H // f, f, W // f, f)
+
+    valid = np.sum(~np.isnan(a4), axis=(1, 3)).astype(np.int32)
+    block_sum = np.nansum(a4, axis=(1, 3)).astype(np.float32)
+    block_sum[valid == 0] = np.nan
+    return block_sum
+
+
+def _per_pixel_tile_path(items: dict, tile_id: str) -> str:
+    """
+    Resolve per-pixel total input path for a tile.
+    This *replaces* any former 'ha' references with 'pixel'.
+    """
+    pp_dir = items.get("mg_per_pixel_dir")
+    pp_pat = items.get("mg_per_pixel_pattern")
+    if not pp_dir or not pp_pat:
+        raise RuntimeError(
+            "Per-pixel total inputs are required but not configured in build_download_upload_dict: "
+            "missing mg_per_pixel_dir and/or mg_per_pixel_pattern."
+        )
+    return f"{pp_dir}{tile_id}{pp_pat}"
+
+
+# --------------------------------------------------------------------
+# Tile aggregation
+# --------------------------------------------------------------------
 
 def agg_tile_to_target(
     tile_id: str,
@@ -82,10 +128,14 @@ def agg_tile_to_target(
         logger.info("Aggregating integer dataset by MODE → %s", dataset_name)
         return uu.reaggregate_mode(arr, native_deg, target_deg)
 
-    # Continuous totals → SUM to target resolution (no unit conversions)
+    # Continuous totals → explicit SUM to target resolution (no unit conversions)
     logger.info("Aggregating continuous dataset by SUM → %s", dataset_name)
-    return uu.reaggregate_resolution(arr, native_deg, target_deg)
+    return _reaggregate_sum(arr, native_deg, target_deg)
 
+
+# --------------------------------------------------------------------
+# Execution helpers
+# --------------------------------------------------------------------
 
 def _compute_tiles(
     delayed_results: List,
@@ -181,6 +231,10 @@ def combine_global_raster(
     return "Success"
 
 
+# --------------------------------------------------------------------
+# Orchestration
+# --------------------------------------------------------------------
+
 def aggregate_main(
     cluster_name: str,
     pixel_resolution: str,
@@ -237,7 +291,8 @@ def aggregate_main(
         lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
 
         for tile_id in cn.tile_id_list:
-            per_pixel_total_tile = f"{items['mg_ha_yr_dir']}{tile_id}{items['mg_ha_yr_pattern']}"
+            # *** IMPORTANT ***: read per-pixel totals; replace 'ha' paths with 'pixel'
+            per_pixel_total_tile = _per_pixel_tile_path(items, tile_id)
 
             bounds = uu.get_10x10_tile_bounds(tile_id)
             bounds_list.append(bounds)
