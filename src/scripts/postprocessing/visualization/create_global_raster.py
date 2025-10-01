@@ -167,27 +167,14 @@ def combine_global_raster(
     global_output_path: str,
     target_deg: float,
     is_final: bool,
-    dtype: np.dtype | type | None = None,
-    nodata: Optional[int | float] = None,
 ):
     """Paste aggregated tiles into a single global array at ``target_deg``."""
 
     logger = lu.setup_logging()
 
-    if not tiles:
-        raise ValueError("No tiles provided to combine into a global raster")
-
-    out_dtype = np.dtype(dtype or tiles[0].dtype)
     rows = int(round(180 / target_deg))
     cols = int(round(360 / target_deg))
-
-    is_float = np.issubdtype(out_dtype, np.floating)
-    if is_float:
-        fill_value = np.nan
-    else:
-        fill_value = nodata if nodata is not None else 0
-
-    global_raster = np.full((rows, cols), fill_value, dtype=out_dtype)
+    global_raster = np.full((rows, cols), np.nan, dtype=np.float32)
 
     for tile, bounds in zip(tiles, bounds_list):
         min_x, min_y, max_x, max_y = bounds
@@ -200,34 +187,24 @@ def combine_global_raster(
         assert (y_end - y_start) == th
         assert (x_end - x_start) == tw
 
-        if tile.dtype != out_dtype:
-            tile = tile.astype(out_dtype, copy=False)
-
-        dest = global_raster[y_start:y_end, x_start:x_end]
-        if is_float:
-            np.copyto(dest, tile, where=~np.isnan(tile))
-        elif nodata is not None:
-            np.copyto(dest, tile, where=tile != nodata)
-        else:
-            dest[:] = tile
+        np.copyto(
+            global_raster[y_start:y_end, x_start:x_end],
+            tile,
+            where=~np.isnan(tile),
+        )
 
     global_bounds = (-180, -90, 180, 90)
-
-    nodata_arg = None
-    if not is_float and nodata is not None:
-        nodata_arg = nodata
 
     uu.save_and_upload_single_raster(
         global_bounds,
         global_raster.shape[1],
         f"{res_label}_global",
         global_raster,
-        global_raster.dtype,
+        np.float32,
         global_outfile,
         global_output_path,
         is_final,
         logger,
-        no_data_val=nodata_arg,
     )
     return "Success"
 
@@ -338,19 +315,12 @@ def aggregate_main(
         start_time = uu.timestr()
         lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
 
-        if not tiles:
-            logger.warning("No aggregated tiles returned for %s; skipping", key)
-            continue
-
         if use_pixel_area and not is_integer and items["dataset"].endswith(("_ha", "_ha_yr")):
             global_outfile = f"{res_label}_global{items['mg_per_pixel_pattern']}"
         else:
             global_outfile = items["global_pattern"]
 
         global_output_path = items["global_dir"]
-
-        nodata_val = 0 if is_integer else None
-        out_dtype = tiles[0].dtype if tiles else np.float32
 
         combine_global_raster(
             tiles=list(tiles),
@@ -360,8 +330,6 @@ def aggregate_main(
             global_output_path=global_output_path,
             target_deg=target_deg,
             is_final=is_final,
-            dtype=out_dtype,
-            nodata=nodata_val,
         )
         lu.print_and_log(
             f"Global raster saved to {global_output_path}{global_outfile}",
