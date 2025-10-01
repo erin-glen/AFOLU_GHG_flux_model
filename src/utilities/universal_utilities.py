@@ -666,7 +666,7 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
     expected_shape = (chunk_length_pixels, chunk_length_pixels)
 
     # Number of retries for submitting requests to s3
-    MAX_RETRIES = 5
+    MAX_RETRIES = 7
 
     # If the uri exists, the relevant window is opened and returned and returned as an array.
     # Note that this chunk could still just have NoData values, which would be downloaded.
@@ -715,8 +715,9 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
             err_msg = str(e)
 
             # Retryable errors-- these mean that the input exists but it's not being successfully accessed,
-            # perhaps because of too many simultaneous requests to s3
-            if any(keyword in err_msg for keyword in ["SlowDown", "Please reduce", "503", "Read failed"]):
+            # perhaps because of too many simultaneous requests to s3.
+            # List of keywords for attempting retries is just from encountering various issues over time and including them here
+            if any(keyword in err_msg for keyword in ["SlowDown", "Please reduce", "503", "Read failed", "internal error"]):
                 if attempt < MAX_RETRIES - 1:
                     sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
                     print(f"Retryable S3 error '{err_msg}' for {uri}. Retrying in {sleep_time:.2f}s...")
