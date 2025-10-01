@@ -4,19 +4,19 @@ Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 Creates a separate global zarr for each model output folder
 
 Local test:
-python -m src.LULUCF.scripts.vegetation_model.4_create_individual_zarrs -yr 2000 2024 --first_folders_to_process 2 --first_1x1s_to_process 2 --input_date YYYYMMDD --run_local
+python -m src.LULUCF.scripts.vegetation_model.4_create_individual_zarrs --first_folders_to_process 2 --first_1x1s_to_process 2 --input_date YYYYMMDD --run_local
 
 Coiled small test:
-python -m src.utilities.create_cluster -n 2 -m 16 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.4_create_individual_zarrs -cn LULUCF_postprocessing -yr 2000 2024 --first_folders_to_process 2 --first_1x1s_to_process 2 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 2 -m 16 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.4_create_individual_zarrs -cn vegetation_postprocessing --first_folders_to_process 2 --first_1x1s_to_process 2 --input_date YYYYMMDD
 
 Coiled large area test:
-python -m src.utilities.create_cluster -n 2 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.4_create_individual_zarrs -cn LULUCF_postprocessing -yr 2000 2024 --first_folders_to_process 2 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 2 -m 32 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.4_create_individual_zarrs -cn vegetation_postprocessing --first_folders_to_process 2 --input_date YYYYMMDD
 
 Full Coiled run:
-python -m src.utilities.create_cluster -n 100 -m 32 -cn LULUCF_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.4_create_individual_zarrs -cn LULUCF_postprocessing -yr 2000 2024 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 100 -m 32 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.4_create_individual_zarrs -cn vegetation_postprocessing --input_date YYYYMMDD
 
 Based on discussion with Justin Terry and https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bf3334-a09c-8320-a556-153f43ef9cd0
 """
@@ -56,12 +56,14 @@ def drop_attrs(ds):
         ds[v].attrs = {}
     return ds.reset_coords(drop=True)
 
-def build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger):
+def build_global_zarr(output_dir_list, first_1x1s_to_process):
 
-    main_logger.info(f"Starting Zarr creation for {len(output_dir_list)} folders: {uu.timestr()}")
+    logger_worker = lu.setup_logging_worker()
+
+    print(f"Starting Zarr creation for {len(output_dir_list)} folders: {uu.timestr()}")
 
     for folder in output_dir_list:
-        main_logger.info(f"Scanning geotiffs in {folder}: {uu.timestr()}")
+        print(f"Scanning geotiffs in {folder}: {uu.timestr()}")
         folder_start_time = time.time()
 
         fs = fsspec.filesystem('s3', use_listings_cache=False, anon=False) if folder.startswith('s3://') else fsspec.filesystem('file')
@@ -110,17 +112,17 @@ def build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger):
             engine="rasterio"
         ).astype(data_type)
 
-        main_logger.info(f"Dask array for {folder}: {uu.timestr()}")
-        main_logger.info(da)
+        print(f"Dask array for {folder}: {uu.timestr()}")
+        print(da)
 
         folder_end_time = time.time()
-        main_logger.info(f"Ingesting {folder} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}")
+        print(f"Ingesting {folder} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}")
 
         # Explicitly rechunks to 10000x10000
-        main_logger.info(f"Rechunking {folder}: {uu.timestr()}")
+        print(f"Rechunking {folder}: {uu.timestr()}")
         da = da.chunk({'x': cn.zarr_pixel_chunks, 'y': cn.zarr_pixel_chunks})
 
-        main_logger.info(f"Saving {folder} as zarr: {uu.timestr()}")
+        print(f"Saving {folder} as zarr: {uu.timestr()}")
         original_var_name = list(da.data_vars.keys())[0]
         da = da.rename({original_var_name: out_file})
         # print(da)
@@ -129,7 +131,7 @@ def build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger):
         da.to_zarr(out_path_final, mode='w')
 
         folder_end_time = time.time()
-        main_logger.info(f"Zarring {folder} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}")
+        print(f"Zarring {folder} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}")
 
 # import numpy as np
 # import rioxarray as rxr
@@ -326,15 +328,15 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__BGC__MgC/standard_model/hybrid_intervals/2005/_ha/4000_pixels/20250904/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3_zarr_testing_small/carbon_density__BGC__MgC/standard_model/hybrid_intervals/2010/_ha/4000_pixels/20250904/"
 
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2015_2016/_ha_yr/4000_pixels/20250904",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2016_2017/_ha_yr/4000_pixels/20250904"
-        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2017_2018/_ha_yr/4000_pixels/20250904"
-        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2018_2019/_ha_yr/4000_pixels/20250904"
-        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2019_2020/_ha_yr/4000_pixels/20250904"
-        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2020_2021/_ha_yr/4000_pixels/20250904"
-        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2021_2022/_ha_yr/4000_pixels/20250904"
-        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2022_2023/_ha_yr/4000_pixels/20250904"
-        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_0_4_3/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/hybrid_intervals/2023_2024/_ha_yr/4000_pixels/20250904"
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2015_2016/_ha_yr/4000_pixels/20250930/",
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2016_2017/_ha_yr/4000_pixels/20250930/",
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2017_2018/_ha_yr/4000_pixels/20250930/",
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2018_2019/_ha_yr/4000_pixels/20250930/",
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2019_2020/_ha_yr/4000_pixels/20250930/",
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2020_2021/_ha_yr/4000_pixels/20250930/",
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2021_2022/_ha_yr/4000_pixels/20250930/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_0/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2022_2023/_ha_yr/4000_pixels/20250921/"
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_0/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2023_2024/_ha_yr/4000_pixels/20250921/"
     ]
 
     # Unlike numba-based scripts, this one doesn't construct the download dictionary in the main function.
@@ -367,7 +369,16 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
     main_logger.info(f"Directories to zarr: {output_dir_list}")
     main_logger.info(f"There are {len(output_dir_list)} folders to convert into global zarrs")
 
-    build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger)
+    futures = []
+    future = client.submit(build_global_zarr,
+                           output_dir_list, first_1x1s_to_process)
+    futures.append(future)
+
+    results = client.gather(futures)
+
+    print(results)    
+
+    # build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
@@ -404,7 +415,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Aggregate 1x1 degree outputs from LULUCF model to 10x10 degree geotifs.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-rd', '--input_date', help='Date of core model run, in YYYYMMDD')
-    parser.add_argument('-yr', '--year_range', nargs=2, type=int, required=True, help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2024.')
+    parser.add_argument('-yr', '--year_range', nargs=2, type=int, default=[cn.first_model_year_annual, cn.last_model_year_annual],
+                        help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2024.')
     parser.add_argument('-ffol', '--first_folders_to_process', type=int, help='Number of folders to process from input list')
     parser.add_argument('-ften', '--first_1x1s_to_process', type=int, help='Number of chunks to process from input list')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
