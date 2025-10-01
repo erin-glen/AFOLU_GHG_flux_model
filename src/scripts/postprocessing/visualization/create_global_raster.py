@@ -1,4 +1,12 @@
-"""Stage 01: aggregate 10×10° tiles into global rasters at a coarser resolution.
+"""
+Stage 01: aggregate 10×10° tiles into global rasters at a coarser resolution.
+
+Assumptions (this version)
+--------------------------
+- All non-integer inputs are **per-pixel totals** (e.g., Mg yr^-1 per native pixel).
+- Aggregation for float datasets is **SUM** to the target grid.
+- Aggregation for integer datasets is **MODE** (categorical majority).
+- No pixel-area products are used; no unit conversions are performed.
 
 Examples
 --------
@@ -7,16 +15,10 @@ python -m src.scripts.postprocessing.visualization.create_global_raster \
   -cn create_maps --run_name ogh_sensitivity_1km \
   --model_version 0_8_0 --date_tag 20250923
 
-# Aggregate at 0.01° and skip per-pixel outputs:
-python -m src.scripts.postprocessing.visualization.create_global_raster \
-  -cn create_maps --run_name ogh_sensitivity_1km --target_deg 0.01 \
-  --model_version 0_8_0 --date_tag 20250923 --skip_pixel_area
-
-# Use a local Dask cluster instead of AWS Batch / ECS:
+# Aggregate at 0.01° using a local Dask cluster instead of AWS Batch / ECS:
 python -m src.scripts.postprocessing.visualization.create_global_raster \
   -cn local --run_name ogh_sensitivity_1km --run_local \
-  --model_version 0_8_0 --date_tag 20250923
-
+  --model_version 0_8_0 --date_tag 20250923 --target_deg 0.01
 """
 
 from __future__ import annotations
@@ -51,66 +53,38 @@ def agg_tile_to_target(
     tile_id: str,
     bounds: Tuple[float, float, float, float],
     chunk_length_pixels: int,
-    pixel_area_tile: Optional[str],
-    mg_ha_yr_tile: str,
-    per_pixel_output_tile: Optional[str],
-    per_pixel_output_path: Optional[str],
-    use_pixel_area: bool,
+    per_pixel_total_tile: str,
     native_deg: float,
     target_deg: float,
     is_final: bool,
 ):
-    """Aggregate one 10×10° tile from ``native_deg`` to ``target_deg``."""
+    """Aggregate one 10×10° tile from ``native_deg`` to ``target_deg``.
+
+    - Float datasets (per-pixel totals): SUM to the coarser grid.
+    - Integer datasets (categorical): MODE to the coarser grid.
+    """
 
     logger = lu.setup_logging()
 
-    logger.info(f"Getting rasters for {tile_id}\n{pixel_area_tile}\n{mg_ha_yr_tile}")
+    logger.info("Reading tile %s\nper-pixel totals: %s", tile_id, per_pixel_total_tile)
 
-    mg_ha_yr_tile_chunk = uu.get_tile_dataset_rio(
-        mg_ha_yr_tile, "Float32", bounds, chunk_length_pixels, is_final, logger
+    # Load native chunk (Float32 by default)
+    arr = uu.get_tile_dataset_rio(
+        per_pixel_total_tile, "Float32", bounds, chunk_length_pixels, is_final, logger
     )[0]
 
-    dataset_name = posixpath.basename(mg_ha_yr_tile).split("__")[1]
+    dataset_name = posixpath.basename(per_pixel_total_tile).split("__")[1]
     is_integer = dataset_name in INTEGER_DATASETS
-    if is_integer:
-        mg_ha_yr_tile_chunk = mg_ha_yr_tile_chunk.astype(np.int32)
-
-    if use_pixel_area and not is_integer:
-        pixel_area_tile_chunk = uu.get_tile_dataset_rio(
-            pixel_area_tile, "Float32", bounds, chunk_length_pixels, is_final, logger
-        )[0]
-
-        mg_per_pixel_tile_chunk = (
-            mg_ha_yr_tile_chunk * pixel_area_tile_chunk * cn.m2_to_ha
-        )
-
-        if per_pixel_output_tile and per_pixel_output_path:
-            data_type = mg_per_pixel_tile_chunk.dtype.name
-            uu.save_and_upload_single_raster(
-                bounds,
-                chunk_length_pixels,
-                tile_id,
-                mg_per_pixel_tile_chunk,
-                data_type,
-                per_pixel_output_tile,
-                per_pixel_output_path,
-                is_final,
-                logger,
-            )
-
-        return uu.reaggregate_resolution(mg_per_pixel_tile_chunk, native_deg, target_deg)
 
     if is_integer:
-        return uu.reaggregate_mode(mg_ha_yr_tile_chunk, native_deg, target_deg)
+        # Categorical aggregation
+        arr = arr.astype(np.int32, copy=False)
+        logger.info("Aggregating integer dataset by MODE → %s", dataset_name)
+        return uu.reaggregate_mode(arr, native_deg, target_deg)
 
-    summed = uu.reaggregate_resolution(mg_ha_yr_tile_chunk, native_deg, target_deg)
-    factor = target_deg / native_deg
-    if not np.isclose(round(factor), factor):
-        raise ValueError(
-            f"target_deg/{native_deg} must be an integer. Got {target_deg}/{native_deg}."
-        )
-    factor = int(round(factor))
-    return summed / float(factor * factor)
+    # Continuous totals → SUM to target resolution (no unit conversions)
+    logger.info("Aggregating continuous dataset by SUM → %s", dataset_name)
+    return uu.reaggregate_resolution(arr, native_deg, target_deg)
 
 
 def _compute_tiles(
@@ -146,9 +120,7 @@ def _compute_tiles(
         tiles[idx] = result
         completed += 1
         if completed % 10 == 0 or completed == total:
-            logger.info(
-                "Completed %d/%d tiles for %s", completed, total, stage_desc
-            )
+            logger.info("Completed %d/%d tiles for %s", completed, total, stage_desc)
 
     missing = [tile_ids[idx] for idx, tile in enumerate(tiles) if tile is None]
     if missing:
@@ -214,7 +186,6 @@ def aggregate_main(
     pixel_resolution: str,
     run_name: str = "ogh_sensitivity_1km",
     run_local: bool = False,
-    use_pixel_area: bool = True,
     native_deg: float = DEFAULT_NATIVE_DEG,
     target_deg: float = DEFAULT_TARGET_DEG,
     output_date: str = DEFAULT_DATE_TAG,
@@ -266,20 +237,7 @@ def aggregate_main(
         lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
 
         for tile_id in cn.tile_id_list:
-            mg_ha_yr_tile = (
-                f"{items['mg_ha_yr_dir']}{tile_id}{items['mg_ha_yr_pattern']}"
-            )
-            pixel_area_tile = (
-                f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
-                if use_pixel_area and not is_integer
-                else None
-            )
-
-            per_pixel_tile_outfile = None
-            per_pixel_output_path = None
-            if use_pixel_area and not is_integer:
-                per_pixel_tile_outfile = f"{tile_id}{items['mg_per_pixel_pattern']}"
-                per_pixel_output_path = items["mg_per_pixel_dir"]
+            per_pixel_total_tile = f"{items['mg_ha_yr_dir']}{tile_id}{items['mg_ha_yr_pattern']}"
 
             bounds = uu.get_10x10_tile_bounds(tile_id)
             bounds_list.append(bounds)
@@ -291,11 +249,7 @@ def aggregate_main(
                     tile_id,
                     bounds,
                     chunk_length_pixels,
-                    pixel_area_tile,
-                    mg_ha_yr_tile,
-                    per_pixel_tile_outfile,
-                    per_pixel_output_path,
-                    use_pixel_area,
+                    per_pixel_total_tile,
                     native_deg,
                     target_deg,
                     is_final,
@@ -315,11 +269,8 @@ def aggregate_main(
         start_time = uu.timestr()
         lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
 
-        if use_pixel_area and not is_integer and items["dataset"].endswith(("_ha", "_ha_yr")):
-            global_outfile = f"{res_label}_global{items['mg_per_pixel_pattern']}"
-        else:
-            global_outfile = items["global_pattern"]
-
+        # Always write the canonical global pattern
+        global_outfile = items["global_pattern"]
         global_output_path = items["global_dir"]
 
         combine_global_raster(
@@ -348,14 +299,13 @@ def aggregate_main(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Aggregate to a target resolution and build global mosaics."
+        description="Aggregate to a target resolution and build global mosaics (SUM for totals, MODE for integers)."
     )
     parser.add_argument("-cn", "--cluster_name", required=True)
     parser.add_argument("--date_tag", required=True)
     parser.add_argument("-p", "--pixel_resolution", default="40000_pixels")
     parser.add_argument("--run_name", default="ogh_sensitivity_1km")
     parser.add_argument("--run_local", action="store_true")
-    parser.add_argument("--skip_pixel_area", action="store_true")
     parser.add_argument("--native_deg", type=float, default=DEFAULT_NATIVE_DEG)
     parser.add_argument("--target_deg", type=float, default=DEFAULT_TARGET_DEG)
     parser.add_argument(
@@ -386,7 +336,6 @@ def main() -> None:
         pixel_resolution=args.pixel_resolution,
         run_name=args.run_name,
         run_local=args.run_local,
-        use_pixel_area=not args.skip_pixel_area,
         native_deg=args.native_deg,
         target_deg=args.target_deg,
         output_date=args.date_tag,
