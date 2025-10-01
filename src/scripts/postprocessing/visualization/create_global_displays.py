@@ -5,7 +5,7 @@ plus derived composites and 4-panel maps.
 This version:
   - Assumes layers are GROSS EMISSIONS (positive-only signal; <=0 masked).
   - Removes duplicate exports (no "for_pres" variant).
-  - Automatically renders THREE profiles per layer: asinh, linear, and steps (no log/sqrt).
+  - Renders THREE profiles per layer: asinh, linear, and steps (no log/sqrt).
   - Uses land-only percentile statistics by default for more stable scaling on sparse globals.
   - Adds products:
       (a) drained emissions
@@ -14,13 +14,14 @@ This version:
       (d) binary drained/undrained peat extent (via reclass of a drained-state raster)
   - Adds 4-panel map composer (global + three AOIs) for drained and burned emissions.
 
-Reclassify drained-state raster as:
+Drained-state reclass:
     0          -> nodata
     20,000,000 -> nodata
     16,000,000 -> UNDRAINED peat (0)
     all other values -> DRAINED peat (1)
 
-Example usage:
+Examples
+--------
 
 # Read mosaics directly from S3 and upload rendered assets back to S3:
 python -m src.scripts.postprocessing.visualization.create_global_displays \
@@ -32,7 +33,7 @@ python -m src.scripts.postprocessing.visualization.create_global_displays \
   --date_tag 20250923 --run_name ogh_sensitivity_1km --model_version 0_8_0 \
   --local_display_only
 
-# All rendering options
+# Everything (global drained, burned, drained+burned, binary extent) with tuned scaling:
 python -m src.scripts.postprocessing.visualization.create_global_displays \
   --date_tag 20250923 --read_from_s3 --run_name ogh_sensitivity_1km --model_version 0_8_0 \
   --ds_drained_emis drained_emissions \
@@ -42,14 +43,26 @@ python -m src.scripts.postprocessing.visualization.create_global_displays \
   --clip_lo 5 --clip_hi 99.97 \
   --cmap inferno --interpolation bilinear
 
-# 4 panel drained or burned
+# 4-panel for drained emissions (global + 3 zooms) using AOIs that match the example figure:
 python -m src.scripts.postprocessing.visualization.create_global_displays \
   --date_tag 20250923 --read_from_s3 --run_name ogh_sensitivity_1km --model_version 0_8_0 \
   --ds_drained_emis drained_emissions \
-  --make_four_panel_drained \
-  --four_panel_profile asinh \
-  --aoi "A:-81.6,27.1,-80.2,28.5" "B:2.0,-2.0,7.0,3.0" "C:71.0,66.5,78.0,69.5"
+  --make_four_panel_drained --four_panel_profile asinh \
+  --clip_lo 5 --clip_hi 99.97 --cmap inferno --interpolation bilinear \
+  --aoi "A:-81.35,26.10,-79.95,27.70" "B:2.00,-2.00,7.00,3.00" "C:71.00,66.50,78.00,69.50"
 
+# 4-panel for burned emissions (swap dataset + flag):
+python -m src.scripts.postprocessing.visualization.create_global_displays \
+  --date_tag 20250923 --read_from_s3 --run_name ogh_sensitivity_1km --model_version 0_8_0 \
+  --ds_burned_emis burned_emissions \
+  --make_four_panel_burned --four_panel_profile asinh \
+  --clip_lo 5 --clip_hi 99.97 --cmap inferno --interpolation bilinear \
+  --aoi "A:-81.35,26.10,-79.95,27.70" "B:2.00,-2.00,7.00,3.00" "C:71.00,66.50,78.00,69.50"
+
+# Extent-only shortcut:
+python -m src.scripts.postprocessing.visualization.create_global_displays \
+  --date_tag 20250923 --read_from_s3 --run_name ogh_sensitivity_1km --model_version 0_8_0 \
+  --ds_drained_state drained_state --only_extent
 """
 
 from __future__ import annotations
@@ -58,7 +71,7 @@ import argparse
 import posixpath
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 import numpy as np
 import rasterio
@@ -70,7 +83,6 @@ from rasterio.warp import (
     transform as rio_transform,
 )
 import matplotlib.pyplot as plt
-from matplotlib import cm
 from matplotlib.colors import (
     LinearSegmentedColormap,
     Normalize,
@@ -79,8 +91,7 @@ from matplotlib.colors import (
     ListedColormap,
 )
 try:
-    # mpl >= 3.6
-    from matplotlib.colors import AsinhNorm  # type: ignore
+    from matplotlib.colors import AsinhNorm  # mpl >= 3.6
 except Exception:  # pragma: no cover
     AsinhNorm = None
 from matplotlib.ticker import ScalarFormatter
@@ -95,6 +106,8 @@ except Exception:  # pragma: no cover
     gaussian_filter, cc_label = None, None
 
 from src.scripts.utilities import constants_and_names as cn
+    # expects attributes like: Robinson_crs, panel_dims, dpi_jpeg, colorbar_dimensions,
+    # legend_fontsize, land_bkgrnd, boundary_color, boundary_width, ocean_color, etc.
 from src.scripts.utilities import log_utilities as lu
 from src.scripts.utilities import universal_utilities as uu
 
@@ -332,13 +345,12 @@ def _try_open_first(paths_noext: List[str], target_crs: str, work_dir: Path) -> 
     )
 
 # ------------------------------------------------------------------------------
-# Emissions viz helpers (profiles: asinh / linear / steps)
+# Emissions viz helpers (asinh / linear / steps)
 # ------------------------------------------------------------------------------
 
 def _profile_suffix(name: str, clip_lo: float, clip_hi: float, steps: Optional[List[float]] = None):
     def fmt_p(p):
-        # 99.5 -> 99p5 for filenames
-        s = str(p).replace(".", "p")
+        s = str(p).replace(".", "p")  # 99.5 -> 99p5
         return s
     if name == "steps":
         if not steps:
@@ -356,9 +368,6 @@ def _select_profiles(
     override_floor: Optional[float],
     override_steps: Optional[List[float]],
 ) -> List[Dict]:
-    """
-    Only 'asinh', 'linear', and 'steps' are supported.
-    """
     default_profiles = [
         {"name": "asinh",  "stretch": "asinh",  "clip_lo": 5.0, "clip_hi": 99.97, "floor": None, "steps": None},
         {"name": "linear", "stretch": "linear", "clip_lo": 5.0, "clip_hi": 95.0,  "floor": None, "steps": None},
@@ -440,55 +449,81 @@ def _get_items_for_dataset_interval(d: Dict, dataset_name: str, interval: str):
     return None
 
 
+def _aggregated_global_dir(resolved_outputs_base: str, res_label: str, dataset_name: str, interval: str) -> str:
+    """Root directory that holds the aggregated mosaic for a dataset/interval."""
+    return posixpath.join(
+        resolved_outputs_base.rstrip("/"),
+        f"{res_label}_output_aggregation",
+        dataset_name,
+        interval,
+    )
+
+
 def _candidates_for_dataset_interval(
     d: Dict,
     dataset_name: str,
     interval: str,
     read_from_s3: bool,
     resolved_base_url: str,
+    resolved_outputs_base: str,   # <-- important: try aggregated canonical path first
     run_name: str,
     pixel_resolution: str,
     date_tag: str,
     res_label: str,
 ) -> List[str]:
-    """Find candidate no-ext paths for a dataset/interval using job dict; fallback to versioned path."""
+    """
+    Build candidate no-ext paths for a dataset/interval.
+
+    Priority:
+      (1) Aggregated canonical path under resolved_outputs_base:
+          {outputs_base}/{res_label}_output_aggregation/{dataset}/{interval}/{res_label}_global__{dataset}_{interval}
+      (2) Canonical path from job dict (if present)
+      (3) Versioned per-tile path under resolved_base_url (may not exist for aggregated mosaics)
+    """
     items = _get_items_for_dataset_interval(d, dataset_name, interval)
     candidates: List[str] = []
+
+    # (1) Aggregated canonical path under outputs_base
+    agg_noext = posixpath.join(
+        _aggregated_global_dir(resolved_outputs_base, res_label, dataset_name, interval),
+        f"{res_label}_global__{dataset_name}_{interval}",
+    )
+    candidates.append(agg_noext)
+
+    # (2) Canonical path from job dict, if available
     if items:
         canonical_noext = posixpath.join(items["global_dir"], items["global_pattern"][:-4])
-        versioned_noext = posixpath.join(
-            resolved_base_url.rstrip("/"),
-            dataset_name,
-            run_name,
-            "five_year_intervals",
-            interval,
-            pixel_resolution,
-            date_tag,
-            f"{res_label}_global__{dataset_name}__{interval}",
-        )
-        candidates = [canonical_noext, versioned_noext]
-    else:
-        versioned_noext = posixpath.join(
-            resolved_base_url.rstrip("/"),
-            dataset_name,
-            run_name,
-            "five_year_intervals",
-            interval,
-            pixel_resolution,
-            date_tag,
-            f"{res_label}_global__{dataset_name}__{interval}",
-        )
-        candidates = [versioned_noext]
+        candidates.append(canonical_noext)
+
+    # (3) Versioned per-tile path
+    versioned_noext = posixpath.join(
+        resolved_base_url.rstrip("/"),
+        dataset_name,
+        run_name,
+        "five_year_intervals",
+        interval,
+        pixel_resolution,
+        date_tag,
+        f"{res_label}_global__{dataset_name}__{interval}",
+    )
+    candidates.append(versioned_noext)
+
+    # Convert to /vsis3 if reading from S3 and dedupe
     if read_from_s3:
         candidates = [gdalize_s3_url(p) for p in candidates]
-    return candidates
+    unique: List[str] = []
+    seen = set()
+    for c in candidates:
+        if c not in seen:
+            unique.append(c); seen.add(c)
+    return unique
 
 
 def _open_array_from_candidates(
     candidates: List[str],
     target_crs: str,
     work_dir: Path,
-) -> Tuple[np.ndarray, rasterio.coords.BoundingBox, any]:
+) -> Tuple[np.ndarray, rasterio.coords.BoundingBox, Any]:
     tif_proj, _ = _try_open_first(candidates, target_crs, work_dir)
     with rasterio.open(tif_proj) as src:
         arr = src.read(1)
@@ -498,10 +533,7 @@ def _open_array_from_candidates(
     return arr, bounds, transform
 
 
-def _compose_sum_positive(
-    a: np.ndarray,
-    b: np.ndarray,
-) -> np.ndarray:
+def _compose_sum_positive(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Return (a+b) with <=0 masked (as 0)."""
     s = np.where(np.isfinite(a), a, 0.0) + np.where(np.isfinite(b), b, 0.0)
     s = np.nan_to_num(s, nan=0.0)
@@ -509,9 +541,7 @@ def _compose_sum_positive(
     return s
 
 
-def _reclass_drained_state_to_binary(
-    state_array: np.ndarray,
-) -> np.ma.MaskedArray:
+def _reclass_drained_state_to_binary(state_array: np.ndarray) -> np.ma.MaskedArray:
     """
     0 -> nodata
     20,000,000 -> nodata
@@ -521,14 +551,13 @@ def _reclass_drained_state_to_binary(
     nodata_mask = (state_array == 0) | (state_array == 20000000)
     undrained_mask = (state_array == 16000000)
     drained_mask = (~nodata_mask) & (~undrained_mask)
-
     out = np.zeros_like(state_array, dtype=np.uint8)
     out[drained_mask] = 1
     out[undrained_mask] = 0
     return np.ma.masked_array(out, mask=nodata_mask)
 
 # ------------------------------------------------------------------------------
-# Rendering: emissions profiles (as before) + binary extent
+# Rendering: emissions profiles + binary extent
 # ------------------------------------------------------------------------------
 
 def _compute_domain_and_norm(
@@ -647,7 +676,7 @@ def _render_binary_extent(
     cmap = ListedColormap([undrained_color, drained_color])
     norm = BoundaryNorm([-0.5, 0.5, 1.5], cmap.N)
 
-    img = _draw_frame(
+    _draw_frame(
         ax,
         [bounds.left, bounds.right, bounds.bottom, bounds.top],
         binary_mask,
@@ -657,7 +686,6 @@ def _render_binary_extent(
         interpolation=interpolation,
     )
 
-    # Legend-like patches
     from matplotlib.patches import Patch
     handles = [Patch(color=undrained_color, label="Undrained peat"),
                Patch(color=drained_color, label="Drained peat")]
@@ -704,7 +732,6 @@ def _add_scale_bar(ax, bbox_xy: Tuple[float, float, float, float]):
     target = width / 4.0
     length = candidates[candidates <= target]
     length = length[-1] if length.size else candidates[0]
-    # position near bottom-left
     pad_x = 0.08 * width
     pad_y = 0.08 * height
     x_left = x0 + pad_x
@@ -733,19 +760,15 @@ def _four_panel(
     label_value: str,
     logger,
 ):
-    """Compose 4 panels: Global + 3 AOIs."""
+    """Compose 4 panels: Global + 3 AOIs (layout mirrors the attached example figure)."""
     masked_positive = np.ma.masked_where(arr <= 0, arr)
     vmin, vmax, steps_levels, norm = _compute_domain_and_norm(
         masked_positive, profile_cfg["stretch"], profile_cfg["clip_lo"], profile_cfg["clip_hi"],
         profile_cfg.get("floor", None), land_stats_mask, stats_scope, profile_cfg.get("steps")
     )
 
-    # AOIs to projection
-    aoi_proj = []
-    for name, bb in aoi_boxes_ll:
-        aoi_proj.append((name, _lonlat_box_to_robinson(bb)))
+    aoi_proj = [(name, _lonlat_box_to_robinson(bb)) for name, bb in aoi_boxes_ll]
 
-    # Figure + axes
     fig = plt.figure(figsize=(12, 7.5))
     gs = fig.add_gridspec(2, 2, height_ratios=[1, 1], width_ratios=[1, 1], hspace=0.15, wspace=0.05)
     ax_global = fig.add_subplot(gs[0, 0])
@@ -753,7 +776,6 @@ def _four_panel(
     ax_b = fig.add_subplot(gs[1, 0])
     ax_c = fig.add_subplot(gs[1, 1])
 
-    # Global panel
     _plot_country_layers(ax_global, shapefile_gdf)
     img = _draw_frame(
         ax_global,
@@ -761,12 +783,10 @@ def _four_panel(
         masked_positive,
         cmap, norm, ocean_color, interpolation
     )
-    # Boxes
     for (name, bb) in aoi_proj:
         _add_box(ax_global, bb, name, color="black")
     ax_global.set_title("Global overview", fontsize=11)
 
-    # Zoom panels A/B/C
     for ax, (name, bb) in zip([ax_a, ax_b, ax_c], aoi_proj):
         _plot_country_layers(ax, shapefile_gdf)
         _draw_frame(
@@ -780,7 +800,6 @@ def _four_panel(
         _add_scale_bar(ax, bb)
         ax.set_title(f"Site {name} [{bb[0]:.0f}, {bb[1]:.0f}, {bb[2]:.0f}, {bb[3]:.0f}]", fontsize=10)
 
-    # Shared colorbar
     cax = fig.add_axes([0.92, 0.12, 0.015, 0.76])
     if steps_levels is not None and steps_levels.size >= 2:
         cb = plt.colorbar(img, cax=cax, orientation="vertical",
@@ -833,17 +852,16 @@ def make_displays_for_dataset(
     work_dir = Path(out_dir_local) / "_reproj_cache"
     ensure_dir(work_dir)
 
-    # Colormap
+    # Colormap (use pyplot API to avoid deprecation)
     if cmap_choice.lower() == "custom":
         colors_mpl = _rgb_palette_to_mpl(palette_rgb)
         cmap = LinearSegmentedColormap.from_list("custom", colors_mpl)
     else:
         try:
-            cmap = cm.get_cmap(cmap_choice)
+            cmap = plt.get_cmap(cmap_choice)
         except Exception:
-            cmap = cm.get_cmap("inferno")
+            cmap = plt.get_cmap("inferno")
 
-    # Sparse-friendly: transparent masked; subtle under/over
     try:
         cmap = cmap.with_extremes(
             under=_rgb_to_mpl(cn.ocean_color) + (0.15,),
@@ -874,7 +892,6 @@ def make_displays_for_dataset(
     land_stats_mask = _land_stats_mask_from_shp(shapefile_gdf, masked_positive.shape, transform)
 
     for frame_label in labels:
-        # Optional cleanup/smoothing for plotting
         plot_array = masked_positive
         if min_cluster_pixels and min_cluster_pixels > 1 and cc_label is not None:
             pos_mask = (~plot_array.mask).astype(np.uint8)
@@ -913,8 +930,7 @@ def make_displays_for_dataset(
             )
             _legend(fig, img, legend_title, steps_levels=steps_levels)
 
-            # NOTE: base path has NO interval; _save_single adds it once
-            base_out = Path(out_dir_local) / out_name_base
+            base_out = Path(out_dir_local) / out_name_base  # NO interval in base
             suffix = _profile_suffix(p["name"], p["clip_lo"], p["clip_hi"], p.get("steps"))
             out_img = _save_single(ax, base_out, frame_label, suffix)
             created_files.append(out_img)
@@ -997,7 +1013,7 @@ def display_main(
 
     shp = _maybe_load_world_boundaries(logger)
 
-    # Default palettes
+    # Default palettes (warm half)
     net_palette = [
         (0, 60, 48),
         (1, 102, 94),
@@ -1010,9 +1026,9 @@ def display_main(
         (140, 81, 10),
         (84, 48, 5),
     ]
-    emissions_palette = net_palette[5:]  # warm half
+    emissions_palette = net_palette[5:]
 
-    # Select which profiles to render (asinh/linear/steps)
+    # Select profiles
     profile_cfgs = _select_profiles(
         profiles_arg=profiles_arg,
         override_clip_lo=clip_lo,
@@ -1021,12 +1037,9 @@ def display_main(
         override_steps=steps,
     )
 
-    # Single profile for the four-panel map (defaults to 'asinh')
-    four_panel_cfg = [p for p in profile_cfgs if p["name"] == four_panel_profile]
-    if not four_panel_cfg:
-        four_panel_cfg = [{"name": "asinh", "stretch": "asinh", "clip_lo": 5.0, "clip_hi": 99.97, "floor": None, "steps": None}]
-    else:
-        four_panel_cfg = four_panel_cfg[0]
+    # Single profile for the four-panel map
+    fp_cfg = [p for p in profile_cfgs if p["name"] == four_panel_profile]
+    four_panel_cfg = fp_cfg[0] if fp_cfg else {"name": "asinh", "stretch": "asinh", "clip_lo": 5.0, "clip_hi": 99.97, "floor": None, "steps": None}
 
     # Try to infer dataset names if not provided
     if ds_drained_emis is None:
@@ -1045,20 +1058,28 @@ def display_main(
             if "drain" in nm and "state" in nm:
                 ds_drained_state = v["dataset"]; break
 
-    if only_extent and ds_drained_state is None:
-        logger.error("only_extent requested but --ds_drained_state not provided and could not be inferred.")
-        return
-
     # AOIs
     aoi_list = []
     if aoi_boxes:
         for s in aoi_boxes:
-            # "A:minlon,minlat,maxlon,maxlat"
             name, coords = s.split(":")
             parts = [float(x) for x in coords.split(",")]
-            if len(parts) != 4:
-                continue
-            aoi_list.append((name.strip(), (parts[0], parts[1], parts[2], parts[3])))
+            if len(parts) == 4:
+                aoi_list.append((name.strip(), (parts[0], parts[1], parts[2], parts[3])))
+
+    logger.info(
+        "Resolved datasets -> drained_emis=%r burned_emis=%r drained_state=%r | AOIs=%s",
+        ds_drained_emis, ds_burned_emis, ds_drained_state, [n for n, _ in aoi_list]
+    )
+    if (make_four_panel_drained or make_four_panel_burned) and not aoi_list:
+        logger.warning("Four-panel requested but no --aoi boxes provided; skipping 4-panel.")
+    if make_four_panel_drained and not ds_drained_emis:
+        logger.warning("Four-panel (drained) requested but --ds_drained_emis was not resolved; skipping.")
+    if make_four_panel_burned and not ds_burned_emis:
+        logger.warning("Four-panel (burned) requested but --ds_burned_emis was not resolved; skipping.")
+    if only_extent and ds_drained_state is None:
+        logger.error("only_extent requested but --ds_drained_state not provided and could not be inferred.")
+        return
 
     # Iterate intervals found in job dict
     intervals = sorted({v["interval"] for v in d.values()})
@@ -1069,14 +1090,18 @@ def display_main(
         # -------------------------
         if ds_drained_state:
             cand_state = _candidates_for_dataset_interval(
-                d, ds_drained_state, interval, read_from_s3, resolved_base_url,
+                d, ds_drained_state, interval, read_from_s3,
+                resolved_base_url, resolved_outputs_base,
                 run_name, pixel_resolution, date_tag, res_label
             )
             items_state = _get_items_for_dataset_interval(d, ds_drained_state, interval)
             if items_state:
                 out_dir_base_state = posixpath.join(items_state["global_dir"], "display", interval, "drained_extent_binary")
             else:
-                out_dir_base_state = posixpath.join(OUTPUT_ROOT, "display", interval, "drained_extent_binary")
+                out_dir_base_state = posixpath.join(
+                    _aggregated_global_dir(resolved_outputs_base, res_label, ds_drained_state, interval),
+                    "display", interval, "drained_extent_binary"
+                )
             out_dir_local_state = to_local_mirror(out_dir_base_state, DISPLAY_OUT_ROOT)
             ensure_dir(out_dir_local_state)
 
@@ -1087,7 +1112,7 @@ def display_main(
             state_arr, state_bounds, _ = _open_array_from_candidates(cand_state, cn.Robinson_crs, work_dir)
             binary = _reclass_drained_state_to_binary(state_arr)
 
-            out_base_state = "drained_extent"  # base has NO interval
+            out_base_state = "drained_extent"
             out_img = _render_binary_extent(
                 binary_mask=binary, bounds=state_bounds, out_dir_local=out_dir_local_state,
                 out_name_base=out_base_state, label_value=interval, shapefile_gdf=shp,
@@ -1104,14 +1129,18 @@ def display_main(
         # -------------------------
         if ds_drained_emis:
             cand_drained = _candidates_for_dataset_interval(
-                d, ds_drained_emis, interval, read_from_s3, resolved_base_url,
+                d, ds_drained_emis, interval, read_from_s3,
+                resolved_base_url, resolved_outputs_base,
                 run_name, pixel_resolution, date_tag, res_label
             )
             items_drained = _get_items_for_dataset_interval(d, ds_drained_emis, interval)
             if items_drained:
                 out_dir_base_drained = posixpath.join(items_drained["global_dir"], "display", interval, ds_drained_emis)
             else:
-                out_dir_base_drained = posixpath.join(OUTPUT_ROOT, "display", interval, ds_drained_emis)
+                out_dir_base_drained = posixpath.join(
+                    _aggregated_global_dir(resolved_outputs_base, res_label, ds_drained_emis, interval),
+                    "display", interval, ds_drained_emis
+                )
             out_dir_local_drained = to_local_mirror(out_dir_base_drained, DISPLAY_OUT_ROOT)
             ensure_dir(out_dir_local_drained)
 
@@ -1121,7 +1150,7 @@ def display_main(
             created = make_displays_for_dataset(
                 dataset_name=ds_drained_emis, interval=interval,
                 tif_path_noext_candidates=cand_drained, out_dir_local=out_dir_local_drained,
-                palette_rgb=emissions_palette, shapefile_gdf=shp, out_name_base=ds_drained_emis,  # base has NO interval
+                palette_rgb=emissions_palette, shapefile_gdf=shp, out_name_base=ds_drained_emis,
                 years=None, target_crs=cn.Robinson_crs, profiles=profile_cfgs,
                 interpolation=interpolation, stats_scope=stats_scope, min_cluster_pixels=min_cluster_pixels,
                 smooth_sigma=smooth_sigma, cmap_choice=cmap_choice, logger=logger,
@@ -1134,14 +1163,18 @@ def display_main(
         # -------------------------
         if ds_burned_emis:
             cand_burned = _candidates_for_dataset_interval(
-                d, ds_burned_emis, interval, read_from_s3, resolved_base_url,
+                d, ds_burned_emis, interval, read_from_s3,
+                resolved_base_url, resolved_outputs_base,
                 run_name, pixel_resolution, date_tag, res_label
             )
             items_burned = _get_items_for_dataset_interval(d, ds_burned_emis, interval)
             if items_burned:
                 out_dir_base_burned = posixpath.join(items_burned["global_dir"], "display", interval, ds_burned_emis)
             else:
-                out_dir_base_burned = posixpath.join(OUTPUT_ROOT, "display", interval, ds_burned_emis)
+                out_dir_base_burned = posixpath.join(
+                    _aggregated_global_dir(resolved_outputs_base, res_label, ds_burned_emis, interval),
+                    "display", interval, ds_burned_emis
+                )
             out_dir_local_burned = to_local_mirror(out_dir_base_burned, DISPLAY_OUT_ROOT)
             ensure_dir(out_dir_local_burned)
 
@@ -1151,7 +1184,7 @@ def display_main(
             created = make_displays_for_dataset(
                 dataset_name=ds_burned_emis, interval=interval,
                 tif_path_noext_candidates=cand_burned, out_dir_local=out_dir_local_burned,
-                palette_rgb=emissions_palette, shapefile_gdf=shp, out_name_base=ds_burned_emis,  # base has NO interval
+                palette_rgb=emissions_palette, shapefile_gdf=shp, out_name_base=ds_burned_emis,
                 years=None, target_crs=cn.Robinson_crs, profiles=profile_cfgs,
                 interpolation=interpolation, stats_scope=stats_scope, min_cluster_pixels=min_cluster_pixels,
                 smooth_sigma=smooth_sigma, cmap_choice=cmap_choice, logger=logger,
@@ -1168,21 +1201,22 @@ def display_main(
 
             drained_arr, bounds_d, transform_d = _open_array_from_candidates(
                 _candidates_for_dataset_interval(d, ds_drained_emis, interval, read_from_s3,
-                                                 resolved_base_url, run_name, pixel_resolution, date_tag, res_label),
+                                                 resolved_base_url, resolved_outputs_base,
+                                                 run_name, pixel_resolution, date_tag, res_label),
                 cn.Robinson_crs, work_dir_sum
             )
             burned_arr, bounds_b, transform_b = _open_array_from_candidates(
                 _candidates_for_dataset_interval(d, ds_burned_emis, interval, read_from_s3,
-                                                 resolved_base_url, run_name, pixel_resolution, date_tag, res_label),
+                                                 resolved_base_url, resolved_outputs_base,
+                                                 run_name, pixel_resolution, date_tag, res_label),
                 cn.Robinson_crs, work_dir_sum
             )
             combined = _compose_sum_positive(drained_arr, burned_arr)
 
-            items_drained = _get_items_for_dataset_interval(d, ds_drained_emis, interval)
-            if items_drained:
-                out_dir_base_sum = posixpath.join(items_drained["global_dir"], "display", interval, "drained_plus_burned")
-            else:
-                out_dir_base_sum = posixpath.join(OUTPUT_ROOT, "display", interval, "drained_plus_burned")
+            out_dir_base_sum = posixpath.join(
+                _aggregated_global_dir(resolved_outputs_base, res_label, "drained_plus_burned", interval),
+                "display", interval, "drained_plus_burned"
+            )
             out_dir_local_sum = to_local_mirror(out_dir_base_sum, DISPLAY_OUT_ROOT)
             ensure_dir(out_dir_local_sum)
 
@@ -1190,9 +1224,7 @@ def display_main(
 
             created = []
             masked_positive = np.ma.masked_where(combined <= 0, combined)
-            land_stats_mask = None
-            if shp is not None:
-                land_stats_mask = _land_stats_mask_from_shp(shp, masked_positive.shape, transform_d)
+            land_stats_mask = _land_stats_mask_from_shp(shp, masked_positive.shape, transform_d) if shp is not None else None
 
             # Colormap
             if cmap_choice.lower() == "custom":
@@ -1200,9 +1232,9 @@ def display_main(
                 cmap = LinearSegmentedColormap.from_list("custom", colors_mpl)
             else:
                 try:
-                    cmap = cm.get_cmap(cmap_choice)
+                    cmap = plt.get_cmap(cmap_choice)
                 except Exception:
-                    cmap = cm.get_cmap("inferno")
+                    cmap = plt.get_cmap("inferno")
             try:
                 cmap = cmap.with_extremes(
                     under=_rgb_to_mpl(cn.ocean_color) + (0.15,),
@@ -1243,9 +1275,9 @@ def display_main(
                 cmap4 = LinearSegmentedColormap.from_list("custom", colors_mpl)
             else:
                 try:
-                    cmap4 = cm.get_cmap(cmap_choice)
+                    cmap4 = plt.get_cmap(cmap_choice)
                 except Exception:
-                    cmap4 = cm.get_cmap("inferno")
+                    cmap4 = plt.get_cmap("inferno")
             try:
                 cmap4 = cmap4.with_extremes(
                     under=_rgb_to_mpl(cn.ocean_color) + (0.15,),
@@ -1256,10 +1288,11 @@ def display_main(
                 cmap4.set_over(_rgb_to_mpl(cn.ocean_color))
             cmap4.set_bad((0, 0, 0, 0))
 
-            # Four-panel for drained
+            # Drained
             if make_four_panel_drained and ds_drained_emis:
                 cand_drained = _candidates_for_dataset_interval(
-                    d, ds_drained_emis, interval, read_from_s3, resolved_base_url,
+                    d, ds_drained_emis, interval, read_from_s3,
+                    resolved_base_url, resolved_outputs_base,
                     run_name, pixel_resolution, date_tag, res_label
                 )
                 work_dir = Path(DISPLAY_OUT_ROOT) / "four_panel" / "_reproj_cache"; ensure_dir(work_dir)
@@ -1267,11 +1300,10 @@ def display_main(
                 masked_d = np.ma.masked_where(arr_d <= 0, arr_d)
                 land_stats_mask = _land_stats_mask_from_shp(shp, masked_d.shape, transform_d)
 
-                items_drained = _get_items_for_dataset_interval(d, ds_drained_emis, interval)
-                if items_drained:
-                    out_dir_base_fp = posixpath.join(items_drained["global_dir"], "display", interval, f"{ds_drained_emis}_fourpanel")
-                else:
-                    out_dir_base_fp = posixpath.join(OUTPUT_ROOT, "display", interval, f"{ds_drained_emis}_fourpanel")
+                out_dir_base_fp = posixpath.join(
+                    _aggregated_global_dir(resolved_outputs_base, res_label, ds_drained_emis, interval),
+                    "display", interval, f"{ds_drained_emis}_fourpanel"
+                )
                 out_dir_local_fp = to_local_mirror(out_dir_base_fp, DISPLAY_OUT_ROOT)
                 ensure_dir(out_dir_local_fp)
 
@@ -1279,16 +1311,17 @@ def display_main(
                     arr=arr_d, bounds=bounds_d, shapefile_gdf=shp, land_stats_mask=land_stats_mask,
                     stats_scope=stats_scope, profile_cfg=four_panel_cfg, cmap=cmap4, interpolation=interpolation,
                     ocean_color=cn.ocean_color, aoi_boxes_ll=aoi_list, legend_title="Drained emissions\nkt CO$_2$e yr$^{-1}$",
-                    out_dir_local=out_dir_local_fp, out_name_base=ds_drained_emis,  # base has NO interval
+                    out_dir_local=out_dir_local_fp, out_name_base=ds_drained_emis,
                     label_value=interval, logger=logger
                 )
                 if upload_to_s3:
                     _upload_display_outputs([out_img], Path(out_dir_local_fp), out_dir_base_fp, logger)
 
-            # Four-panel for burned
+            # Burned
             if make_four_panel_burned and ds_burned_emis:
                 cand_burned = _candidates_for_dataset_interval(
-                    d, ds_burned_emis, interval, read_from_s3, resolved_base_url,
+                    d, ds_burned_emis, interval, read_from_s3,
+                    resolved_base_url, resolved_outputs_base,
                     run_name, pixel_resolution, date_tag, res_label
                 )
                 work_dir = Path(DISPLAY_OUT_ROOT) / "four_panel" / "_reproj_cache"; ensure_dir(work_dir)
@@ -1296,11 +1329,10 @@ def display_main(
                 masked_b = np.ma.masked_where(arr_b <= 0, arr_b)
                 land_stats_mask = _land_stats_mask_from_shp(shp, masked_b.shape, transform_b)
 
-                items_burned = _get_items_for_dataset_interval(d, ds_burned_emis, interval)
-                if items_burned:
-                    out_dir_base_fp = posixpath.join(items_burned["global_dir"], "display", interval, f"{ds_burned_emis}_fourpanel")
-                else:
-                    out_dir_base_fp = posixpath.join(OUTPUT_ROOT, "display", interval, f"{ds_burned_emis}_fourpanel")
+                out_dir_base_fp = posixpath.join(
+                    _aggregated_global_dir(resolved_outputs_base, res_label, ds_burned_emis, interval),
+                    "display", interval, f"{ds_burned_emis}_fourpanel"
+                )
                 out_dir_local_fp = to_local_mirror(out_dir_base_fp, DISPLAY_OUT_ROOT)
                 ensure_dir(out_dir_local_fp)
 
@@ -1308,7 +1340,7 @@ def display_main(
                     arr=arr_b, bounds=bounds_b, shapefile_gdf=shp, land_stats_mask=land_stats_mask,
                     stats_scope=stats_scope, profile_cfg=four_panel_cfg, cmap=cmap4, interpolation=interpolation,
                     ocean_color=cn.ocean_color, aoi_boxes_ll=aoi_list, legend_title="Burned emissions\nkt CO$_2$e yr$^{-1}$",
-                    out_dir_local=out_dir_local_fp, out_name_base=ds_burned_emis,  # base has NO interval
+                    out_dir_local=out_dir_local_fp, out_name_base=ds_burned_emis,
                     label_value=interval, logger=logger
                 )
                 if upload_to_s3:
