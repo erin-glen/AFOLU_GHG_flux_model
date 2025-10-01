@@ -659,7 +659,7 @@ def stage_duration(start_time_str, end_time_str, stage, logger, format="full"):
 # the Numba functions won't be able to handle that (since they're so particular about datatypes).
 # So, that is addressed here through setting the array of 0s to the datatype of the dataset.
 # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
-def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
+def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_type='float32'):
 
     bounds_str = boundstr(bounds)
     numpy_dtype = map_to_numpy_dtype(data_type)
@@ -717,10 +717,10 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
             # Retryable errors-- these mean that the input exists but it's not being successfully accessed,
             # perhaps because of too many simultaneous requests to s3.
             # List of keywords for attempting retries is just from encountering various issues over time and including them here
-            if any(keyword in err_msg for keyword in ["SlowDown", "Please reduce", "503", "Read failed", "internal error"]):
+            if any(keyword in err_msg for keyword in ["SlowDown", "Please reduce", "503", "Read failed", "internal error", "not recognized"]):
                 if attempt < MAX_RETRIES - 1:
                     sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
-                    print(f"Retryable S3 error '{err_msg}' for {uri}. Retrying in {sleep_time:.2f}s...")
+                    lu.print_and_log(f"Retryable S3 error '{err_msg}' for {uri}. Retrying in {sleep_time:.2f}s...", False, logger_worker)
                     time.sleep(sleep_time)
                     continue
                 else:
@@ -739,7 +739,7 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, data_type='float32'):
 # Prepares list of chunks to download.
 # Chunks are defined by a bounding box.
 # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
-def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger, stagger_download):
+def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger_worker, stagger_download):
 
     # Only staggers downloads for scripts that require it because they're hitting individual s3 folders a lot, e.g., summative outputs.
     # Not all scripts hit individual s3 folders beyond s3's request limit.
@@ -757,18 +757,18 @@ def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_fin
     # This queueing of the requests before downloading then speeds up the downloading.
     # Approach is to download all the input chunks up front for every year to make downloading more efficient, even though it means storing more upfront.
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        lu.print_and_log(f"Requesting data in chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger)
+        lu.print_and_log(f"Requesting data in chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
 
         for key, value in download_dict.items():
             # print(key, value)
 
             # When the values are a list with just the file to download, without the datatype
             if len(value)==1:
-                future = executor.submit(get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, 'float32')
+                future = executor.submit(get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, logger_worker, 'float32')
 
             # When the values are a list with the file to download and the datatype
             elif len(value)==2:
-                future = executor.submit(get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, value[1])
+                future = executor.submit(get_tile_dataset_rio, value[0], bounds, chunk_length_pixels, logger_worker, value[1])
 
             else:
                 sys.exit("Unexpected number of parameters in download dictionary")
