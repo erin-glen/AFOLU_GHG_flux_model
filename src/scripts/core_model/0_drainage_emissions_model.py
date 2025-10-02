@@ -216,7 +216,10 @@ def calculate_drainage_and_emissions(
                 # BOREAL ---------------------------------------------------
                 if ecozone == boreal_code:
                     emission_node = nu.accrete_node(emission_node, 1)
-                    if land_cover == forest_code:
+                    if extraction > 0:
+                        emission_node = nu.accrete_node(emission_node, 4)
+                        key = "boreal_extraction"
+                    elif land_cover == forest_code:
                         emission_node = nu.accrete_node(emission_node, 1)
                         if nutrient == poor_nutrient_code:
                             emission_node = nu.accrete_node(emission_node, 1)
@@ -224,16 +227,12 @@ def calculate_drainage_and_emissions(
                         elif nutrient == rich_nutrient_code:
                             emission_node = nu.accrete_node(emission_node, 2)
                             key = "boreal_forest_rich"
-                    elif extraction > 0:
-                        emission_node = nu.accrete_node(emission_node, 4)
-                        key = "boreal_extraction"
                     elif land_cover == grassland_code:
                         emission_node = nu.accrete_node(emission_node, 2)
                         key = "boreal_grassland"
                     elif land_cover == cropland_code:
                         emission_node = nu.accrete_node(emission_node, 3)
                         key = "boreal_cropland"
-
                     elif land_cover == settlement_code:
                         emission_node = nu.accrete_node(emission_node, 5)
                         key = "boreal_settlement"
@@ -247,12 +246,12 @@ def calculate_drainage_and_emissions(
                 # TEMPERATE -----------------------------------------------
                 elif ecozone == temperate_code:
                     emission_node = nu.accrete_node(emission_node, 2)
+                    if extraction > 0:
+                        emission_node = nu.accrete_node(emission_node, 4)
+                        key = "temperate_extraction"
                     if land_cover == forest_code:
                         emission_node = nu.accrete_node(emission_node, 1)
                         key = "temperate_forest"
-                    elif extraction > 0:
-                        emission_node = nu.accrete_node(emission_node, 4)
-                        key = "temperate_extraction"
                     elif land_cover == grassland_code:
                         emission_node = nu.accrete_node(emission_node, 2)
                         if nutrient == poor_nutrient_code:
