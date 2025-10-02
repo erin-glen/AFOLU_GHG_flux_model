@@ -64,10 +64,10 @@ def _reaggregate_sum(arr: np.ndarray, native_deg: float, target_deg: float) -> n
 
     h, w = arr.shape
     H = (h // f) * f
-    W = (w // f) * w  # NOTE: fixed typo below (should be W = (w // f) * f)
     W = (w // f) * f  # correct width trim
 
     a = arr[:H, :W]
+    # reshape into blocks of (f x f)
     a4 = a.reshape(H // f, f, W // f, f)
 
     valid = np.sum(~np.isnan(a4), axis=(1, 3)).astype(np.int32)
@@ -79,14 +79,18 @@ def _reaggregate_sum(arr: np.ndarray, native_deg: float, target_deg: float) -> n
 def _per_pixel_tile_path(items: dict, tile_id: str) -> str:
     """
     Resolve per-pixel total input path for a tile.
-    This *replaces* any former 'ha' references with 'pixel'.
+
+    Supports both the new key names produced by your current common helper:
+        - per_pixel_dir / per_pixel_pattern
+    and the older names (for backwards compatibility):
+        - mg_per_pixel_dir / mg_per_pixel_pattern
     """
-    pp_dir = items.get("mg_per_pixel_dir")
-    pp_pat = items.get("mg_per_pixel_pattern")
+    pp_dir = items.get("per_pixel_dir") or items.get("mg_per_pixel_dir")
+    pp_pat = items.get("per_pixel_pattern") or items.get("mg_per_pixel_pattern")
     if not pp_dir or not pp_pat:
         raise RuntimeError(
             "Per-pixel total inputs are required but not configured in build_download_upload_dict: "
-            "missing mg_per_pixel_dir and/or mg_per_pixel_pattern."
+            "missing per_pixel_dir/per_pixel_pattern (or mg_per_pixel_dir/mg_per_pixel_pattern)."
         )
     return f"{pp_dir}{tile_id}{pp_pat}"
 
@@ -119,7 +123,13 @@ def agg_tile_to_target(
         per_pixel_total_tile, "Float32", bounds, chunk_length_pixels, is_final, logger
     )[0]
 
-    dataset_name = posixpath.basename(per_pixel_total_tile).split("__")[1]
+    # dataset name expected in: <tile>__<dataset>__<interval>.tif
+    parts = posixpath.basename(per_pixel_total_tile).split("__")
+    if len(parts) >= 3:
+        dataset_name = parts[-2]
+    else:
+        dataset_name = posixpath.basename(per_pixel_total_tile)
+
     is_integer = dataset_name in INTEGER_DATASETS
 
     if is_integer:
@@ -217,6 +227,7 @@ def combine_global_raster(
 
     global_bounds = (-180, -90, 180, 90)
 
+    # IMPORTANT: This writes only to the canonical aggregated output location.
     uu.save_and_upload_single_raster(
         global_bounds,
         global_raster.shape[1],
@@ -291,7 +302,7 @@ def aggregate_main(
         lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
 
         for tile_id in cn.tile_id_list:
-            # *** IMPORTANT ***: read per-pixel totals; replace 'ha' paths with 'pixel'
+            # Read per-pixel totals from the versioned input tree
             per_pixel_total_tile = _per_pixel_tile_path(items, tile_id)
 
             bounds = uu.get_10x10_tile_bounds(tile_id)
@@ -324,7 +335,7 @@ def aggregate_main(
         start_time = uu.timestr()
         lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
 
-        # Always write the canonical global pattern
+        # Always write the canonical global pattern in the aggregated output tree
         global_outfile = items["global_pattern"]
         global_output_path = items["global_dir"]
 

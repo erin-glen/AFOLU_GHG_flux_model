@@ -156,20 +156,28 @@ def build_download_upload_dict(
         output_date,
     ):
         parts = path.rstrip("/").split("/")
-        dataset = parts[8]
-        interval = parts[11]
+
+        # Paths follow:
+        # ``.../version_<ver>/<dataset>/<run_name>/five_year_intervals/<interval>/<pixels>/<date>/``
+        # ``parts`` therefore looks like:
+        # ["s3:", "", "gfw2-data", ..., "version_<ver>", "<dataset>", "<run_name>",
+        #  "five_year_intervals", "<interval>", "<pixel_res>", "<date>"]
+        try:
+            dataset = parts[-6]
+            interval = parts[-3]
+        except IndexError as exc:  # pragma: no cover - defensive; path template should hold
+            raise ValueError(f"Unexpected input path format: {path}") from exc
+
         key = f"{dataset}__{interval}"
 
-        mg_ha_yr_dir = path
-        mg_ha_yr_pattern = f"__{dataset}__{interval}.tif"
-
         if dataset.endswith("_ha") or dataset.endswith("_ha_yr"):
-            dataset_pixel = dataset.replace("_ha_yr", "_pixel_yr").replace("_ha", "_pixel")
-        else:
-            dataset_pixel = dataset
+            raise ValueError(
+                "Per-hectare datasets are no longer supported by the visualization pipeline: "
+                f"received '{dataset}' in path {path}"
+            )
 
-        mg_per_pixel_dir = mg_ha_yr_dir.replace(dataset, dataset_pixel)
-        mg_per_pixel_pattern = f"__{dataset_pixel}__{interval}.tif"
+        per_pixel_dir = path
+        per_pixel_pattern = f"__{dataset}__{interval}.tif"
 
         out_dir = (
             f"{outputs_base}/{res_label}_output_aggregation/"
@@ -179,10 +187,8 @@ def build_download_upload_dict(
         dictionary[key] = {
             "dataset": dataset,
             "interval": interval,
-            "mg_ha_yr_dir": mg_ha_yr_dir,
-            "mg_ha_yr_pattern": mg_ha_yr_pattern,
-            "mg_per_pixel_dir": mg_per_pixel_dir,
-            "mg_per_pixel_pattern": mg_per_pixel_pattern,
+            "per_pixel_dir": per_pixel_dir,
+            "per_pixel_pattern": per_pixel_pattern,
             "global_dir": out_dir,
             "global_pattern": f"{res_label}_global__{dataset}_{interval}.tif",
         }
