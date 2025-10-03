@@ -19,11 +19,11 @@ python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_postprocess
 python -m src.LULUCF.scripts.3b_vegetation_model.create_global_0_04x0_04deg -cn vegetation_postprocessing --no_upload --input_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 65 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing
 python -m src.LULUCF.scripts.3b_vegetation_model.create_global_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
 
 Full run:
-python -m src.utilities.create_cluster -n 65 -t 1 -m 4 -cn vegetation_postprocessing  (because running 6 outputs with 10 years each (including full model total)=60 maps, plus a few workers for safety)
+python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing  (because running 6 outputs with 10 years each (including full model total)=60 maps, plus a few workers for safety)
 python -m src.LULUCF.scripts.3b_core_veg_model.create_global_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is intended to be the definitive global 0.04x0.04 deg output run for model v1.0.0 (2016-2024)."
 
 THIS TAKES IMPOSSIBLY LONG! >12 HOURS FOR 60 INPUT FOLDERS!!!!!!!!
@@ -247,17 +247,18 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Creates a list of input directories used in output creation based on specifics of the model run
 
     basic_dirs_to_expand = [
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
     ]
 
     inputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, interval_type, start_year,
                                                                            25, model_type, interval_end_years_list,
-                                                                           interval_year_diff_list, input_date, True, cn.flux_aggreg_pixel_meaning)
+                                                                           # interval_year_diff_list, input_date, True, cn.flux_aggreg_pixel_meaning)
+                                                                           interval_year_diff_list, input_date, False, cn.flux_aggreg_pixel_meaning)
     # Limits folders to process (for testing)
     if first_folders_to_process:
         inputs_by_interval_dir_list = inputs_by_interval_dir_list[:first_folders_to_process]
@@ -271,7 +272,8 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
     outputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, interval_type, start_year,
                                                                             "global", model_type, interval_end_years_list,
-                                                                            interval_year_diff_list, input_date, True, cn.flux_aggreg_pixel_meaning)
+                                                                            # interval_year_diff_list, input_date, True, cn.flux_aggreg_pixel_meaning)
+                                                                            interval_year_diff_list, input_date, False, cn.flux_aggreg_pixel_meaning)
     # Limits folders to process (for testing)
     if first_folders_to_process:
         outputs_by_interval_dir_list = outputs_by_interval_dir_list[:first_folders_to_process]

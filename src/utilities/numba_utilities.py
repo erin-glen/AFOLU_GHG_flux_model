@@ -148,7 +148,6 @@ def create_typed_dicts(layers):
 
 
 # Classifies GLCLU as short (<5 m) or tall (>= 5 m) vegetation
-# No medium-height vegetation used as it's not available from annual GLCLU data.
 @jit(nopython=True)
 def classify_veg_height(LC):
     short_veg = (((LC >= cn.short_veg_dry_min_code) and (LC <= cn.short_veg_dry_max_code)) or
@@ -282,7 +281,7 @@ def calc_deadwood_litter_ratios(elevation, climate_domain, precipitation):
 # short_veg_BGB_RF is the difference between short_veg_AGB_RF and the "total (above-ground and below-ground) non-woody biomass" column.
 # Climate zone is from IPCC 2019 Corrigenda map. See constants_and_names.py for more information.
 @jit(nopython=True)
-def calc_short_veg_removals(climate_zone):
+def calc_short_veg_removals(climate_zone, LC_curr):
 
     if climate_zone >= 9:  # Boreal- dry and wet (and polar)
         short_veg_AGB_RF = 1.7
@@ -312,10 +311,24 @@ def calc_short_veg_removals(climate_zone):
         short_veg_AGB_RF = 1.7
         short_veg_BGB_RF = (8.5-short_veg_AGB_RF)
 
-    short_veg_AGC_RF = short_veg_AGB_RF * cn.biomass_to_carbon_non_mangrove
-    short_veg_BGC_RF = short_veg_BGB_RF * cn.biomass_to_carbon_non_mangrove
+    short_veg_AGC_RF_raw = short_veg_AGB_RF * cn.biomass_to_carbon_non_mangrove
+    short_veg_BGC_RF_raw = short_veg_BGB_RF * cn.biomass_to_carbon_non_mangrove
 
-    return short_veg_AGC_RF, short_veg_BGC_RF
+    # Need the LC_curr GLAD code to be between 0 and 100 to calculate the short vegetation fraction (0-100).
+    # This gets the "wet short veg" GLAD code between 0 and 100 so it can be converted to vegetation fraction.
+    # Empirically, the relationship between the GLAD LC composite and vegetation fraction is (class*4 + 3)
+    # from https://docs.google.com/spreadsheets/d/1UwZNcfXJpQHLwrSLHYyH3Zcahh0GIjcsu7D0F0SncvU/edit?pli=1&gid=0#gid=0
+    # for the short veg classes (5-24 and 105-124).
+    if LC_curr >= 100:
+        veg_fraction = np.float32((((LC_curr - 100) * 4 + 3) / 100))
+    else:
+        veg_fraction = np.float32(((LC_curr * 4 + 3) / 100))
+
+    # Adjusts the short veg removal factor/C density based on the vegetation fraction in the year of short veg gain
+    short_veg_AGC_RF_adj = np.float32((short_veg_AGC_RF_raw * veg_fraction))
+    short_veg_BGC_RF_adj = np.float32((short_veg_BGC_RF_raw * veg_fraction))
+
+    return short_veg_AGC_RF_adj, short_veg_BGC_RF_adj
 
 
 # Returns the starting carbon density for each carbon pool
@@ -1036,11 +1049,15 @@ def calc_T_NT(node, interval_length, burned_in_curr_interval, RF_AGC_in, RF_BGC_
 
 
     # Step 6: Updates gross removals to include one-time post-disturbance regrowth,
-    # if applicable (medium height veg and cropland) (Mg C/ha/interval).
-    # Regrowth of medium height veg and cropland is a one-time value, not annual, so no multiplication by gain year count.
+    # if applicable (short veg and cropland) (Mg C/ha/interval).
+    # Regrowth of short veg and cropland is a one-time value, not annual, so no multiplication by gain year count.
     # Post-disturbance regrowth can occur for 5-year and annual intervals because either can have an ending land cover
     # with aboveground carbon.
-    c_gross_removals_out = c_gross_removals_out - post_dist_regrowth
+    if post_dist_regrowth[0] > 0:
+        c_gross_removals_out = c_gross_removals_out - post_dist_regrowth
+
+        RF_AGC_out = post_dist_regrowth[0]
+        RF_BGC_out = post_dist_regrowth[1]
 
 
     # Step 7: Calculates ending carbon densities by carbon pool (Mg C/ha).

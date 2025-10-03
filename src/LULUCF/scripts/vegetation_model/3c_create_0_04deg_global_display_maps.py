@@ -369,6 +369,9 @@ def map_net_flux(input_date, s3_folders,
 
         print(f"\n\n---Mapping {pattern_segment} for {year} from {year_file}")
 
+        print(f"Unprojected raster: {year_path_unproj}")
+        print(f"Reprojected raster: {year_path_reproj}")
+
         # Reprojects raster, if needed
         reproject_raster(year_path_unproj, year_path_reproj)
 
@@ -448,7 +451,7 @@ def map_net_flux(input_date, s3_folders,
         remove_ticks(ax)
 
         pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
-        core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.model_version_underscore}"  #
+        core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.model_version_underscore}__{uu.timestr()[0:8]}"
         jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
         jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
@@ -504,7 +507,11 @@ def map_gross(input_date, s3_folders,
         else:
             year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
 
+
         print(f"\n\n---Mapping {pattern_segment} for {year} from {year_file}")
+
+        print(f"Unprojected raster: {year_path_unproj}")
+        print(f"Reprojected raster: {year_path_reproj}")
 
         # Reprojects raster, if needed
         reproject_raster(year_path_unproj, year_path_reproj)
@@ -601,7 +608,7 @@ def map_gross(input_date, s3_folders,
         remove_ticks(ax)
 
         pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
-        core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.model_version_underscore}"  #
+        core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.model_version_underscore}__{uu.timestr()[0:8]}"
         jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
         jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
@@ -677,14 +684,12 @@ if __name__ == '__main__':
     removals_colors = net_color_palette[0:5]
     emissions_colors = net_color_palette[5:]
 
-    local_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v1_0_0_2016_2024_global/"
-
     basic_dirs_to_expand = [
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.outputs_path}{cn.gross_removals_all_C_pools_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         f"{cn.outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/{cn.model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
     ]
 
@@ -725,6 +730,9 @@ if __name__ == '__main__':
     # print(net_CO2_only_input_folders_s3)
     # print(net_all_gases_input_folders_s3)
 
+    # local_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v{cn.model_version_underscore}_2016_2024/"
+    local_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v{cn.model_version_underscore}_AUS_w_v100global/"
+
     local_reproj_folder = Path(local_folder)
     local_reproj_folder.mkdir(parents=True, exist_ok=True)
     local_jpeg_non_pres_folder = Path(f"{local_folder}output_jpegs_and_gifs/jpegs_non_pres")
@@ -741,31 +749,31 @@ if __name__ == '__main__':
         reprojected_shapefile_path=cn.reprojected_shapefile_path
     )
 
-    # Generates jpegs for gross emissions, removals and net flux
-
-    map_gross(input_date, gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
-                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                     emissions_colors, emissions_percentiles)
-
-    map_gross(input_date, gross_emis_non_CO2_input_folders_s3, local_reproj_folder,
-                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                     emissions_colors, emissions_percentiles)
-
-    map_gross(input_date, gross_emis_all_gases_input_folders_s3, local_reproj_folder,
-                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                     emissions_colors, emissions_percentiles)
-
-    map_gross(input_date, gross_removals_input_folders_s3, local_reproj_folder,
-                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 removals_colors, removals_percentiles)
-
-    map_net_flux(input_date, net_CO2_only_input_folders_s3, local_reproj_folder,
-                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_color_palette, net_percentiles)
+    # Generates jpegs for net flux, gross emissions, and gross removals
 
     map_net_flux(input_date, net_all_gases_input_folders_s3, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
                  net_color_palette, net_percentiles)
+
+    # map_net_flux(input_date, net_CO2_only_input_folders_s3, local_reproj_folder,
+    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #              net_color_palette, net_percentiles)
+    #
+    # map_gross(input_date, gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
+    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #                  emissions_colors, emissions_percentiles)
+    #
+    # map_gross(input_date, gross_emis_non_CO2_input_folders_s3, local_reproj_folder,
+    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #                  emissions_colors, emissions_percentiles)
+    #
+    # map_gross(input_date, gross_emis_all_gases_input_folders_s3, local_reproj_folder,
+    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #                  emissions_colors, emissions_percentiles)
+    #
+    # map_gross(input_date, gross_removals_input_folders_s3, local_reproj_folder,
+    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #              removals_colors, removals_percentiles)
 
     # # Generates three-panel map
     # create_three_panel_map()
