@@ -57,82 +57,83 @@ def drop_attrs(ds):
         ds[v].attrs = {}
     return ds.reset_coords(drop=True)
 
-def build_global_zarr(output_dir_list, first_1x1s_to_process):
+def build_global_zarr(output_dir, first_1x1s_to_process):
 
     logger_worker = lu.setup_logging_worker()
 
-    print(f"Starting Zarr creation for {len(output_dir_list)} folders: {uu.timestr()}")
+    lu.print_and_log(f"Starting Zarr creation for {output_dir} folders: {uu.timestr()}", False, logger_worker)
 
-    for folder in output_dir_list:
-        print(f"Scanning geotiffs in {folder}: {uu.timestr()}")
-        folder_start_time = time.time()
+    folder_start_time = time.time()
 
-        fs = fsspec.filesystem('s3', use_listings_cache=False, anon=False) if folder.startswith('s3://') else fsspec.filesystem('file')
+    fs = fsspec.filesystem('s3', use_listings_cache=False, anon=False) if output_dir.startswith('s3://') else fsspec.filesystem('file')
 
-        if folder.startswith('s3://'):
-            keys = fs.glob(os.path.join(folder, '*.tif'))
-            chunk_list = [f if f.startswith("s3://") else f"s3://{f}" for f in keys]
-        else:
-            chunk_list = fs.glob(os.path.join(folder, '*.tif'))
+    if output_dir.startswith('s3://'):
+        keys = fs.glob(os.path.join(output_dir, '*.tif'))
+        chunk_list = [f if f.startswith("s3://") else f"s3://{f}" for f in keys]
+    else:
+        chunk_list = fs.glob(os.path.join(output_dir, '*.tif'))
 
-        # Limits chunks to process (for testing)
-        if first_1x1s_to_process:
-            chunk_list = chunk_list[:first_1x1s_to_process]
+    # Limits chunks to process (for testing)
+    if first_1x1s_to_process:
+        chunk_list = chunk_list[:first_1x1s_to_process]
 
-        # Sample tif for getting various path and metadata from
-        sample_tif = chunk_list[0]
+    # Sample tif for getting various path and metadata from
+    sample_tif = chunk_list[0]
 
-        with rasterio.open(sample_tif) as src:
-            data_type = src.dtypes[0]
+    with rasterio.open(sample_tif) as src:
+        data_type = src.dtypes[0]
 
-        layer_pattern = re.search(r"version_\d+_\d+_\d+(?:_[^/]*)?/([^/]+)/", sample_tif).group(1)
-        # print(layer_pattern)
+    layer_pattern = re.search(r"version_\d+_\d+_\d+(?:_[^/]*)?/([^/]+)/", sample_tif).group(1)
+    # print(layer_pattern)
 
-        layer_date = re.search(r"intervals/([^/]+)", sample_tif).group(1)
-        # print(layer_date)
+    layer_date = re.search(r"intervals/([^/]+)", sample_tif).group(1)
+    # print(layer_date)
 
-        layer_unit = re.search(r"([^/]+)/4000", sample_tif).group(1)
-        # print(layer_unit)
+    layer_unit = re.search(r"([^/]+)/4000", sample_tif).group(1)
+    # print(layer_unit)
 
-        # Constructs the output path
-        if layer_unit == layer_date:
-            out_file = f"{layer_pattern}_{layer_date}.zarr"
-        else:
-            out_file = f"{layer_pattern}{layer_unit}_{layer_date}.zarr"
+    # Constructs the output path
+    if layer_unit == layer_date:
+        out_file = f"{layer_pattern}_{layer_date}.zarr"
+    else:
+        out_file = f"{layer_pattern}{layer_unit}_{layer_date}.zarr"
 
-        out_path = folder.replace("4000_pixels", cn.zarr_output_pattern)
-        out_path_final = out_path + out_file
-        # print(out_path_final)
+    out_path = output_dir.replace("4000_pixels", cn.zarr_output_pattern)
+    out_path_final = out_path + out_file
+    # print(out_path_final)
 
-        da = xr.open_mfdataset(
-            chunk_list,
-            parallel=True,
-            chunks={'x': cn.zarr_pixel_chunks, 'y': cn.zarr_pixel_chunks}, # This doesn't actually rechunk to 10000x10000. It takes it up to 4000x4000.
-            preprocess=drop_attrs,
-            combine='by_coords',
-            engine="rasterio"
-        ).astype(data_type)
 
-        print(f"Dask array for {folder}: {uu.timestr()}")
-        print(da)
+    da = xr.open_mfdataset(
+        chunk_list,
+        parallel=True,
+        chunks={'x': cn.zarr_pixel_chunks, 'y': cn.zarr_pixel_chunks}, # This doesn't actually rechunk to 10000x10000. It takes it up to 4000x4000.
+        preprocess=drop_attrs,
+        combine='by_coords',
+        engine="rasterio"
+    ).astype(data_type)
 
-        folder_end_time = time.time()
-        print(f"Ingesting {folder} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}")
+    print(f"Dask array for {output_dir}: {uu.timestr()}")
+    # print(da)
 
-        # Explicitly rechunks to 10000x10000
-        print(f"Rechunking {folder}: {uu.timestr()}")
-        da = da.chunk({'x': cn.zarr_pixel_chunks, 'y': cn.zarr_pixel_chunks})
+    folder_end_time = time.time()
+    lu.print_and_log(f"Ingesting {output_dir} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
-        print(f"Saving {folder} as zarr: {uu.timestr()}")
-        original_var_name = list(da.data_vars.keys())[0]
-        da = da.rename({original_var_name: out_file})
-        # print(da)
+    # Explicitly rechunks to 10000x10000
+    lu.print_and_log(f"Rechunking {output_dir}: {uu.timestr()}", False, logger_worker)
+    da = da.chunk({'x': cn.zarr_pixel_chunks, 'y': cn.zarr_pixel_chunks})
 
-        # Converts dask array to zarr and saves it to s3
-        da.to_zarr(out_path_final, mode='w')
+    lu.print_and_log(f"Saving {output_dir} as zarr: {uu.timestr()}", False, logger_worker)
+    original_var_name = list(da.data_vars.keys())[0]
+    da = da.rename({original_var_name: out_file})
+    # print(da)
 
-        folder_end_time = time.time()
-        print(f"Zarring {folder} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}")
+    # Converts dask array to zarr and saves it to s3
+    da.to_zarr(out_path_final, mode='w')
+
+    folder_end_time = time.time()
+    lu.print_and_log(f"Zarring {output_dir} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+
+    return f"Zarring {output_dir} took {round(folder_end_time - folder_start_time)} seconds: {uu.timestr()}"
 
 
 def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
@@ -181,10 +182,10 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2016_2017/_ha_yr/4000_pixels/20250930/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2017_2018/_ha_yr/4000_pixels/20250930/",
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2018_2019/_ha_yr/4000_pixels/20250930/",
-        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2019_2020/_ha_yr/4000_pixels/20250930/",
-        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2020_2021/_ha_yr/4000_pixels/20250930/",
-        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_1/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2021_2022/_ha_yr/4000_pixels/20250930/",
-        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_0/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2022_2023/_ha_yr/4000_pixels/20250921/"
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_0/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2019_2020/_ha_yr/4000_pixels/20250921/",
+        "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_0/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2020_2021/_ha_yr/4000_pixels/20250921/"
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_0/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2021_2022/_ha_yr/4000_pixels/20250921/",
+        # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_0/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2022_2023/_ha_yr/4000_pixels/20250921/"
         # "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_0/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/2023_2024/_ha_yr/4000_pixels/20250921/"
     ]
 
@@ -218,16 +219,15 @@ def main(cluster_name, year_range, input_date, run_local=False, no_stats=False, 
     main_logger.info(f"Directories to zarr: {output_dir_list}")
     main_logger.info(f"There are {len(output_dir_list)} folders to convert into global zarrs")
 
-    futures = []
-    future = client.submit(build_global_zarr,
-                           output_dir_list, first_1x1s_to_process)
-    futures.append(future)
+    for output_dir in output_dir_list:
 
-    results = client.gather(futures)
+        futures = []
+        future = client.submit(build_global_zarr,
+                               output_dir, first_1x1s_to_process)
+        futures.append(future)
 
-    print(results)    
-
-    # build_global_zarr(output_dir_list, first_1x1s_to_process, main_logger)
+        results = client.gather(futures)
+        print(results)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 

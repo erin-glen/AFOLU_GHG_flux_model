@@ -672,7 +672,7 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
     # Note that this chunk could still just have NoData values, which would be downloaded.
     # If the uri exists but the raster just doesn't extend there (e.g., far north), the array has to be padded to
     # reach the expected size.
-    # Retries accessing the raster 5 times in case too many requests to s3 are being made.
+    # Retries accessing the raster 7 times in case too many requests to s3 are being made.
     # If too many requests to s3 are being made, the script terminates for safety.
     # https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68c3235e-a590-832d-bfdc-c1531416c311
     for attempt in range(MAX_RETRIES):
