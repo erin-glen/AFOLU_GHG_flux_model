@@ -3,10 +3,10 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
-python -m src.LULUCF.scripts.preprocessing.SDPTv3.1_rasterize_SDPTv3 --run_local
+python -m src.LULUCF.scripts.preprocessing.sdptv3_rasterization.1_rasterize_SDPTv3 --run_local
 
-python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn SDPTv3
-python -m src.LULUCF.scripts.preprocessing.SDPTv3.1_rasterize_SDPTv3 -cn SDPTv3
+python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn 10x10_tiles
+python -m src.LULUCF.scripts.preprocessing.sdptv3_rasterization.1_rasterize_SDPTv3 -cn 10x10_tiles
 
 """
 
@@ -155,7 +155,7 @@ def build_global_union_vrt_from_gdb(gdb_s3_path, output_vrt_s3_path, main_logger
 def clip_vrt_to_bbox_shapefile(vrt_s3_path, tile_id, west, south, east, north, out_s3_prefix, main_logger, overwrite = True):
     
     logger_worker = lu.setup_logging_worker()
-    lu.print_and_log(f"Starting SDPTv3 shapefile creation for {tile_id}: [{west}, {south}, {east}, {north}]: {uu.timestr('time')}", False, logger_worker)
+    lu.print_and_log(f"Starting task for {tile_id}: {uu.timestr('time')}", False, logger_worker)
 
     #Step 1: If overwrite is False, checks if all files for tile already exist in s3. If so, skips tile creation.
     exts = [".shp", ".shx", ".dbf", ".prj", ".cpg"]
@@ -194,7 +194,7 @@ def clip_vrt_to_bbox_shapefile(vrt_s3_path, tile_id, west, south, east, north, o
             except:
                 pass
 
-    # Step 4: Clip vectors to counding box
+    # Step 4: Clip vectors to bounding box
     clip_wkt = f"POLYGON(({west} {south}, {west} {north}, {east} {north}, {east} {south}, {west} {south}))"
     opts = gdal.VectorTranslateOptions(
         format="ESRI Shapefile",
@@ -243,7 +243,7 @@ def clip_vrt_to_bbox_shapefile(vrt_s3_path, tile_id, west, south, east, north, o
 
     # Step 6: Cleanup local files
     clean_local_shp_tmp(shp_dir, tmp_dir, main_logger)
-    lu.print_and_log(f"Uploaded shapefile for {tile_id} ({len(uploaded)} files) to {out_s3_prefix}: {uu.timestr('time')}", False, logger_worker)
+    lu.print_and_log(f"Finished task for {tile_id} ({len(uploaded)} files uploaded): {uu.timestr('time')}", False, logger_worker)
     return
 
 
@@ -254,8 +254,8 @@ def main(cluster_name, bounding_box = None, chunk_size = None, run_local = False
     client
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, f"Rasterizing SDPTv3",
-                                                        run_local,'standard', f'Rasterizing SDPTv3')
+    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, f"Creating sdptv3 vector tiles",
+                                                        run_local,'standard', f'Creating sdptv3 vector tiles')
     # TODO: Update in constants and names
     gdb_s3_path = "s3://gfw2-data/plantations/sdpt_v3/sdpt_v3_final.gdb/sdpt_v3_final.gdb"
     out_vrt_s3_path = "s3://gfw2-data/plantations/sdpt_v3/sdpt_v3.vrt"
@@ -269,15 +269,16 @@ def main(cluster_name, bounding_box = None, chunk_size = None, run_local = False
     #TODO: Remove after fishnet logic
 
     #STEP 1: Create a global VRT of unionized polygons for SDPTv3
-    main_logger.info(f"STEP 1: Submitting VRT build for SDPTv3: {uu.timestr('time')}\n")
+    main_logger.info(f"STEP 1: Submitting VRT build for sdptv3: {uu.timestr('time')}")
     if not run_local:
         vrt_future = client.submit(build_global_union_vrt_from_gdb, gdb_s3_path, out_vrt_s3_path, main_logger)
         vrt_future.result()
     else:
         build_global_union_vrt_from_gdb(gdb_s3_path, out_vrt_s3_path, main_logger)
-    main_logger.info(f"STEP 1: VRT creation complete: {uu.timestr('time')}\n")
+    main_logger.info(f"STEP 1: VRT build complete: {uu.timestr('time')}\n")
 
-    #STEP 2: Create SDPTv3 shapefile tiles using fishnet
+    #STEP 2: Create SDPTv3 shapeflie tiles using fishnet
+    main_logger.info(f"STEP 2: Submitting vector tile creation for sdptv3: {uu.timestr('time')}")
     # if chunk_size == 1:
     #     chunk_shapefile_uri = cn.fishnet_1x1deg_uri
     #     tile_id_field = "chunk_id"
@@ -289,7 +290,7 @@ def main(cluster_name, bounding_box = None, chunk_size = None, run_local = False
     # (if provided by the user), and loop through the tile creation step for all selected tiles.
 
     overwrite = True
-
+    #STEP 2: c
     if not run_local:
         shp_future = client.submit(clip_vrt_to_bbox_shapefile, out_vrt_s3_path, tile_id, west, south, east, north, out_shp_s3_path, main_logger, overwrite)
         shp_future.result()

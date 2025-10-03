@@ -44,8 +44,8 @@ from src.utilities import constants_and_names as cn, log_utilities as lu
 ###################################################################################################
 # Splits a full s3 path "s3://bucket-name/rest_of_path" into "bucket-name" and "rest_of_path"
 def split_s3_path(s3_path):
-    s3_path = s3_path.replace("s3://", "")   # Remove the "s3://" prefix
-    bucket, key = s3_path.split("/", 1)    # Split the remaining string by the first "/"
+    s3_path = s3_path.replace("s3://", "")
+    bucket, key = s3_path.split("/", 1)
     return bucket, key
 
 # List files in an S3 bucket with a certain pattern
@@ -99,19 +99,6 @@ def upload_s3_file(s3_path, local_path):
     s3 = boto3.client('s3')
     bucket, key = split_s3_path(s3_path)
     s3.upload_file(local_path, Bucket=bucket, Key=key)
-
-def check_s3_file_created(s3_path, main_logger):
-    s3 = boto3.client('s3')
-    bucket, key = split_s3_path(s3_path)
-    try:
-        s3.head_object(Bucket=bucket, Key=key)
-        main_logger.info(f"File successfully created at: {s3_path}")
-        return True
-    except s3.exceptions.ClientError as e:
-        if e.response['Error']['Code'] == "404":
-            raise RuntimeError(f"Failed to create file at: {s3_path}")
-        else:
-            raise RuntimeError(f"Error accessing S3: {e}")
 
 def check_and_make_s3_dir(s3_directory, main_logger):
     if s3_directory.startswith("s3://"):
@@ -2075,22 +2062,18 @@ def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
 #     gdal.BuildVRT(output_vrt_vsis3, raw_raster_paths_list_vsis3)
 #
 #     #Check that s3 file exists
-#     check_s3_file_created(output_vrt_s3)
+#     exists_in_s3(output_vrt_s3)
 
 # Checks if a file already exists in s3
 # https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67dc3f96-40f0-800a-9c89-2895c332bd01
 def exists_in_s3(s3_path):
 
     s3 = boto3.client("s3")
-
-    # Parse the S3 path
-    s3_path_parts = s3_path.replace("s3://", "").split("/", 1)
-    bucket_name = s3_path_parts[0]
-    object_key = s3_path_parts[1]
+    bucket, key = split_s3_path(s3_path)
 
     try:
         # Check if the file exists in S3
-        s3.head_object(Bucket=bucket_name, Key=object_key)
+        s3.head_object(Bucket=bucket, Key=key)
         return True  # File exists
     except s3.exceptions.ClientError as e:
         if e.response["Error"]["Code"] == "404":
@@ -2144,7 +2127,7 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt, ma
     upload_s3_file(output_vrt_s3, local_vrt)
 
     #If successfully uploaded, delete local vrt
-    if check_s3_file_created(output_vrt_s3, main_logger):
+    if exists_in_s3(output_vrt_s3):
         #Delete local VRT file     #TODO create a microservice to do this instead of repeating code in multiple functions
         try:
             os.remove(local_vrt)
@@ -2210,7 +2193,7 @@ def warp_to_hansen_local(source_raster_s3_path, output_raster_s3_path, xmin, ymi
         gdal.Warp(output_gdal_path, source_gdal_path, options=options)
 
         # Check that file exists
-        check_s3_file_created(output_raster_s3_path)
+        exists_in_s3(output_raster_s3_path)
 
     else:
         raise RuntimeError(f"Failed to open VRT: {source_gdal_path}")
