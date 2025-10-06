@@ -37,7 +37,7 @@ INVENTORY_PERIODS = [
 
 version = cn.model_version_underscore
 BASE_URL = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_{version}"
-OUTPUT_DATE = "20250923"
+OUTPUT_DATE = "20251002"
 
 
 def get_input_datasets(
@@ -166,5 +166,5 @@ if __name__ == "__main__":
     )
 
 """
-python -m src.scripts.core_model.3_aggregate_soils_outputs -cn aggregate --run_name ogh_standard_model
+python -m src.scripts.core_model.3_aggregate_soils_outputs -cn aggregate --run_name ogh_sensitivity_1km
 """

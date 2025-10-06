@@ -249,7 +249,7 @@ def calculate_drainage_and_emissions(
                     if extraction > 0:
                         emission_node = nu.accrete_node(emission_node, 4)
                         key = "temperate_extraction"
-                    if land_cover == forest_code:
+                    elif land_cover == forest_code:
                         emission_node = nu.accrete_node(emission_node, 1)
                         key = "temperate_forest"
                     elif land_cover == grassland_code:
@@ -1185,13 +1185,23 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --full_model \
   --chunk_size 1 \
-  --start_year 2020 \
+  --start_year 2021 \
   --end_year 2024 \
   --all_five_year_periods \
   --mark_missing_factors \
   --count_burned_years \
   --run_name ogh_sensitivity_1km
-  
+
+python -m src.scripts.core_model.0_drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --full_model \
+  --chunk_size 1 \
+  --start_year 2021 \
+  --end_year 2024 \
+  --mark_missing_factors \
+  --count_burned_years \
+  --run_name ogh_sensitivity_1km \
+  --interval_type five_year \
   
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \

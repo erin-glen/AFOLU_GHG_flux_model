@@ -8,8 +8,8 @@ Production-lean defaults:
 python -m src.scripts.zonal_statistics.02_run_zonal_stats \
   --interval_end_years 2015 \
   --cluster_name zonal_stats \
-  --run_date 20250923 \
-  --model_version 0_8_0 \
+  --run_date 20251002 \
+  --model_version 0_8_5 \
   --run_name ogh_sensitivity_1km \
   --chunk_size 10000 \
   --diagnostics off
