@@ -38,19 +38,21 @@ INVENTORY_PERIODS = [
 
 version = cn.model_version_underscore
 BASE_URL = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_{version}"
-OUTPUT_DATE = "20251007"
+DEFAULT_OUTPUT_DATE = "20251007"
 PIXEL_RES = "4000_pixels"
 
 
 def get_input_folders(
-    pixel_resolution: str = PIXEL_RES, run_name: str = "ogh_standard_model"
+    pixel_resolution: str = PIXEL_RES,
+    run_name: str = "ogh_standard_model",
+    output_date: str = DEFAULT_OUTPUT_DATE,
 ) -> list:
     paths = []
     for period in INVENTORY_PERIODS:
         for dtype in DATA_TYPES:
             path = (
                 f"{BASE_URL}/{dtype}/{run_name}/"
-                f"five_year_intervals/{period}/{pixel_resolution}/{OUTPUT_DATE}/"
+                f"five_year_intervals/{period}/{pixel_resolution}/{output_date}/"
             )
             paths.append(path)
     return paths
@@ -180,6 +182,7 @@ def main(
         first_chunks=None,
         log_note=None,
         run_name: str = "ogh_standard_model",
+        output_date: str = DEFAULT_OUTPUT_DATE,
 ):
     stage = "per_pixel_soils_outputs"
     model_type = run_name
@@ -221,7 +224,7 @@ def main(
 
     is_final = True if len(chunk_list) > 20 else False
 
-    input_dirs = get_input_folders(run_name=run_name)
+    input_dirs = get_input_folders(run_name=run_name, output_date=output_date)
 
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
@@ -273,6 +276,11 @@ if __name__ == "__main__":
     parser.add_argument("--no_log", action="store_true", help="Do not create combined log")
     parser.add_argument("--no_upload", action="store_true", help="Do not upload outputs to S3")
     parser.add_argument("--run_name", default="ogh_standard_model", help="Model run name")
+    parser.add_argument(
+        "--output_date",
+        default=DEFAULT_OUTPUT_DATE,
+        help="Date tag for selecting input datasets (YYYYMMDD)",
+    )
 
     args = parser.parse_args()
 
@@ -288,6 +296,7 @@ if __name__ == "__main__":
         first_chunks=args.first_chunks,
         log_note=args.log_note,
         run_name=args.run_name,
+        output_date=args.output_date,
     )
 
     """
