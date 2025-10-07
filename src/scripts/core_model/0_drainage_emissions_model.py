@@ -1202,6 +1202,8 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --count_burned_years \
   --run_name ogh_sensitivity_1km \
   --interval_type five_year \
+  --peat_dataset gfw \
+  --run_name gfw_standard_model_1km
   
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
