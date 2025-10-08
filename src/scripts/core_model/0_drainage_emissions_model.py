@@ -182,7 +182,7 @@ def calculate_drainage_and_emissions(
             drained = False
 
             # A) Drainage classification ----------------------------------
-            if peat == 1:
+            if peat > 0:
                 node = nu.accrete_node(node, 1)
                 if dadap > 1 or osm_canals > 1:
                     node = nu.accrete_node(node, 1)
