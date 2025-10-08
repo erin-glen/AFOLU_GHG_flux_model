@@ -1,5 +1,60 @@
 # -*- coding: utf-8 -*-
-"""Build comparison figures across multiple zonal-statistics runs."""
+"""Build comparison figures across multiple zonal-statistics runs.
+
+Arguments mirror ``pub_assets`` conventions:
+
+* ``--years`` – one or more inventory period end years (``YYYY``).
+* ``--run`` – repeatable run specification in the form
+  ``run_name=model_version:run_date`` (optionally ``|Custom Label``).
+  ``run_date`` **must** be formatted as ``YYYYMMDD`` to align with
+  :func:`_make_base_prefixes` and downstream file discovery.
+  When adding a custom label (anything after ``|``) quote the entire
+  argument so your shell does not treat the pipe character as a command
+  separator; e.g. ``--run "gfw_standard_model_1km=0_8_5:20251006|GFW 1 km"``.
+* ``--aws_region`` – optional AWS region for S3 access (mirrors
+  ``pub_assets`` default behaviour).
+* ``--data-only`` – skip figure generation and export CSV data only.
+
+Each comparison defined below expects a specific set of run names. When a
+comparison's requirements are not fully met, the script will skip that
+comparison and emit a note summarizing the missing runs. Provide
+additional ``--run`` entries if you need to compare multiple model
+versions or reruns of the same scenario.
+
+Usage example:
+
+  cd /mnt/c/gis/git/AFOLU_GHG_flux_model
+
+  python -m src.scripts.zonal_statistics.pub_compare_runs \
+    --years 2005 2010 2015 2020 2024 \
+    --run ogh_sensitivity_0km=0_8_5:20251006 \
+    --run ogh_sensitivity_1km=0_8_5:20251006 \
+    --run ogh_sensitivity_2km=0_8_5:20251006 \
+    --run "ogh_sensitivity_high=0_8_5:20251006|OGH High" \
+    --run "ogh_sensitivity_low=0_8_5:20251006|OGH Low" \
+    --run "gfw_standard_model_1km=0_8_5:20251006|GFW 1 km" \
+    --run "gpd_standard_model_1km=0_8_5:20251006|gpd 1 km"
+
+To generate a subset, provide only the runs required for the comparisons
+you care about. For example, the following command builds the inventory
+input comparison while skipping the OGH sensitivity plots:
+
+  python -m src.scripts.zonal_statistics.pub_compare_runs \
+    --years 2024 \
+    --run ogh_sensitivity_1km=0_8_5:20251002 \
+    --run "gfw_standard_model_1km=0_8_5:20251006|GFW 1 km" \
+    --run "gpd_standard_model_1km=0_8_5:20251007|gpd 1 km"
+
+Each run name may specify a custom label after ``|`` that will be used in
+the exported tables and figure titles. If you skip the custom label the
+script will derive one automatically from the run name. In addition to the
+comparison summaries, the script now exports run-level tables mirroring the
+``pub_assets`` outputs (by country, drained state, burned state, and their
+country/state intersections). Each table includes the run metadata columns
+(``run_name``, ``Run``, ``model_version``, ``run_date``) so you can join or
+filter across scenarios. Country-level tables also carry best-effort ISO3 and
+country name lookups using the same helper logic as ``pub_assets``.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +78,7 @@ _save_png = pa._save_png
 _write_csv_df = pa._write_csv_df
 _register_components = pa._register_components
 _register_state_context_views = pa._register_state_context_views
+_ensure_adm0_lookup = pa._ensure_adm0_lookup
 _interval_folder_strings = pa._interval_folder_strings
 _make_base_prefixes = pa._make_base_prefixes
 _make_globs_for_components = pa._make_globs_for_components
@@ -52,10 +108,20 @@ class RunMetrics:
         return self.drained_emissions_gt + self.burned_emissions_gt
 
 
+@dataclass
+class RunBreakouts:
+    by_country: pd.DataFrame
+    by_drained_state: pd.DataFrame
+    by_burned_state: pd.DataFrame
+    by_country_drained_state: pd.DataFrame
+    by_country_burned_state: pd.DataFrame
+
+
 @dataclass(frozen=True)
 class RunRecord:
     spec: RunSpec
     metrics: RunMetrics
+    breakouts: RunBreakouts
     color: str
 
 
@@ -119,7 +185,7 @@ COMPARISONS: Sequence[ComparisonSpec] = (
     ComparisonSpec(
         key="inventory_source",
         label="Inventory Input Source Comparison",
-        run_names=("ogh_sensitivity_1km", "gfw_standard_1km", "gdp_standard_1km"),
+        run_names=("ogh_sensitivity_1km", "gfw_standard_model_1km", "gpd_standard_model_1km"),
         metric_keys=("peat_total_area", "peat_drained_area", "drained_emissions", "burned_emissions"),
     ),
     ComparisonSpec(
@@ -130,8 +196,18 @@ COMPARISONS: Sequence[ComparisonSpec] = (
     ),
 )
 
-
-REQUIRED_RUNS = {run for comp in COMPARISONS for run in comp.run_names}
+def _partition_comparisons(
+    run_specs: Mapping[str, RunSpec],
+) -> tuple[list[ComparisonSpec], Mapping[str, tuple[str, ...]]]:
+    active: list[ComparisonSpec] = []
+    missing: dict[str, tuple[str, ...]] = {}
+    for comp in COMPARISONS:
+        missing_runs = tuple(run for run in comp.run_names if run not in run_specs)
+        if missing_runs:
+            missing[comp.key] = missing_runs
+        else:
+            active.append(comp)
+    return active, missing
 
 
 def _default_label(run_name: str) -> str:
@@ -173,7 +249,23 @@ def _assign_colors(run_names: Iterable[str]) -> Mapping[str, str]:
     return {run: mcolors.to_hex(cmap(i % cmap.N)) for i, run in enumerate(ordered)}
 
 
-def _compute_run_metrics(spec: RunSpec, years: Sequence[int], aws_region: str | None) -> RunMetrics:
+def _add_run_columns(df: pd.DataFrame, spec: RunSpec) -> pd.DataFrame:
+    meta = {
+        "run_name": spec.run_name,
+        "Run": spec.label,
+        "model_version": spec.model_version,
+        "run_date": spec.run_date,
+    }
+    df = df.copy()
+    for col, value in meta.items():
+        df[col] = value
+    ordered_cols = list(meta.keys()) + [c for c in df.columns if c not in meta]
+    return df[ordered_cols]
+
+
+def _compute_run_data(
+    spec: RunSpec, years: Sequence[int], aws_region: str | None
+) -> tuple[RunMetrics, RunBreakouts]:
     interval_folders = _interval_folder_strings(years)
     base_prefixes = _make_base_prefixes(spec.model_version, spec.run_name, spec.run_date, interval_folders)
     drained_globs, burned_globs = _make_globs_for_components(base_prefixes)
@@ -182,6 +274,7 @@ def _compute_run_metrics(spec: RunSpec, years: Sequence[int], aws_region: str | 
     try:
         _register_components(con, drained_globs, burned_globs, aws_region=aws_region)
         _register_state_context_views(con)
+        have_lookup = _ensure_adm0_lookup(con, None)
 
         latest_year = max(years)
         area_df = con.execute(pc.sql_global_peat_area_split(latest_year)).df()
@@ -194,15 +287,35 @@ def _compute_run_metrics(spec: RunSpec, years: Sequence[int], aws_region: str | 
         emissions_map = {row["component"]: float(row["avg_GtCO2e_per_yr"]) for _, row in emissions_df.iterrows()}
         drained_emissions = float(emissions_map.get("Drained", 0.0))
         burned_emissions = float(emissions_map.get("Burned", 0.0))
+
+        by_country = con.execute(pc.table_by_country_period_sql(with_lookup=have_lookup)).df()
+        by_drained_state = con.execute(pc.table_by_drained_state_sql()).df()
+        by_burned_state = con.execute(pc.table_by_burned_state_sql()).df()
+        by_country_drained_state = con.execute(
+            pc.table_by_country_drained_state_sql(with_lookup=have_lookup)
+        ).df()
+        by_country_burned_state = con.execute(
+            pc.table_by_country_burned_state_sql(with_lookup=have_lookup)
+        ).df()
     finally:
         con.close()
 
-    return RunMetrics(
+    metrics = RunMetrics(
         drained_area_mha=drained_area,
         undrained_area_mha=undrained_area,
         drained_emissions_gt=drained_emissions,
         burned_emissions_gt=burned_emissions,
     )
+
+    breakouts = RunBreakouts(
+        by_country=_add_run_columns(by_country, spec),
+        by_drained_state=_add_run_columns(by_drained_state, spec),
+        by_burned_state=_add_run_columns(by_burned_state, spec),
+        by_country_drained_state=_add_run_columns(by_country_drained_state, spec),
+        by_country_burned_state=_add_run_columns(by_country_burned_state, spec),
+    )
+
+    return metrics, breakouts
 
 
 def _summary_column(metric: MetricSpec) -> str:
@@ -257,6 +370,16 @@ def _plot_metric(df: pd.DataFrame, metric: MetricSpec, comp: ComparisonSpec, col
     return fig
 
 
+def _collect_breakouts(records: Mapping[str, RunRecord], attr: str) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    for run_name in sorted(records):
+        df = getattr(records[run_name].breakouts, attr)
+        frames.append(df)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
 def main(argv: Sequence[str] | None = None):
     parser = argparse.ArgumentParser("Build comparison figures across multiple runs")
     parser.add_argument("--years", nargs="+", required=True, help="Inventory period end years (e.g., 2005 2010 2015)")
@@ -282,23 +405,35 @@ def main(argv: Sequence[str] | None = None):
         raise SystemExit("At least one inventory year must be provided")
 
     run_specs = _parse_run_specs(args.run)
-    missing_runs = sorted(REQUIRED_RUNS.difference(run_specs.keys()))
-    if missing_runs:
+    active_comparisons, skipped_comparisons = _partition_comparisons(run_specs)
+    if skipped_comparisons:
+        for key, missing_runs in sorted(skipped_comparisons.items()):
+            missing_list = ", ".join(missing_runs)
+            print(
+                f"Skipping comparison '{key}' because the following runs were not provided: {missing_list}"
+            )
+
+    if not active_comparisons:
         raise SystemExit(
-            "Missing --run specification(s) for required runs: " + ", ".join(missing_runs)
+            "No comparisons can be generated because none of the required run combinations were provided."
         )
 
     color_map = _assign_colors(run_specs.keys())
 
     records: dict[str, RunRecord] = {}
     for run_name, spec in run_specs.items():
-        metrics = _compute_run_metrics(spec, years, args.aws_region)
-        records[run_name] = RunRecord(spec=spec, metrics=metrics, color=color_map[run_name])
+        metrics, breakouts = _compute_run_data(spec, years, args.aws_region)
+        records[run_name] = RunRecord(
+            spec=spec,
+            metrics=metrics,
+            breakouts=breakouts,
+            color=color_map[run_name],
+        )
 
     out_data_dir = _join(OUT_DIR, "figures", "comparisons", "data")
     writer_con = duckdb.connect()
     try:
-        for comp in COMPARISONS:
+        for comp in active_comparisons:
             summary_df = _build_comparison_summary(comp, records)
             summary_path = _join(out_data_dir, f"{comp.key}_summary.csv")
             _write_csv_df(writer_con, summary_df, summary_path)
@@ -317,6 +452,18 @@ def main(argv: Sequence[str] | None = None):
                 fig_path = _join(OUT_DIR, "figures", "comparisons", f"{comp.key}_{metric.key}.png")
                 _save_png(fig, fig_path, dpi=300)
                 plt.close(fig)
+
+        breakout_specs = (
+            ("by_country_period", "by_country"),
+            ("by_drained_state_period", "by_drained_state"),
+            ("by_burned_state_period", "by_burned_state"),
+            ("by_country_drained_state_period", "by_country_drained_state"),
+            ("by_country_burned_state_period", "by_country_burned_state"),
+        )
+        for file_stub, attr in breakout_specs:
+            breakout_df = _collect_breakouts(records, attr)
+            breakout_path = _join(out_data_dir, f"runs_{file_stub}.csv")
+            _write_csv_df(writer_con, breakout_df, breakout_path)
     finally:
         writer_con.close()
 
