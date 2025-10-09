@@ -251,6 +251,9 @@ def _save_png(fig: plt.Figure, path: str, dpi: int = 300, width: float | None = 
 
 # ----------------------------- Plot metadata & helpers -----------------------------
 
+# Choose a palette globally (applies to all climate charts)
+pc.set_climate_palette("brewer_dark2")  # or "brewer_set2" / "okabe_ito"
+
 @dataclass(frozen=True)
 class ComponentPlotMeta:
     component: str

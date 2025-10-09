@@ -4,14 +4,25 @@ Utilities for building publication tables & figures from organic-soils zonal sta
 
 Pure utilities: plotting helpers, constants, SQL string builders.
 No DuckDB setup or registration; the driver wires everything.
+
+Additions:
+- Publication themes (rcParams) + context manager: THEME_LIGHT_GRID, THEME_PANEL, THEME_GRAYSCALE, use_theme()
+- Axis utilities: tidy_axes(), fmt_si()
+- Color utilities: PALETTES, categorical_color_map(), landuse_colors(), resolve_colors()
+- Plot helpers now:
+    * apply consistent gridlines/spines via tidy_axes()
+    * auto-fill missing colors stably via resolve_colors()
 """
 
 from __future__ import annotations
 
 import re
-from typing import Optional, Sequence, List, Dict
+import hashlib
+from contextlib import contextmanager
+from typing import Optional, Sequence, List, Dict, Mapping
 
 import pandas as pd
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 # Attempt to import pycountry lazily for ISO lookups. The dependency is optional and
@@ -22,18 +33,231 @@ try:  # pragma: no cover - import guard is environment dependent
 except Exception:  # pragma: no cover - best effort optional dependency
     pycountry = None  # type: ignore
 
+# cycler is often available via matplotlib dependency; keep optional
+try:  # pragma: no cover
+    from cycler import cycler  # type: ignore
+except Exception:  # pragma: no cover
+    cycler = None  # type: ignore
+
 # ----------------------------- Plot constants -----------------------------
 
 CLIMATE_ORDER = ["Boreal", "Temperate", "Tropical"]
 
-CLIMATE_COLORS = {
-    "Boreal":    "#4575B4",  # deep blue
-    "Temperate": "#FDB863",  # warm amber
-    "Tropical":  "#1A9850",  # rich green
+# New: curated climate palettes (CVD-safe)
+CLIMATE_PALETTES = {
+    "brewer_set2": {      # soft, modern
+        "Boreal":    "#8DA0CB",
+        "Temperate": "#FC8D62",
+        "Tropical":  "#66C2A5",
+    },
+    "brewer_dark2": {     # rich, high contrast
+        "Boreal":    "#7570B3",
+        "Temperate": "#D95F02",
+        "Tropical":  "#1B9E77",
+    },
+    "okabe_ito": {       # canonical CVD-safe triad
+        "Boreal":    "#0072B2",
+        "Temperate": "#E69F00",
+        "Tropical":  "#009E73",
+    },
 }
+
+# Default climate colors (switch here if you want a different default)
+CLIMATE_COLORS = CLIMATE_PALETTES["brewer_set2"].copy()
 
 PROCESS_ORDER = ["Drained", "Burned"]
 PROCESS_COLORS = {"Drained": "#3E3753", "Burned": "#FB6A29"}
+
+def set_climate_palette(name: str) -> dict:
+    """
+    Mutate CLIMATE_COLORS in-place so any references captured earlier
+    (e.g., in ComponentPlotMeta) pick up the new palette automatically.
+    """
+    new_map = CLIMATE_PALETTES.get(name)
+    if not new_map:
+        raise ValueError(f"Unknown climate palette: {name}. "
+                         f"Choose from: {', '.join(CLIMATE_PALETTES.keys())}")
+    CLIMATE_COLORS.clear()
+    CLIMATE_COLORS.update(new_map)
+    return CLIMATE_COLORS
+
+
+# ----------------------------- Color utilities ----------------------------
+
+# Paul Tol / Okabe–Ito inspired, color-vision-deficiency-safe sets
+PALETTES: Dict[str, List[str]] = {
+    "tol_bright": [
+        "#4477AA", "#EE6677", "#228833", "#CCBB44",
+        "#66CCEE", "#AA3377", "#BBBBBB", "#000000",
+    ],
+    "tol_muted": [
+        "#332288", "#88CCEE", "#44AA99", "#117733",
+        "#999933", "#DDCC77", "#CC6677", "#882255", "#AA4499",
+    ],
+    "okabe_ito": [
+        "#0072B2", "#E69F00", "#009E73", "#D55E00",
+        "#CC79A7", "#F0E442", "#56B4E9", "#000000",
+    ],
+    "grayscale": ["#111111", "#555555", "#888888", "#BBBBBB"],
+}
+
+# Land-use color pins (get stable, meaningful hues for common classes)
+DEFAULT_LANDUSE_OVERRIDES: Dict[str, str] = {
+    "Cropland":        "#E17C05",
+    "Other plantation":"#1B9E77",
+    "Oil Palm":        "#66A61E",
+    "Forest":          "#7570B3",
+    "Grassland":       "#A6761D",
+    "Settlement":      "#666666",
+    "Extraction":      "#E7298A",
+    "Wetland":         "#1B9E77",
+    "Otherland":       "#BBBBBB",
+}
+
+def categorical_color_map(
+    categories: Sequence[str],
+    *,
+    palette: str = "tol_muted",
+    overrides: Optional[Mapping[str, str]] = None
+) -> Dict[str, str]:
+    """
+    Build a stable {category: color} map.
+    - Deterministic assignment using SHA1 hash into a palette.
+    - 'overrides' let you pin specific categories to specific colors.
+    - Works even if 'categories' changes between runs: unchanged labels keep colors.
+    """
+    base = PALETTES.get(palette, PALETTES["tol_muted"])
+    cmap: Dict[str, str] = {}
+    if overrides:
+        cmap.update(dict(overrides))
+
+    for c in categories:
+        if c in cmap:
+            continue
+        h = int(hashlib.sha1(str(c).encode("utf-8")).hexdigest(), 16)
+        cmap[c] = base[h % len(base)]
+    return cmap
+
+def resolve_colors(
+    categories: Sequence[str],
+    color_map: Optional[Mapping[str, str]] = None,
+    *,
+    palette: str = "okabe_ito",
+    overrides: Optional[Mapping[str, str]] = None,
+) -> Dict[str, str]:
+    """
+    Ensure a complete color map for 'categories', preserving any provided colors
+    and deterministically filling the rest from 'palette'.
+    """
+    provided = dict(color_map) if color_map else {}
+    missing = [c for c in categories if c not in provided]
+    if missing:
+        auto_map = categorical_color_map(missing, palette=palette, overrides=overrides or {})
+        provided.update({k: auto_map[k] for k in missing})
+    return provided
+
+def landuse_colors(categories: Sequence[str]) -> Dict[str, str]:
+    """Stable, readable colors for land-use classes."""
+    return categorical_color_map(categories, palette="okabe_ito", overrides=DEFAULT_LANDUSE_OVERRIDES)
+
+# ----------------------------- Theme utilities ----------------------------
+
+def _maybe_cycle(colors: List[str]) -> Dict[str, object]:
+    if cycler is None:
+        return {}
+    return {"axes.prop_cycle": cycler(color=colors)}
+
+_BASE_THEME: Dict[str, object] = {
+    # Export behavior
+    "figure.dpi": 300,
+    "savefig.dpi": 300,
+    "savefig.bbox": "tight",
+    "savefig.pad_inches": 0.05,
+    # Typography (journal-friendly)
+    "font.family": "DejaVu Sans",
+    "font.size": 9.5,
+    "axes.labelsize": 9.5,
+    "axes.titlesize": 10.5,
+    "legend.fontsize": 8.5,
+    "xtick.labelsize": 8.5,
+    "ytick.labelsize": 8.5,
+    # Lines/ticks
+    "axes.linewidth": 0.8,
+    "xtick.major.width": 0.8,
+    "ytick.major.width": 0.8,
+    "xtick.major.size": 3.5,
+    "ytick.major.size": 3.5,
+    # Spacing
+    "axes.titlepad": 8.0,
+    "axes.labelpad": 6.0,
+}
+
+THEME_LIGHT_GRID: Dict[str, object] = {
+    **_BASE_THEME,
+    "axes.grid": True,
+    "axes.grid.axis": "y",       # default helpful for column/bar charts
+    "grid.linewidth": 0.6,
+    "grid.color": "#D6D6D6",
+}
+
+THEME_PANEL: Dict[str, object] = {
+    **_BASE_THEME,
+    "axes.facecolor": "#FAFAFA",
+    "axes.grid": True,
+    "axes.grid.axis": "both",
+    "grid.linewidth": 0.5,
+    "grid.color": "#E1E1E1",
+}
+
+THEME_GRAYSCALE: Dict[str, object] = {
+    **_BASE_THEME,
+    **_maybe_cycle(PALETTES["grayscale"]),
+    "axes.grid": True,
+    "axes.grid.axis": "y",
+    "grid.color": "#CFCFCF",
+}
+
+@contextmanager
+def use_theme(theme: Mapping[str, object]):
+    """Temporarily apply rcParams (use around plotting code)."""
+    with mpl.rc_context(theme):
+        yield
+
+def tidy_axes(ax: plt.Axes, *, grid: Optional[str] = "y", minor: bool = False) -> plt.Axes:
+    """
+    Standardize spines, ticks, and gridlines on an Axes.
+    grid: 'x', 'y', 'both', or None
+    """
+    # gridlines
+    if grid:
+        ax.grid(True, axis=grid, which="major")
+        if minor:
+            ax.minorticks_on()
+            ax.grid(True, axis=grid, which="minor", linewidth=0.4, alpha=0.6)
+    # spines & ticks
+    for side in ("top", "right"):
+        if side in ax.spines:
+            ax.spines[side].set_visible(False)
+    ax.tick_params(axis="both", which="both", direction="out")
+    return ax
+
+def fmt_si(ax: plt.Axes, *, axis: str = "y", unit: Optional[str] = None) -> plt.Axes:
+    """
+    Apply SI-style tick formatter and optionally set unit label if none is set.
+    axis: 'x' or 'y'
+    """
+    from matplotlib.ticker import ScalarFormatter
+    fmt = ScalarFormatter(useOffset=False, useMathText=True)
+    fmt.set_powerlimits((-3, 4))
+    if axis == "y":
+        ax.yaxis.set_major_formatter(fmt)
+        if unit and not ax.get_ylabel():
+            ax.set_ylabel(unit)
+    else:
+        ax.xaxis.set_major_formatter(fmt)
+        if unit and not ax.get_xlabel():
+            ax.set_xlabel(unit)
+    return ax
 
 # ----------------------------- Small helpers ------------------------------
 
@@ -53,14 +277,11 @@ def country_label(df: pd.DataFrame) -> pd.Series:
         return iso.where(iso.str.len().fillna(0) > 0, df["gadm_adm0"].astype(str))
     return df["gadm_adm0"].astype(str)
 
-
 def build_adm0_lookup_df(manual_overrides: Optional[Dict[int, Dict[str, Optional[str]]]] = None) -> pd.DataFrame:
     """Return a DataFrame with gadm_adm0 → (iso3, country) best-effort mappings."""
-
     from src.scripts.zonal_statistics import zonal_constants as zc
 
     overrides: Dict[int, Dict[str, Optional[str]]] = manual_overrides or {}
-
     rows: list[dict[str, Optional[str] | int]] = []
     seen: set[int] = set()
 
@@ -174,6 +395,10 @@ def stacked_column_by_category(
     width: float = 7.5,
     height: float = 4.5,
     legend_above: bool = False,
+    # NEW:
+    bar_width: float = 0.58,              # <— slimmer columns (was implicit 0.8)
+    segment_edgecolor: str = "white",     # clean separators between stacked segments
+    segment_linewidth: float = 0.5,
 ) -> plt.Figure:
     df = df_long.copy()
     df[category_col] = pd.Categorical(df[category_col], category_order, ordered=True)
@@ -187,13 +412,29 @@ def stacked_column_by_category(
     totals = wide.sum(axis=1).values
     y_max = float(max(totals)) * 1.12 if len(totals) else 1.0
 
+    # ensure a complete color map
+    colors = resolve_colors(category_order, color_map)
+
     fig, ax = plt.subplots(figsize=(width, height))
+    ax.set_axisbelow(True)  # keep grid behind bars
     bottom = None
     for cat in category_order:
         vals = wide[cat].values
-        ax.bar([str(x) for x in wide.index], vals, bottom=bottom, label=cat, color=color_map.get(cat))
+        ax.bar([str(x) for x in wide.index], vals,
+               width=bar_width,
+               bottom=bottom,
+               label=cat,
+               color=colors[cat],
+               edgecolor=segment_edgecolor,
+               linewidth=segment_linewidth)
         bottom = vals if bottom is None else bottom + vals
-    ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    tidy_axes(ax, grid="y")
+    fmt_si(ax, axis="y")
+    ax.margins(x=0.04)  # a touch of breathing room
+
     if legend_above:
         ax.legend(ncol=min(len(category_order), 5), loc="upper center",
                   bbox_to_anchor=(0.5, 1.18), frameon=False, handlelength=1.6, columnspacing=1.2)
@@ -208,7 +449,9 @@ def stacked_column_by_category(
         ax.text(xpos, total + (y_max * 0.015), f"{total:.2f}", ha="center", va="bottom", fontsize=9)
     return fig
 
+
 def stacked_hbar(df_long: pd.DataFrame, value_col: str, xlabel: str) -> plt.Figure:
+    """Stacked horizontal bars by Climate within LandUse."""
     df = df_long.copy()
     df["Climate"] = pd.Categorical(df["Climate"], CLIMATE_ORDER, ordered=True)
     wide = (
@@ -224,13 +467,20 @@ def stacked_hbar(df_long: pd.DataFrame, value_col: str, xlabel: str) -> plt.Figu
     height = max(3.2, 0.55 * len(order) + 1.0)
     fig, ax = plt.subplots(figsize=(7.5, height))
 
+    # Ensure climate colors are complete (in case of extra domains)
+    colors = resolve_colors(CLIMATE_ORDER, CLIMATE_COLORS)
+
     left = None
     for climate in CLIMATE_ORDER:
         vals = wide[climate].values
-        ax.barh(wide.index.astype(str), vals, left=left, color=CLIMATE_COLORS.get(climate), label=climate)
+        ax.barh(wide.index.astype(str), vals, left=left, color=colors[climate], label=climate)
         left = vals if left is None else left + vals
 
-    ax.set_xlabel(xlabel); ax.set_ylabel("Land Use")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Land Use")
+    tidy_axes(ax, grid="x")
+    fmt_si(ax, axis="x")
+
     ax.legend(ncol=3, loc="upper left", bbox_to_anchor=(0.0, 1.12),
               frameon=False, handlelength=1.6, columnspacing=1.2)
     for y, total in zip(range(len(totals)), totals):
@@ -240,6 +490,7 @@ def stacked_hbar(df_long: pd.DataFrame, value_col: str, xlabel: str) -> plt.Figu
 
 def hbar_two_series(labels: List[str], left_vals: List[float], right_vals: List[float],
                     xlabel: str, legends: tuple[str, str], colors: tuple[str, str]) -> plt.Figure:
+    """Two-series horizontal stacked bars (e.g., drained vs undrained)."""
     totals = [lv + rv for lv, rv in zip(left_vals, right_vals)]
     order = sorted(range(len(labels)), key=lambda i: totals[i], reverse=True)
     labs   = [labels[i] for i in order]
@@ -255,6 +506,9 @@ def hbar_two_series(labels: List[str], left_vals: List[float], right_vals: List[
     ax.barh(y, rvals, left=lvals, color=colors[1], label=legends[1])
     ax.set_yticks(y); ax.set_yticklabels(labs); ax.invert_yaxis()
     ax.set_xlabel(xlabel)
+    tidy_axes(ax, grid="x")
+    fmt_si(ax, axis="x")
+
     ax.legend(ncol=2, loc="upper left", bbox_to_anchor=(0.0, 1.10), frameon=False)
     for yy, tot in zip(y, tots):
         ax.text(tot + (x_max * 0.01), yy, f"{tot:.2f}", ha="left", va="center", fontsize=9)
@@ -263,23 +517,7 @@ def hbar_two_series(labels: List[str], left_vals: List[float], right_vals: List[
 
 def barh_single(labels: List[str], values: List[float], xlabel: str, color: str,
                 *, sort_desc: bool = True) -> plt.Figure:
-    """Horizontal bar chart for a single series.
-
-    Parameters
-    ----------
-    labels
-        Category labels corresponding to ``values``.
-    values
-        Numeric values to plot.
-    xlabel
-        Label for the X axis.
-    color
-        Bar color (all bars use the same color).
-    sort_desc
-        Whether to sort bars descending by value (default) or preserve the
-        original order provided by ``labels`` and ``values``.
-    """
-
+    """Horizontal bar chart for a single series."""
     if sort_desc:
         order = sorted(range(len(labels)), key=lambda i: values[i], reverse=True)
     else:
@@ -292,6 +530,9 @@ def barh_single(labels: List[str], values: List[float], xlabel: str, color: str,
     ax.barh(y, vals, color=color)
     ax.set_yticks(y); ax.set_yticklabels(labs); ax.invert_yaxis()
     ax.set_xlabel(xlabel)
+    tidy_axes(ax, grid="x")
+    fmt_si(ax, axis="x")
+
     x_max = max(vals) if vals else 1.0
     for yy, v in zip(y, vals):
         ax.text(v + (x_max * 0.01), yy, f"{v:.2f}", ha="left", va="center", fontsize=9)
@@ -498,7 +739,7 @@ def table_topn_country_sql(component: str, topn: int, with_lookup: bool) -> str:
     ORDER BY ranked.interval_end, rank
     """
 
-# ----------------------------- Figure SQL -------------------------------
+# ----------------------------- Figure SQL --------------------------------
 
 def sql_drained_by_climate() -> str:
     return """
@@ -813,7 +1054,7 @@ def sql_country_emissions_intensity_avg(
       WHERE flux_type = 'drained_total_Mg_CO2e'
       GROUP BY 1
     ),
-    avg_em AS (
+    avg_em As (
       SELECT gadm_adm0, (drained_Mg_per_periods / {n_periods}) AS avg_Mg_per_yr
       FROM d
     )
