@@ -526,44 +526,7 @@ def main(argv=None):
             )
             _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_emissions_intensity_bar.png"), dpi=300)
 
-        # 9) Share of global avg-annual emissions by Land-Use (100% stacked, drained only)
-        d_share_src = con.execute(pc.sql_drained_landuse_climate_avgs(n_periods)).df()
-        d_share_src["Climate"] = d_share_src["climate_domain"].apply(pc.titlecase_domain)
-        d_share_src = d_share_src[d_share_src["Climate"].isin(pc.CLIMATE_ORDER)]
-        d_lu = pc.aggregate_landuse(d_share_src, "drained_avg_GtCO2e_per_yr")
-        share = d_lu.copy()
-        share["total_climate"] = share.groupby("Climate", observed=False)["drained_avg_GtCO2e_per_yr"].transform("sum")
-        share["Share (%)"] = (share["drained_avg_GtCO2e_per_yr"] / share["total_climate"].replace({0: pd.NA})) * 100.0
-        _write_csv_df(con, share[["LandUse", "Climate", "Share (%)"]],
-                      _join(OUT_DIR, "figures", "data", "drained_landuse_share_by_climate_100pct.csv"))
-        if not args.data_only:
-            lu_order = (
-                share.groupby("LandUse", observed=False)["Share (%)"]
-                     .sum().sort_values(ascending=False).index.tolist()
-            )
-            fig = pc.stacked_column_by_category(
-                share, index_col="Climate", category_col="LandUse", value_col="Share (%)",
-                category_order=lu_order, color_map={}, xlabel="Climate Domain",
-                ylabel="Share of Avg Annual Emissions (%)", legend_above=True
-            )
-            _save_png(fig, _join(OUT_DIR, "figures", "drained_landuse_share_by_climate_100pct.png"), dpi=300)
-
-        # 10) Country scatter: Avg-annual emissions vs Avg drained area
-        df_sc = con.execute(pc.sql_country_emissions_vs_area_avg(n_periods, have_lookup)).df()
-        df_sc["label"] = pc.country_label(df_sc)
-        _write_csv_df(con,
-                      df_sc[["label", "total_avg_GtCO2e_per_yr", "avg_drained_area_mha"]]
-                           .rename(columns={"label": "iso3_or_code"}),
-                      _join(OUT_DIR, "figures", "data", "country_emissions_vs_area.csv"))
-        if not args.data_only:
-            fig, ax = plt.subplots(figsize=(7.5, 5.4))
-            ax.scatter(df_sc["avg_drained_area_mha"], df_sc["total_avg_GtCO2e_per_yr"], alpha=0.8)
-            for xi, yi, lab in zip(df_sc["avg_drained_area_mha"], df_sc["total_avg_GtCO2e_per_yr"], df_sc["label"]):
-                ax.annotate(str(lab), (xi, yi), xytext=(4, 3), textcoords="offset points", fontsize=8)
-            ax.set_xlabel("Avg Drained Peat Area (Mha)")
-            ax.set_ylabel("Avg Annual Emissions (Gt CO₂e/year)")
-            fig.tight_layout()
-            _save_png(fig, _join(OUT_DIR, "figures", "country_emissions_vs_area_scatter.png"), dpi=300)
+        # 9) Country scatter and land-use share figures removed per workflow update
 
     print("Assets written to:", OUT_DIR)
 
