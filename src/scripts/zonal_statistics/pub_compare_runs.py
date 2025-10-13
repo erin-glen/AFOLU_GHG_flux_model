@@ -25,6 +25,9 @@ comparison and emit a note summarizing the missing runs. Provide
 additional ``--run`` entries if you need to compare multiple model
 versions or reruns of the same scenario.
 
+Outputs are grouped under ``/mnt/c/tmp/pub_assets/comparisons/<run_dates>/<run_names>/``
+to mirror the main driver folder hierarchy.
+
 Usage example:
 
   cd /mnt/c/gis/git/AFOLU_GHG_flux_model
@@ -84,7 +87,7 @@ import src.scripts.zonal_statistics.pub_common as pc
 import src.scripts.zonal_statistics.pub_assets as pa
 
 
-OUT_DIR = pa.OUT_DIR
+OUT_DIR_ROOT = pa.OUT_DIR_ROOT
 
 _join = pa._join
 _save_png = pa._save_png
@@ -152,6 +155,16 @@ class ComparisonSpec:
     label: str
     run_names: tuple[str, ...]
     metric_keys: tuple[str, ...]
+
+
+def _comparison_out_dir(run_specs: Mapping[str, RunSpec]) -> str:
+    """Build comparison output directory segmented by run dates and names."""
+
+    run_dates = sorted({spec.run_date for spec in run_specs.values()})
+    run_names = sorted(run_specs.keys())
+    date_slug = "__".join(run_dates) if run_dates else "unspecified_dates"
+    name_slug = "__".join(run_names) if run_names else "unspecified_runs"
+    return _join(OUT_DIR_ROOT, "comparisons", date_slug, name_slug)
 
 
 METRIC_SPECS: Mapping[str, MetricSpec] = {
@@ -819,6 +832,7 @@ def main(argv: Sequence[str] | None = None):
         raise SystemExit("At least one inventory year must be provided")
 
     run_specs = _parse_run_specs(args.run)
+    out_dir = _comparison_out_dir(run_specs)
     active_comparisons, skipped_comparisons = _partition_comparisons(run_specs)
     if skipped_comparisons:
         for key, missing_runs in sorted(skipped_comparisons.items()):
@@ -844,7 +858,7 @@ def main(argv: Sequence[str] | None = None):
             color=color_map[run_name],
         )
 
-    out_data_dir = _join(OUT_DIR, "figures", "comparisons", "data")
+    out_data_dir = _join(out_dir, "figures", "comparisons", "data")
     writer_con = duckdb.connect()
     try:
         for comp in active_comparisons:
@@ -863,7 +877,7 @@ def main(argv: Sequence[str] | None = None):
 
                 colors = [records[rn].color for rn in comp.run_names]
                 fig = _plot_metric(metric_df, metric, comp, colors)
-                fig_path = _join(OUT_DIR, "figures", "comparisons", f"{comp.key}_{metric.key}.png")
+                fig_path = _join(out_dir, "figures", "comparisons", f"{comp.key}_{metric.key}.png")
                 _save_png(fig, fig_path, dpi=300)
                 plt.close(fig)
 
@@ -893,6 +907,8 @@ def main(argv: Sequence[str] | None = None):
                 )
     finally:
         writer_con.close()
+
+    print("Comparison assets written to:", out_dir)
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point

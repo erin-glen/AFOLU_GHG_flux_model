@@ -11,6 +11,10 @@ Design:
     * create adm0_lookup ONLY if --adm0_lookup is provided (optional)
 - No line charts.
 
+Outputs mirror the main drivers and are organized under::
+
+    /mnt/c/tmp/pub_assets/version_<model_version>/<run_name>/<run_date>/
+
 Usage examples:
   cd /mnt/c/gis/git/AFOLU_GHG_flux_model
 
@@ -43,7 +47,8 @@ from src.scripts.zonal_statistics.run_zonal_stats import (
 )
 
 # ----------------------------- config -----------------------------
-OUT_DIR = "/mnt/c/tmp/pub_assets"  # hardcoded output root
+OUT_DIR_ROOT = "/mnt/c/tmp/pub_assets"  # hardcoded output root
+OUT_DIR = OUT_DIR_ROOT
 
 # ----------------------------- path helpers -----------------------------
 
@@ -60,6 +65,12 @@ def _ensure_parent_dir_local(path: str):
 
 def _to_duckdb_path(path: str) -> str:
     return path if _is_s3(path) else Path(path).as_posix()
+
+
+def build_output_dir(model_version: str, run_name: str, run_date: str) -> str:
+    """Return the publication output directory for a run."""
+
+    return _join(OUT_DIR_ROOT, f"version_{model_version}", run_name, run_date)
 
 # ----------------------------- DuckDB setup -----------------------------
 
@@ -352,6 +363,9 @@ def main(argv=None):
     p.add_argument("--do-figures", type=int, default=1)
     p.add_argument("--data-only", action="store_true")
     args = p.parse_args(argv)
+
+    global OUT_DIR
+    OUT_DIR = build_output_dir(args.model_version, args.run_name, args.run_date)
 
     years = [int(y) for y in args.years]
     interval_folders = _interval_folder_strings(years)
