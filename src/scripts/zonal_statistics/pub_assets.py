@@ -18,7 +18,8 @@ Usage examples:
     --model_version 0_8_0 \
     --run_name ogh_sensitivity_1km \
     --run_date 20250923 \
-    --years 2005 2010 2015 2020 2024
+    --years 2005 2010 2015 2020 2024 \
+    --topn 10
 """
 
 from __future__ import annotations
@@ -393,6 +394,24 @@ def main(argv=None):
         for meta in CLIMATE_COMPONENT_PLOTS:
             _build_component_climate_plot(con, meta, inv_col, period_labels, args.data_only)
 
+        # C) Total emissions (drained+burned) by climate × period
+        df_tot = con.execute(pc.sql_total_by_climate()).df()
+        df_tot["Climate"] = df_tot["climate_domain"].apply(pc.titlecase_domain)
+        df_tot = df_tot[df_tot["Climate"].isin(pc.CLIMATE_ORDER)].rename(columns={"interval_end": "Year"})
+        df_tot[inv_col] = df_tot["Year"].map(period_labels)
+        tot_long = df_tot[[inv_col, "Climate", "total_GtCO2e"]]
+
+        _write_csv_df(con, tot_long, _join(OUT_DIR, "figures", "data", "global_total_by_climate_long.csv"))
+        _write_csv_df(con, pc.pivot_wide(tot_long, "total_GtCO2e", inv_col),
+                      _join(OUT_DIR, "figures", "data", "global_total_by_climate_wide.csv"))
+        if not args.data_only:
+            fig = pc.stacked_column_by_category(
+                tot_long, inv_col, "Climate", "total_GtCO2e",
+                pc.CLIMATE_ORDER, pc.CLIMATE_COLORS,
+                xlabel="Inventory Period", ylabel="Annual Emissions (Gt CO₂e/year)"
+            )
+            _save_png(fig, _join(OUT_DIR, "figures", "global_total_by_climate_column.png"), dpi=300)
+
         # 2) Drained: Land Use × Climate (avg annual across selected periods)
         d_lu_raw = con.execute(pc.sql_drained_landuse_climate_avgs(n_periods)).df()
         d_lu = pc.aggregate_landuse(d_lu_raw, "drained_avg_GtCO2e_per_yr")
@@ -424,6 +443,27 @@ def main(argv=None):
             fig = pc.stacked_hbar(b_lu, "burned_avg_GtCO2e_per_yr",
                                   xlabel="Average Annual Emissions (Gt CO₂e/year)")
             _save_png(fig, _join(OUT_DIR, "figures", "burned_landuse_climate_bar.png"), dpi=300)
+
+        # D) Component split within each climate (avg over selected periods)
+        df_cs = con.execute(pc.sql_component_split_by_climate_avg(n_periods)).df()
+        df_cs["Climate"] = df_cs["climate_domain"].apply(pc.titlecase_domain)
+        df_cs = df_cs[df_cs["Climate"].isin(pc.CLIMATE_ORDER)]
+        df_cs["Component"] = pd.Categorical(df_cs["component"], pc.PROCESS_ORDER, ordered=True)
+
+        _write_csv_df(con, df_cs[["Climate", "Component", "avg_GtCO2e_per_yr"]],
+                      _join(OUT_DIR, "figures", "data", "component_split_by_climate_avg.csv"))
+        if not args.data_only:
+            fig = pc.stacked_column_by_category(
+                df_cs.rename(columns={"avg_GtCO2e_per_yr": "Value"}),
+                index_col="Climate",
+                category_col="Component",
+                value_col="Value",
+                category_order=pc.PROCESS_ORDER,
+                color_map=pc.PROCESS_COLORS,
+                xlabel="Climate",
+                ylabel="Average Annual Emissions (Gt CO₂e/year)"
+            )
+            _save_png(fig, _join(OUT_DIR, "figures", "component_split_by_climate_bar.png"), dpi=300)
 
         # 4) Top-N by country: PEAT AREA split (latest interval only)
         latest_year = max(years)
@@ -510,21 +550,23 @@ def main(argv=None):
             )
             _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_burned_avg_emissions_bar.png"), dpi=300)
 
-        # 8) Emissions intensity (drained-only): t CO₂e/ha/yr, Top-N
-        df_int = con.execute(pc.sql_country_emissions_intensity_avg(n_periods, have_lookup, args.topn, 10000.0)).df()
-        df_int["label"] = pc.country_label(df_int)
-        _write_csv_df(con,
-                      df_int[["label", "intensity_tCO2e_per_ha_yr", "total_avg_GtCO2e_per_yr", "latest_drained_area_mha"]]
-                           .rename(columns={"label": "iso3_or_code"}),
-                      _join(OUT_DIR, "figures", "data", "top_10_country_emissions_intensity.csv"))
+        # F) Drained emissions intensity by climate (avg over periods / latest drained area)
+        df_ic = con.execute(pc.sql_drained_intensity_by_climate_avg(n_periods)).df()
+        df_ic["Climate"] = df_ic["climate_domain"].apply(pc.titlecase_domain)
+        df_ic = df_ic[df_ic["Climate"].isin(pc.CLIMATE_ORDER)]
+        df_ic = df_ic.sort_values("intensity_tCO2e_per_ha_yr", ascending=False)
+
+        _write_csv_df(con, df_ic[["Climate", "intensity_tCO2e_per_ha_yr"]],
+                      _join(OUT_DIR, "figures", "data", "drained_intensity_by_climate.csv"))
         if not args.data_only:
             fig = pc.barh_single(
-                labels=df_int["label"].tolist(),
-                values=df_int["intensity_tCO2e_per_ha_yr"].tolist(),
+                labels=df_ic["Climate"].tolist(),
+                values=df_ic["intensity_tCO2e_per_ha_yr"].tolist(),
                 xlabel="Drained Emissions Intensity (t CO₂e/ha/year)",
                 color="#5C6BC0",
+                sort_desc=False,
             )
-            _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_emissions_intensity_bar.png"), dpi=300)
+            _save_png(fig, _join(OUT_DIR, "figures", "drained_intensity_by_climate_bar.png"), dpi=300)
 
         # 9) Country scatter and land-use share figures removed per workflow update
 

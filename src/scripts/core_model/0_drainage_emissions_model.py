@@ -1226,7 +1226,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --all_five_year_periods \
   --mark_missing_factors \
   --count_burned_years \
-  --peat_dataset gpd \
-  --run_name gpd_standard_model
+  --peat_dataset gfw \
+  --run_name gfw_standard_model_1km
   
 """
