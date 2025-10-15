@@ -6,7 +6,7 @@ Production-lean defaults:
 - Smart alignment: skip reindex_like if coords already equal to pixel_area.
 
 python -m src.scripts.zonal_statistics.02_run_zonal_stats \
-  --interval_end_years 2005 2010 2015 2020 2024 \
+  --interval_end_years 2005 \
   --cluster_name zonal_stats \
   --run_date 20251010 \
   --model_version 0_8_5 \
