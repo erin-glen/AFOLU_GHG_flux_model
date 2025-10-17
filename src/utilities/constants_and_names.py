@@ -7,7 +7,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "1.0.2"
+model_version = "1.0.2_zarr_testing"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets
@@ -180,6 +180,13 @@ builtup = 250
 full_raster_dims = 40000    # Size of a 10x10 deg raster in pixels
 
 resolution = 0.00025  # Decimal degrees
+
+#Dimensions for global zarrs
+global_width = int(round(360.0 / resolution))
+global_height = int(round(180.0 / resolution))
+origin_x = -180.0
+origin_y = 90.0
+zarr_chunks = (4000, 4000)
 
 agg_chunk_length_pixels = 4000 * 0.04  # Dimensions for 1x1 deg outputs at 0.04x0.04 deg resolution
 

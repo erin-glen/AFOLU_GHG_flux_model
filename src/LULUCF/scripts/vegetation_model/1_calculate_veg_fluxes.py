@@ -42,6 +42,14 @@ import time
 import sys
 import pandas as pd
 import numpy as np
+import xarray as xr
+import dask.array as da
+import zarr
+from numcodecs import Blosc
+import fsspec
+import tempfile
+import shutil
+
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -61,6 +69,223 @@ from src.utilities import resize_cluster
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
 os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
+def get_dtype_from_pattern(pattern):
+    float32 = [
+        cn.agc_modeled_dens_pattern,
+        cn.bgc_modeled_dens_pattern,
+        cn.deadwood_c_modeled_dens_pattern,
+        cn.litter_c_modeled_dens_pattern,
+        cn.agc_gross_emis_pattern,
+        cn.bgc_gross_emis_pattern,
+        cn.deadwood_c_gross_emis_pattern,
+        cn.litter_c_gross_emis_pattern,
+        cn.ch4_flux_pattern,
+        cn.n2o_flux_pattern,
+        cn.agc_gross_removals_pattern,
+        cn.bgc_gross_removals_pattern,
+        cn.deadwood_c_gross_removals_pattern,
+        cn.litter_c_gross_removals_pattern,
+        cn.agc_rf_pre_dist_pattern,
+        cn.agc_emission_factor
+    ]
+
+    uint8  = [
+        cn.composite_primary_forest,
+        cn.gain_year_count_pattern,
+        cn.max_height_since_last_time_not_tall_veg,
+        cn.first_time_sig_loss_from_max_height,
+        cn.part_or_full_dist_in_earlier_intervals,
+        cn.part_or_full_dist_in_curr_interval,
+        cn.times_burned_in_interval,
+
+    ]
+
+    uint16 = [
+        cn.forest_age_output_pattern,
+        cn.most_recent_year_not_tall_veg
+    ]
+
+    uint32 = [
+        cn.land_state_pattern
+    ]
+
+    mapping = {
+        **{p: "float32" for p in float32 if p},
+        **{p: "uint8"   for p in uint8   if p},
+        **{p: "uint16"  for p in uint16  if p},
+        **{p: "uint32"  for p in uint32  if p},
+    }
+
+    return mapping.get(pattern)
+
+def get_pixel_meaning_from_pattern(pattern):
+    flux_density = [
+        cn.agc_rf_pre_dist_pattern,
+        cn.agc_gross_emis_pattern,
+        cn.bgc_gross_emis_pattern,
+        cn.deadwood_c_gross_emis_pattern,
+        cn.litter_c_gross_emis_pattern,
+        cn.agc_gross_removals_pattern,
+        cn.bgc_gross_removals_pattern,
+        cn.deadwood_c_gross_removals_pattern,
+        cn.litter_c_gross_removals_pattern,
+        cn.ch4_flux_pattern,
+        cn.n2o_flux_pattern
+    ]
+
+    c_density = [
+        cn.agc_modeled_dens_pattern,
+        cn.bgc_modeled_dens_pattern,
+        cn.deadwood_c_modeled_dens_pattern,
+        cn.litter_c_modeled_dens_pattern
+    ]
+
+    mapping = {
+        **{p: cn.flux_density_pixel_meaning for p in flux_density if p},
+        **{p: cn.C_density_pixel_meaning   for p in c_density if p},
+    }
+
+    return mapping.get(pattern, "")
+
+#Compression types for global zarrs
+# lz4 is extremely fast, shuffling doesn’t help uint8 (single-byte) but does for uint16
+# zstd gives much better ratios on floats and BITSHUFFLE usually does better than SHUFFLE (byte-shuffle is best for integers)
+def get_zarr_compression_from_dtype(dtype):
+    if dtype == "float32":
+        return Blosc(cname="zstd", clevel=5, shuffle=Blosc.BITSHUFFLE)
+    elif dtype == "uint8":
+        return Blosc(cname="lz4", clevel=2, shuffle=Blosc.NOSHUFFLE)
+    elif dtype == "uint16":
+        return Blosc(cname="lz4", clevel=2, shuffle=Blosc.SHUFFLE)
+    elif dtype == "uint32":
+        return Blosc(cname="zstd", clevel=4, shuffle=Blosc.SHUFFLE)
+    else:
+        raise ValueError(f"dtype {dtype} is not a valid datatype")
+
+#Create zarr output dictionary from output s3_list
+def format_zarr_out_dict(out_dir_list, patterns):
+    out = {}
+    for item in out_dir_list:
+        match = next((p for p in patterns if p and p in item), None)
+        year = item.rstrip("/").split("/")[-4]
+        dtype = get_dtype_from_pattern(match)
+        compression_type = get_zarr_compression_from_dtype(dtype)
+        pixel_meaning = get_pixel_meaning_from_pattern(match)
+        fill_value = 0 if dtype in {"uint8", "uint16", "uint32"} else 0.0
+        key = f"{match}{pixel_meaning}_{year}"
+        out[key] = {
+            "zarr_root_s3": item,
+            "dtype": dtype,
+            "fill_value": fill_value,
+            "compression": compression_type,
+        }
+
+    return out
+
+# Creates empty global zarr stores for every key in zarr_out_dict, using per-key dtype, fill_value, compressor.
+# Each key in zarr_out_dict becomes one store: <zarr_root_local>/<key>.zarr
+# Does not write any data; just array metadata + coords.
+def init_global_zarrs(zarr_out_dict, zarr_root_local, height, width, y0, x0, pixel_size, chunks, crs_wkt = None, common_attrs = None):
+
+    y = np.arange(height, dtype=np.int64)
+    x = np.arange(width, dtype=np.int64)
+
+    global_attrs = {}
+    if common_attrs:
+        global_attrs.update(common_attrs)
+    if crs_wkt:
+        global_attrs["crs_wkt"] = crs_wkt
+    global_attrs["transform"] = [x0, pixel_size, 0.0, y0, 0.0, -pixel_size] # affine transform (x0, px, 0, y0, 0, -px)
+
+    for key, meta in zarr_out_dict.items():
+        dtype = meta["dtype"]
+        fill_value = meta["fill_value"]
+        compressor = meta["compression"]
+
+        # lazily-shaped array => metadata-only write on to_zarr with compute=False
+        var = xr.DataArray(
+            da.empty((height, width), dtype=dtype, chunks=chunks),
+            dims=("y", "x"),
+            coords={"y": y, "x": x},
+            name=key,
+            attrs={},   # per-variable attrs go here if we want to add them later on (like units)
+        )
+        ds = xr.Dataset({key: var}, attrs=global_attrs)
+
+        ds[key].encoding = {
+            "chunks": chunks,
+            "compressor": compressor,
+            "dtype": dtype,
+            "fill_value": fill_value,
+        }
+
+        store_url = f"{zarr_root_local.rstrip('/')}/{key}.zarr"
+        ds.to_zarr(
+            store_url,
+            mode="w",
+            compute=False,  # metadata only; no chunk writes now
+            consolidated=False  # consolidate at the very end
+        )
+
+#Calculate global zarr index position from chunk bounds
+def calculate_zarr_idx(bounds):
+    x0_idx = int(round((bounds[0] - cn.origin_x) / cn.resolution))
+    x1_idx = int(round((bounds[2] - cn.origin_x) / cn.resolution))
+    y0_idx = int(round((cn.origin_y - bounds[3]) / cn.resolution))
+    y1_idx = int(round((cn.origin_y - bounds[1]) / cn.resolution))
+    return x0_idx, x1_idx, y0_idx, y1_idx
+
+# Append a single chunk to each variable's zarr using region writes.
+# Indices are 0-based pixel indices into the global grid.
+def write_chunk_to_zarrs(zarr_root, y0_idx, y1_idx, x0_idx, x1_idx, arrays_by_name):
+    # Builds a small dataset with aligned dimsensions for each var we are writing in this call (loop by year)
+    # Writes each variable into its own store to reduce write conflicts.
+    region = {"y": slice(y0_idx, y1_idx), "x": slice(x0_idx, x1_idx)}
+
+    # Ensure 2D and native dtype
+    for name, arr in arrays_by_name.items():
+        if arr.ndim != 2:
+            raise ValueError(f"{name} must be 2D (y, x)")
+        arr = np.asanyarray(arr)
+        ds = xr.Dataset({name: xr.DataArray(arr, dims=("y", "x"))})
+        store_url = f"{zarr_root.rstrip('/')}/{name}.zarr"
+
+        # Use "r+" to append into existing store
+        ds.to_zarr(store_url, mode="r+", region=region)
+
+# Consolidate zarr metadata locally and upload each variable to S3 once. Then clean up local staging directory.
+def finalize_and_upload_global_zarrs(zarr_root_local, zarr_out_dict):
+    logger_worker = lu.setup_logging_worker()
+    lu.print_and_log(f"Consolidating metadata for staged zarrs in: {zarr_root_local}: {uu.timestr()}", False, logger_worker)
+
+    # 1) consolidate metadata locally (write .zmetadata)
+    for key in zarr_out_dict.keys():
+        local_store = os.path.join(zarr_root_local, f"{key}.zarr")
+        if not os.path.isdir(local_store):
+            lu.print_and_log(f"Skipping missing local zarr for {key} - {local_store}: {uu.timestr()}", False, logger_worker)
+            continue
+        mapper = fsspec.get_mapper(local_store)
+        zarr.consolidate_metadata(mapper)
+
+    # 2) single upload per store to S3
+    fs = fsspec.filesystem("s3", anon=False)
+    lu.print_and_log(f"Starting zarr upload step: {uu.timestr()}", False, logger_worker)
+    for key, meta in zarr_out_dict.items():
+        if "zarr_root_s3" not in meta or not meta["zarr_root_s3"]:
+            raise ValueError(f"zarr_out_dict['{key}'] missing required 'zarr_root_s3' path")
+
+        local_store = os.path.join(zarr_root_local, f"{key}.zarr")
+        s3_prefix = meta["zarr_root_s3"].rstrip("/")
+        s3_store = f"{s3_prefix}/{s3_store}"
+
+        lu.print_and_log(f"Uploading {local_store} -> {s3_store}", False, logger_worker)
+        fs.put(local_store, s3_store, recursive=True)
+
+    # 3) clean local tmp environment
+    lu.print_and_log(f"Upload complete. Cleaning up local staging directory: {zarr_root_local}: {uu.timestr()}", False, logger_worker)
+    shutil.rmtree(zarr_root_local, ignore_errors=True)
+
+#TODO: Move these utilities to uu
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
@@ -1804,7 +2029,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                        download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                                       interval_length_list, interval_end_years, is_final, no_upload, output_folders, stage):
+                                       interval_length_list, interval_end_years, is_final, no_upload, output_folders, zarr_out_dict, stage):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -1820,6 +2045,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
+    print(f"{chunk_length_pixels=}")
 
     ### Part 1: Downloads all inputs for chunk.
     ### No checks about whether the chunk has data because the way the chunk_list is constructed,
@@ -1929,6 +2155,24 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
         # Clear memory of unneeded arrays
         del out_dict
 
+    for key, meta in out_dict_all_dtypes.items():
+        lu.print_and_log(key)
+        for k, v in meta.items():
+            lu.print_and_log(f"  {k}: {v}")
+    #TODO: Delete print
+
+    # Match out_dict_all_dtypes keys to zarr_out_dict keys
+    arrays_by_name = {}
+    for key, arr in out_dict_all_dtypes.items():
+        if key in zarr_out_dict:
+            arrays_by_name[key] = arr
+
+    # Compute the global pixel window for this chunk using the global georeference
+    if arrays_by_name:
+        x0_idx, x1_idx, y0_idx, y1_idx = calculate_zarr_idx(bounds)
+
+        # Append arrays into each variable’s store using region write
+        write_chunk_to_zarrs( zarr_root_local, x0_idx, y1_idx, x0_idx, x1_idx, arrays_by_name)
 
     # Deletes all unnecessary input dictionaries before moving on
     # Suggested by ChatGPT: https://chatgpt.com/share/e/672bbf2e-ebbc-800a-aae3-3d92f5a1d663
@@ -2252,7 +2496,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         main_logger.info(f"output_dir_list for {stage}:")
         for item in output_dir_list:
             main_logger.info(f"  {item}")
-    # print(output_dir_list)
+    #TODO @David this includes composite_primary_forest paths for all years, but we only want to output for 2016, right?
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.
@@ -2276,6 +2520,31 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                                                      '3_shift_cult_EF',	'4_logging_EF',	'5_wildfire_EF',
                                                                      '6_sett_infrastr_EF', '7_natrl_dist_EF'])
 
+
+    #Initialize global zarrs
+    zarr_root_local = tempfile.mkdtemp(prefix="zarrs")
+    main_logger.info(f"Staging global zarrs locally at: {zarr_root_local}")
+
+    # Decide which datasets to output as global zarrs
+    keep_patterns = [
+        cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern, cn.litter_c_modeled_dens_pattern,
+        cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
+        cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
+        cn.ch4_flux_pattern, cn.n2o_flux_pattern, cn.land_state_pattern, cn.composite_primary_forest, cn.forest_age_output_pattern,
+    ]
+
+    # Format zarrs into output dictionary based using the output_dir_list
+    zarr_output_dir_list = [s for s in output_dir_list if any(p in s for p in keep_patterns)]
+    zarr_out_dict = format_zarr_out_dict(zarr_output_dir_list, keep_patterns)
+    for key, meta in zarr_out_dict.items():
+        print(key)
+        for k, v in meta.items():
+            print(f"  {k}: {v}")
+
+    init_global_zarrs(zarr_out_dict, zarr_root_local, cn.global_height, cn.global_width, cn.origin_y, cn.origin_x,
+                      cn.resolution, cn.zarr_chunks, crs_wkt=None, common_attrs={"grid_mapping": "epsg:4326"})
+    #TODO: Double check the height, width, origin_y, origin_x, pixel_size, and chunks are correct. Might limit to 80N and 80S instead.
+    #TODO: Can also try using region="auto" as Justin recommended instead of explicit index
 
     ### Step 2: Create 1x1 degree outputs
 
@@ -2304,7 +2573,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
             future = client.submit(calculate_and_upload_LULUCF_fluxes,
                                    chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                    download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                                   interval_length_list, interval_end_years, is_final, no_upload, output_dir_list, stage)
+                                   interval_length_list, interval_end_years, is_final, no_upload, output_dir_list, zarr_out_dict, stage)
             futures.append(future)
 
         batch_results = client.gather(futures)
@@ -2330,6 +2599,9 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
+    # Upload global zarrs
+    if not no_upload:
+        finalize_and_upload_global_zarrs(zarr_root_local, zarr_out_dict)
 
     ### Step 3: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs
 
