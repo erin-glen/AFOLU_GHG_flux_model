@@ -179,9 +179,11 @@ def build_download_upload_dict(
         per_pixel_dir = path
         per_pixel_pattern = f"__{dataset}__{interval}.tif"
 
+        # Mirror the main drivers: include the run name between dataset and interval so
+        # global artifacts stay isolated per run.
         out_dir = (
             f"{outputs_base}/{res_label}_output_aggregation/"
-            f"{dataset}/{interval}/"
+            f"{dataset}/{run_name}/{interval}/"
         )
 
         dictionary[key] = {

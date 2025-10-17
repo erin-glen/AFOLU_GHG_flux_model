@@ -992,6 +992,7 @@ def display_main(
                     resolved_outputs_base,
                     f"{res_label}_output_aggregation",
                     SUM_DATASET_NAME,
+                    run_name,
                     interval,
                 )
                 out_jpeg_dir_base = posixpath.join(sum_global_dir, "display", interval, SUM_DATASET_NAME)
