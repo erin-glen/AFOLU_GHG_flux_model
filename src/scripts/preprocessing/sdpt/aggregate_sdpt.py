@@ -122,5 +122,5 @@ if __name__ == "__main__":
     )
 
 """
-python -m src.scripts.preprocessing.sdpt.aggregate_sdpt -d 20250809 -cn aggregate --pixel_resolution 4000_pixels
+python -m src.scripts.preprocessing.sdpt.aggregate_sdpt -d 20251017 -cn aggregate --pixel_resolution 4000_pixels
 """

@@ -126,7 +126,7 @@ def split_sdpt_by_tiles(tile_grid_path, countries_gdb, out_dir, tile_id_field="t
             print(f"Tile {tile_id}: no features after clipping.")
 
 def main():
-    tile_grid_path = r"C:\tmp\peat_index\Global_Peatlands.shp"
+    tile_grid_path = r"C:\tmp\peat_index\Global_Peatlands_project.shp"
     countries_gdb = r"C:\tmp\sdpt_v3_final.gdb\sdpt_v3_final.gdb"
     out_dir = r"C:\GIS\Data\Global\Plantation\sdpt_by_tiles"
     tile_id_field = "tile_id"
