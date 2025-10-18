@@ -9,8 +9,8 @@ python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -bb 116.25 -2.25 116.5 -2 -cs 0.25 --run_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs 32GB worker):
-python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -bb -64.5 -22.5 -63.5 -21.5 -cs 1 --run_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn global_zarr_vegetation_model
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn global_zarr_vegetation_model -bb -64 -22 -63 -21 -cs 1 --run_date 20258888
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn vegetation_model
@@ -45,7 +45,7 @@ import numpy as np
 import xarray as xr
 import dask.array as da
 import zarr
-from numcodecs import Blosc
+from zarr.codecs import Blosc
 import fsspec
 import tempfile
 import shutil
@@ -70,95 +70,54 @@ from src.utilities import resize_cluster
 os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
 def get_dtype_from_pattern(pattern):
-    float32 = [
-        cn.agc_modeled_dens_pattern,
-        cn.bgc_modeled_dens_pattern,
-        cn.deadwood_c_modeled_dens_pattern,
-        cn.litter_c_modeled_dens_pattern,
-        cn.agc_gross_emis_pattern,
-        cn.bgc_gross_emis_pattern,
-        cn.deadwood_c_gross_emis_pattern,
-        cn.litter_c_gross_emis_pattern,
-        cn.ch4_flux_pattern,
-        cn.n2o_flux_pattern,
-        cn.agc_gross_removals_pattern,
-        cn.bgc_gross_removals_pattern,
-        cn.deadwood_c_gross_removals_pattern,
-        cn.litter_c_gross_removals_pattern,
-        cn.agc_rf_pre_dist_pattern,
-        cn.agc_emission_factor
-    ]
+    float32=[cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern, cn.litter_c_modeled_dens_pattern,
+        cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
+        cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
+        cn.ch4_flux_pattern, cn.n2o_flux_pattern, cn.agc_rf_pre_dist_pattern, cn.agc_emission_factor]
 
-    uint8  = [
-        cn.composite_primary_forest,
-        cn.gain_year_count_pattern,
-        cn.max_height_since_last_time_not_tall_veg,
-        cn.first_time_sig_loss_from_max_height,
-        cn.part_or_full_dist_in_earlier_intervals,
-        cn.part_or_full_dist_in_curr_interval,
-        cn.times_burned_in_interval,
+    uint8 =[cn.composite_primary_forest, cn.gain_year_count_pattern, cn.max_height_since_last_time_not_tall_veg,
+        cn.first_time_sig_loss_from_max_height, cn.part_or_full_dist_in_earlier_intervals,
+        cn.part_or_full_dist_in_curr_interval, cn.times_burned_in_interval]
 
-    ]
+    uint16=[cn.forest_age_output_pattern, cn.most_recent_year_not_tall_veg]
 
-    uint16 = [
-        cn.forest_age_output_pattern,
-        cn.most_recent_year_not_tall_veg
-    ]
+    uint32=[cn.land_state_pattern]
 
-    uint32 = [
-        cn.land_state_pattern
-    ]
-
-    mapping = {
-        **{p: "float32" for p in float32 if p},
-        **{p: "uint8"   for p in uint8   if p},
-        **{p: "uint16"  for p in uint16  if p},
-        **{p: "uint32"  for p in uint32  if p},
-    }
+    mapping={**{p: "float32" for p in float32 if p},
+             **{p: "uint8"   for p in uint8   if p},
+             **{p: "uint16"  for p in uint16  if p},
+             **{p: "uint32"  for p in uint32  if p}}
 
     return mapping.get(pattern)
 
 def get_pixel_meaning_from_pattern(pattern):
-    flux_density = [
-        cn.agc_rf_pre_dist_pattern,
-        cn.agc_gross_emis_pattern,
-        cn.bgc_gross_emis_pattern,
-        cn.deadwood_c_gross_emis_pattern,
-        cn.litter_c_gross_emis_pattern,
-        cn.agc_gross_removals_pattern,
-        cn.bgc_gross_removals_pattern,
-        cn.deadwood_c_gross_removals_pattern,
-        cn.litter_c_gross_removals_pattern,
-        cn.ch4_flux_pattern,
-        cn.n2o_flux_pattern
-    ]
+    flux_density = [cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
+                    cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
+                    cn.ch4_flux_pattern, cn.n2o_flux_pattern, cn.agc_rf_pre_dist_pattern]
 
-    c_density = [
-        cn.agc_modeled_dens_pattern,
-        cn.bgc_modeled_dens_pattern,
-        cn.deadwood_c_modeled_dens_pattern,
-        cn.litter_c_modeled_dens_pattern
-    ]
+    c_density = [cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern,
+                 cn.litter_c_modeled_dens_pattern]
 
-    mapping = {
-        **{p: cn.flux_density_pixel_meaning for p in flux_density if p},
-        **{p: cn.C_density_pixel_meaning   for p in c_density if p},
-    }
+    mapping = {**{p: cn.flux_density_pixel_meaning for p in flux_density if p},
+               **{p: cn.C_density_pixel_meaning   for p in c_density if p}}
 
     return mapping.get(pattern, "")
 
 #Compression types for global zarrs
 # lz4 is extremely fast, shuffling doesn’t help uint8 (single-byte) but does for uint16
-# zstd gives much better ratios on floats and BITSHUFFLE usually does better than SHUFFLE (byte-shuffle is best for integers)
+# zstd gives much better ratios on floats and bitshuffle usually does better than shuffle (byte-shuffle is best for integers)
+# 0 = noshuffle
+# 1 = shuffle
+# 2 = bitshuffle
 def get_zarr_compression_from_dtype(dtype):
     if dtype == "float32":
-        return Blosc(cname="zstd", clevel=5, shuffle=Blosc.BITSHUFFLE)
+        return Blosc(cname="zstd", clevel=5, shuffle=2)
     elif dtype == "uint8":
-        return Blosc(cname="lz4", clevel=2, shuffle=Blosc.NOSHUFFLE)
+        return Blosc(cname="lz4", clevel=2, shuffle=0)
     elif dtype == "uint16":
-        return Blosc(cname="lz4", clevel=2, shuffle=Blosc.SHUFFLE)
+        return Blosc(cname="lz4", clevel=2, shuffle=1)
     elif dtype == "uint32":
-        return Blosc(cname="zstd", clevel=4, shuffle=Blosc.SHUFFLE)
+        return Blosc(cname="zstd", clevel=4, shuffle=1)
     else:
         raise ValueError(f"dtype {dtype} is not a valid datatype")
 
@@ -167,17 +126,15 @@ def format_zarr_out_dict(out_dir_list, patterns):
     out = {}
     for item in out_dir_list:
         match = next((p for p in patterns if p and p in item), None)
+        pixel_meaning = get_pixel_meaning_from_pattern(match)
         year = item.rstrip("/").split("/")[-4]
         dtype = get_dtype_from_pattern(match)
-        compression_type = get_zarr_compression_from_dtype(dtype)
-        pixel_meaning = get_pixel_meaning_from_pattern(match)
-        fill_value = 0 if dtype in {"uint8", "uint16", "uint32"} else 0.0
-        key = f"{match}{pixel_meaning}_{year}"
-        out[key] = {
+
+        out[f"{match}{pixel_meaning}_{year}"] = {
             "zarr_root_s3": item,
             "dtype": dtype,
-            "fill_value": fill_value,
-            "compression": compression_type,
+            "fill_value": 0 if dtype in {"uint8", "uint16", "uint32"} else 0.0,
+            "compressors": get_zarr_compression_from_dtype(dtype)
         }
 
     return out
@@ -185,7 +142,16 @@ def format_zarr_out_dict(out_dir_list, patterns):
 # Creates empty global zarr stores for every key in zarr_out_dict, using per-key dtype, fill_value, compressor.
 # Each key in zarr_out_dict becomes one store: <zarr_root_local>/<key>.zarr
 # Does not write any data; just array metadata + coords.
-def init_global_zarrs(zarr_out_dict, zarr_root_local, height, width, y0, x0, pixel_size, chunks, crs_wkt = None, common_attrs = None):
+def init_global_zarrs_to_s3(zarr_out_dict, chunk_size, crs_wkt = None, common_attrs = None):
+
+    height = cn.global_height
+    width = cn.global_width
+    y0 = cn.origin_y
+    x0 = cn.origin_x
+    pixel_size = cn.resolution
+
+    chunk_pixels = int(round(chunk_size/pixel_size))
+    chunks = (chunk_pixels, chunk_pixels)
 
     y = np.arange(height, dtype=np.int64)
     x = np.arange(width, dtype=np.int64)
@@ -200,7 +166,7 @@ def init_global_zarrs(zarr_out_dict, zarr_root_local, height, width, y0, x0, pix
     for key, meta in zarr_out_dict.items():
         dtype = meta["dtype"]
         fill_value = meta["fill_value"]
-        compressor = meta["compression"]
+        compressor = meta["compressors"]
 
         # lazily-shaped array => metadata-only write on to_zarr with compute=False
         var = xr.DataArray(
@@ -214,12 +180,16 @@ def init_global_zarrs(zarr_out_dict, zarr_root_local, height, width, y0, x0, pix
 
         ds[key].encoding = {
             "chunks": chunks,
-            "compressor": compressor,
+            "compressors": compressor,
             "dtype": dtype,
             "fill_value": fill_value,
         }
 
-        store_url = f"{zarr_root_local.rstrip('/')}/{key}.zarr"
+        # s3 output path
+        s3_prefix = meta["zarr_root_s3"].rstrip("/")
+        store_url = f"{s3_prefix}/{key}.zarr"
+
+        # metadata-only create on S3
         ds.to_zarr(
             store_url,
             mode="w",
@@ -237,53 +207,81 @@ def calculate_zarr_idx(bounds):
 
 # Append a single chunk to each variable's zarr using region writes.
 # Indices are 0-based pixel indices into the global grid.
-def write_chunk_to_zarrs(zarr_root, y0_idx, y1_idx, x0_idx, x1_idx, arrays_by_name):
+def write_chunk_to_zarrs(zarr_out_dict, arrays_by_name, bounds):
     # Builds a small dataset with aligned dimsensions for each var we are writing in this call (loop by year)
     # Writes each variable into its own store to reduce write conflicts.
+    x0_idx, x1_idx, y0_idx, y1_idx = calculate_zarr_idx(bounds)
+    h = y1_idx - y0_idx
+    w = x1_idx - x0_idx
     region = {"y": slice(y0_idx, y1_idx), "x": slice(x0_idx, x1_idx)}
 
     # Ensure 2D and native dtype
     for name, arr in arrays_by_name.items():
         if arr.ndim != 2:
             raise ValueError(f"{name} must be 2D (y, x)")
-        arr = np.asanyarray(arr)
-        ds = xr.Dataset({name: xr.DataArray(arr, dims=("y", "x"))})
-        store_url = f"{zarr_root.rstrip('/')}/{name}.zarr"
+        if arr.shape != (h, w):
+            raise ValueError(f"{name} array shape {arr.shape} does not match target window {(h, w)} derived from bounds {bounds}")
 
-        # Use "r+" to append into existing store
+        ds = xr.Dataset({name: xr.DataArray(np.asanyarray(arr), dims=("y", "x"))})
+
+        # check that each
+        meta = zarr_out_dict.get(name)
+        if meta is None or not meta.get("zarr_root_s3"):
+            raise ValueError(f"Missing zarr_root_s3 for variable {name}")
+
+        s3_prefix = meta["zarr_root_s3"].rstrip("/")
+        store_url = f"{s3_prefix}/{name}.zarr"
+
+        # Use "r+" to write directly to S3
         ds.to_zarr(store_url, mode="r+", region=region)
 
 # Consolidate zarr metadata locally and upload each variable to S3 once. Then clean up local staging directory.
-def finalize_and_upload_global_zarrs(zarr_root_local, zarr_out_dict):
+# def finalize_and_upload_global_zarrs(zarr_root_local, zarr_out_dict):
+#     logger_worker = lu.setup_logging_worker()
+#     lu.print_and_log(f"Consolidating metadata for staged zarrs in: {zarr_root_local}: {uu.timestr()}", False, logger_worker)
+#
+#     # 1) consolidate metadata locally (write .zmetadata)
+#     for key in zarr_out_dict.keys():
+#         local_store = os.path.join(zarr_root_local, f"{key}.zarr")
+#         if not os.path.isdir(local_store):
+#             lu.print_and_log(f"Skipping missing local zarr for {key} - {local_store}: {uu.timestr()}", False, logger_worker)
+#             continue
+#         mapper = fsspec.get_mapper(local_store)
+#         zarr.consolidate_metadata(mapper)
+#
+#     # 2) single upload per store to S3
+#     fs = fsspec.filesystem("s3", anon=False)
+#     lu.print_and_log(f"Starting zarr upload step: {uu.timestr()}", False, logger_worker)
+#     for key, meta in zarr_out_dict.items():
+#         if "zarr_root_s3" not in meta or not meta["zarr_root_s3"]:
+#             raise ValueError(f"zarr_out_dict['{key}'] missing required 'zarr_root_s3' path")
+#
+#         local_store = os.path.join(zarr_root_local, f"{key}.zarr")
+#         s3_prefix = meta["zarr_root_s3"].rstrip("/")
+#         s3_store = f"{s3_prefix}/{os.path.basename(local_store)}"
+#
+#         lu.print_and_log(f"Uploading {local_store} -> {s3_store}", False, logger_worker)
+#         fs.put(local_store, s3_store, recursive=True)
+#
+#     # 3) clean local tmp environment
+#     lu.print_and_log(f"Upload complete. Cleaning up local staging directory: {zarr_root_local}: {uu.timestr()}", False, logger_worker)
+#     shutil.rmtree(zarr_root_local, ignore_errors=True)
+
+def finalize_global_zarrs_on_s3(zarr_out_dict):
     logger_worker = lu.setup_logging_worker()
-    lu.print_and_log(f"Consolidating metadata for staged zarrs in: {zarr_root_local}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Consolidating zarr metadata on S3 for {len(zarr_out_dict)} stores: {uu.timestr()}", False, logger_worker)
 
-    # 1) consolidate metadata locally (write .zmetadata)
-    for key in zarr_out_dict.keys():
-        local_store = os.path.join(zarr_root_local, f"{key}.zarr")
-        if not os.path.isdir(local_store):
-            lu.print_and_log(f"Skipping missing local zarr for {key} - {local_store}: {uu.timestr()}", False, logger_worker)
-            continue
-        mapper = fsspec.get_mapper(local_store)
-        zarr.consolidate_metadata(mapper)
-
-    # 2) single upload per store to S3
-    fs = fsspec.filesystem("s3", anon=False)
-    lu.print_and_log(f"Starting zarr upload step: {uu.timestr()}", False, logger_worker)
     for key, meta in zarr_out_dict.items():
-        if "zarr_root_s3" not in meta or not meta["zarr_root_s3"]:
+        s3_prefix = meta.get("zarr_root_s3", "").rstrip("/")
+        if not s3_prefix:
             raise ValueError(f"zarr_out_dict['{key}'] missing required 'zarr_root_s3' path")
 
-        local_store = os.path.join(zarr_root_local, f"{key}.zarr")
-        s3_prefix = meta["zarr_root_s3"].rstrip("/")
-        s3_store = f"{s3_prefix}/{s3_store}"
+        s3_store = f"{s3_prefix}/{key}.zarr"
+        mapper = fsspec.get_mapper(s3_store)  # S3-aware mapper
+        zarr.consolidate_metadata(mapper)     # writes .zmetadata on S3
 
-        lu.print_and_log(f"Uploading {local_store} -> {s3_store}", False, logger_worker)
-        fs.put(local_store, s3_store, recursive=True)
+        lu.print_and_log(f"Consolidated: {s3_store}", False, logger_worker)
 
-    # 3) clean local tmp environment
-    lu.print_and_log(f"Upload complete. Cleaning up local staging directory: {zarr_root_local}: {uu.timestr()}", False, logger_worker)
-    shutil.rmtree(zarr_root_local, ignore_errors=True)
 
 #TODO: Move these utilities to uu
 
@@ -2155,13 +2153,13 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
         # Clear memory of unneeded arrays
         del out_dict
 
-    for key, meta in out_dict_all_dtypes.items():
-        lu.print_and_log(key)
-        for k, v in meta.items():
-            lu.print_and_log(f"  {k}: {v}")
-    #TODO: Delete print
 
     # Match out_dict_all_dtypes keys to zarr_out_dict keys
+    lu.print_and_log(f"Writing LULUCF fluxes and densities to global zarrs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    uu.rename_s3_task_file(stage, bounds, "zarr_creation_", is_final, logger_worker)
+    zarr_start = time.time()
+
+    # Match LULUCF arrays to their corresponding zarrs (out_dict_all_dtypes keys --> zarr_out_dict keys)
     arrays_by_name = {}
     for key, arr in out_dict_all_dtypes.items():
         if key in zarr_out_dict:
@@ -2169,10 +2167,12 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
     # Compute the global pixel window for this chunk using the global georeference
     if arrays_by_name:
-        x0_idx, x1_idx, y0_idx, y1_idx = calculate_zarr_idx(bounds)
-
         # Append arrays into each variable’s store using region write
-        write_chunk_to_zarrs( zarr_root_local, x0_idx, y1_idx, x0_idx, x1_idx, arrays_by_name)
+        write_chunk_to_zarrs(zarr_out_dict, arrays_by_name, bounds)
+    zarr_end = time.time()
+
+    lu.print_and_log(f"Memory usage after writing to_zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+    lu.print_and_log(f"Wrote outputs for {bounds_str} in {tile_id} to global zarrs in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}", False, logger_worker)
 
     # Deletes all unnecessary input dictionaries before moving on
     # Suggested by ChatGPT: https://chatgpt.com/share/e/672bbf2e-ebbc-800a-aae3-3d92f5a1d663
@@ -2332,7 +2332,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
     chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size, first_chunks, fishnet_iso_df, main_logger)
-
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
@@ -2522,8 +2521,10 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
 
     #Initialize global zarrs
-    zarr_root_local = tempfile.mkdtemp(prefix="zarrs")
-    main_logger.info(f"Staging global zarrs locally at: {zarr_root_local}")
+    #zarr_root_local = tempfile.mkdtemp(prefix="zarr_")
+    #zarr_root_local = "/tmp/zarr/"         #TODO delete
+    main_logger.info(f"Staging global zarrs creation: {uu.timestr()}")
+    zarr_start = time.time()
 
     # Decide which datasets to output as global zarrs
     keep_patterns = [
@@ -2536,15 +2537,17 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Format zarrs into output dictionary based using the output_dir_list
     zarr_output_dir_list = [s for s in output_dir_list if any(p in s for p in keep_patterns)]
     zarr_out_dict = format_zarr_out_dict(zarr_output_dir_list, keep_patterns)
-    for key, meta in zarr_out_dict.items():
-        print(key)
-        for k, v in meta.items():
-            print(f"  {k}: {v}")
+    # for key, meta in zarr_out_dict.items():
+    #     print(key)
+    #     for k, v in meta.items():
+    #         print(f"  {k}: {v}")
 
-    init_global_zarrs(zarr_out_dict, zarr_root_local, cn.global_height, cn.global_width, cn.origin_y, cn.origin_x,
-                      cn.resolution, cn.zarr_chunks, crs_wkt=None, common_attrs={"grid_mapping": "epsg:4326"})
-    #TODO: Double check the height, width, origin_y, origin_x, pixel_size, and chunks are correct. Might limit to 80N and 80S instead.
-    #TODO: Can also try using region="auto" as Justin recommended instead of explicit index
+    # TODO: This step is slow so cluster is timing out.
+    init_global_zarrs_to_s3(zarr_out_dict, chunk_size, crs_wkt=None, common_attrs={"grid_mapping": "epsg:4326"})
+    zarr_end = time.time()
+    main_logger.info(f"Finished initializing global zarrs in {round(zarr_end - zarr_start)} seconds")
+    # TODO: Double check the height, width, origin_y, origin_x, pixel_size, and chunks are correct.
+    # TODO: Can also try using region="auto" as Justin recommended instead  explicit index
 
     ### Step 2: Create 1x1 degree outputs
 
@@ -2599,9 +2602,8 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
-    # Upload global zarrs
-    if not no_upload:
-        finalize_and_upload_global_zarrs(zarr_root_local, zarr_out_dict)
+    # Finalize global zarrs on s3
+    finalize_global_zarrs_on_s3(zarr_out_dict)
 
     ### Step 3: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs
 

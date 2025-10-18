@@ -176,17 +176,16 @@ builtup = 250
 
 
 ### Miscellaneous
-
+chunk_dims = 4000           # Size of a 1x1 deg raster in pixels
 full_raster_dims = 40000    # Size of a 10x10 deg raster in pixels
 
 resolution = 0.00025  # Decimal degrees
 
-#Dimensions for global zarrs
+#Dimensions for global zarrs (80N to 80S)
 global_width = int(round(360.0 / resolution))
-global_height = int(round(180.0 / resolution))
+global_height = int(round(160.0 / resolution))
 origin_x = -180.0
-origin_y = 90.0
-zarr_chunks = (4000, 4000)
+origin_y = 80.0
 
 agg_chunk_length_pixels = 4000 * 0.04  # Dimensions for 1x1 deg outputs at 0.04x0.04 deg resolution
 
