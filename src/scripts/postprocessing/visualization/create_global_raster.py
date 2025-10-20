@@ -6,6 +6,9 @@ What's new in this drop-in update
 - Streamed global mosaic build using a disk-backed memmap (no N×10 GB RAM spike).
 - As-completed iteration over Dask futures; no giant gather into a Python list.
 - Early cast for `drained_state` tiles to UInt8 (0,1,255 nodata) to cut tile payloads 4×.
+- **FIX 1 (GeoTransform)**: Use rasterio.transform.from_bounds (rows & cols) so pixel size Y == X.
+- **FIX 2 (S3 writing)**: When writing to s3:// paths, enable GDAL spooling:
+    CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE=YES and CPL_TMPDIR=<our working tmpdir>.
 
 Assumptions (this version)
 --------------------------
@@ -23,7 +26,7 @@ python -m src.scripts.postprocessing.visualization.create_global_raster \
   -cn create_maps --run_name gfw_standard_model_1km \
   --model_version 0_8_0 --date_tag 20251010 --target_deg 0.01
 
-# Aggregate at 0.01° using a local Dask cluster instead of AWS Batch / ECS:
+# Aggregate at 0.01° using a local Dask cluster:
 python -m src.scripts.postprocessing.visualization.create_global_raster \
   -cn local --run_name ogh_sensitivity_1km --run_local \
   --model_version 0_8_0 --date_tag 20250923 --target_deg 0.01
@@ -45,6 +48,10 @@ from typing import Iterator, List, Optional, Tuple
 import dask
 from dask.distributed import as_completed
 import numpy as np
+
+# Write with a correct transform derived from rows & cols
+import rasterio
+from rasterio.transform import from_bounds
 
 from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import log_utilities as lu
@@ -83,7 +90,7 @@ def _reaggregate_sum(arr: np.ndarray, native_deg: float, target_deg: float) -> n
 
     h, w = arr.shape
     H = (h // f) * f
-    W = (w // f) * f  # correct width trim
+    W = (w // f) * f
 
     a = arr[:H, :W]
     a4 = a.reshape(H // f, f, W // f, f)
@@ -112,12 +119,11 @@ def _reaggregate_mode_binary(arr01_nan: np.ndarray, native_deg: float, target_de
     a4 = a.reshape(H // f, f, W // f, f)
 
     valid = np.sum(~np.isnan(a4), axis=(1, 3)).astype(np.float32)
-    ones  = np.nansum(a4, axis=(1, 3)).astype(np.float32)  # sum of 1s
+    ones  = np.nansum(a4, axis=(1, 3)).astype(np.float32)
     zeros = valid - ones
 
     out = np.full((H // f, W // f), np.nan, dtype=np.float32)
     has = valid > 0
-    # ties resolve to 1 (favor drained when equal)
     out[has] = (ones[has] >= zeros[has]).astype(np.float32)
     return out
 
@@ -132,7 +138,6 @@ def _reclass_drained_to_binary(arr: np.ndarray) -> np.ndarray:
     Returns float32 array with values {0,1,NaN}.
     """
     a = arr.astype(np.int64, copy=False)
-
     nodata_mask = (a == 0) | (a == 20_000_000)
     undrained   = (a == 16_000_000)
     drained     = (~nodata_mask) & (~undrained)
@@ -140,14 +145,10 @@ def _reclass_drained_to_binary(arr: np.ndarray) -> np.ndarray:
     out = np.full(a.shape, np.nan, dtype=np.float32)
     out[undrained] = 0.0
     out[drained]   = 1.0
-    return out  # NaNs retained for nodata
+    return out
 
 
 def _per_pixel_tile_path(items: dict, tile_id: str) -> str:
-    """
-    Resolve per-pixel total / state input path for a tile.
-    Uses the per_pixel_dir/per_pixel_pattern keys provided by build_download_upload_dict.
-    """
     pp_dir = items.get("per_pixel_dir")
     pp_pat = items.get("per_pixel_pattern")
     if not pp_dir or not pp_pat:
@@ -156,6 +157,77 @@ def _per_pixel_tile_path(items: dict, tile_id: str) -> str:
             "missing per_pixel_dir and/or per_pixel_pattern."
         )
     return f"{pp_dir}{tile_id}{pp_pat}"
+
+
+def _join_output_path(base: str, name: str) -> str:
+    return f"{base.rstrip('/')}/{name}"
+
+
+def _to_vsipath_if_s3(path: str) -> str:
+    return "/vsis3/" + path[len("s3://") :] if path.startswith("s3://") else path
+
+
+def _save_global_raster_correct(
+    *,
+    bounds: Tuple[float, float, float, float],
+    arr: np.ndarray,
+    dtype: np.dtype,
+    dst_base: str,
+    dst_name: str,
+    logger,
+    int_nodata: Optional[int] = None,
+    spool_dir: Optional[str] = None,
+) -> str:
+    """
+    Write a single-band GeoTIFF with a correct geotransform derived from rows & cols.
+    If destination is s3://..., enable GDAL spooling so random writes work.
+    Returns the final destination path.
+    """
+    minx, miny, maxx, maxy = bounds
+    rows, cols = arr.shape
+    transform = from_bounds(minx, miny, maxx, maxy, cols, rows)
+
+    dst_path = _join_output_path(dst_base, dst_name)
+    vsi_path = _to_vsipath_if_s3(dst_path)
+
+    is_float = np.issubdtype(dtype, np.floating)
+    creation_opts = dict(
+        driver="GTiff",
+        bigtiff="YES",
+        tiled=True,
+        blockxsize=512,
+        blockysize=512,
+        compress="DEFLATE",
+        predictor=2 if is_float else 1,
+        num_threads="ALL_CPUS",
+    )
+
+    profile = dict(
+        width=cols,
+        height=rows,
+        count=1,
+        dtype=dtype,
+        crs="EPSG:4326",
+        transform=transform,
+        nodata=None if is_float else int_nodata,
+        **creation_opts,
+    )
+
+    # If writing to S3, enable GDAL's temp-file spooling for random writes.
+    env_kwargs = {}
+    if dst_path.startswith("s3://"):
+        env_kwargs["CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE"] = "YES"
+        if spool_dir:
+            env_kwargs["CPL_TMPDIR"] = spool_dir  # ensure enough space on this disk
+
+    logger.info("Writing %s (size %d×%d, dtype=%s) ...",
+                dst_path, cols, rows, np.dtype(dtype).name)
+    with rasterio.Env(**env_kwargs):
+        with rasterio.open(vsi_path, "w", **profile) as dst:
+            dst.write(arr, 1)
+
+    logger.info("Saved global (%s) → %s", np.dtype(dtype).name, dst_path)
+    return dst_path
 
 
 # --------------------------------------------------------------------
@@ -171,23 +243,16 @@ def agg_tile_to_target(
     target_deg: float,
     is_final: bool,
 ):
-    """Aggregate one 10×10° tile from ``native_deg`` to ``target_deg``.
-
-    - Float datasets (per-pixel totals): SUM to the coarser grid.
-    - burned_state (integer codes): MODE on native codes.
-    - drained_state: **reclass to binary (0/1, NaN for nodata) then binary MODE** → cast to UInt8 (0/1/255).
     """
-
+    Aggregate one 10×10° tile from native_deg to target_deg.
+    """
     logger = lu.setup_logging()
-
     logger.info("Reading tile %s\ninput: %s", tile_id, per_pixel_total_or_state_tile)
 
-    # Load native chunk (Float32 by default)
     arr = uu.get_tile_dataset_rio(
         per_pixel_total_or_state_tile, "Float32", bounds, chunk_length_pixels, is_final, logger
     )[0]
 
-    # Dataset name is the middle token: "<tile>__<dataset>__<interval>.tif"
     parts = posixpath.basename(per_pixel_total_or_state_tile).split("__")
     if len(parts) == 3:
         _, dataset_name, _ = parts
@@ -195,23 +260,19 @@ def agg_tile_to_target(
         dataset_name = parts[2]
     else:
         raise ValueError(
-            "Expected filenames like '<tile>__<dataset>__<interval>.tif' or "
-            "'<tile>__<bounds>__<dataset>__<interval>.tif'. "
-            f"Got: {posixpath.basename(per_pixel_total_or_state_tile)}"
+            "Expected '<tile>__<dataset>__<interval>.tif' or "
+            "'<tile>__<bounds>__<dataset>__<interval>.tif'; "
+            f"got: {posixpath.basename(per_pixel_total_or_state_tile)}"
         )
 
-    # Integer datasets (categorical)
     if dataset_name in INTEGER_DATASETS:
         if dataset_name == "drained_state":
-            # Reclass → binary mode → cast to UInt8 with nodata=255 (smaller tile payloads)
             arr01_nan = _reclass_drained_to_binary(arr)
             out = _reaggregate_mode_binary(arr01_nan, native_deg, target_deg)  # float32 {0,1,NaN}
             return np.where(np.isnan(out), UINT8_NODATA, out.astype(np.uint8, copy=False))
         else:
-            # e.g., burned_state: keep native codes, aggregate by mode
             return uu.reaggregate_mode(arr.astype(np.int32, copy=False), native_deg, target_deg)
 
-    # Continuous totals → explicit SUM to target resolution (no unit conversions)
     return _reaggregate_sum(arr, native_deg, target_deg)
 
 
@@ -226,12 +287,9 @@ def _compute_tiles(
     stage_desc: str,
     tile_ids: List[str],
 ) -> List[np.ndarray]:
-    """(Legacy) Compute all tile aggregation tasks and gather into a list.
-    Kept for backward-compat; the streaming path below is preferred.
-    """
+    """Legacy all-at-once compute; kept for backward compatibility."""
     if not delayed_results:
         return []
-
     if client is None:
         return list(dask.compute(*delayed_results))
 
@@ -271,14 +329,10 @@ def iterate_tiles(
     stage_desc: str,
     tile_ids: List[str],
 ) -> Iterator[Tuple[int, np.ndarray]]:
-    """Yield (tile_index, tile_array) as each tile finishes computing.
-
-    This keeps driver memory flat by avoiding a giant gather of all tiles.
-    """
+    """Yield (tile_index, tile_array) as each tile finishes computing."""
     if not delayed_results:
         return
     if client is None:
-        # Local scheduler: compute in bounded batches to keep memory predictable
         B = 64
         for i in range(0, len(delayed_results), B):
             batch = delayed_results[i:i + B]
@@ -303,6 +357,10 @@ def iterate_tiles(
             yield (idx, arr)
 
 
+# --------------------------------------------------------------------
+# Combine & write
+# --------------------------------------------------------------------
+
 def combine_global_raster(
     tiles: List[np.ndarray],
     bounds_list: List[Tuple[float, float, float, float]],
@@ -315,38 +373,25 @@ def combine_global_raster(
     out_dtype: Optional[np.dtype] = None,
     int_nodata: Optional[int] = None,
 ):
-    """
-    (Legacy) Paste aggregated tiles into a single global array (in-RAM) and save/upload.
-    Kept for backward-compat; prefer the streaming variant below for large outputs.
-    """
+    """Legacy in-RAM combine; now writes with correct transform and S3-safe spooling."""
     logger = lu.setup_logging()
-
     rows = int(round(180 / target_deg))
     cols = int(round(360 / target_deg))
 
     if out_dtype is None or np.issubdtype(out_dtype, np.floating):
-        # Float output
         global_raster = np.full((rows, cols), np.nan, dtype=np.float32)
         for tile, bounds in zip(tiles, bounds_list):
             min_x, min_y, max_x, max_y = bounds
-            x_start = int(round((min_x + 180) / target_deg))
-            x_end   = int(round((max_x + 180) / target_deg))
-            y_start = int(round((90 - max_y) / target_deg))
-            y_end   = int(round((90 - min_y) / target_deg))
-
-            th, tw = tile.shape
-            assert (y_end - y_start) == th
-            assert (x_end - x_start) == tw
-
-            # Be robust to integer inputs
+            x0 = int(round((min_x + 180) / target_deg))
+            x1 = int(round((max_x + 180) / target_deg))
+            y0 = int(round((90 - max_y) / target_deg))
+            y1 = int(round((90 - min_y) / target_deg))
             t = tile.astype(np.float32, copy=False)
             mask = ~np.isnan(t) if np.issubdtype(t.dtype, np.floating) else np.ones_like(t, dtype=bool)
-
-            np.copyto(global_raster[y_start:y_end, x_start:x_end], t, where=mask)
-
+            np.copyto(global_raster[y0:y1, x0:x1], t, where=mask)
         save_dtype = np.float32
+        int_nodata_eff = None
     else:
-        # Integer output (e.g., UInt8 for binary drained_state)
         if int_nodata is None:
             raise ValueError("int_nodata must be provided when out_dtype is integer.")
         global_raster = np.full((rows, cols), int_nodata, dtype=out_dtype)
@@ -355,35 +400,25 @@ def combine_global_raster(
                 t = np.where(np.isnan(tile), int_nodata, tile).astype(out_dtype, copy=False)
             else:
                 t = tile.astype(out_dtype, copy=False)
-
             min_x, min_y, max_x, max_y = bounds
-            x_start = int(round((min_x + 180) / target_deg))
-            x_end   = int(round((max_x + 180) / target_deg))
-            y_start = int(round((90 - max_y) / target_deg))
-            y_end   = int(round((90 - min_y) / target_deg))
-
-            th, tw = t.shape
-            assert (y_end - y_start) == th
-            assert (x_end - x_start) == tw
-
-            np.copyto(global_raster[y_start:y_end, x_start:x_end], t, where=(t != int_nodata))
-
+            x0 = int(round((min_x + 180) / target_deg))
+            x1 = int(round((max_x + 180) / target_deg))
+            y0 = int(round((90 - max_y) / target_deg))
+            y1 = int(round((90 - min_y) / target_deg))
+            np.copyto(global_raster[y0:y1, x0:x1], t, where=(t != int_nodata))
         save_dtype = out_dtype
+        int_nodata_eff = int_nodata
 
-    global_bounds = (-180, -90, 180, 90)
-
-    uu.save_and_upload_single_raster(
-        global_bounds,
-        cols,
-        f"{res_label}_global",
-        global_raster,
-        save_dtype,
-        global_outfile,
-        global_output_path,
-        is_final,
-        logger,
+    _ = _save_global_raster_correct(
+        bounds=(-180, -90, 180, 90),
+        arr=global_raster,
+        dtype=save_dtype,
+        dst_base=global_output_path,
+        dst_name=global_outfile,
+        logger=logger,
+        int_nodata=int_nodata_eff,
+        spool_dir=tempfile.gettempdir(),  # safe default
     )
-    logger.info("Saved global (%s) → %s%s", str(save_dtype), global_output_path, global_outfile)
     return "Success"
 
 
@@ -400,18 +435,15 @@ def combine_global_raster_streaming(
     int_nodata: Optional[int] = None,
 ):
     """
-    Paste aggregated tiles into a global memmap **on disk**, streaming as each tile
-    finishes, then save/upload using existing utilities.
-
-    If out_dtype is float: use NaN nodata and paste where ~np.isnan(tile) (ints are treated as all-valid).
-    If out_dtype is integer: require int_nodata and paste where (tile != int_nodata).
+    Stream tiles into a global memmap on disk; then write with correct transform.
+    When writing to s3://, enable GDAL spooling and use the same tmpdir for spooling.
     """
     logger = lu.setup_logging()
 
     rows = int(round(180 / target_deg))
     cols = int(round(360 / target_deg))
 
-    # Prepare on-disk memmap to avoid 10+ GB RAM usage
+    # Use a dedicated working directory; we also point GDAL spooling here.
     tmpdir = tempfile.mkdtemp(prefix=f"{res_label}_global_")
     mm_path = os.path.join(tmpdir, "global_mm.dat")
 
@@ -419,68 +451,53 @@ def combine_global_raster_streaming(
         save_dtype = np.float32
         global_mm = np.memmap(mm_path, dtype=np.float32, mode="w+", shape=(rows, cols))
         global_mm[:] = np.nan
-
-        def paste(tile: np.ndarray, y0: int, y1: int, x0: int, x1: int) -> None:
+        def paste(tile, y0, y1, x0, x1):
             t = tile.astype(np.float32, copy=False)
-            if np.issubdtype(t.dtype, np.floating):
-                mask = ~np.isnan(t)
-            else:
-                mask = np.ones_like(t, dtype=bool)
+            mask = ~np.isnan(t) if np.issubdtype(t.dtype, np.floating) else np.ones_like(t, dtype=bool)
             np.copyto(global_mm[y0:y1, x0:x1], t, where=mask)
-
+        int_nodata_eff = None
     else:
-        # Integer output (e.g., UInt8 for binary drained_state)
         if int_nodata is None:
             raise ValueError("int_nodata must be provided when out_dtype is integer.")
         save_dtype = out_dtype
         global_mm = np.memmap(mm_path, dtype=out_dtype, mode="w+", shape=(rows, cols))
         global_mm[:] = int_nodata
-
-        def paste(tile: np.ndarray, y0: int, y1: int, x0: int, x1: int) -> None:
+        def paste(tile, y0, y1, x0, x1):
             if np.issubdtype(tile.dtype, np.floating):
                 t = np.where(np.isnan(tile), int_nodata, tile).astype(out_dtype, copy=False)
             else:
                 t = tile.astype(out_dtype, copy=False)
             np.copyto(global_mm[y0:y1, x0:x1], t, where=(t != int_nodata))
+        int_nodata_eff = int_nodata
 
-    # Stream tiles as they complete
     flush_every = 16
     seen = 0
     for idx, tile in tiles_iter:
         min_x, min_y, max_x, max_y = bounds_list[idx]
-        x_start = int(round((min_x + 180) / target_deg))
-        x_end   = int(round((max_x + 180) / target_deg))
-        y_start = int(round((90 - max_y) / target_deg))
-        y_end   = int(round((90 - min_y) / target_deg))
-
-        th, tw = tile.shape
-        assert (y_end - y_start) == th
-        assert (x_end - x_start) == tw
-
-        paste(tile, y_start, y_end, x_start, x_end)
+        x0 = int(round((min_x + 180) / target_deg))
+        x1 = int(round((max_x + 180) / target_deg))
+        y0 = int(round((90 - max_y) / target_deg))
+        y1 = int(round((90 - min_y) / target_deg))
+        paste(tile, y0, y1, x0, x1)
         seen += 1
         if seen % flush_every == 0:
             global_mm.flush()
 
-    # Reopen r/o for safe handoff to writer
     del global_mm
     global_mm = np.memmap(mm_path, dtype=save_dtype, mode="r", shape=(rows, cols))
 
-    # IMPORTANT: ensure your uu.save_and_upload_single_raster writes BIGTIFF with tiling & compression
-    uu.save_and_upload_single_raster(
-        (-180, -90, 180, 90),
-        cols,
-        f"{res_label}_global",
-        global_mm,
-        save_dtype,
-        global_outfile,
-        global_output_path,
-        is_final,
-        logger,
+    _ = _save_global_raster_correct(
+        bounds=(-180, -90, 180, 90),
+        arr=global_mm,
+        dtype=save_dtype,
+        dst_base=global_output_path,
+        dst_name=global_outfile,
+        logger=logger,
+        int_nodata=int_nodata_eff,
+        spool_dir=tmpdir,  # <-- S3 spooling will use this same directory
     )
-    logger.info("Saved global (%s) → %s%s", str(save_dtype), global_output_path, global_outfile)
 
-    # Cleanup memmap files
+    # Cleanup
     try:
         del global_mm
         os.remove(mm_path)
@@ -508,16 +525,12 @@ def aggregate_main(
     base_url: Optional[str] = None,
     outputs_base: Optional[str] = None,
 ) -> None:
-    """Drive Stage 01: aggregation to ``target_deg`` and global mosaic creation."""
-
     assert_grid_divides_world(target_deg)
 
     logger = lu.setup_logging_main()
     is_final = not run_local
 
-    cluster, client, run_local = uu.connect_to_cluster(
-        cluster_name, run_local=run_local
-    )
+    cluster, client, run_local = uu.connect_to_cluster(cluster_name, run_local=run_local)
     is_final = not run_local
 
     resolved_base_url, resolved_outputs_base = resolve_versioned_paths(
@@ -544,17 +557,13 @@ def aggregate_main(
         tile_ids: List[str] = []
 
         dataset_name = items["dataset"]
-        is_integer = dataset_name in INTEGER_DATASETS
         is_drained = (dataset_name == "drained_state")
 
         stage = f"aggregate tiles to {res_label} for {key}"
-        start_time = uu.timestr()
-        lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
+        lu.print_and_log(f"Stage {stage} started at: {uu.timestr()}", is_final, logger)
 
         for tile_id in cn.tile_id_list:
-            # Read per-pixel/state inputs (never overwritten; read-only)
             tile_path = _per_pixel_tile_path(items, tile_id)
-
             bounds = uu.get_10x10_tile_bounds(tile_id)
             bounds_list.append(bounds)
             chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
@@ -573,8 +582,6 @@ def aggregate_main(
             )
 
         stage_desc = f"{res_label} aggregation for {key}"
-
-        # STREAMING: iterate as tiles complete; no giant gather into memory
         tiles_iter = iterate_tiles(
             delayed_results=delayed_results,
             client=None if run_local else client,
@@ -584,16 +591,12 @@ def aggregate_main(
         )
 
         stage = f"build {res_label} global mosaic for {key}"
-        start_time = uu.timestr()
-        lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
+        lu.print_and_log(f"Stage {stage} started at: {uu.timestr()}", is_final, logger)
 
-        # Always write the canonical global pattern
         global_outfile = items["global_pattern"]
         global_output_path = items["global_dir"]
 
-        # Choose output dtype / nodata for the global raster
         if is_drained:
-            # Binary UInt8 with nodata=255
             _ = combine_global_raster_streaming(
                 tiles_iter=tiles_iter,
                 bounds_list=bounds_list,
@@ -614,11 +617,11 @@ def aggregate_main(
                 global_output_path=global_output_path,
                 target_deg=target_deg,
                 is_final=is_final,
-                out_dtype=None,  # float32 with NaN nodata (default)
+                out_dtype=None,
             )
 
         lu.print_and_log(
-            f"Global raster saved to {global_output_path}{global_outfile}",
+            f"Global raster saved to {_join_output_path(global_output_path, global_outfile)}",
             is_final,
             logger,
         )
