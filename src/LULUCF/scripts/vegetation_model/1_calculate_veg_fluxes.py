@@ -139,10 +139,73 @@ def format_zarr_out_dict(out_dir_list, patterns):
 
     return out
 
-# Creates empty global zarr stores for every key in zarr_out_dict, using per-key dtype, fill_value, compressor.
-# Each key in zarr_out_dict becomes one store: <zarr_root_local>/<key>.zarr
+# # Creates empty global zarr stores for every key in zarr_out_dict, using per-key dtype, fill_value, compressor.
+# # Each key in zarr_out_dict becomes one store: <zarr_root_local>/<key>.zarr
+# # Does not write any data; just array metadata + coords.
+# def init_global_zarrs_to_s3(zarr_out_dict, chunk_size, crs_wkt = None, common_attrs = None):
+#
+#     height = cn.global_height
+#     width = cn.global_width
+#     y0 = cn.origin_y
+#     x0 = cn.origin_x
+#     pixel_size = cn.resolution
+#
+#     chunk_pixels = int(round(chunk_size/pixel_size))
+#     chunks = (chunk_pixels, chunk_pixels)
+#
+#     y = np.arange(height, dtype=np.int64)
+#     x = np.arange(width, dtype=np.int64)
+#
+#     global_attrs = {}
+#     if common_attrs:
+#         global_attrs.update(common_attrs)
+#     if crs_wkt:
+#         global_attrs["crs_wkt"] = crs_wkt
+#     global_attrs["transform"] = [x0, pixel_size, 0.0, y0, 0.0, -pixel_size] # affine transform (x0, px, 0, y0, 0, -px)
+#
+#     for key, meta in zarr_out_dict.items():
+#         dtype = meta["dtype"]
+#         fill_value = meta["fill_value"]
+#         compressor = meta["compressors"]
+#
+#         # lazily-shaped array => metadata-only write on to_zarr with compute=False
+#         var = xr.DataArray(
+#             da.empty((height, width), dtype=dtype, chunks=chunks),
+#             dims=("y", "x"),
+#             coords={"y": y, "x": x},
+#             name=key,
+#             attrs={},   # per-variable attrs go here if we want to add them later on (like units)
+#         )
+#         ds = xr.Dataset({key: var}, attrs=global_attrs)
+#
+#         ds[key].encoding = {
+#             "chunks": chunks,
+#             "compressors": compressor,
+#             "dtype": dtype,
+#             "fill_value": fill_value,
+#         }
+#
+#         # s3 output path
+#         s3_prefix = meta["zarr_root_s3"].rstrip("/")
+#         store_url = f"{s3_prefix}/{key}.zarr"
+#
+#         # metadata-only create on S3
+#         ds.to_zarr(
+#             store_url,
+#             mode="w",
+#             compute=False,  # metadata only; no chunk writes now
+#             consolidated=False  # consolidate at the very end
+#         )
+
+
+# Creates empty global zarr stores for provided key in zarr_out_dict, using per-key dtype, fill_value, and compressor.
+# Key becomes one store: <zarr_root_local>/<key>.zarr
 # Does not write any data; just array metadata + coords.
-def init_global_zarrs_to_s3(zarr_out_dict, chunk_size, crs_wkt = None, common_attrs = None):
+def init_global_zarr(key, dtype, fill_value, compressor, chunk_size, zarr_root_local, crs_wkt = None, common_attrs = None):
+
+    logger_worker = lu.setup_logging_worker()
+    lu.print_and_log(f"Starting zarr creation step for {key}: {uu.timestr()}", False, logger_worker)
+    start_time = time.time()
 
     height = cn.global_height
     width = cn.global_width
@@ -150,7 +213,7 @@ def init_global_zarrs_to_s3(zarr_out_dict, chunk_size, crs_wkt = None, common_at
     x0 = cn.origin_x
     pixel_size = cn.resolution
 
-    chunk_pixels = int(round(chunk_size/pixel_size))
+    chunk_pixels = int(round(chunk_size / pixel_size))
     chunks = (chunk_pixels, chunk_pixels)
 
     y = np.arange(height, dtype=np.int64)
@@ -163,39 +226,62 @@ def init_global_zarrs_to_s3(zarr_out_dict, chunk_size, crs_wkt = None, common_at
         global_attrs["crs_wkt"] = crs_wkt
     global_attrs["transform"] = [x0, pixel_size, 0.0, y0, 0.0, -pixel_size] # affine transform (x0, px, 0, y0, 0, -px)
 
-    for key, meta in zarr_out_dict.items():
-        dtype = meta["dtype"]
-        fill_value = meta["fill_value"]
-        compressor = meta["compressors"]
+    # lazily-shaped array => metadata-only write on to_zarr with compute=False
+    var = xr.DataArray(
+        da.empty((height, width), dtype=dtype, chunks=chunks),
+        dims=("y", "x"),
+        coords={"y": y, "x": x},
+        name=key,
+        attrs={},   # per-variable attrs go here if we want to add them later on (like units)
+    )
+    ds = xr.Dataset({key: var}, attrs=global_attrs)
 
-        # lazily-shaped array => metadata-only write on to_zarr with compute=False
-        var = xr.DataArray(
-            da.empty((height, width), dtype=dtype, chunks=chunks),
-            dims=("y", "x"),
-            coords={"y": y, "x": x},
-            name=key,
-            attrs={},   # per-variable attrs go here if we want to add them later on (like units)
-        )
-        ds = xr.Dataset({key: var}, attrs=global_attrs)
+    ds[key].encoding = {
+        "chunks": chunks,
+        "compressor": compressor,
+        "dtype": dtype,
+        "fill_value": fill_value,
+    }
 
-        ds[key].encoding = {
-            "chunks": chunks,
-            "compressors": compressor,
-            "dtype": dtype,
-            "fill_value": fill_value,
-        }
+    local_store = f"{zarr_root_local.rstrip('/')}/{key}.zarr"
 
-        # s3 output path
-        s3_prefix = meta["zarr_root_s3"].rstrip("/")
-        store_url = f"{s3_prefix}/{key}.zarr"
+    ds.to_zarr(
+        local_store,
+        mode="w",
+        compute=False,  # metadata only; no chunk writes now
+        consolidated=False  # consolidate at the very end
+    )
 
-        # metadata-only create on S3
-        ds.to_zarr(
-            store_url,
-            mode="w",
-            compute=False,  # metadata only; no chunk writes now
-            consolidated=False  # consolidate at the very end
-        )
+    if os.path.exists(local_store):
+        end_time = time.time()
+        lu.print_and_log(f"Successfully finished zarr creation step for {key} in {round(end_time - start_time)}", False, logger_worker)
+    else:
+        raise RuntimeError(f"Failed to create global zarr locally for {key}")
+    #TODO: update with Justin's code to create empty zarrs and compare time
+
+
+# Upload empty global zarr to S3 then clean up local staging directory.
+def upload_global_zarr(key, s3_path, zarr_root_local):
+
+    logger_worker = lu.setup_logging_worker()
+    start_time = time.time()
+
+    # Upload local zarr to s3
+    local_store = f"{zarr_root_local.rstrip('/')}/{key}.zarr"
+    s3_store = f"{s3_path.rstrip('/')}/{os.path.basename(local_store)}"
+
+    lu.print_and_log(f"Starting zarr upload step for {key}. {local_store} -> {s3_store}: {uu.timestr()}", False, logger_worker)
+    fs = fsspec.filesystem("s3", anon=False)
+    fs.put(local_store, s3_store, recursive=True)
+
+    # Clean local tmp environment
+    if uu.check_s3_file_created(s3_store):
+        end_time = time.time()
+        lu.print_and_log(f"Successfully uploaded {local_store} to {s3_store} in {round(end_time - start_time)} seconds.", False, logger_worker)
+        lu.print_and_log(f"Cleaning up local staging directory: {local_store}: {uu.timestr()}", False, logger_worker)
+        shutil.rmtree(local_store)
+    else:
+        raise RuntimeError(f"Failed to upload {local_store} to {s3_store}")
 
 #Calculate global zarr index position from chunk bounds
 def calculate_zarr_idx(bounds):
@@ -235,37 +321,7 @@ def write_chunk_to_zarrs(zarr_out_dict, arrays_by_name, bounds):
         # Use "r+" to write directly to S3
         ds.to_zarr(store_url, mode="r+", region=region)
 
-# Consolidate zarr metadata locally and upload each variable to S3 once. Then clean up local staging directory.
-# def finalize_and_upload_global_zarrs(zarr_root_local, zarr_out_dict):
-#     logger_worker = lu.setup_logging_worker()
-#     lu.print_and_log(f"Consolidating metadata for staged zarrs in: {zarr_root_local}: {uu.timestr()}", False, logger_worker)
-#
-#     # 1) consolidate metadata locally (write .zmetadata)
-#     for key in zarr_out_dict.keys():
-#         local_store = os.path.join(zarr_root_local, f"{key}.zarr")
-#         if not os.path.isdir(local_store):
-#             lu.print_and_log(f"Skipping missing local zarr for {key} - {local_store}: {uu.timestr()}", False, logger_worker)
-#             continue
-#         mapper = fsspec.get_mapper(local_store)
-#         zarr.consolidate_metadata(mapper)
-#
-#     # 2) single upload per store to S3
-#     fs = fsspec.filesystem("s3", anon=False)
-#     lu.print_and_log(f"Starting zarr upload step: {uu.timestr()}", False, logger_worker)
-#     for key, meta in zarr_out_dict.items():
-#         if "zarr_root_s3" not in meta or not meta["zarr_root_s3"]:
-#             raise ValueError(f"zarr_out_dict['{key}'] missing required 'zarr_root_s3' path")
-#
-#         local_store = os.path.join(zarr_root_local, f"{key}.zarr")
-#         s3_prefix = meta["zarr_root_s3"].rstrip("/")
-#         s3_store = f"{s3_prefix}/{os.path.basename(local_store)}"
-#
-#         lu.print_and_log(f"Uploading {local_store} -> {s3_store}", False, logger_worker)
-#         fs.put(local_store, s3_store, recursive=True)
-#
-#     # 3) clean local tmp environment
-#     lu.print_and_log(f"Upload complete. Cleaning up local staging directory: {zarr_root_local}: {uu.timestr()}", False, logger_worker)
-#     shutil.rmtree(zarr_root_local, ignore_errors=True)
+
 
 def finalize_global_zarrs_on_s3(zarr_out_dict):
     logger_worker = lu.setup_logging_worker()
@@ -2495,7 +2551,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         main_logger.info(f"output_dir_list for {stage}:")
         for item in output_dir_list:
             main_logger.info(f"  {item}")
-    #TODO @David this includes composite_primary_forest paths for all years, but we only want to output for 2016, right?
 
     # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
     # Needs to by a numpy array for the numba function to use it.
@@ -2520,11 +2575,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                                                      '6_sett_infrastr_EF', '7_natrl_dist_EF'])
 
 
-    #Initialize global zarrs
-    #zarr_root_local = tempfile.mkdtemp(prefix="zarr_")
-    #zarr_root_local = "/tmp/zarr/"         #TODO delete
-    main_logger.info(f"Staging global zarrs creation: {uu.timestr()}")
-    zarr_start = time.time()
+
 
     # Decide which datasets to output as global zarrs
     keep_patterns = [
@@ -2542,12 +2593,38 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     #     for k, v in meta.items():
     #         print(f"  {k}: {v}")
 
-    # TODO: This step is slow so cluster is timing out.
-    init_global_zarrs_to_s3(zarr_out_dict, chunk_size, crs_wkt=None, common_attrs={"grid_mapping": "epsg:4326"})
-    zarr_end = time.time()
-    main_logger.info(f"Finished initializing global zarrs in {round(zarr_end - zarr_start)} seconds")
-    # TODO: Double check the height, width, origin_y, origin_x, pixel_size, and chunks are correct.
-    # TODO: Can also try using region="auto" as Justin recommended instead  explicit index
+    # Initialize global zarrs
+    zarr_root_local = tempfile.mkdtemp(prefix="zarr_")
+    main_logger.info(f"Staging global zarrs locally at: {zarr_root_local}")
+    zarr_start = time.time()
+
+    zarr_tasks = []
+    for key, meta in zarr_out_dict.items():
+        dtype = meta["dtype"]
+        fill_value = meta["fill_value"]
+        compressor = meta["compression"]
+        zarr_task = client.submit(init_global_zarr, key, dtype, fill_value, compressor, chunk_size, zarr_root_local,
+                               crs_wkt=None, common_attrs={"grid_mapping": "epsg:4326"})
+        zarr_tasks.append(zarr_task)
+    zarr_results = client.gather(zarr_tasks)
+
+    zarrs_created = time.time()
+    main_logger.info(f"Finished staging global zarrs locally in {round(zarrs_created-zarr_start)} seconds")
+
+    # Upload locally staged, empty global zarrs to s3
+    main_logger.info(f"Uploading global zarrs to s3")
+
+    upload_tasks = []
+    for key, meta in zarr_out_dict.items():
+        s3_path = meta["zarr_root_s3"]
+        upload_task = client.submit(upload_global_zarr, key, s3_path, zarr_root_local)
+        upload_tasks.append(upload_task)
+    upload_results = client.gather(upload_tasks)
+
+    zarrs_uploaded = time.time()
+    main_logger.info(f"Finished uploading global zarrs to s3 in {round(zarrs_uploaded - zarrs_created)} seconds")
+    # TODO: compare creation time with the code Justin sent
+    # TODO: Can also try using region="auto" as Justin recommended instead explicit index
 
     ### Step 2: Create 1x1 degree outputs
 
