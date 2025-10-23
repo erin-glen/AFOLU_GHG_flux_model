@@ -2,7 +2,7 @@ import numpy as np
 import zarr
 import fsspec
 import coiled
-from dask.distributed import Client
+from dask.distributed import Client, print
 
 
 # Project imports
@@ -138,6 +138,8 @@ if __name__ == "__main__":
 
     # Step 5: Validate one region
     check_region_min_max("carbon_density_AGC", 0)
+    check_region_min_max("flux_NEE", 3)
+    check_region_min_max("forest_mask", 7)
 
     # Step 6: Consolidate metadata
     consolidate_metadata()
