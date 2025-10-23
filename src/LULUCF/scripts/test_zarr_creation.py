@@ -1,4 +1,6 @@
 import numpy as np
+import xarray as xr
+import dask.array as da
 import zarr
 import fsspec
 import coiled
@@ -15,7 +17,7 @@ from src.utilities import resize_cluster
 # ──────────────────────────────
 # CONFIGURATION
 # ──────────────────────────────
-store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_2_zarr_testing/global_outputs.zarr"
+store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/global_outputs.zarr"
 
 dataset_keys = [
     "carbon_density_AGC",
@@ -33,6 +35,11 @@ chunks = (1, 1000, 1000)
 dtype = "float32"
 fill_value = 0.0
 
+# Lat/lon coordinate arrays
+lats = np.arange(90.0 - resolution / 2, -90, -resolution)[:lat_size]
+lons = np.arange(-180.0 + resolution / 2, 180, resolution)[:lon_size]
+years = np.arange(n_years)
+
 # Target region: 49–50N, 10–11E
 target_box = {
     "lat_min": 49.0,
@@ -49,8 +56,13 @@ def create_global_output_zarr(store_url, dataset_keys, n_years, lat_size, lon_si
     """Create a global Zarr group with multiple datasets (year, lat, lon)."""
     fs = fsspec.filesystem("s3", anon=False)
     mapper = fs.get_mapper(store_url)
-    root = zarr.group(store=mapper, overwrite=True)
 
+    # Step 1: Explicitly create a group and write root metadata
+    root = zarr.open_group(store=mapper, mode="w")
+    root.attrs["description"] = "Global outputs with multiple datasets and years"
+    print("✅ Root Zarr group created.")
+
+    # Step 2: Create datasets inside the group
     for key in dataset_keys:
         root.create_dataset(
             name=key,
@@ -58,10 +70,83 @@ def create_global_output_zarr(store_url, dataset_keys, n_years, lat_size, lon_si
             chunks=chunks,
             dtype=dtype,
             fill_value=fill_value,
+            overwrite=True,
         )
         print(f"✅ Created dataset: {key} shape={(n_years, lat_size, lon_size)}")
 
     print(f"✅ Zarr group created at {store_url}")
+
+def initialize_zarr_with_coords(
+    store_url: str,
+    dataset_keys: list[str],
+    n_years: int,
+    resolution: float = 0.00025,
+    dtype: str = "float32",
+    fill_value: float = np.nan,
+    chunks: tuple[int, int, int] = (1, 4000, 4000),
+):
+    """
+    Create a Zarr store on S3 with coordinate arrays (x/y/year),
+    spatial_ref metadata, and dataset definitions WITHOUT allocating global arrays.
+    """
+
+    # Compute dimensions
+    lat_size = int(180 / resolution)
+    lon_size = int(360 / resolution)
+
+    # Create coordinate arrays
+    lats = np.arange(90.0 - resolution / 2, -90, -resolution)[:lat_size]
+    lons = np.arange(-180.0 + resolution / 2, 180, resolution)[:lon_size]
+    years = np.arange(n_years)
+
+    # Spatial reference (CRS metadata)
+    spatial_attrs = {
+        "grid_mapping_name": "latitude_longitude",
+        "epsg_code": 4326,
+        "semi_major_axis": 6378137.0,
+        "inverse_flattening": 298.257223563,
+    }
+
+    # Use Dask arrays filled lazily (no memory blowup)
+    data_vars = {}
+    for key in dataset_keys:
+        print(f"{key}: {uu.timestr()}")
+        dask_data = da.full(
+            (n_years, lat_size, lon_size),
+            fill_value,
+            dtype=dtype,
+            chunks=chunks
+        )
+
+        data_vars[key] = xr.DataArray(
+            dask_data,
+            dims=("year", "y", "x"),
+            coords={"year": years, "y": lats, "x": lons},
+            name=key,
+            attrs={"grid_mapping": "spatial_ref"},
+        )
+
+    # Construct dataset
+    print(f"Constructing dataset: {uu.timestr()}")
+    ds = xr.Dataset(
+        data_vars=data_vars,
+        coords={
+            "x": lons,
+            "y": lats,
+            "year": years,
+            "spatial_ref": 0,
+        },
+    )
+
+    ds["spatial_ref"].attrs = spatial_attrs
+
+    # Write metadata only (lazy)
+    print(f"Writing metadata: {uu.timestr()}")
+    fs = fsspec.filesystem("s3", anon=False)
+    mapper = fs.get_mapper(store_url)
+    ds.to_zarr(mapper, mode="w", compute=False, consolidated=False)
+
+    print(f"✅ Initialized spatial Zarr metadata at {store_url}: {uu.timestr()}")
 
 
 def latlon_to_indices(lat, lon):
@@ -99,16 +184,8 @@ def check_region_min_max(dataset_key, year_idx):
     lat1, lon1 = latlon_to_indices(target_box["lat_min"], target_box["lon_max"])
 
     region = z[dataset_key][year_idx, lat0:lat1, lon0:lon1]
-    print(f"🔍 {dataset_key} year {year_idx}: min={region.min():.4f}, mean={region.mean():.4f}, max={region.max():.4f}")
+    print(f"🔍 {dataset_key} year {year_idx}: min={region.min()}, mean={region.mean()}, max={region.max()}")
 
-
-def consolidate_metadata():
-    """Consolidate Zarr metadata into a single .zmetadata file."""
-    fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(store_url)
-    print("📦 Consolidating metadata...")
-    zarr.consolidate_metadata(mapper)
-    print("✅ Metadata consolidated.")
 
 
 # ──────────────────────────────
@@ -116,7 +193,8 @@ def consolidate_metadata():
 # ──────────────────────────────
 if __name__ == "__main__":
     # Step 1: Create empty Zarr store (only once)
-    create_global_output_zarr(store_url, dataset_keys, n_years, lat_size, lon_size, chunks)
+    # create_global_output_zarr(store_url, dataset_keys, n_years, lat_size, lon_size, chunks)
+    initialize_zarr_with_coords(store_url, dataset_keys, n_years)
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster("zarr_testing", False)
@@ -138,8 +216,5 @@ if __name__ == "__main__":
 
     # Step 5: Validate one region
     check_region_min_max("carbon_density_AGC", 0)
-    check_region_min_max("flux_NEE", 3)
-    check_region_min_max("forest_mask", 7)
-
-    # Step 6: Consolidate metadata
-    consolidate_metadata()
+    check_region_min_max("carbon_density_BGC", 1)
+    # check_region_min_max("flux_NEE", 2)
