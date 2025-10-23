@@ -68,12 +68,20 @@ from src.utilities import resize_cluster
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
 os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
+def latlon_to_indices(lat, lon, resolution=0.00025):
+    lat_max = 90.0
+    lon_min = -180.0
 
+    lat_idx = int(round((lat_max - lat) / resolution))
+    lon_idx = int(round((lon - lon_min) / resolution))
+
+    return lat_idx, lon_idx
+
+# All zarr elements from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
 def initialize_zarr_with_coords(
     store_url: str,
     dataset_keys: list[str],
     n_years: int,
-    resolution: float = 0.00025,
     dtype: str = "float32",
     fill_value: float = np.nan,
     chunks: tuple[int, int, int] = (1, 4000, 4000),
@@ -84,12 +92,12 @@ def initialize_zarr_with_coords(
     """
 
     # Compute dimensions
-    lat_size = int(180 / resolution)
-    lon_size = int(360 / resolution)
+    lat_size = int(180 / cn.resolution)
+    lon_size = int(360 / cn.resolution)
 
     # Create coordinate arrays
-    lats = np.arange(90.0 - resolution / 2, -90, -resolution)[:lat_size]
-    lons = np.arange(-180.0 + resolution / 2, 180, resolution)[:lon_size]
+    lats = np.arange(90.0 - cn.resolution / 2, -90, -cn.resolution)[:lat_size]
+    lons = np.arange(-180.0 + cn.resolution / 2, 180, cn.resolution)[:lon_size]
     years = np.arange(n_years)
 
     # Spatial reference (CRS metadata)
@@ -142,9 +150,8 @@ def initialize_zarr_with_coords(
 
     z = zarr.open_group(mapper, mode="r")
     print(f"Zarr group info: {z.info}")
-    print(f"Zarr tree: {z.tree}")
 
-    print(f"✅ Initialized spatial Zarr metadata at {store_url}: {uu.timestr()}")
+    print(f"Initialized spatial Zarr metadata at {store_url}: {uu.timestr()}")
 
 
 # Function to calculate LULUCF fluxes and carbon densities
@@ -2020,31 +2027,33 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     uu.rename_s3_task_file(stage, bounds, "zarr_population_", is_final, logger_worker)
     zarr_start = time.time()
     fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/{cn.agc_modeled_dens_pattern}")
+    mapper = fs.get_mapper(f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/")
     z = zarr.open(mapper, mode="r+")
+    print("Z:", z)
+    print("Available datasets:", list(z.array_keys()))
+    print(f"Accessing dataset: {cn.agc_modeled_dens_pattern}")
+    print("Type of z[...] object:", type(z[cn.agc_modeled_dens_pattern]))
+    print("Zarr dtype:", z[cn.agc_modeled_dens_pattern].dtype)
+    print("Target slice shape:", (bounds[1] - bounds[3], bounds[2] - bounds[0]))
 
-    print(f"Worker writing {cn.agc_modeled_dens_pattern} for 2016 for {bounds_str}: {uu.timestr()}")
+    print(f"Worker writing {cn.agc_modeled_dens_pattern} for 2016 for {bounds_str} to zarr: {uu.timestr()}")
+
+    # Convert bounding box corners to indices
+    lat_start, lon_start = latlon_to_indices(bounds[3], bounds[0])  # north, west
+    lat_end, lon_end = latlon_to_indices(bounds[1], bounds[2])  # south, east
 
     # Write data
     data = out_dict_all_dtypes[f"{cn.agc_modeled_dens_pattern}_ha_2016"]
     print(data)
-    z[cn.agc_modeled_dens_pattern][2016, bounds[3]:bounds[1], bounds[0]:bounds[2]] = data
-    print(z)
-
-    # # Match LULUCF arrays to their corresponding zarrs (out_dict_all_dtypes keys --> zarr_out_dict keys)
-    # arrays_by_name = {}
-    # for key, arr in out_dict_all_dtypes.items():
-    #     if key in zarr_out_dict:
-    #         arrays_by_name[key] = arr
-    #
-    # # Compute the global pixel window for this chunk using the global georeference
-    # if arrays_by_name:
-    #     # Append arrays into each variable’s store using region write
-    #     write_chunk_to_zarrs(zarr_out_dict, arrays_by_name, bounds)
+    z[cn.agc_modeled_dens_pattern][
+    0,  # year index
+        lat_start:lat_end,  # rows (Y)
+        lat_start:lat_end,  # columns (X)
+    ] = data
 
     # Check min, mean and max values for chunk in the zarr
     z = zarr.open(mapper, mode="r")
-    region = z["carbon_density__AGC__MgC"][2016, bounds[3]:bounds[1], bounds[0]:bounds[2]]
+    region = z["carbon_density__AGC__MgC"][0, lat_start:lat_end, lat_start:lat_end]
     print(f"🔍 {"carbon_density__AGC__MgC"} year {2016}: min={region.min()}, mean={region.mean()}, max={region.max()}")
 
     zarr_end = time.time()
