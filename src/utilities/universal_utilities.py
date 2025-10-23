@@ -100,12 +100,16 @@ def upload_s3_file(s3_path, local_path):
     bucket, key = split_s3_path(s3_path)
     s3.upload_file(local_path, Bucket=bucket, Key=key)
 
-def check_s3_file_created(s3_path, main_logger):
+def check_s3_file_created(s3_path):
+
+    logger_worker = lu.setup_logging_worker()
+
     s3 = boto3.client('s3')
     bucket, key = split_s3_path(s3_path)
+
     try:
         s3.head_object(Bucket=bucket, Key=key)
-        main_logger.info(f"File successfully created at: {s3_path}")
+        lu.print_and_log.info(f"File successfully created at: {s3_path}", False, logger_worker)
         return True
     except s3.exceptions.ClientError as e:
         if e.response['Error']['Code'] == "404":

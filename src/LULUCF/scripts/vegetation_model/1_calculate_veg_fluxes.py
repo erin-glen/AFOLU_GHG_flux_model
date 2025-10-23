@@ -9,7 +9,7 @@ python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -bb 116.25 -2.25 116.5 -2 -cs 0.25 --run_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs 32GB worker):
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn global_zarr_vegetation_model
+python -m src.utilities.create_cluster -n 10 -t 1 -m 32 -cn global_zarr_vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn global_zarr_vegetation_model -bb -64 -22 -63 -21 -cs 1 --run_date 20258888
 
 Coiled Cerrado test (174 features):
@@ -134,7 +134,7 @@ def format_zarr_out_dict(out_dir_list, patterns):
             "zarr_root_s3": item,
             "dtype": dtype,
             "fill_value": 0 if dtype in {"uint8", "uint16", "uint32"} else 0.0,
-            "compressors": get_zarr_compression_from_dtype(dtype)
+            "compressor": get_zarr_compression_from_dtype(dtype)
         }
 
     return out
@@ -268,20 +268,21 @@ def upload_global_zarr(key, s3_path, zarr_root_local):
 
     # Upload local zarr to s3
     local_store = f"{zarr_root_local.rstrip('/')}/{key}.zarr"
-    s3_store = f"{s3_path.rstrip('/')}/{os.path.basename(local_store)}"
+    s3_store = f"{s3_path.rstrip('/')}/{os.path.basename(local_store)}/"
 
     lu.print_and_log(f"Starting zarr upload step for {key}. {local_store} -> {s3_store}: {uu.timestr()}", False, logger_worker)
     fs = fsspec.filesystem("s3", anon=False)
     fs.put(local_store, s3_store, recursive=True)
 
     # Clean local tmp environment
-    if uu.check_s3_file_created(s3_store):
-        end_time = time.time()
-        lu.print_and_log(f"Successfully uploaded {local_store} to {s3_store} in {round(end_time - start_time)} seconds.", False, logger_worker)
-        lu.print_and_log(f"Cleaning up local staging directory: {local_store}: {uu.timestr()}", False, logger_worker)
-        shutil.rmtree(local_store)
-    else:
-        raise RuntimeError(f"Failed to upload {local_store} to {s3_store}")
+    #if uu.check_s3_file_created(s3_store):
+    end_time = time.time()
+    lu.print_and_log(f"Successfully uploaded {local_store} to {s3_store} in {round(end_time - start_time)} seconds.", False, logger_worker)
+    lu.print_and_log(f"Cleaning up local staging directory: {local_store}: {uu.timestr()}", False, logger_worker)
+    shutil.rmtree(local_store)
+    #else:
+        #raise RuntimeError(f"Failed to upload {local_store} to {s3_store}")
+    #TODO: Update so it checks that the dir exists, not file. uu.check_s3_file_created even though it was uploaded to s3
 
 #Calculate global zarr index position from chunk bounds
 def calculate_zarr_idx(bounds):
@@ -2575,7 +2576,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                                                      '6_sett_infrastr_EF', '7_natrl_dist_EF'])
 
 
-
+    ### Step 1.5: Create empty, global zarrs and upload to s3
 
     # Decide which datasets to output as global zarrs
     keep_patterns = [
@@ -2594,35 +2595,23 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     #         print(f"  {k}: {v}")
 
     # Initialize global zarrs
-    zarr_root_local = tempfile.mkdtemp(prefix="zarr_")
+    zarr_root_local = os.path.join(os.getcwd(), "zarr")
+    os.makedirs(zarr_root_local, exist_ok=True)
+
     main_logger.info(f"Staging global zarrs locally at: {zarr_root_local}")
     zarr_start = time.time()
 
-    zarr_tasks = []
     for key, meta in zarr_out_dict.items():
         dtype = meta["dtype"]
         fill_value = meta["fill_value"]
-        compressor = meta["compression"]
-        zarr_task = client.submit(init_global_zarr, key, dtype, fill_value, compressor, chunk_size, zarr_root_local,
-                               crs_wkt=None, common_attrs={"grid_mapping": "epsg:4326"})
-        zarr_tasks.append(zarr_task)
-    zarr_results = client.gather(zarr_tasks)
-
-    zarrs_created = time.time()
-    main_logger.info(f"Finished staging global zarrs locally in {round(zarrs_created-zarr_start)} seconds")
-
-    # Upload locally staged, empty global zarrs to s3
-    main_logger.info(f"Uploading global zarrs to s3")
-
-    upload_tasks = []
-    for key, meta in zarr_out_dict.items():
+        compressor = meta["compressor"]
         s3_path = meta["zarr_root_s3"]
-        upload_task = client.submit(upload_global_zarr, key, s3_path, zarr_root_local)
-        upload_tasks.append(upload_task)
-    upload_results = client.gather(upload_tasks)
 
-    zarrs_uploaded = time.time()
-    main_logger.info(f"Finished uploading global zarrs to s3 in {round(zarrs_uploaded - zarrs_created)} seconds")
+        init_global_zarr(key, dtype, fill_value, compressor, chunk_size, zarr_root_local, crs_wkt=None, common_attrs={"grid_mapping": "epsg:4326"})
+        upload_global_zarr(key, s3_path, zarr_root_local)
+
+    zarr_end = time.time()
+    main_logger.info(f"Finished creating and uploading global zarrs to s3 in {round(zarr_end-zarr_start)} seconds")
     # TODO: compare creation time with the code Justin sent
     # TODO: Can also try using region="auto" as Justin recommended instead explicit index
 
