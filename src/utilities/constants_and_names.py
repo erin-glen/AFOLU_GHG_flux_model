@@ -42,7 +42,8 @@ last_model_year_annual = 2024   # Last year of annual data
 years_annual = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
 interval_end_years_annual = years_annual[1:]
 
-possible_task_statuses = ["pending_", "loading_", "preprocessing_", "calculating_", "uploading_", "error_"]
+possible_task_statuses = ["pending_", "loading_", "preprocessing_", "calculating_",
+                          "zarr_population_", "uploading_", "error_"]
 
 # Model interval types
 intervals_five_years = "five_years"

@@ -50,7 +50,6 @@ import fsspec
 import tempfile
 import shutil
 
-
 from concurrent.futures import ThreadPoolExecutor
 
 from dask.distributed import print
@@ -69,338 +68,84 @@ from src.utilities import resize_cluster
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
 os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
-def get_dtype_from_pattern(pattern):
-    float32=[cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern, cn.litter_c_modeled_dens_pattern,
-        cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
-        cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
-        cn.ch4_flux_pattern, cn.n2o_flux_pattern, cn.agc_rf_pre_dist_pattern, cn.agc_emission_factor]
 
-    uint8 =[cn.composite_primary_forest, cn.gain_year_count_pattern, cn.max_height_since_last_time_not_tall_veg,
-        cn.first_time_sig_loss_from_max_height, cn.part_or_full_dist_in_earlier_intervals,
-        cn.part_or_full_dist_in_curr_interval, cn.times_burned_in_interval]
+def initialize_zarr_with_coords(
+    store_url: str,
+    dataset_keys: list[str],
+    n_years: int,
+    resolution: float = 0.00025,
+    dtype: str = "float32",
+    fill_value: float = np.nan,
+    chunks: tuple[int, int, int] = (1, 4000, 4000),
+):
+    """
+    Create a Zarr store on S3 with coordinate arrays (x/y/year),
+    spatial_ref metadata, and dataset definitions WITHOUT allocating global arrays.
+    """
 
-    uint16=[cn.forest_age_output_pattern, cn.most_recent_year_not_tall_veg]
+    # Compute dimensions
+    lat_size = int(180 / resolution)
+    lon_size = int(360 / resolution)
 
-    uint32=[cn.land_state_pattern]
+    # Create coordinate arrays
+    lats = np.arange(90.0 - resolution / 2, -90, -resolution)[:lat_size]
+    lons = np.arange(-180.0 + resolution / 2, 180, resolution)[:lon_size]
+    years = np.arange(n_years)
 
-    mapping={**{p: "float32" for p in float32 if p},
-             **{p: "uint8"   for p in uint8   if p},
-             **{p: "uint16"  for p in uint16  if p},
-             **{p: "uint32"  for p in uint32  if p}}
+    # Spatial reference (CRS metadata)
+    spatial_attrs = {
+        "grid_mapping_name": "latitude_longitude",
+        "epsg_code": 4326,
+        "semi_major_axis": 6378137.0,
+        "inverse_flattening": 298.257223563,
+    }
 
-    return mapping.get(pattern)
+    # Use Dask arrays filled lazily (no memory blowup)
+    data_vars = {}
+    for key in dataset_keys:
+        print(f"{key}: {uu.timestr()}")
+        dask_data = da.full(
+            (n_years, lat_size, lon_size),
+            fill_value,
+            dtype=dtype,
+            chunks=chunks
+        )
 
-def get_pixel_meaning_from_pattern(pattern):
-    flux_density = [cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
-                    cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
-                    cn.ch4_flux_pattern, cn.n2o_flux_pattern, cn.agc_rf_pre_dist_pattern]
+        data_vars[key] = xr.DataArray(
+            dask_data,
+            dims=("year", "y", "x"),
+            coords={"year": years, "y": lats, "x": lons},
+            name=key,
+            attrs={"grid_mapping": "spatial_ref"},
+        )
 
-    c_density = [cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern,
-                 cn.litter_c_modeled_dens_pattern]
-
-    mapping = {**{p: cn.flux_density_pixel_meaning for p in flux_density if p},
-               **{p: cn.C_density_pixel_meaning   for p in c_density if p}}
-
-    return mapping.get(pattern, "")
-
-#Compression types for global zarrs
-# lz4 is extremely fast, shuffling doesn’t help uint8 (single-byte) but does for uint16
-# zstd gives much better ratios on floats and bitshuffle usually does better than shuffle (byte-shuffle is best for integers)
-# 0 = noshuffle
-# 1 = shuffle
-# 2 = bitshuffle
-def get_zarr_compression_from_dtype(dtype):
-    if dtype == "float32":
-        return Blosc(cname="zstd", clevel=5, shuffle=2)
-    elif dtype == "uint8":
-        return Blosc(cname="lz4", clevel=2, shuffle=0)
-    elif dtype == "uint16":
-        return Blosc(cname="lz4", clevel=2, shuffle=1)
-    elif dtype == "uint32":
-        return Blosc(cname="zstd", clevel=4, shuffle=1)
-    else:
-        raise ValueError(f"dtype {dtype} is not a valid datatype")
-
-#Create zarr output dictionary from output s3_list
-def format_zarr_out_dict(out_dir_list, patterns):
-    out = {}
-    for item in out_dir_list:
-        match = next((p for p in patterns if p and p in item), None)
-        pixel_meaning = get_pixel_meaning_from_pattern(match)
-        year = item.rstrip("/").split("/")[-4]
-        dtype = get_dtype_from_pattern(match)
-
-        out[f"{match}{pixel_meaning}_{year}"] = {
-            "zarr_root_s3": item,
-            "dtype": dtype,
-            "fill_value": 0 if dtype in {"uint8", "uint16", "uint32"} else 0.0,
-            "compressor": get_zarr_compression_from_dtype(dtype)
-        }
-
-    return out
-
-# # Creates empty global zarr stores for every key in zarr_out_dict, using per-key dtype, fill_value, compressor.
-# # Each key in zarr_out_dict becomes one store: <zarr_root_local>/<key>.zarr
-# # Does not write any data; just array metadata + coords.
-# def init_global_zarrs_to_s3(zarr_out_dict, chunk_size, crs_wkt = None, common_attrs = None):
-#
-#     height = cn.global_height
-#     width = cn.global_width
-#     y0 = cn.origin_y
-#     x0 = cn.origin_x
-#     pixel_size = cn.resolution
-#
-#     chunk_pixels = int(round(chunk_size/pixel_size))
-#     chunks = (chunk_pixels, chunk_pixels)
-#
-#     y = np.arange(height, dtype=np.int64)
-#     x = np.arange(width, dtype=np.int64)
-#
-#     global_attrs = {}
-#     if common_attrs:
-#         global_attrs.update(common_attrs)
-#     if crs_wkt:
-#         global_attrs["crs_wkt"] = crs_wkt
-#     global_attrs["transform"] = [x0, pixel_size, 0.0, y0, 0.0, -pixel_size] # affine transform (x0, px, 0, y0, 0, -px)
-#
-#     for key, meta in zarr_out_dict.items():
-#         dtype = meta["dtype"]
-#         fill_value = meta["fill_value"]
-#         compressor = meta["compressors"]
-#
-#         # lazily-shaped array => metadata-only write on to_zarr with compute=False
-#         var = xr.DataArray(
-#             da.empty((height, width), dtype=dtype, chunks=chunks),
-#             dims=("y", "x"),
-#             coords={"y": y, "x": x},
-#             name=key,
-#             attrs={},   # per-variable attrs go here if we want to add them later on (like units)
-#         )
-#         ds = xr.Dataset({key: var}, attrs=global_attrs)
-#
-#         ds[key].encoding = {
-#             "chunks": chunks,
-#             "compressors": compressor,
-#             "dtype": dtype,
-#             "fill_value": fill_value,
-#         }
-#
-#         # s3 output path
-#         s3_prefix = meta["zarr_root_s3"].rstrip("/")
-#         store_url = f"{s3_prefix}/{key}.zarr"
-#
-#         # metadata-only create on S3
-#         ds.to_zarr(
-#             store_url,
-#             mode="w",
-#             compute=False,  # metadata only; no chunk writes now
-#             consolidated=False  # consolidate at the very end
-#         )
-
-from zarr.array import Array
-
-# Creates empty global zarr stores for provided key in zarr_out_dict, using per-key dtype, fill_value, and compressor.
-# Key becomes one store: <zarr_root_local>/<key>.zarr
-# Does not write any data; just array metadata + coords.
-def init_global_zarr(key, dtype, fill_value, compressor, chunk_size, zarr_root_local,
-                     crs_wkt=None, common_attrs=None):
-    logger_worker = lu.setup_logging_worker()
-    lu.print_and_log(f"Starting zarr creation step for {key}: {uu.timestr()}", False, logger_worker)
-    start_time = time.time()
-
-    # height = cn.global_height
-    # width = cn.global_width
-    # y0 = cn.origin_y
-    # x0 = cn.origin_x
-    # pixel_size = cn.resolution
-    #
-    # chunk_pixels = int(round(chunk_size / pixel_size))
-    # chunks = (chunk_pixels, chunk_pixels)
-    #
-    # y = np.arange(height, dtype=np.int64)
-    # x = np.arange(width, dtype=np.int64)
-    #
-    # global_attrs = {}
-    # if common_attrs:
-    #     global_attrs.update(common_attrs)
-    # if crs_wkt:
-    #     global_attrs["crs_wkt"] = crs_wkt
-    # global_attrs["transform"] = [x0, pixel_size, 0.0, y0, 0.0, -pixel_size]
-
-    # # ✅ Force fill_value to Python float
-    # fill_value = float(fill_value)
-    #
-    # # ✅ Use dask array to avoid memory blowup
-    # arr = da.full((height, width), fill_value, dtype=dtype, chunks=chunks)
-
-    # Target location on S3
-    # store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_2_zarr_testing/test.zarr"
-    year = key[-4:]
-    store_url = f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_2_zarr_testing/carbon_density__AGC__MgC/standard_model/annual_intervals/{year}/_ha/4000_pixels/20251023/{key}.zarr"
-
-    height = cn.global_height
-    width = cn.global_width
-    chunk_pixels = int(round(chunk_size / cn.resolution))
-    chunks = (chunk_pixels, chunk_pixels)
-
-    # Set up the S3 store and group
-    store = fsspec.get_mapper(store_url)
-    root = zarr.group(store=store, overwrite=True)
-
-    # Create array manually and assign to group
-    arr = Array.create(
-        shape=(height, width),
-        chunks=chunks,
-        dtype=dtype,
-        fill_value=float(fill_value),
-        compressor=compressor,
-        store=store,
-        path=key,  # put it under the group with the name `key`
-        overwrite=True
+    # Construct dataset
+    print(f"Constructing dataset: {uu.timestr()}")
+    ds = xr.Dataset(
+        data_vars=data_vars,
+        coords={
+            "x": lons,
+            "y": lats,
+            "year": years,
+            "spatial_ref": 0,
+        },
     )
 
-    # Optionally: assign to group (if you're doing group-style access later)
-    root.arrays[key] = arr
+    ds["spatial_ref"].attrs = spatial_attrs
+    print(f"dataset info: {ds}")
 
-    print(f"Zarr array created at: {store_url}/{key}")
-    print(root)
-    print(root.info)
+    # Write metadata only (lazy)
+    print(f"Writing metadata: {uu.timestr()}")
+    fs = fsspec.filesystem("s3", anon=False)
+    mapper = fs.get_mapper(store_url)
+    ds.to_zarr(mapper, mode="w", compute=False, consolidated=False)
 
-    #
-    # da_xr = xr.DataArray(arr, dims=("y", "x"), coords={"y": y, "x": x}, name=key)
-    #
-    # # ✅ Set encoding
-    # da_xr.encoding = {
-    #     "chunks": chunks,
-    #     "compressor": compressor,
-    #     "dtype": dtype,
-    #     "fill_value": fill_value,
-    # }
-    #
-    # ds = xr.Dataset({key: da_xr}, attrs=global_attrs)
-    #
-    # local_store = f"{zarr_root_local.rstrip('/')}/{key}.zarr"
-    #
-    # # ✅ IMPORTANT: compute=True to ensure metadata is flushed correctly
-    # ds.to_zarr(
-    #     local_store,
-    #     mode="w",
-    #     compute=True,     # important: forces xarray to create array and avoid bad metadata
-    #     consolidated=False
-    # )
-    #
-    # if os.path.exists(local_store):
-    #     end_time = time.time()
-    #     lu.print_and_log(f"Successfully finished zarr creation step for {key} in {round(end_time - start_time)}", False, logger_worker)
-    # else:
-    #     raise RuntimeError(f"Failed to create global zarr locally for {key}")
+    z = zarr.open_group(mapper, mode="r")
+    print(f"Zarr group info: {z.info}")
+    print(f"Zarr tree: {z.tree}")
 
+    print(f"✅ Initialized spatial Zarr metadata at {store_url}: {uu.timestr()}")
 
-
-# # Upload empty global zarr to S3 then clean up local staging directory.
-# def upload_global_zarr(key, s3_path, zarr_root_local):
-#
-#     logger_worker = lu.setup_logging_worker()
-#     start_time = time.time()
-#
-#     # Upload local zarr to s3
-#     local_store = f"{zarr_root_local.rstrip('/')}/{key}.zarr"
-#     s3_store = f"{s3_path.rstrip('/')}/"
-#
-#     lu.print_and_log(f"Starting zarr upload step for {key}. {local_store} -> {s3_store}: {uu.timestr()}", False, logger_worker)
-#     fs = fsspec.filesystem("s3", anon=False)
-#     fs.put(local_store, s3_store, recursive=True)
-#
-#     # Clean local tmp environment
-#     #if uu.check_s3_file_created(s3_store):
-#     end_time = time.time()
-#     lu.print_and_log(f"Successfully uploaded {local_store} to {s3_store} in {round(end_time - start_time)} seconds.", False, logger_worker)
-#     lu.print_and_log(f"Cleaning up local staging directory: {local_store}: {uu.timestr()}", False, logger_worker)
-#     shutil.rmtree(local_store)
-#     #else:
-#         #raise RuntimeError(f"Failed to upload {local_store} to {s3_store}")
-#     #TODO: Update so it checks that the dir exists, not file. uu.check_s3_file_created even though it was uploaded to s3
-
-#Calculate global zarr index position from chunk bounds
-def calculate_zarr_idx(bounds):
-    x0_idx = int(round((bounds[0] - cn.origin_x) / cn.resolution))
-    x1_idx = int(round((bounds[2] - cn.origin_x) / cn.resolution))
-    y0_idx = int(round((cn.origin_y - bounds[3]) / cn.resolution))
-    y1_idx = int(round((cn.origin_y - bounds[1]) / cn.resolution))
-    return x0_idx, x1_idx, y0_idx, y1_idx
-
-# Append a single chunk to each variable's zarr using region writes.
-# Indices are 0-based pixel indices into the global grid.
-def write_chunk_to_zarrs(zarr_out_dict, arrays_by_name, bounds):
-    # Builds a small dataset with aligned dimsensions for each var we are writing in this call (loop by year)
-    # Writes each variable into its own store to reduce write conflicts.
-    x0_idx, x1_idx, y0_idx, y1_idx = calculate_zarr_idx(bounds)
-    h = y1_idx - y0_idx
-    w = x1_idx - x0_idx
-    region = {"y": slice(y0_idx, y1_idx), "x": slice(x0_idx, x1_idx)}
-
-    # Ensure 2D and native dtype
-    for name, arr in arrays_by_name.items():
-        if arr.ndim != 2:
-            raise ValueError(f"{name} must be 2D (y, x)")
-        if arr.shape != (h, w):
-            raise ValueError(f"{name} array shape {arr.shape} does not match target window {(h, w)} derived from bounds {bounds}")
-
-        # check that each
-        meta = zarr_out_dict.get(name)
-        print(meta)
-        print(type(meta['fill_value']))
-        if meta is None or not meta.get("zarr_root_s3"):
-            raise ValueError(f"Missing zarr_root_s3 for variable {name}")
-
-        ds = xr.Dataset({
-            name: xr.DataArray(np.asanyarray(arr, dtype=meta["dtype"]), dims=("y", "x"))
-        })
-        print(ds)
-
-        s3_prefix = meta["zarr_root_s3"].rstrip("/")
-        print(s3_prefix)
-        store_url = f"{s3_prefix}/{name}.zarr"
-        print(store_url)
-
-        # store = fsspec.get_mapper(store_url)
-        # z = zarr.open(store, mode="r")
-        # print(z.fill_value)
-        # print(type(z.fill_value))
-
-        # Use "r+" to write directly to S3
-        ds.to_zarr(store_url, mode="r+", region=region)
-
-        # store = fsspec.get_mapper(store_url)
-        # ds = xr.open_zarr(store, consolidated=False)
-        #
-        # # Access variable (use actual variable name)
-        # var = ds[name]
-        #
-        # # Compute min and max (lazy until .compute() is called)
-        # min_val = var.min().compute()
-        # max_val = var.max().compute()
-        #
-        # print(f"Min: {min_val.item()}, Max: {max_val.item()}")
-
-
-def finalize_global_zarrs_on_s3(zarr_out_dict):
-    logger_worker = lu.setup_logging_worker()
-    lu.print_and_log(f"Consolidating zarr metadata on S3 for {len(zarr_out_dict)} stores: {uu.timestr()}", False, logger_worker)
-
-    for key, meta in zarr_out_dict.items():
-        s3_prefix = meta.get("zarr_root_s3", "").rstrip("/")
-        if not s3_prefix:
-            raise ValueError(f"zarr_out_dict['{key}'] missing required 'zarr_root_s3' path")
-
-        s3_store = f"{s3_prefix}/{key}.zarr"
-        mapper = fsspec.get_mapper(s3_store)  # S3-aware mapper
-        zarr.consolidate_metadata(mapper)     # writes .zmetadata on S3
-
-        lu.print_and_log(f"Consolidated: {s3_store}", False, logger_worker)
-
-
-#TODO: Move these utilities to uu
 
 # Function to calculate LULUCF fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
@@ -2140,11 +1885,10 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
 
-
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                        download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                                       interval_length_list, interval_end_years, is_final, no_upload, output_folders, zarr_out_dict, stage):
+                                       interval_length_list, interval_end_years, is_final, no_upload, output_folders, zarr_patterns, stage):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -2160,7 +1904,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
-    print(f"{chunk_length_pixels=}")
+
 
     ### Part 1: Downloads all inputs for chunk.
     ### No checks about whether the chunk has data because the way the chunk_list is constructed,
@@ -2270,24 +2014,40 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
         # Clear memory of unneeded arrays
         del out_dict
 
+    # print(out_dict_all_dtypes)
 
-    # Match out_dict_all_dtypes keys to zarr_out_dict keys
     lu.print_and_log(f"Writing LULUCF fluxes and densities to global zarrs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-    uu.rename_s3_task_file(stage, bounds, "zarr_creation_", is_final, logger_worker)
+    uu.rename_s3_task_file(stage, bounds, "zarr_population_", is_final, logger_worker)
     zarr_start = time.time()
+    fs = fsspec.filesystem("s3", anon=False)
+    mapper = fs.get_mapper(f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/{cn.agc_modeled_dens_pattern}")
+    z = zarr.open(mapper, mode="r+")
 
-    # Match LULUCF arrays to their corresponding zarrs (out_dict_all_dtypes keys --> zarr_out_dict keys)
-    arrays_by_name = {}
-    for key, arr in out_dict_all_dtypes.items():
-        if key in zarr_out_dict:
-            arrays_by_name[key] = arr
+    print(f"Worker writing {cn.agc_modeled_dens_pattern} for 2016 for {bounds_str}: {uu.timestr()}")
 
-    # Compute the global pixel window for this chunk using the global georeference
-    if arrays_by_name:
-        # Append arrays into each variable’s store using region write
-        write_chunk_to_zarrs(zarr_out_dict, arrays_by_name, bounds)
+    # Write data
+    data = out_dict_all_dtypes[f"{cn.agc_modeled_dens_pattern}_ha_2016"]
+    print(data)
+    z[cn.agc_modeled_dens_pattern][2016, bounds[3]:bounds[1], bounds[0]:bounds[2]] = data
+    print(z)
+
+    # # Match LULUCF arrays to their corresponding zarrs (out_dict_all_dtypes keys --> zarr_out_dict keys)
+    # arrays_by_name = {}
+    # for key, arr in out_dict_all_dtypes.items():
+    #     if key in zarr_out_dict:
+    #         arrays_by_name[key] = arr
+    #
+    # # Compute the global pixel window for this chunk using the global georeference
+    # if arrays_by_name:
+    #     # Append arrays into each variable’s store using region write
+    #     write_chunk_to_zarrs(zarr_out_dict, arrays_by_name, bounds)
+
+    # Check min, mean and max values for chunk in the zarr
+    z = zarr.open(mapper, mode="r")
+    region = z["carbon_density__AGC__MgC"][2016, bounds[3]:bounds[1], bounds[0]:bounds[2]]
+    print(f"🔍 {"carbon_density__AGC__MgC"} year {2016}: min={region.min()}, mean={region.mean()}, max={region.max()}")
+
     zarr_end = time.time()
-
     lu.print_and_log(f"Memory usage after writing to_zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
     lu.print_and_log(f"Wrote outputs for {bounds_str} in {tile_id} to global zarrs in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}", False, logger_worker)
 
@@ -2639,42 +2399,18 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     ### Step 1.5: Create empty, global zarrs and upload to s3
 
     # Decide which datasets to output as global zarrs
-    keep_patterns = [
-        cn.agc_modeled_dens_pattern
-        # , cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern, cn.litter_c_modeled_dens_pattern,
+    zarr_patterns = [
+        cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern
+        # , cn.deadwood_c_modeled_dens_pattern, cn.litter_c_modeled_dens_pattern,
         # cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
         # cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
         # cn.ch4_flux_pattern, cn.n2o_flux_pattern, cn.land_state_pattern, cn.composite_primary_forest, cn.forest_age_output_pattern,
     ]
 
-    # Format zarrs into output dictionary based using the output_dir_list
-    zarr_output_dir_list = [s for s in output_dir_list if any(p in s for p in keep_patterns)]
-    zarr_out_dict = format_zarr_out_dict(zarr_output_dir_list, keep_patterns)
-    # for key, meta in zarr_out_dict.items():
-    #     print(key)
-    #     for k, v in meta.items():
-    #         print(f"  {k}: {v}")
+    # Create empty Zarr store (only once)
+    # create_global_output_zarr(store_url, dataset_keys, n_years)
+    initialize_zarr_with_coords(cn.outputs_path, zarr_patterns, len(interval_year_diff_list))
 
-    # Initialize global zarrs
-    zarr_root_local = os.path.join(os.getcwd(), "zarr")
-    os.makedirs(zarr_root_local, exist_ok=True)
-
-    main_logger.info(f"Staging global zarrs locally at: {zarr_root_local}")
-    zarr_start = time.time()
-
-    for key, meta in zarr_out_dict.items():
-        dtype = meta["dtype"]
-        fill_value = meta["fill_value"]
-        compressor = meta["compressor"]
-        s3_path = meta["zarr_root_s3"]
-
-        init_global_zarr(key, dtype, fill_value, compressor, chunk_size, zarr_root_local, crs_wkt=None, common_attrs={"grid_mapping": "epsg:4326"})
-        # upload_global_zarr(key, s3_path, zarr_root_local)
-
-    zarr_end = time.time()
-    main_logger.info(f"Finished creating and uploading global zarrs to s3 in {round(zarr_end-zarr_start)} seconds")
-    # TODO: compare creation time with the code Justin sent
-    # TODO: Can also try using region="auto" as Justin recommended instead explicit index
 
     ### Step 2: Create 1x1 degree outputs
 
@@ -2703,7 +2439,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
             future = client.submit(calculate_and_upload_LULUCF_fluxes,
                                    chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                    download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                                   interval_length_list, interval_end_years, is_final, no_upload, output_dir_list, zarr_out_dict, stage)
+                                   interval_length_list, interval_end_years, is_final, no_upload, output_dir_list, zarr_patterns, stage)
             futures.append(future)
 
         batch_results = client.gather(futures)
@@ -2729,8 +2465,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
-    # Finalize global zarrs on s3
-    finalize_global_zarrs_on_s3(zarr_out_dict)
 
     ### Step 3: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs
 
