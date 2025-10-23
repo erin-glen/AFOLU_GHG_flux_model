@@ -35,7 +35,7 @@ def create_empty_zarr():
     mapper = fs.get_mapper(store_url)
 
     # Create metadata-only array (no data is written)
-    zarr.create(
+    z = zarr.create(
         store=mapper,
         shape=shape,
         chunks=chunks,
@@ -44,7 +44,7 @@ def create_empty_zarr():
         overwrite=True
     )
 
-    print("Zarr metadata created:", store_url)
+    print(f"Zarr metadata created at {store_url}: {z}")
 
 
 def latlon_to_indices(lat, lon):
@@ -54,6 +54,7 @@ def latlon_to_indices(lat, lon):
     lat_idx = int(round((lat_max - lat) / resolution))
     lon_idx = int(round((lon - lon_min) / resolution))
     return lat_idx, lon_idx
+
 
 def write_chunk_to_zarr(lat0, lat1, lon0, lon1, store_url, value=12.0, dtype="float32"):
     """Function that will run on a Dask worker to write to Zarr."""
@@ -123,6 +124,7 @@ def consolidate_metadata():
     print("Consolidating Zarr metadata...")
     zarr.consolidate_metadata(mapper)
     print("Zarr metadata consolidation complete.")
+
 
 if __name__ == "__main__":
     create_empty_zarr()
