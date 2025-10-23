@@ -31,7 +31,6 @@ n_years = 9
 resolution = 0.00025
 lat_size = int(180 / resolution)   # 720000
 lon_size = int(360 / resolution)   # 1440000
-chunks = (1, 1000, 1000)
 dtype = "float32"
 fill_value = 0.0
 
@@ -139,6 +138,7 @@ def initialize_zarr_with_coords(
     )
 
     ds["spatial_ref"].attrs = spatial_attrs
+    print(ds)
 
     # Write metadata only (lazy)
     print(f"Writing metadata: {uu.timestr()}")
