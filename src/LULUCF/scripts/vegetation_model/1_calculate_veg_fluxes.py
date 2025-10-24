@@ -68,14 +68,6 @@ from src.utilities import resize_cluster
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
 os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
-def latlon_to_indices(lat, lon, resolution=0.00025):
-    lat_max = 90.0
-    lon_min = -180.0
-
-    lat_idx = int(round((lat_max - lat) / resolution))
-    lon_idx = int(round((lon - lon_min) / resolution))
-
-    return lat_idx, lon_idx
 
 # All zarr-related code from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
 # Creates a Zarr group with individual datasets on S3 with coordinate arrays (x/y/year),
@@ -113,7 +105,7 @@ def initialize_global_mega_zarr(
     # For each dataset, uses Dask arrays filled lazily (no memory blowup)
     data_vars = {}
     for key in dataset_keys:
-        main_logger.info(f"Creating {key}: {uu.timestr()}")
+        main_logger.info(f"Creating {key} in global mega-zarr: {uu.timestr()}")
         dask_data = da.full(
             (n_years, lat_size, lon_size),
             fill_value,
@@ -130,7 +122,7 @@ def initialize_global_mega_zarr(
         )
 
     # Constructs dataset
-    print(f"Constructing dataset: {uu.timestr()}")
+    main_logger.info(f"Constructing dataset: {uu.timestr()}")
     ds = xr.Dataset(
         data_vars=data_vars,
         coords={
@@ -161,7 +153,7 @@ def initialize_global_mega_zarr(
 @jit(nopython=True)
 def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, in_dict_float32,
                   primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
-                  model_start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_final):
+                  model_start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_large_run):
 
     # Separate dictionaries for output numpy arrays of each datatype, named by output data type.
     # This is because a dictionary in a Numba function cannot have arrays with multiple data types, so each dictionary has to store only one data type,
@@ -1897,7 +1889,8 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                        download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                                       interval_length_list, interval_end_years, is_final, no_upload, output_folders, mega_zarr_path, outputs_to_zarr, stage, model_type):
+                                       interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
+                                       output_folders, stage, model_type, mega_zarr_path=None, outputs_to_zarr=None):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -1908,7 +1901,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
     chunk_start_time = time.time()
 
-    uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
+    uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_large_run, logger_worker)
 
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
@@ -1926,7 +1919,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
     # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
-    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_final, logger_worker, False)
+    futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_large_run, logger_worker, False)
     # print(futures)
 
     lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
@@ -1966,7 +1959,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     ### Numba functions can accept (and return) dictionaries of arrays as long as each dictionary only has arrays of one data type (e.g., uint8, float32).
     ### Note: need to add new code if inputs with other data types are added
 
-    lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"Creating typed dictionaries for chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
 
     # Creates the typed dictionaries for all input layers (including those that originally had no data)
     typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32 = nu.create_typed_dicts(layers)
@@ -1986,13 +1979,13 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     ### Part 4: Calculates LULUCF fluxes and densities
 
     lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-    uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
+    uu.rename_s3_task_file(stage, bounds, "calculating_", is_large_run, logger_worker)
     numba_start = time.time()
 
     out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(
         typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32,
         primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
-        start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_final)
+        start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_large_run)
 
     numba_end = time.time()
     lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
@@ -2023,58 +2016,72 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
         # Clear memory of unneeded arrays
         del out_dict
 
-    print(out_dict_all_dtypes)
+    # print(out_dict_all_dtypes)
 
-    lu.print_and_log(f"Writing LULUCF fluxes and densities to global zarrs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-    uu.rename_s3_task_file(stage, bounds, "zarr_population_", is_final, logger_worker)
+
+    ### Part 5: Writes outputs to pre-existing global mega-zarr
+
+    lu.print_and_log(f"Writing LULUCF fluxes and densities to global zarrs in {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
+    uu.rename_s3_task_file(stage, bounds, "zarr_population_", is_large_run, logger_worker)
     zarr_start = time.time()
-    fs = fsspec.filesystem("s3", anon=False)
 
+    # Opens existing global mega-zarr
+    fs = fsspec.filesystem("s3", anon=False)
     mapper = fs.get_mapper(mega_zarr_path)
     z = zarr.open(mapper, mode="r+")
-    # print("Z:", z)
-    print("Available datasets:", list(z.array_keys()))
 
+    lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}", is_large_run, logger_worker)
+
+    # Iterates through each output that we want to include in the zarr and each interval to add it
     for output_to_zarr in outputs_to_zarr:
         for i, year in enumerate(interval_end_years):
 
-            print(f"Worker writing {output_to_zarr} for {year} for {bounds_str} to zarr: {uu.timestr()}")
+            lu.print_and_log(f"Writing {output_to_zarr} for {year} for {bounds_str} to zarr: {uu.timestr()}", is_large_run, logger_worker)
 
-            # Convert bounding box corners to indices
-            lat_start, lon_start = latlon_to_indices(bounds[3], bounds[0])  # north, west
-            lat_end, lon_end = latlon_to_indices(bounds[1], bounds[2])  # south, east
+            # Converts bounding box corners to row and column indices
+            lat_start, lon_start = uu.latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
+            lat_end, lon_end = uu.latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
 
-            # Write data
+            # Creates the pattern used to select the relevant numpy array from the output dictionary.
+            # Each kind of output has a different pattern based on whether it's for a specific year or interval.
             if "density" in output_to_zarr:
-                data = out_dict_all_dtypes[f"{output_to_zarr}_ha_{year}"]
+                selected_pattern = f"{output_to_zarr}_ha_{year}"
             elif "emis" in output_to_zarr:
-                data = out_dict_all_dtypes[f"{output_to_zarr}_ha_yr_{year-1}_{year}"]
+                selected_pattern = f"{output_to_zarr}_ha_yr_{year-1}_{year}"
             elif "removals" in output_to_zarr:
-                data = out_dict_all_dtypes[f"{output_to_zarr}_ha_yr_{year-1}_{year}"]
+                selected_pattern = f"{output_to_zarr}_ha_yr_{year-1}_{year}"
             elif cn.composite_primary_forest in output_to_zarr:
-                data = out_dict_all_dtypes[f"{output_to_zarr}_{year}"]
+                selected_pattern = f"{output_to_zarr}_{year}"
             elif cn.forest_age_output_pattern in output_to_zarr:
-                data = out_dict_all_dtypes[f"{output_to_zarr}_{year}"]
+                selected_pattern = f"{output_to_zarr}_{year}"
             else:
-                data = out_dict_all_dtypes[f"{output_to_zarr}_{year - 1}_{year}"]
+                selected_pattern = f"{output_to_zarr}_{year - 1}_{year}"
+
+            # Selects the relevant numpy array
+            print(selected_pattern)
+            data = out_dict_all_dtypes[selected_pattern]
+
+            # Writes numpy array to global zarr
             z[output_to_zarr][
             i,  # year index
                 lat_start:lat_end,  # rows (Y)
                 lat_start:lat_end,  # columns (X)
             ] = data
 
-    # Check min, mean and max values for chunk in the zarr
+    # Checks min, mean and max values for chunk in the zarr for comparison with chunk stats spreadsheet
+    # that directly uses original numpy arrays
     for output_to_zarr in outputs_to_zarr:
         for i, year in enumerate(interval_end_years):
 
             # Convert bounding box corners to indices
-            lat_start, lon_start = latlon_to_indices(bounds[3], bounds[0])  # north, west
-            lat_end, lon_end = latlon_to_indices(bounds[1], bounds[2])  # south, east
+            lat_start, lon_start = uu.latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
+            lat_end, lon_end = uu.latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
 
             z = zarr.open(mapper, mode="r")
             region = z[output_to_zarr][i, lat_start:lat_end, lat_start:lat_end]
             non_zero_count = np.count_nonzero(region)
-            print(f"🔍 {output_to_zarr} year {year}: min={region.min()}, mean={region.mean()}, max={region.max()}, non-zero pixels={non_zero_count}")
+            lu.print_and_log(f"🔍 {output_to_zarr} year {year} for {bounds_str}: min={region.min():.3f}, mean={region.mean():.3f}, max={region.max():.3f}, non-zero pixels={non_zero_count}",
+                             False, logger_worker)
 
     zarr_end = time.time()
     lu.print_and_log(f"Memory usage after writing to zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
@@ -2107,12 +2114,12 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
-    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
 
 
     ### Part 6: Saves numpy arrays as rasters and uploads to s3
 
-    uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
+    uu.rename_s3_task_file(stage, bounds, "uploading_", is_large_run, logger_worker)
 
     # Only saves arrays to geotifs and uploads them to s3 if enabled
     if no_upload == False:
@@ -2165,7 +2172,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
         # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
         upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
-                                                        out_dict_all_dtypes, is_final, logger_worker, out_no_data_val)
+                                                        out_dict_all_dtypes, is_large_run, logger_worker, out_no_data_val)
 
         lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", False, logger_worker)
 
@@ -2173,7 +2180,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
         with ThreadPoolExecutor(max_workers=5) as executor:
             executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
-        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}", is_large_run, logger_worker)
 
     chunk_end_time = time.time()
     lu.print_and_log(f"{bounds_str} took {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
@@ -2181,12 +2188,12 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     return_message = f"Success for {bounds_str}: {uu.timestr()}"
 
     # Removes task tracking file from S3 once task is successful
-    uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
+    uu.delete_s3_task_file(stage, bounds, is_large_run, logger_worker)
 
     return return_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False, create_zarr=False,
          chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     ### Step 1: Preparation
@@ -2241,11 +2248,16 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
-    is_final = False
-    # is_final = True  # For simulating a large run
+    is_large_run = False
+    # is_large_run = True  # For simulating a large run
     if len(chunk_list) > 20:
-        is_final = True
+        is_large_run = True
         main_logger.info("Running as final model.")
+
+    # Whenever the run is large-scale (final), force zarr creation
+    if is_large_run:
+        create_zarr = True
+    main_logger.info(f"Create and populate global mega-zarr: {create_zarr}")
 
     # This is just a placeholder tile_id that is used to obtain the datatype of each input tile set.
     # It is overwritten when chunks are assigned and analyzed.
@@ -2386,7 +2398,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
     download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
 
-    if is_final:
+    if is_large_run:
         main_logger.info(f"download_dict_with_data_types for {stage}:")
         for key, value in download_dict_with_data_types.items():
             main_logger.info(f"  {key}: {value}")
@@ -2397,7 +2409,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                                      chunk_size_pixels, model_type, interval_end_years,
                                                      interval_year_diff_list, run_date, False, "per_ha")
     output_dir_list.sort()  # Alphabetically order the outputs (modifies output_dir_list)
-    if is_final:
+    if is_large_run:
         main_logger.info(f"output_dir_list for {stage}:")
         for item in output_dir_list:
             main_logger.info(f"  {item}")
@@ -2425,26 +2437,32 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                                                      '6_sett_infrastr_EF', '7_natrl_dist_EF'])
 
 
-    ### Step 1.5: Create empty, global zarrs and upload to s3
+    ### Step 2: Create empty (metadata-only), global mega-zarr in s3
 
-    # Decide which datasets to output as global zarrs
-    outputs_to_zarr = [
-        cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern, cn.litter_c_modeled_dens_pattern,
-        cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
-        cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
-        cn.ch4_flux_pattern, cn.n2o_flux_pattern,
-        cn.land_state_pattern, cn.composite_primary_forest, cn.forest_age_output_pattern
-    ]
+    # Only creates the global mega-zarr if needed (large runs or otherwise specified)
+    if create_zarr:
 
-    mega_zarr_path = cn.outputs_path_mega_zarr.replace(cn.model_type_placholder, model_type)
-    mega_zarr_path = mega_zarr_path.replace("MODEL_INTERVAL_TYPE", interval_type)
-    mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
-    mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
+        # Only specific datasets output to zarrs
+        outputs_to_zarr = [
+            cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern, cn.litter_c_modeled_dens_pattern,
+            cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
+            cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
+            cn.ch4_flux_pattern, cn.n2o_flux_pattern,
+            cn.land_state_pattern, cn.composite_primary_forest, cn.forest_age_output_pattern
+        ]
 
-    initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list), (1, chunk_size_pixels, chunk_size_pixels), main_logger)
+        # Sets the output zarr location based on the model run
+        mega_zarr_path = cn.outputs_path_mega_zarr.replace(cn.model_type_placholder, model_type)
+        mega_zarr_path = mega_zarr_path.replace("MODEL_INTERVAL_TYPE", interval_type)
+        mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
+        mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
+
+        # Creates the global mega-zarr with metadata only
+        initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+                                    (1, chunk_size_pixels, chunk_size_pixels), main_logger)
 
 
-    ### Step 2: Create 1x1 degree outputs
+    ### Step 3: Create 1x1 degree outputs
 
     # Creates list of tasks to run (1 task = 1 chunk)
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
@@ -2471,14 +2489,15 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
             future = client.submit(calculate_and_upload_LULUCF_fluxes,
                                    chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                    download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                                   interval_length_list, interval_end_years, is_final, no_upload, output_dir_list, mega_zarr_path, outputs_to_zarr, stage, model_type)
+                                   interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
+                                   output_dir_list, stage, model_type, mega_zarr_path, outputs_to_zarr)
             futures.append(future)
 
         batch_results = client.gather(futures)
 
         all_results.extend(batch_results)
 
-        success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_final, main_logger, batch_results)
+        success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_large_run, main_logger, batch_results)
         all_1x1_stats.extend(batch_stats)
 
         # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
@@ -2498,7 +2517,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
 
-    ### Step 3: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs
+    ### Step 4: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
@@ -2513,7 +2532,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
-    if not no_upload and is_final:
+    if not no_upload and is_large_run:
         for output_folder in output_dir_list:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output rasters in {output_folder}: {file_count}")
@@ -2558,6 +2577,7 @@ if __name__ == "__main__":
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
     parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
+    parser.add_argument('--create_zarr', action='store_true', help='Create and populate global mega-zarr with model outputs')
 
     args = parser.parse_args()
 
@@ -2574,7 +2594,8 @@ if __name__ == "__main__":
     no_stats = args.no_stats
     no_log = args.no_log
     no_upload = args.no_upload
+    create_zarr = args.create_zarr
 
     # Create the cluster with command line arguments
-    main(cluster_name, run_date, year_range, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
+    main(cluster_name, run_date, year_range, run_local, no_stats, no_log, no_upload, create_zarr, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size, first_chunks=first_chunks, log_note=log_note)

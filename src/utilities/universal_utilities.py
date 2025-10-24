@@ -2072,6 +2072,17 @@ def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
         lu.print_and_log(f"No task file found for chunk {chunk_id}. Nothing to delete.", is_final, logger_worker)
 
 
+# Gets the row and column indexes in a global grid for a given lat and long using a given resolution
+def latlon_to_global_zarr_indices(lat, lon, resolution):
+    lat_max = 90.0
+    lon_min = -180.0
+
+    lat_idx = int(round((lat_max - lat) / resolution))
+    lon_idx = int(round((lon - lon_min) / resolution))
+
+    return lat_idx, lon_idx
+
+
 ###################################################################################################
 # Hansenize Functions
 ###################################################################################################
