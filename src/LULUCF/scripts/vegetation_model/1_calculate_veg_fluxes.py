@@ -77,28 +77,30 @@ def latlon_to_indices(lat, lon, resolution=0.00025):
 
     return lat_idx, lon_idx
 
-# All zarr elements from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
-def initialize_zarr_with_coords(
+# All zarr-related code from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
+# Creates a Zarr group with individual datasets on S3 with coordinate arrays (x/y/year),
+# spatial_ref metadata, and dataset definitions WITHOUT allocating global arrays.
+# That is, it doesn't computer anything upfront or locally. It just creates the zarr group
+# with datasets inside.
+# In addition to x and y dimensions, there is also a time dimension (intervals).
+def initialize_global_mega_zarr(
     store_url: str,
     dataset_keys: list[str],
     n_years: int,
+    chunk_size: tuple[int, int, int],
+    main_logger,
     dtype: str = "float32",
-    fill_value: float = np.nan,
-    chunks: tuple[int, int, int] = (1, 4000, 4000),
+    fill_value: float = np.nan
 ):
-    """
-    Create a Zarr store on S3 with coordinate arrays (x/y/year),
-    spatial_ref metadata, and dataset definitions WITHOUT allocating global arrays.
-    """
 
-    # Compute dimensions
+    # Computes dimensions
     lat_size = int(180 / cn.resolution)
     lon_size = int(360 / cn.resolution)
 
-    # Create coordinate arrays
+    # Creates coordinate arrays globally and for all years
     lats = np.arange(90.0 - cn.resolution / 2, -90, -cn.resolution)[:lat_size]
     lons = np.arange(-180.0 + cn.resolution / 2, 180, cn.resolution)[:lon_size]
-    years = np.arange(n_years)
+    years = np.arange(n_years)  # TODO Can this be the actual interval end years rather than just 0-8?
 
     # Spatial reference (CRS metadata)
     spatial_attrs = {
@@ -108,15 +110,15 @@ def initialize_zarr_with_coords(
         "inverse_flattening": 298.257223563,
     }
 
-    # Use Dask arrays filled lazily (no memory blowup)
+    # For each dataset, uses Dask arrays filled lazily (no memory blowup)
     data_vars = {}
     for key in dataset_keys:
-        print(f"{key}: {uu.timestr()}")
+        main_logger.info(f"Creating {key}: {uu.timestr()}")
         dask_data = da.full(
             (n_years, lat_size, lon_size),
             fill_value,
             dtype=dtype,
-            chunks=chunks
+            chunks=chunk_size
         )
 
         data_vars[key] = xr.DataArray(
@@ -127,7 +129,7 @@ def initialize_zarr_with_coords(
             attrs={"grid_mapping": "spatial_ref"},
         )
 
-    # Construct dataset
+    # Constructs dataset
     print(f"Constructing dataset: {uu.timestr()}")
     ds = xr.Dataset(
         data_vars=data_vars,
@@ -140,18 +142,18 @@ def initialize_zarr_with_coords(
     )
 
     ds["spatial_ref"].attrs = spatial_attrs
-    print(f"dataset info: {ds}")
+    main_logger.info(f"dataset info: {ds}: {uu.timestr()}")
 
-    # Write metadata only (lazy)
-    print(f"Writing metadata: {uu.timestr()}")
+    # Writes only metadata to s3 (lazy), not values
+    main_logger.info(f"Writing metadata for mega-zarr: {uu.timestr()}")
     fs = fsspec.filesystem("s3", anon=False)
     mapper = fs.get_mapper(store_url)
     ds.to_zarr(mapper, mode="w", compute=False, consolidated=False)
 
     z = zarr.open_group(mapper, mode="r")
-    print(f"Zarr group info: {z.info}")
+    main_logger.info(f"Mega-zarr group info: {z.info}: {uu.timestr()}")
 
-    print(f"Initialized spatial Zarr metadata at {store_url}: {uu.timestr()}")
+    main_logger.info(f"Initialized spatial mega-zarr metadata at {store_url}: {uu.timestr()}")
 
 
 # Function to calculate LULUCF fluxes and carbon densities
@@ -2021,7 +2023,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
         # Clear memory of unneeded arrays
         del out_dict
 
-    # print(out_dict_all_dtypes)
+    print(out_dict_all_dtypes)
 
     lu.print_and_log(f"Writing LULUCF fluxes and densities to global zarrs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "zarr_population_", is_final, logger_worker)
@@ -2031,7 +2033,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     mapper = fs.get_mapper(mega_zarr_path)
     z = zarr.open(mapper, mode="r+")
     # print("Z:", z)
-    # print("Available datasets:", list(z.array_keys()))
+    print("Available datasets:", list(z.array_keys()))
 
     for output_to_zarr in outputs_to_zarr:
         for i, year in enumerate(interval_end_years):
@@ -2043,7 +2045,18 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
             lat_end, lon_end = latlon_to_indices(bounds[1], bounds[2])  # south, east
 
             # Write data
-            data = out_dict_all_dtypes[f"{output_to_zarr}_ha_{year}"]
+            if "density" in output_to_zarr:
+                data = out_dict_all_dtypes[f"{output_to_zarr}_ha_{year}"]
+            elif "emis" in output_to_zarr:
+                data = out_dict_all_dtypes[f"{output_to_zarr}_ha_yr_{year-1}_{year}"]
+            elif "removals" in output_to_zarr:
+                data = out_dict_all_dtypes[f"{output_to_zarr}_ha_yr_{year-1}_{year}"]
+            elif cn.composite_primary_forest in output_to_zarr:
+                data = out_dict_all_dtypes[f"{output_to_zarr}_{year}"]
+            elif cn.forest_age_output_pattern in output_to_zarr:
+                data = out_dict_all_dtypes[f"{output_to_zarr}_{year}"]
+            else:
+                data = out_dict_all_dtypes[f"{output_to_zarr}_{year - 1}_{year}"]
             z[output_to_zarr][
             i,  # year index
                 lat_start:lat_end,  # rows (Y)
@@ -2060,7 +2073,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
             z = zarr.open(mapper, mode="r")
             region = z[output_to_zarr][i, lat_start:lat_end, lat_start:lat_end]
-            print(f"🔍 {output_to_zarr} year {year}: min={region.min()}, mean={region.mean()}, max={region.max()}")
+            non_zero_count = np.count_nonzero(region)
+            print(f"🔍 {output_to_zarr} year {year}: min={region.min()}, mean={region.mean()}, max={region.max()}, non-zero pixels={non_zero_count}")
 
     zarr_end = time.time()
     lu.print_and_log(f"Memory usage after writing to zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
@@ -2416,9 +2430,10 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Decide which datasets to output as global zarrs
     outputs_to_zarr = [
         cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern, cn.litter_c_modeled_dens_pattern,
-        # cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
-        # cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
-        # cn.ch4_flux_pattern, cn.n2o_flux_pattern, cn.land_state_pattern, cn.composite_primary_forest, cn.forest_age_output_pattern,
+        cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
+        cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
+        cn.ch4_flux_pattern, cn.n2o_flux_pattern,
+        cn.land_state_pattern, cn.composite_primary_forest, cn.forest_age_output_pattern
     ]
 
     mega_zarr_path = cn.outputs_path_mega_zarr.replace(cn.model_type_placholder, model_type)
@@ -2426,7 +2441,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
     mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
 
-    initialize_zarr_with_coords(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list))
+    initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list), (1, chunk_size_pixels, chunk_size_pixels), main_logger)
 
 
     ### Step 2: Create 1x1 degree outputs
