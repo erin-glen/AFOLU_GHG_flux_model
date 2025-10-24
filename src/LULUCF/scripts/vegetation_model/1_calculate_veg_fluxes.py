@@ -42,8 +42,6 @@ import time
 import sys
 import pandas as pd
 import numpy as np
-import zarr
-import fsspec
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -1942,7 +1940,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
     ### Part 5: Writes outputs to pre-existing global mega-zarr (only if requested)
 
-    populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
+    uu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
                   out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
 
 
@@ -2290,19 +2288,30 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                                                      '6_sett_infrastr_EF', '7_natrl_dist_EF'])
 
 
-    ### Step 2: Create empty (metadata-only), global mega-zarr in s3
-    ### Zarr code from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
+    ### Step 2: Create empty (metadata-only), global mega-zarr in s3.
+    ### Zarr approach from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
 
     # Only creates the global mega-zarr if needed (large runs or otherwise specified)
     if create_zarr:
 
-        # Only specific datasets output to zarrs
+        # Only specific datasets output to zarrs.
+        # Starts with non-summative outputs from the vegetation model
         outputs_to_zarr = [
             cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern, cn.litter_c_modeled_dens_pattern,
             cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
             cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
             cn.ch4_flux_pattern, cn.n2o_flux_pattern,
             cn.land_state_pattern, cn.composite_primary_forest, cn.forest_age_output_pattern
+        ]
+
+        # Also want to add the metadata for the summative outputs to the global zarr upfront for simplicity,
+        # rather than having to add more empty layers to the zarr at the summative stage
+        outputs_to_zarr = outputs_to_zarr + [
+            cn.gross_emis_all_C_pools_CO2_only_pattern, cn.gross_emis_all_C_pools_non_CO2_only_pattern, cn.gross_emis_all_C_pools_all_gases_pattern,
+            cn.gross_removals_all_C_pools_pattern,
+            cn.net_flux_agc_pattern, cn.net_flux_bgc_pattern, cn.net_flux_deadwood_c_pattern, cn.net_flux_litter_c_pattern,
+            cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
+            cn.non_soil_c_modeled_dens_pattern
         ]
 
         # Sets the output zarr location based on the model run
@@ -2312,7 +2321,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
 
         # Creates the global mega-zarr with metadata only
-        initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+        uu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
                                     (1, chunk_size_pixels, chunk_size_pixels), main_logger)
     else:
         mega_zarr_path = None

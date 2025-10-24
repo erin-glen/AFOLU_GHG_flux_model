@@ -22,6 +22,7 @@ from botocore.config import Config
 from dask.distributed import print
 from dask.distributed import Client, LocalCluster
 from dask import delayed
+import dask.array as da
 from datetime import datetime
 from io import BytesIO
 import xarray as xr
@@ -2180,6 +2181,7 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
     main_logger.info(f"Initialized spatial mega-zarr metadata at {store_url} in {round(end_time-start_time)} seconds: {timestr()}")
 
 
+# Populates pre-existing global mega-zarr with select output numpy arrays (out_dict_all_dtypes)
 def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
                   out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id):
 
@@ -2194,14 +2196,14 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
         mapper = fs.get_mapper(mega_zarr_path)
         z = zarr.open(mapper, mode="r+")
 
-        lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}", False, logger_worker)
+        lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}: {timestr()}", False, logger_worker)
 
         # Iterates through each output that we want to include in the zarr and each interval to add it
         for output_to_zarr_pattern in outputs_to_zarr:
             for i, year in enumerate(interval_end_years):
 
-                lu.print_and_log(f"Writing {output_to_zarr_pattern} for {year} for {bounds_str} to zarr: {timestr()}",
-                    is_large_run, logger_worker)
+                # lu.print_and_log(f"Writing {output_to_zarr_pattern} for {year} for {bounds_str} to zarr: {timestr()}",
+                #     is_large_run, logger_worker)
 
                 # Converts bounding box corners to row and column indices
                 lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0],
@@ -2226,37 +2228,60 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
                 elif cn.forest_age_output_pattern in output_to_zarr_pattern:
                     pattern_with_units = f"{output_to_zarr_pattern}_{year}"
                 else:
-                    sys.exit(
-                        f"Dataset {output_to_zarr_pattern} not assigned a pattern with units for addition to global zarr")
+                    sys.exit(f"Dataset {output_to_zarr_pattern} not assigned a pattern with units for addition to global zarr")
 
-                # Selects the relevant output numpy array for insertion into zarr
-                data = out_dict_all_dtypes[pattern_with_units]
+                # Selects the relevant output numpy array for insertion into zarr.
+                # Only inserts into zarr if that data is in the output dictionary.
+                # That way, it won't try to insert summative outputs in the global zarr when the summative outputs aren't in the output dictionary.
+                if output_to_zarr_pattern in out_dict_all_dtypes:
+                    data = out_dict_all_dtypes[pattern_with_units]
 
-                # Writes numpy array to global zarr
-                z[output_to_zarr_pattern][
-                i,  # year index (not the actual year)
-                lat_start:lat_end,  # rows (Y)
-                lat_start:lat_end,  # columns (X)
-                ] = data
+                    # Writes numpy array to global zarr
+                    z[output_to_zarr_pattern][
+                        i,                  # year index (not the actual year)
+                        lat_start:lat_end,  # rows (Y)
+                        lat_start:lat_end,  # columns (X)
+                    ] = data
+
+                else:
+                    lu.print_and_log(f"Skipping missing key {pattern_with_units} for inclusion in zarr: {timestr()}", is_large_run, logger_worker)
+
 
         # Checks min, mean and max values for chunk in the zarr for comparison with chunk stats spreadsheet
         # that directly uses original numpy arrays.
         # For QC only.
         for output_to_zarr_pattern in outputs_to_zarr:
             for i, year in enumerate(interval_end_years):
+
                 # Converts bounding box corners to indices
                 lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
                 lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
 
-                z = zarr.open(mapper, mode="r")
-                region = z[output_to_zarr_pattern][i, lat_start:lat_end, lat_start:lat_end]
-                non_zero_count = np.count_nonzero(region)
-                lu.print_and_log(f"🔍 {output_to_zarr_pattern} year {year} for {bounds_str}: min={region.min():.3f}, mean={region.mean():.3f}, max={region.max():.3f}, non-zero pixels={non_zero_count}",
-                    False, logger_worker)
+                if output_to_zarr_pattern in out_dict_all_dtypes:
+
+                    z = zarr.open(mapper, mode="r")
+                    region = z[output_to_zarr_pattern][
+                                i,                  # year index (not the actual year)
+                                lat_start:lat_end,  # rows (Y)
+                                lat_start:lat_end   # columns (X)
+                             ]
+                    non_zero_count = np.count_nonzero(region)
+                    lu.print_and_log(f"🔍 {output_to_zarr_pattern} year {year} for {bounds_str}: "
+                                     f"min={region.min():.3f}, "
+                                     f"mean={region.mean():.3f}, "
+                                     f"max={region.max():.3f}, "
+                                     f"non-zero pixels={non_zero_count}",
+                        False, logger_worker)
+
+                else:
+                    lu.print_and_log(f"Skipping missing key {output_to_zarr_pattern} for zarr QC: {timestr()}", is_large_run, logger_worker)
 
         zarr_end = time.time()
         lu.print_and_log(f"Memory usage after writing to zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
         lu.print_and_log(f"Wrote outputs for {bounds_str} in {tile_id} to global zarrs in {round(zarr_end - zarr_start)} seconds: {timestr()}",False, logger_worker)
+
+    else:
+        lu.print_and_log(f"Not writing outputs for {bounds_str} in {tile_id} to global zarrs: {timestr()}",False, logger_worker)
 
 
 ###################################################################################################
