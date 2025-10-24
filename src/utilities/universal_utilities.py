@@ -2233,7 +2233,7 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
                 # Selects the relevant output numpy array for insertion into zarr.
                 # Only inserts into zarr if that data is in the output dictionary.
                 # That way, it won't try to insert summative outputs in the global zarr when the summative outputs aren't in the output dictionary.
-                if output_to_zarr_pattern in out_dict_all_dtypes:
+                if pattern_with_units in out_dict_all_dtypes:
                     data = out_dict_all_dtypes[pattern_with_units]
 
                     # Writes numpy array to global zarr
@@ -2257,24 +2257,20 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
                 lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
                 lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
 
-                if output_to_zarr_pattern in out_dict_all_dtypes:
+                z = zarr.open(mapper, mode="r")
+                region = z[output_to_zarr_pattern][
+                            i,                  # year index (not the actual year)
+                            lat_start:lat_end,  # rows (Y)
+                            lat_start:lat_end   # columns (X)
+                         ]
+                non_zero_count = np.count_nonzero(region)
+                lu.print_and_log(f"🔍 {output_to_zarr_pattern} year {year} for {bounds_str}: "
+                                 f"min={region.min():.3f}, "
+                                 f"mean={region.mean():.3f}, "
+                                 f"max={region.max():.3f}, "
+                                 f"non-zero pixels={non_zero_count}",
+                           False, logger_worker)
 
-                    z = zarr.open(mapper, mode="r")
-                    region = z[output_to_zarr_pattern][
-                                i,                  # year index (not the actual year)
-                                lat_start:lat_end,  # rows (Y)
-                                lat_start:lat_end   # columns (X)
-                             ]
-                    non_zero_count = np.count_nonzero(region)
-                    lu.print_and_log(f"🔍 {output_to_zarr_pattern} year {year} for {bounds_str}: "
-                                     f"min={region.min():.3f}, "
-                                     f"mean={region.mean():.3f}, "
-                                     f"max={region.max():.3f}, "
-                                     f"non-zero pixels={non_zero_count}",
-                        False, logger_worker)
-
-                else:
-                    lu.print_and_log(f"Skipping missing key {output_to_zarr_pattern} for zarr QC: {timestr()}", is_large_run, logger_worker)
 
         zarr_end = time.time()
         lu.print_and_log(f"Memory usage after writing to zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
