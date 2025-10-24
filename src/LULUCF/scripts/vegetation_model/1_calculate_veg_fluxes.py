@@ -42,13 +42,8 @@ import time
 import sys
 import pandas as pd
 import numpy as np
-import xarray as xr
-import dask.array as da
 import zarr
-from zarr.codecs import Blosc
 import fsspec
-import tempfile
-import shutil
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -67,85 +62,6 @@ from src.utilities import resize_cluster
 # A little testing of it in this script suggests that it doesn't save much, if any time, but leaving it in just in case.
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
 os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
-
-
-# All zarr-related code from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
-# Creates a Zarr group with individual datasets on S3 with coordinate arrays (x/y/year),
-# spatial_ref metadata, and dataset definitions WITHOUT allocating global arrays.
-# That is, it doesn't computer anything upfront or locally. It just creates the zarr group
-# with datasets inside.
-# In addition to x and y dimensions, there is also a time dimension (intervals).
-def initialize_global_mega_zarr(
-    store_url: str,
-    dataset_keys: list[str],
-    n_years: int,
-    chunk_size: tuple[int, int, int],
-    main_logger,
-    dtype: str = "float32",
-    fill_value: float = np.nan
-):
-
-    # Computes dimensions
-    lat_size = int(180 / cn.resolution)
-    lon_size = int(360 / cn.resolution)
-
-    # Creates coordinate arrays globally and for all years
-    lats = np.arange(90.0 - cn.resolution / 2, -90, -cn.resolution)[:lat_size]
-    lons = np.arange(-180.0 + cn.resolution / 2, 180, cn.resolution)[:lon_size]
-    years = np.arange(n_years)  # TODO Can this be the actual interval end years rather than just 0-8?
-
-    # Spatial reference (CRS metadata)
-    spatial_attrs = {
-        "grid_mapping_name": "latitude_longitude",
-        "epsg_code": 4326,
-        "semi_major_axis": 6378137.0,
-        "inverse_flattening": 298.257223563,
-    }
-
-    # For each dataset, uses Dask arrays filled lazily (no memory blowup)
-    data_vars = {}
-    for key in dataset_keys:
-        main_logger.info(f"Creating {key} in global mega-zarr: {uu.timestr()}")
-        dask_data = da.full(
-            (n_years, lat_size, lon_size),
-            fill_value,
-            dtype=dtype,
-            chunks=chunk_size
-        )
-
-        data_vars[key] = xr.DataArray(
-            dask_data,
-            dims=("year", "y", "x"),
-            coords={"year": years, "y": lats, "x": lons},
-            name=key,
-            attrs={"grid_mapping": "spatial_ref"},
-        )
-
-    # Constructs dataset
-    main_logger.info(f"Constructing dataset: {uu.timestr()}")
-    ds = xr.Dataset(
-        data_vars=data_vars,
-        coords={
-            "x": lons,
-            "y": lats,
-            "year": years,
-            "spatial_ref": 0,
-        },
-    )
-
-    ds["spatial_ref"].attrs = spatial_attrs
-    main_logger.info(f"dataset info: {ds}: {uu.timestr()}")
-
-    # Writes only metadata to s3 (lazy), not values
-    main_logger.info(f"Writing metadata for mega-zarr: {uu.timestr()}")
-    fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(store_url)
-    ds.to_zarr(mapper, mode="w", compute=False, consolidated=False)
-
-    z = zarr.open_group(mapper, mode="r")
-    main_logger.info(f"Mega-zarr group info: {z.info}: {uu.timestr()}")
-
-    main_logger.info(f"Initialized spatial mega-zarr metadata at {store_url}: {uu.timestr()}")
 
 
 # Function to calculate LULUCF fluxes and carbon densities
@@ -2016,84 +1932,21 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
         # Clear memory of unneeded arrays
         del out_dict
 
-    # print(out_dict_all_dtypes)
-
-
-    ### Part 5: Writes outputs to pre-existing global mega-zarr
-
-    lu.print_and_log(f"Writing LULUCF fluxes and densities to global zarrs in {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
-    uu.rename_s3_task_file(stage, bounds, "zarr_population_", is_large_run, logger_worker)
-    zarr_start = time.time()
-
-    # Opens existing global mega-zarr
-    fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(mega_zarr_path)
-    z = zarr.open(mapper, mode="r+")
-
-    lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}", is_large_run, logger_worker)
-
-    # Iterates through each output that we want to include in the zarr and each interval to add it
-    for output_to_zarr in outputs_to_zarr:
-        for i, year in enumerate(interval_end_years):
-
-            lu.print_and_log(f"Writing {output_to_zarr} for {year} for {bounds_str} to zarr: {uu.timestr()}", is_large_run, logger_worker)
-
-            # Converts bounding box corners to row and column indices
-            lat_start, lon_start = uu.latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
-            lat_end, lon_end = uu.latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
-
-            # Creates the pattern used to select the relevant numpy array from the output dictionary.
-            # Each kind of output has a different pattern based on whether it's for a specific year or interval.
-            if "density" in output_to_zarr:
-                selected_pattern = f"{output_to_zarr}_ha_{year}"
-            elif "emis" in output_to_zarr:
-                selected_pattern = f"{output_to_zarr}_ha_yr_{year-1}_{year}"
-            elif "removals" in output_to_zarr:
-                selected_pattern = f"{output_to_zarr}_ha_yr_{year-1}_{year}"
-            elif cn.composite_primary_forest in output_to_zarr:
-                selected_pattern = f"{output_to_zarr}_{year}"
-            elif cn.forest_age_output_pattern in output_to_zarr:
-                selected_pattern = f"{output_to_zarr}_{year}"
-            else:
-                selected_pattern = f"{output_to_zarr}_{year - 1}_{year}"
-
-            # Selects the relevant numpy array
-            print(selected_pattern)
-            data = out_dict_all_dtypes[selected_pattern]
-
-            # Writes numpy array to global zarr
-            z[output_to_zarr][
-            i,  # year index
-                lat_start:lat_end,  # rows (Y)
-                lat_start:lat_end,  # columns (X)
-            ] = data
-
-    # Checks min, mean and max values for chunk in the zarr for comparison with chunk stats spreadsheet
-    # that directly uses original numpy arrays
-    for output_to_zarr in outputs_to_zarr:
-        for i, year in enumerate(interval_end_years):
-
-            # Convert bounding box corners to indices
-            lat_start, lon_start = uu.latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
-            lat_end, lon_end = uu.latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
-
-            z = zarr.open(mapper, mode="r")
-            region = z[output_to_zarr][i, lat_start:lat_end, lat_start:lat_end]
-            non_zero_count = np.count_nonzero(region)
-            lu.print_and_log(f"🔍 {output_to_zarr} year {year} for {bounds_str}: min={region.min():.3f}, mean={region.mean():.3f}, max={region.max():.3f}, non-zero pixels={non_zero_count}",
-                             False, logger_worker)
-
-    zarr_end = time.time()
-    lu.print_and_log(f"Memory usage after writing to zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
-    lu.print_and_log(f"Wrote outputs for {bounds_str} in {tile_id} to global zarrs in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}", False, logger_worker)
-
     # Deletes all unnecessary input dictionaries before moving on
     # Suggested by ChatGPT: https://chatgpt.com/share/e/672bbf2e-ebbc-800a-aae3-3d92f5a1d663
     in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
     [in_dict.clear() for in_dict in in_dicts]
 
+    # print(out_dict_all_dtypes)
 
-    ### Part 5: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
+
+    ### Part 5: Writes outputs to pre-existing global mega-zarr (only if requested)
+
+    populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
+                  out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
+
+
+    ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
     ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
     ### Also useful for a quick sum of outputs without doing zonal stats
 
@@ -2117,7 +1970,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
 
 
-    ### Part 6: Saves numpy arrays as rasters and uploads to s3
+    ### Part 7: Saves numpy arrays as rasters and uploads to s3
 
     uu.rename_s3_task_file(stage, bounds, "uploading_", is_large_run, logger_worker)
 
@@ -2438,6 +2291,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
 
     ### Step 2: Create empty (metadata-only), global mega-zarr in s3
+    ### Zarr code from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
 
     # Only creates the global mega-zarr if needed (large runs or otherwise specified)
     if create_zarr:
@@ -2460,6 +2314,9 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         # Creates the global mega-zarr with metadata only
         initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
                                     (1, chunk_size_pixels, chunk_size_pixels), main_logger)
+    else:
+        mega_zarr_path = None
+        outputs_to_zarr = False
 
 
     ### Step 3: Create 1x1 degree outputs
