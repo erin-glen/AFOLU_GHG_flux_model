@@ -729,7 +729,10 @@ global_cropland_total_amount_all_crops_nonpeat_2019_processed_pattern = f"all_GH
 
 ##### Outputs
 
+model_type_placholder = "MODEL_TYPE"
+
 outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs/version_{model_version_underscore}/"
+outputs_path_mega_zarr = f"{outputs_path}mega_zarr/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"
 
 ### IPCC classes and change
 IPCC_class_path = "IPCC_basic_classes"
@@ -791,8 +794,6 @@ part_or_full_dist_in_curr_interval = "partial_or_full_dist_in_current_interval"
 times_burned_in_interval = "times_burned_in_current_interval"
 agc_emission_factor = "AGC_emission_factor_CO2_only__fraction"
 composite_primary_forest = "composite_primary_forest"
-
-model_type_placholder = "MODEL_TYPE"
 
 zarr_output_pattern = "global_zarr"
 zarr_pixel_chunks = 10000

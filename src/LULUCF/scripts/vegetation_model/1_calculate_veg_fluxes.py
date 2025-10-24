@@ -1895,7 +1895,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                        download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                                       interval_length_list, interval_end_years, is_final, no_upload, output_folders, zarr_patterns, stage):
+                                       interval_length_list, interval_end_years, is_final, no_upload, output_folders, mega_zarr_path, zarr_patterns, stage, model_type):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -2027,37 +2027,44 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     uu.rename_s3_task_file(stage, bounds, "zarr_population_", is_final, logger_worker)
     zarr_start = time.time()
     fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(f"s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/")
+
+    mapper = fs.get_mapper(mega_zarr_path)
     z = zarr.open(mapper, mode="r+")
     print("Z:", z)
     print("Available datasets:", list(z.array_keys()))
-    print(f"Accessing dataset: {cn.agc_modeled_dens_pattern}")
-    print("Type of z[...] object:", type(z[cn.agc_modeled_dens_pattern]))
-    print("Zarr dtype:", z[cn.agc_modeled_dens_pattern].dtype)
-    print("Target slice shape:", (bounds[1] - bounds[3], bounds[2] - bounds[0]))
 
-    print(f"Worker writing {cn.agc_modeled_dens_pattern} for 2016 for {bounds_str} to zarr: {uu.timestr()}")
+    for i, year in enumerate(interval_end_years):
+        print(f"Accessing dataset: {cn.agc_modeled_dens_pattern}")
+        print("Type of z[...] object:", type(z[cn.agc_modeled_dens_pattern]))
+        print("Zarr dtype:", z[cn.agc_modeled_dens_pattern].dtype)
 
-    # Convert bounding box corners to indices
-    lat_start, lon_start = latlon_to_indices(bounds[3], bounds[0])  # north, west
-    lat_end, lon_end = latlon_to_indices(bounds[1], bounds[2])  # south, east
+        print(f"Worker writing {cn.agc_modeled_dens_pattern} for {year} for {bounds_str} to zarr: {uu.timestr()}")
 
-    # Write data
-    data = out_dict_all_dtypes[f"{cn.agc_modeled_dens_pattern}_ha_2016"]
-    print(data)
-    z[cn.agc_modeled_dens_pattern][
-    0,  # year index
-        lat_start:lat_end,  # rows (Y)
-        lat_start:lat_end,  # columns (X)
-    ] = data
+        # Convert bounding box corners to indices
+        lat_start, lon_start = latlon_to_indices(bounds[3], bounds[0])  # north, west
+        lat_end, lon_end = latlon_to_indices(bounds[1], bounds[2])  # south, east
+
+        # Write data
+        data = out_dict_all_dtypes[f"{cn.agc_modeled_dens_pattern}_ha_{year}"]
+        z[cn.agc_modeled_dens_pattern][
+        i,  # year index
+            lat_start:lat_end,  # rows (Y)
+            lat_start:lat_end,  # columns (X)
+        ] = data
 
     # Check min, mean and max values for chunk in the zarr
-    z = zarr.open(mapper, mode="r")
-    region = z["carbon_density__AGC__MgC"][0, lat_start:lat_end, lat_start:lat_end]
-    print(f"🔍 {"carbon_density__AGC__MgC"} year {2016}: min={region.min()}, mean={region.mean()}, max={region.max()}")
+    for i, year in enumerate(interval_end_years):
+
+        # Convert bounding box corners to indices
+        lat_start, lon_start = latlon_to_indices(bounds[3], bounds[0])  # north, west
+        lat_end, lon_end = latlon_to_indices(bounds[1], bounds[2])  # south, east
+
+        z = zarr.open(mapper, mode="r")
+        region = z["carbon_density__AGC__MgC"][i, lat_start:lat_end, lat_start:lat_end]
+        print(f"🔍 {"carbon_density__AGC__MgC"} year {year}: min={region.min()}, mean={region.mean()}, max={region.max()}")
 
     zarr_end = time.time()
-    lu.print_and_log(f"Memory usage after writing to_zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+    lu.print_and_log(f"Memory usage after writing to zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
     lu.print_and_log(f"Wrote outputs for {bounds_str} in {tile_id} to global zarrs in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}", False, logger_worker)
 
     # Deletes all unnecessary input dictionaries before moving on
@@ -2416,9 +2423,12 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         # cn.ch4_flux_pattern, cn.n2o_flux_pattern, cn.land_state_pattern, cn.composite_primary_forest, cn.forest_age_output_pattern,
     ]
 
-    # Create empty Zarr store (only once)
-    # create_global_output_zarr(store_url, dataset_keys, n_years)
-    initialize_zarr_with_coords(cn.outputs_path, zarr_patterns, len(interval_year_diff_list))
+    mega_zarr_path = cn.outputs_path_mega_zarr.replace(cn.model_type_placholder, model_type)
+    mega_zarr_path = mega_zarr_path.replace("MODEL_INTERVAL_TYPE", interval_type)
+    mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
+    mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
+
+    initialize_zarr_with_coords(mega_zarr_path, zarr_patterns, len(interval_year_diff_list))
 
 
     ### Step 2: Create 1x1 degree outputs
@@ -2448,7 +2458,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
             future = client.submit(calculate_and_upload_LULUCF_fluxes,
                                    chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                    download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                                   interval_length_list, interval_end_years, is_final, no_upload, output_dir_list, zarr_patterns, stage)
+                                   interval_length_list, interval_end_years, is_final, no_upload, output_dir_list, mega_zarr_path, zarr_patterns, stage, model_type)
             futures.append(future)
 
         batch_results = client.gather(futures)
