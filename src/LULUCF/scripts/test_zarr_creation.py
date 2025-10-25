@@ -387,26 +387,30 @@ if __name__ == "__main__":
 
     # Paths
     source_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/small_test_zarr/"
-    target_url = source_url.rstrip("/") + "_rechunked/"
+    rechunk_url = source_url.rstrip("/") + "_rechunked/"
     temp_url = source_url.rstrip("/") + "_temp/"
 
     # FS mappers
     fs = fsspec.filesystem("s3", anon=False)
     source_mapper = fs.get_mapper(source_url)
-    target_mapper = fs.get_mapper(target_url)
+    rechunk_mapper = fs.get_mapper(rechunk_url)
     temp_mapper = fs.get_mapper(temp_url)
 
     # Open the dataset
-    ds = xr.open_zarr(source_mapper, consolidated=False)
+    ds_raw = xr.open_zarr(source_mapper, consolidated=False)
+
+    # Print chunks for each variable
+    for var in ds_raw.data_vars:
+        print(f"{var}: chunks={ds_raw[var].data.chunks}")
 
     # Select only variables that have ("year", "y", "x") dimensions
-    vars_to_rechunk = [v for v in ds.data_vars if ds[v].dims == ("year", "y", "x")]
+    vars_to_rechunk = [v for v in ds_raw.data_vars if ds_raw[v].dims == ("year", "y", "x")]
     print(f"vars_to_rechunk: {vars_to_rechunk}: {timestr()}")
 
     # Define new chunk sizes
     target_chunks = {"year": 1, "y": 10000, "x": 10000}
 
-    source_subset = xr.Dataset({v: ds[v] for v in vars_to_rechunk})
+    source_subset = xr.Dataset({v: ds_raw[v] for v in vars_to_rechunk})
 
     print(source_subset)
     for v in source_subset.data_vars:
@@ -418,7 +422,7 @@ if __name__ == "__main__":
         source=source_subset,
         target_chunks=target_chunks,
         max_mem="1GB",  # You can adjust this depending on your available RAM
-        target_store=target_mapper,
+        target_store=rechunk_mapper,
         temp_store=temp_mapper,
     )
 
@@ -429,108 +433,15 @@ if __name__ == "__main__":
     print(f"✅ Rechunking complete: {timestr()}")
 
     fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(target_url)
-    ds = xr.open_zarr(mapper, consolidated=False)
-    print(f"rechunked ds: {ds}")
+    mapper = fs.get_mapper(rechunk_url)
+    ds_rechunk = xr.open_zarr(mapper, consolidated=False)
+    print(f"rechunked ds: {ds_rechunk}")
 
     # Print chunks for each variable
-    for var in ds.data_vars:
-        print(f"{var}: chunks={ds[var].data.chunks}")
+    for var in ds_rechunk.data_vars:
+        print(f"{var}: chunks={ds_rechunk[var].data.chunks}")
 
-    check_region_min_max(target_url, "carbon_density_AGC", 0)
-    check_region_min_max(target_url, "carbon_density_BGC", 0)
-    check_region_min_max(target_url, "carbon_density_AGC", 1)
-    check_region_min_max(target_url, "carbon_density_BGC", 1)
-
-
-
-
-
-
-
-
-
-
-    #
-    # # Define target and temp S3 locations
-    # rechunk_store_url = raw_store_url.rstrip("/") + "_rechunked/"
-    #
-    # # Get mappers for S3 stores
-    # target_mapper = fs.get_mapper(rechunk_store_url)
-    #
-    # # Define target chunk sizes
-    # target_chunks = {"year": 1, "y": 10_000, "x": 10_000}
-    # # target_chunks = (1, 10000, 10000)
-    #
-    # # Open the source Zarr dataset
-    # ds = xr.open_zarr(source_mapper, consolidated=False, chunks={})
-    #
-    # vars_to_rechunk = [v for v in ds.data_vars if "year" in ds[v].dims]
-    # print(f"🧩 Variables to rechunk: {vars_to_rechunk}: {timestr()}")
-    #
-    # # Step 1: First writes (serial, to initialize)
-    # for var in vars_to_rechunk:
-    #     print(f"🪶 Initializing Zarr for {var} (year=0): {timestr()}")
-    #     rechunk_one_year_dataset(
-    #         var_name=var,
-    #         year_idx=0,
-    #         chunks=target_chunks,
-    #         source_url=raw_store_url,
-    #         target_url=rechunk_store_url,
-    #         first_write=True,
-    #     )
-    #
-    #     fs = fsspec.filesystem("s3", anon=False)
-    #     mapper = fs.get_mapper(rechunk_store_url)
-    #     ds = xr.open_zarr(mapper, consolidated=False)
-    #
-    #     # Print chunks for each variable
-    #     for var in ds.data_vars:
-    #         print(f"{var}: chunks={ds[var].data.chunks}")
-    #
-    #
-    # fs = fsspec.filesystem("s3", anon=False)
-    # mapper = fs.get_mapper(rechunk_store_url)
-    # ds = xr.open_zarr(mapper, consolidated=False)
-    #
-    # # Print chunks for each variable
-    # for var in ds.data_vars:
-    #     print(f"{var}: chunks={ds[var].data.chunks}")
-    #
-    # # # Step 2: Parallel appends (remaining years)
-    # # print(f"Rechunking later years for datasets: {timestr()}")
-    # # futures = []
-    # # for var in vars_to_rechunk:
-    # #     for i, year in enumerate(ds.year.values):
-    # #         if i == 0:
-    # #             continue  # skip the first year (already written)
-    # #         fut = client.submit(
-    # #             rechunk_one_year_dataset,
-    # #             var_name=var,
-    # #             year_idx=int(year),
-    # #             chunks=target_chunks,
-    # #             source_url=raw_store_url,
-    # #             target_url=rechunk_store_url,
-    # #             first_write=False,
-    # #         )
-    # #         futures.append(fut)
-    # #
-    # # results = client.gather(futures)
-    # # for r in results:
-    # #     print(r)
-    # #
-    # # print(f"✅ All dataset-year chunks written: {timestr()}")
-    #
-    # fs = fsspec.filesystem("s3", anon=False)
-    # mapper = fs.get_mapper(rechunk_store_url)
-    # ds = xr.open_zarr(mapper, consolidated=False)
-    #
-    # # Print chunks for each variable
-    # for var in ds.data_vars:
-    #     print(f"{var}: chunks={ds[var].data.chunks}")
-    #
-    # # Step 5: Validate one region
-    # check_region_min_max(rechunk_store_url, "carbon_density_AGC", 0)
-    # check_region_min_max(rechunk_store_url, "carbon_density_BGC", 0)
-    # # check_region_min_max(rechunk_store_url, "carbon_density_AGC", 1)
-    # # check_region_min_max(rechunk_store_url, "carbon_density_BGC", 1)
+    check_region_min_max(rechunk_url, "carbon_density_AGC", 0)
+    check_region_min_max(rechunk_url, "carbon_density_BGC", 0)
+    check_region_min_max(rechunk_url, "carbon_density_AGC", 1)
+    check_region_min_max(rechunk_url, "carbon_density_BGC", 1)
