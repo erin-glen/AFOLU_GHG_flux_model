@@ -31,7 +31,7 @@ dataset_keys = [
     # "forest_mask",
 ]
 
-n_years = 2
+n_years = 4
 resolution = 0.00025
 lat_size = int(180 / resolution)   # 720000
 lon_size = int(360 / resolution)   # 1440000
@@ -399,10 +399,6 @@ if __name__ == "__main__":
     # Open the dataset
     ds_raw = xr.open_zarr(source_mapper, consolidated=False)
 
-    # Print chunks for each variable
-    for var in ds_raw.data_vars:
-        print(f"{var}: chunks={ds_raw[var].data.chunks}")
-
     # Select only variables that have ("year", "y", "x") dimensions
     vars_to_rechunk = [v for v in ds_raw.data_vars if ds_raw[v].dims == ("year", "y", "x")]
     print(f"vars_to_rechunk: {vars_to_rechunk}: {timestr()}")
@@ -411,17 +407,14 @@ if __name__ == "__main__":
     target_chunks = {"year": 1, "y": 10000, "x": 10000}
 
     source_subset = xr.Dataset({v: ds_raw[v] for v in vars_to_rechunk})
-
-    print(source_subset)
-    for v in source_subset.data_vars:
-        print(v, type(source_subset[v].data))
+    print(f"source_subset: {source_subset}: {timestr()}")
 
     # Set up rechunking
     print(f"Creating rechunk plan: {timestr()}")
     rechunk_plan = rechunk(
         source=source_subset,
         target_chunks=target_chunks,
-        max_mem="1GB",  # You can adjust this depending on your available RAM
+        max_mem="2GB",  # You can adjust this depending on your available RAM
         target_store=rechunk_mapper,
         temp_store=temp_mapper,
     )
@@ -437,6 +430,9 @@ if __name__ == "__main__":
     ds_rechunk = xr.open_zarr(mapper, consolidated=False)
     print(f"rechunked ds: {ds_rechunk}")
 
+    for v in ds_rechunk.data_vars:
+        print(f"{v} has {da.core.numblocks(ds_rechunk[v].data)} blocks")
+
     # Print chunks for each variable
     for var in ds_rechunk.data_vars:
         print(f"{var}: chunks={ds_rechunk[var].data.chunks}")
@@ -445,3 +441,8 @@ if __name__ == "__main__":
     check_region_min_max(rechunk_url, "carbon_density_BGC", 0)
     check_region_min_max(rechunk_url, "carbon_density_AGC", 1)
     check_region_min_max(rechunk_url, "carbon_density_BGC", 1)
+
+    # --- Cleanup temp store ---
+    print(f"🧹 Deleting temporary store: {temp_url}")
+    fs.rm(temp_url, recursive=True)
+    print(f"✅ Temp store deleted at {timestr()}")
