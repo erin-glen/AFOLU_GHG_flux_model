@@ -43,6 +43,12 @@ import sys
 import pandas as pd
 import numpy as np
 
+import fsspec
+import xarray as xr
+import rechunker
+import zarr
+import uuid
+
 from concurrent.futures import ThreadPoolExecutor
 
 from dask.distributed import print
@@ -2237,153 +2243,233 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # for key, item in download_dict.items():
     #     print(f"{key}: {item}")
 
-    # Returns the first tile in each input so that the datatype can be determined.
-    # This is done up front, once per tile set, rather than on each chunk, since
-    # all tiles have the same datatype for each input-- it only needs to be done once at the very beginning of the stage.
-    main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
-    first_tiles = uu.first_file_name_in_s3_folder(download_dict)
+    # # Returns the first tile in each input so that the datatype can be determined.
+    # # This is done up front, once per tile set, rather than on each chunk, since
+    # # all tiles have the same datatype for each input-- it only needs to be done once at the very beginning of the stage.
+    # main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
+    # first_tiles = uu.first_file_name_in_s3_folder(download_dict)
+    #
+    # # Creates a download dictionary with the datatype of each input in the values.
+    # # This is supplied to each chunk that is being analyzed.
+    # # This also serves as a check of whether all inputs are being found (s3 paths correct)
+    # main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
+    # download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
+    #
+    # if is_large_run:
+    #     main_logger.info(f"download_dict_with_data_types for {stage}:")
+    #     for key, value in download_dict_with_data_types.items():
+    #         main_logger.info(f"  {key}: {value}")
+    #
+    # # Creates a list of output directories (core and intermediates) for all outputs and intervals based on specifics of the model run
+    # output_dir_list_core_intermediate = cn.veg_core_output_dirs + cn.veg_intermediate_output_dirs
+    # output_dir_list = uu.create_output_dir_name_list(output_dir_list_core_intermediate, interval_type, start_year,
+    #                                                  chunk_size_pixels, model_type, interval_end_years,
+    #                                                  interval_year_diff_list, run_date, False, "per_ha")
+    # output_dir_list.sort()  # Alphabetically order the outputs (modifies output_dir_list)
+    # if is_large_run:
+    #     main_logger.info(f"output_dir_list for {stage}:")
+    #     for item in output_dir_list:
+    #         main_logger.info(f"  {item}")
+    #
+    # # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
+    # # Needs to by a numpy array for the numba function to use it.
+    # # Inputs are Mg AGB/ha/yr. Outputs are Mg AGB/ha/yr. Conversion to Mg AGC/ha/yr is done below.
+    # primary_forest_RF_array = uu.convert_lookup_table_to_array(cn.RF_C_ratio_spreadsheet_full_path,
+    #                                                            cn.IPCC_removal_factor_table_tab,
+    #                                                            ['gainEcoCon', 'growth_primary'])
+    #
+    # # Converts primary forest AGB RFs to AGC RFs (Mg AGB/ha/yr -> Mg AGC/ha/yr)
+    # primary_forest_RF_array[:, 1] = primary_forest_RF_array[:, 1] * cn.biomass_to_carbon_non_mangrove
+    #
+    #
+    # # Creates numpy array of ratios of BGC, deadwood C, and litter C relative to AGC. Relevant columns must be specified.
+    # mangrove_C_ratio_array = uu.convert_lookup_table_to_array(cn.RF_C_ratio_spreadsheet_full_path, cn.mangrove_rate_ratio_tab,
+    #                                                           ['gainEcoCon', 'AGB_gain_tons_ha_yr', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
+    #
+    # # Creates numpy array of emission factors for partially disturbed forest by driver and continent-ecozone combination
+    # partial_disturbance_EF_array = uu.convert_lookup_table_to_array(cn.partial_disturbance_emission_factor_table_full_path,
+    #                                                                 cn.partial_disturbance_emission_factor_table_tab,
+    #                                                                 ['gainEcoCon', '1_perm_ag_EF', '2_hard_comm_EF',
+    #                                                                  '3_shift_cult_EF',	'4_logging_EF',	'5_wildfire_EF',
+    #                                                                  '6_sett_infrastr_EF', '7_natrl_dist_EF'])
+    #
+    #
+    # ### Step 2: Create empty (metadata-only), global mega-zarr in s3.
+    # ### Zarr approach from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
+    #
+    # # Only creates the global mega-zarr if needed (large runs or otherwise specified)
+    # if create_zarr:
+    #
+    #     # Only specific datasets output to zarrs.
+    #     # Starts with non-summative outputs from the vegetation model
+    #     outputs_to_zarr = [
+    #         cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern, cn.litter_c_modeled_dens_pattern,
+    #         cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
+    #         cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
+    #         cn.ch4_flux_pattern, cn.n2o_flux_pattern,
+    #         cn.land_state_pattern, cn.composite_primary_forest, cn.forest_age_output_pattern
+    #     ]
+    #
+    #     # Also want to add the metadata for the summative outputs to the global zarr upfront for simplicity,
+    #     # rather than having to add more empty layers to the zarr at the summative stage
+    #     outputs_to_zarr = outputs_to_zarr + [
+    #         cn.gross_emis_all_C_pools_CO2_only_pattern, cn.gross_emis_all_C_pools_non_CO2_only_pattern, cn.gross_emis_all_C_pools_all_gases_pattern,
+    #         cn.gross_removals_all_C_pools_pattern,
+    #         cn.net_flux_agc_pattern, cn.net_flux_bgc_pattern, cn.net_flux_deadwood_c_pattern, cn.net_flux_litter_c_pattern,
+    #         cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
+    #         cn.non_soil_c_modeled_dens_pattern
+    #     ]
+    #
+    #     # Sets the output zarr location based on the model run
+    #     mega_zarr_path = cn.outputs_path_mega_zarr.replace(cn.model_type_placholder, model_type)
+    #     mega_zarr_path = mega_zarr_path.replace("MODEL_INTERVAL_TYPE", interval_type)
+    #     mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
+    #     mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
+    #
+    #     # Creates the global mega-zarr with metadata only
+    #     uu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+    #                                 (1, chunk_size_pixels, chunk_size_pixels), main_logger)
+    # else:
+    #     mega_zarr_path = None
+    #     outputs_to_zarr = False
+    #
+    #
+    # ### Step 3: Create 1x1 degree outputs
+    #
+    # # Creates list of tasks to run (1 task = 1 chunk)
+    # main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
+    # main_logger.info("Workers' logs to be appended after main function log"+ "\n")
+    #
+    # chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
+    # main_logger.info(f"There are {len(chunk_batches)} batches to process: {uu.timestr()}")
+    #
+    # # Accumulates all output messages and statistics across batches
+    # # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
+    # all_results = []
+    # all_1x1_stats = []
+    # success_count = 0  # Count of successful chunks
+    #
+    # # Iterates through the batches
+    # for i, chunk_batch in enumerate(chunk_batches):
+    #     main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks): {uu.timestr()}")
+    #     main_logger.info("Creating batch task txts in s3...")
+    #     uu.create_s3_task_files(stage, chunk_batch)
+    #
+    #     # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
+    #     futures = []
+    #     for chunk in chunk_batch:
+    #         future = client.submit(calculate_and_upload_LULUCF_fluxes,
+    #                                chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
+    #                                download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
+    #                                interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
+    #                                output_dir_list, stage, model_type, mega_zarr_path, outputs_to_zarr)
+    #         futures.append(future)
+    #
+    #     batch_results = client.gather(futures)
+    #
+    #     all_results.extend(batch_results)
+    #
+    #     success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_large_run, main_logger, batch_results)
+    #     all_1x1_stats.extend(batch_stats)
+    #
+    #     # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
+    #     # That way there are some basic chunk stats (not sorted or anything) to fall back on.
+    #     if len(chunk_batches) > 1:
+    #         main_logger.info(f"Writing batch stats to spreadsheet: {uu.timestr()}")
+    #         df_batch_stats = pd.DataFrame(batch_stats)
+    #         out_spreadsheet = f'TEMP_BATCH_{stage}__batch_{i}_{uu.timestr()}.xlsx'
+    #         local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+    #         with pd.ExcelWriter(local_spreadsheet) as writer:
+    #             df_batch_stats.to_excel(writer, sheet_name=f'stats__batch_{i}', index=False)
+    #
+    #     del futures
+    #     del batch_results
+    #     client.run(gc.collect)
+    #
+    #     uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
-    # Creates a download dictionary with the datatype of each input in the values.
-    # This is supplied to each chunk that is being analyzed.
-    # This also serves as a check of whether all inputs are being found (s3 paths correct)
-    main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
-    download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
 
-    if is_large_run:
-        main_logger.info(f"download_dict_with_data_types for {stage}:")
-        for key, value in download_dict_with_data_types.items():
-            main_logger.info(f"  {key}: {value}")
+    ### Step 4: Rechunk the global mega-zarr from 4000x4000 to 10000x10000
 
-    # Creates a list of output directories (core and intermediates) for all outputs and intervals based on specifics of the model run
-    output_dir_list_core_intermediate = cn.veg_core_output_dirs + cn.veg_intermediate_output_dirs
-    output_dir_list = uu.create_output_dir_name_list(output_dir_list_core_intermediate, interval_type, start_year,
-                                                     chunk_size_pixels, model_type, interval_end_years,
-                                                     interval_year_diff_list, run_date, False, "per_ha")
-    output_dir_list.sort()  # Alphabetically order the outputs (modifies output_dir_list)
-    if is_large_run:
-        main_logger.info(f"output_dir_list for {stage}:")
-        for item in output_dir_list:
-            main_logger.info(f"  {item}")
-
-    # Creates numpy array of IPCC Tier 1 primary forest removal factors by continent-ecozone combination.
-    # Needs to by a numpy array for the numba function to use it.
-    # Inputs are Mg AGB/ha/yr. Outputs are Mg AGB/ha/yr. Conversion to Mg AGC/ha/yr is done below.
-    primary_forest_RF_array = uu.convert_lookup_table_to_array(cn.RF_C_ratio_spreadsheet_full_path,
-                                                               cn.IPCC_removal_factor_table_tab,
-                                                               ['gainEcoCon', 'growth_primary'])
-
-    # Converts primary forest AGB RFs to AGC RFs (Mg AGB/ha/yr -> Mg AGC/ha/yr)
-    primary_forest_RF_array[:, 1] = primary_forest_RF_array[:, 1] * cn.biomass_to_carbon_non_mangrove
+    # --- Config ---
+    source_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/4000_pixels/20251024/"
+    target_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/10000_pixels/20251024/"
+    temp_store_url = f"s3://gfw2-data/tmp/rechunker-{uuid.uuid4()}/"
 
 
-    # Creates numpy array of ratios of BGC, deadwood C, and litter C relative to AGC. Relevant columns must be specified.
-    mangrove_C_ratio_array = uu.convert_lookup_table_to_array(cn.RF_C_ratio_spreadsheet_full_path, cn.mangrove_rate_ratio_tab,
-                                                              ['gainEcoCon', 'AGB_gain_tons_ha_yr', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
-
-    # Creates numpy array of emission factors for partially disturbed forest by driver and continent-ecozone combination
-    partial_disturbance_EF_array = uu.convert_lookup_table_to_array(cn.partial_disturbance_emission_factor_table_full_path,
-                                                                    cn.partial_disturbance_emission_factor_table_tab,
-                                                                    ['gainEcoCon', '1_perm_ag_EF', '2_hard_comm_EF',
-                                                                     '3_shift_cult_EF',	'4_logging_EF',	'5_wildfire_EF',
-                                                                     '6_sett_infrastr_EF', '7_natrl_dist_EF'])
-
-
-    ### Step 2: Create empty (metadata-only), global mega-zarr in s3.
-    ### Zarr approach from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
-
-    # Only creates the global mega-zarr if needed (large runs or otherwise specified)
-    if create_zarr:
-
-        # Only specific datasets output to zarrs.
-        # Starts with non-summative outputs from the vegetation model
-        outputs_to_zarr = [
-            cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern, cn.litter_c_modeled_dens_pattern,
-            cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
-            cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
-            cn.ch4_flux_pattern, cn.n2o_flux_pattern,
-            cn.land_state_pattern, cn.composite_primary_forest, cn.forest_age_output_pattern
-        ]
-
-        # Also want to add the metadata for the summative outputs to the global zarr upfront for simplicity,
-        # rather than having to add more empty layers to the zarr at the summative stage
-        outputs_to_zarr = outputs_to_zarr + [
-            cn.gross_emis_all_C_pools_CO2_only_pattern, cn.gross_emis_all_C_pools_non_CO2_only_pattern, cn.gross_emis_all_C_pools_all_gases_pattern,
-            cn.gross_removals_all_C_pools_pattern,
-            cn.net_flux_agc_pattern, cn.net_flux_bgc_pattern, cn.net_flux_deadwood_c_pattern, cn.net_flux_litter_c_pattern,
-            cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
-            cn.non_soil_c_modeled_dens_pattern
-        ]
-
-        # Sets the output zarr location based on the model run
-        mega_zarr_path = cn.outputs_path_mega_zarr.replace(cn.model_type_placholder, model_type)
-        mega_zarr_path = mega_zarr_path.replace("MODEL_INTERVAL_TYPE", interval_type)
-        mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
-        mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
-
-        # Creates the global mega-zarr with metadata only
-        uu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
-                                    (1, chunk_size_pixels, chunk_size_pixels), main_logger)
-    else:
-        mega_zarr_path = None
-        outputs_to_zarr = False
+    # # Open the source Zarr with smaller chunks
+    # fs = fsspec.filesystem("s3", anon=False)
+    # source_mapper = fs.get_mapper(source_store_url)
+    # ds = xr.open_zarr(source_mapper, chunks="auto")
+    #
+    # # Rechunk to larger blocks
+    # ds_rechunked = ds.chunk({"x": 10000, "y": 10000, "year": 1})
+    #
+    # # Save to a new Zarr store (or overwrite)
+    # target_mapper = fs.get_mapper(target_store_url)
+    # ds_rechunked.to_zarr(target_mapper, mode="w", consolidated=True)
 
 
-    ### Step 3: Create 1x1 degree outputs
+    # Desired new chunk shape
+    target_chunk_shape = (1, 10000, 10000)
 
-    # Creates list of tasks to run (1 task = 1 chunk)
-    main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
-    main_logger.info("Workers' logs to be appended after main function log"+ "\n")
+    # --- Load source store ---
+    fs = fsspec.filesystem("s3", anon=False)
+    source_mapper = fs.get_mapper(source_store_url)
+    target_mapper = fs.get_mapper(target_store_url)
+    temp_mapper = fs.get_mapper(temp_store_url)
 
-    chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
-    main_logger.info(f"There are {len(chunk_batches)} batches to process: {uu.timestr()}")
+    from xarray.backends.zarr import ZarrBackendEntrypoint
 
-    # Accumulates all output messages and statistics across batches
-    # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-    all_results = []
-    all_1x1_stats = []
-    success_count = 0  # Count of successful chunks
+    backend = ZarrBackendEntrypoint()
+    ds = backend.open_dataset(
+        filename_or_obj=source_mapper,
+        zarr_version=3,
+        consolidated=False,
+    )
 
-    # Iterates through the batches
-    for i, chunk_batch in enumerate(chunk_batches):
-        main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks): {uu.timestr()}")
-        main_logger.info("Creating batch task txts in s3...")
-        uu.create_s3_task_files(stage, chunk_batch)
+    # --- Define rechunking plan ---
+    target_chunks = {
+        var: target_chunk_shape
+        for var in ds.data_vars
+        if ds[var].ndim == 3  # Apply only to 3D variables (year, y, x)
+    }
 
-        # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
-        futures = []
-        for chunk in chunk_batch:
-            future = client.submit(calculate_and_upload_LULUCF_fluxes,
-                                   chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
-                                   download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                                   interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
-                                   output_dir_list, stage, model_type, mega_zarr_path, outputs_to_zarr)
-            futures.append(future)
+    # Add any 1D coordinate chunks (optional, safe default is "-1" = full)
+    for coord in ['x', 'y', 'year']:
+        if coord in ds.coords and ds[coord].ndim == 1:
+            target_chunks[coord] = -1
 
-        batch_results = client.gather(futures)
+    # --- Rechunk ---
+    rechunk_plan = rechunker.rechunk(
+        ds,
+        target_chunks=target_chunks,
+        max_mem="2GB",  # Adjust based on your memory capacity
+        target_store=target_mapper,
+        temp_store=temp_mapper,
+        executor="dask",  # or "processes"
+    )
 
-        all_results.extend(batch_results)
+    # --- Execute plan ---
+    rechunk_plan.execute()
 
-        success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_large_run, main_logger, batch_results)
-        all_1x1_stats.extend(batch_stats)
-
-        # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
-        # That way there are some basic chunk stats (not sorted or anything) to fall back on.
-        if len(chunk_batches) > 1:
-            main_logger.info(f"Writing batch stats to spreadsheet: {uu.timestr()}")
-            df_batch_stats = pd.DataFrame(batch_stats)
-            out_spreadsheet = f'TEMP_BATCH_{stage}__batch_{i}_{uu.timestr()}.xlsx'
-            local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
-            with pd.ExcelWriter(local_spreadsheet) as writer:
-                df_batch_stats.to_excel(writer, sheet_name=f'stats__batch_{i}', index=False)
-
-        del futures
-        del batch_results
-        client.run(gc.collect)
-
-        uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
+    print(f"✅ Rechunked and saved to: {target_store_url}")
 
 
-    ### Step 4: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs
+    # Path to your rechunked Zarr
+    target_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/10000_pixels/20251024/"
+
+    fs = fsspec.filesystem("s3", anon=False)
+    target_mapper = fs.get_mapper(target_store_url)
+
+    # Load dataset (lazy)
+    ds = xr.open_zarr(target_mapper, consolidated=True)  # Use consolidated if you ran `zarr.consolidate_metadata`
+
+    print(ds)
+
+
+
+    ### Step 5: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
