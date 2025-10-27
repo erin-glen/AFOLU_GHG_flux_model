@@ -20,6 +20,7 @@ from datetime import datetime
 import json
 import numcodecs
 from dask.distributed import Client, print
+from dask import delayed
 
 from rechunker import rechunk
 import os
@@ -108,31 +109,6 @@ def connect_to_Coiled_cluster(cluster_name, run_local, fallback_to_local_on_fail
             return None, None, True
         else:
             raise
-
-
-def create_global_output_zarr(store_url, dataset_keys, n_years, lat_size, lon_size, chunks):
-    """Create a global Zarr group with multiple datasets (year, lat, lon)."""
-    fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(store_url)
-
-    # Step 1: Explicitly create a group and write root metadata
-    root = zarr.open_group(store=mapper, mode="w")
-    root.attrs["description"] = "Global outputs with multiple datasets and years"
-    print("✅ Root Zarr group created.")
-
-    # Step 2: Create datasets inside the group
-    for key in dataset_keys:
-        root.create_dataset(
-            name=key,
-            shape=(n_years, lat_size, lon_size),
-            chunks=chunks,
-            dtype=dtype,
-            fill_value=fill_value,
-            overwrite=True,
-        )
-        print(f"✅ Created dataset: {key} shape={(n_years, lat_size, lon_size)}")
-
-    print(f"✅ Zarr group created at {store_url}")
 
 
 def initialize_zarr_with_coords(
@@ -272,6 +248,66 @@ def check_region_min_max(store_url, dataset_key, year_idx):
     print(f"🔍 {dataset_key} year {year_idx}: min={region.min()}, mean={region.mean()}, max={region.max()}")
 
 
+def rechunk_variable_year_by_year(raw_store_url, rechunk_url, var_names=None, years=None, chunk_size=(10000, 10000)):
+
+    # S3 mappers
+    fs = fsspec.filesystem("s3", anon=False)
+    source_mapper = fs.get_mapper(raw_store_url)
+    target_mapper = fs.get_mapper(rechunk_url)
+
+    print(f"🔓 Opening full Zarr dataset: {timestr()}")
+    ds = xr.open_zarr(source_mapper, consolidated=False, zarr_format=3)
+
+    if var_names is None:
+        var_names = list(ds.data_vars)
+
+    if years is None:
+        years = list(ds.year.values)
+
+    # Zstd compression
+    compressor = {
+        "name": "zstd",
+        "configuration": {"level": 3}
+    }
+
+    # Open target Zarr for checking existing vars
+    target_z = zarr.open_group(target_mapper, mode="r+")
+    existing_vars = set(target_z.array_keys())
+
+    for var in var_names:
+        print(f"\n📦 Rechunking variable: {var}")
+        for year_idx in years:
+            print(f"🕒 Year index {year_idx}: {timestr()}")
+
+            # Slice and expand to keep "year" dim
+            da_slice = ds[var].isel(year=year_idx).expand_dims(year=[year_idx])
+
+            # Rechunk spatial dims
+            da_rechunked = da_slice.chunk({"y": chunk_size[0], "x": chunk_size[1]})
+            da_rechunked.encoding.pop("chunks", None)
+
+            # Build encoding dict only if variable does not yet exist
+            if var not in existing_vars and year_idx == years[0]:
+                encoding = {var: {"compressor": compressor}}
+                mode = "a"  # First write
+                print(f"🆕 Creating variable {var} with compression")
+            else:
+                encoding = None  # Don't pass encoding again
+                mode = "a"
+
+            # Write to Zarr
+            da_rechunked.to_dataset(name=var).to_zarr(
+                store=target_mapper,
+                mode=mode,
+                zarr_format=3,
+                encoding=encoding,
+                append_dim="year",
+            )
+
+            print(f"✅ Wrote {var} year={year_idx} to {rechunk_url}: {timestr()}")
+
+
+
 
 # Define writing function
 def sanitize_attrs(ds: xr.Dataset) -> xr.Dataset:
@@ -297,7 +333,6 @@ def sanitize_attrs(ds: xr.Dataset) -> xr.Dataset:
         ds[var].attrs = new_attrs
 
     return ds
-
 
 
 def rechunk_one_year_dataset(var_name, year_idx, chunks, source_url, target_url, first_write=False):
@@ -351,40 +386,100 @@ if __name__ == "__main__":
     # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
     start_time = time.time()
 
-    # Step 1: Create empty Zarr store (only once)
-    initialize_zarr_with_coords(raw_store_url, dataset_keys, n_years)
-    # create_zarr_v3_with_zarr_json(raw_store_url, dataset_keys, n_years)
+    # # Step 1: Create empty Zarr store (only once)
+    # initialize_zarr_with_coords(raw_store_url, dataset_keys, n_years)
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = connect_to_Coiled_cluster("zarr_testing", False)
 
-    # Step 3: Compute region indices
-    lat0, lon0 = latlon_to_indices(target_box["lat_max"], target_box["lon_min"])
-    lat1, lon1 = latlon_to_indices(target_box["lat_min"], target_box["lon_max"])
 
-    # Step 4: Populate zarr: Submit write tasks for all datasets + all years
-    futures = []
-    for dataset_key in dataset_keys:
-        for year_idx in range(n_years):
-            f = client.submit(write_chunk, dataset_key, year_idx, lat0, lat1, lon0, lon1, raw_store_url, pure=False)
-            futures.append(f)
+    # # Step 3: Compute region indices
+    # lat0, lon0 = latlon_to_indices(target_box["lat_max"], target_box["lon_min"])
+    # lat1, lon1 = latlon_to_indices(target_box["lat_min"], target_box["lon_max"])
+    #
+    #
+    # # Step 4: Populate zarr: Submit write tasks for all datasets + all years
+    # futures = []
+    # for dataset_key in dataset_keys:
+    #     for year_idx in range(n_years):
+    #         f = client.submit(write_chunk, dataset_key, year_idx, lat0, lat1, lon0, lon1, raw_store_url, pure=False)
+    #         futures.append(f)
+    #
+    # results = client.gather(futures)
+    # for r in results:
+    #     print(r)
+    #
+    #
+    # # Step 5: Clean _FillValue in populated zarr
+    # ### Need to remove _FillValue attribute in zarr because it's being encoded in some way that is incompatible with xarray while using zarr v3,
+    # ### per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc.
+    # ### There doesn't seem to be a way to create the zarr with a correctly encoded _FillValue in the first place,
+    # ### hence this fix after the fact.
+    #
+    # fs = fsspec.filesystem("s3", anon=False)
+    # source_mapper = fs.get_mapper(raw_store_url)
+    #
+    # # Open Zarr group in read/write mode
+    # z = zarr.open_group(store=source_mapper, mode="r+")
+    # print(z["carbon_density__AGC__MgC"].filters)  # Should include compressor info
+    #
+    # # Loop through all arrays
+    # for key in z.array_keys():
+    #     arr = z[key]
+    #     if "_FillValue" in arr.attrs:
+    #         print(f"🔧 Removing _FillValue from {key}")
+    #         del arr.attrs["_FillValue"]
+    #
+    # print("✅ Cleaned _FillValue from Zarr metadata.")
+    #
+    # arr = z["carbon_density__AGC__MgC"]
+    # attrs = dict(arr.attrs)
+    # print(f"Attributes: {attrs}: {timestr()}")
+    # print("Type of _FillValue:", type(attrs.get("_FillValue")))
+    #
+    #
+    # # Step 6: Validate one region
+    # fs = fsspec.filesystem("s3", anon=False)
+    # source_mapper = fs.get_mapper(raw_store_url)
+    # ds = xr.open_zarr(source_mapper, consolidated=False)
+    # print(ds)
+    # print(ds.coords)
+    # print("y range:", ds.y.values.min(), ds.y.values.max())
+    # print("x range:", ds.x.values.min(), ds.x.values.max())
+    #
+    # check_region_min_max(raw_store_url, "carbon_density__AGC__MgC", 0)
+    # check_region_min_max(raw_store_url, "carbon_density__BGC__MgC", 0)
+    # check_region_min_max(raw_store_url, "carbon_density__AGC__MgC", 1)
+    # check_region_min_max(raw_store_url, "carbon_density__BGC__MgC", 1)
+    # # check_region_min_max("flux_NEE", 2)
 
-    results = client.gather(futures)
-    for r in results:
-        print(r)
 
+    # Step 7: Rechunk to 10000x10000-- one dataset-year at a time
 
-    # Step 5: Clean _FillValue in populated zarr
+    # === Create paths ===
+    rechunk_url = raw_store_url.rstrip("/") + "_rechunked/"
+
+    initialize_zarr_with_coords(
+        rechunk_url,
+        dataset_keys,
+        n_years,
+        resolution=0.00025,
+        dtype="float32",
+        fill_value=np.nan,
+        chunks=(1, 10000, 10000)
+    )
+
+    # Clean _FillValue in populated rechunked zarr
     ### Need to remove _FillValue attribute in zarr because it's being encoded in some way that is incompatible with xarray while using zarr v3,
     ### per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc.
     ### There doesn't seem to be a way to create the zarr with a correctly encoded _FillValue in the first place,
     ### hence this fix after the fact.
 
     fs = fsspec.filesystem("s3", anon=False)
-    source_mapper = fs.get_mapper(raw_store_url)
+    rechunk_mapper = fs.get_mapper(rechunk_url)
 
     # Open Zarr group in read/write mode
-    z = zarr.open_group(store=source_mapper, mode="r+")
+    z = zarr.open_group(store=rechunk_mapper, mode="r+")
     print(z["carbon_density__AGC__MgC"].filters)  # Should include compressor info
 
     # Loop through all arrays
@@ -401,66 +496,58 @@ if __name__ == "__main__":
     print(f"Attributes: {attrs}: {timestr()}")
     print("Type of _FillValue:", type(attrs.get("_FillValue")))
 
-    # Step 6: Validate one region
-    fs = fsspec.filesystem("s3", anon=False)
-    source_mapper = fs.get_mapper(raw_store_url)
-    ds = xr.open_zarr(source_mapper, consolidated=False)
-    print(ds)
-    print(ds.coords)
-    print("y range:", ds.y.values.min(), ds.y.values.max())
-    print("x range:", ds.x.values.min(), ds.x.values.max())
-
-    check_region_min_max(raw_store_url, "carbon_density__AGC__MgC", 0)
-    check_region_min_max(raw_store_url, "carbon_density__BGC__MgC", 0)
-    check_region_min_max(raw_store_url, "carbon_density__AGC__MgC", 1)
-    check_region_min_max(raw_store_url, "carbon_density__BGC__MgC", 1)
-    # check_region_min_max("flux_NEE", 2)
-
-
-    # Step 7: Rechunk to 10000x10000
-
-    # Paths
-    rechunk_url = raw_store_url.rstrip("/") + "_rechunked/"
-
-    # === Create S3 mappers ===
-    fs = fsspec.filesystem("s3", anon=False)
-    source_mapper = fs.get_mapper(raw_store_url)
-    target_mapper = fs.get_mapper(rechunk_url)
-
-    # === Open Zarr v3 dataset ===
-    print(f"Opening zarr dataset for rechunking: {timestr()}")
-    ds = xr.open_zarr(source_mapper, consolidated=False, chunks={})
-
-    # === Rechunk in memory ===
-    print(f"Rechunking in memory: {timestr()}")
-    rechunked = ds.chunk({"year": 1, "y": 10000, "x": 10000})
-
-    # === Clean stale encoding to avoid alignment errors ===
-    print(f"Cleaning rechunked output: {timestr()}")
-    for var in rechunked.data_vars:
-        rechunked[var].encoding.pop("chunks", None)
-
-    # === Write to new Zarr v3 store on S3 ===
-
-    compressor = {
-        "name": "zstd",
-        "configuration": {"level": 3}
-    }
-
-    encoding = {
-        var: {"compressor": compressor}
-        for var in rechunked.data_vars
-    }
-
-    print(f"Writing rechunked output to s3: {timestr()}")
-    rechunked.to_zarr(
-        store=target_mapper,
-        mode="w",
-        encoding=encoding,
-        zarr_format=3
+    rechunk_variable_year_by_year(
+        raw_store_url=raw_store_url,
+        rechunk_url=rechunk_url,
+        var_names=["carbon_density__AGC__MgC"],  # or None for all variables
+        years=[0, 1, 2],  # or None for all years
+        chunk_size=(10000, 10000)
     )
 
-    print(f"✅ Rechunked dataset written to {rechunk_url}: {timestr()}")
+    # # Step 7: Rechunk to 10000x10000-- all datasets and years together
+    #
+    # # Paths
+    # rechunk_url = raw_store_url.rstrip("/") + "_rechunked/"
+    #
+    # # === Create S3 mappers ===
+    # fs = fsspec.filesystem("s3", anon=False)
+    # source_mapper = fs.get_mapper(raw_store_url)
+    # target_mapper = fs.get_mapper(rechunk_url)
+    #
+    # # === Open Zarr v3 dataset ===
+    # print(f"Opening zarr dataset for rechunking: {timestr()}")
+    # ds = xr.open_zarr(source_mapper, consolidated=False, chunks={})
+    #
+    # # === Rechunk in memory ===
+    # print(f"Rechunking in memory: {timestr()}")
+    # rechunked = ds.chunk({"year": 1, "y": 10000, "x": 10000})
+    #
+    # # === Clean stale encoding to avoid alignment errors ===
+    # print(f"Cleaning rechunked output: {timestr()}")
+    # for var in rechunked.data_vars:
+    #     rechunked[var].encoding.pop("chunks", None)
+    #
+    # # === Write to new Zarr v3 store on S3 ===
+    #
+    # compressor = {
+    #     "name": "zstd",
+    #     "configuration": {"level": 3}
+    # }
+    #
+    # encoding = {
+    #     var: {"compressor": compressor}
+    #     for var in rechunked.data_vars
+    # }
+    #
+    # print(f"Writing rechunked output to s3: {timestr()}")
+    # rechunked.to_zarr(
+    #     store=target_mapper,
+    #     mode="w",
+    #     encoding=encoding,
+    #     zarr_format=3
+    # )
+    #
+    # print(f"✅ Rechunked dataset written to {rechunk_url}: {timestr()}")
 
     # Test the rechunking
 
@@ -468,7 +555,7 @@ if __name__ == "__main__":
     rechunk_mapper = fs.get_mapper(rechunk_url)
     ds_rechunk = xr.open_zarr(rechunk_mapper, consolidated=False)
     print(f"rechunked ds: {ds_rechunk}: {timestr()}")
-    print(ds.coords)
+    print(ds_rechunk.coords)
 
     # Open Zarr group in read/write mode
     z = zarr.open_group(store=rechunk_mapper, mode="r+")
