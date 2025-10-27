@@ -18,9 +18,12 @@ import coiled
 import time
 from datetime import datetime
 import json
+import dask
 import numcodecs
 from dask.distributed import Client, print
 from dask import delayed
+from dask.diagnostics import ProgressBar
+
 
 from rechunker import rechunk
 import os
@@ -308,73 +311,205 @@ def rechunk_variable_year_by_year(raw_store_url, rechunk_url, var_names=None, ye
 
 
 
-
-# Define writing function
-def sanitize_attrs(ds: xr.Dataset) -> xr.Dataset:
-    clean_global_attrs = {}
-    for k, v in ds.attrs.items():
-        if isinstance(v, (np.generic, np.ndarray)):
-            clean_global_attrs[k] = v.item()
-        elif isinstance(v, np.dtype):
-            clean_global_attrs[k] = str(v)
-        else:
-            clean_global_attrs[k] = v
-    ds.attrs = clean_global_attrs
-
-    for var in ds.variables:
-        new_attrs = {}
-        for k, v in ds[var].attrs.items():
-            if isinstance(v, (np.generic, np.ndarray)):
-                new_attrs[k] = v.item()
-            elif isinstance(v, np.dtype):
-                new_attrs[k] = str(v)
-            else:
-                new_attrs[k] = v
-        ds[var].attrs = new_attrs
-
-    return ds
-
-
-def rechunk_one_year_dataset(var_name, year_idx, chunks, source_url, target_url, first_write=False):
-
-    print(f"Rechunking {var_name} year={year_idx} (first_write={first_write}): {timestr()}")
-
-    fs = fsspec.filesystem("s3", anon=False)
-    src = xr.open_zarr(fs.get_mapper(source_url), consolidated=False, chunks={})
-    tgt_mapper = fs.get_mapper(target_url)
-    print(target_url)
-    print(src)
-    print(tgt_mapper)
-
-    # one_year = src[[var_name]].sel(year=year_idx).expand_dims("year")
-    one_year = src[var_name].isel(year=year_idx).expand_dims("year").to_dataset()
-    one_year = one_year.chunk(chunks)
-    print(one_year)
-
-    # Clean encoding and attrs
-    for v in one_year.data_vars:
-        one_year[v].encoding.pop("chunks", None)
-        one_year[v].encoding.pop("compressor", None)
-    one_year = sanitize_attrs(one_year)
-    print(one_year)
-
-    # First write initializes the array
-    if first_write:
-        mode = "w"
-        append_dim = None
-    else:
-        mode = "a"
-        append_dim = "year"
-
-    one_year.to_zarr(
-        store=tgt_mapper,
-        mode=mode,
-        consolidated=False,
-        append_dim=append_dim,
+@delayed
+def write_slice_to_zarr(dataarray, var, store, year_index):
+    dataarray.encoding.pop("chunks", None)
+    dataarray = dataarray.expand_dims("year")
+    return dataarray.to_dataset(name=var).to_zarr(
+        store=store,
+        mode="a",
+        zarr_format=3,
+        append_dim="year"
     )
 
-    print(f"✅ Wrote {var_name} year={year_idx}: {timestr()}")
-    return f"✅ Wrote {var_name} year={year_idx}"
+def rechunk_variable_with_delayed(raw_store_url, rechunk_url, var_names=None, years=None):
+    fs = fsspec.filesystem("s3", anon=False)
+    source_mapper = fs.get_mapper(raw_store_url)
+    target_mapper = fs.get_mapper(rechunk_url)
+
+    ds = xr.open_zarr(source_mapper, consolidated=False, zarr_format=3)
+
+    if var_names is None:
+        var_names = list(ds.data_vars)
+    if years is None:
+        years = list(ds.year.values)
+
+    tasks = []
+
+    for var in var_names:
+        for year_idx in years:
+
+            if "year" not in ds[var].dims:
+                print(f"⛔ Skipping variable {var} — no 'year' dimension found.")
+                continue
+
+            da_slice = ds[var].isel(year=year_idx).copy(deep=False)
+
+            da_slice.attrs = {}
+            da_slice = da_slice.reset_coords(drop=True)
+            da_rechunked = da_slice.chunk({"y": 10000, "x": 10000})
+
+            task = write_slice_to_zarr(da_rechunked, var, target_mapper, year_idx)
+            tasks.append(task)
+
+    print(f"⏳ Submitting {len(tasks)} delayed tasks...")
+    dask.compute(*tasks)
+    print("✅ All chunks written.")
+
+
+
+def write_chunk_delayed(da_slice, target_mapper, var, compressor):
+    # Clean encoding and write
+    da_slice.encoding.pop("chunks", None)
+    return da_slice.to_dataset(name=var).to_zarr(
+        store=target_mapper,
+        mode="a",
+        zarr_format=3,
+        append_dim="year",
+        encoding={var: {"compressor": compressor}},
+    )
+
+def rechunk_variable_with_delayed_one_by_one(
+    raw_store_url,
+    rechunk_url,
+    var_names=None,
+    years=None,
+    chunk_size=(10000, 10000),
+):
+
+    fs = fsspec.filesystem("s3", anon=False)
+    source_mapper = fs.get_mapper(raw_store_url)
+    target_mapper = fs.get_mapper(rechunk_url)
+
+    print(f"🔓 Opening full Zarr dataset: {timestr()}")
+    ds = xr.open_zarr(source_mapper, consolidated=False, zarr_format=3)
+
+    # Clean _FillValue to avoid dtype errors
+    for var in ds.data_vars:
+        if "_FillValue" in ds[var].attrs:
+            print(f"🧹 Removing _FillValue from {var}: {timestr()}")
+            ds[var].attrs.pop("_FillValue")
+
+    if var_names is None:
+        var_names = list(ds.data_vars)
+
+    if years is None:
+        years = list(ds.year.values)
+
+    compressor = {
+        "name": "zstd",
+        "configuration": {"level": 3}
+    }
+
+    for var in var_names:
+        if "year" not in ds[var].dims:
+            print(f"⛔ Skipping variable {var} — no 'year' dimension found.")
+            continue
+
+        print(f"\n📦 Rechunking variable: {var}")
+        for year_idx in years:
+            print(f"🕒 Year index {year_idx}: {timestr()}")
+            try:
+                # Select 2D slice
+                da_slice = ds[var].isel(year=year_idx)
+
+                # Add year dimension back
+                da_slice = da_slice.expand_dims(year=[year_idx])
+
+                # Rechunk
+                da_rechunked = da_slice.chunk({"y": chunk_size[0], "x": chunk_size[1]})
+
+                # Delayed write, then compute immediately
+                delayed_task = dask.delayed(write_chunk_delayed)(
+                    da_rechunked, target_mapper, var, compressor
+                )
+
+                with ProgressBar():
+                    dask.compute(delayed_task)
+
+                print(f"✅ Wrote {var} year={year_idx} to {rechunk_url}: {timestr()}")
+
+            except Exception as e:
+                print(f"❌ Failed writing {var} year={year_idx}: {e}")
+
+
+
+
+def write_chunk_direct(da_slice, target_mapper, var, compressor, first_year):
+    da_slice.encoding.clear()  # Prevent stale encoding like _FillValue
+
+    encoding = {}
+    if first_year:
+        encoding[var] = {"compressor": compressor}
+
+    return (
+        da_slice
+        .to_dataset(name=var)
+        .to_zarr(
+            store=target_mapper,
+            mode="a",
+            zarr_format=3,
+            append_dim="year",
+            encoding=encoding if first_year else None,
+        )
+    )
+
+
+def rechunk_variable_with_futures(
+    client,
+    raw_store_url,
+    rechunk_url,
+    var_names=None,
+    years=None,
+    chunk_size=(10000, 10000),
+):
+    fs = fsspec.filesystem("s3", anon=False)
+    source_mapper = fs.get_mapper(raw_store_url)
+    target_mapper = fs.get_mapper(rechunk_url)
+
+    print(f"🔓 Opening full Zarr dataset: {timestr()}")
+    ds = xr.open_zarr(source_mapper, consolidated=False, zarr_format=3)
+
+    if var_names is None:
+        var_names = list(ds.data_vars)
+
+    if years is None:
+        years = list(ds.year.values)
+
+    compressor = {"name": "zstd", "configuration": {"level": 3}}
+
+    for var in var_names:
+        if "year" not in ds[var].dims:
+            print(f"⛔ Skipping variable {var} — no 'year' dimension found.")
+            continue
+
+        print(f"\n📦 Rechunking variable: {var}")
+        for year_idx in years:
+            print(f"🕒 Year index {year_idx}: {timestr()}")
+
+            try:
+                da_slice = (
+                    ds[var]
+                    .isel(year=year_idx)
+                    .expand_dims(year=[year_idx])
+                    .chunk({"y": chunk_size[0], "x": chunk_size[1]})
+                )
+
+                future = client.submit(
+                    write_chunk_direct,
+                    da_slice,
+                    target_mapper,
+                    var,
+                    compressor,
+                    year_idx == 0,  # only pass encoding on year=0
+                    pure=False,
+                )
+                future.result()
+
+                print(f"✅ Wrote {var} year={year_idx} to {rechunk_url}: {timestr()}")
+
+            except Exception as e:
+                print(f"❌ Failed writing {var} year={year_idx}: {e}")
 
 
 # ──────────────────────────────
@@ -382,8 +517,8 @@ def rechunk_one_year_dataset(var_name, year_idx, chunks, source_url, target_url,
 # ──────────────────────────────
 if __name__ == "__main__":
 
-    raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/small_test_zarr_2vars_2yrs/"
-    # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
+    # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/small_test_zarr_2vars_2yrs/"
+    raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
     start_time = time.time()
 
     # # Step 1: Create empty Zarr store (only once)
@@ -469,40 +604,66 @@ if __name__ == "__main__":
         chunks=(1, 10000, 10000)
     )
 
-    # Clean _FillValue in populated rechunked zarr
-    ### Need to remove _FillValue attribute in zarr because it's being encoded in some way that is incompatible with xarray while using zarr v3,
-    ### per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc.
-    ### There doesn't seem to be a way to create the zarr with a correctly encoded _FillValue in the first place,
-    ### hence this fix after the fact.
+    # # Clean _FillValue in populated rechunked zarr
+    # ### Need to remove _FillValue attribute in zarr because it's being encoded in some way that is incompatible with xarray while using zarr v3,
+    # ### per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc.
+    # ### There doesn't seem to be a way to create the zarr with a correctly encoded _FillValue in the first place,
+    # ### hence this fix after the fact.
+    #
+    # fs = fsspec.filesystem("s3", anon=False)
+    # rechunk_mapper = fs.get_mapper(rechunk_url)
+    #
+    # # Open Zarr group in read/write mode
+    # z = zarr.open_group(store=rechunk_mapper, mode="r+")
+    # print(z["carbon_density__AGC__MgC"].filters)  # Should include compressor info
+    #
+    # # Loop through all arrays
+    # for key in z.array_keys():
+    #     arr = z[key]
+    #     if "_FillValue" in arr.attrs:
+    #         print(f"🔧 Removing _FillValue from {key}")
+    #         del arr.attrs["_FillValue"]
+    #
+    # print("✅ Cleaned _FillValue from Zarr metadata.")
+    #
+    # arr = z["carbon_density__AGC__MgC"]
+    # attrs = dict(arr.attrs)
+    # print(f"Attributes: {attrs}: {timestr()}")
+    # print("Type of _FillValue:", type(attrs.get("_FillValue")))
 
-    fs = fsspec.filesystem("s3", anon=False)
-    rechunk_mapper = fs.get_mapper(rechunk_url)
+    # # Graph size of 67 MB
+    # rechunk_variable_year_by_year(
+    #     raw_store_url=raw_store_url,
+    #     rechunk_url=rechunk_url,
+    #     var_names=["carbon_density__AGC__MgC"],  # or None for all variables
+    #     years=[0, 1, 2],  # or None for all years
+    #     chunk_size=(10000, 10000)
+    # )
 
-    # Open Zarr group in read/write mode
-    z = zarr.open_group(store=rechunk_mapper, mode="r+")
-    print(z["carbon_density__AGC__MgC"].filters)  # Should include compressor info
+    # # Graph size of 116 MB
+    # rechunk_variable_with_delayed(
+    #     raw_store_url=raw_store_url,
+    #     rechunk_url=rechunk_url
+    # )
 
-    # Loop through all arrays
-    for key in z.array_keys():
-        arr = z[key]
-        if "_FillValue" in arr.attrs:
-            print(f"🔧 Removing _FillValue from {key}")
-            del arr.attrs["_FillValue"]
-
-    print("✅ Cleaned _FillValue from Zarr metadata.")
-
-    arr = z["carbon_density__AGC__MgC"]
-    attrs = dict(arr.attrs)
-    print(f"Attributes: {attrs}: {timestr()}")
-    print("Type of _FillValue:", type(attrs.get("_FillValue")))
-
-    rechunk_variable_year_by_year(
+    # Graph size of 44 MB
+    rechunk_variable_with_delayed_one_by_one(
         raw_store_url=raw_store_url,
         rechunk_url=rechunk_url,
-        var_names=["carbon_density__AGC__MgC"],  # or None for all variables
-        years=[0, 1, 2],  # or None for all years
+        var_names=None,  # or None for all
+        years=None,  # or None for all
         chunk_size=(10000, 10000)
     )
+
+    # # Failed, but also graph size of 45 MB
+    # rechunk_variable_with_futures(
+    #     client,
+    #     raw_store_url=raw_store_url,
+    #     rechunk_url=rechunk_url,
+    #     var_names=None,
+    #     years=None,  # Or all years
+    #     chunk_size=(10000, 10000),
+    # )
 
     # # Step 7: Rechunk to 10000x10000-- all datasets and years together
     #
