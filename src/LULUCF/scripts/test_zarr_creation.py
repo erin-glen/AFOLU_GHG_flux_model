@@ -15,6 +15,8 @@ import dask.array as da
 import zarr
 import fsspec
 import coiled
+import time
+from datetime import datetime
 import json
 from dask.distributed import Client, print
 
@@ -27,8 +29,8 @@ import os
 # ──────────────────────────────
 
 dataset_keys = [
-    "carbon_density_AGC",
-    "carbon_density_BGC",
+    "carbon_density__AGC__MgC",
+    "carbon_density__BGC__MgC",
     # "flux_NEE",
     # "flux_FIRE",
     # "forest_mask",
@@ -296,6 +298,14 @@ def check_region_min_max(store_url, dataset_key, year_idx):
     lat1, lon1 = latlon_to_indices(target_box["lat_min"], target_box["lon_max"])
 
     region = z[dataset_key][year_idx, lat0:lat1, lon0:lon1]
+
+    # print(dataset_key)
+    # print(mapper)
+    # print(z)
+    # print(lat0, lon0)
+    # print(lat1, lon1)
+    # print(region)
+
     print(f"🔍 {dataset_key} year {year_idx}: min={region.min()}, mean={region.mean()}, max={region.max()}")
 
 
@@ -374,61 +384,72 @@ def rechunk_one_year_dataset(var_name, year_idx, chunks, source_url, target_url,
 # ──────────────────────────────
 if __name__ == "__main__":
 
-    raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/small_test_zarr/"
+    # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/small_test_zarr_2vars_2yrs/"
+    raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
+    start_time = time.time()
 
-    # Step 1: Create empty Zarr store (only once)
-    initialize_zarr_with_coords(raw_store_url, dataset_keys, n_years)
-    # create_zarr_v3_with_zarr_json(raw_store_url, dataset_keys, n_years)
+    # # Step 1: Create empty Zarr store (only once)
+    # initialize_zarr_with_coords(raw_store_url, dataset_keys, n_years)
+    # # create_zarr_v3_with_zarr_json(raw_store_url, dataset_keys, n_years)
 
-    # Connects to Coiled cluster if not running locally and the named cluster exists
-    cluster, client, run_local = connect_to_Coiled_cluster("zarr_testing", False)
+    # # Connects to Coiled cluster if not running locally and the named cluster exists
+    # cluster, client, run_local = connect_to_Coiled_cluster("zarr_testing", False)
 
-    # Step 3: Compute region indices
-    lat0, lon0 = latlon_to_indices(target_box["lat_max"], target_box["lon_min"])
-    lat1, lon1 = latlon_to_indices(target_box["lat_min"], target_box["lon_max"])
-
-    # Step 4: Populate zarr: Submit write tasks for all datasets + all years--
-    futures = []
-    for dataset_key in dataset_keys:
-        for year_idx in range(n_years):
-            f = client.submit(write_chunk, dataset_key, year_idx, lat0, lat1, lon0, lon1, raw_store_url, pure=False)
-            futures.append(f)
-
-    results = client.gather(futures)
-    for r in results:
-        print(r)
+    # # Step 3: Compute region indices
+    # lat0, lon0 = latlon_to_indices(target_box["lat_max"], target_box["lon_min"])
+    # lat1, lon1 = latlon_to_indices(target_box["lat_min"], target_box["lon_max"])
+    #
+    # # Step 4: Populate zarr: Submit write tasks for all datasets + all years--
+    # futures = []
+    # for dataset_key in dataset_keys:
+    #     for year_idx in range(n_years):
+    #         f = client.submit(write_chunk, dataset_key, year_idx, lat0, lat1, lon0, lon1, raw_store_url, pure=False)
+    #         futures.append(f)
+    #
+    # results = client.gather(futures)
+    # for r in results:
+    #     print(r)
 
     # Step 5: Validate one region
-    check_region_min_max(raw_store_url, "carbon_density_AGC", 0)
-    check_region_min_max(raw_store_url, "carbon_density_BGC", 0)
-    check_region_min_max(raw_store_url, "carbon_density_AGC", 1)
-    check_region_min_max(raw_store_url, "carbon_density_BGC", 1)
-    # check_region_min_max("flux_NEE", 2)
-
-    # Step 6: Clean _FillValue in populated zarr
-    ### Need to remove _FillValue attribute in zarr because it's being encoded in some way that is incompatible with xarray while using zarr v3,
-    ### per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc.
-    ### There doesn't seem to be a way to create the zarr with a correctly encoded _FillValue in the first place,
-    ### hence this fix after the fact.
-
     fs = fsspec.filesystem("s3", anon=False)
     source_mapper = fs.get_mapper(raw_store_url)
+    ds = xr.open_zarr(source_mapper, consolidated=False)
+    print(ds.coords)
+    print("y range:", ds.y.values.min(), ds.y.values.max())
+    print("x range:", ds.x.values.min(), ds.x.values.max())
 
-    # Open Zarr group in read/write mode
-    z = zarr.open_group(store=source_mapper, mode="r+")
+    check_region_min_max(raw_store_url, "carbon_density__AGC__MgC", 0)
+    check_region_min_max(raw_store_url, "carbon_density__BGC__MgC", 0)
+    check_region_min_max(raw_store_url, "carbon_density__AGC__MgC", 1)
+    check_region_min_max(raw_store_url, "carbon_density__BGC__MgC", 1)
+    # check_region_min_max("flux_NEE", 2)
 
-    # Loop through all arrays
-    for key in z.array_keys():
-        arr = z[key]
-        if "_FillValue" in arr.attrs:
-            print(f"🔧 Removing _FillValue from {key}")
-            del arr.attrs["_FillValue"]
+    sys.quit()
 
-    print("✅ Cleaned _FillValue from Zarr metadata.")
+    # # Step 6: Clean _FillValue in populated zarr
+    # ### Need to remove _FillValue attribute in zarr because it's being encoded in some way that is incompatible with xarray while using zarr v3,
+    # ### per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc.
+    # ### There doesn't seem to be a way to create the zarr with a correctly encoded _FillValue in the first place,
+    # ### hence this fix after the fact.
+    #
+    # fs = fsspec.filesystem("s3", anon=False)
+    # source_mapper = fs.get_mapper(raw_store_url)
+    #
+    # # Open Zarr group in read/write mode
+    # z = zarr.open_group(store=source_mapper, mode="r+")
+    #
+    # # Loop through all arrays
+    # for key in z.array_keys():
+    #     arr = z[key]
+    #     if "_FillValue" in arr.attrs:
+    #         print(f"🔧 Removing _FillValue from {key}")
+    #         del arr.attrs["_FillValue"]
+    #
+    # print("✅ Cleaned _FillValue from Zarr metadata.")
 
-    arr = z["carbon_density_AGC"]
+    arr = z["carbon_density__AGC_MgC"]
     attrs = dict(arr.attrs)
-    print("Attributes:", attrs)
+    print(f"Attributes: {attrs}: {timestr()}")
     print("Type of _FillValue:", type(attrs.get("_FillValue")))
 
     ds = xr.open_zarr(source_mapper, consolidated=False, chunks={})
@@ -438,16 +459,16 @@ if __name__ == "__main__":
     # Step 7: Rechunk to 10000x10000
 
     # Paths
-    source_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/small_test_zarr/"
-    rechunk_url = source_url.rstrip("/") + "_rechunked/"
+    rechunk_url = raw_store_url.rstrip("/") + "_rechunked/"
 
     # === Create S3 mappers ===
     fs = fsspec.filesystem("s3", anon=False)
-    source_mapper = fs.get_mapper(source_url)
+    source_mapper = fs.get_mapper(raw_store_url)
     target_mapper = fs.get_mapper(rechunk_url)
 
     # === Open Zarr v3 dataset ===
     ds = xr.open_zarr(source_mapper, zarr_format=3)
+    print(f"Opened zarr dataset for rechunking: {timestr()}")
 
     # === Rechunk in memory ===
     rechunked = ds.chunk({"year": 1, "y": 10000, "x": 10000})
@@ -459,7 +480,7 @@ if __name__ == "__main__":
     # === Write to new Zarr v3 store on S3 ===
     rechunked.to_zarr(store=target_mapper, mode="w", zarr_format=3)
 
-    print("✅ Rechunked dataset written to:", rechunk_url)
+    print(f"✅ Rechunked dataset written to {rechunk_url}: {timestr()}")
 
 
     # Test the rechunking
@@ -467,12 +488,16 @@ if __name__ == "__main__":
     fs = fsspec.filesystem("s3", anon=False)
     rechunk_mapper = fs.get_mapper(rechunk_url)
     ds_rechunk = xr.open_zarr(rechunk_mapper, consolidated=False)
-    print(f"rechunked ds: {ds_rechunk}")
+    print(f"rechunked ds: {ds_rechunk}: {timestr()}")
+    print(ds.coords)
 
-    check_region_min_max(rechunk_url, "carbon_density_AGC", 0)
-    check_region_min_max(rechunk_url, "carbon_density_BGC", 0)
-    check_region_min_max(rechunk_url, "carbon_density_AGC", 1)
-    check_region_min_max(rechunk_url, "carbon_density_BGC", 1)
+    check_region_min_max(rechunk_url, "carbon_density__AGC__MgC", 0)
+    check_region_min_max(rechunk_url, "carbon_density__BGC__MgC", 0)
+    check_region_min_max(rechunk_url, "carbon_density__AGC__MgC", 1)
+    check_region_min_max(rechunk_url, "carbon_density__BGC__MgC", 1)
+
+    end_time = time.time()
+    print(f"Done with test. Elapsed time {round(end_time - start_time)} seconds: {timestr()}")
 
 
 

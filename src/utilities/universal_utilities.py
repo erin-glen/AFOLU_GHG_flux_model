@@ -837,7 +837,7 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
     output_full_dirs = []
 
     # Replaces placeholders in paths with values specific to the run
-    dir_list = [path.replace(cn.model_type_placholder, model_type) for path in dir_list]
+    dir_list = [path.replace(cn.model_type_placeholder, model_type) for path in dir_list]
     dir_list = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in dir_list]
     dir_list = [path.replace("RUN_DATE", run_date) for path in dir_list]
 
@@ -2122,19 +2122,19 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
         # Rather than pre-creating an output datatype dictionary, I'm taking the hard-coded route
         # and just assigning the output datatype here for each dataset that goes in the zarr
         if "density" in key:
-            dtype = 'float32'
+            dtype = np.dtype('float32')
         elif "emis" in key:
-            dtype = 'float32'
+            dtype = np.dtype('float32')
         elif "removals" in key:
-            dtype = 'float32'
+            dtype = np.dtype('float32')
         elif "net" in key:
-            dtype = 'float32'
+            dtype = np.dtype('float32')
         elif cn.land_state_pattern in key:
-            dtype = 'uint32'
+            dtype = np.dtype('uint32')
         elif cn.composite_primary_forest in key:
-            dtype = 'uint8'
+            dtype = np.dtype('uint8')
         elif cn.forest_age_output_pattern in key:
-            dtype = 'uint16'
+            dtype = np.dtype('uint16')
         else:
             sys.exit(f"Dataset {key} not assigned a data type for addition to global zarr")
 
@@ -2166,12 +2166,7 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
 
     ds["spatial_ref"] = xr.DataArray(
         np.array(0, dtype="int32"),
-        attrs={
-            "grid_mapping_name": "latitude_longitude",
-            "epsg_code": 4326,
-            "semi_major_axis": 6378137.0,
-            "inverse_flattening": 298.257223563,
-        },
+        attrs=spatial_attrs,
     )
 
     main_logger.info(f"dataset info: {ds}: {timestr()}")
@@ -2180,10 +2175,29 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
     main_logger.info(f"Writing metadata for mega-zarr: {timestr()}")
     fs = fsspec.filesystem("s3", anon=False)
     mapper = fs.get_mapper(store_url)
-    ds.to_zarr(mapper, mode="w", compute=False, consolidated=False)
+    ds.to_zarr(store=mapper, mode="w", compute=False, zarr_format=3)
 
     z = zarr.open_group(mapper, mode="r")
     main_logger.info(f"Mega-zarr group info: {z.info}: {timestr()}")
+
+    # Clean _FillValue in populated zarr
+    # Need to remove _FillValue attribute in zarr because it's being encoded in some way that is incompatible with xarray while using zarr v3,
+    # per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc.
+    # There doesn't seem to be a way to create the zarr with a correctly encoded _FillValue in the first place,
+    # hence this fix after the fact.
+    main_logger.info(f"Cleaning zarr _FillValue from each dataset: {timestr()}")
+
+    # Open Zarr group in read/write mode
+    z = zarr.open_group(store=mapper, mode="r+")
+
+    # Loop through all arrays
+    for key in z.array_keys():
+        arr = z[key]
+        if "_FillValue" in arr.attrs:
+            main_logger.info(f"Removing _FillValue from {key}: {timestr()}")
+            del arr.attrs["_FillValue"]
+
+    main_logger.info(f"Cleaned _FillValue from Zarr metadata: {timestr()}")
 
     end_time = time.time()
     main_logger.info(f"Initialized spatial mega-zarr metadata at {store_url} in {round(end_time-start_time)} seconds: {timestr()}")
@@ -2214,8 +2228,7 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
                 #     is_large_run, logger_worker)
 
                 # Converts bounding box corners to row and column indices
-                lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0],
-                                                                        cn.resolution)  # north, west
+                lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
                 lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
 
                 # Creates the pattern used to select the relevant numpy array from the output dictionary.
@@ -2248,7 +2261,7 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
                     z[output_to_zarr_pattern][
                         i,                  # year index (not the actual year)
                         lat_start:lat_end,  # rows (Y)
-                        lat_start:lat_end,  # columns (X)
+                        lon_start:lon_end,  # columns (X)
                     ] = data
 
                 else:
@@ -2265,12 +2278,20 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
                 lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
                 lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
 
-                z = zarr.open(mapper, mode="r")
                 region = z[output_to_zarr_pattern][
                             i,                  # year index (not the actual year)
                             lat_start:lat_end,  # rows (Y)
-                            lat_start:lat_end   # columns (X)
+                            lon_start:lon_end   # columns (X)
                          ]
+
+                if "density__AGC" in output_to_zarr_pattern:
+                    print(output_to_zarr_pattern)
+                    print(mapper)
+                    print(z)
+                    print(lat_start, lon_start)
+                    print(lat_end, lon_end)
+                    print(region)
+
                 non_zero_count = np.count_nonzero(region)
                 lu.print_and_log(f"🔍 {output_to_zarr_pattern} year {year} for {bounds_str}: "
                                  f"min={region.min():.3f}, "
