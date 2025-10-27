@@ -2154,18 +2154,26 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
         )
 
     # Constructs dataset
-    main_logger.info(f"Constructing dataset: {timestr()}")
+    main_logger.info(f"Constructing megazarr dataset with metadata only: {timestr()}")
     ds = xr.Dataset(
         data_vars=data_vars,
         coords={
             "x": lons,
             "y": lats,
-            "year": year_index,
-            "spatial_ref": 0,
+            "year": year_index
         },
     )
 
-    ds["spatial_ref"].attrs = spatial_attrs
+    ds["spatial_ref"] = xr.DataArray(
+        np.array(0, dtype="int32"),
+        attrs={
+            "grid_mapping_name": "latitude_longitude",
+            "epsg_code": 4326,
+            "semi_major_axis": 6378137.0,
+            "inverse_flattening": 298.257223563,
+        },
+    )
+
     main_logger.info(f"dataset info: {ds}: {timestr()}")
 
     # Writes only metadata to s3 (lazy), not values
