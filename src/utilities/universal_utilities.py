@@ -2112,29 +2112,37 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
         "inverse_flattening": 298.257223563,
     }
 
+    compressor = {
+        "name": "zstd",
+        "configuration": {"level": 3}
+    }
+    print(f"Using zstd compression (level=3): {timestr()}")
+
     start_time = time.time()
 
     # For each dataset, uses Dask arrays filled lazily (no memory blowup)
     data_vars = {}
+    encoding = {}
+
     for key in dataset_keys:
         main_logger.info(f"Creating {key} in global mega-zarr: {timestr()}")
 
         # Rather than pre-creating an output datatype dictionary, I'm taking the hard-coded route
         # and just assigning the output datatype here for each dataset that goes in the zarr
         if "density" in key:
-            dtype = np.dtype('float32')
+            dtype = 'float32'
         elif "emis" in key:
-            dtype = np.dtype('float32')
+            dtype = 'float32'
         elif "removals" in key:
-            dtype = np.dtype('float32')
+            dtype = 'float32'
         elif "net" in key:
-            dtype = np.dtype('float32')
+            dtype = 'float32'
         elif cn.land_state_pattern in key:
-            dtype = np.dtype('uint32')
+            dtype = 'uint32'
         elif cn.composite_primary_forest in key:
-            dtype = np.dtype('uint8')
+            dtype = 'uint8'
         elif cn.forest_age_output_pattern in key:
-            dtype = np.dtype('uint16')
+            dtype = 'uint16'
         else:
             sys.exit(f"Dataset {key} not assigned a data type for addition to global zarr")
 
@@ -2152,6 +2160,9 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
             name=key,
             attrs={"grid_mapping": "spatial_ref"},
         )
+
+        # Define encoding (compression, dtype, and chunks)
+        encoding[key] = {"compressor": compressor}
 
     # Constructs dataset
     main_logger.info(f"Constructing megazarr dataset with metadata only: {timestr()}")
@@ -2175,7 +2186,13 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
     main_logger.info(f"Writing metadata for mega-zarr: {timestr()}")
     fs = fsspec.filesystem("s3", anon=False)
     mapper = fs.get_mapper(store_url)
-    ds.to_zarr(store=mapper, mode="w", compute=False, zarr_format=3)
+    ds.to_zarr(
+        store=mapper,
+        mode="w",
+        compute=False,
+        encoding=encoding,
+        zarr_format=3
+    )
 
     z = zarr.open_group(mapper, mode="r")
     main_logger.info(f"Mega-zarr group info: {z.info}: {timestr()}")

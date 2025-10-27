@@ -169,7 +169,10 @@ def initialize_zarr_with_coords(
     # ──────────────────────────────
     # Configure zstd compression
     # ──────────────────────────────
-    compressor = {"name": "zstd", "configuration": {"level": 3}}
+    compressor = {
+        "name": "zstd",
+        "configuration": {"level": 3}
+    }
     print(f"🧩 Using zstd compression (level=3): {timestr()}")
 
     # Use Dask arrays filled lazily
@@ -382,6 +385,7 @@ if __name__ == "__main__":
 
     # Open Zarr group in read/write mode
     z = zarr.open_group(store=source_mapper, mode="r+")
+    print(z["carbon_density__AGC__MgC"].filters)  # Should include compressor info
 
     # Loop through all arrays
     for key in z.array_keys():
@@ -437,8 +441,24 @@ if __name__ == "__main__":
         rechunked[var].encoding.pop("chunks", None)
 
     # === Write to new Zarr v3 store on S3 ===
+
+    compressor = {
+        "name": "zstd",
+        "configuration": {"level": 3}
+    }
+
+    encoding = {
+        var: {"compressor": compressor}
+        for var in rechunked.data_vars
+    }
+
     print(f"Writing rechunked output to s3: {timestr()}")
-    rechunked.to_zarr(store=target_mapper, mode="w", zarr_format=3)
+    rechunked.to_zarr(
+        store=target_mapper,
+        mode="w",
+        encoding=encoding,
+        zarr_format=3
+    )
 
     print(f"✅ Rechunked dataset written to {rechunk_url}: {timestr()}")
 
@@ -450,6 +470,10 @@ if __name__ == "__main__":
     print(f"rechunked ds: {ds_rechunk}: {timestr()}")
     print(ds.coords)
 
+    # Open Zarr group in read/write mode
+    z = zarr.open_group(store=rechunk_mapper, mode="r+")
+    print(z["carbon_density__AGC__MgC"].filters)  # Should include compressor info
+
     check_region_min_max(rechunk_url, "carbon_density__AGC__MgC", 0)
     check_region_min_max(rechunk_url, "carbon_density__BGC__MgC", 0)
     check_region_min_max(rechunk_url, "carbon_density__AGC__MgC", 1)
@@ -457,6 +481,9 @@ if __name__ == "__main__":
 
     end_time = time.time()
     print(f"Done with test. Elapsed time {round(end_time - start_time)} seconds: {timestr()}")
+
+
+
 
 
 
