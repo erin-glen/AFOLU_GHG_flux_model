@@ -1,7 +1,7 @@
 """
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
-python -m src.utilities.create_cluster -n 1 -m 4 -cn zarr_testing
+python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn zarr_testing
 python -m src.LULUCF.scripts.test_zarr_workflow -cn zarr_testing
 
 Most recent ChatGPT convo: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68feb594-6d50-8325-a59a-f4c53750be17
@@ -847,6 +847,21 @@ def rechunk_variable_by_year_and_yblock(
     print(f"✅ Finished writing {var_name}")
 
 
+def rechunk_by_lat_band(year_idx, y_start, y_block_size, ny, source_arr, rechunk_arr):
+
+    lat_band_start_time = time.time()
+    y_end = min(y_start + y_block_size, ny)
+    print(f"    y={y_start}:{y_end}: {timestr()}")
+
+    try:
+        block = source_arr[year_idx, y_start:y_end, :]  # shape (y_block, x)
+        rechunk_arr[year_idx, y_start:y_end, :] = block
+        lat_band_end_time = time.time()
+        print(f"      Wrote block y={y_start}:{y_end} in {round(lat_band_end_time - lat_band_start_time)} seconds: {timestr()}")
+
+    except Exception as e:
+        print(f"      Failed block y={y_start}:{y_end}: {e}: {timestr()}")
+
 
 # ──────────────────────────────
 # MAIN EXECUTION
@@ -856,13 +871,13 @@ if __name__ == "__main__":
     # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/small_test_zarr_2vars_2yrs/"
     # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
     raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_1884_chunks/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
-    start_time = time.time()
+    test_start_time = time.time()
 
     # # Step 1: Create empty Zarr store (only once)
     # initialize_zarr_with_coords(raw_store_url, dataset_keys, n_years)
 
-    # # Connects to Coiled cluster if not running locally and the named cluster exists
-    # cluster, client, run_local = connect_to_Coiled_cluster("zarr_testing", False)
+    # Connects to Coiled cluster if not running locally and the named cluster exists
+    cluster, client, run_local = connect_to_Coiled_cluster("zarr_testing", False)
 
 
     # # Step 3: Compute region indices
@@ -924,8 +939,6 @@ if __name__ == "__main__":
     check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 1)
     check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 1)
     # check_region_min_max("flux_NEE", 2)
-
-    sys.quit()
 
 
     # Step 7: Rechunk to 10000x10000-- one dataset-year at a time
@@ -1060,17 +1073,59 @@ if __name__ == "__main__":
     #     y_block_size=100_000,
     # )
 
-    rechunk_variable_by_year_and_yblock(
-        raw_store_url=raw_store_url,
-        rechunk_url=rechunk_url,
-        var_name="carbon_density__AGC__MgC",
-        chunk_size=(1, 10_000, 10_000),  # final Zarr chunking
-        y_block_size=2_000  # controls memory size per read
-    )
+    # rechunk_variable_by_year_and_yblock(
+    #     raw_store_url=raw_store_url,
+    #     rechunk_url=rechunk_url,
+    #     var_name="carbon_density__AGC__MgC",
+    #     chunk_size=(1, 10_000, 10_000),  # final Zarr chunking
+    #     y_block_size=2_000  # controls memory size per read
+    # )
 
+    y_block_size = 3500
 
     fs = fsspec.filesystem("s3", anon=False)
+    source_mapper = fs.get_mapper(raw_store_url)
     rechunk_mapper = fs.get_mapper(rechunk_url)
+
+    rechunk_start_time = time.time()
+    for dataset in dataset_keys:
+
+        source_zg = zarr.open_group(source_mapper, mode="r")
+        source_arr = source_zg[dataset]
+
+        shape = source_arr.shape
+        dtype = source_arr.dtype
+        n_years, ny, nx = shape
+
+        print(f"  Dataset: {dataset}; shape: {shape};  dtype: {dtype}: {timestr()}")
+
+        zarr_out = zarr.open_group(rechunk_mapper, mode="a")
+
+        rechunk_arr = zarr_out[dataset]
+
+        futures = []
+
+        dataset_start_time = time.time()
+
+        for year_idx in range(n_years):
+            year_start_time = time.time()
+            print(f"  Year {year_idx}: {timestr()}")
+            for y_start in range(0, ny, y_block_size):
+
+                future = client.submit(rechunk_by_lat_band, year_idx, y_start, y_block_size, ny, source_arr, rechunk_arr)
+                futures.append(future)
+
+            client.gather(futures)
+            year_end_time = time.time()
+            print(f"{dataset} for {year_idx} took {round(year_end_time - year_start_time)} seconds: {timestr()}")
+
+        dataset_end_time = time.time()
+        print(f"All years for {dataset} took {round(dataset_end_time - dataset_start_time)} seconds: {timestr()}")
+
+    rechunk_end_time = time.time()
+    print(f"Rechunking all years for all datasets  took {round(rechunk_end_time - rechunk_start_time)} seconds: {timestr()}")
+
+
     ds_rechunk = xr.open_zarr(rechunk_mapper, consolidated=False)
     print(f"rechunked ds: {ds_rechunk}: {timestr()}")
     print(ds_rechunk.coords)
@@ -1084,8 +1139,8 @@ if __name__ == "__main__":
     check_region_stats(rechunk_url, "carbon_density__AGC__MgC", 1)
     check_region_stats(rechunk_url, "carbon_density__BGC__MgC", 1)
 
-    end_time = time.time()
-    print(f"Done with test. Elapsed time {round(end_time - start_time)} seconds: {timestr()}")
+    test_end_time = time.time()
+    print(f"Done with test. Elapsed time {round(test_end_time - test_start_time)} seconds: {timestr()}")
 
 
 
