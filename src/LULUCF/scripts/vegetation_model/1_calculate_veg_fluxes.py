@@ -1805,6 +1805,41 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
 
+def latlon_to_global_zarr_indices(lat: float, lon: float, resolution: float):
+    """
+    Convert latitude and longitude in degrees to global Zarr array indices.
+
+    Parameters
+    ----------
+    lat : float
+        Latitude in decimal degrees (-90 to +90). North is positive.
+    lon : float
+        Longitude in decimal degrees (-180 to +180). East is positive.
+    resolution : float
+        Grid resolution in degrees per pixel (e.g., 0.00025).
+
+    Returns
+    -------
+    lat_idx : int
+        Row index (0 at 90°N, increases southward)
+    lon_idx : int
+        Column index (0 at 180°W, increases eastward)
+    """
+    # Define reference edges of grid
+    LAT_MAX = 90.0   # top edge of array
+    LON_MIN = -180.0 # left edge of array
+
+    # Clamp to bounds to avoid rounding overflow (e.g., lon=180)
+    lat = max(-90.0, min(90.0, lat))
+    lon = max(-180.0, min(180.0, lon))
+
+    # Compute indices
+    lat_idx = int(np.floor((LAT_MAX - lat) / resolution))
+    lon_idx = int(np.floor((lon - LON_MIN) / resolution))
+
+    return lat_idx, lon_idx
+
+
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                        download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
@@ -1948,70 +1983,90 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     # uu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
     #               out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
 
-    def lat_to_y_idx(lat_deg):
-        return int((90 - lat_deg) / cn.resolution)
+    # ─────────────── STEP 1: Convert bounding box to Zarr indices ─────────────── #
 
-    # Zarr grid: x = 0 is -180, x = 1_440_000 is 180E
-    def lon_to_x_idx(lon_deg):
-        return int((lon_deg + 180) / cn.resolution)
+    # Convert lat/lon to Zarr row/col indices
+    lat_n_idx, lon_w_idx = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
+    lat_s_idx, lon_e_idx = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
 
-    tile_size = 4000
-    year_idx = 0  # test year
+    # Sort so start < end
+    lat_start_idx, lat_end_idx = sorted([lat_n_idx, lat_s_idx])
+    lon_start_idx, lon_end_idx = sorted([lon_w_idx, lon_e_idx])
+
+    # # Confirm Zarr index ranges
+    # print(f"Zarr index ranges (Y): {lat_start_idx} → {lat_end_idx}")
+    # print(f"Zarr index ranges (X): {lon_start_idx} → {lon_end_idx}")
+
+    # ─────────────── STEP 2: Generate real-world coordinates ─────────────── #
+
+    # Convert Zarr indices to lat/lon coordinate values
+    y_coords = 90.0 - np.arange(lat_start_idx, lat_end_idx) * cn.resolution
+    x_coords = -180.0 + np.arange(lon_start_idx, lon_end_idx) * cn.resolution
+
+    # Confirm
+    print(f"Latitude range: {y_coords.min():.6f} to {y_coords.max():.6f}")
+    print(f"Longitude range: {x_coords.min():.6f} to {x_coords.max():.6f}")
+
+    # ─────────────── STEP 3: Loop through years and write to Zarr ─────────────── #
+
     var = "carbon_density__AGC__MgC"
 
-    # bounds = [lon_min, lon_max, lat_min, lat_max]
-    lon_min, lon_max, lat_min, lat_max = bounds
-    print(lon_min)
-    print(lon_max)
-    print(lat_min)
-    print(lat_max)
+    for year_idx, year in enumerate(interval_end_years):
+        coords = {
+            "year": [year_idx],
+            "y": y_coords,
+            "x": x_coords,
+        }
 
-    # Convert bounds to Zarr index range
-    y0 = lat_to_y_idx(lat_max)  # north
-    y1 = lat_to_y_idx(lat_min)  # south
-    x0 = lon_to_x_idx(lon_min)
-    x1 = lon_to_x_idx(lon_max)
+        data_name = f"{var}_ha_{year}"
+        data = out_dict_all_dtypes[data_name]  # shape: (ny, nx)
 
-    # Clip to tile size (optional: comment these out if you want full bbox)
-    y1 = min(y0 + tile_size, 720_000)
-    x1 = min(x0 + tile_size, 1_440_000)
+        print(f"Writing {data_name}: shape={data.shape} → Zarr indices y={lat_start_idx}:{lat_end_idx}, x={lon_start_idx}:{lon_end_idx}")
+        # print("data:", data)
 
-    # Determine tile shape
-    ny_tile = y1 - y0
-    nx_tile = x1 - x0
+        # Wrap into xarray DataArray with proper dimension names
+        data_vars = {
+            var: (("year", "y", "x"), data[np.newaxis, :, :].astype("float32"))
+        }
 
-    print(f"Writing to Zarr: y={y0}:{y1}  x={x0}:{x1}")
+        ds = xr.Dataset(data_vars, coords=coords)
 
-    # Generate coordinates
-    y_coords = np.arange(y0, y1) * cn.resolution
-    x_coords = np.arange(x0, x1) * cn.resolution
+        # Write to Zarr manually (Zarr v3 safe)
+        fs = fsspec.filesystem("s3", anon=False)
+        store = fs.get_mapper(mega_zarr_path)
+        zgroup = zarr.open_group(store, mode="r+")
 
-    coords = {
-        "year": [year_idx],
-        "y": y_coords,
-        "x": x_coords,
-    }
+        zarray = zgroup[var]
+        zarray[year_idx:year_idx + 1, lat_start_idx:lat_end_idx, lon_start_idx:lon_end_idx] = ds[var].values
 
-    data_name = "carbon_density__AGC__MgC_ha_2016"
-    data = out_dict_all_dtypes[data_name]
-    print("data", data)
 
-    # Data for one variable, one year
-    data_vars = {
-        var: (("year", "y", "x"), data[np.newaxis, :, :].astype("float32"))
-    }
-    print(f"data_vars: {data_vars}")
 
-    ds = xr.Dataset(data_vars, coords=coords)
-    print(f"ds: {ds}")
-
-    # Manual Zarr v3 write
+    # Opens pre-created global mega-zarr that was just populated
     fs = fsspec.filesystem("s3", anon=False)
-    store = fs.get_mapper(mega_zarr_path)
-    zgroup = zarr.open_group(store, mode="r+")
+    mapper = fs.get_mapper(mega_zarr_path)
+    z = zarr.open(mapper, mode="r+")
 
-    zarray = zgroup[var]
-    zarray[year_idx:year_idx + 1, y0:y1, x0:x1] = ds[var].values
+    print("Checking zarr")
+    for year_idx, year in enumerate(interval_end_years):
+
+        region = z[var][
+                 year_idx,  # year index (not the actual year)
+                 lat_start_idx:lat_end_idx,  # rows (Y)
+                 lon_start_idx:lon_end_idx  # columns (X)
+                 ]
+
+        print(f"  Inspecting {var}_{year}")
+        # print(f"  Zarr path: {mega_zarr_path}")
+        print(f"  Index ranges: Y={lat_start_idx}:{lat_end_idx}, X={lon_start_idx}:{lon_end_idx}")
+        # print(f"  Region: {region}")
+
+        non_zero_count = np.count_nonzero(region)
+        lu.print_and_log(f"🔍 {var} year {year} for {bounds_str}: "
+                         f"min={region.min():.3f}, "
+                         f"mean={region.mean():.3f}, "
+                         f"max={region.max():.3f}, "
+                         f"non-zero pixels={non_zero_count}",
+                         False, logger_worker)
 
 
 
@@ -2391,17 +2446,17 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
         mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
 
-        # # Creates the global mega-zarr with metadata only
-        # uu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
-        #                             (1, 10000, 10000), main_logger)
-        #
-        # # Checks the zarr coordinates and extent
-        # fs = fsspec.filesystem("s3", anon=False)
-        # mapper = fs.get_mapper(mega_zarr_path)
-        # ds = xr.open_zarr(mapper, consolidated=False)
-        # print(ds.coords)
-        # print("y range:", ds.y.values.min(), ds.y.values.max())
-        # print("x range:", ds.x.values.min(), ds.x.values.max())
+        # Creates the global mega-zarr with metadata only
+        uu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+                                    (1, 10000, 10000), main_logger)
+
+        # Checks the zarr coordinates and extent
+        fs = fsspec.filesystem("s3", anon=False)
+        mapper = fs.get_mapper(mega_zarr_path)
+        ds = xr.open_zarr(mapper, consolidated=False)
+        print(ds.coords)
+        print("y range:", ds.y.values.min(), ds.y.values.max())
+        print("x range:", ds.x.values.min(), ds.x.values.max())
 
     else:
         mega_zarr_path = None
