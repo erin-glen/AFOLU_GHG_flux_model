@@ -298,8 +298,8 @@ def rechunk_by_lat_band(year_idx, y_start, y_block_size, ny, source_zarr_ds, rec
 if __name__ == "__main__":
 
     # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/small_test_zarr_2vars_2yrs/"
-    # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
-    raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_1884_chunks/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
+    raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/4000_pixels/20251028/"
+    # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_1884_chunks/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
     test_start_time = time.time()
 
     # # Step 1: Create empty Zarr store (only once)
@@ -312,9 +312,8 @@ if __name__ == "__main__":
     #     chunks=(1, 4000, 4000)
     # )
 
-    # Connects to Coiled cluster if not running locally and the named cluster exists
-    cluster, client, run_local = connect_to_Coiled_cluster("zarr_testing", False)
-
+    # # Connects to Coiled cluster if not running locally and the named cluster exists
+    # cluster, client, run_local = connect_to_Coiled_cluster("zarr_testing", False)
 
     # # Step 3: Compute region indices
     # lat0, lon0 = latlon_to_indices(target_box["lat_max"], target_box["lon_min"])
@@ -375,92 +374,92 @@ if __name__ == "__main__":
     check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 1)
     check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 1)
     # check_region_min_max("flux_NEE", 2)
-
-
-    # Step 7: Rechunk to 10000x10000
-
-    # Rechunked mega-zarr path
-    rechunk_url = raw_store_url.rstrip("/") + "_rechunked/"
-
-    # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
-    initialize_zarr_with_coords(
-        rechunk_url,
-        dataset_keys,
-        test_n_years,
-        resolution=0.00025,
-        dtype="float32",
-        fill_value=np.nan,
-        chunks=(1, 10000, 10000)
-    )
-
-    # Number of latitudinal pixel bands that will be processed in each task.
-    # Can change this to more completely use worker memory.
-    y_block_size = 3500
-
-    fs = fsspec.filesystem("s3", anon=False)
-    source_mapper = fs.get_mapper(raw_store_url)
-    rechunk_mapper = fs.get_mapper(rechunk_url)
-
-    # Iterates through datasets
-    rechunk_start_time = time.time()
-    for dataset in dataset_keys:
-
-        # Opens original zarr group, then specific dataset
-        source_zarr_group = zarr.open_group(source_mapper, mode="r")
-        source_dataset = source_zarr_group[dataset]
-
-        # Dataset properties
-        shape = source_dataset.shape
-        dtype = source_dataset.dtype
-        source_n_years, ny, nx = shape
-
-        print(f"  Dataset: {dataset}; shape: {shape};  dtype: {dtype}: {timestr()}")
-
-        # Opens pre-created rechunked zarr group
-        zarr_out = zarr.open_group(rechunk_mapper, mode="a")
-
-        # Rechunked dataset
-        rechunk_dataset = zarr_out[dataset]
-
-        dataset_start_time = time.time()
-
-        # Iterates by year
-        # for year_idx in range(source_n_years):
-        for year_idx in range(test_n_years):
-            year_start_time = time.time()
-            print(f"  Year {year_idx}: {timestr()}")
-
-            # Iterates by latitudinal band
-            futures = []
-            for y_start in range(0, ny, y_block_size):
-
-                future = client.submit(rechunk_by_lat_band, year_idx, y_start, y_block_size, ny, source_dataset, rechunk_dataset)
-                futures.append(future)
-
-            client.gather(futures)
-            year_end_time = time.time()
-            print(f"     {dataset} for year {year_idx} took {round(year_end_time - year_start_time)} seconds: {timestr()}")
-
-        dataset_end_time = time.time()
-        print(f"All years for {dataset} took {round(dataset_end_time - dataset_start_time)} seconds: {timestr()}")
-
-    rechunk_end_time = time.time()
-    print(f"Rechunking all years for all datasets  took {round(rechunk_end_time - rechunk_start_time)} seconds: {timestr()}")
-
-
-    # Step 8: Check stats for chunk x dataset x year combinations in rechunked zarr
-
-    ds_rechunk = xr.open_zarr(rechunk_mapper, consolidated=False)
-    print(f"rechunked ds: {ds_rechunk}: {timestr()}")
-    print(ds_rechunk.coords)
-
-    check_region_stats(rechunk_url, "carbon_density__AGC__MgC", 0)
-    check_region_stats(rechunk_url, "carbon_density__BGC__MgC", 0)
-    check_region_stats(rechunk_url, "carbon_density__AGC__MgC", 1)
-    check_region_stats(rechunk_url, "carbon_density__BGC__MgC", 1)
-
-    test_end_time = time.time()
-    print(f"Done with test. Elapsed time {round(test_end_time - test_start_time)} seconds: {timestr()}")
-
-    # Optional shutdown
-    cluster.shutdown()
+    #
+    #
+    # # Step 7: Rechunk to 10000x10000
+    #
+    # # Rechunked mega-zarr path
+    # rechunk_url = raw_store_url.rstrip("/") + "_rechunked/"
+    #
+    # # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
+    # initialize_zarr_with_coords(
+    #     rechunk_url,
+    #     dataset_keys,
+    #     test_n_years,
+    #     resolution=0.00025,
+    #     dtype="float32",
+    #     fill_value=np.nan,
+    #     chunks=(1, 10000, 10000)
+    # )
+    #
+    # # Number of latitudinal pixel bands that will be processed in each task.
+    # # Can change this to more completely use worker memory.
+    # y_block_size = 3500
+    #
+    # fs = fsspec.filesystem("s3", anon=False)
+    # source_mapper = fs.get_mapper(raw_store_url)
+    # rechunk_mapper = fs.get_mapper(rechunk_url)
+    #
+    # # Iterates through datasets
+    # rechunk_start_time = time.time()
+    # for dataset in dataset_keys:
+    #
+    #     # Opens original zarr group, then specific dataset
+    #     source_zarr_group = zarr.open_group(source_mapper, mode="r")
+    #     source_dataset = source_zarr_group[dataset]
+    #
+    #     # Dataset properties
+    #     shape = source_dataset.shape
+    #     dtype = source_dataset.dtype
+    #     source_n_years, ny, nx = shape
+    #
+    #     print(f"  Dataset: {dataset}; shape: {shape};  dtype: {dtype}: {timestr()}")
+    #
+    #     # Opens pre-created rechunked zarr group
+    #     zarr_out = zarr.open_group(rechunk_mapper, mode="a")
+    #
+    #     # Rechunked dataset
+    #     rechunk_dataset = zarr_out[dataset]
+    #
+    #     dataset_start_time = time.time()
+    #
+    #     # Iterates by year
+    #     # for year_idx in range(source_n_years):
+    #     for year_idx in range(test_n_years):
+    #         year_start_time = time.time()
+    #         print(f"  Year {year_idx}: {timestr()}")
+    #
+    #         # Iterates by latitudinal band
+    #         futures = []
+    #         for y_start in range(0, ny, y_block_size):
+    #
+    #             future = client.submit(rechunk_by_lat_band, year_idx, y_start, y_block_size, ny, source_dataset, rechunk_dataset)
+    #             futures.append(future)
+    #
+    #         client.gather(futures)
+    #         year_end_time = time.time()
+    #         print(f"     {dataset} for year {year_idx} took {round(year_end_time - year_start_time)} seconds: {timestr()}")
+    #
+    #     dataset_end_time = time.time()
+    #     print(f"All years for {dataset} took {round(dataset_end_time - dataset_start_time)} seconds: {timestr()}")
+    #
+    # rechunk_end_time = time.time()
+    # print(f"Rechunking all years for all datasets  took {round(rechunk_end_time - rechunk_start_time)} seconds: {timestr()}")
+    #
+    #
+    # # Step 8: Check stats for chunk x dataset x year combinations in rechunked zarr
+    #
+    # ds_rechunk = xr.open_zarr(rechunk_mapper, consolidated=False)
+    # print(f"rechunked ds: {ds_rechunk}: {timestr()}")
+    # print(ds_rechunk.coords)
+    #
+    # check_region_stats(rechunk_url, "carbon_density__AGC__MgC", 0)
+    # check_region_stats(rechunk_url, "carbon_density__BGC__MgC", 0)
+    # check_region_stats(rechunk_url, "carbon_density__AGC__MgC", 1)
+    # check_region_stats(rechunk_url, "carbon_density__BGC__MgC", 1)
+    #
+    # test_end_time = time.time()
+    # print(f"Done with test. Elapsed time {round(test_end_time - test_start_time)} seconds: {timestr()}")
+    #
+    # # Optional shutdown
+    # cluster.shutdown()

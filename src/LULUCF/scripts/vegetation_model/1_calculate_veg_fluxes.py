@@ -10,7 +10,7 @@ python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetat
 
 Coiled small tests (1x1 deg chunk needs 32GB worker):
 python -m src.utilities.create_cluster -n 10 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn global_zarr_vegetation_model -bb -64 -22 -63 -21 -cs 1 --run_date 20258888 --create_zarr
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn global_zarr_vegetation_model -bb -64 -22 -63 -21 -cs 1 --run_date YYYYMMDD --create_zarr
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn vegetation_model
@@ -1945,8 +1945,74 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
     ### Part 5: Writes outputs to pre-existing global mega-zarr (only if requested)
 
-    uu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
-                  out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
+    # uu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
+    #               out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
+
+    def lat_to_y_idx(lat_deg):
+        return int((90 - lat_deg) / cn.resolution)
+
+    # Zarr grid: x = 0 is -180, x = 1_440_000 is 180E
+    def lon_to_x_idx(lon_deg):
+        return int((lon_deg + 180) / cn.resolution)
+
+    tile_size = 4000
+    year_idx = 0  # test year
+    var = "carbon_density__AGC__MgC"
+
+    # bounds = [lon_min, lon_max, lat_min, lat_max]
+    lon_min, lon_max, lat_min, lat_max = bounds
+    print(lon_min)
+    print(lon_max)
+    print(lat_min)
+    print(lat_max)
+
+    # Convert bounds to Zarr index range
+    y0 = lat_to_y_idx(lat_max)  # north
+    y1 = lat_to_y_idx(lat_min)  # south
+    x0 = lon_to_x_idx(lon_min)
+    x1 = lon_to_x_idx(lon_max)
+
+    # Clip to tile size (optional: comment these out if you want full bbox)
+    y1 = min(y0 + tile_size, 720_000)
+    x1 = min(x0 + tile_size, 1_440_000)
+
+    # Determine tile shape
+    ny_tile = y1 - y0
+    nx_tile = x1 - x0
+
+    print(f"Writing to Zarr: y={y0}:{y1}  x={x0}:{x1}")
+
+    # Generate coordinates
+    y_coords = np.arange(y0, y1) * cn.resolution
+    x_coords = np.arange(x0, x1) * cn.resolution
+
+    coords = {
+        "year": [year_idx],
+        "y": y_coords,
+        "x": x_coords,
+    }
+
+    data_name = "carbon_density__AGC__MgC_ha_2016"
+    data = out_dict_all_dtypes[data_name]
+    print("data", data)
+
+    # Data for one variable, one year
+    data_vars = {
+        var: (("year", "y", "x"), data[np.newaxis, :, :].astype("float32"))
+    }
+    print(f"data_vars: {data_vars}")
+
+    ds = xr.Dataset(data_vars, coords=coords)
+    print(f"ds: {ds}")
+
+    # Manual Zarr v3 write
+    fs = fsspec.filesystem("s3", anon=False)
+    store = fs.get_mapper(mega_zarr_path)
+    zgroup = zarr.open_group(store, mode="r+")
+
+    zarray = zgroup[var]
+    zarray[year_idx:year_idx + 1, y0:y1, x0:x1] = ds[var].values
+
 
 
     ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
@@ -2325,17 +2391,17 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
         mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
 
-        # Creates the global mega-zarr with metadata only
-        uu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
-                                    (1, chunk_size_pixels, chunk_size_pixels), main_logger)
-
-        # Checks the zarr coordinates and extent
-        fs = fsspec.filesystem("s3", anon=False)
-        mapper = fs.get_mapper(mega_zarr_path)
-        ds = xr.open_zarr(mapper, consolidated=False)
-        print(ds.coords)
-        print("y range:", ds.y.values.min(), ds.y.values.max())
-        print("x range:", ds.x.values.min(), ds.x.values.max())
+        # # Creates the global mega-zarr with metadata only
+        # uu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+        #                             (1, 10000, 10000), main_logger)
+        #
+        # # Checks the zarr coordinates and extent
+        # fs = fsspec.filesystem("s3", anon=False)
+        # mapper = fs.get_mapper(mega_zarr_path)
+        # ds = xr.open_zarr(mapper, consolidated=False)
+        # print(ds.coords)
+        # print("y range:", ds.y.values.min(), ds.y.values.max())
+        # print("x range:", ds.x.values.min(), ds.x.values.max())
 
     else:
         mega_zarr_path = None
