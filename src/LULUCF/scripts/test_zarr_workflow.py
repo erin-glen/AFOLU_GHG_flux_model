@@ -2,7 +2,7 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 python -m src.utilities.create_cluster -n 1 -m 4 -cn zarr_testing
-python -m src.LULUCF.scripts.test_zarr_creation -cn zarr_testing
+python -m src.LULUCF.scripts.test_zarr_workflow -cn zarr_testing
 
 Most recent ChatGPT convo: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68feb594-6d50-8325-a59a-f4c53750be17
 """
@@ -53,12 +53,12 @@ lats = np.arange(90.0 - resolution / 2, -90, -resolution)[:lat_size]
 lons = np.arange(-180.0 + resolution / 2, 180, resolution)[:lon_size]
 years = np.arange(n_years)
 
-# Target region: 49–50N, 10–11E
+# Target region
 target_box = {
-    "lat_min": 49.0,
-    "lat_max": 50.0,
-    "lon_min": 10.0,
-    "lon_max": 11.0
+    "lat_min": 1.0,
+    "lat_max": 2.0,
+    "lon_min": 20.0,
+    "lon_max": 21.0
 }
 
 
@@ -249,7 +249,7 @@ def write_chunk(dataset_key, year_idx, lat0, lat1, lon0, lon1, store_url):
     return f"✅ Wrote {dataset_key} year={year_idx} region=({lat0}:{lat1}, {lon0}:{lon1})"
 
 
-def check_region_min_max(store_url, dataset_key, year_idx):
+def check_region_stats(store_url, dataset_key, year_idx):
     """Check min/max of the region written."""
     fs = fsspec.filesystem("s3", anon=False)
     mapper = fs.get_mapper(store_url)
@@ -258,7 +258,7 @@ def check_region_min_max(store_url, dataset_key, year_idx):
     lat0, lon0 = latlon_to_indices(target_box["lat_max"], target_box["lon_min"])
     lat1, lon1 = latlon_to_indices(target_box["lat_min"], target_box["lon_max"])
 
-    region = z[dataset_key][year_idx, lat0:lat1, lon0:lon1]
+    region_array = z[dataset_key][year_idx, lat0:lat1, lon0:lon1]
 
     # print(dataset_key)
     # print(mapper)
@@ -267,7 +267,10 @@ def check_region_min_max(store_url, dataset_key, year_idx):
     # print(lat1, lon1)
     # print(region)
 
-    print(f"🔍 {dataset_key} year {year_idx}: min={region.min()}, mean={region.mean()}, max={region.max()}")
+    # Non-zero pixels in the array
+    non_zero_count = np.count_nonzero(region_array)
+
+    print(f"🔍 {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}")
 
 
 
@@ -851,14 +854,15 @@ def rechunk_variable_by_year_and_yblock(
 if __name__ == "__main__":
 
     # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/small_test_zarr_2vars_2yrs/"
-    raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
+    # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
+    raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_1884_chunks/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
     start_time = time.time()
 
     # # Step 1: Create empty Zarr store (only once)
     # initialize_zarr_with_coords(raw_store_url, dataset_keys, n_years)
 
-    # Connects to Coiled cluster if not running locally and the named cluster exists
-    cluster, client, run_local = connect_to_Coiled_cluster("zarr_testing", False)
+    # # Connects to Coiled cluster if not running locally and the named cluster exists
+    # cluster, client, run_local = connect_to_Coiled_cluster("zarr_testing", False)
 
 
     # # Step 3: Compute region indices
@@ -904,22 +908,24 @@ if __name__ == "__main__":
     # attrs = dict(arr.attrs)
     # print(f"Attributes: {attrs}: {timestr()}")
     # print("Type of _FillValue:", type(attrs.get("_FillValue")))
-    #
-    #
+
+
     # Step 6: Validate one region
-    # fs = fsspec.filesystem("s3", anon=False)
-    # source_mapper = fs.get_mapper(raw_store_url)
-    # ds = xr.open_zarr(source_mapper, consolidated=False)
+    fs = fsspec.filesystem("s3", anon=False)
+    source_mapper = fs.get_mapper(raw_store_url)
+    ds = xr.open_zarr(source_mapper, consolidated=False)
     # print(ds)
     # print(ds.coords)
-    # print("y range:", ds.y.values.min(), ds.y.values.max())
-    # print("x range:", ds.x.values.min(), ds.x.values.max())
-    #
-    # check_region_min_max(raw_store_url, "carbon_density__AGC__MgC", 0)
-    # check_region_min_max(raw_store_url, "carbon_density__BGC__MgC", 0)
-    # check_region_min_max(raw_store_url, "carbon_density__AGC__MgC", 1)
-    # check_region_min_max(raw_store_url, "carbon_density__BGC__MgC", 1)
-    # # check_region_min_max("flux_NEE", 2)
+    print("y range:", ds.y.values.min(), ds.y.values.max())
+    print("x range:", ds.x.values.min(), ds.x.values.max())
+
+    check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 0)
+    check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 0)
+    check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 1)
+    check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 1)
+    # check_region_min_max("flux_NEE", 2)
+
+    sys.quit()
 
 
     # Step 7: Rechunk to 10000x10000-- one dataset-year at a time
@@ -1073,10 +1079,10 @@ if __name__ == "__main__":
     z = zarr.open_group(store=rechunk_mapper, mode="r+")
     print(z["carbon_density__AGC__MgC"].filters)  # Should include compressor info
 
-    check_region_min_max(rechunk_url, "carbon_density__AGC__MgC", 0)
-    check_region_min_max(rechunk_url, "carbon_density__BGC__MgC", 0)
-    check_region_min_max(rechunk_url, "carbon_density__AGC__MgC", 1)
-    check_region_min_max(rechunk_url, "carbon_density__BGC__MgC", 1)
+    check_region_stats(rechunk_url, "carbon_density__AGC__MgC", 0)
+    check_region_stats(rechunk_url, "carbon_density__BGC__MgC", 0)
+    check_region_stats(rechunk_url, "carbon_density__AGC__MgC", 1)
+    check_region_stats(rechunk_url, "carbon_density__BGC__MgC", 1)
 
     end_time = time.time()
     print(f"Done with test. Elapsed time {round(end_time - start_time)} seconds: {timestr()}")
