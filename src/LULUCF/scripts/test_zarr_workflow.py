@@ -847,20 +847,24 @@ def rechunk_variable_by_year_and_yblock(
     print(f"✅ Finished writing {var_name}")
 
 
-def rechunk_by_lat_band(year_idx, y_start, y_block_size, ny, source_arr, rechunk_arr):
+
+# Rechunks a latitudinal band for the entire planet for a given year and dataset.
+# The rechunk size is determined by the pre-created rechunked zarr (destination zarr).
+# Here, the corresponding source and rechunked zarr datasets are used and have their chunking built-in.
+def rechunk_by_lat_band(year_idx, y_start, y_block_size, ny, source_zarr_ds, rechunk_zarr_ds):
 
     lat_band_start_time = time.time()
-    y_end = min(y_start + y_block_size, ny)
-    print(f"    y={y_start}:{y_end}: {timestr()}")
+    y_end = min(y_start + y_block_size, ny)   # The ending latitudinal band
+    print(f"    Rechunking y={y_start}:{y_end}: {timestr()}")
 
     try:
-        block = source_arr[year_idx, y_start:y_end, :]  # shape (y_block, x)
-        rechunk_arr[year_idx, y_start:y_end, :] = block
+        block = source_zarr_ds[year_idx, y_start:y_end, :]  # shape (year, specific y range, all x values in that range)
+        rechunk_zarr_ds[year_idx, y_start:y_end, :] = block
         lat_band_end_time = time.time()
-        print(f"      Wrote block y={y_start}:{y_end} in {round(lat_band_end_time - lat_band_start_time)} seconds: {timestr()}")
+        print(f"      Rechunked block y={y_start}:{y_end} in {round(lat_band_end_time - lat_band_start_time)} seconds: {timestr()}")
 
     except Exception as e:
-        print(f"      Failed block y={y_start}:{y_end}: {e}: {timestr()}")
+        print(f"      Failed to rechunk block y={y_start}:{y_end}: {e}: {timestr()}")
 
 
 # ──────────────────────────────
@@ -1081,43 +1085,52 @@ if __name__ == "__main__":
     #     y_block_size=2_000  # controls memory size per read
     # )
 
+    # Number of latitudinal pixel bands that will be processed in each task.
+    # Can change this to more completely use worker memory.
     y_block_size = 3500
 
     fs = fsspec.filesystem("s3", anon=False)
     source_mapper = fs.get_mapper(raw_store_url)
     rechunk_mapper = fs.get_mapper(rechunk_url)
 
+    # Iterates through datasets
     rechunk_start_time = time.time()
     for dataset in dataset_keys:
 
-        source_zg = zarr.open_group(source_mapper, mode="r")
-        source_arr = source_zg[dataset]
+        # Opens original zarr group, then specific dataset
+        source_zarr_group = zarr.open_group(source_mapper, mode="r")
+        source_dataset = source_zarr_group[dataset]
 
-        shape = source_arr.shape
-        dtype = source_arr.dtype
+        # Dataset properties
+        shape = source_dataset.shape
+        dtype = source_dataset.dtype
         n_years, ny, nx = shape
 
         print(f"  Dataset: {dataset}; shape: {shape};  dtype: {dtype}: {timestr()}")
 
+        # Opens pre-created rechunked zarr group
         zarr_out = zarr.open_group(rechunk_mapper, mode="a")
 
-        rechunk_arr = zarr_out[dataset]
-
-        futures = []
+        # Rechunked dataset
+        rechunk_dataset = zarr_out[dataset]
 
         dataset_start_time = time.time()
 
+        # Iterates by year
         for year_idx in range(n_years):
             year_start_time = time.time()
             print(f"  Year {year_idx}: {timestr()}")
+
+            # Iterates by latitudinal band
+            futures = []
             for y_start in range(0, ny, y_block_size):
 
-                future = client.submit(rechunk_by_lat_band, year_idx, y_start, y_block_size, ny, source_arr, rechunk_arr)
+                future = client.submit(rechunk_by_lat_band, year_idx, y_start, y_block_size, ny, source_dataset, rechunk_dataset)
                 futures.append(future)
 
             client.gather(futures)
             year_end_time = time.time()
-            print(f"{dataset} for {year_idx} took {round(year_end_time - year_start_time)} seconds: {timestr()}")
+            print(f"     {dataset} for year {year_idx} took {round(year_end_time - year_start_time)} seconds: {timestr()}")
 
         dataset_end_time = time.time()
         print(f"All years for {dataset} took {round(dataset_end_time - dataset_start_time)} seconds: {timestr()}")
