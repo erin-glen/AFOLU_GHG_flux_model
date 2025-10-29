@@ -54,11 +54,18 @@ lons = np.arange(-180.0 + resolution / 2, 180, resolution)[:lon_size]
 years = np.arange(test_n_years)
 
 # Target region
+# target_box = {
+#     "lat_min": 1.0,
+#     "lat_max": 2.0,
+#     "lon_min": 20.0,
+#     "lon_max": 21.0
+# }
+
 target_box = {
-    "lat_min": 1.0,
-    "lat_max": 2.0,
-    "lon_min": 20.0,
-    "lon_max": 21.0
+    "lat_min": 38.0,
+    "lat_max": 39.0,
+    "lon_min": 0.0,
+    "lon_max": 1.0
 }
 
 
@@ -298,8 +305,8 @@ def rechunk_by_lat_band(year_idx, y_start, y_block_size, ny, source_zarr_ds, rec
 if __name__ == "__main__":
 
     # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/small_test_zarr_2vars_2yrs/"
-    raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/4000_pixels/20251028/"
-    # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_1884_chunks/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
+    # raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_zarr_testing/mega_zarr/standard_model/annual_intervals/4000_pixels/20251028/"
+    raw_store_url = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/version_1_0_3_1884_chunks/mega_zarr/standard_model/annual_intervals/4000_pixels/20251027/"
     test_start_time = time.time()
 
     # # Step 1: Create empty Zarr store (only once)
@@ -360,19 +367,35 @@ if __name__ == "__main__":
     # print("Type of _FillValue:", type(attrs.get("_FillValue")))
 
 
-    # Step 6: Check stats for chunk x dataset x year combinations
-    fs = fsspec.filesystem("s3", anon=False)
-    source_mapper = fs.get_mapper(raw_store_url)
-    ds = xr.open_zarr(source_mapper, consolidated=False)
-    # print(ds)
-    # print(ds.coords)
-    print("y range:", ds.y.values.min(), ds.y.values.max())
-    print("x range:", ds.x.values.min(), ds.x.values.max())
+    # # Step 6: Check stats for chunk x dataset x year combinations
+    # fs = fsspec.filesystem("s3", anon=False)
+    # source_mapper = fs.get_mapper(raw_store_url)
+    # ds = xr.open_zarr(source_mapper, consolidated=False)
+    # # print(ds)
+    # # print(ds.coords)
+    # print("y range:", ds.y.values.min(), ds.y.values.max())
+    # print("x range:", ds.x.values.min(), ds.x.values.max())
 
     check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 0)
-    check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 0)
     check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 1)
+    check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 2)
+    check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 3)
+    check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 4)
+    check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 5)
+    check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 6)
+    check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 7)
+    check_region_stats(raw_store_url, "carbon_density__AGC__MgC", 8)
+    check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 0)
     check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 1)
+    check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 2)
+    check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 3)
+    check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 4)
+    check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 5)
+    check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 6)
+    check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 7)
+    check_region_stats(raw_store_url, "carbon_density__BGC__MgC", 8)
+
+
     # check_region_min_max("flux_NEE", 2)
     #
     #

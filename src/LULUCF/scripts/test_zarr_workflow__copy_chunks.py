@@ -33,15 +33,17 @@ import os
 # CONFIGURATION
 # ──────────────────────────────
 
-dataset_keys = [
+test_dataset_keys = [
     "carbon_density__AGC__MgC",
-    # "carbon_density__BGC__MgC",
+    "carbon_density__BGC__MgC",
+    "gross_emissions__AGC__MgCO2",
+    "gross_removals__AGC__MgCO2"
     # "flux_NEE",
     # "flux_FIRE",
     # "forest_mask",
 ]
 
-test_n_years = 1
+test_n_years = 3
 full_n_years = 9
 resolution = 0.00025
 lat_size = int(180 / resolution)   # 720000
@@ -263,7 +265,7 @@ def check_region_stats(store_url, dataset_key, year_idx, target_box):
     # Non-zero pixels in the array
     non_zero_count = np.count_nonzero(region_array)
 
-    print(f"🔍 {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}")
+    print(f"  🔍 {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}")
 
 
 # ──────────────────────────────
@@ -319,7 +321,7 @@ def run_parallel_copy(
     results = client.gather(futures)
     # for r in results[:5]:
     #     print(r)
-    print(f"  All blocks copied for {var} for year {year_idx}: {timestr()}")
+    # print(f"  All blocks copied for {var} for year {year_idx}: {timestr()}")
 
 
 # ──────────────────────────────
@@ -441,49 +443,58 @@ if __name__ == "__main__":
     # Rechunked mega-zarr path
     rechunk_url = raw_store_url.rstrip("/") + "_rechunked/"
 
+    rechunk_size = 10_000  # we're copying 10000x10000 blocks
+
     # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
     initialize_zarr_with_coords(
         rechunk_url,
-        dataset_keys,
-        full_n_years,
+        test_dataset_keys,
+        test_n_years,
+        # full_n_years,
         resolution=0.00025,
         dtype="float32",
         fill_value=np.nan,
-        chunks=(1, 10000, 10000)
+        chunks=(1, rechunk_size, rechunk_size)
     )
 
-    var_name = "carbon_density__AGC__MgC"  # <- set your variable here
-    ny, nx = 720_000, 1_440_000
-    block_size = 10_000  # we're copying 10000x10000 blocks
 
-    print(f"Starting {var_name}: {timestr()}")
-    var_start_time = time.time()
+    print(f"Starting rechunk transfers: {timestr()}")
+    start_time = time.time()
 
-    for year_idx in range(full_n_years):
+    for var_name in test_dataset_keys:
 
-        print(f"  Starting {var_name} for year {year_idx}: {timestr()}")
-        year_start_time = time.time()
+        print(f"Starting {var_name}: {timestr()}")
+        var_start_time = time.time()
 
-        run_parallel_copy(
-            client=client,
-            var=var_name,
-            year_idx=year_idx,
-            ny=ny,
-            nx=nx,
-            block_size=block_size,
-            raw_path=raw_store_url,
-            dest_path=rechunk_url,
-        )
-        print(f"Original (4000x4000) zarr:")
-        check_region_stats(raw_store_url, var_name, 0, target_box)
-        print(f"Rechunked (10000x10000) zarr:")
-        check_region_stats(rechunk_url, var_name, 0, target_box)
+        # for year_idx in range(full_n_years):
+        for year_idx in range(test_n_years):
 
-        year_end_time = time.time()
-        print(f"  Transferred {var_name} for year {year_idx} in {round(year_end_time - year_start_time)} seconds: {timestr()}")
+            print(f"  Starting {var_name} for year {year_idx}: {timestr()}")
+            year_start_time = time.time()
 
-    var_end_time = time.time()
-    print(f"Transferred {var_name} in {round(var_end_time - var_start_time)} seconds: {timestr()}")
+            run_parallel_copy(
+                client=client,
+                var=var_name,
+                year_idx=year_idx,
+                ny=lat_size,
+                nx=lon_size,
+                block_size=rechunk_size,
+                raw_path=raw_store_url,
+                dest_path=rechunk_url,
+            )
+            year_end_time = time.time()
+            print(f"    Transferred {var_name} for year {year_idx} in {round(year_end_time - year_start_time)} seconds: {timestr()}")
+
+            print(f"    Original (4000x4000) zarr:")
+            check_region_stats(raw_store_url, var_name, year_idx, target_box)
+            print(f"    Rechunked (10000x10000) zarr:")
+            check_region_stats(rechunk_url, var_name, year_idx, target_box)
+
+        var_end_time = time.time()
+        print(f"  Transferred {var_name} in {round(var_end_time - var_start_time)} seconds: {timestr()}")
+
+    end_time = time.time()
+    print(f"Transferred/rechunked all variables and years in {round(end_time - start_time)} seconds: {timestr()}")
 
 
     # # Step 8: Check stats for chunk x dataset x year combinations in rechunked zarr
@@ -530,6 +541,6 @@ if __name__ == "__main__":
     #
     # # test_end_time = time.time()
     # # print(f"Done with test. Elapsed time {round(test_end_time - test_start_time)} seconds: {timestr()}")
-    # #
-    # # # Optional shutdown
-    # # cluster.shutdown()
+
+    # Optional shutdown
+    cluster.shutdown()
