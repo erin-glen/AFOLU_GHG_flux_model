@@ -1805,41 +1805,6 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
 
-def latlon_to_global_zarr_indices(lat: float, lon: float, resolution: float):
-    """
-    Convert latitude and longitude in degrees to global Zarr array indices.
-
-    Parameters
-    ----------
-    lat : float
-        Latitude in decimal degrees (-90 to +90). North is positive.
-    lon : float
-        Longitude in decimal degrees (-180 to +180). East is positive.
-    resolution : float
-        Grid resolution in degrees per pixel (e.g., 0.00025).
-
-    Returns
-    -------
-    lat_idx : int
-        Row index (0 at 90°N, increases southward)
-    lon_idx : int
-        Column index (0 at 180°W, increases eastward)
-    """
-    # Define reference edges of grid
-    LAT_MAX = 90.0   # top edge of array
-    LON_MIN = -180.0 # left edge of array
-
-    # Clamp to bounds to avoid rounding overflow (e.g., lon=180)
-    lat = max(-90.0, min(90.0, lat))
-    lon = max(-180.0, min(180.0, lon))
-
-    # Compute indices
-    lat_idx = int(np.floor((LAT_MAX - lat) / resolution))
-    lon_idx = int(np.floor((lon - LON_MIN) / resolution))
-
-    return lat_idx, lon_idx
-
-
 # Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
 def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                        download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
@@ -1981,7 +1946,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     ### Part 5: Writes outputs to pre-existing global mega-zarr (only if requested)
 
     uu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
-                  out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
+                  out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id, logger_worker)
 
 
     ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
@@ -2143,7 +2108,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # is_large_run = True  # For simulating a large run
     if len(chunk_list) > 20:
         is_large_run = True
-        main_logger.info("Running as final model.")
+        main_logger.info(f"Running as large-scale run model: {is_large_run}")
 
     # Whenever the run is large-scale (final), force zarr creation
     if is_large_run:

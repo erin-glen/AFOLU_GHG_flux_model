@@ -2315,8 +2315,8 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
                     "lon_max": bounds[2]
                 }
 
-                if "density__AGC" in output_to_zarr_pattern:
-                    check_region_stats(mega_zarr_path, output_to_zarr_pattern, year_idx, target_box)
+                if "density__AGC" in output_to_zarr_pattern:  # Just calculates and prints for AGC density for QC purposes
+                    check_region_stats(mega_zarr_path, output_to_zarr_pattern, year_idx, target_box, logger_worker)
 
         zarr_end = time.time()
         lu.print_and_log(f"Memory usage after writing to zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
@@ -2327,7 +2327,7 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
 
 
 # Checks the stats for a bounding box in a zarr for a given dataset and year
-def check_region_stats(store_url, dataset_key, year_idx, target_box, main_logger):
+def check_region_stats(store_url, dataset_key, year_idx, target_box):
 
     """Check min/max of the region written."""
     fs = fsspec.filesystem("s3", anon=False)
@@ -2342,8 +2342,9 @@ def check_region_stats(store_url, dataset_key, year_idx, target_box, main_logger
     # Non-zero pixels in the array
     non_zero_count = np.count_nonzero(region_array)
 
+    # Statement to print
     statement = f"      {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}"
-    main_logger.info(statement)
+    print(statement)
 
 
 ###################################################################################################
