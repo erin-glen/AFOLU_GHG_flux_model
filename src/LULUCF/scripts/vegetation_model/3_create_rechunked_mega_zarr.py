@@ -17,9 +17,9 @@ Most recent ChatGPT convo: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/
 
 import argparse
 import numpy as np
-import xarray as xr
 import zarr
 import fsspec
+import sys
 import time
 from dask.distributed import Client, print
 
@@ -83,7 +83,6 @@ def run_parallel_copy(
 # Checks the stats for a bounding box in a zarr for a given dataset and year
 def check_region_stats(store_url, dataset_key, year_idx, target_box):
 
-    """Check min/max of the region written."""
     fs = fsspec.filesystem("s3", anon=False)
     mapper = fs.get_mapper(store_url)
     z = zarr.open(mapper, mode="r")
@@ -97,13 +96,23 @@ def check_region_stats(store_url, dataset_key, year_idx, target_box):
     non_zero_count = np.count_nonzero(region_array)
 
     # Statement to print
-    statement = f"      {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}"
-    print(statement)
+    print_statement = f"      {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}"
+    print(print_statement)
+
+    return_statement = {'min_value': region_array.min(), 'mean_value': region_array.mean(), 'max_value': region_array.max()}
+    return(return_statement)
 
 # Calculates stats in 1x1 deg chunk in raw and rechunked zarrs
-def zarr_1x1_deg_stats(chunk, var, year_idx, raw_path, rechunk_path):
+def zarr_1x1_deg_stats(bounds, var_name, year_idx, raw_path, rechunk_path):
 
-    print(f"Getting stats for {var} for year {year_idx} for {chunk}: {uu.timestr()}")
+    print(f"Getting stats for {var_name} for year {year_idx} for {bounds}: {uu.timestr()}")
+
+    # Stores the min, mean, and max chunks for inputs and outputs for the chunk
+    chunk_stats = []
+
+    bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
+    tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
+
     # start_time = time.time()
 
     logger_worker = lu.setup_logging_worker()
@@ -111,24 +120,38 @@ def zarr_1x1_deg_stats(chunk, var, year_idx, raw_path, rechunk_path):
     year = cn.interval_end_years_annual[year_idx]
 
     target_box = {
-        "lat_min": chunk[1],
-        "lat_max": chunk[3],
-        "lon_min": chunk[0],
-        "lon_max": chunk[2]
+        "lat_min": bounds[1],
+        "lat_max": bounds[3],
+        "lon_min": bounds[0],
+        "lon_max": bounds[2]
     }
 
-    lu.print_and_log(f"    Original (4000x4000) zarr:", False, logger_worker)
-    raw_stats = check_region_stats(raw_path, var, year_idx, target_box)
-    lu.print_and_log(f"    Rechunked (10000x10000) zarr:", False, logger_worker)
-    rechunk_stats = check_region_stats(rechunk_path, var, year_idx, target_box)
+    fs = fsspec.filesystem("s3", anon=False)
+    mapper = fs.get_mapper(raw_path)
+    z = zarr.open(mapper, mode="r")
 
-    # block = raw_store[var][year_idx, y0:y1, x0:x1]
-    # rechunked_store[var][year_idx, y0:y1, x0:x1] = block
+    pattern_with_units = uu.add_units_year_to_pattern(var_name, year)
+
+    lat0, lon0 = uu.latlon_to_global_zarr_indices(target_box["lat_max"], target_box["lon_min"], cn.resolution)
+    lat1, lon1 = uu.latlon_to_global_zarr_indices(target_box["lat_min"], target_box["lon_max"], cn.resolution)
+
+    region_array = z[var_name][year_idx, lat0:lat1, lon0:lon1]
+
+    chunk_stats.append(uu.calculate_stats(region_array, pattern_with_units, bounds_str, tile_id, 'output_layer'))
+
+    # lu.print_and_log(f"    Original (4000x4000) zarr:", False, logger_worker)
+    # raw_stats = check_region_stats(raw_path, var, year_idx, target_box)
+    # lu.print_and_log(f"    Rechunked (10000x10000) zarr:", False, logger_worker)
+    # rechunk_stats = check_region_stats(rechunk_path, var, year_idx, target_box)
+    # print(raw_stats)
+    # print(rechunk_stats)
+
+    print(chunk_stats)
 
     # end_time = time.time()
     # print(f"  Transferred {var} for {year_idx} for y={y0}:{y1}, x={x0}:{x1} in {round(end_time - start_time)} seconds: {uu.timestr()}")
 
-    return f"Got stats for {var} for {year_idx} for {chunk}: {uu.timestr()}"
+    return f"Got stats for {var_name} for {year_idx} for {bounds}: {uu.timestr()}"
 
 
 # Parallelizes stats calculating in 1x1 deg chunks in raw and rechunked zarrs

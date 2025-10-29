@@ -1509,9 +1509,9 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'chunk_name': f'{tile_id}__{bounds_str}__{out_pattern}_{year_range}.tif',
             'tile_name': f'{tile_id}__{out_pattern}_{year_range}.tif',
             'in_out': in_out,
-            'min_value': np.min(array_per_ha),
-            'mean_value': np.mean(array_per_ha),
-            'max_value': np.max(array_per_ha),
+            'min_value': float(np.min(array_per_ha)),
+            'mean_value': float(np.mean(array_per_ha)),
+            'max_value': float(np.max(array_per_ha)),
             'count_value': np.count_nonzero(array_per_ha),
             'sum_value': sum_value,
             'data_type': array_per_ha.dtype.name
@@ -2076,6 +2076,28 @@ def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
         lu.print_and_log(f"No task file found for chunk {chunk_id}. Nothing to delete.", is_final, logger_worker)
 
 
+# Adds units and year specifications to core pattern
+def add_units_year_to_pattern(core_pattern, year):
+    if "density" in core_pattern:
+        pattern_with_units = f"{core_pattern}_ha_{year}"
+    elif "emis" in core_pattern:
+        pattern_with_units = f"{core_pattern}_ha_yr_{year - 1}_{year}"
+    elif "removals" in core_pattern:
+        pattern_with_units = f"{core_pattern}_ha_yr_{year - 1}_{year}"
+    elif "net" in core_pattern:
+        pattern_with_units = f"{core_pattern}_ha_yr_{year - 1}_{year}"
+    elif cn.land_state_pattern in core_pattern:
+        pattern_with_units = f"{core_pattern}_{year - 1}_{year}"
+    elif cn.composite_primary_forest in core_pattern:
+        pattern_with_units = f"{core_pattern}_{year}"
+    elif cn.forest_age_output_pattern in core_pattern:
+        pattern_with_units = f"{core_pattern}_{year}"
+    else:
+        sys.exit(f"Dataset {core_pattern} not assigned a pattern with units for addition to global zarr")
+
+    return pattern_with_units
+
+
 ##################
 ### Zarr processing
 ##################
@@ -2265,25 +2287,7 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
                 lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
                 lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
 
-                # Creates the pattern used to select the relevant numpy array from the output dictionary.
-                # Each kind of output has a different pattern based on whether it's for a specific year or interval.
-                # Hard-coded the full patterns with units here instead of trying to do it automatically or pre-create a dictionary.
-                if "density" in output_to_zarr_pattern:
-                    pattern_with_units = f"{output_to_zarr_pattern}_ha_{year}"
-                elif "emis" in output_to_zarr_pattern:
-                    pattern_with_units = f"{output_to_zarr_pattern}_ha_yr_{year - 1}_{year}"
-                elif "removals" in output_to_zarr_pattern:
-                    pattern_with_units = f"{output_to_zarr_pattern}_ha_yr_{year - 1}_{year}"
-                elif "net" in output_to_zarr_pattern:
-                    pattern_with_units = f"{output_to_zarr_pattern}_ha_yr_{year - 1}_{year}"
-                elif cn.land_state_pattern in output_to_zarr_pattern:
-                    pattern_with_units = f"{output_to_zarr_pattern}_{year - 1}_{year}"
-                elif cn.composite_primary_forest in output_to_zarr_pattern:
-                    pattern_with_units = f"{output_to_zarr_pattern}_{year}"
-                elif cn.forest_age_output_pattern in output_to_zarr_pattern:
-                    pattern_with_units = f"{output_to_zarr_pattern}_{year}"
-                else:
-                    sys.exit(f"Dataset {output_to_zarr_pattern} not assigned a pattern with units for addition to global zarr")
+                pattern_with_units = add_units_year_to_pattern(output_to_zarr_pattern, year)
 
                 # Selects the relevant output numpy array for insertion into zarr.
                 # Only inserts into zarr if that data is in the output dictionary.

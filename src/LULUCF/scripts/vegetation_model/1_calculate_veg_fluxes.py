@@ -1946,7 +1946,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     ### Part 5: Writes outputs to pre-existing global mega-zarr (only if requested)
 
     uu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
-                  out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id, logger_worker)
+                  out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
 
 
     ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
