@@ -2,14 +2,14 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr --run_local --test_chunk 0 41 1 42 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr --run_local -fv 1 -fy 1 --test_chunk 0 41 1 42 --input_date YYYYMMDD
 
 Test run:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_chunk 0 41 1 42 --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_model
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model -fv 2 -fy 2 --test_chunk 0 41 1 42 --input_date YYYYMMDD
 
 Full run:
-python -m src.utilities.create_cluster -n 50 -t 1 -m 8 -cn vegetation_model
+python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_chunk 0 41 1 42 --input_date YYYYMMDD
 
 Most recent ChatGPT convo: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6900ce1b-e728-832a-9b87-4702f646da42
@@ -30,47 +30,28 @@ from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
 
 
-# ──────────────────────────────
-# CONFIGURATION
-# ──────────────────────────────
-
-test_dataset_keys = [
-    "carbon_density__deadwood_C__MgC",
-    "carbon_density__litter_C__MgC",
-    "gross_emissions__BGC__MgCO2",
-    "gross_removals__BGC__MgCO2",
-]
-
-test_n_years = 3
-full_n_years = 9
-lat_size = int(180 / cn.resolution)   # 720000
-lon_size = int(360 / cn.resolution)   # 1440000
-dtype = "float32"
-fill_value = 0.0
-
-
-# ──────────────────────────────
-# Define copy task
-# ──────────────────────────────
+# Copies the 10000x10000 chunk
 def copy_block(var, year_idx, y0, y1, x0, x1, raw_path, dest_path):
 
     # print(f"Transferring {var} for {year_idx} for {y0}:{y1}, {x0}:{x1}: {uu.timestr()}")
-    start_time = time.time()
+    # start_time = time.time()
+
     fs = fsspec.filesystem("s3", anon=False)
     raw_store = zarr.open_group(fs.get_mapper(raw_path), mode="r")
     rechunked_store = zarr.open_group(fs.get_mapper(dest_path), mode="r+")
 
+    year = cn.interval_end_years_annual[year_idx]
+
     block = raw_store[var][year_idx, y0:y1, x0:x1]
     rechunked_store[var][year_idx, y0:y1, x0:x1] = block
 
-    end_time = time.time()
+    # end_time = time.time()
     # print(f"  Transferred {var} for {year_idx} for y={y0}:{y1}, x={x0}:{x1} in {round(end_time - start_time)} seconds: {uu.timestr()}")
 
-    return f"Copied {var} year {year_idx} region y={y0}:{y1}, x={x0}:{x1}"
+    return f"Copied {var} year {year} region y={y0}:{y1}, x={x0}:{x1}"
 
-# ──────────────────────────────
-# Launch parallel copy
-# ──────────────────────────────
+
+# Parallelizes copy across 10000x10000 chunks for a given dataset-year combination
 def run_parallel_copy(
     client: Client,
     var: str,
@@ -95,7 +76,8 @@ def run_parallel_copy(
                 y0, y1,
                 x0, x1,
                 raw_path,
-                dest_path
+                dest_path,
+                retries=2
             )
             futures.append(fut)
 
@@ -134,6 +116,13 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, test_chunk=None,
     main_logger.info(f"Number of years to rechunk: {first_years_to_process}")
     main_logger.info(f"Test chunk (to print stats): {test_chunk}")
 
+    test_dataset_keys = [
+        "carbon_density__deadwood_C__MgC",
+        "carbon_density__litter_C__MgC",
+        "gross_emissions__BGC__MgCO2",
+        "gross_removals__BGC__MgCO2",
+    ]
+
     if first_variables_to_process:
         vars_to_process = test_dataset_keys[0:first_variables_to_process]  #TODO testing
     else:
@@ -146,7 +135,13 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, test_chunk=None,
         years_to_process = len(cn.interval_end_years_annual)
     main_logger.info(f"Years to rechunk: {years_to_process}")
 
-    start_time = time.time()
+    lat_size = int(180 / cn.resolution)  # 720000 rows
+    lon_size = int(360 / cn.resolution)  # 1440000 columns
+
+    start_time = uu.timestr()
+
+
+    ### Step 2: Create metadata-only chunk=10000x10000 mega-zarr
 
     # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
     uu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, years_to_process,
@@ -157,6 +152,9 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, test_chunk=None,
     ds = xr.open_zarr(source_mapper, consolidated=False)
     main_logger.info(ds)
 
+
+    ### Step 3: Copy from chunk=4000x4000 zarr to chunk=10000x10000 zarr
+
     main_logger.info(f"Starting rechunk transfers: {uu.timestr()}")
 
     for var_name in vars_to_process:
@@ -164,10 +162,11 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, test_chunk=None,
         main_logger.info(f"Starting {var_name}: {uu.timestr()}")
         var_start_time = time.time()
 
-        # for year_idx in range(full_n_years):
         for year_idx in range(years_to_process):
 
-            main_logger.info(f"  Starting {var_name} for year {year_idx}: {uu.timestr()}")
+            year = cn.interval_end_years_annual[year_idx]
+
+            main_logger.info(f"  Starting {var_name} for year {year}: {uu.timestr()}")
             year_start_time = time.time()
 
             run_parallel_copy(
@@ -181,8 +180,9 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, test_chunk=None,
                 dest_path=rechunked_mega_zarr_path,
             )
             year_end_time = time.time()
-            main_logger.info(f"    Transferred {var_name} for year {year_idx} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
+            main_logger.info(f"    Transferred {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
 
+            # Only prints test chunk stats if selected
             if test_chunk:
 
                 target_box = {
@@ -191,20 +191,33 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, test_chunk=None,
                     "lon_min": test_chunk[0],
                     "lon_max": test_chunk[2]
                 }
-                print(target_box)
 
                 main_logger.info(f"    Original (4000x4000) zarr:")
-                stats_raw = uu.check_region_stats(raw_mega_zarr_path, var_name, year_idx, target_box)
+                uu.check_region_stats(raw_mega_zarr_path, var_name, year_idx, target_box, main_logger)
                 main_logger.info(f"    Rechunked (10000x10000) zarr:")
-                stats_rechunk = uu.check_region_stats(rechunked_mega_zarr_path, var_name, year_idx, target_box)
-
-                print(stats_rechunk)
+                uu.check_region_stats(rechunked_mega_zarr_path, var_name, year_idx, target_box, main_logger)
 
         var_end_time = time.time()
         main_logger.info(f"  Transferred {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
-    end_time = time.time()
-    main_logger.info(f"Transferred/rechunked all variables and years in {round(end_time - start_time)} seconds: {uu.timestr()}")
+
+    ### Step 4: Process logs
+
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+
+    # Worker logs are not aggregated if doing a local run (since there are no workers)
+    if not run_local:
+
+        # Creates combined log from all workers if not deactivated
+        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
+
+        # Adds the workers' logs to the main log and uploads to s3
+        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
+
+    # Closes the Dask client if not running locally
+    if not run_local:
+        client.close()
 
 
 

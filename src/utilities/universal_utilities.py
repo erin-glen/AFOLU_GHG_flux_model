@@ -2075,7 +2075,12 @@ def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
 
         lu.print_and_log(f"No task file found for chunk {chunk_id}. Nothing to delete.", is_final, logger_worker)
 
-# Creates the paths for the raw and rechunked mega-zarrs
+
+##################
+### Zarr processing
+##################
+
+# Creates the s3 paths for the raw and rechunked mega-zarrs
 def create_mega_zarr_paths(chunk_size_pixels, interval_type, model_type, run_date):
 
     # Sets the output zarr location based on the model run
@@ -2098,12 +2103,13 @@ def latlon_to_global_zarr_indices(lat, lon, resolution):
     return lat_idx, lon_idx
 
 
-# All zarr-related code from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
 # Creates a Zarr group with individual datasets on S3 with coordinate arrays (x/y/year),
 # spatial_ref metadata, and dataset definitions WITHOUT allocating global arrays.
 # That is, it doesn't computer anything upfront or locally. It just creates the zarr group
 # with datasets inside.
 # In addition to x and y dimensions, there is also a time dimension (intervals), which uses an index (not the actual year).
+# This zarr-related code from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
+# and maybe some later chats, too.
 def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, main_logger, fill_value= np.nan):
 
     # Computes dimensions
@@ -2320,7 +2326,8 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
         lu.print_and_log(f"Not writing outputs for {bounds_str} in {tile_id} to global zarrs: {timestr()}",False, logger_worker)
 
 
-def check_region_stats(store_url, dataset_key, year_idx, target_box):
+# Checks the stats for a bounding box in a zarr for a given dataset and year
+def check_region_stats(store_url, dataset_key, year_idx, target_box, main_logger):
 
     """Check min/max of the region written."""
     fs = fsspec.filesystem("s3", anon=False)
@@ -2332,20 +2339,11 @@ def check_region_stats(store_url, dataset_key, year_idx, target_box):
 
     region_array = z[dataset_key][year_idx, lat0:lat1, lon0:lon1]
 
-    # print(dataset_key)
-    # print(mapper)
-    # print(z)
-    # print(lat0, lon0)
-    # print(lat1, lon1)
-    # print(region)
-
     # Non-zero pixels in the array
     non_zero_count = np.count_nonzero(region_array)
 
-    statement = f"  🔍 {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}"
-
-    print(statement)
-    return statement
+    statement = f"      {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}"
+    main_logger.info(statement)
 
 
 ###################################################################################################
