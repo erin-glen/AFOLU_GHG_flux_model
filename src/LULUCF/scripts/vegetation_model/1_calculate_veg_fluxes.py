@@ -1,7 +1,7 @@
 """
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
-Local test (Dask part does not work):
+Local test (Dask part does not work because of client.submit()):
 python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload --run_date YYYYMMDD
 
 Coiled small tests:
@@ -1980,94 +1980,8 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
     ### Part 5: Writes outputs to pre-existing global mega-zarr (only if requested)
 
-    # uu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
-    #               out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
-
-    # ─────────────── STEP 1: Convert bounding box to Zarr indices ─────────────── #
-
-    # Convert lat/lon to Zarr row/col indices
-    lat_n_idx, lon_w_idx = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
-    lat_s_idx, lon_e_idx = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
-
-    # Sort so start < end
-    lat_start_idx, lat_end_idx = sorted([lat_n_idx, lat_s_idx])
-    lon_start_idx, lon_end_idx = sorted([lon_w_idx, lon_e_idx])
-
-    # # Confirm Zarr index ranges
-    # print(f"Zarr index ranges (Y): {lat_start_idx} → {lat_end_idx}")
-    # print(f"Zarr index ranges (X): {lon_start_idx} → {lon_end_idx}")
-
-    # ─────────────── STEP 2: Generate real-world coordinates ─────────────── #
-
-    # Convert Zarr indices to lat/lon coordinate values
-    y_coords = 90.0 - np.arange(lat_start_idx, lat_end_idx) * cn.resolution
-    x_coords = -180.0 + np.arange(lon_start_idx, lon_end_idx) * cn.resolution
-
-    # Confirm
-    print(f"Latitude range: {y_coords.min():.6f} to {y_coords.max():.6f}")
-    print(f"Longitude range: {x_coords.min():.6f} to {x_coords.max():.6f}")
-
-    # ─────────────── STEP 3: Loop through years and write to Zarr ─────────────── #
-
-    var = "carbon_density__AGC__MgC"
-
-    for year_idx, year in enumerate(interval_end_years):
-        coords = {
-            "year": [year_idx],
-            "y": y_coords,
-            "x": x_coords,
-        }
-
-        data_name = f"{var}_ha_{year}"
-        data = out_dict_all_dtypes[data_name]  # shape: (ny, nx)
-
-        print(f"Writing {data_name}: shape={data.shape} → Zarr indices y={lat_start_idx}:{lat_end_idx}, x={lon_start_idx}:{lon_end_idx}")
-        # print("data:", data)
-
-        # Wrap into xarray DataArray with proper dimension names
-        data_vars = {
-            var: (("year", "y", "x"), data[np.newaxis, :, :].astype("float32"))
-        }
-
-        ds = xr.Dataset(data_vars, coords=coords)
-
-        # Write to Zarr manually (Zarr v3 safe)
-        fs = fsspec.filesystem("s3", anon=False)
-        store = fs.get_mapper(mega_zarr_path)
-        zgroup = zarr.open_group(store, mode="r+")
-
-        zarray = zgroup[var]
-        zarray[year_idx:year_idx + 1, lat_start_idx:lat_end_idx, lon_start_idx:lon_end_idx] = ds[var].values
-
-
-
-    # Opens pre-created global mega-zarr that was just populated
-    fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(mega_zarr_path)
-    z = zarr.open(mapper, mode="r+")
-
-    print("Checking zarr")
-    for year_idx, year in enumerate(interval_end_years):
-
-        region = z[var][
-                 year_idx,  # year index (not the actual year)
-                 lat_start_idx:lat_end_idx,  # rows (Y)
-                 lon_start_idx:lon_end_idx  # columns (X)
-                 ]
-
-        print(f"  Inspecting {var}_{year}")
-        # print(f"  Zarr path: {mega_zarr_path}")
-        print(f"  Index ranges: Y={lat_start_idx}:{lat_end_idx}, X={lon_start_idx}:{lon_end_idx}")
-        # print(f"  Region: {region}")
-
-        non_zero_count = np.count_nonzero(region)
-        lu.print_and_log(f"🔍 {var} year {year} for {bounds_str}: "
-                         f"min={region.min():.3f}, "
-                         f"mean={region.mean():.3f}, "
-                         f"max={region.max():.3f}, "
-                         f"non-zero pixels={non_zero_count}",
-                         False, logger_worker)
-
+    uu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
+                  out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
 
 
     ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
@@ -2420,46 +2334,26 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Only creates the global mega-zarr if needed (large runs or otherwise specified)
     if create_zarr:
 
-        # Only specific datasets output to zarrs.
-        # Starts with non-summative outputs from the vegetation model
-        outputs_to_zarr = [
-            cn.agc_modeled_dens_pattern, cn.bgc_modeled_dens_pattern, cn.deadwood_c_modeled_dens_pattern, cn.litter_c_modeled_dens_pattern,
-            cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
-            cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
-            cn.ch4_flux_pattern, cn.n2o_flux_pattern,
-            cn.land_state_pattern, cn.composite_primary_forest, cn.forest_age_output_pattern
-        ]
+        # Creates s3 paths for the raw mega-zarr
+        raw_mega_zarr_path = uu.create_mega_zarr_paths(chunk_size_pixels, interval_type, model_type, run_date)
 
-        # Also want to add the metadata for the summative outputs to the global zarr upfront for simplicity,
-        # rather than having to add more empty layers to the zarr at the summative stage
-        outputs_to_zarr = outputs_to_zarr + [
-            cn.gross_emis_all_C_pools_CO2_only_pattern, cn.gross_emis_all_C_pools_non_CO2_only_pattern, cn.gross_emis_all_C_pools_all_gases_pattern,
-            cn.gross_removals_all_C_pools_pattern,
-            cn.net_flux_agc_pattern, cn.net_flux_bgc_pattern, cn.net_flux_deadwood_c_pattern, cn.net_flux_litter_c_pattern,
-            cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
-            cn.non_soil_c_modeled_dens_pattern
-        ]
-
-        # Sets the output zarr location based on the model run
-        mega_zarr_path = cn.outputs_path_mega_zarr.replace(cn.model_type_placeholder, model_type)
-        mega_zarr_path = mega_zarr_path.replace("MODEL_INTERVAL_TYPE", interval_type)
-        mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
-        mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
+        # Add the variables listed here to the mega-zarr
+        outputs_to_zarr = cn.outputs_to_zarr
 
         # Creates the global mega-zarr with metadata only
-        uu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
-                                    (1, 4000, 4000), main_logger)
+        uu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+                                    (1, chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
-        mapper = fs.get_mapper(mega_zarr_path)
+        mapper = fs.get_mapper(raw_mega_zarr_path)
         ds = xr.open_zarr(mapper, consolidated=False)
         print(ds.coords)
         print("y range:", ds.y.values.min(), ds.y.values.max())
         print("x range:", ds.x.values.min(), ds.x.values.max())
 
     else:
-        mega_zarr_path = None
+        raw_mega_zarr_path = None
         outputs_to_zarr = False
 
 
@@ -2491,7 +2385,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                    chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                    download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
                                    interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
-                                   output_dir_list, stage, model_type, mega_zarr_path, outputs_to_zarr)
+                                   output_dir_list, stage, model_type, raw_mega_zarr_path, outputs_to_zarr)
             futures.append(future)
 
         batch_results = client.gather(futures)
@@ -2560,6 +2454,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Closes the Dask client if not running locally
     if not run_local:
         client.close()
+
 
 
 if __name__ == "__main__":

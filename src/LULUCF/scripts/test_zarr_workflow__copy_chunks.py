@@ -1,7 +1,7 @@
 """
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
-python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn zarr_testing
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn zarr_testing
 python -m src.LULUCF.scripts.test_zarr_workflow -cn zarr_testing
 
 Most recent ChatGPT convo: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6900ce1b-e728-832a-9b87-4702f646da42

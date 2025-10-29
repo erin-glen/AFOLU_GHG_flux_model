@@ -2075,6 +2075,17 @@ def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
 
         lu.print_and_log(f"No task file found for chunk {chunk_id}. Nothing to delete.", is_final, logger_worker)
 
+# Creates the paths for the raw and rechunked mega-zarrs
+def create_mega_zarr_paths(chunk_size_pixels, interval_type, model_type, run_date):
+
+    # Sets the output zarr location based on the model run
+    mega_zarr_path = cn.outputs_path_mega_zarr.replace(cn.model_type_placeholder, model_type)
+    mega_zarr_path = mega_zarr_path.replace("MODEL_INTERVAL_TYPE", interval_type)
+    mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
+    mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
+
+    return mega_zarr_path
+
 
 # Gets the row and column indexes in a global grid for a given lat and long using a given resolution
 def latlon_to_global_zarr_indices(lat, lon, resolution):
