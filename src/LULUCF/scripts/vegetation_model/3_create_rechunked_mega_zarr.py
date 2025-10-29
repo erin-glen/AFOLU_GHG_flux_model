@@ -2,15 +2,15 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr --run_local --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr --run_local --test_chunk 0 41 1 42 --input_date YYYYMMDD
 
 Test run:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_chunk 0 41 1 42 --input_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 50 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_chunk 0 41 1 42 --input_date YYYYMMDD
 
 Most recent ChatGPT convo: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6900ce1b-e728-832a-9b87-4702f646da42
 """
@@ -26,7 +26,6 @@ from dask.distributed import Client, print
 # Project imports
 from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
-from src.utilities import numba_utilities as nu
 from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
 
@@ -48,39 +47,6 @@ lat_size = int(180 / cn.resolution)   # 720000
 lon_size = int(360 / cn.resolution)   # 1440000
 dtype = "float32"
 fill_value = 0.0
-
-
-
-def latlon_to_indices(lat, lon):
-    """Convert lat/lon to array indices for (lat descending, lon increasing)."""
-    lat_max = 90.0
-    lon_min = -180.0
-    lat_idx = int(round((lat_max - lat) / cn.resolution))
-    lon_idx = int(round((lon - lon_min) / cn.resolution))
-    return lat_idx, lon_idx
-
-def check_region_stats(store_url, dataset_key, year_idx, target_box):
-    """Check min/max of the region written."""
-    fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(store_url)
-    z = zarr.open(mapper, mode="r")
-
-    lat0, lon0 = latlon_to_indices(target_box["lat_max"], target_box["lon_min"])
-    lat1, lon1 = latlon_to_indices(target_box["lat_min"], target_box["lon_max"])
-
-    region_array = z[dataset_key][year_idx, lat0:lat1, lon0:lon1]
-
-    # print(dataset_key)
-    # print(mapper)
-    # print(z)
-    # print(lat0, lon0)
-    # print(lat1, lon1)
-    # print(region)
-
-    # Non-zero pixels in the array
-    non_zero_count = np.count_nonzero(region_array)
-
-    print(f"  🔍 {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}")
 
 
 # ──────────────────────────────
@@ -140,7 +106,8 @@ def run_parallel_copy(
 
 
 def main(cluster_name, input_date, run_local, no_stats, no_log, test_chunk=None,
-         first_variables=None, first_years=None, log_note=None):
+         first_variables_to_process=None, first_years_to_process=None,
+         log_note=None):
 
     ### Step 1: Preparation
 
@@ -164,15 +131,25 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, test_chunk=None,
 
     main_logger.info(f"Raw mega-zarr path: {raw_mega_zarr_path}")
     main_logger.info(f"Rechunked mega-zarr path: {rechunked_mega_zarr_path}")
+    main_logger.info(f"Number of years to rechunk: {first_years_to_process}")
+    main_logger.info(f"Test chunk (to print stats): {test_chunk}")
 
-    if not first_years:
-        first_years = len(cn.interval_end_years_annual)
-    main_logger.info(f"Number of years to run: {first_years}")
+    if first_variables_to_process:
+        vars_to_process = test_dataset_keys[0:first_variables_to_process]  #TODO testing
+    else:
+        vars_to_process = test_dataset_keys                                #TODO testing
+    main_logger.info(f"Variables to rechunk: {vars_to_process}")
+
+    if first_years_to_process:
+        years_to_process = first_years_to_process
+    else:
+        years_to_process = len(cn.interval_end_years_annual)
+    main_logger.info(f"Years to rechunk: {years_to_process}")
 
     start_time = time.time()
 
     # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
-    uu.initialize_global_mega_zarr(rechunked_mega_zarr_path, test_dataset_keys, first_years,
+    uu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, years_to_process,
                                    (1, cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
 
     fs = fsspec.filesystem("s3", anon=False)
@@ -180,30 +157,15 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, test_chunk=None,
     ds = xr.open_zarr(source_mapper, consolidated=False)
     main_logger.info(ds)
 
-
-    target_box_1 = {
-        "lat_min": 40.0,
-        "lat_max": 41.0,
-        "lon_min": 0.0,
-        "lon_max": 1.0
-    }
-    target_box_2 = {
-        "lat_min": 41.0,
-        "lat_max": 42.0,
-        "lon_min": 0.0,
-        "lon_max": 1.0
-    }
-
     main_logger.info(f"Starting rechunk transfers: {uu.timestr()}")
-    start_time = time.time()
 
-    for var_name in test_dataset_keys:
+    for var_name in vars_to_process:
 
         main_logger.info(f"Starting {var_name}: {uu.timestr()}")
         var_start_time = time.time()
 
         # for year_idx in range(full_n_years):
-        for year_idx in range(test_n_years):
+        for year_idx in range(years_to_process):
 
             main_logger.info(f"  Starting {var_name} for year {year_idx}: {uu.timestr()}")
             year_start_time = time.time()
@@ -221,14 +183,22 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, test_chunk=None,
             year_end_time = time.time()
             main_logger.info(f"    Transferred {var_name} for year {year_idx} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
 
-            main_logger.info(f"    Original (4000x4000) zarr:")
-            check_region_stats(raw_mega_zarr_path, var_name, year_idx, target_box_1)
-            main_logger.info(f"    Rechunked (10000x10000) zarr:")
-            check_region_stats(rechunked_mega_zarr_path, var_name, year_idx, target_box_1)
-            main_logger.info(f"    Original (4000x4000) zarr:")
-            check_region_stats(raw_mega_zarr_path, var_name, year_idx, target_box_2)
-            main_logger.info(f"    Rechunked (10000x10000) zarr:")
-            check_region_stats(rechunked_mega_zarr_path, var_name, year_idx, target_box_2)
+            if test_chunk:
+
+                target_box = {
+                    "lat_min": test_chunk[1],
+                    "lat_max": test_chunk[3],
+                    "lon_min": test_chunk[0],
+                    "lon_max": test_chunk[2]
+                }
+                print(target_box)
+
+                main_logger.info(f"    Original (4000x4000) zarr:")
+                stats_raw = uu.check_region_stats(raw_mega_zarr_path, var_name, year_idx, target_box)
+                main_logger.info(f"    Rechunked (10000x10000) zarr:")
+                stats_rechunk = uu.check_region_stats(rechunked_mega_zarr_path, var_name, year_idx, target_box)
+
+                print(stats_rechunk)
 
         var_end_time = time.time()
         main_logger.info(f"  Transferred {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
@@ -244,8 +214,8 @@ if __name__ == "__main__":
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-rd', '--input_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-tc', '--test_chunk', nargs=4, type=float, help='Bounding box to print rechunked zarr stats from: W, S, E, N (degrees)')
-    parser.add_argument('-fv', '--first_variables', type=int, help='Number of variables to process from raw mega-zarr (for testing)')
-    parser.add_argument('-fy', '--first_years', type=int, help='Number of years to process from raw mega-zarr (for testing)')
+    parser.add_argument('-fv', '--first_variables_to_process', type=int, help='Number of variables to process from raw mega-zarr (for testing)')
+    parser.add_argument('-fy', '--first_years_to_process', type=int, help='Number of years to process from raw mega-zarr (for testing)')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
@@ -257,8 +227,8 @@ if __name__ == "__main__":
     cluster_name = args.cluster_name
     input_date = args.input_date
     test_chunk = args.test_chunk
-    first_variables = args.first_variables
-    first_years = args.first_years
+    first_variables_to_process = args.first_variables_to_process
+    first_years_to_process = args.first_years_to_process
     log_note = args.log_note
 
     run_local = args.run_local
@@ -267,4 +237,5 @@ if __name__ == "__main__":
 
     # Create the cluster with command line arguments
     main(cluster_name, input_date, run_local, no_stats, no_log, test_chunk=test_chunk,
-         first_variables=first_variables, first_years=first_years, log_note=log_note)
+         first_variables_to_process=first_variables_to_process, first_years_to_process=first_years_to_process,
+         log_note=log_note)

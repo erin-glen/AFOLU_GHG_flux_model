@@ -2300,34 +2300,17 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
         # that directly uses original numpy arrays.
         # For QC only.
         for output_to_zarr_pattern in outputs_to_zarr:
-            for i, year in enumerate(interval_end_years):
+            for year_idx, year in enumerate(interval_end_years):
 
-                # Converts bounding box corners to indices
-                lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
-                lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
-
-                region = z[output_to_zarr_pattern][
-                            i,                  # year index (not the actual year)
-                            lat_start:lat_end,  # rows (Y)
-                            lon_start:lon_end   # columns (X)
-                         ]
+                target_box = {
+                    "lat_min": bounds[1],
+                    "lat_max": bounds[3],
+                    "lon_min": bounds[0],
+                    "lon_max": bounds[2]
+                }
 
                 if "density__AGC" in output_to_zarr_pattern:
-                    print(output_to_zarr_pattern)
-                    print(mapper)
-                    print(z)
-                    print(lat_start, lon_start)
-                    print(lat_end, lon_end)
-                    print(region)
-
-                non_zero_count = np.count_nonzero(region)
-                lu.print_and_log(f"🔍 {output_to_zarr_pattern} year {year} for {bounds_str}: "
-                                 f"min={region.min():.3f}, "
-                                 f"mean={region.mean():.3f}, "
-                                 f"max={region.max():.3f}, "
-                                 f"non-zero pixels={non_zero_count}",
-                           False, logger_worker)
-
+                    check_region_stats(mega_zarr_path, output_to_zarr_pattern, year_idx, target_box)
 
         zarr_end = time.time()
         lu.print_and_log(f"Memory usage after writing to zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
@@ -2335,6 +2318,34 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
 
     else:
         lu.print_and_log(f"Not writing outputs for {bounds_str} in {tile_id} to global zarrs: {timestr()}",False, logger_worker)
+
+
+def check_region_stats(store_url, dataset_key, year_idx, target_box):
+
+    """Check min/max of the region written."""
+    fs = fsspec.filesystem("s3", anon=False)
+    mapper = fs.get_mapper(store_url)
+    z = zarr.open(mapper, mode="r")
+
+    lat0, lon0 = latlon_to_global_zarr_indices(target_box["lat_max"], target_box["lon_min"], cn.resolution)
+    lat1, lon1 = latlon_to_global_zarr_indices(target_box["lat_min"], target_box["lon_max"], cn.resolution)
+
+    region_array = z[dataset_key][year_idx, lat0:lat1, lon0:lon1]
+
+    # print(dataset_key)
+    # print(mapper)
+    # print(z)
+    # print(lat0, lon0)
+    # print(lat1, lon1)
+    # print(region)
+
+    # Non-zero pixels in the array
+    non_zero_count = np.count_nonzero(region_array)
+
+    statement = f"  🔍 {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}"
+
+    print(statement)
+    return statement
 
 
 ###################################################################################################
