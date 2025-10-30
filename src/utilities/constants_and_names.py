@@ -865,21 +865,20 @@ veg_summative_output_dirs = [
 # Only specific datasets output to zarrs.
 # Starts with non-summative outputs from the vegetation model
 outputs_to_zarr = [
-    agc_modeled_dens_pattern, bgc_modeled_dens_pattern, deadwood_c_modeled_dens_pattern, litter_c_modeled_dens_pattern,
-    agc_gross_removals_pattern, bgc_gross_removals_pattern, deadwood_c_gross_removals_pattern,
-    litter_c_gross_removals_pattern,
-    agc_gross_emis_pattern, bgc_gross_emis_pattern, deadwood_c_gross_emis_pattern, litter_c_gross_emis_pattern,
-    ch4_flux_pattern, n2o_flux_pattern,
-    land_state_pattern, composite_primary_forest, forest_age_output_pattern
+    agc_modeled_dens_pattern, # bgc_modeled_dens_pattern, deadwood_c_modeled_dens_pattern, litter_c_modeled_dens_pattern,
+    agc_gross_removals_pattern, # bgc_gross_removals_pattern, deadwood_c_gross_removals_pattern, litter_c_gross_removals_pattern,
+    agc_gross_emis_pattern, # bgc_gross_emis_pattern, deadwood_c_gross_emis_pattern, litter_c_gross_emis_pattern,
+    ch4_flux_pattern, # n2o_flux_pattern,
+    land_state_pattern, # composite_primary_forest, forest_age_output_pattern
 ]
 
 # Also want to add the metadata for the summative outputs to the global zarr upfront for simplicity,
 # rather than having to add more empty layers to the zarr at the summative stage
 outputs_to_zarr = outputs_to_zarr + [
-    gross_emis_all_C_pools_CO2_only_pattern, gross_emis_all_C_pools_non_CO2_only_pattern, gross_emis_all_C_pools_all_gases_pattern,
-    gross_removals_all_C_pools_pattern,
-    net_flux_agc_pattern, net_flux_bgc_pattern, net_flux_deadwood_c_pattern, net_flux_litter_c_pattern,
-    net_flux_all_C_pools_CO2_only_pattern, net_flux_all_C_pools_all_gases_pattern,
+    gross_emis_all_C_pools_CO2_only_pattern, # gross_emis_all_C_pools_non_CO2_only_pattern, gross_emis_all_C_pools_all_gases_pattern,
+    # gross_removals_all_C_pools_pattern,
+    # net_flux_agc_pattern, net_flux_bgc_pattern, net_flux_deadwood_c_pattern, net_flux_litter_c_pattern,
+    # net_flux_all_C_pools_CO2_only_pattern, net_flux_all_C_pools_all_gases_pattern,
     non_soil_c_modeled_dens_pattern
 ]
 

@@ -2404,17 +2404,18 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     if (not no_stats) and (success_count > 0):
         uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
 
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
     # Worker logs are not aggregated if doing a local run (since there are no workers)
     if not run_local:
 
         # Creates combined log from all workers if not deactivated
         worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
-        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats and worker log compilation", main_logger)
 
         # Adds the workers' logs to the main log and uploads to s3
         lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
+
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats and worker log compilation", main_logger)
 
     # Closes the Dask client if not running locally
     if not run_local:
