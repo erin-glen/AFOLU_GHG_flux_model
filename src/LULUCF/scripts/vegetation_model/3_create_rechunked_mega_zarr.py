@@ -1,4 +1,39 @@
 """
+Rechunks the global mega-zarr (zarr group with all variables/datasets and years) from 4000x4000 pixels into
+10000x10000 pixels by copying data from the populated raw zarr to the metadata-only rechunked zarr chunk by chunk
+for each dataset-year combination.
+
+I went through many iterations for how to rechunk the zarr and wound up with this one, which is kind of cumbersome and
+manual and doesn't use native Dask/xarray abilities.
+First, I tried using the rechunker library but that requires using zarr v2 file format and I need zarr v3 file format
+for zonal stats with flox. So, rechunker was out.
+Then, I tried a variety of systems using Dask and xarray. Those mostly ran into problems with having graph sizes that
+were too large because they were trying to arrange the rechunking of an entire dataset-year at once.
+Then, I tried rechunking by dataset-year-latitude band to keep the Dask graph sizes lower. I think that may have worked
+if I had set it up differently but I configured it in a way that had multiple workers writing 4000x4000 chunks to the
+same 10000x1000 destination chunk at the same time, which zarr can't handle. (Can't write to the same chunk concurrently,
+I learned.) If I had tried transferring in chunks of 10000x10000 instead of 4000x4000, I think this would have
+been similar to what I am ultimately doing, except with the added complication of iterating by latitude band.
+BTW, this situation didn't show any errors; the failure was silent. It was only noticeable because I was calculating
+chunk stats (min, mean max) for test chunks in the raw and rechunked zarr and noticed that they were different compared
+to the numpy-based chunk stats spreadsheet directly from the model. It turned out that whenever I tried concurrently
+writing to a single chunk with multiple workers, it would just drop data (presumably because of conflict over write access
+to the chunk), so the destination chunk would be missing some or all of its data.
+Then, I tried just creating a chunk=10000x10000 Zarr up front and having the vegetation model write to that.
+That didn't work for the same reason; I was writing multiple 4000x4000 chunks to a single 10000x10000 destination
+chunk concurrently. It had the same missing data issue as above (in comparison with the model output chunk stats
+spreadsheet).
+Finally, I settled on this approach, which grabs 10000x10000 pixel chunks from a raw zarr dataset-year
+and writes them into the rechunked one. The 10000x10000 chunks for a given dataset-year are transferred in parallel
+but each chunk is written by only one worker. It then iterates through the datasets and years in a nested for loop
+(which is at all Dask or xarray).
+
+After transferring a single dataset-year to the rechunked zarr, it then gets 1x1 deg chunk stats for the provided
+chunk list from the raw and rechunked zarrs. The chunk stats are in the same format as the chunk stats from
+numpy arrays from the main model. The chunk stats from the raw and rechunked zarrs can then be compared against the
+chunk stats from the numpy arrays to make sure nothing has changed during the transfer from 1x1 geotifs to
+raw zarr to rechunked zarr.
+
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
@@ -106,8 +141,6 @@ def check_region_stats(store_url, dataset_key, year_idx, target_box):
 # Calculates stats in 1x1 deg chunk in raw and rechunked zarrs
 def zarr_1x1_deg_stats(bounds, var_name, year_idx, raw_path, rechunk_path):
 
-    logger_worker = lu.setup_logging_worker()
-
     # lu.print_and_log(f"Getting stats for {var_name} for year {year_idx} for {bounds}: {uu.timestr()}", False, logger_worker)
     # start_time = time.time()
 
@@ -148,6 +181,9 @@ def zarr_1x1_deg_stats(bounds, var_name, year_idx, raw_path, rechunk_path):
     # end_time = time.time()
     # lu.print_and_log(f"  Calculated stats for {pattern_with_units} for {year} for {bounds} in {round(end_time - start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
+    # print("chunk_stats_raw:", chunk_stats_raw)
+    # print("chunk_stats_rechunk:", chunk_stats_rechunk)
+
     # Returns the chunk stats from the raw and rechunked zarrs as separate dictionaries
     return chunk_stats_raw, chunk_stats_rechunk
 
@@ -163,15 +199,25 @@ def run_parallel_stats(client, chunk_list, var, year_idx, raw_path, dest_path):
                                chunk, var, year_idx, raw_path, dest_path, retries=2)
         futures.append(future)
 
+    # results is a list of chunks containing tuples of raw and rechunked stats, each of which is a dictionary
     results = client.gather(futures)
 
-    # Separates the raw and rechunked zarr stats into separate objects to return
-    results_raw_zarr_stats = results[0][0]
-    results_rechunk_zarr_stats = results[0][1]
-    # print("results_raw_zarr_stats:", results_raw_zarr_stats)
-    # print("results_rechunk_zarr_stats:", results_rechunk_zarr_stats)
+    # Initializes empty lists for raw_zarr and rechunked_zarr
+    raw_zarr_stats_list = []
+    rechunked_zarr_stats_list = []
 
-    return results_raw_zarr_stats, results_rechunk_zarr_stats
+    # Iterates through the tuples
+    # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6903c69f-8104-8321-964b-0a4f561cd8e2
+    for raw_dict, rechunked_dict in results:
+        if raw_dict.get("in_out") == "raw_zarr":
+            raw_zarr_stats_list.append(raw_dict)
+        if rechunked_dict.get("in_out") == "rechunked_zarr":
+            rechunked_zarr_stats_list.append(rechunked_dict)
+
+    # print("results_raw_zarr_stats:", raw_zarr_stats_list)
+    # print("results_rechunk_zarr_stats:", rechunked_zarr_stats_list)
+
+    return raw_zarr_stats_list, rechunked_zarr_stats_list
 
 
 
@@ -197,7 +243,7 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
-    main_logger.info(f"Run date: {input_date}")
+    main_logger.info(f"Input date: {input_date}")
 
     # Creates s3 paths for the raw mega-zarr
     raw_mega_zarr_path = uu.create_mega_zarr_paths(cn.chunk_dims, 'annual', model_type, input_date)
@@ -230,13 +276,13 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
         vars_to_process = cn.outputs_to_zarr[0:first_variables_to_process]
     else:
         vars_to_process = cn.outputs_to_zarr
-    main_logger.info(f"Variables to rechunk: {vars_to_process}")
+    main_logger.info(f"Variables to rechunk and get chunk stats for: {vars_to_process}")
 
     if first_years_to_process:
         years_to_process = first_years_to_process
     else:
         years_to_process = len(cn.interval_end_years_annual)
-    main_logger.info(f"Years to process: {years_to_process}")
+    main_logger.info(f"Years to rechunk and get chunk stats for: {years_to_process}")
 
     lat_size = int(180 / cn.resolution)  # 720000 rows
     lon_size = int(360 / cn.resolution)  # 1440000 columns
@@ -246,14 +292,14 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
 
     start_time = uu.timestr()
 
-    # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
-    uu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, years_to_process,
-                                   (1, cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
-
-    # fs = fsspec.filesystem("s3", anon=False)
-    # source_mapper = fs.get_mapper(rechunked_mega_zarr_path)
-    # ds = xr.open_zarr(source_mapper, consolidated=False)
-    # print(ds)
+    # # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
+    # uu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, years_to_process,
+    #                                (1, cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
+    #
+    # # fs = fsspec.filesystem("s3", anon=False)
+    # # source_mapper = fs.get_mapper(rechunked_mega_zarr_path)
+    # # ds = xr.open_zarr(source_mapper, consolidated=False)
+    # # print(ds)
 
 
     ### Step 3: Copy from chunk=4000x4000 zarr to chunk=10000x10000 zarr and obtain chunk stats
@@ -265,7 +311,8 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
     chunk_stats_raw_zarr = []
     chunk_stats_rechunked_zarr = []
 
-    # Iterates through variables/datasets
+    # Iterates through variables/datasets. Each chunk=10000x10000 is transferred by just one task/worker
+    # so that multiple workers aren't touching the same zarr chunk at the same time.
     for var_name in vars_to_process:
 
         main_logger.info(f"Starting {var_name}: {uu.timestr()}")
@@ -276,38 +323,38 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
 
             year = cn.interval_end_years_annual[year_idx]
 
-            # Transfers to rechunked zarr
             main_logger.info(f"  Starting transfer of {var_name} for year {year}: {uu.timestr()}")
             year_start_time = time.time()
 
-            run_parallel_copy(
-                client=client,
-                var=var_name,
-                year_idx=year_idx,
-                ny=lat_size,
-                nx=lon_size,
-                block_size=cn.zarr_pixel_chunks,
-                raw_path=raw_mega_zarr_path,
-                dest_path=rechunked_mega_zarr_path,
-            )
-            year_end_time = time.time()
-            main_logger.info(f"    Transferred {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
-
-            # Only prints test chunk stats if selected
-            if test_print_stats_chunk:
-
-                # Converts chunk bounds to the form needed for getting chunk stats
-                target_box = {
-                    "lat_min": test_print_stats_chunk[1],
-                    "lat_max": test_print_stats_chunk[3],
-                    "lon_min": test_print_stats_chunk[0],
-                    "lon_max": test_print_stats_chunk[2]
-                }
-
-                main_logger.info(f"    Original (4000x4000) zarr:")
-                uu.check_region_stats(raw_mega_zarr_path, var_name, year_idx, target_box)
-                main_logger.info(f"    Rechunked (10000x10000) zarr:")
-                uu.check_region_stats(rechunked_mega_zarr_path, var_name, year_idx, target_box)
+            # # Transfers to rechunked zarr for a given dataset-year in parallel
+            # run_parallel_copy(
+            #     client=client,
+            #     var=var_name,
+            #     year_idx=year_idx,
+            #     ny=lat_size,
+            #     nx=lon_size,
+            #     block_size=cn.zarr_pixel_chunks,
+            #     raw_path=raw_mega_zarr_path,
+            #     dest_path=rechunked_mega_zarr_path,
+            # )
+            # year_end_time = time.time()
+            # main_logger.info(f"    Transferred {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
+            #
+            # # Only prints test chunk stats if selected
+            # if test_print_stats_chunk:
+            #
+            #     # Converts chunk bounds to the form needed for getting chunk stats
+            #     target_box = {
+            #         "lat_min": test_print_stats_chunk[1],
+            #         "lat_max": test_print_stats_chunk[3],
+            #         "lon_min": test_print_stats_chunk[0],
+            #         "lon_max": test_print_stats_chunk[2]
+            #     }
+            #
+            #     main_logger.info(f"    Original (4000x4000) zarr:")
+            #     uu.check_region_stats(raw_mega_zarr_path, var_name, year_idx, target_box, main_logger)
+            #     main_logger.info(f"    Rechunked (10000x10000) zarr:")
+            #     uu.check_region_stats(rechunked_mega_zarr_path, var_name, year_idx, target_box, main_logger)
 
             # Gets stats for selected 1x1 deg chunks in raw and rechunked zarrs
             main_logger.info(f"  Starting stats of raw and rechunked {var_name} for year {year}: {uu.timestr()}")
@@ -330,8 +377,13 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
         var_end_time = time.time()
         main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
-    print("chunk_stats_raw_zarr:", chunk_stats_raw_zarr)
-    print("chunk_stats_rechunked_zarr:", chunk_stats_rechunked_zarr)
+    # Chunk stats for all datasets-years is a nested list (each dataset-year is a list in the combined list).
+    # This flattens all dataset-year chunk stats into flat lists.
+    chunk_stats_raw_zarr = uu.flatten_list(chunk_stats_raw_zarr)
+    chunk_stats_rechunked_zarr = uu.flatten_list(chunk_stats_rechunked_zarr)
+
+    # print("chunk_stats_raw_zarr:", chunk_stats_raw_zarr)
+    # print("chunk_stats_rechunked_zarr:", chunk_stats_rechunked_zarr)
 
 
     ### Step 4: Process chunk stats and process logs

@@ -2331,7 +2331,7 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
 
 
 # Checks the stats for a bounding box in a zarr for a given dataset and year
-def check_region_stats(store_url, dataset_key, year_idx, target_box):
+def check_region_stats(store_url, dataset_key, year_idx, target_box, logger_worker=None, main_logger=None):
 
     """Check min/max of the region written."""
     fs = fsspec.filesystem("s3", anon=False)
@@ -2346,9 +2346,13 @@ def check_region_stats(store_url, dataset_key, year_idx, target_box):
     # Non-zero pixels in the array
     non_zero_count = np.count_nonzero(region_array)
 
-    # Statement to print
     statement = f"      {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}"
-    print(statement)
+
+    # This can be accessed either by the main function or a worker, so it is designed to print to the log from either
+    if logger_worker:
+        lu.print_and_log(statement, False, logger_worker)
+    if main_logger:
+        main_logger.info(statement)
 
 
 ###################################################################################################
