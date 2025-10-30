@@ -1536,6 +1536,7 @@ def sanitize_numeric_columns(df, numeric_cols):
 # Calculates difference between pixel counts in all 1x1s in a 10x10 vs. the corresponding 10x10
 # to make sure that aggregation of 1x1s didn't lose any data (difference should be 0).
 # From https://chatgpt.com/share/e/67d5d68d-7168-800a-ada1-e42f8c3e9253
+# Returns the local path to the saved chunk stats, whether parquet or Excel.
 def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger):
 
     ### Part 1: Organizes chunk stats for 1x1 degree chunks (inputs and outputs)
@@ -1680,6 +1681,9 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
                 main_logger.info(f"Uploading {filename} to S3: {timestr()}")
                 s3_client.upload_file(full_path, cn.short_bucket_prefix, Key=s3_key)
 
+        # Returns the name of the parquet folder
+        return parquet_folder
+
     # Saves chunk stats to Excel
     else:
 
@@ -1724,6 +1728,9 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
                 main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}")
             except Exception as e:
                 main_logger.warning(f"Chunk stats upload to S3 failed: {e}. Continuing without halting.")
+
+        # Returns path to spreadsheet
+        return local_spreadsheet
 
 
 

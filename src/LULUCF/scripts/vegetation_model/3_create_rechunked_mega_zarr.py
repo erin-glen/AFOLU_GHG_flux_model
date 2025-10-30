@@ -402,8 +402,11 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
 
     if (not no_stats):
         raw_stage = stage.replace("rechunk", "raw")
-        uu.compile_1x1_chunk_stats(chunk_stats_raw_zarr, chunk_shapefile_uri, raw_stage, False, main_logger)
-        uu.compile_1x1_chunk_stats(chunk_stats_rechunked_zarr, chunk_shapefile_uri, stage, False, main_logger)
+        raw_chunk_stats_path = uu.compile_1x1_chunk_stats(chunk_stats_raw_zarr, chunk_shapefile_uri, raw_stage, False, main_logger)
+        rechunked_chunk_stats_path = uu.compile_1x1_chunk_stats(chunk_stats_rechunked_zarr, chunk_shapefile_uri, stage, False, main_logger)
+
+        print(raw_chunk_stats_path)
+        print(rechunked_chunk_stats_path)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
