@@ -866,9 +866,9 @@ veg_summative_output_dirs = [
 # Starts with non-summative outputs from the vegetation model
 outputs_to_zarr = [
     agc_modeled_dens_pattern, bgc_modeled_dens_pattern, deadwood_c_modeled_dens_pattern, litter_c_modeled_dens_pattern,
-    agc_gross_removals_pattern, bgc_gross_removals_pattern, deadwood_c_gross_removals_pattern, litter_c_gross_removals_pattern,
     agc_gross_emis_pattern, bgc_gross_emis_pattern, deadwood_c_gross_emis_pattern, litter_c_gross_emis_pattern,
     ch4_flux_pattern, n2o_flux_pattern,
+    agc_gross_removals_pattern, bgc_gross_removals_pattern, deadwood_c_gross_removals_pattern, litter_c_gross_removals_pattern,
     land_state_pattern, composite_primary_forest, forest_age_output_pattern
 ]
 
