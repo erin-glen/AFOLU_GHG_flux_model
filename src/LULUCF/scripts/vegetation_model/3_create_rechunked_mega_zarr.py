@@ -70,6 +70,8 @@ from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
 
+pd.set_option('display.float_format', '{:.6e}'.format)
+
 
 # Copies the 10000x10000 chunk
 def copy_block(var, year_idx, y0, y1, x0, x1, raw_path, dest_path):
@@ -225,6 +227,115 @@ def run_parallel_stats(client, chunk_list, var, year_idx, raw_path, dest_path):
     return raw_zarr_stats_list, rechunked_zarr_stats_list
 
 
+# Compares chunk stats from model and from zarr for a dataset-year combination
+# Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6903d1dd-555c-8321-8547-0aa4772c9878
+def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_year_zarr, main_logger,
+                                     tables_to_compare_dict, var_name, year, zarr_comparison_stats_path):
+
+    # Selects relevant model output table
+    # The formatting of the year depends on the variable.
+    if "gross" in var_name:
+        model_table = tables_to_compare_dict['model_gross']
+        year = f"{int(year) - 1}_{year}"
+    elif "net" in var_name:
+        model_table = tables_to_compare_dict['model_net']
+        year = f"{int(year) - 1}_{year}"
+    else:
+        model_table = tables_to_compare_dict['model_other']
+        year = str(year)
+
+    # Converts zarr chunk stats from dictionary to dataframe
+    zarr_df = pd.DataFrame(chunk_stats_variable_year_zarr)
+
+    # Subsets model chunk stats to relevant pattern and year.
+    subset_model_table = model_table[(model_table['pattern'].str.contains(var_name, na=False)) & (model_table['years'] == year)]
+
+    # Selects only the needed columns from rechunked_zarr_table
+    main_logger.info(f"    Subsetting zarr table to numeric columns for {var_name} for {year}: {uu.timestr()}")
+    zarr_subset_table = zarr_df[['chunk_name', 'min_value', 'mean_value', 'max_value', 'count_value']].copy()
+
+    # Renames columns in raw_subset to distinguish them after merge
+    main_logger.info(f"    Renaming zarr columns for {var_name} for {year}: {uu.timestr()}")
+    zarr_subset_table = zarr_subset_table.rename(columns={
+        'min_value': 'min_value_zarr',
+        'mean_value': 'mean_value_zarr',
+        'max_value': 'max_value_zarr',
+        'count_value': 'count_value_zarr'
+    })
+
+    # onverts all zarr value columns to numeric, coercing errors to NaN
+    main_logger.info(f"    Converting zarr columns to numeric for {var_name} for {year}: {uu.timestr()}")
+    for col in ['min_value_zarr', 'mean_value_zarr', 'max_value_zarr', 'count_value_zarr']:
+        zarr_subset_table[col] = pd.to_numeric(zarr_subset_table[col], errors='coerce')
+
+    # Merges with subset_model_table on 'chunk_name', left join (keeps all model output rows)
+    main_logger.info(f"    Merging zarr data to original model data for {var_name} for {year}: {uu.timestr()}")
+    merged_table = subset_model_table.merge(zarr_subset_table, on='chunk_name', how='left')
+
+    # Calculates differences for four metrics and stores in new columns
+    main_logger.info(f"    Calculating differences for {var_name} for {year}: {uu.timestr()}")
+    merged_table['min_value_diff'] = merged_table['min_value'] - merged_table['min_value_zarr']
+    merged_table['mean_value_diff'] = merged_table['mean_value'] - merged_table['mean_value_zarr']
+    merged_table['max_value_diff'] = merged_table['max_value'] - merged_table['max_value_zarr']
+    merged_table['count_value_diff'] = merged_table['count_value'] - merged_table['count_value_zarr']
+    # print(merged_table.head())
+
+    # Calculates max absolute difference across the four metrics' difference columns
+    merged_table['maximum_diff_value'] = merged_table[
+        ['min_value_diff', 'mean_value_diff', 'max_value_diff', 'count_value_diff']
+    ].abs().max(axis=1)
+
+    # Identifies rows (chunks) which have stats that differ between model and zarr
+    mask = merged_table['maximum_diff_value'] > cn.zarr_difference_tolerance
+
+    # Applies the mask to filter those rows
+    differences_exceeding_tolerance = merged_table[mask]
+
+    # Prints rows that exceed the tolerance for difference between original and zarr chunk stats
+    if len(differences_exceeding_tolerance) > 0:
+        main_logger.warning(f"    WARNING: There are {len(differences_exceeding_tolerance)} rows in {var_name} for year {year} that have differences exceeding the tolerance!")
+
+        # Selects chunk_id and all difference to print in the console for easy viewing
+        cols_to_print = [
+            'chunk_id',
+            'min_value_diff',
+            'mean_value_diff',
+            'max_value_diff',
+            'count_value_diff',
+            'maximum_diff_value'
+        ]
+
+        main_logger.warning(differences_exceeding_tolerance[cols_to_print])
+
+    else:
+        main_logger.info(f"    No rows in {var_name} for year {year} have metrics with differences exceeding the tolerance.")
+
+    # Adds df for this dataset-year combination to the list of all the dataset-year dfs
+    all_merged_tables.append(merged_table)
+
+
+    # Step 7: Writes cumulative results (all dataset-year combinations) to Excel file
+
+    # Concatenates all merged dataset-year tables into a single DataFrame
+    final_merged_table = pd.concat(all_merged_tables, ignore_index=True)
+
+    # Splits output rows based on 'layer_name' containing 'flux', 'gross', or 'net'
+    gross_flux_1x1_outputs = final_merged_table[final_merged_table['layer_name'].str.contains('gross', case=False, na=False)]
+    net_flux_1x1_outputs = final_merged_table[final_merged_table['layer_name'].str.contains('net|flux', case=False, na=False)]
+
+    # Puts output rows that don't contain 'flux|gross|net' in a separate tab
+    other_1x1_outputs = final_merged_table[~final_merged_table['layer_name'].str.contains('flux|gross|net', case=False, na=False)]
+
+    # Writes to Excel after each iteration of dataset-year to check results more easily (not have to wait until end)
+    with pd.ExcelWriter(zarr_comparison_stats_path, engine='openpyxl', mode='w') as writer:
+
+        gross_flux_1x1_outputs.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
+        net_flux_1x1_outputs.to_excel(writer, sheet_name='net_outputs_1x1', index=False)
+        other_1x1_outputs.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
+
+    # Need to return the combined table so that it can be added to in the next iteration
+    return all_merged_tables
+
 
 def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_uri=False, bounding_box=None,
          test_print_stats_chunk=None, first_variables_to_process=None, first_years_to_process=None,
@@ -258,6 +369,7 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
     main_logger.info(f"Rechunked mega-zarr path: {rechunked_mega_zarr_path}")
     main_logger.info(f"Number of years to rechunk: {first_years_to_process}")
     main_logger.info(f"Test chunk (to print stats): {test_print_stats_chunk}")
+    main_logger.info(f"Tolerance for comparison between model and zarr chunk stat metrics: {cn.zarr_difference_tolerance}")
 
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -281,13 +393,13 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
         vars_to_process = cn.outputs_to_zarr[0:first_variables_to_process]
     else:
         vars_to_process = cn.outputs_to_zarr
-    main_logger.info(f"Variables to rechunk and get chunk stats for: {vars_to_process}")
+    main_logger.info(f"Variables to rechunk and compare chunk stats for: {vars_to_process}")
 
     if first_years_to_process:
         years_to_process = first_years_to_process
     else:
         years_to_process = len(cn.interval_end_years_annual)
-    main_logger.info(f"Years to rechunk and get chunk stats for: {years_to_process}")
+    main_logger.info(f"Years to rechunk and compare chunk stats for: {years_to_process}")
 
     lat_size = int(180 / cn.resolution)  # 720000 rows
     lon_size = int(360 / cn.resolution)  # 1440000 columns
@@ -315,17 +427,24 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
     model_stats_path = "chunk_stats/vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP.xlsx"
 
     main_logger.info(f"Reading model chunk stats tables: {uu.timestr()}")
-    # model_gross = pd.read_excel(model_stats_path, sheet_name='gross_outputs_1x1')
-    # model_other = pd.read_excel(model_stats_path, sheet_name='other_outputs_1x1')
-    model_other = pd.read_excel(model_stats_path, sheet_name='other_outputs_1x1', nrows = 60000)   # TODO FOR TESTING
-    # model_net = pd.read_excel(model_stats_path, sheet_name='net_outputs_1x1')
 
-    # print(model_other.head())
+    zarr_comparison_stats_path = "chunk_stats/vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP__zarr_comparison.xlsx"
 
-    # Separate lists of chunk stats from raw and rechunked zarrs
-    chunk_stats_raw_zarr = []
-    chunk_stats_rechunked_zarr = []
+    # chunk_stats_model_gross = pd.read_excel(model_stats_path, sheet_name='gross_outputs_1x1')
+    # chunk_stats_model_other = pd.read_excel(model_stats_path, sheet_name='other_outputs_1x1')
+    # chunk_stats_model_net = pd.read_excel(model_stats_path, sheet_name='net_outputs_1x1')
 
+    chunk_stats_model_gross = pd.read_excel(model_stats_path, sheet_name='gross_outputs_1x1', nrows = 85000)   # TODO FOR TESTING
+    chunk_stats_model_other = pd.read_excel(model_stats_path, sheet_name='other_outputs_1x1', nrows = 60000)   # TODO FOR TESTING
+    chunk_stats_model_net = pd.read_excel(model_stats_path, sheet_name='net_outputs_1x1', nrows = 60000)   # TODO FOR TESTING
+
+    # The model chunk stat tables
+    tables_to_compare_dict = {"model_gross": chunk_stats_model_gross, "model_other": chunk_stats_model_other,
+                        "model_net": chunk_stats_model_net}
+
+    # print(chunk_stats_model_other.head())
+
+    # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
     all_merged_tables = []
 
     # Iterates through variables/datasets. Each chunk=10000x10000 is transferred by just one task/worker
@@ -374,7 +493,7 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
             #     uu.check_region_stats(rechunked_mega_zarr_path, var_name, year_idx, target_box, main_logger)
 
             # Gets stats for selected 1x1 deg chunks in raw and rechunked zarrs
-            main_logger.info(f"  Starting stats of raw and rechunked {var_name} for year {year}: {uu.timestr()}")
+            main_logger.info(f"  Starting zarr stats for {var_name} for year {year}: {uu.timestr()}")
             year_start_time = time.time()
 
             chunk_stats_variable_year_raw_zarr, chunk_stats_variable_year_rechunked_zarr = run_parallel_stats(
@@ -386,61 +505,15 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
                 dest_path=rechunked_mega_zarr_path,
             )
             year_end_time = time.time()
-            main_logger.info(f"    Got stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
+            main_logger.info(f"    Got zarr stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
 
-            # print(chunk_stats_variable_year_rechunked_zarr)
-            zarr_df = pd.DataFrame(chunk_stats_variable_year_rechunked_zarr)
-            # print(zarr_df)
+            all_merged_tables = compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_year_rechunked_zarr,
+                                                                 main_logger, tables_to_compare_dict, var_name, year,
+                                                                 zarr_comparison_stats_path)
 
-            subset_model_other = model_other[(model_other['pattern'].str.contains(var_name, na=False)) & (model_other['years'] == str(year))]
-            # print(subset_model_other)
+            var_end_time = time.time()
+            main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
-            # Step 1: Selects only the needed columns from rechunked_zarr_table
-            main_logger.info(f"Subsetting zarr table to numeric columns: {uu.timestr()}")
-            zarr_subset_table = zarr_df[['chunk_name', 'min_value', 'mean_value', 'max_value', 'count_value']].copy()
-
-            # Step 2: Renames columns in raw_subset to distinguish them after merge
-            main_logger.info(f"Renaming zarr columns: {uu.timestr()}")
-            zarr_subset_table = zarr_subset_table.rename(columns={
-                'min_value': 'min_value_zarr',
-                'mean_value': 'mean_value_zarr',
-                'max_value': 'max_value_zarr',
-                'count_value': 'count_value_zarr'
-            })
-
-            # Step 3: Converts all zarr value columns to numeric, coercing errors to NaN
-            main_logger.info(f"Converting zarr columns to numeric: {uu.timestr()}")
-            for col in ['min_value_zarr', 'mean_value_zarr', 'max_value_zarr', 'count_value_zarr']:
-                zarr_subset_table[col] = pd.to_numeric(zarr_subset_table[col], errors='coerce')
-
-            # Step 4: Merges with model_gross on 'chunk_name', left join
-            main_logger.info(f"Merging zarr data to original model data: {uu.timestr()}")
-            merged_table = subset_model_other.merge(zarr_subset_table, on='chunk_name', how='left')
-
-            # Step 5: Calculates differences and store in new columns
-            main_logger.info(f"Calculating differences: {uu.timestr()}")
-            merged_table['min_value_diff'] = merged_table['min_value'] - merged_table['min_value_zarr']
-            merged_table['mean_value_diff'] = merged_table['mean_value'] - merged_table['mean_value_zarr']
-            merged_table['max_value_diff'] = merged_table['max_value'] - merged_table['max_value_zarr']
-            merged_table['count_value_diff'] = merged_table['count_value'] - merged_table['count_value_zarr']
-            # print(merged_table.head())
-
-            all_merged_tables.append(merged_table)
-
-    # Concatenate all merged tables into a single DataFrame
-    final_merged_table = pd.concat(all_merged_tables, ignore_index=True)
-
-    zarr_comparison_stats_path = "chunk_stats/vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP__zarr_comparison.xlsx"
-
-    with pd.ExcelWriter(zarr_comparison_stats_path, engine='openpyxl', mode='w') as writer:
-
-        final_merged_table.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
-
-            # chunk_stats_raw_zarr.append(chunk_stats_variable_year_raw_zarr)
-            # chunk_stats_rechunked_zarr.append(chunk_stats_variable_year_rechunked_zarr)
-
-        var_end_time = time.time()
-        main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
     # # Chunk stats for all datasets-years is a nested list (each dataset-year is a list in the combined list).
     # # This flattens all dataset-year chunk stats into flat lists.

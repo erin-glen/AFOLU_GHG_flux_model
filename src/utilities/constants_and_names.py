@@ -798,6 +798,10 @@ composite_primary_forest = "composite_primary_forest"
 zarr_output_pattern = "global_zarr"
 zarr_pixel_chunks = 10000
 
+# Tolerance for difference between model and zarr chunk stat metrics.
+# There's often some rounding/float error between them, so a small difference (~10^-8) is expected.
+zarr_difference_tolerance = 0.00
+
 # List of output directories from vegetation model with placeholders for parts of the directory
 veg_core_output_dirs = [
     f"{outputs_path}{agc_modeled_dens_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
