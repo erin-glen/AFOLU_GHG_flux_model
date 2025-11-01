@@ -39,21 +39,21 @@ allows confirmation that data wasn't modified or lost during the transfer from g
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr --run_local -fv 1 -fy 1 --test_print_stats_chunk 0 41 1 42 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr --run_local -fv 1 -fy 1 --test_print_stats_chunk 0 41 1 42 -mcstn s3://XYZ --input_date YYYYMMDD
 
 Small test run:
 python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model -fv 2 -fy 2 --test_print_stats_chunk 0 41 1 42 -bb 0 41 1 42 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model -fv 2 -fy 2 --test_print_stats_chunk 0 41 1 42 -bb 0 41 1 42 -mcstn s3://XYZ --input_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
 python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -mcstn s3://XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -mcstn s3://XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is the definitive rechunking run."
 
-Most recent ChatGPT convo: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6900ce1b-e728-832a-9b87-4702f646da42
+Most recent ChatGPT convo about rechunking approach: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6900ce1b-e728-832a-9b87-4702f646da42
 """
 
 import argparse
@@ -61,6 +61,9 @@ import numpy as np
 import zarr
 import fsspec
 import pandas as pd
+import requests
+import boto3
+import os
 import sys
 import time
 from dask.distributed import Client, print
@@ -221,7 +224,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
         'count_value': 'count_value_zarr'
     })
 
-    # onverts all zarr value columns to numeric, coercing errors to NaN
+    # Converts all zarr value columns to numeric, coercing errors to NaN
     main_logger.info(f"    Converting zarr columns to numeric for {var_name} for {year}: {uu.timestr()}")
     for col in ['min_value_zarr', 'mean_value_zarr', 'max_value_zarr', 'count_value_zarr']:
         zarr_subset_table[col] = pd.to_numeric(zarr_subset_table[col], errors='coerce')
@@ -271,8 +274,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     # Adds df for this dataset-year combination to the list of all the dataset-year dfs
     all_merged_tables.append(merged_table)
 
-
-    # Step 7: Writes cumulative results (all dataset-year combinations) to Excel file
+    # Writes cumulative results (all dataset-year combinations) to Excel file
 
     # Concatenates all merged dataset-year tables into a single DataFrame
     final_merged_table = pd.concat(all_merged_tables, ignore_index=True)
@@ -295,7 +297,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     return all_merged_tables
 
 
-def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_uri=False, bounding_box=None,
+def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_name, chunk_shapefile_uri=False, bounding_box=None,
          test_print_stats_chunk=None, first_variables_to_process=None, first_years_to_process=None,
          first_chunks=None, log_note=None):
 
@@ -377,30 +379,36 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
     # print(ds)
 
 
-    ### Step 3: Copy from chunk=4000x4000 zarr to chunk=10000x10000 zarr and obtain chunk stats
+    ### Step 3: Prepare model chunk stats for comparison with zarr chunk stats
+
+    main_logger.info(f"Reading local model chunk stats tables: {uu.timestr()}")
+    model_chunk_stats_path = os.path.join(cn.local_chunk_stats_path, model_chunk_stats_table_name)
+
+    if not os.path.exists(model_chunk_stats_path):
+        raise FileNotFoundError(f"Fallback file not found at {model_chunk_stats_path}")
+
+    print(f"Reading model chunk stats from local file: {model_chunk_stats_path}")
+    chunk_stats_model_gross = pd.read_excel(model_chunk_stats_path, sheet_name='gross_outputs_1x1', nrows=60000)  # TODO FOR TESTING
+    chunk_stats_model_other = pd.read_excel(model_chunk_stats_path, sheet_name='other_outputs_1x1', nrows=85000)  # TODO FOR TESTING
+    chunk_stats_model_net = pd.read_excel(model_chunk_stats_path, sheet_name='net_outputs_1x1', nrows=60000)  # TODO FOR TESTING
+
+    # The model chunk stat tables
+    tables_to_compare_dict = {"model_gross": chunk_stats_model_gross,
+                              "model_other": chunk_stats_model_other,
+                              "model_net": chunk_stats_model_net}
+
+    # Name of output tables with chunk stats comparison
+    name, ext = os.path.splitext(model_chunk_stats_path)
+    comparison_insert = "_rechunk_zarr_comparison"
+    zarr_comparison_stats_path = f"{name}{comparison_insert}{ext}"
+    zarr_comparison_stats_name = os.path.basename(zarr_comparison_stats_path)
+    # print(zarr_comparison_stats_path)
+
+
+    ### Step 4: Copy from chunk=4000x4000 zarr to chunk=10000x10000 zarr and obtain chunk stats
     ### for the rechunked zarr
 
     main_logger.info(f"Starting rechunk transfers and rechunk stats: {uu.timestr()}")
-
-    model_stats_path = "chunk_stats/vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP.xlsx"
-
-    main_logger.info(f"Reading model chunk stats tables: {uu.timestr()}")
-
-    zarr_comparison_stats_path = "chunk_stats/vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP__zarr_comparison.xlsx"
-
-    # chunk_stats_model_gross = pd.read_excel(model_stats_path, sheet_name='gross_outputs_1x1')
-    # chunk_stats_model_other = pd.read_excel(model_stats_path, sheet_name='other_outputs_1x1')
-    # chunk_stats_model_net = pd.read_excel(model_stats_path, sheet_name='net_outputs_1x1')
-
-    chunk_stats_model_gross = pd.read_excel(model_stats_path, sheet_name='gross_outputs_1x1', nrows = 60000)   # TODO FOR TESTING
-    chunk_stats_model_other = pd.read_excel(model_stats_path, sheet_name='other_outputs_1x1', nrows = 85000)   # TODO FOR TESTING
-    chunk_stats_model_net = pd.read_excel(model_stats_path, sheet_name='net_outputs_1x1', nrows = 60000)   # TODO FOR TESTING
-
-    # The model chunk stat tables
-    tables_to_compare_dict = {"model_gross": chunk_stats_model_gross, "model_other": chunk_stats_model_other,
-                        "model_net": chunk_stats_model_net}
-
-    # print(chunk_stats_model_other.head())
 
     # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
     all_merged_tables = []
@@ -472,8 +480,18 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
             var_end_time = time.time()
             main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
+    main_logger.info(f"Uploading chunk stats comparison spreadsheet to s3: {uu.timestr()}")
+    s3_client = boto3.client("s3")
+    try:
+        s3_client.upload_file(zarr_comparison_stats_path, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{zarr_comparison_stats_name}")
+        main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{zarr_comparison_stats_name}: {uu.timestr()}")
+    except Exception as e:
+        main_logger.warning(f"Chunk stats upload to S3 failed: {e}. Continuing without halting.")
 
-    ### Step 4: Combine logs
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+
+
+    ### Step 5: Combine logs
 
     # Worker logs are not aggregated if doing a local run (since there are no workers)
     if not run_local:
@@ -503,10 +521,10 @@ if __name__ == "__main__":
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-fy', '--first_years_to_process', type=int, help='Number of years to process from raw mega-zarr (for testing)')
     parser.add_argument('-tpsc', '--test_print_stats_chunk', nargs=4, type=float, help='Bounding box to print rechunked zarr stats from: W, S, E, N (degrees)')
+    parser.add_argument('-mcstn', '--model_chunk_stats_table_name', help='s3 path for model chunk stats table that will be compared with zarr chunk stats')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
-    parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
     parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
 
     args = parser.parse_args()
@@ -519,13 +537,13 @@ if __name__ == "__main__":
     first_variables_to_process = args.first_variables_to_process
     first_years_to_process = args.first_years_to_process
     test_print_stats_chunk = args.test_print_stats_chunk
+    model_chunk_stats_table_name = args.model_chunk_stats_table_name
     log_note = args.log_note
 
     run_local = args.run_local
-    no_stats = args.no_stats
     no_log = args.no_log
 
     # Create the cluster with command line arguments
-    main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_uri, bounding_box=bounding_box,
+    main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_name, chunk_shapefile_uri, bounding_box=bounding_box,
          test_print_stats_chunk=test_print_stats_chunk, first_variables_to_process=first_variables_to_process, first_years_to_process=first_years_to_process,
          first_chunks=first_chunks, log_note=log_note)
