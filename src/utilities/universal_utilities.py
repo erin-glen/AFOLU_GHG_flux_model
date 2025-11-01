@@ -1585,7 +1585,7 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     # Separates input rows (in_out == 'input') and output rows (in_out == 'output' or anything from a zarr)
     main_logger.info(f"Separating 1x1 outputs into different tables: {timestr()}")
     input_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'] == 'input_layer']
-    output_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'].isin(['output_layer', 'raw_zarr', 'rechunked_zarr'])]
+    output_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'].isin(['output_layer', 'zarr_stats'])]
 
     # Groups inputs that are a timeseries so they can go in their own tab so that no tab is too many rows
     timeseries_input_layers = f'{cn.burned_area_final_pattern}|{cn.forest_disturbance_layer_name}|{cn.vegetation_height_pattern}|{cn.land_cover_pattern}|{cn.mangrove_extent_processed_pattern}'

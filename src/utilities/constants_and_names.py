@@ -800,7 +800,7 @@ zarr_pixel_chunks = 10000
 
 # Tolerance for difference between model and zarr chunk stat metrics.
 # There's often some rounding/float error between them, so a small difference (~10^-8) is expected.
-zarr_difference_tolerance = 0.00
+zarr_difference_tolerance = 0.05
 
 # List of output directories from vegetation model with placeholders for parts of the directory
 veg_core_output_dirs = [

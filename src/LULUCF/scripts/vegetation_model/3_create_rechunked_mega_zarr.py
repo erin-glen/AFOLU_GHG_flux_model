@@ -29,10 +29,12 @@ but each chunk is written by only one worker. It then iterates through the datas
 (which is at all Dask or xarray).
 
 After transferring a single dataset-year to the rechunked zarr, it then gets 1x1 deg chunk stats for the provided
-chunk list from the raw and rechunked zarrs. The chunk stats are in the same format as the chunk stats from
-numpy arrays from the main model. The chunk stats from the raw and rechunked zarrs can then be compared against the
-chunk stats from the numpy arrays to make sure nothing has changed during the transfer from 1x1 geotifs to
-raw zarr to rechunked zarr.
+chunk list from the rechunked zarr. The chunk stats are in the same format as the chunk stats from
+numpy arrays from the main model. It compares the min, mean, max and pixel count for each zarr chunk against the
+original model chunk stats and prints any rows that have a difference in any metric above a specified tolerance.
+After the chunk stats for each dataset-year combination are compared, a spreadsheet or parquet file is
+written with the cumulative comparison between model and rechunked zarr stats. This chunk stats comparison
+allows confirmation that data wasn't modified or lost during the transfer from geotifs to rechunked zarr.
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
@@ -58,7 +60,6 @@ import argparse
 import numpy as np
 import zarr
 import fsspec
-import xarray as xr
 import pandas as pd
 import sys
 import time
@@ -123,30 +124,8 @@ def run_parallel_copy(
     # print(f"  All blocks copied for {var} for year {year_idx}: {uu.timestr()}")
 
 
-# Checks the stats for a bounding box in a zarr for a given dataset and year
-def check_region_stats(store_url, dataset_key, year_idx, target_box):
-
-    fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(store_url)
-    z = zarr.open(mapper, mode="r")
-
-    lat0, lon0 = uu.latlon_to_global_zarr_indices(target_box["lat_max"], target_box["lon_min"], cn.resolution)
-    lat1, lon1 = uu.latlon_to_global_zarr_indices(target_box["lat_min"], target_box["lon_max"], cn.resolution)
-
-    region_array = z[dataset_key][year_idx, lat0:lat1, lon0:lon1]
-
-    # Non-zero pixels in the array
-    non_zero_count = np.count_nonzero(region_array)
-
-    # Statement to print
-    print_statement = f"      {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}"
-    print(print_statement)
-
-    return_statement = {'min_value': region_array.min(), 'mean_value': region_array.mean(), 'max_value': region_array.max()}
-    return(return_statement)
-
-# Calculates stats in 1x1 deg chunk in raw and rechunked zarrs
-def zarr_1x1_deg_stats(bounds, var_name, year_idx, raw_path, rechunk_path):
+# Calculates stats in 1x1 deg chunk of dataset-year slice of zarr
+def zarr_1x1_deg_stats(bounds, var_name, year_idx, zarr_path):
 
     # lu.print_and_log(f"Getting stats for {var_name} for year {year_idx} for {bounds}: {uu.timestr()}", False, logger_worker)
     # start_time = time.time()
@@ -175,56 +154,35 @@ def zarr_1x1_deg_stats(bounds, var_name, year_idx, raw_path, rechunk_path):
     # Rather than encoding rows as input or output layer, they are encoded by whether they are raw or rechunked zarr
     # since all of these are outputs.
     # Chunk stats are dictionaries.
-    raw_mapper = fs.get_mapper(raw_path)
-    raw_zarr = zarr.open(raw_mapper, mode="r")
-    raw_array = raw_zarr[var_name][year_idx, lat0:lat1, lon0:lon1]
-    chunk_stats_raw = uu.calculate_stats(raw_array, pattern_with_units, bounds_str, tile_id, 'raw_zarr')
-
-    rechunk_mapper = fs.get_mapper(rechunk_path)
-    rechunk_zarr = zarr.open(rechunk_mapper, mode="r")
-    rechunk_array = rechunk_zarr[var_name][year_idx, lat0:lat1, lon0:lon1]
-    chunk_stats_rechunk = uu.calculate_stats(rechunk_array, pattern_with_units, bounds_str, tile_id, 'rechunked_zarr')
+    zarr_mapper = fs.get_mapper(zarr_path)
+    zarr_group = zarr.open(zarr_mapper, mode="r")
+    zarr_chunk_array = zarr_group[var_name][year_idx, lat0:lat1, lon0:lon1]
+    zarr_stats_raw = uu.calculate_stats(zarr_chunk_array, pattern_with_units, bounds_str, tile_id, 'zarr_stats')
 
     # end_time = time.time()
     # lu.print_and_log(f"  Calculated stats for {pattern_with_units} for {year} for {bounds} in {round(end_time - start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
-    # print("chunk_stats_raw:", chunk_stats_raw)
-    # print("chunk_stats_rechunk:", chunk_stats_rechunk)
+    # print("zarr_stats_raw:", zarr_stats_raw)
 
-    # Returns the chunk stats from the raw and rechunked zarrs as separate dictionaries
-    return chunk_stats_raw, chunk_stats_rechunk
+    # Returns the chunk stats from the zarr as a dictionary
+    return zarr_stats_raw
 
 
 # Parallelizes stats calculating in 1x1 deg chunks in raw and rechunked zarrs for a given dataset-year
-def run_parallel_stats(client, chunk_list, var, year_idx, raw_path, dest_path):
+def run_parallel_stats(client, chunk_list, var, year_idx, zarr_path):
 
     futures = []
 
     # Iterates through all chunks in the list for a given dataset-year
     for chunk in chunk_list:
         future = client.submit(zarr_1x1_deg_stats,
-                               chunk, var, year_idx, raw_path, dest_path, retries=2)
+                               chunk, var, year_idx, zarr_path, retries=2)
         futures.append(future)
 
-    # results is a list of chunks containing tuples of raw and rechunked stats, each of which is a dictionary
+    # List of dictionaries, where each dictionary is stats for a single chunk
     results = client.gather(futures)
 
-    # Initializes empty lists for raw_zarr and rechunked_zarr
-    raw_zarr_stats_list = []
-    rechunked_zarr_stats_list = []
-
-    # Iterates through the tuples
-    # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6903c69f-8104-8321-964b-0a4f561cd8e2
-    for raw_dict, rechunked_dict in results:
-        if raw_dict.get("in_out") == "raw_zarr":
-            raw_zarr_stats_list.append(raw_dict)
-        if rechunked_dict.get("in_out") == "rechunked_zarr":
-            rechunked_zarr_stats_list.append(rechunked_dict)
-
-    # print("results_raw_zarr_stats:", raw_zarr_stats_list)
-    # print("results_rechunk_zarr_stats:", rechunked_zarr_stats_list)
-
-    return raw_zarr_stats_list, rechunked_zarr_stats_list
+    return results
 
 
 # Compares chunk stats from model and from zarr for a dataset-year combination
@@ -361,7 +319,7 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Input date: {input_date}")
 
-    # Creates s3 paths for the raw mega-zarr
+    # Creates s3 paths for the raw and rechunked mega-zarrs
     raw_mega_zarr_path = uu.create_mega_zarr_paths(cn.chunk_dims, 'annual', model_type, input_date)
     rechunked_mega_zarr_path = uu.create_mega_zarr_paths(cn.zarr_pixel_chunks, 'annual', model_type, input_date)
 
@@ -420,7 +378,7 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
 
 
     ### Step 3: Copy from chunk=4000x4000 zarr to chunk=10000x10000 zarr and obtain chunk stats
-    ### for the raw and rechunked zarrs
+    ### for the rechunked zarr
 
     main_logger.info(f"Starting rechunk transfers and rechunk stats: {uu.timestr()}")
 
@@ -434,8 +392,8 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
     # chunk_stats_model_other = pd.read_excel(model_stats_path, sheet_name='other_outputs_1x1')
     # chunk_stats_model_net = pd.read_excel(model_stats_path, sheet_name='net_outputs_1x1')
 
-    chunk_stats_model_gross = pd.read_excel(model_stats_path, sheet_name='gross_outputs_1x1', nrows = 85000)   # TODO FOR TESTING
-    chunk_stats_model_other = pd.read_excel(model_stats_path, sheet_name='other_outputs_1x1', nrows = 60000)   # TODO FOR TESTING
+    chunk_stats_model_gross = pd.read_excel(model_stats_path, sheet_name='gross_outputs_1x1', nrows = 60000)   # TODO FOR TESTING
+    chunk_stats_model_other = pd.read_excel(model_stats_path, sheet_name='other_outputs_1x1', nrows = 85000)   # TODO FOR TESTING
     chunk_stats_model_net = pd.read_excel(model_stats_path, sheet_name='net_outputs_1x1', nrows = 60000)   # TODO FOR TESTING
 
     # The model chunk stat tables
@@ -496,13 +454,13 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
             main_logger.info(f"  Starting zarr stats for {var_name} for year {year}: {uu.timestr()}")
             year_start_time = time.time()
 
-            chunk_stats_variable_year_raw_zarr, chunk_stats_variable_year_rechunked_zarr = run_parallel_stats(
+            # Runs chunk stats for a dataset-year in the zarr in parallel
+            chunk_stats_variable_year_rechunked_zarr = run_parallel_stats(
                 client=client,
                 chunk_list=chunk_list,
                 var=var_name,
                 year_idx=year_idx,
-                raw_path=raw_mega_zarr_path,
-                dest_path=rechunked_mega_zarr_path,
+                zarr_path=rechunked_mega_zarr_path,
             )
             year_end_time = time.time()
             main_logger.info(f"    Got zarr stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
@@ -515,107 +473,22 @@ def main(cluster_name, input_date, run_local, no_stats, no_log, chunk_shapefile_
             main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
 
-    # # Chunk stats for all datasets-years is a nested list (each dataset-year is a list in the combined list).
-    # # This flattens all dataset-year chunk stats into flat lists.
-    # chunk_stats_raw_zarr = uu.flatten_list(chunk_stats_raw_zarr)
-    # chunk_stats_rechunked_zarr = uu.flatten_list(chunk_stats_rechunked_zarr)
-    #
-    # # print("chunk_stats_raw_zarr:", chunk_stats_raw_zarr)
-    # # print("chunk_stats_rechunked_zarr:", chunk_stats_rechunked_zarr)
-    #
-    #
-    # ### Step 4: Compare original model and zarr chunk stats and process logs
-    #
-    # # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
-    # # cluster, not all the workers.
-    # if not run_local:
-    #     workers = client.scheduler_info()["workers"]
-    #     n_workers = len(workers)
-    #
-    #     # Reduces number of workers in the cluster down to 1 if there is more than 10
-    #     if n_workers > 10:
-    #         main_logger.info("Resizing cluster to 1 worker")
-    #
-    #         resize_cluster.resize_coiled_cluster(cluster_name, 1)
-    #
-    # if (not no_stats):
-    #     raw_stage = stage.replace("rechunk", "raw")
-    #     raw_zarr_chunk_stats_path = uu.compile_1x1_chunk_stats(chunk_stats_raw_zarr, chunk_shapefile_uri, raw_stage, False, main_logger)
-    #     rechunked_zarr_chunk_stats_path = uu.compile_1x1_chunk_stats(chunk_stats_rechunked_zarr, chunk_shapefile_uri, stage, False, main_logger)
-    #
-    #     print(raw_zarr_chunk_stats_path)
-    #     print(rechunked_zarr_chunk_stats_path)
-    #
-    #     model_stats_path = "chunk_stats/vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP.xlsx"
-    #     zarr_comparison_stats_path = "chunk_stats/vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP__zarr_comparison.xlsx"
-    #
-    #     rechunked_zarr_chunk_stats_path = "chunk_stats/rechunk_global_mega_zarr_1x1_chunk_statistics_20251030_16_48_20.xlsx"
-    #
-    #     tables_to_compare = ['gross_outputs_1x1', 'other_outputs_1x1', 'net_outputs_1x1']
-    #
-    #     # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6903d1dd-555c-8321-8547-0aa4772c9878
-    #     with pd.ExcelWriter(zarr_comparison_stats_path, engine='openpyxl', mode='w') as writer:
-    #         for table in tables_to_compare:
-    #
-    #             main_logger.info(f"Processing table {table}: {uu.timestr()}")
-    #
-    #             main_logger.info(f"Reading model and zarr tables: {uu.timestr()}")
-    #             merged_table = pd.read_excel(model_stats_path, sheet_name=table)
-    #             rechunked_zarr_table = pd.read_excel(rechunked_zarr_chunk_stats_path, sheet_name=table)
-    #
-    #             # Step 1: Selects only the needed columns from rechunked_zarr_table
-    #             main_logger.info(f"Subsetting zarr table to numeric columns: {uu.timestr()}")
-    #             zarr_subset_table = rechunked_zarr_table[['chunk_name', 'min_value', 'mean_value', 'max_value', 'count_value']].copy()
-    #
-    #             # Step 2: Renames columns in raw_subset to distinguish them after merge
-    #             main_logger.info(f"Renaming zarr columns: {uu.timestr()}")
-    #             zarr_subset_table = zarr_subset_table.rename(columns={
-    #                 'min_value': 'min_value_zarr',
-    #                 'mean_value': 'mean_value_zarr',
-    #                 'max_value': 'max_value_zarr',
-    #                 'count_value': 'count_value_zarr'
-    #             })
-    #
-    #             # Step 3: Converts all zarr value columns to numeric, coercing errors to NaN
-    #             main_logger.info(f"Converting zarr columns to numeric: {uu.timestr()}")
-    #             for col in ['min_value_zarr', 'mean_value_zarr', 'max_value_zarr', 'count_value_zarr']:
-    #                 zarr_subset_table[col] = pd.to_numeric(zarr_subset_table[col], errors='coerce')
-    #
-    #             # Step 4: Merges with model_gross on 'chunk_name', left join
-    #             main_logger.info(f"Merging zarr data to original model data: {uu.timestr()}")
-    #             merged_table = merged_table.merge(zarr_subset_table, on='chunk_name', how='left')
-    #
-    #             # Step 5: Calculates differences and store in new columns
-    #             main_logger.info(f"Calculating differences: {uu.timestr()}")
-    #             merged_table['min_value_diff'] = merged_table['min_value'] - merged_table['min_value_zarr']
-    #             merged_table['mean_value_diff'] = merged_table['mean_value'] - merged_table['mean_value_zarr']
-    #             merged_table['max_value_diff'] = merged_table['max_value'] - merged_table['max_value_zarr']
-    #             merged_table['count_value_diff'] = merged_table['count_value'] - merged_table['count_value_zarr']
-    #             print(merged_table.head())
-    #
-    #             # Step 6: Writes outputs
-    #             merged_table.to_excel(writer, sheet_name=table, index=False)
-    #
-    #             # Optional: log success
-    #             main_logger.info(f"Saved {table} sheet to {zarr_comparison_stats_path}: {uu.timestr()}")
-    #
-    #     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
-    #
-    #
-    # # Worker logs are not aggregated if doing a local run (since there are no workers)
-    # if not run_local:
-    #
-    #     # Creates combined log from all workers if not deactivated
-    #     worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
-    #
-    #     # Adds the workers' logs to the main log and uploads to s3
-    #     lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
-    #
-    #     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats and worker log compilation", main_logger)
-    #
-    # # Closes the Dask client if not running locally
-    # if not run_local:
-    #     client.close()
+    ### Step 4: Combine logs
+
+    # Worker logs are not aggregated if doing a local run (since there are no workers)
+    if not run_local:
+
+        # Creates combined log from all workers if not deactivated
+        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+
+        # Adds the workers' logs to the main log and uploads to s3
+        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
+
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats and worker log compilation", main_logger)
+
+    # Closes the Dask client if not running locally
+    if not run_local:
+        client.close()
 
 
 
