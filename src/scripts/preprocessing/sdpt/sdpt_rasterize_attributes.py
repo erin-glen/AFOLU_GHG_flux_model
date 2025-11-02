@@ -26,7 +26,7 @@ Usage examples:
 """
 
 import os
-import sys
+import syscon
 import logging
 import argparse
 import warnings
