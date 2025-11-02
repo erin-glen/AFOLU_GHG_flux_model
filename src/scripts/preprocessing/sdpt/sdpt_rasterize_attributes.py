@@ -26,7 +26,7 @@ Usage examples:
 """
 
 import os
-import syscon
+import sys
 import logging
 import argparse
 import warnings
@@ -73,7 +73,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 # Reclassification CSV in S3 (vernacName -> rotation_code)
 ADVANCED_REMAP_S3 = (
-    "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/remapping_tables/advanced_remapping.csv"
+    "climate/AFOLU_flux_model/organic_soils/inputs/raw/plantations/sdpt/remapping_tables/advanced_remapping_2.csv"
 )
 
 # Rasterization settings
