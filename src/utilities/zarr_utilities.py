@@ -434,8 +434,8 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
         with pd.ExcelWriter(zarr_comparison_stats_path, engine='openpyxl', mode='w') as writer:
 
             gross_flux_1x1_outputs.to_excel(writer, sheet_name=cn.gross_outputs_1x1, index=False)
-            other_1x1_outputs.to_excel(writer, sheet_name=cn.other_outputs_1x1, index=False)
             net_flux_1x1_outputs.to_excel(writer, sheet_name=cn.net_outputs_1x1, index=False)
+            other_1x1_outputs.to_excel(writer, sheet_name=cn.other_outputs_1x1, index=False)
 
     # Saves output to three parquet tables.
     # These must be written in the same order as the file names are created in zu.get_table_names_for_zarr_stats_comparison()

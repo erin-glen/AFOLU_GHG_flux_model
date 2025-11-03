@@ -2461,6 +2461,13 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                 year_end_time = time.time()
                 main_logger.info(f"    Got zarr stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
 
+                # After all zarr chunk stats is done for the dataset-year combination,
+                # the chunk stats from the zarr are compared to the chunk stats from the model.
+                # This is done with Pandas dataframes and is not parallelized because it's just table manipulation
+                # for each dataset-year combination.
+                # The model output vs. zarr comparison is done after each dataset-year combination
+                # to get more real-time feedback on how the datasets compare (rather than waiting until after
+                # all zarr chunk stats have been calculated to do the metric comparisons).
                 all_merged_tables, chunks_count_exceeding = zu.compare_dataset_year_chunk_stats(all_merged_tables,
                                                                 chunk_stats_variable_year_rechunked_zarr,
                                                                 main_logger,
@@ -2468,6 +2475,8 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                                                 var_name, year,
                                                                 zarr_comparison_stats_path)
 
+                # Total number of chunks that have differences in metrics between the model and zarr
+                # that exceed the tolerance
                 chunks_count_exceeding_total += chunks_count_exceeding
 
             var_end_time = time.time()
