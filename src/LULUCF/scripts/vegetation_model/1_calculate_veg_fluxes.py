@@ -45,8 +45,6 @@ import numpy as np
 
 import fsspec
 import xarray as xr
-import zarr
-import uuid
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -2377,7 +2375,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
 
-    ### Step 4: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs
+    ### Step 4: Counts files in output folders, aggregates chunk stats for 1x1 degree outputs
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
@@ -2388,8 +2386,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         # Reduces number of workers in the cluster down to 1 if there is more than 10
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
-
-            resize_cluster.resize_coiled_cluster(cluster_name, 1)
+            resize_cluster.resize_coiled_cluster(cluster_name, 2)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
     if not no_upload and is_large_run:
@@ -2405,6 +2402,72 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         chunk_stats_path = uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+
+
+    ### Step 5: Compares model output chunk stats to zarr chunk stats for each variable-year
+
+    main_logger.info(f"Starting zarr chunk stats comparison: {uu.timestr()}")
+
+
+
+    # The model chunk stat tables
+    tables_to_compare_dict = {"model_gross": chunk_stats_model_gross,
+                              "model_other": chunk_stats_model_other,
+                              "model_net": chunk_stats_model_net}
+
+    # Resizes cluster up to 50 workers for zarr chunk stat comparison only if a large-scale run
+    if (not run_local) and (is_large_run == True):
+
+        main_logger.info("Resizing cluster to 50 workers")
+
+        resize_cluster.resize_coiled_cluster(cluster_name, 50)
+
+    # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
+    all_merged_tables = []
+
+    # Number of chunks with differences between original and zarr exceeding tolerance
+    chunks_count_exceeding_total = 0
+
+    # Iterates through variables/datasets. Each chunk=10000x10000 is transferred by just one task/worker
+    # so that multiple workers aren't touching the same zarr chunk at the same time.
+    for var_name in cn.outputs_to_zarr:
+
+        main_logger.info(f"Starting {var_name}: {uu.timestr()}")
+        var_start_time = time.time()
+
+        # Iterates through years
+        for year_idx in range(len(cn.interval_end_years_annual)):
+            year = cn.interval_end_years_annual[year_idx]
+
+            # Gets stats for selected 1x1 deg chunks in raw and rechunked zarrs
+            main_logger.info(f"  Starting zarr stats for {var_name} for year {year}: {uu.timestr()}")
+            year_start_time = time.time()
+
+            # Runs chunk stats for a dataset-year in the zarr in parallel
+            chunk_stats_variable_year_rechunked_zarr = uu.run_parallel_stats(
+                client=client,
+                chunk_list=chunk_list,
+                var=var_name,
+                year_idx=year_idx,
+                zarr_path=raw_mega_zarr_path,
+            )
+            year_end_time = time.time()
+            main_logger.info(f"    Got zarr stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
+
+            all_merged_tables, chunks_count_exceeding = uu.compare_dataset_year_chunk_stats(all_merged_tables,
+                                                            chunk_stats_variable_year_rechunked_zarr,
+                                                            main_logger,
+                                                            tables_to_compare_dict,
+                                                            var_name, year,
+                                                            zarr_comparison_stats_path)
+
+            chunks_count_exceeding_total += chunks_count_exceeding
+
+        var_end_time = time.time()
+        main_logger.info(f"  Processed {var_name}  in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
+
+
+    # Step 6: Aggregates logs
 
     # Worker logs are not aggregated if doing a local run (since there are no workers)
     if not run_local:
