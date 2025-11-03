@@ -15,6 +15,7 @@ import concurrent.futures
 import os
 import sys
 from datetime import datetime
+from typing import Optional
 
 import dask.bag
 import numpy as np
@@ -37,6 +38,10 @@ n2o_n_to_n2o = np.float32(cn.n2o_n_to_n2o)
 gwp_ch4 = np.float32(cn.gwp_ch4)
 gwp_n2o = np.float32(cn.gwp_n2o)
 combustion_factor = np.float32(cn.combustion_factor)
+
+# Default peat probability threshold for the OGH dataset. This matches the
+# preprocessing threshold previously applied during tiling.
+DEFAULT_OGH_THRESHOLD = 23.0
 
 forest_code = cn.ipcc_codes["forest"]
 cropland_code = cn.ipcc_codes["cropland"]
@@ -529,6 +534,7 @@ def calculate_and_upload_drainage(
     closing_year,
     peat_dataset="ogh",
     run_name="ogh_standard_model",
+    peat_threshold: Optional[float] = None,
     mark_missing=False,
     count_burned_years=False,
 ):
@@ -552,6 +558,10 @@ def calculate_and_upload_drainage(
         Peat mask dataset name.
     run_name : str, optional
         Model run identifier used to label output paths.
+    peat_threshold : float or None, optional
+        Threshold applied to the peat probability layer when using the OGH
+        dataset. Values strictly greater than the threshold are treated as
+        peat. ``None`` disables thresholding and uses the raw probabilities.
     mark_missing : bool, optional
         Append sentinel digits for missing emission factors if ``True``.
     count_burned_years : bool, optional
@@ -631,6 +641,11 @@ def calculate_and_upload_drainage(
     layers = uu.fill_missing_input_layers_with_no_data(
         layers, uint8, int16, [], float32, bstr, tid, is_final, logger
     )
+
+    if peat_dataset in {"ogh", "ogh_unthresholded"} and peat_threshold is not None:
+        peat_layer = layers.get("peat")
+        if peat_layer is not None:
+            layers["peat"] = (peat_layer > peat_threshold).astype(np.uint8)
 
     # stats for inputs
     for k, arr in layers.items():
@@ -833,6 +848,15 @@ def compute_intervals(start_year, end_year, interval_type, all_five_year_periods
     return intervals, start_year, end_year, interval_type
 
 
+def parse_optional_float(value: Optional[str]) -> Optional[float]:
+    if value is None:
+        return None
+    value = value.strip()
+    if value.lower() in {"none", "null"}:
+        return None
+    return float(value)
+
+
 def run_drainage_model(
     cluster_name=None,
     bounding_box=None,
@@ -850,6 +874,7 @@ def run_drainage_model(
     tile_ids=None,
     peat_dataset="ogh",
     run_name="ogh_standard_model",
+    peat_threshold: Optional[float] = DEFAULT_OGH_THRESHOLD,
     mark_missing=False,
     count_burned_years=False,
 ):
@@ -872,6 +897,13 @@ def run_drainage_model(
         run_local=run_local,
         model_type="organic_soils",
         stage=stage,
+    )
+
+    threshold_msg = "none" if peat_threshold is None else f"> {peat_threshold}"
+    main_logger.info(
+        "Peat dataset set to %s with threshold %s",
+        peat_dataset,
+        threshold_msg,
     )
 
     if chunk_shapefile_uri:
@@ -950,6 +982,7 @@ def run_drainage_model(
             closing_year,
             peat_dataset,
             run_name,
+            peat_threshold,
             mark_missing,
             count_burned_years,
         )
@@ -1011,6 +1044,7 @@ def main(argv=None):
             all_five_year_periods=False,
             peat_dataset="ogh",
             run_name="ogh_standard_model",
+            peat_threshold=DEFAULT_OGH_THRESHOLD,
             mark_missing=False,
             count_burned_years=False,
         )
@@ -1074,6 +1108,16 @@ def main(argv=None):
         help="Peat mask dataset to use",
     )
     p.add_argument(
+        "--peat_threshold",
+        type=parse_optional_float,
+        default=DEFAULT_OGH_THRESHOLD,
+        help=(
+            "Threshold applied to OGH peat probabilities; values strictly "
+            "greater than the threshold are treated as peat. Pass 'none' "
+            "to disable thresholding."
+        ),
+    )
+    p.add_argument(
         "--run_name",
         default="ogh_standard_model",
         help="Run name used to label output directories",
@@ -1117,6 +1161,7 @@ def main(argv=None):
         tile_ids=tile_ids,
         peat_dataset=args.peat_dataset,
         run_name=args.run_name,
+        peat_threshold=args.peat_threshold,
         mark_missing=args.mark_missing_factors,
         count_burned_years=args.count_burned_years,
     )

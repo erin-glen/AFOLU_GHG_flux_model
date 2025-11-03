@@ -350,17 +350,24 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
     if peat_dataset not in peat_mask_dirs:
         raise ValueError(f"Unknown peat dataset: {peat_dataset}")
 
-    if peat_dataset == 'gfw':
+    peat_path_dataset = peat_dataset
+    if peat_dataset == 'ogh':
+        # Use the unthresholded probability surface for OGH and apply
+        # thresholds downstream in the core model.
+        peat_path_dataset = 'ogh_unthresholded'
+
+    if peat_path_dataset == 'gfw':
         peat_path = posixpath.join(
             peat_mask_dirs['gfw'], patterns['peat'].format(tile_id=tile_id)
         )
-    elif peat_dataset == 'union_mask':
+    elif peat_path_dataset == 'union_mask':
         peat_path = posixpath.join(
             peat_mask_dirs['union_mask'], f"{tile_id}_union_mask.tif"
         )
     else:
         peat_path = posixpath.join(
-            peat_mask_dirs[peat_dataset], f"{tile_id}_{peat_dataset}_mask.tif"
+            peat_mask_dirs[peat_path_dataset],
+            f"{tile_id}_{peat_path_dataset}_mask.tif"
         )
 
     dynamic_dict = {
@@ -381,7 +388,10 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
             patterns['climate_domain'].format(tile_id=tile_id),
         ),
         'descals_type': posixpath.join(dirs['descals_type'], patterns['descals_type'].format(tile_id=tile_id)),
-        'ogh': posixpath.join(peat_mask_dirs['ogh'], patterns['ogh'].format(tile_id=tile_id)),
+        'ogh': posixpath.join(
+            peat_mask_dirs['ogh_unthresholded'],
+            f"{tile_id}_ogh_unthresholded_mask.tif",
+        ),
     }
 
     # Add burned area layers for each year in the interval
