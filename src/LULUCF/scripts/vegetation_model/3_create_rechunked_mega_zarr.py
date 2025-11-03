@@ -388,9 +388,9 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
         raise FileNotFoundError(f"Fallback file not found at {model_chunk_stats_path}")
 
     print(f"Reading model chunk stats from local file: {model_chunk_stats_path}")
-    chunk_stats_model_gross = pd.read_excel(model_chunk_stats_path, sheet_name='gross_outputs_1x1', nrows=60000)  # TODO FOR TESTING
-    chunk_stats_model_other = pd.read_excel(model_chunk_stats_path, sheet_name='other_outputs_1x1', nrows=85000)  # TODO FOR TESTING
-    chunk_stats_model_net = pd.read_excel(model_chunk_stats_path, sheet_name='net_outputs_1x1', nrows=60000)  # TODO FOR TESTING
+    chunk_stats_model_gross = pd.read_excel(model_chunk_stats_path, sheet_name='gross_outputs_1x1')
+    chunk_stats_model_other = pd.read_excel(model_chunk_stats_path, sheet_name='other_outputs_1x1')
+    chunk_stats_model_net = pd.read_excel(model_chunk_stats_path, sheet_name='net_outputs_1x1')
 
     # The model chunk stat tables
     tables_to_compare_dict = {"model_gross": chunk_stats_model_gross,
