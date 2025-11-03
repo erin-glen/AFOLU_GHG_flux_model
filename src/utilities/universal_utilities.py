@@ -2085,28 +2085,6 @@ def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
         lu.print_and_log(f"No task file found for chunk {chunk_id}. Nothing to delete.", is_final, logger_worker)
 
 
-# Adds units and year specifications to core pattern
-def add_units_year_to_pattern(core_pattern, year):
-    if "density" in core_pattern:
-        pattern_with_units = f"{core_pattern}_ha_{year}"
-    elif "emis" in core_pattern:
-        pattern_with_units = f"{core_pattern}_ha_yr_{year - 1}_{year}"
-    elif "removals" in core_pattern:
-        pattern_with_units = f"{core_pattern}_ha_yr_{year - 1}_{year}"
-    elif "net" in core_pattern:
-        pattern_with_units = f"{core_pattern}_ha_yr_{year - 1}_{year}"
-    elif cn.land_state_pattern in core_pattern:
-        pattern_with_units = f"{core_pattern}_{year - 1}_{year}"
-    elif cn.composite_primary_forest in core_pattern:
-        pattern_with_units = f"{core_pattern}_{year}"
-    elif cn.forest_age_output_pattern in core_pattern:
-        pattern_with_units = f"{core_pattern}_{year}"
-    else:
-        sys.exit(f"Dataset {core_pattern} not assigned a pattern with units for addition to global zarr")
-
-    return pattern_with_units
-
-
 
 ###################################################################################################
 # Hansenize Functions

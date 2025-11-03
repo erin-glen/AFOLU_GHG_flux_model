@@ -199,7 +199,7 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
                 lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
                 lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
 
-                pattern_with_units = uu.add_units_year_to_pattern(output_to_zarr_pattern, year)
+                pattern_with_units = add_units_year_to_pattern(output_to_zarr_pattern, year)
 
                 # Selects the relevant output numpy array for insertion into zarr.
                 # Only inserts into zarr if that data is in the output dictionary.
@@ -287,7 +287,7 @@ def zarr_1x1_deg_stats(bounds, var_name, year_idx, zarr_path):
     }
 
     # The dataset pattern being analyzed, with year and units added
-    pattern_with_units = uu.add_units_year_to_pattern(var_name, year)
+    pattern_with_units = add_units_year_to_pattern(var_name, year)
 
     lat0, lon0 = latlon_to_global_zarr_indices(target_box["lat_max"], target_box["lon_min"], cn.resolution)
     lat1, lon1 = latlon_to_global_zarr_indices(target_box["lat_min"], target_box["lon_max"], cn.resolution)
@@ -337,13 +337,13 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     # Selects relevant model output table
     # The formatting of the year depends on the variable.
     if "gross" in var_name:
-        model_table = tables_to_compare_dict['model_gross']
+        model_table = tables_to_compare_dict[cn.gross_outputs_1x1]
         year = f"{int(year) - 1}_{year}"
     elif "net" in var_name:
-        model_table = tables_to_compare_dict['model_net']
+        model_table = tables_to_compare_dict[cn.net_outputs_1x1]
         year = f"{int(year) - 1}_{year}"
     else:
-        model_table = tables_to_compare_dict['model_other']
+        model_table = tables_to_compare_dict[cn.other_outputs_1x1]
         year = str(year)
 
     # Converts zarr chunk stats from dictionary to dataframe
@@ -458,6 +458,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
 # Parquet table names for the comparison chunk stats. 
 def get_table_names_for_zarr_stats_comparison(comparison_insert, main_logger, model_chunk_stats_path,
                                               model_chunk_stats_table_name):
+
     # Separate logic for naming chunk stat comparison outputs if using Excel or Parquet (very large runs)
     if "xlsx" in model_chunk_stats_table_name:
         main_logger.info(f"Reading model chunk stats from local file: {model_chunk_stats_path}")
@@ -491,7 +492,29 @@ def get_table_names_for_zarr_stats_comparison(comparison_insert, main_logger, mo
     else:
         sys.exit("Table type not found")
     # The model chunk stat tables
-    tables_to_compare_dict = {"model_gross": chunk_stats_model_gross,
-                              "model_net": chunk_stats_model_net,
-                              "model_other": chunk_stats_model_other}
+    tables_to_compare_dict = {cn.gross_outputs_1x1: chunk_stats_model_gross,
+                              cn.net_outputs_1x1: chunk_stats_model_net,
+                              cn.other_outputs_1x1: chunk_stats_model_other}
     return tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path
+
+
+# Adds units and year specifications to core pattern
+def add_units_year_to_pattern(core_pattern, year):
+    if "density" in core_pattern:
+        pattern_with_units = f"{core_pattern}_ha_{year}"
+    elif "emis" in core_pattern:
+        pattern_with_units = f"{core_pattern}_ha_yr_{year - 1}_{year}"
+    elif "removals" in core_pattern:
+        pattern_with_units = f"{core_pattern}_ha_yr_{year - 1}_{year}"
+    elif "net" in core_pattern:
+        pattern_with_units = f"{core_pattern}_ha_yr_{year - 1}_{year}"
+    elif cn.land_state_pattern in core_pattern:
+        pattern_with_units = f"{core_pattern}_{year - 1}_{year}"
+    elif cn.composite_primary_forest in core_pattern:
+        pattern_with_units = f"{core_pattern}_{year}"
+    elif cn.forest_age_output_pattern in core_pattern:
+        pattern_with_units = f"{core_pattern}_{year}"
+    else:
+        sys.exit(f"Dataset {core_pattern} not assigned a pattern with units for addition to global zarr")
+
+    return pattern_with_units

@@ -217,7 +217,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     main_logger.info(f"Reading local model chunk stats tables: {uu.timestr()}")
     model_chunk_stats_path = os.path.join(cn.local_chunk_stats_path, model_chunk_stats_table_name)
 
-    # Text added to output chunk stats tables (Excel or Parquet)
+    # Text added to output chunk stats table name(s) (Excel or Parquet)
     comparison_insert = "_rechunk_zarr_comparison"
 
     tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(

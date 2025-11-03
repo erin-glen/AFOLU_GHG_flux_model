@@ -888,10 +888,10 @@ outputs_to_zarr = [
 # Also want to add the metadata for the summative outputs to the global zarr upfront for simplicity,
 # rather than having to add more empty layers to the zarr at the summative stage
 outputs_to_zarr = outputs_to_zarr + [
-    # gross_emis_all_C_pools_CO2_only_pattern, # gross_emis_all_C_pools_non_CO2_only_pattern, gross_emis_all_C_pools_all_gases_pattern,
-    # gross_removals_all_C_pools_pattern,
-    # net_flux_agc_pattern, net_flux_bgc_pattern, net_flux_deadwood_c_pattern, net_flux_litter_c_pattern,
-    # net_flux_all_C_pools_CO2_only_pattern, net_flux_all_C_pools_all_gases_pattern,
+    gross_emis_all_C_pools_CO2_only_pattern, gross_emis_all_C_pools_non_CO2_only_pattern, gross_emis_all_C_pools_all_gases_pattern,
+    gross_removals_all_C_pools_pattern,
+    net_flux_agc_pattern, net_flux_bgc_pattern, net_flux_deadwood_c_pattern, net_flux_litter_c_pattern,
+    net_flux_all_C_pools_CO2_only_pattern, net_flux_all_C_pools_all_gases_pattern,
     non_soil_c_modeled_dens_pattern
 ]
 

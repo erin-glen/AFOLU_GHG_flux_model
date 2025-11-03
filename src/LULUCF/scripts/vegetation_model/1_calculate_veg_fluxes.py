@@ -5,12 +5,12 @@ Local test (Dask part does not work because of client.submit()):
 python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload --run_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_model
+python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -bb 116.25 -2.25 116.5 -2 -cs 0.25 --run_date YYYYMMDD
 
 Coiled small tests (1x1 deg chunk needs 32GB worker):
-python -m src.utilities.create_cluster -n 10 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn global_zarr_vegetation_model -bb -64 -22 -63 -21 -cs 1 --run_date YYYYMMDD --create_zarr
+python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -bb -64 -22 -63 -21 -cs 1 --run_date YYYYMMDD --create_zarr
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn vegetation_model
@@ -2302,19 +2302,19 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         raw_mega_zarr_path = zu.create_mega_zarr_paths(chunk_size_pixels, interval_type, model_type, run_date)
 
         # Add the variables listed here to the mega-zarr
-        outputs_to_zarr = cn.outputs_to_zarr
+        outputs_to_zarr = cn.outputs_to_zarr # [0:2] # For testing
 
-        # Creates the global mega-zarr with metadata only
-        zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
-                                    (1, chunk_size_pixels, chunk_size_pixels), main_logger)
-
-        # Checks the zarr coordinates and extent
-        fs = fsspec.filesystem("s3", anon=False)
-        mapper = fs.get_mapper(raw_mega_zarr_path)
-        ds = xr.open_zarr(mapper, consolidated=False)
-        print(ds.coords)
-        print("y range:", ds.y.values.min(), ds.y.values.max())
-        print("x range:", ds.x.values.min(), ds.x.values.max())
+    #     # Creates the global mega-zarr with metadata only
+    #     zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+    #                                 (1, chunk_size_pixels, chunk_size_pixels), main_logger)
+    #
+    #     # Checks the zarr coordinates and extent
+    #     fs = fsspec.filesystem("s3", anon=False)
+    #     mapper = fs.get_mapper(raw_mega_zarr_path)
+    #     ds = xr.open_zarr(mapper, consolidated=False)
+    #     print(ds.coords)
+    #     print("y range:", ds.y.values.min(), ds.y.values.max())
+    #     print("x range:", ds.x.values.min(), ds.x.values.max())
 
     else:
         raw_mega_zarr_path = None
@@ -2400,22 +2400,24 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
     if (not no_stats) and (success_count > 0):
-        chunk_stats_path = uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
-        print(chunk_stats_path)
+        model_chunk_stats_path = uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+        print(model_chunk_stats_path)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
 
-    ### Step 5: Compares model output chunk stats to zarr chunk stats for each variable-year
+    ### Step 5: Compares model output chunk stats to zarr chunk stats for each variable-year (only if chunk stats created)
 
     if (not no_stats):
 
         main_logger.info(f"Starting zarr chunk stats comparison: {uu.timestr()}")
 
-        model_chunk_stats_path = os.path.join(cn.local_chunk_stats_path, model_chunk_stats_table_name)
-
-        # Text added to output chunk stats tables (Excel or Parquet)
+        # Text added to output chunk stats table name(s) (Excel or Parquet)
         comparison_insert = "_original_zarr_comparison"
+
+        # The name of the chunk stats table from the model
+        model_chunk_stats_table_name = os.path.basename(model_chunk_stats_path)
+        print(model_chunk_stats_table_name)
 
         tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
             comparison_insert, main_logger, model_chunk_stats_path, model_chunk_stats_table_name)
@@ -2435,7 +2437,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
         # Iterates through variables/datasets. Each chunk=10000x10000 is transferred by just one task/worker
         # so that multiple workers aren't touching the same zarr chunk at the same time.
-        for var_name in cn.outputs_to_zarr:
+        for var_name in outputs_to_zarr:
 
             main_logger.info(f"Starting {var_name}: {uu.timestr()}")
             var_start_time = time.time()
