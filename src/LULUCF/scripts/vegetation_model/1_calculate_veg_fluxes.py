@@ -2408,7 +2408,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     ### Step 5: Compares model output chunk stats to zarr chunk stats for each variable-year (only if chunk stats created)
 
-    if (not no_stats):
+    if (not no_stats) and create_zarr:
 
         main_logger.info(f"Starting zarr chunk stats comparison: {uu.timestr()}")
 
@@ -2474,7 +2474,14 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
             main_logger.info(f"  Processed {var_name}  in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
 
-    # Step 6: Aggregates logs
+    ### Step 6: All chunk stats comparison iterations done.
+    ### Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
+
+    zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger, model_chunk_stats_table_name,
+                                          stage, start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
+
+
+    # Step 7: Aggregates logs
 
     # Worker logs are not aggregated if doing a local run (since there are no workers)
     if not run_local:

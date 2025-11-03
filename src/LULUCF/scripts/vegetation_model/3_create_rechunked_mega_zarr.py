@@ -223,6 +223,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
         comparison_insert, main_logger, model_chunk_stats_path, model_chunk_stats_table_name)
 
+
     ### Step 4: Copy from chunk=4000x4000 zarr to chunk=10000x10000 zarr and obtain chunk stats
     ### for the rechunked zarr
 
@@ -305,37 +306,10 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
         main_logger.info(f"  Processed {var_name}  in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
 
-    ### Step 5: All iterations done. Tallies chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
+    ### Step 5: All iterations done. Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
 
-    if chunks_count_exceeding_total > 0:
-        main_logger.warning(f"WARNING: {chunks_count_exceeding_total} chunks exceeded difference tolerance! Check log!")
-    else:
-        main_logger.info(f"{chunks_count_exceeding_total} chunks exceeded the difference tolerance).")
-
-    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
-
-    s3_client = boto3.client("s3")
-
-    if "xlsx" in model_chunk_stats_table_name:
-        main_logger.info(f"Uploading chunk stats comparison Excel spreadsheet to s3: {uu.timestr()}")
-        try:
-            s3_client.upload_file(zarr_comparison_stats_path, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{zarr_comparison_stats_name}")
-            main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{zarr_comparison_stats_name}: {uu.timestr()}")
-        except Exception as e:
-            main_logger.warning(f"Chunk stats upload to s3 failed: {e}. Continuing without halting.")
-
-    elif "parquet" in model_chunk_stats_table_name:
-        main_logger.info(f"Uploading chunk stats comparison parquet tables to s3: {uu.timestr()}")
-
-        for parquet_name, parquet_path in zip(zarr_comparison_stats_name, zarr_comparison_stats_path):
-            s3_key = f"{cn.s3_chunk_stats_path}{parquet_name}"
-            main_logger.info(f"Uploading {parquet_path} to {s3_key}: {uu.timestr()}")
-            s3_client.upload_file(parquet_path, cn.short_bucket_prefix, Key=s3_key)
-
-    else:
-        sys.exit("Table type not found")
-
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+    zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger, model_chunk_stats_table_name, stage,
+                                       start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
 
 
     ### Step 6: Combine and upload logs

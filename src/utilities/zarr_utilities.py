@@ -1,4 +1,5 @@
 import os
+import boto3
 import fsspec
 import time
 import numpy as np
@@ -518,3 +519,38 @@ def add_units_year_to_pattern(core_pattern, year):
         sys.exit(f"Dataset {core_pattern} not assigned a pattern with units for addition to global zarr")
 
     return pattern_with_units
+
+
+def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger, model_chunk_stats_table_name, stage,
+                                       start_time, zarr_comparison_stats_name, zarr_comparison_stats_path):
+
+    if chunks_count_exceeding_total > 0:
+        main_logger.warning(f"WARNING: {chunks_count_exceeding_total} chunks exceeded difference tolerance! Check log!")
+    else:
+        main_logger.info(f"{chunks_count_exceeding_total} chunks exceeded the difference tolerance).")
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+
+    s3_client = boto3.client("s3")
+
+    if "xlsx" in model_chunk_stats_table_name:
+        main_logger.info(f"Uploading chunk stats comparison Excel spreadsheet to s3: {uu.timestr()}")
+        try:
+            s3_client.upload_file(zarr_comparison_stats_path, cn.short_bucket_prefix,
+                                  Key=f"{cn.s3_chunk_stats_path}{zarr_comparison_stats_name}")
+            main_logger.info(
+                f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{zarr_comparison_stats_name}: {uu.timestr()}")
+        except Exception as e:
+            main_logger.warning(f"Chunk stats upload to s3 failed: {e}. Continuing without halting.")
+
+    elif "parquet" in model_chunk_stats_table_name:
+        main_logger.info(f"Uploading chunk stats comparison parquet tables to s3: {uu.timestr()}")
+
+        for parquet_name, parquet_path in zip(zarr_comparison_stats_name, zarr_comparison_stats_path):
+            s3_key = f"{cn.s3_chunk_stats_path}{parquet_name}"
+            main_logger.info(f"Uploading {parquet_path} to {s3_key}: {uu.timestr()}")
+            s3_client.upload_file(parquet_path, cn.short_bucket_prefix, Key=s3_key)
+
+    else:
+        sys.exit("Table type not found")
+
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
