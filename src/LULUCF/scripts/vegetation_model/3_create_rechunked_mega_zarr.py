@@ -294,7 +294,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
         other_1x1_outputs.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
 
     # Need to return the combined table so that it can be added to in the next iteration
-    return all_merged_tables
+    return all_merged_tables, len(differences_exceeding_tolerance)
 
 
 def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_name, chunk_shapefile_uri=False, bounding_box=None,
@@ -384,13 +384,21 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     main_logger.info(f"Reading local model chunk stats tables: {uu.timestr()}")
     model_chunk_stats_path = os.path.join(cn.local_chunk_stats_path, model_chunk_stats_table_name)
 
-    if not os.path.exists(model_chunk_stats_path):
-        raise FileNotFoundError(f"Fallback file not found at {model_chunk_stats_path}")
+    if "parquet" in model_chunk_stats_table_name:
+        main_logger.info(f"Reading parquet tables from local files: {model_chunk_stats_path}")
+        chunk_stats_model_gross = pd.read_parquet(f"{model_chunk_stats_path}__gross_outputs_1x1.parquet")
+        chunk_stats_model_other = pd.read_parquet(f"{model_chunk_stats_path}__other_outputs_1x1.parquet")
+        chunk_stats_model_net = pd.read_parquet(f"{model_chunk_stats_path}__net_outputs_1x1.parquet")
 
-    print(f"Reading model chunk stats from local file: {model_chunk_stats_path}")
-    chunk_stats_model_gross = pd.read_excel(model_chunk_stats_path, sheet_name='gross_outputs_1x1')
-    chunk_stats_model_other = pd.read_excel(model_chunk_stats_path, sheet_name='other_outputs_1x1')
-    chunk_stats_model_net = pd.read_excel(model_chunk_stats_path, sheet_name='net_outputs_1x1')
+    else:
+        main_logger.info(f"Reading model chunk stats from local file: {model_chunk_stats_path}")
+
+        if not os.path.exists(model_chunk_stats_path):
+            raise FileNotFoundError(f"Chunk stats table not found at {model_chunk_stats_path}")
+
+        chunk_stats_model_gross = pd.read_excel(model_chunk_stats_path, sheet_name='gross_outputs_1x1')
+        chunk_stats_model_other = pd.read_excel(model_chunk_stats_path, sheet_name='other_outputs_1x1')
+        chunk_stats_model_net = pd.read_excel(model_chunk_stats_path, sheet_name='net_outputs_1x1')
 
     # The model chunk stat tables
     tables_to_compare_dict = {"model_gross": chunk_stats_model_gross,
@@ -400,7 +408,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     # Name of output tables with chunk stats comparison
     name, ext = os.path.splitext(model_chunk_stats_path)
     comparison_insert = "_rechunk_zarr_comparison"
-    zarr_comparison_stats_path = f"{name}{comparison_insert}{ext}"
+    zarr_comparison_stats_path = f"{name}{comparison_insert}_{uu.timestr()}{ext}"
     zarr_comparison_stats_name = os.path.basename(zarr_comparison_stats_path)
     # print(zarr_comparison_stats_path)
 
@@ -412,6 +420,9 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
 
     # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
     all_merged_tables = []
+
+    # Number of chunks with differences between original and zarr exceeding tolerance
+    chunks_count_exceeding_total = 0
 
     # Iterates through variables/datasets. Each chunk=10000x10000 is transferred by just one task/worker
     # so that multiple workers aren't touching the same zarr chunk at the same time.
@@ -473,12 +484,25 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
             year_end_time = time.time()
             main_logger.info(f"    Got zarr stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
 
-            all_merged_tables = compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_year_rechunked_zarr,
+            all_merged_tables, chunks_count_exceeding = compare_dataset_year_chunk_stats(all_merged_tables,
+                                                                 chunk_stats_variable_year_rechunked_zarr,
                                                                  main_logger, tables_to_compare_dict, var_name, year,
                                                                  zarr_comparison_stats_path)
 
-            var_end_time = time.time()
-            main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
+            chunks_count_exceeding_total += chunks_count_exceeding
+
+        var_end_time = time.time()
+        main_logger.info(f"  Processed {var_name}  in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
+
+
+    ### Step 5: All iterations done. Tallies chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
+
+    if chunks_count_exceeding_total > 0:
+        main_logger.warning(f"WARNING: {chunks_count_exceeding_total} chunks exceeded difference tolerance! Check log!")
+    else:
+        main_logger.info(f"{chunks_count_exceeding_total} chunks exceeded the difference tolerance).")
+
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
     main_logger.info(f"Uploading chunk stats comparison spreadsheet to s3: {uu.timestr()}")
     s3_client = boto3.client("s3")
@@ -491,7 +515,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
 
-    ### Step 5: Combine logs
+    ### Step 6: Combine and upload logs
 
     # Worker logs are not aggregated if doing a local run (since there are no workers)
     if not run_local:
