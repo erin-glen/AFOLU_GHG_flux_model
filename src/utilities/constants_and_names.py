@@ -7,7 +7,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "1.0.3_1884_chunks"
+model_version = "1.0.3_zarr_testing"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets
@@ -243,6 +243,15 @@ combined_log = "AFOLU"
 # Local path for chunk stats
 local_chunk_stats_path = "chunk_stats/"
 s3_chunk_stats_path = "climate/AFOLU_flux_model/LULUCF/chunk_stats/"
+
+# Chunk stats table name patterns (Excel tabs or Parquet tables)
+annual_1x1_inputs = "annual_1x1_inputs"
+other_1x1_inputs = "other_1x1_inputs"
+gross_outputs_1x1 = "gross_outputs_1x1"
+net_outputs_1x1 = "net_outputs_1x1"
+other_outputs_1x1 = "other_outputs_1x1"
+min_max_for_layers_1x1 = "min_max_for_layers_1x1"
+counts_1x1_in_10x10 = "1x1_counts_in_10x10"
 
 # 1x1 deg fishnet between 80N and 60N, 180W and 180E that intersects GADM4.1 and has GADM iso joined to it
 fishnet_1x1deg_s3_dir = f"{AFOLU_dir}fishnet_1x1deg/20250429/"

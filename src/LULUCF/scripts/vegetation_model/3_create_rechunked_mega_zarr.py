@@ -75,7 +75,7 @@ from dask.distributed import Client, print
 from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
-from src.utilities import resize_cluster
+from src.utilities import zarr_utilities as zu
 
 pd.set_option('display.float_format', '{:.6e}'.format)
 
@@ -155,8 +155,8 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     main_logger.info(f"Input date: {input_date}")
 
     # Creates s3 paths for the raw and rechunked mega-zarrs
-    raw_mega_zarr_path = uu.create_mega_zarr_paths(cn.chunk_dims, 'annual', model_type, input_date)
-    rechunked_mega_zarr_path = uu.create_mega_zarr_paths(cn.zarr_pixel_chunks, 'annual', model_type, input_date)
+    raw_mega_zarr_path = zu.create_mega_zarr_paths(cn.chunk_dims, 'annual', model_type, input_date)
+    rechunked_mega_zarr_path = zu.create_mega_zarr_paths(cn.zarr_pixel_chunks, 'annual', model_type, input_date)
 
     main_logger.info(f"Raw mega-zarr path: {raw_mega_zarr_path}")
     main_logger.info(f"Rechunked mega-zarr path: {rechunked_mega_zarr_path}")
@@ -203,7 +203,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     start_time = uu.timestr()
 
     # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
-    uu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, years_to_process,
+    zu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, years_to_process,
                                    (1, cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
 
     fs = fsspec.filesystem("s3", anon=False)
@@ -220,43 +220,8 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     # Text added to output chunk stats tables (Excel or Parquet)
     comparison_insert = "_rechunk_zarr_comparison"
 
-    # Separate logic for naming chunk stat comparison outputs if using Excel or Parquet (very large runs)
-    if "xlsx" in model_chunk_stats_table_name:
-        main_logger.info(f"Reading model chunk stats from local file: {model_chunk_stats_path}")
-        chunk_stats_model_gross = pd.read_excel(model_chunk_stats_path, sheet_name='gross_outputs_1x1')
-        chunk_stats_model_other = pd.read_excel(model_chunk_stats_path, sheet_name='other_outputs_1x1')
-        chunk_stats_model_net = pd.read_excel(model_chunk_stats_path, sheet_name='net_outputs_1x1')
-
-        # Name of output Excel spreadsheet with chunk stats comparisons
-        name, ext = os.path.splitext(model_chunk_stats_path)
-        zarr_comparison_stats_path = f"{name}{comparison_insert}_{uu.timestr()}{ext}"
-        zarr_comparison_stats_name = os.path.basename(zarr_comparison_stats_path)
-        # print(zarr_comparison_stats_path)
-        # print(zarr_comparison_stats_name)
-
-    elif "parquet" in model_chunk_stats_table_name:
-        main_logger.info(f"Reading parquet tables from local files: {model_chunk_stats_path}")
-        chunk_stats_model_gross = pd.read_parquet(f"{model_chunk_stats_path}__gross_outputs_1x1.parquet")
-        chunk_stats_model_other = pd.read_parquet(f"{model_chunk_stats_path}__other_outputs_1x1.parquet")
-        chunk_stats_model_net = pd.read_parquet(f"{model_chunk_stats_path}__net_outputs_1x1.parquet")
-
-        # Names of output parquet tables with chunk stats comparisons
-        zarr_comparison_stats_gross_name = f"{model_chunk_stats_path}__gross_outputs_1x1_{comparison_insert}_{uu.timestr()}.parquet"
-        zarr_comparison_stats_other_name = f"{model_chunk_stats_path}__other_outputs_1x1_{comparison_insert}_{uu.timestr()}.parquet"
-        zarr_comparison_stats_net_name = f"{model_chunk_stats_path}__net_outputs_1x1_{comparison_insert}_{uu.timestr()}.parquet"
-        zarr_comparison_stats_path = [zarr_comparison_stats_gross_name, zarr_comparison_stats_other_name, zarr_comparison_stats_net_name]
-        zarr_comparison_stats_name = [os.path.basename(stats_path) for stats_path in zarr_comparison_stats_path]
-        # print(zarr_comparison_stats_path)
-        # print(zarr_comparison_stats_name)
-
-    else:
-        sys.exit("Table type not found")
-
-    # The model chunk stat tables
-    tables_to_compare_dict = {"model_gross": chunk_stats_model_gross,
-                              "model_other": chunk_stats_model_other,
-                              "model_net": chunk_stats_model_net}
-
+    tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
+        comparison_insert, main_logger, model_chunk_stats_path, model_chunk_stats_table_name)
 
     ### Step 4: Copy from chunk=4000x4000 zarr to chunk=10000x10000 zarr and obtain chunk stats
     ### for the rechunked zarr
@@ -310,16 +275,16 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
                 }
 
                 main_logger.info(f"    Original (4000x4000) zarr:")
-                uu.check_region_stats(raw_mega_zarr_path, var_name, year_idx, target_box, main_logger)
+                zu.check_region_stats(raw_mega_zarr_path, var_name, year_idx, target_box, main_logger)
                 main_logger.info(f"    Rechunked (10000x10000) zarr:")
-                uu.check_region_stats(rechunked_mega_zarr_path, var_name, year_idx, target_box, main_logger)
+                zu.check_region_stats(rechunked_mega_zarr_path, var_name, year_idx, target_box, main_logger)
 
             # Gets stats for selected 1x1 deg chunks in raw and rechunked zarrs
             main_logger.info(f"  Starting zarr stats for {var_name} for year {year}: {uu.timestr()}")
             year_start_time = time.time()
 
             # Runs chunk stats for a dataset-year in the zarr in parallel
-            chunk_stats_variable_year_rechunked_zarr = uu.run_parallel_stats(
+            chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
                 client=client,
                 chunk_list=chunk_list,
                 var=var_name,
@@ -329,7 +294,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
             year_end_time = time.time()
             main_logger.info(f"    Got zarr stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
 
-            all_merged_tables, chunks_count_exceeding = uu.compare_dataset_year_chunk_stats(all_merged_tables,
+            all_merged_tables, chunks_count_exceeding = zu.compare_dataset_year_chunk_stats(all_merged_tables,
                                                                  chunk_stats_variable_year_rechunked_zarr,
                                                                  main_logger, tables_to_compare_dict, var_name, year,
                                                                  zarr_comparison_stats_path)

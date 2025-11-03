@@ -56,6 +56,7 @@ from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
 from src.utilities import numba_utilities as nu
 from src.utilities import universal_utilities as uu
+from src.utilities import zarr_utilities as zu
 from src.utilities import resize_cluster
 
 # Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
@@ -1943,7 +1944,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
 
     ### Part 5: Writes outputs to pre-existing global mega-zarr (only if requested)
 
-    uu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
+    zu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
                   out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
 
 
@@ -2298,13 +2299,13 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     if create_zarr:
 
         # Creates s3 paths for the raw mega-zarr
-        raw_mega_zarr_path = uu.create_mega_zarr_paths(chunk_size_pixels, interval_type, model_type, run_date)
+        raw_mega_zarr_path = zu.create_mega_zarr_paths(chunk_size_pixels, interval_type, model_type, run_date)
 
         # Add the variables listed here to the mega-zarr
         outputs_to_zarr = cn.outputs_to_zarr
 
         # Creates the global mega-zarr with metadata only
-        uu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+        zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
                                     (1, chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
@@ -2400,71 +2401,75 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
     if (not no_stats) and (success_count > 0):
         chunk_stats_path = uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+        print(chunk_stats_path)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
 
     ### Step 5: Compares model output chunk stats to zarr chunk stats for each variable-year
 
-    main_logger.info(f"Starting zarr chunk stats comparison: {uu.timestr()}")
+    if (not no_stats):
 
+        main_logger.info(f"Starting zarr chunk stats comparison: {uu.timestr()}")
 
+        model_chunk_stats_path = os.path.join(cn.local_chunk_stats_path, model_chunk_stats_table_name)
 
-    # The model chunk stat tables
-    tables_to_compare_dict = {"model_gross": chunk_stats_model_gross,
-                              "model_other": chunk_stats_model_other,
-                              "model_net": chunk_stats_model_net}
+        # Text added to output chunk stats tables (Excel or Parquet)
+        comparison_insert = "_original_zarr_comparison"
 
-    # Resizes cluster up to 50 workers for zarr chunk stat comparison only if a large-scale run
-    if (not run_local) and (is_large_run == True):
+        tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
+            comparison_insert, main_logger, model_chunk_stats_path, model_chunk_stats_table_name)
 
-        main_logger.info("Resizing cluster to 50 workers")
+        # Resizes cluster up to 50 workers for zarr chunk stat comparison only if a large-scale run
+        if (not run_local) and (is_large_run == True):
 
-        resize_cluster.resize_coiled_cluster(cluster_name, 50)
+            main_logger.info("Resizing cluster to 50 workers")
 
-    # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
-    all_merged_tables = []
+            resize_cluster.resize_coiled_cluster(cluster_name, 50)
 
-    # Number of chunks with differences between original and zarr exceeding tolerance
-    chunks_count_exceeding_total = 0
+        # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
+        all_merged_tables = []
 
-    # Iterates through variables/datasets. Each chunk=10000x10000 is transferred by just one task/worker
-    # so that multiple workers aren't touching the same zarr chunk at the same time.
-    for var_name in cn.outputs_to_zarr:
+        # Number of chunks with differences between original and zarr exceeding tolerance
+        chunks_count_exceeding_total = 0
 
-        main_logger.info(f"Starting {var_name}: {uu.timestr()}")
-        var_start_time = time.time()
+        # Iterates through variables/datasets. Each chunk=10000x10000 is transferred by just one task/worker
+        # so that multiple workers aren't touching the same zarr chunk at the same time.
+        for var_name in cn.outputs_to_zarr:
 
-        # Iterates through years
-        for year_idx in range(len(cn.interval_end_years_annual)):
-            year = cn.interval_end_years_annual[year_idx]
+            main_logger.info(f"Starting {var_name}: {uu.timestr()}")
+            var_start_time = time.time()
 
-            # Gets stats for selected 1x1 deg chunks in raw and rechunked zarrs
-            main_logger.info(f"  Starting zarr stats for {var_name} for year {year}: {uu.timestr()}")
-            year_start_time = time.time()
+            # Iterates through years
+            for year_idx in range(len(cn.interval_end_years_annual)):
+                year = cn.interval_end_years_annual[year_idx]
 
-            # Runs chunk stats for a dataset-year in the zarr in parallel
-            chunk_stats_variable_year_rechunked_zarr = uu.run_parallel_stats(
-                client=client,
-                chunk_list=chunk_list,
-                var=var_name,
-                year_idx=year_idx,
-                zarr_path=raw_mega_zarr_path,
-            )
-            year_end_time = time.time()
-            main_logger.info(f"    Got zarr stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
+                # Gets stats for selected 1x1 deg chunks in raw and rechunked zarrs
+                main_logger.info(f"  Starting zarr stats for {var_name} for year {year}: {uu.timestr()}")
+                year_start_time = time.time()
 
-            all_merged_tables, chunks_count_exceeding = uu.compare_dataset_year_chunk_stats(all_merged_tables,
-                                                            chunk_stats_variable_year_rechunked_zarr,
-                                                            main_logger,
-                                                            tables_to_compare_dict,
-                                                            var_name, year,
-                                                            zarr_comparison_stats_path)
+                # Runs chunk stats for a dataset-year in the zarr in parallel
+                chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
+                    client=client,
+                    chunk_list=chunk_list,
+                    var=var_name,
+                    year_idx=year_idx,
+                    zarr_path=raw_mega_zarr_path,
+                )
+                year_end_time = time.time()
+                main_logger.info(f"    Got zarr stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
 
-            chunks_count_exceeding_total += chunks_count_exceeding
+                all_merged_tables, chunks_count_exceeding = zu.compare_dataset_year_chunk_stats(all_merged_tables,
+                                                                chunk_stats_variable_year_rechunked_zarr,
+                                                                main_logger,
+                                                                tables_to_compare_dict,
+                                                                var_name, year,
+                                                                zarr_comparison_stats_path)
 
-        var_end_time = time.time()
-        main_logger.info(f"  Processed {var_name}  in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
+                chunks_count_exceeding_total += chunks_count_exceeding
+
+            var_end_time = time.time()
+            main_logger.info(f"  Processed {var_name}  in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
 
     # Step 6: Aggregates logs
