@@ -39,19 +39,19 @@ allows confirmation that data wasn't modified or lost during the transfer from g
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr --run_local -fv 1 -fy 1 --test_print_stats_chunk 0 41 1 42 -mcstn s3://XYZ --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr --run_local -fv 1 -fy 1 --test_print_stats_chunk 0 41 1 42 -mcstn [local_file in chunk_stats folder] --input_date YYYYMMDD
 
 Small test run:
 python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model -fv 2 -fy 2 --test_print_stats_chunk 0 41 1 42 -bb 0 41 1 42 -mcstn s3://XYZ --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model -fv 2 -fy 2 --test_print_stats_chunk 0 41 1 42 -bb 0 41 1 42 -mcstn [local_file in chunk_stats folder] --input_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
 python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -mcstn s3://XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -mcstn [local_file in chunk_stats folder] -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -mcstn s3://XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is the definitive rechunking run."
+python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -mcstn [local_file in chunk_stats folder] -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is the definitive rechunking run."
 
 Most recent ChatGPT convo about rechunking approach: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6900ce1b-e728-832a-9b87-4702f646da42
 """
@@ -274,7 +274,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     # Adds df for this dataset-year combination to the list of all the dataset-year dfs
     all_merged_tables.append(merged_table)
 
-    # Writes cumulative results (all dataset-year combinations) to Excel file
+    # Writes cumulative results (all dataset-year combinations) to Excel file or parquet tables
 
     # Concatenates all merged dataset-year tables into a single DataFrame
     final_merged_table = pd.concat(all_merged_tables, ignore_index=True)
@@ -283,15 +283,28 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     gross_flux_1x1_outputs = final_merged_table[final_merged_table['layer_name'].str.contains('gross', case=False, na=False)]
     net_flux_1x1_outputs = final_merged_table[final_merged_table['layer_name'].str.contains('net|flux', case=False, na=False)]
 
-    # Puts output rows that don't contain 'flux|gross|net' in a separate tab
+    # Puts output rows that don't contain 'flux|gross|net' in a separate table
     other_1x1_outputs = final_merged_table[~final_merged_table['layer_name'].str.contains('flux|gross|net', case=False, na=False)]
 
-    # Writes to Excel after each iteration of dataset-year to check results more easily (not have to wait until end)
-    with pd.ExcelWriter(zarr_comparison_stats_path, engine='openpyxl', mode='w') as writer:
+    # Saves output to three tabs in Excel
+    if "xlsx" in zarr_comparison_stats_path:
+        # Writes to Excel after each iteration of dataset-year to check results more easily (not have to wait until end)
+        with pd.ExcelWriter(zarr_comparison_stats_path, engine='openpyxl', mode='w') as writer:
 
-        gross_flux_1x1_outputs.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
-        net_flux_1x1_outputs.to_excel(writer, sheet_name='net_outputs_1x1', index=False)
-        other_1x1_outputs.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
+            gross_flux_1x1_outputs.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
+            other_1x1_outputs.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
+            net_flux_1x1_outputs.to_excel(writer, sheet_name='net_outputs_1x1', index=False)
+
+    # Saves output to three parquet tables.
+    # These must be written in the same order as the file names are created in main()
+    elif "parquet" in zarr_comparison_stats_path[0]:
+        gross_flux_1x1_outputs.to_parquet(zarr_comparison_stats_path[0], index=False)
+        other_1x1_outputs.to_parquet(zarr_comparison_stats_path[1], index=False)
+        net_flux_1x1_outputs.to_parquet(zarr_comparison_stats_path[2], index=False)
+
+    else:
+        sys.exit("Table type not found")
+
 
     # Need to return the combined table so that it can be added to in the next iteration
     return all_merged_tables, len(differences_exceeding_tolerance)
@@ -384,34 +397,46 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     main_logger.info(f"Reading local model chunk stats tables: {uu.timestr()}")
     model_chunk_stats_path = os.path.join(cn.local_chunk_stats_path, model_chunk_stats_table_name)
 
-    if "parquet" in model_chunk_stats_table_name:
+    # Text added to output chunk stats tables (Excel or Parquet)
+    comparison_insert = "_rechunk_zarr_comparison"
+
+    # Separate logic for naming chunk stat comparison outputs if using Excel or Parquet (very large runs)
+    if "xlsx" in model_chunk_stats_table_name:
+        main_logger.info(f"Reading model chunk stats from local file: {model_chunk_stats_path}")
+        chunk_stats_model_gross = pd.read_excel(model_chunk_stats_path, sheet_name='gross_outputs_1x1')
+        chunk_stats_model_other = pd.read_excel(model_chunk_stats_path, sheet_name='other_outputs_1x1')
+        chunk_stats_model_net = pd.read_excel(model_chunk_stats_path, sheet_name='net_outputs_1x1')
+
+        # Name of output Excel spreadsheet with chunk stats comparisons
+        name, ext = os.path.splitext(model_chunk_stats_path)
+        zarr_comparison_stats_path = f"{name}{comparison_insert}_{uu.timestr()}{ext}"
+        zarr_comparison_stats_name = os.path.basename(zarr_comparison_stats_path)
+        # print(zarr_comparison_stats_path)
+        # print(zarr_comparison_stats_name)
+
+    elif "parquet" in model_chunk_stats_table_name:
         main_logger.info(f"Reading parquet tables from local files: {model_chunk_stats_path}")
         chunk_stats_model_gross = pd.read_parquet(f"{model_chunk_stats_path}__gross_outputs_1x1.parquet")
         chunk_stats_model_other = pd.read_parquet(f"{model_chunk_stats_path}__other_outputs_1x1.parquet")
         chunk_stats_model_net = pd.read_parquet(f"{model_chunk_stats_path}__net_outputs_1x1.parquet")
 
+        # Names of output parquet tables with chunk stats comparisons
+        zarr_comparison_stats_gross_name = f"{model_chunk_stats_path}__gross_outputs_1x1_{comparison_insert}_{uu.timestr()}.parquet"
+        zarr_comparison_stats_other_name = f"{model_chunk_stats_path}__other_outputs_1x1_{comparison_insert}_{uu.timestr()}.parquet"
+        zarr_comparison_stats_net_name = f"{model_chunk_stats_path}__net_outputs_1x1_{comparison_insert}_{uu.timestr()}.parquet"
+        zarr_comparison_stats_path = [zarr_comparison_stats_gross_name, zarr_comparison_stats_other_name, zarr_comparison_stats_net_name]
+        zarr_comparison_stats_name = [os.path.basename(stats_path) for stats_path in zarr_comparison_stats_path]
+        # print(zarr_comparison_stats_path)
+        # print(zarr_comparison_stats_name)
+
     else:
-        main_logger.info(f"Reading model chunk stats from local file: {model_chunk_stats_path}")
+        sys.exit("Table type not found")
 
-        if not os.path.exists(model_chunk_stats_path):
-            raise FileNotFoundError(f"Chunk stats table not found at {model_chunk_stats_path}")
-
-        chunk_stats_model_gross = pd.read_excel(model_chunk_stats_path, sheet_name='gross_outputs_1x1')
-        chunk_stats_model_other = pd.read_excel(model_chunk_stats_path, sheet_name='other_outputs_1x1')
-        chunk_stats_model_net = pd.read_excel(model_chunk_stats_path, sheet_name='net_outputs_1x1')
 
     # The model chunk stat tables
     tables_to_compare_dict = {"model_gross": chunk_stats_model_gross,
                               "model_other": chunk_stats_model_other,
                               "model_net": chunk_stats_model_net}
-
-    # Name of output tables with chunk stats comparison
-    name, ext = os.path.splitext(model_chunk_stats_path)
-    comparison_insert = "_rechunk_zarr_comparison"
-    zarr_comparison_stats_path = f"{name}{comparison_insert}_{uu.timestr()}{ext}"
-    zarr_comparison_stats_name = os.path.basename(zarr_comparison_stats_path)
-    # print(zarr_comparison_stats_path)
-
 
     ### Step 4: Copy from chunk=4000x4000 zarr to chunk=10000x10000 zarr and obtain chunk stats
     ### for the rechunked zarr
@@ -504,13 +529,26 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
-    main_logger.info(f"Uploading chunk stats comparison spreadsheet to s3: {uu.timestr()}")
     s3_client = boto3.client("s3")
-    try:
-        s3_client.upload_file(zarr_comparison_stats_path, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{zarr_comparison_stats_name}")
-        main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{zarr_comparison_stats_name}: {uu.timestr()}")
-    except Exception as e:
-        main_logger.warning(f"Chunk stats upload to S3 failed: {e}. Continuing without halting.")
+
+    if "xlsx" in model_chunk_stats_table_name:
+        main_logger.info(f"Uploading chunk stats comparison Excel spreadsheet to s3: {uu.timestr()}")
+        try:
+            s3_client.upload_file(zarr_comparison_stats_path, cn.short_bucket_prefix, Key=f"{cn.s3_chunk_stats_path}{zarr_comparison_stats_name}")
+            main_logger.info(f"Chunk stats spreadsheet uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{zarr_comparison_stats_name}: {uu.timestr()}")
+        except Exception as e:
+            main_logger.warning(f"Chunk stats upload to s3 failed: {e}. Continuing without halting.")
+
+    elif "parquet" in model_chunk_stats_table_name:
+        main_logger.info(f"Uploading chunk stats comparison parquet tables to s3: {uu.timestr()}")
+
+        for parquet_name, parquet_path in zip(zarr_comparison_stats_name, zarr_comparison_stats_path):
+            s3_key = f"{cn.s3_chunk_stats_path}{parquet_name}"
+            main_logger.info(f"Uploading {parquet_path} to {s3_key}: {uu.timestr()}")
+            s3_client.upload_file(parquet_path, cn.short_bucket_prefix, Key=s3_key)
+
+    else:
+        sys.exit("Table type not found")
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
