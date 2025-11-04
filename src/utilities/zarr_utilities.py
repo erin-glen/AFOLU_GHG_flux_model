@@ -527,7 +527,7 @@ def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger
     if chunks_count_exceeding_total > 0:
         main_logger.warning(f"WARNING: {chunks_count_exceeding_total} chunks exceeded difference tolerance! Check log!")
     else:
-        main_logger.info(f"{chunks_count_exceeding_total} chunks exceeded the difference tolerance).")
+        main_logger.info(f"{chunks_count_exceeding_total} chunks exceeded the difference tolerance.")
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with zarr chunk stat comparison", main_logger)
 
     s3_client = boto3.client("s3")
@@ -546,7 +546,12 @@ def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger
         main_logger.info(f"Uploading chunk stats comparison parquet tables to s3: {uu.timestr()}")
 
         for parquet_name, parquet_path in zip(zarr_comparison_stats_name, zarr_comparison_stats_path):
-            s3_key = f"{cn.s3_chunk_stats_path}{parquet_name}"
+            parquet_folder = parquet_path.split('/')[1]   # parquet_YYYYMMDD_HH_MM_SS
+            s3_key = f"{cn.s3_chunk_stats_path}{parquet_folder}/{parquet_name}"
+            print(cn.s3_chunk_stats_path)
+            print(parquet_folder)
+            print(parquet_name)
+            print(s3_key)
             main_logger.info(f"Uploading {parquet_path} to {s3_key}: {uu.timestr()}")
             s3_client.upload_file(parquet_path, cn.short_bucket_prefix, Key=s3_key)
 

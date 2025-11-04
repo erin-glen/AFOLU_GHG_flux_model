@@ -2304,17 +2304,17 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         # Add the variables listed here to the mega-zarr
         outputs_to_zarr = cn.outputs_to_zarr # [0:2] # For testing
 
-    #     # Creates the global mega-zarr with metadata only
-    #     zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
-    #                                 (1, chunk_size_pixels, chunk_size_pixels), main_logger)
-    #
-    #     # Checks the zarr coordinates and extent
-    #     fs = fsspec.filesystem("s3", anon=False)
-    #     mapper = fs.get_mapper(raw_mega_zarr_path)
-    #     ds = xr.open_zarr(mapper, consolidated=False)
-    #     print(ds.coords)
-    #     print("y range:", ds.y.values.min(), ds.y.values.max())
-    #     print("x range:", ds.x.values.min(), ds.x.values.max())
+        # Creates the global mega-zarr with metadata only
+        zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+                                    (1, chunk_size_pixels, chunk_size_pixels), main_logger)
+
+        # Checks the zarr coordinates and extent
+        fs = fsspec.filesystem("s3", anon=False)
+        mapper = fs.get_mapper(raw_mega_zarr_path)
+        ds = xr.open_zarr(mapper, consolidated=False)
+        print(ds.coords)
+        print("y range:", ds.y.values.min(), ds.y.values.max())
+        print("x range:", ds.x.values.min(), ds.x.values.max())
 
     else:
         raw_mega_zarr_path = None

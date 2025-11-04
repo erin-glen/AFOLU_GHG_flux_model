@@ -60,14 +60,11 @@ Most recent ChatGPT convo about rechunking approach: https://chatgpt.com/g/g-vK4
 """
 
 import argparse
-import numpy as np
 import xarray as xr
 import zarr
 import fsspec
 import pandas as pd
-import boto3
 import os
-import sys
 import time
 from dask.distributed import Client, print
 
@@ -76,6 +73,7 @@ from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 from src.utilities import zarr_utilities as zu
+from src.utilities import resize_cluster
 
 pd.set_option('display.float_format', '{:.6e}'.format)
 
@@ -316,6 +314,17 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
 
 
     ### Step 5: All iterations done. Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
+
+    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    # cluster, not all the workers.
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
+
+        # Reduces number of workers in the cluster down to 1 if there is more than 10
+        if n_workers > 10:
+            main_logger.info("Resizing cluster to 1 worker")
+            resize_cluster.resize_coiled_cluster(cluster_name, 2)
 
     zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger, model_chunk_stats_table_name, stage,
                                        start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)

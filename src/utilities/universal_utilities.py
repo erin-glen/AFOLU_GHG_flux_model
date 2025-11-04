@@ -1625,8 +1625,8 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     ### Part 3: Saves dataframes to Excel spreadsheet if three of the main output tabs are <900,000 rows; otherwise, saves to parquet format
     # other_1x1_outputs is the output table that has the most rows, so it's the best way to judge what's output is too large for Excel.
     # Excel's row limit is more like 1.5 million, but that'd be a really unwieldy spreadsheet.
-    # if (len(other_1x1_outputs) > 900000) or (len(net_flux_1x1_outputs) > 900000) or (len(gross_flux_1x1_outputs) > 900000):
-    if (len(other_1x1_outputs) > 2) or (len(net_flux_1x1_outputs) > 2) or (len(gross_flux_1x1_outputs) > 2):
+    if (len(other_1x1_outputs) > 900000) or (len(net_flux_1x1_outputs) > 900000) or (len(gross_flux_1x1_outputs) > 900000):
+    # if (len(other_1x1_outputs) > 2) or (len(net_flux_1x1_outputs) > 2) or (len(gross_flux_1x1_outputs) > 2):   # For testing
         main_logger.info(f"Row count {len(other_1x1_outputs)} greater than 900,000. Writing all outputs to Parquet.")
 
         # Saves each output DataFrame as Parquet
