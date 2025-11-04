@@ -2417,7 +2417,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
         # The name of the chunk stats table from the model
         model_chunk_stats_table_name = os.path.basename(model_chunk_stats_path)
-        print(model_chunk_stats_table_name)
+        # print(model_chunk_stats_table_name)
 
         tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
             comparison_insert, main_logger, model_chunk_stats_path, model_chunk_stats_table_name)

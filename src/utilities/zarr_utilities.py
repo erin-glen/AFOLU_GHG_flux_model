@@ -461,7 +461,7 @@ def get_table_names_for_zarr_stats_comparison(comparison_insert, main_logger, mo
                                               model_chunk_stats_table_name):
 
     # Separate logic for naming chunk stat comparison outputs if using Excel or Parquet (very large runs)
-    if "xlsx" in model_chunk_stats_table_name:
+    if "xlsx" in model_chunk_stats_path:
         main_logger.info(f"Reading model chunk stats from local file: {model_chunk_stats_path}")
         chunk_stats_model_gross = pd.read_excel(model_chunk_stats_path, sheet_name=cn.gross_outputs_1x1)
         chunk_stats_model_other = pd.read_excel(model_chunk_stats_path, sheet_name=cn.other_outputs_1x1)
@@ -474,7 +474,7 @@ def get_table_names_for_zarr_stats_comparison(comparison_insert, main_logger, mo
         # print(zarr_comparison_stats_path)
         # print(zarr_comparison_stats_name)
 
-    elif "parquet" in model_chunk_stats_table_name:
+    elif "parquet" in model_chunk_stats_path:
         main_logger.info(f"Reading parquet tables from local files: {model_chunk_stats_path}")
         chunk_stats_model_gross = pd.read_parquet(f"{model_chunk_stats_path}__{cn.gross_outputs_1x1}.parquet")
         chunk_stats_model_other = pd.read_parquet(f"{model_chunk_stats_path}__{cn.other_outputs_1x1}.parquet")
@@ -528,11 +528,11 @@ def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger
         main_logger.warning(f"WARNING: {chunks_count_exceeding_total} chunks exceeded difference tolerance! Check log!")
     else:
         main_logger.info(f"{chunks_count_exceeding_total} chunks exceeded the difference tolerance).")
-    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with zarr chunk stat comparison", main_logger)
 
     s3_client = boto3.client("s3")
 
-    if "xlsx" in model_chunk_stats_table_name:
+    if "xlsx" in zarr_comparison_stats_path:
         main_logger.info(f"Uploading chunk stats comparison Excel spreadsheet to s3: {uu.timestr()}")
         try:
             s3_client.upload_file(zarr_comparison_stats_path, cn.short_bucket_prefix,
@@ -542,7 +542,7 @@ def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger
         except Exception as e:
             main_logger.warning(f"Chunk stats upload to s3 failed: {e}. Continuing without halting.")
 
-    elif "parquet" in model_chunk_stats_table_name:
+    elif "parquet" in zarr_comparison_stats_path[0]:  # Because this is a list, so just use the first one to get the pattern
         main_logger.info(f"Uploading chunk stats comparison parquet tables to s3: {uu.timestr()}")
 
         for parquet_name, parquet_path in zip(zarr_comparison_stats_name, zarr_comparison_stats_path):
