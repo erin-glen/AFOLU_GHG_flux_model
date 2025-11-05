@@ -44,9 +44,14 @@ def bounds_for_tile(tid):
 
 def output_paths(ds_key, tid):
     ds = cn.datasets["peat"][ds_key]
+    date_str = cn.today_date
     fname = f"{tid}_{ds_key}_mask.tif"
-    local = Path(ds["local_processed"]) / fname
-    s3_key = f"{ds['s3_processed'].rstrip('/')}/{fname}"
+
+    local_dir = Path(ds["local_processed"]) / date_str
+    local_dir.mkdir(parents=True, exist_ok=True)
+    local = local_dir / fname
+
+    s3_key = f"{ds['s3_processed'].rstrip('/')}/{date_str}/{fname}"
     return local, s3_key
 
 def cache_shapefile(prefix, dest_dir):
@@ -254,17 +259,26 @@ def build_tasks(tids, ds_keys, mode):
 # Main orchestrator
 ################################################################################
 def main(tile_id=None, dataset=None, client="coiled", run_mode="default"):
+    cluster = None
+    client_obj = None
+
     if client == "local":
         cluster = LocalCluster(processes=False, dashboard_address=None)
         client_obj = Client(cluster)
         log.info("Running locally.")
     else:
-        cluster, client_obj = uutil.connect_to_cluster(
+        cluster, client_obj, run_local = uutil.connect_to_cluster(
             cluster_name="peat_masks",
             n_workers=20,
             region="us-east-1",
         )
-        log.info(f"Running on Coiled: {cluster.name}")
+
+        if run_local:
+            log.info("Coiled cluster unavailable. Falling back to a local Dask cluster.")
+            cluster = LocalCluster(processes=False, dashboard_address=None)
+            client_obj = Client(cluster)
+        else:
+            log.info(f"Running on Coiled: {cluster.name}")
 
     ds_keys = [dataset] if dataset else ["peatml", "gpd", "peatmap", "ogh", "ogh_unthresholded"]
     tids = [tile_id] if tile_id else cn.tile_id_list
@@ -275,8 +289,9 @@ def main(tile_id=None, dataset=None, client="coiled", run_mode="default"):
     dask.compute(*tasks)
 
     # Close out
-    client_obj.close()
-    if client == "coiled":
+    if client_obj is not None:
+        client_obj.close()
+    if cluster is not None:
         cluster.close()
     log.info("All tasks completed.")
 
