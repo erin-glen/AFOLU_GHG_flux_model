@@ -7,7 +7,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "1.0.3_zarr_testing"
+model_version = "1.0.3_1884_chunks"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets
@@ -846,6 +846,15 @@ veg_intermediate_output_dirs = [
 ]
 
 # Summative outputs from core vegetation model
+veg_summative_output_patterns = [
+    gross_emis_all_C_pools_CO2_only_pattern, gross_emis_all_C_pools_non_CO2_only_pattern, gross_emis_all_C_pools_all_gases_pattern,
+    gross_removals_all_C_pools_pattern,
+    net_flux_agc_pattern, net_flux_bgc_pattern, net_flux_deadwood_c_pattern, net_flux_litter_c_pattern,
+    net_flux_all_C_pools_CO2_only_pattern, net_flux_all_C_pools_all_gases_pattern,
+    non_soil_c_modeled_dens_pattern
+]
+
+# Summative outputs from core vegetation model
 veg_summative_output_dirs = [
     # Outputs per interval
     f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
@@ -859,25 +868,11 @@ veg_summative_output_dirs = [
     f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{outputs_path}{non_soil_c_modeled_dens_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"  # Only per interval
-
-    # # Outputs that cover the entire model (start year to end of model).
-    # # These also need to be specifically specified in the summative outputs script.
-    # # TODO: NOT SURE IF I NEED THESE ANYMORE, AFTER SOME CHANGES TO create_output_dir_name_list TO INCLUDE FULL MODEL PERIOD OUTPUT CREATION. THIS EXISTED FOR V1.0.0 BUT NOT SURE HOW USED IT WAS.
-    # f"{outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{gross_emis_all_C_pools_non_CO2_only_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{gross_removals_all_C_pools_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{net_flux_agc_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{net_flux_bgc_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{net_flux_deadwood_c_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{net_flux_litter_c_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    # f"{outputs_path}{net_flux_all_C_pools_all_gases_pattern}/{model_type_placholder}/MODEL_INTERVAL_TYPE_intervals/FULL_MODEL/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
 # Only specific datasets output to zarrs.
 # Starts with non-summative outputs from the vegetation model
-outputs_to_zarr = [
+core_veg_outputs_to_zarr = [
     agc_modeled_dens_pattern, bgc_modeled_dens_pattern, deadwood_c_modeled_dens_pattern, litter_c_modeled_dens_pattern,
     agc_gross_emis_pattern, bgc_gross_emis_pattern, deadwood_c_gross_emis_pattern, litter_c_gross_emis_pattern,
     ch4_flux_pattern, n2o_flux_pattern,
@@ -885,15 +880,9 @@ outputs_to_zarr = [
     land_state_pattern, composite_primary_forest, forest_age_output_pattern
 ]
 
-# # Also want to add the metadata for the summative outputs to the global zarr upfront for simplicity,
-# # rather than having to add more empty layers to the zarr at the summative stage
-# outputs_to_zarr = outputs_to_zarr + [
-#     gross_emis_all_C_pools_CO2_only_pattern, gross_emis_all_C_pools_non_CO2_only_pattern, gross_emis_all_C_pools_all_gases_pattern,
-#     gross_removals_all_C_pools_pattern,
-#     net_flux_agc_pattern, net_flux_bgc_pattern, net_flux_deadwood_c_pattern, net_flux_litter_c_pattern,
-#     net_flux_all_C_pools_CO2_only_pattern, net_flux_all_C_pools_all_gases_pattern,
-#     non_soil_c_modeled_dens_pattern
-# ]
+# Also want to add the metadata for the summative outputs to the global zarr upfront for simplicity,
+# rather than having to add more empty layers to the zarr at the summative stage
+full_outputs_to_zarr = core_veg_outputs_to_zarr.extend(veg_summative_output_patterns)
 
 
 #######

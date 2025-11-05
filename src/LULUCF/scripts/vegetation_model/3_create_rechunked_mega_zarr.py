@@ -181,9 +181,9 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
 
     # Limits the processed variables to the supplied number (for testing)
     if first_variables_to_process:
-        vars_to_process = cn.outputs_to_zarr[0:first_variables_to_process]
+        vars_to_process = cn.full_outputs_to_zarr[0:first_variables_to_process]
     else:
-        vars_to_process = cn.outputs_to_zarr
+        vars_to_process = cn.full_outputs_to_zarr
     main_logger.info(f"Variables to rechunk and compare chunk stats for: {vars_to_process}")
 
     if first_years_to_process:

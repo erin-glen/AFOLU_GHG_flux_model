@@ -46,7 +46,7 @@ from src.utilities import numba_utilities as nu
 from src.utilities import universal_utilities as uu
 from src.utilities import zarr_utilities as zu
 from src.utilities import resize_cluster
-from src.utilities.constants_and_names import outputs_to_zarr
+from src.utilities.constants_and_names import full_outputs_to_zarr
 
 # STEP 1: Start Dask cluster via Coiled
 
@@ -153,7 +153,7 @@ def extract_10x10(var, year_idx, tile_id, raw_path, output_base):
     return s3_filename
 
 
-outputs_to_process = cn.outputs_to_zarr
+outputs_to_process = cn.full_outputs_to_zarr
 years_to_process = len(cn.interval_end_years_annual)
 
 # outputs_to_process = cn.outputs_to_zarr[0:1]

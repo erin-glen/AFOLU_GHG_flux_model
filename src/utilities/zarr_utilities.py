@@ -345,7 +345,8 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
         year = f"{int(year) - 1}_{year}"
     else:
         model_table = tables_to_compare_dict[cn.other_outputs_1x1]
-        year = str(year)
+        # year = str(year)  # May need for vegetation model, but messed up the summative output results. So, not sure what to do.
+        year = year
 
     # Converts zarr chunk stats from dictionary to dataframe
     zarr_df = pd.DataFrame(chunk_stats_variable_year_zarr)

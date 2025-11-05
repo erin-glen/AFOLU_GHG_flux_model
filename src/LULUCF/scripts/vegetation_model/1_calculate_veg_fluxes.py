@@ -10,19 +10,19 @@ python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetat
 
 Coiled small tests (1x1 deg chunk needs 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -bb -64 -22 -63 -21 -cs 1 --run_date YYYYMMDD --create_zarr
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -bb -64 -22 -63 -21 -cs 1 --create_zarr --run_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --create_zarr --run_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --create_zarr --run_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --run_date 20250921 --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --create_zarr --run_date 20250921 --log_note "This is a global run for model v1.0.0 (2016-2024)."
 
 To download all outputs locally:
 python src/utilities/download_outputs_local.py v1_test_name 23_-4_24_-3
@@ -2302,7 +2302,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         raw_mega_zarr_path = zu.create_mega_zarr_paths(chunk_size_pixels, interval_type, model_type, run_date)
 
         # Add the variables listed here to the mega-zarr
-        outputs_to_zarr = cn.outputs_to_zarr # [0:2] # For testing
+        outputs_to_zarr = cn.full_outputs_to_zarr # [0:2] # For testing
 
         # Creates the global mega-zarr with metadata only
         zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
@@ -2490,7 +2490,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
                                           stage, start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
 
 
-    # Step 7: Aggregates logs
+    ### Step 7: Aggregates logs
 
     # Worker logs are not aggregated if doing a local run (since there are no workers)
     if not run_local:
