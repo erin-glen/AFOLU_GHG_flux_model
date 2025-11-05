@@ -141,7 +141,7 @@ peat_mask_dirs = {
     'peatmap': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/PEATMAP/tiles'),
     'peatml': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/PEATML/tiles'),
     'ogh': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/OGH/tiles'),
-    'ogh_unthresholded': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/OGH/tiles_unthresholded'),
+    'ogh_unthresholded': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/OGH/tiles_unthresholded/20251105'),
     'union_mask': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/union/30m/tiles'),
 }
 
