@@ -711,10 +711,14 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
                         padded_data[row_offset:end_row, col_offset:end_col] = data[:end_row - row_offset, :end_col - col_offset]
 
                         data = padded_data
-                        status = f"padded {bounds_str} chunk from {original_shape} to {expected_shape}"
+                        status = f"padded {bounds_str} for {uri} from {original_shape} to {expected_shape}"
 
                     else:
-                        status = "success- chunk complete, no padding needed"
+                        status = f"success- {bounds_str} for {uri} complete, no padding needed"
+
+            # If previous attempts to download failed, log here that this attempt succeeded
+            if attempt > 1:
+                lu.print_and_log(f"Succeeded downloading {uri} on attempt {attempt}: {timestr()}",False, logger_worker)
 
             return data, status
 
@@ -725,16 +729,16 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
             # Retryable errors-- these mean that the input exists but it's not being successfully accessed,
             # perhaps because of too many simultaneous requests to s3.
             # List of keywords for attempting retries is just from encountering various issues over time and including them here
-            if any(keyword in err_msg for keyword in ["SlowDown", "Please reduce", "503", "Read failed", "internal error", "not recognized"]):
+            if any(keyword in err_msg for keyword in ["SlowDown", "Please reduce", "503", "Read failed", "previous exception", "internal error", "not recognized"]):
                 if attempt < MAX_RETRIES - 1:
                     sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
-                    lu.print_and_log(f"Retryable S3 error '{err_msg}' for {uri}. Retrying in {sleep_time:.2f}s...", False, logger_worker)
+                    lu.print_and_log(f"Retryable S3 error '{err_msg}' for {uri} on attempt {attempt}. Retrying in {sleep_time:.2f}s...: {timestr()}", False, logger_worker)
                     time.sleep(sleep_time)
                     continue
                 else:
                     # Too many retries → fail hard
                     raise RuntimeError(
-                        f"Retryable S3 error ('{err_msg}') persisted after {MAX_RETRIES} retries for {uri}"
+                        f"Retryable S3 error ('{err_msg}') persisted after {MAX_RETRIES} retries for {uri}: {timestr()}"
                     )
 
             # Non-retryable: missing key or other rasterio I/O issue

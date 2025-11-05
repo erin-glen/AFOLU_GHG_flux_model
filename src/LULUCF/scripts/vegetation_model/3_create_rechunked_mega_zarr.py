@@ -184,13 +184,13 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
         vars_to_process = cn.full_outputs_to_zarr[0:first_variables_to_process]
     else:
         vars_to_process = cn.full_outputs_to_zarr
-    main_logger.info(f"Variables to rechunk and compare chunk stats for: {vars_to_process}")
+    main_logger.info(f"Variables to rechunk and compare chunk stats for: {vars_to_process} out of {len(cn.full_outputs_to_zarr)}")
 
     if first_years_to_process:
         years_to_process = first_years_to_process
     else:
         years_to_process = len(cn.interval_end_years_annual)
-    main_logger.info(f"Years to rechunk and compare chunk stats for: {years_to_process}")
+    main_logger.info(f"Years to rechunk and compare chunk stats for: {years_to_process} out of {len(cn.interval_end_years_annual)}")
 
     lat_size = int(180 / cn.resolution)  # 720000 rows
     lon_size = int(360 / cn.resolution)  # 1440000 columns

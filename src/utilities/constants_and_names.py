@@ -882,7 +882,8 @@ core_veg_outputs_to_zarr = [
 
 # Also want to add the metadata for the summative outputs to the global zarr upfront for simplicity,
 # rather than having to add more empty layers to the zarr at the summative stage
-full_outputs_to_zarr = core_veg_outputs_to_zarr.extend(veg_summative_output_patterns)
+full_outputs_to_zarr = core_veg_outputs_to_zarr
+full_outputs_to_zarr.extend(veg_summative_output_patterns)
 
 
 #######

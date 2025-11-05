@@ -280,12 +280,12 @@ def main(cluster_name, year_range, input_date, number_of_workers, run_local=Fals
     output_dir_list_per_ha = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, interval_type, start_year, '4000',
                                                             model_type, interval_end_years, interval_year_diff, input_date, "per_ha")
     output_dir_list_per_pixel = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, interval_type, start_year, '4000',
-                                                               model_type, interval_end_years, interval_year_diff, input_date, "per_pixel")
+                                                               model_type, interval_end_years, interval_year_diff, input_date, False, "per_pixel")
 
     # Also need to aggregate the land state nodes
     land_state_node_list = [s for s in cn.veg_core_output_dirs if cn.land_state_pattern in s]
     land_state_node_list = uu.create_output_dir_name_list(land_state_node_list, interval_type, start_year,'4000',
-                                                     model_type, interval_end_years, interval_year_diff, input_date)
+                                                     model_type, interval_end_years, interval_year_diff, input_date, False)
 
     # Full list of folders to aggregate, in alphabetical order
     output_dir_list = output_dir_list_per_ha + output_dir_list_per_pixel + land_state_node_list

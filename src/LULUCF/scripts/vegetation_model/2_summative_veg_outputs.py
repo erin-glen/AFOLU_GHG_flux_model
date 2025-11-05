@@ -350,6 +350,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
     main_logger.info(f"Run date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
+    main_logger.info(f"Tolerance for comparison between model and zarr chunk stat metrics: {cn.zarr_difference_tolerance}")
 
     # Calculates the interval type, difference between start and end years of intervals,
     # and the model output years for the model run
@@ -395,7 +396,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
     summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, interval_type, start_year,
                                                                             chunk_size_pixels, model_type, interval_end_years_list,
-                                                                            interval_year_diff_list, input_date, True, "per_ha")
+                                                                            interval_year_diff_list, input_date, False, "per_ha")
 
     if is_large_run:
         main_logger.info(f"outputs_dir_list:")
@@ -552,6 +553,9 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
 
     # Sets it so that no worker logs are created if doing a local run
     if not run_local:
+
+        main_logger.info("Resizing cluster to 1 worker")
+        resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
         # Creates combined log from all workers if not deactivated
         worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
