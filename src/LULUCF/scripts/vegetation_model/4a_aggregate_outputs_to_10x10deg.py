@@ -6,30 +6,29 @@ Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 Local test (Dask part does not work because of client.submit()):
 python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -bb 10 49 11 50 --run_local --no_upload -fy 1 -fv 1 -ft 1 --input_date YYYYMMDD
 
-Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
+Coiled small tests (needs 64 GB because of per-ha and per-pixel outputs):
+python -m src.utilities.create_cluster -n 1 -t 1 -m 64 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -bb 10 49 11 50 fy 2 -fv 2 -ft 2 --input_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
+python -m src.utilities.create_cluster -n 1 -t 1 -m 64 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 --input_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
-python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn vegetation_model
+python -m src.utilities.create_cluster -n 20 -t 1 -m 64 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
-python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn vegetation_model
+python -m src.utilities.create_cluster -n 100 -t 1 -m 64 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 
 Full run:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_model
+python -m src.utilities.create_cluster -n 200 -t 1 -m 64 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/690a21cd-2ea0-8333-9c7f-7091f8016fb3
 """
 
-import xarray as xr
 import argparse
 import numpy as np
 import rasterio
@@ -40,24 +39,18 @@ import psutil
 import os
 from dask.distributed import print
 from rasterio.transform import from_origin
-from osgeo import gdal
-import s3fs
 import zarr
 
 # Project imports
 from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
-from src.utilities import numba_utilities as nu
 from src.utilities import universal_utilities as uu
 from src.utilities import zarr_utilities as zu
 from src.utilities import resize_cluster
-from src.utilities.constants_and_names import full_outputs_to_zarr
 
 
 # Write single GeoTIFF to S3 using in-memory buffer
 def write_single_geotiff_to_s3(var, year_idx, tile_id, data, transform, s3_path, logger_worker):
-
-    process = psutil.Process(os.getpid())
 
     fs = fsspec.filesystem("s3", anon=False)
 
@@ -113,21 +106,20 @@ def extract_10x10(var, year_idx, tile_id, raw_path, output_base, no_upload):
 
     # Open Zarr group using fsspec mapper
     fs = fsspec.filesystem("s3", anon=False)
-    zarr_store = zarr.open_group(fs.get_mapper(raw_path), mode="r")
+    model_zarr_store = zarr.open_group(fs.get_mapper(raw_path), mode="r")
 
-    # Determine pixel indices
-    lat_array = zarr_store["y"][:]
-    lon_array = zarr_store["x"][:]
+    # Determine pixel indices (applies to model outputs and pixel area)
+    lat_array = model_zarr_store["y"][:]
+    lon_array = model_zarr_store["x"][:]
 
-    # Get index ranges
+    # Get index ranges (applies to model outputs and pixel area)
     y0 = np.searchsorted(lat_array[::-1], max_y, side='right')
     y1 = np.searchsorted(lat_array[::-1], min_y, side='left')
     x0 = np.searchsorted(lon_array, min_x, side='left')
     x1 = np.searchsorted(lon_array, max_x, side='right')
 
-    # Flip y indices since lat is descending
+    # Flips y indices since lat is descending
     y0, y1 = len(lat_array) - y1, len(lat_array) - y0
-
     if y0 > y1:
         y0, y1 = y1, y0
 
@@ -136,9 +128,15 @@ def extract_10x10(var, year_idx, tile_id, raw_path, output_base, no_upload):
     lu.print_and_log(f"Extracting {var} for {year} for {tile_id}: {uu.timestr()}", False, logger_worker)
     extract_start_time = time.time()
 
-    # Load data block (Zarr lazy indexing)
-    block = zarr_store[var][year_idx, y0:y1, x0:x1]
-    data = block.astype(np.float32)
+    # Loads model output data block
+    data_per_ha = model_zarr_store[var][year_idx, y0:y1, x0:x1]
+
+    # Calculates per-pixel output (for numeric outputs only)
+    pixel_area_zarr_store = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
+    pixel_area = pixel_area_zarr_store['pixel_area'][y0:y1, x0:x1]
+
+    # Converts per-ha to per-pixel
+    data_per_pixel = data_per_ha * pixel_area / 10000
 
     # GeoTransform (top-left corner)
     transform = from_origin(min_x, max_y, cn.resolution, cn.resolution)
@@ -150,51 +148,70 @@ def extract_10x10(var, year_idx, tile_id, raw_path, output_base, no_upload):
     # Establishes year/year range and units for dataset
     if "density" in var:
         year_or_range = f"{year}"
-        units = "_ha"
+        per_ha_units = "_ha"
+        per_pixel_units = "_pixel"
     elif "emis" in var:
         year_or_range = f"{year - 1}_{year}"
-        units = "_ha_yr"
+        per_ha_units = "_ha_yr"
+        per_pixel_units = "_pixel_yr"
     elif "removals" in var:
         year_or_range = f"{year - 1}_{year}"
-        units = "_ha_yr"
+        per_ha_units = "_ha_yr"
+        per_pixel_units = "_pixel_yr"
     elif "net" in var:
         year_or_range = f"{year - 1}_{year}"
-        units = "_ha_yr"
+        per_ha_units = "_ha_yr"
+        per_pixel_units = "_pixel_yr"
     elif cn.land_state_pattern in var:
         year_or_range = f"{year - 1}_{year}"
-        units = ""
+        per_ha_units = ""
+        per_pixel_units = ""
     else:
         year_or_range = f"{year}"
-        units = ""
+        per_ha_units = ""
+        per_pixel_units = ""
 
-    # Output path
+    # Output names and paths for per-ha and per-pixel outputs
     output_path = output_base.replace("PATTERN", var)
     output_path = output_path.replace("START_END", year_or_range)
-    output_path = output_path.replace("PER_HA_OR_PIXEL", units)
-    output_name = f"{tile_id}__{var}{units}_{year_or_range}.tif"
-    s3_filename = f"{output_path}{output_name}"
+    output_path_per_ha = output_path.replace("PER_HA_OR_PIXEL", per_ha_units)
+    output_name_per_ha = f"{tile_id}__{var}{per_ha_units}_{year_or_range}.tif"
+    s3_filename_per_ha = f"{output_path_per_ha}{output_name_per_ha}"
+
+    output_path_per_pixel = output_path.replace("PER_HA_OR_PIXEL", per_pixel_units)
+    output_name_per_pixel = f"{tile_id}__{var}{per_pixel_units}_{year_or_range}.tif"
+    s3_filename_per_pixel = f"{output_path_per_pixel}{output_name_per_pixel}"
 
     # Uploads to s3 if requested
     if no_upload == False:
 
         # Writes geotif to S3
-        valid_pixel_count = write_single_geotiff_to_s3(var, year_idx, tile_id, data, transform, s3_filename, logger_worker)
+        valid_pixel_count_per_ha = write_single_geotiff_to_s3(var, year_idx, tile_id, data_per_ha, transform, s3_filename_per_ha, logger_worker)
 
-        # Most stats for the 10x10 aren't calculated.
+        # Conditionally writes per-pixel output (only if dataset is float32, i.e. numeric output from model).
+        # Pixel count from per-pixel outputs is not used.
+        if model_zarr_store[var].dtype == np.float32:
+            valid_pixel_count_per_pixel = write_single_geotiff_to_s3(
+                var, year_idx, tile_id, data_per_pixel, transform, s3_filename_per_pixel, logger_worker
+            )
+        else:
+            valid_pixel_count_per_pixel = None
+
+        # Most stats for the 10x10 deg outputs aren't calculated.
         # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
         # Dictionary is in a list because it's necessary for chunk stats processing later.
         chunk_stats = [{
             'chunk_id': 'N/A',
             'tile_id': tile_id,
-            'layer_name': output_name,
-            'tile_name': output_name,
+            'layer_name': output_name_per_ha,
+            'tile_name': output_name_per_ha,
             'in_out': 'output_layer',
             'pattern': var,
             'years': year_or_range,
             'min_value': 'no data',
             'mean_value': 'no data',
             'max_value': 'no data',
-            'count_value': valid_pixel_count,
+            'count_value': valid_pixel_count_per_ha,
             'sum_value': 'no data',
             'data_type': 'no data'
         }]
@@ -207,8 +224,8 @@ def extract_10x10(var, year_idx, tile_id, raw_path, output_base, no_upload):
         chunk_stats = [{
             'chunk_id': 'N/A',
             'tile_id': tile_id,
-            'layer_name': output_name,
-            'tile_name': output_name,
+            'layer_name': output_name_per_ha,
+            'tile_name': output_name_per_ha,
             'in_out': 'output_layer',
             'pattern': var,
             'years': year_or_range,
@@ -225,7 +242,7 @@ def extract_10x10(var, year_idx, tile_id, raw_path, output_base, no_upload):
 
 
 def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_stats_table_name, chunk_shapefile_uri=False, bounding_box=None,
-         test_print_stats_chunk=None, first_variables_to_process=None, first_years_to_process=None,
+         first_variables_to_process=None, first_years_to_process=None,
          first_tiles_to_process=None, log_note=None):
 
 
@@ -256,8 +273,6 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
     main_logger.info(f"Raw mega-zarr path: {raw_mega_zarr_path}")
     main_logger.info(f"Rechunked mega-zarr path: {rechunked_mega_zarr_path}")
     main_logger.info(f"Number of years to rechunk: {first_years_to_process}")
-    main_logger.info(f"Test chunk (to print stats): {test_print_stats_chunk}")
-    main_logger.info(f"Tolerance for comparison between model and zarr chunk stat metrics: {cn.zarr_difference_tolerance}")
 
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -381,7 +396,6 @@ if __name__ == "__main__":
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-ft', '--first_tiles_to_process', type=int, help='Number of tiles to process (for testing)')
     parser.add_argument('-fy', '--first_years_to_process', type=int, help='Number of years to process from raw mega-zarr (for testing)')
-    parser.add_argument('-tpsc', '--test_print_stats_chunk', nargs=4, type=float, help='Bounding box to print rechunked zarr stats from: W, S, E, N (degrees)')
     parser.add_argument('-mcstn', '--model_chunk_stats_table_name', help='s3 path for model chunk stats table that will be compared with zarr chunk stats')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
@@ -398,7 +412,6 @@ if __name__ == "__main__":
     first_tiles_to_process = args.first_tiles_to_process
     first_variables_to_process = args.first_variables_to_process
     first_years_to_process = args.first_years_to_process
-    test_print_stats_chunk = args.test_print_stats_chunk
     model_chunk_stats_table_name = args.model_chunk_stats_table_name
     log_note = args.log_note
 
@@ -408,5 +421,5 @@ if __name__ == "__main__":
 
     # Create the cluster with command line arguments
     main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_stats_table_name, chunk_shapefile_uri, bounding_box=bounding_box,
-         test_print_stats_chunk=test_print_stats_chunk, first_variables_to_process=first_variables_to_process, first_years_to_process=first_years_to_process,
+         first_variables_to_process=first_variables_to_process, first_years_to_process=first_years_to_process,
          first_tiles_to_process=first_tiles_to_process, log_note=log_note)
