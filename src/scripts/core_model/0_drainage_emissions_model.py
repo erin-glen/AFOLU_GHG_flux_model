@@ -1232,10 +1232,11 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2021 \
   --end_year 2024 \
-  --all_five_year_periods \
+  --interval_type five_year \
   --mark_missing_factors \
   --count_burned_years \
-  --run_name ogh_sensitivity_1km
+  --run_name ogh_sensitivity_1km \
+  --peat_threshold 10.0
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
@@ -1247,8 +1248,8 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --count_burned_years \
   --run_name ogh_sensitivity_1km \
   --interval_type five_year \
-  --peat_dataset gfw \
-  --run_name gfw_standard_model_1km
+  --peat_dataset ogh \
+  --run_name ogh_standard_model_1km
   
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
