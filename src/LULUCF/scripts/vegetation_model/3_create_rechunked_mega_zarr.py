@@ -219,7 +219,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     comparison_insert = "_rechunk_zarr_comparison"
 
     tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
-        comparison_insert, main_logger, model_chunk_stats_path, model_chunk_stats_table_name)
+        comparison_insert, main_logger, model_chunk_stats_path)
 
 
     ### Step 4: Copy from chunk=4000x4000 zarr to chunk=10000x10000 zarr and obtain chunk stats

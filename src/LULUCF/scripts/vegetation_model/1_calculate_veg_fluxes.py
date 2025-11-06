@@ -2421,7 +2421,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         # print(model_chunk_stats_table_name)
 
         tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
-            comparison_insert, main_logger, model_chunk_stats_path, model_chunk_stats_table_name)
+            comparison_insert, main_logger, model_chunk_stats_path)
 
         # Resizes cluster up to 50 workers for zarr chunk stat comparison only if a large-scale run
         if (not run_local) and (is_large_run == True):

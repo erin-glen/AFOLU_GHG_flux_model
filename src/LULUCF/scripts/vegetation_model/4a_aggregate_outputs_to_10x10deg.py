@@ -104,36 +104,61 @@ def extract_10x10(var, year_idx, tile_id, raw_path, output_base, no_upload):
     # Convert tile_id to bounding box (W, S, E, N)
     min_x, min_y, max_x, max_y = uu.get_10x10_tile_bounds(tile_id)
 
+    year = cn.interval_end_years_annual[year_idx]
+
     # Open Zarr group using fsspec mapper
     fs = fsspec.filesystem("s3", anon=False)
     model_zarr_store = zarr.open_group(fs.get_mapper(raw_path), mode="r")
 
     # Determine pixel indices (applies to model outputs and pixel area)
-    lat_array = model_zarr_store["y"][:]
-    lon_array = model_zarr_store["x"][:]
+    lat_array_model = model_zarr_store["y"][:]
+    lon_array_model = model_zarr_store["x"][:]
 
     # Get index ranges (applies to model outputs and pixel area)
-    y0 = np.searchsorted(lat_array[::-1], max_y, side='right')
-    y1 = np.searchsorted(lat_array[::-1], min_y, side='left')
-    x0 = np.searchsorted(lon_array, min_x, side='left')
-    x1 = np.searchsorted(lon_array, max_x, side='right')
+    y0_model = np.searchsorted(lat_array_model[::-1], max_y, side='right')
+    y1_model = np.searchsorted(lat_array_model[::-1], min_y, side='left')
+    x0_model = np.searchsorted(lon_array_model, min_x, side='left')
+    x1_model = np.searchsorted(lon_array_model, max_x, side='right')
 
     # Flips y indices since lat is descending
-    y0, y1 = len(lat_array) - y1, len(lat_array) - y0
-    if y0 > y1:
-        y0, y1 = y1, y0
-
-    year = cn.interval_end_years_annual[year_idx]
+    y0_model, y1_model = len(lat_array_model) - y1_model, len(lat_array_model) - y0_model
+    if y0_model > y1_model:
+        y0_model, y1_model = y1_model, y0_model
 
     lu.print_and_log(f"Extracting {var} for {year} for {tile_id}: {uu.timestr()}", False, logger_worker)
     extract_start_time = time.time()
 
     # Loads model output data block
-    data_per_ha = model_zarr_store[var][year_idx, y0:y1, x0:x1]
+    data_per_ha = model_zarr_store[var][year_idx, y0_model:y1_model, x0_model:x1_model]
 
     # Calculates per-pixel output (for numeric outputs only)
-    pixel_area_zarr_store = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
-    pixel_area = pixel_area_zarr_store['pixel_area'][y0:y1, x0:x1]
+    # pixel_area_zarr_store = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
+    pixel_area_zarr_store = zarr.open_group(fs.get_mapper('s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20251106/global_pixel_area_20251106.zarr'), mode="r")
+    # pixel_area_zarr_store = zarr.open_group(fs.get_mapper('s3://gfw2-data/climate/AFOLU_flux_model/global_contextual_zarrs/pixel_area/20250925/global_pixel_area_20250925.zarr'), mode="r")
+
+    # Determine pixel indices (applies to model outputs and pixel area)
+    lat_array_pixel_area = pixel_area_zarr_store["y"][:]
+    lon_array_pixel_area = pixel_area_zarr_store["x"][:]
+
+    # Get index ranges (applies to model outputs and pixel area)
+    y0_pixel_area = np.searchsorted(lat_array_pixel_area[::-1], max_y, side='right')
+    y1_pixel_area = np.searchsorted(lat_array_pixel_area[::-1], min_y, side='left')
+    x0_pixel_area = np.searchsorted(lon_array_pixel_area, min_x, side='left')
+    x1_pixel_area = np.searchsorted(lon_array_pixel_area, max_x, side='right')
+
+    # Flips y indices since lat is descending
+    y0_pixel_area, y1_pixel_area = len(lat_array_pixel_area) - y1_pixel_area, len(lat_array_pixel_area) - y0_pixel_area
+    if y0_pixel_area > y1_pixel_area:
+        y0_pixel_area, y1_pixel_area = y1_pixel_area, y0_pixel_area
+
+    pixel_area = pixel_area_zarr_store['band_data'][y0_pixel_area:y1_pixel_area, x0_pixel_area:x1_pixel_area]
+    # pixel_area = pixel_area_zarr_store['pixel_area'][y0_pixel_area:y1_pixel_area, x0_pixel_area:x1_pixel_area]
+    print("y0:", y0_pixel_area)
+    print("y1:", y1_pixel_area)
+    print("x0:", x0_pixel_area)
+    print("x1:", x1_pixel_area)
+    print(pixel_area)
+    # sys.quit()
 
     # Converts per-ha to per-pixel
     data_per_pixel = data_per_ha * pixel_area / 10000

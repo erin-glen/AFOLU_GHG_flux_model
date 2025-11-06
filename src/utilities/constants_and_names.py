@@ -885,7 +885,7 @@ core_veg_outputs_to_zarr = [
 full_outputs_to_zarr = core_veg_outputs_to_zarr
 full_outputs_to_zarr.extend(veg_summative_output_patterns)
 
-pixel_area_global_zarr = "s3://gfw2-data/climate/AFOLU_flux_model/global_contextual_zarrs/pixel_area/20250925/global_pixel_area_20250925.zarr"
+pixel_area_global_zarr = "s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20251106/global_pixel_area_20251106.zarr"
 
 
 #######

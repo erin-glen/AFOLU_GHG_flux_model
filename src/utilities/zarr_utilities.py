@@ -458,8 +458,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
 # Works for both Excel and Parquet model chunk stats.
 # If the model being compared against output Parquet chunk stats, this will return
 # Parquet table names for the comparison chunk stats. 
-def get_table_names_for_zarr_stats_comparison(comparison_insert, main_logger, model_chunk_stats_path,
-                                              model_chunk_stats_table_name):
+def get_table_names_for_zarr_stats_comparison(comparison_insert, main_logger, model_chunk_stats_path):
 
     # Separate logic for naming chunk stat comparison outputs if using Excel or Parquet (very large runs)
     if "xlsx" in model_chunk_stats_path:
@@ -467,6 +466,7 @@ def get_table_names_for_zarr_stats_comparison(comparison_insert, main_logger, mo
         chunk_stats_model_gross = pd.read_excel(model_chunk_stats_path, sheet_name=cn.gross_outputs_1x1)
         chunk_stats_model_other = pd.read_excel(model_chunk_stats_path, sheet_name=cn.other_outputs_1x1)
         chunk_stats_model_net = pd.read_excel(model_chunk_stats_path, sheet_name=cn.net_outputs_1x1)
+        chunk_stats_model_1x1_in_10x10 = pd.read_excel(model_chunk_stats_path, sheet_name=cn.counts_1x1_in_10x10)
 
         # Name of output Excel spreadsheet with chunk stats comparisons
         name, ext = os.path.splitext(model_chunk_stats_path)
@@ -480,13 +480,15 @@ def get_table_names_for_zarr_stats_comparison(comparison_insert, main_logger, mo
         chunk_stats_model_gross = pd.read_parquet(f"{model_chunk_stats_path}__{cn.gross_outputs_1x1}.parquet")
         chunk_stats_model_other = pd.read_parquet(f"{model_chunk_stats_path}__{cn.other_outputs_1x1}.parquet")
         chunk_stats_model_net = pd.read_parquet(f"{model_chunk_stats_path}__{cn.net_outputs_1x1}.parquet")
+        chunk_stats_model_1x1_in_10x10 = pd.read_parquet(f"{model_chunk_stats_path}__{cn.counts_1x1_in_10x10}.parquet")
 
         # Names of output parquet tables with chunk stats comparisons
         zarr_comparison_stats_gross_name = f"{model_chunk_stats_path}__{cn.gross_outputs_1x1}_{comparison_insert}_{uu.timestr()}.parquet"
         zarr_comparison_stats_other_name = f"{model_chunk_stats_path}__{cn.other_outputs_1x1}_{comparison_insert}_{uu.timestr()}.parquet"
         zarr_comparison_stats_net_name = f"{model_chunk_stats_path}__{cn.net_outputs_1x1}_{comparison_insert}_{uu.timestr()}.parquet"
+        zarr_comparison_stats_1x1_in_10x10_name = f"{model_chunk_stats_path}__{cn.counts_1x1_in_10x10}_{comparison_insert}_{uu.timestr()}.parquet"
         zarr_comparison_stats_path = [zarr_comparison_stats_gross_name, zarr_comparison_stats_other_name,
-                                      zarr_comparison_stats_net_name]
+                                      zarr_comparison_stats_net_name, zarr_comparison_stats_1x1_in_10x10_name]
         zarr_comparison_stats_name = [os.path.basename(stats_path) for stats_path in zarr_comparison_stats_path]
         # print(zarr_comparison_stats_path)
         # print(zarr_comparison_stats_name)
@@ -496,7 +498,8 @@ def get_table_names_for_zarr_stats_comparison(comparison_insert, main_logger, mo
     # The model chunk stat tables
     tables_to_compare_dict = {cn.gross_outputs_1x1: chunk_stats_model_gross,
                               cn.net_outputs_1x1: chunk_stats_model_net,
-                              cn.other_outputs_1x1: chunk_stats_model_other}
+                              cn.other_outputs_1x1: chunk_stats_model_other,
+                              cn.counts_1x1_in_10x10: chunk_stats_model_1x1_in_10x10}
     return tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path
 
 
