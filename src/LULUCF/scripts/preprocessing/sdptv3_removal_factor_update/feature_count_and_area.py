@@ -1,14 +1,5 @@
 """
-Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
-
-# Local test
-python -m src.LULUCF.scripts.preprocessing.sdptv3_removal_factor_update.feature_count_and_area --run_local
-
-# Coiled test
-python -m src.utilities.create_cluster -cn sdpt -n 1 -m 16
-python -m src.LULUCF.scripts.preprocessing.sdptv3_removal_factor_update.feature_count_and_area -cn sdpt
-
-Summarizes country gdb layers by:
+Summarizes SDPTv3 country gdb layers by:
 1) optionally, filters data to specific conditions (i.e. simpleType == "Planted forest")
 2) gets all unique values in the summary attribute (i.e. "final_id")
 3) counts the number of features for each unique value, and
@@ -20,6 +11,22 @@ Notes:
     - Processing locally with s3 copy of gdb took ~4.5 min for NZL without GDAL s3 read options
     - Processing locally with s3 copy of gdb took ~2.25 min for NZL with GDAL s3 read options
     - Processing in coiled with s3 copy of gdb took ~1.25 min for NZL with GDAL s3 read options
+
+There are 168 country layer in the gfw_only copy of SDPTv3. To get filtered summary stats for all countries using 20
+workers took
+------------------------------------------------------------------------------------------------------------------------
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
+
+# Local test
+python -m src.LULUCF.scripts.preprocessing.sdptv3_removal_factor_update.feature_count_and_area --run_local
+
+# Coiled test
+python -m src.utilities.create_cluster -cn sdpt -n 1 -m 8
+python -m src.LULUCF.scripts.preprocessing.sdptv3_removal_factor_update.feature_count_and_area -cn sdpt
+
+# Coiled run
+python -m src.utilities.create_cluster -cn sdpt -n 20 -m 16
+python -m src.LULUCF.scripts.preprocessing.sdptv3_removal_factor_update.feature_count_and_area -cn sdpt
 """
 from __future__ import annotations
 import os
@@ -35,33 +42,18 @@ from pyproj import Geod
 import operator as op
 import functools
 from tqdm import tqdm
+import dask
 
 # Project imports
 from src.utilities import universal_utilities as uu
-
-#-----------------------------------------------------------------------------------------------------------------------
-# GDAL options for faster s3 reads
-#-----------------------------------------------------------------------------------------------------------------------
-# Avoid directory listing / metadata storms
-os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "EMPTY_DIR"
-os.environ["CPL_VSIL_CURL_LIST_DIR"] = "NO"
-
-# Only probe file types we actually need (helps a lot with FileGDBs)
-os.environ["CPL_VSIL_CURL_ALLOWED_EXTENSIONS"] = (".gdb,.gdbtable,.gdbtablx,.spx,.freelist,.dat,.atx,.xml,.indexes")
-
-# Cache upstream reads in-process
-os.environ["VSI_CACHE"] = "TRUE"
-os.environ["VSI_CACHE_SIZE"] = str(64 * 1024 * 1024)  # 64 MB; try 128–256MB for RAM
-
-# Larger HTTP range request chunks (fewer GETs for faster reads)
-os.environ["CPL_VSIL_CURL_CHUNK_SIZE"] = str(1000 * 1024 * 1024)
+from src.utilities import log_utilities as lu
 
 #-----------------------------------------------------------------------------------------------------------------------
 # User inputs
 #-----------------------------------------------------------------------------------------------------------------------
-gdb_path = r"/vsis3/gfw2-data/plantations/sdpt_v3/oct2025_updates/oct212025_updates/vector_gdb_gfw_only/sdpt_v3_final_gfw_only.gdb"
-#gdb_path = r"/mnt/c/GIS/shapefiles/SDPTv3/sdpt_v3_final_gfw_only.gdb/sdpt_v3_final_gfw_only.gdb"
-output_path = r"/mnt/c/GIS/shapefiles/SDPTv3/stats/planted_forest_summary_test.csv"
+#gdb_path = r"/vsis3/gfw2-data/plantations/sdpt_v3/oct2025_updates/oct212025_updates/vector_gdb_gfw_only/sdpt_v3_final_gfw_only.gdb"
+gdb_path = r"/mnt/c/GIS/shapefiles/SDPTv3/sdpt_v3_final_gfw_only.gdb/sdpt_v3_final_gfw_only.gdb"
+output_path = r"/mnt/c/GIS/shapefiles/SDPTv3/stats/planted_forest_summary_20251103.csv"
 
 # The main attribute to group results by
 attribute_col = "final_id"
@@ -82,6 +74,7 @@ keep_cols = [
 ]
 
 # Optional: filters applied to the whole country layer before grouping
+where = "simpleType = 'Planted forest' AND sciName1 <> 'Unknown' AND sciName2 IS NULL"  #TODO update everywhere instead of filters
 filters = {
     # AND conditions
     "all": [
@@ -98,6 +91,36 @@ filters = {
         # ("ownership", "contains", "private"),
     ],
 }
+#-----------------------------------------------------------------------------------------------------------------------
+# GDAL options for faster s3 reads
+#-----------------------------------------------------------------------------------------------------------------------
+# Avoid directory listing / metadata storms
+os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "EMPTY_DIR"
+os.environ["CPL_VSIL_CURL_LIST_DIR"] = "NO"
+
+# Only probe file types we actually need (helps a lot with FileGDBs)
+os.environ["CPL_VSIL_CURL_ALLOWED_EXTENSIONS"] = (".gdb,.gdbtable,.gdbtablx,.spx,.freelist,.dat,.atx,.xml,.indexes")
+
+# Cache upstream reads in-process
+os.environ["VSI_CACHE"] = "TRUE"
+os.environ["VSI_CACHE_SIZE"] = str(64 * 1024 * 1024)  # 64 MB; try 128–256MB for RAM
+
+# Larger HTTP range request chunks (fewer GETs for faster reads)
+os.environ["CPL_VSIL_CURL_CHUNK_SIZE"] = str(1000 * 1024 * 1024)
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Dask config to avoid worker TTL
+#-----------------------------------------------------------------------------------------------------------------------
+dask.config.set({
+    # allow slower S3/TCP and long native calls without tripping connection timeouts
+    "distributed.comm.timeouts.connect": "120s",
+    "distributed.comm.timeouts.tcp": "600s",
+    "distributed.scheduler.worker-ttl": None,
+
+    # scheduler waits longer before considering a worker unresponsive
+    # (only affects this process unless also set on the scheduler at cluster creation)
+    "distributed.scheduler.worker-timeout": "1800s",  # 30 minutes
+})
 
 #-----------------------------------------------------------------------------------------------------------------------
 # Utilities     #TODO: Move to UU
@@ -111,11 +134,12 @@ def list_gdb_layers(gdb_path):
 
 # Reads a single layer as a GeoDataFrame
 def read_gdb_layer(gdb_path, layer_name):
+    cols = [attribute_col] + keep_cols + ["geometry"]
     try:
-        return gpd.read_file(gdb_path, layer=layer_name, engine="pyogrio")
+        return gpd.read_file(str(gdb_path), layer=layer_name, engine="pyogrio", columns=cols, where=where, use_arrow=True)
     except Exception:
         # Fallback to default engine if pyogrio not available
-        return gpd.read_file(gdb_path, layer=layer_name)
+        return gpd.read_file(str(gdb_path), layer=layer_name, columns=cols, where=where, use_arrow=True)
 
 # Applies filter conditions to a geopandas GeoDataFrame. Returns a filtered copy.
 def apply_gdf_filters(gdf, filter_dict):
@@ -202,23 +226,26 @@ def summarize_country_layer(gdf, layer, attribute_col, keep_cols):
     return agg[cols + ["feature_count", "area_ha"]]
 
 def get_country_layer_stats(gdb_path, layer):
+
+    logger_worker = lu.setup_logging_worker()
+
     start_time = time.time()
     try:
         gdf = read_gdb_layer(gdb_path, layer)
         if gdf is None or gdf.empty:
-            warnings.warn(f"Layer '{layer}' is empty. Skipping.")
+            lu.print_and_log(f"Layer '{layer}' is empty. Skipping.", False, logger_worker)
             return None
 
         # 1) Optional filters
         gdf_f = apply_gdf_filters(gdf, filters) if filters else gdf
         if gdf_f.empty:
-            warnings.warn(f"Layer '{layer}' filtered to zero rows. Skipping.")
+            lu.print_and_log(f"Layer '{layer}' filtered to zero rows. Skipping.", False, logger_worker)
             return None
 
         # 2) Summarize/collapse by keep_cols (includes attribute_col)
         summary_df = summarize_country_layer(gdf_f, layer, attribute_col, keep_cols)
         end_time = time.time()
-        print(f"Finished summarizing {layer} in {round(end_time - start_time)} seconds")
+        lu.print_and_log(f"Finished summarizing {layer} in {round(end_time - start_time)} seconds", False, logger_worker)
         del gdf, gdf_f
 
         return summary_df if not summary_df.empty else None
@@ -234,6 +261,7 @@ def main(cluster_name, run_local):
 
     gdb = Path(gdb_path)
     layers = list_gdb_layers(gdb)
+
     # layers = layers[:1]  #TODO: comment out to run the whole GDB
     print(f"Found {len(layers)} layers in {gdb.name}. Processing…")
 
@@ -246,7 +274,7 @@ def main(cluster_name, run_local):
     else:
         layer_futures = []
         for layer in tqdm(layers):
-            layer_future = client.submit(get_country_layer_stats, str(gdb), layer)
+            layer_future = client.submit(get_country_layer_stats, str(gdb), layer, retries=3)
             layer_futures.append(layer_future)
         results = client.gather(layer_futures)
     end_time = time.time()
