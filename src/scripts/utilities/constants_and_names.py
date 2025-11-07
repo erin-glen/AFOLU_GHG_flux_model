@@ -126,7 +126,7 @@ dirs = {
     'grip': posixpath.join(full_bucket_prefix, processed_dir, f'grip_density/{full_raster_dims}_pixels/20250526'),
     'osm_roads': posixpath.join(full_bucket_prefix, processed_dir, f'osm_roads_density/{full_raster_dims}_pixels/20250526'),
     'osm_canals': posixpath.join(full_bucket_prefix, processed_dir, f'osm_canals_density/{full_raster_dims}_pixels/20250526'),
-    'planted_forest_type': posixpath.join(full_bucket_prefix, processed_dir, f'sdpt/{full_raster_dims}_pixels/20250531'),
+    'planted_forest_type': posixpath.join(full_bucket_prefix, processed_dir, f'sdpt/{full_raster_dims}_pixels/20251102'),
     'extraction': posixpath.join(full_bucket_prefix, processed_dir, 'extraction/20241021'),
     'climate_domain': lulucf_climate_domain_dir,
     'descals_type': posixpath.join(full_bucket_prefix, processed_dir, 'descals_plantation/extent/20241105'),
