@@ -23,8 +23,8 @@ Examples
 --------
 # Aggregate to 0.01° using AWS Batch/ECS style cluster
 python -m src.scripts.postprocessing.visualization.create_global_raster \
-  -cn create_maps --run_name gfw_standard_model_1km \
-  --model_version 0_8_0 --date_tag 20251010 --target_deg 0.01
+  -cn create_maps --run_name ogh_sensitivity_1km_10 \
+  --model_version 0_8_5 --date_tag 20251105 --target_deg 0.01
 
 # Aggregate at 0.01° using a local Dask cluster:
 python -m src.scripts.postprocessing.visualization.create_global_raster \
