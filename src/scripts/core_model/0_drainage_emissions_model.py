@@ -221,97 +221,103 @@ def calculate_drainage_and_emissions(
                 # BOREAL ---------------------------------------------------
                 if ecozone == boreal_code:
                     emission_node = nu.accrete_node(emission_node, 1)
+                    category_node = emission_node
                     if extraction > 0:
-                        emission_node = nu.accrete_node(emission_node, 4)
+                        emission_node = nu.accrete_node(category_node, 1)
                         key = "boreal_extraction"
                     elif land_cover == forest_code:
-                        emission_node = nu.accrete_node(emission_node, 1)
+                        forest_node = nu.accrete_node(category_node, 3)
+                        emission_node = forest_node
                         if nutrient == poor_nutrient_code:
-                            emission_node = nu.accrete_node(emission_node, 1)
+                            emission_node = nu.accrete_node(forest_node, 1)
                             key = "boreal_forest_poor"
                         elif nutrient == rich_nutrient_code:
-                            emission_node = nu.accrete_node(emission_node, 2)
+                            emission_node = nu.accrete_node(forest_node, 2)
                             key = "boreal_forest_rich"
                     elif land_cover == grassland_code:
-                        emission_node = nu.accrete_node(emission_node, 2)
+                        emission_node = nu.accrete_node(category_node, 4)
                         key = "boreal_grassland"
                     elif land_cover == cropland_code:
-                        emission_node = nu.accrete_node(emission_node, 3)
+                        emission_node = nu.accrete_node(category_node, 5)
                         key = "boreal_cropland"
                     elif land_cover == settlement_code:
-                        emission_node = nu.accrete_node(emission_node, 5)
+                        emission_node = nu.accrete_node(category_node, 6)
                         key = "boreal_settlement"
                     elif land_cover == wetland_code:
-                        emission_node = nu.accrete_node(emission_node, 6)
+                        emission_node = nu.accrete_node(category_node, 7)
                         key = "boreal_wetland"
                     else:
-                        emission_node = nu.accrete_node(emission_node, 7)
+                        emission_node = nu.accrete_node(category_node, 8)
                         key = "boreal_otherland"
 
                 # TEMPERATE -----------------------------------------------
                 elif ecozone == temperate_code:
                     emission_node = nu.accrete_node(emission_node, 2)
+                    category_node = emission_node
                     if extraction > 0:
-                        emission_node = nu.accrete_node(emission_node, 4)
+                        emission_node = nu.accrete_node(category_node, 1)
                         key = "temperate_extraction"
                     elif land_cover == forest_code:
-                        emission_node = nu.accrete_node(emission_node, 1)
+                        emission_node = nu.accrete_node(category_node, 3)
                         key = "temperate_forest"
                     elif land_cover == grassland_code:
-                        emission_node = nu.accrete_node(emission_node, 2)
+                        grassland_node = nu.accrete_node(category_node, 4)
+                        emission_node = grassland_node
                         if nutrient == poor_nutrient_code:
-                            emission_node = nu.accrete_node(emission_node, 1)
+                            emission_node = nu.accrete_node(grassland_node, 1)
                             key = "temperate_grassland_poor"
                         elif nutrient == rich_nutrient_code:
-                            emission_node = nu.accrete_node(emission_node, 2)
+                            emission_node = nu.accrete_node(grassland_node, 2)
                             key = "temperate_grassland_rich"
                     elif land_cover == cropland_code:
-                        emission_node = nu.accrete_node(emission_node, 3)
+                        emission_node = nu.accrete_node(category_node, 5)
                         key = "temperate_cropland"
                     elif land_cover == settlement_code:
-                        emission_node = nu.accrete_node(emission_node, 5)
+                        emission_node = nu.accrete_node(category_node, 6)
                         key = "temperate_settlement"
                     elif land_cover == wetland_code:
-                        emission_node = nu.accrete_node(emission_node, 6)
+                        emission_node = nu.accrete_node(category_node, 7)
                         key = "temperate_wetland"
                     else:
-                        emission_node = nu.accrete_node(emission_node, 7)
+                        emission_node = nu.accrete_node(category_node, 8)
                         key = "temperate_otherland"
 
                 # TROPICAL -------------------------------------------------
                 elif ecozone == tropical_code:
                     emission_node = nu.accrete_node(emission_node, 3)
-                    if planted_forest_type > 0:
-                        emission_node = nu.accrete_node(emission_node, 1)
+                    category_node = emission_node
+                    if extraction > 0:
+                        emission_node = nu.accrete_node(category_node, 1)
+                        key = "tropical_extraction"
+                    elif planted_forest_type > 0:
+                        plantation_node = nu.accrete_node(category_node, 2)
+                        emission_node = plantation_node
                         if planted_forest_type == long_rotation_code:
-                            emission_node = nu.accrete_node(emission_node, 1)
+                            emission_node = nu.accrete_node(plantation_node, 1)
                             key = "tropical_long_rotation"
                         elif planted_forest_type == short_rotation_code:
-                            emission_node = nu.accrete_node(emission_node, 2)
+                            emission_node = nu.accrete_node(plantation_node, 2)
                             key = "tropical_short_rotation"
                         elif planted_forest_type == oil_palm_code:
-                            emission_node = nu.accrete_node(emission_node, 3)
+                            emission_node = nu.accrete_node(plantation_node, 3)
                             key = "tropical_oil_palm"
                     elif land_cover == forest_code:
-                        emission_node = nu.accrete_node(emission_node, 2)
+                        emission_node = nu.accrete_node(category_node, 3)
                         key = "tropical_forest"
                     elif land_cover == grassland_code:
-                        emission_node = nu.accrete_node(emission_node, 3)
+                        emission_node = nu.accrete_node(category_node, 4)
                         key = "tropical_grassland"
                     elif land_cover == cropland_code:
-                        emission_node = nu.accrete_node(emission_node, 4)
+                        emission_node = nu.accrete_node(category_node, 5)
                         key = "tropical_cropland"
-                    elif extraction > 0:
-                        emission_node = nu.accrete_node(emission_node, 5)
-                        key = "tropical_extraction"
                     elif land_cover == settlement_code:
-                        emission_node = nu.accrete_node(emission_node, 8)
+                        emission_node = nu.accrete_node(category_node, 6)
                         key = "tropical_settlement"
                     elif land_cover == wetland_code:
-                        emission_node = nu.accrete_node(emission_node, 9)
+                        emission_node = nu.accrete_node(category_node, 7)
                         key = "tropical_wetland"
                     else:
-                        emission_node = nu.accrete_node(emission_node, 0)
+                        emission_node = nu.accrete_node(category_node, 8)
                         key = "tropical_otherland"
 
                 vals, missing = lookup_efs(key, drainage_table)
