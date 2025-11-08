@@ -278,10 +278,12 @@ def main(tile_id=None, dataset_group='descals_oil_palm', dataset_type='plantatio
     try:
         logging.info(f"Starting main processing routine for dataset group '{dataset_group}', dataset type '{dataset_type}'")
 
-        # Ensure the global peatlands index is available
-        peatlands_index_path = os.path.join(cn.local_temp_dir, os.path.basename(cn.index_shapefile_prefix) + '.shp')
-        if not os.path.exists(peatlands_index_path):
-            logging.info("Global peatlands index not found locally. Downloading...")
+        # Ensure the global tile index shapefile is available
+        tile_index_path = os.path.join(
+            cn.local_temp_dir, os.path.basename(cn.index_shapefile_prefix) + '.shp'
+        )
+        if not os.path.exists(tile_index_path):
+            logging.info("Global tile index shapefile not found locally. Downloading...")
             read_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir)
 
         # Ensure the descals tile index is available
@@ -303,23 +305,25 @@ def main(tile_id=None, dataset_group='descals_oil_palm', dataset_type='plantatio
         descals_gdf = gpd.read_file(descals_index_path)
         logging.info(f"Loaded descals index with {len(descals_gdf)} tiles")
 
-        # Load peatlands index
-        peatlands_gdf = gpd.read_file(peatlands_index_path)
-        logging.info(f"Loaded peatlands index with {len(peatlands_gdf)} tiles")
+        # Load tile index
+        tile_index_gdf = gpd.read_file(tile_index_path)
+        logging.info(f"Loaded global tile index with {len(tile_index_gdf)} tiles")
 
-        # If a specific tile ID is provided, filter peatlands_gdf to only include that tile
+        # If a specific tile ID is provided, filter the tile index to only include that tile
         if tile_id:
-            peatlands_gdf = peatlands_gdf[peatlands_gdf['tile_id'] == tile_id]
-            if peatlands_gdf.empty:
-                logging.error(f"Tile '{tile_id}' not found in peatlands index.")
+            tile_index_gdf = tile_index_gdf[tile_index_gdf['tile_id'] == tile_id]
+            if tile_index_gdf.empty:
+                logging.error(f"Tile '{tile_id}' not found in global tile index.")
                 return
 
         # Process selected tiles
-        for _, peatland_tile in peatlands_gdf.iterrows():
-            peatland_tile_id = peatland_tile['tile_id']
-            tile_bounds = peatland_tile.geometry.bounds
-            logging.info(f"Checking intersection for peatland tile '{peatland_tile_id}' with bounds {tile_bounds}")
-            process_tile(peatland_tile_id, dataset_group, dataset_type, tile_bounds, descals_gdf, run_mode)
+        for _, tile_row in tile_index_gdf.iterrows():
+            current_tile_id = tile_row['tile_id']
+            tile_bounds = tile_row.geometry.bounds
+            logging.info(
+                f"Checking intersection for tile '{current_tile_id}' with bounds {tile_bounds}"
+            )
+            process_tile(current_tile_id, dataset_group, dataset_type, tile_bounds, descals_gdf, run_mode)
 
     except Exception as e:
         logging.error(f"Error in main processing routine: {e}")

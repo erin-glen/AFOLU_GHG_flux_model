@@ -32,6 +32,7 @@ import geopandas as gpd
 from shapely.geometry import Polygon, box
 import pandas as pd
 import src.scripts.preprocessing.preprocessing_constants as cn
+from src.scripts.utilities import universal_utilities as uutil
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -252,23 +253,23 @@ def main():
     """
     poly_folder = os.path.join(cn.local_root, "OSM", "poly_files", "OSM_bounds")
     output_dir = os.path.join(cn.local_root, "OSM", "poly_files", "OSM_bounds")
-    tile_index_path = os.path.join(
-        cn.local_root,
-        "Wetlands",
-        "Raw",
-        "Global",
-        "gfw_peatlands",
-        "Global_Peatlands_Index",
-        "Global_Peatlands.shp",
-    )
+    tile_index_filename = cn.index_shapefile_name
+    tile_index_dir = os.path.join(cn.local_temp_dir, "tile_index")
+    os.makedirs(tile_index_dir, exist_ok=True)
+
+    tile_index_path = os.path.join(tile_index_dir, tile_index_filename)
+    if not os.path.exists(tile_index_path):
+        logging.info(
+            "Downloading global tile index shapefile from S3 to %s", tile_index_dir
+        )
+        uutil.read_shapefile_from_s3(
+            cn.index_shapefile_prefix, tile_index_dir, cn.s3_bucket_name
+        )
+    else:
+        logging.info("Using cached tile index shapefile at %s", tile_index_path)
+
     output_tile_index_path = os.path.join(
-        cn.local_root,
-        "Wetlands",
-        "Raw",
-        "Global",
-        "gfw_peatlands",
-        "Global_Peatlands_Index",
-        "Global_Peatlands_Indexed.shp",
+        tile_index_dir, f"{os.path.splitext(tile_index_filename)[0]}_Indexed.shp"
     )
 
     # Ensure output directory exists

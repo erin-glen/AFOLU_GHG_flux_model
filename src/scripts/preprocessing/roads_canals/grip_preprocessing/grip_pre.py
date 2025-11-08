@@ -1,283 +1,278 @@
-import os
-import geopandas as gpd
-import logging
-import dask
-from dask.distributed import Client, LocalCluster
-from dask.diagnostics import ProgressBar
-import pandas as pd
-import argparse
-import sys
+import posixpath as pp
+from pathlib import Path
 
-import src.scripts.preprocessing.utilities as uu
-from src.scripts.utilities import universal_utilities as uutil
-import src.scripts.preprocessing.preprocessing_constants as cn
-from src.scripts.utilities import universal_utilities as uutil
+from src.scripts.utilities.constants_and_names import (
+    s3_bucket_name,
+    s3_region_name,
+    full_bucket_prefix,
+    project_dir,
+    raw_dir,
+    processed_dir,
+    local_root,
+    local_temp_dir,
+    today_date,
+    pixel_area_dir,
+    pixel_area_pattern,
+    m2_to_ha,
+    ipcc_codes,
+    t_to_Mt,
+    sample_tile_id,
+    full_raster_dims,
+    tile_index_shapefile_prefix,
+    tile_index_shapefile_name,
+    tile_id_list as master_tile_id_list,
+)
 
-"""
-This script processes GRIP (Global Roads Inventory Project) roads by tiles using a pre-existing tile index shapefile.
-It reads the tile index shapefile, identifies the regions each tile overlaps with, processes the corresponding
-roads shapefiles, clips the roads data to the tile boundaries, and saves the results as shapefiles for each tile.
+# Peat mask related paths
+peat_pattern = "_peat_mask_processed.tif"
+peat_tiles_prefix_1km = pp.join(processed_dir, "peat_mask", "GFW", "1km") + "/"
+peat_tiles_prefix_1km_3395 = pp.join(processed_dir, "peat_mask", "1km_3395") + "/"
+peat_tiles_prefix = "climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"
 
-The script uses Dask to parallelize the processing of multiple tiles.
+# Global tile index (no extension)
+index_shapefile_prefix = tile_index_shapefile_prefix
+index_shapefile_name = tile_index_shapefile_name
 
-Functions:
-- read_tiles_shapefile: Reads and returns the tile index shapefile from S3.
-- download_regional_shapefiles: Downloads regional shapefiles from S3 to a local directory.
-- process_tile: Processes a single tile by reading and clipping road data within the tile's bounds.
-- process_all_tiles: Processes all tiles using Dask for parallelization.
-- upload_final_output_to_s3: Uploads the final output file to S3.
-- main: Main function to orchestrate the processing based on provided arguments.
+# 30 m resolution in degrees (approx. 1 km)
+resolution = 0.000025
 
-Usage examples:
-- Process a specific tile (00N_110E):
-  python script.py --tile_id 00N_110E
+# ---------------------------------------------------------------------
+# 2. Dataset configurations
+# ---------------------------------------------------------------------
+datasets = {
+    'osm': {
+        'roads': {
+            's3_raw': pp.join(raw_dir, 'roads', 'osm_roads', 'roads_by_tile'),
+            's3_processed_base': pp.join(processed_dir, 'osm_roads_density'),
+            's3_processed_small': pp.join(processed_dir, 'osm_roads_density',
+                                          '4000_pixels', today_date),
+            's3_processed': pp.join(processed_dir, 'osm_roads_density', today_date),
+            'local_processed': pp.join(local_temp_dir, 'osm_roads_density', today_date),
+            's3_projected': pp.join(raw_dir, 'roads', 'osm_roads', 'roads_by_tile_3395')
+        },
+        'canals': {
+            's3_raw': pp.join(raw_dir, 'roads', 'osm_roads', 'canals_by_tile'),
+            's3_processed_base': pp.join(processed_dir, 'osm_canals_density'),
+            's3_processed_small': pp.join(processed_dir, 'osm_canals_density',
+                                          '4000_pixels', today_date),
+            's3_processed': pp.join(processed_dir, 'osm_canals_density', today_date),
+            'local_processed': pp.join(local_temp_dir, 'osm_canals_density', today_date),
+            's3_projected': pp.join(raw_dir, 'roads', 'osm_roads', 'canals_by_tile_3395')
+        }
+    },
+    "glclu_composite": {
+        "s3_raw": pp.join(
+            "climate",
+            "AFOLU_flux_model",
+            "LULUCF",
+            "landcover",
+            "composite",
+            "{interval}",
+            "v2",
+            "raw",
+            "{year}",
+            "{tile_id}.tif",
+        )
+    },
+    'grip': {
+        'roads': {
+            's3_raw': pp.join(raw_dir, 'roads', 'grip_roads', 'roads_by_tile'),
+            's3_processed_base': pp.join(processed_dir, 'grip_density'),
+            's3_processed_small': pp.join(processed_dir, 'grip_density','4000_pixels', today_date),
+            's3_processed': pp.join(processed_dir, 'grip_density', today_date),
+            'local_processed': pp.join(local_temp_dir, 'grip_density', today_date),
+            's3_projected': pp.join(raw_dir, 'roads', 'grip_roads', 'roads_by_tile_3395')
+        }
+    },
+    'engert': {
+        's3_raw': pp.join(raw_dir, 'roads', 'engert_roads',
+                          'engert_asiapac_ghrdens_1km_resample_30m.tif'),
+        's3_processed_base': pp.join(processed_dir, 'engert_density', '30m'),
+        's3_processed': pp.join(processed_dir, 'engert_density', '30m', today_date),
+        'local_processed': pp.join(local_temp_dir, 'engert_density', today_date),
+        'working_version': pp.join(processed_dir, 'engert_density', '30m', '20240925')
+    },
+    'dadap': {
+        's3_raw': pp.join(raw_dir, 'canals', 'Dadap_SEA_Drainage',
+                          'canal_length_data', 'canal_length_1km_resample_30m.tif'),
+        's3_processed_base': pp.join(processed_dir, 'dadap_density', '30m'),
+        's3_processed': pp.join(processed_dir, 'dadap_density', '30m', today_date),
+        'local_processed': pp.join(local_temp_dir, 'dadap_density', today_date),
+        'working_version': pp.join(processed_dir, 'dadap_density', '30m', '20240925')
 
-- Process all tiles:
-  python script.py
+    },
+    'planted_forest_type': {
+        's3_processed_base': pp.join('climate', 'carbon_model', 'other_emissions_inputs',
+                                     'plantation_type', 'SDPTv2', '20230911')
+    },
+    'sdpt': {
+        's3_raw': pp.join('plantations', 'sdpt_v3','oct2025_updates','sdpt_by_tiles'),
+        's3_processed_base': pp.join(processed_dir, 'sdpt'),
+        's3_processed_small': pp.join(processed_dir, 'sdpt', 'chunks', today_date),
+        's3_processed': pp.join(processed_dir, 'sdpt', today_date),
+        'local_processed': pp.join(local_temp_dir, 'sdpt', today_date)
+    },
+    'extraction': {
+        'finland': {
+            's3_raw': f'{raw_dir}/extracion/Finland/Finland_turvetuotantoalueet/'
+                      f'turvetuotantoalueet_jalkikaytto',
+            's3_processed_base': f'{processed_dir}/extraction/',
+            's3_processed': f'{processed_dir}/extraction/{today_date}/',
+            'local_processed': f'{local_temp_dir}/extraction/finland/{today_date}/'
+        },
+        'ireland': {
+            's3_raw': f'{raw_dir}/extraction/Ireland/Ireland_Habibetal/RF_S2_LU_5_11_23.tif',
+            's3_processed_base': f'{processed_dir}/extraction/',
+            's3_processed': f'{processed_dir}/extraction/{today_date}/',
+            'local_processed': f'{local_temp_dir}/extraction/ireland/{today_date}/'
+        },
+        'russia': {
+            's3_raw': [
+                f'{raw_dir}/extraction/Russia/allocated_without_licenses/'
+                f'allocated_mineral_reserve',
+                f'{raw_dir}/extraction/Russia/allocated_with_licenses/'
+                f'peat_extraction_dates'
+            ],
+            's3_processed_base': f'{processed_dir}/extraction/',
+            's3_processed': f'{processed_dir}/extraction/{today_date}/',
+            'local_processed': f'{local_temp_dir}/extraction/russia/{today_date}/'
+        }
+    },
+    'descals_oil_palm': {
+        'plantation_year': {
+            's3_raw': pp.join(raw_dir, 'plantations', 'plantation_year'),
+            's3_processed_base': pp.join(processed_dir, 'descals_plantation', 'year'),
+            's3_processed': pp.join(processed_dir, 'descals_plantation',
+                                    'year', today_date),
+            'local_processed': pp.join(local_temp_dir, 'descals_plantation', 'year', today_date),
+            'working_version': pp.join(processed_dir, 'descals_plantation',
+                                       'year', '20240823')
+        },
+        'plantation_type': {
+            's3_raw': pp.join(raw_dir, 'plantations', 'plantation_extent'),
+            's3_processed_base': pp.join(processed_dir, 'descals_plantation', 'extent'),
+            's3_processed': pp.join(processed_dir, 'descals_plantation',
+                                    'extent', today_date),
+            'local_processed': pp.join(local_temp_dir, 'descals_plantation', 'extent', today_date),
+            'working_version': pp.join(processed_dir, 'descals_plantation',
+                                       'extent', '20240823')
+        }
+    },
+    'land_cover_ipcc': {
+        's3_processed_base': pp.join(processed_dir, 'land_cover_ipcc'),
+        's3_processed': pp.join(processed_dir, 'land_cover_ipcc', today_date),
+        'local_processed': pp.join(local_temp_dir, 'land_cover_ipcc', today_date),
+    },
+    'peat': {
+        'gfw': {
+            's3_processed': 'climate/AFOLU_flux_model/organic_soils/inputs/raw/soils/GFW_Global_Peatlands/'
+        },
+        'gpd': {
+            'input_type': 'raster',
+            's3_raw': pp.join(raw_dir, 'soils', 'GPD', 'peatGPA22WGS_2cl.tif'),
+            's3_processed': pp.join(processed_dir, 'peat_mask', 'GPD', 'tiles') + '/',
+            'local_processed': pp.join(local_temp_dir, 'peat', 'gpd', 'tiles') + '/'
+        },
+        'peatmap': {
+            'input_type': 'vector',
+            's3_raw': pp.join(raw_dir, 'soils', 'PEATMAP'),
+            'file_pattern': '*.shp',
+            's3_processed': pp.join(processed_dir, 'peat_mask',
+                                    'PEATMAP', 'tiles') + '/',
+            'local_processed': pp.join(local_temp_dir, 'peat', 'peatmap', 'tiles') + '/'
+        },
+        'peatml': {
+            'input_type': 'raster',
+            'threshold': 50,
+            's3_raw': pp.join(raw_dir, 'soils',
+                              'PEATML', 'Peat-ML_global_peatland_extent.tif'),
+            's3_processed': pp.join(processed_dir, 'peat_mask',
+                                    'PEATML', 'tiles') + '/',
+            'local_processed': pp.join(local_temp_dir, 'peat', 'peatml', 'tiles') + '/'
+        },
+        'ogh': {
+            'input_type': 'raster',
+            's3_raw': pp.join(raw_dir, 'soils', 'OGH','20251103' 'organic_soils_extent.tif'),
+            's3_processed': pp.join(processed_dir, 'peat_mask', 'OGH', 'tiles') + '/',
+            'local_processed': pp.join(local_temp_dir, 'peat', 'ogh', 'tiles') + '/',
+            'threshold': 23
+        },
+        'ogh_unthresholded': {
+            'input_type': 'raster',
+            's3_raw': pp.join(raw_dir, 'soils', 'OGH', 'organic_soils_extent.tif'),
+            's3_processed': pp.join(processed_dir, 'peat_mask', 'OGH', 'tiles_unthresholded') + '/',
+            'local_processed': pp.join(local_temp_dir, 'peat', 'ogh_unthresholded', 'tiles') + '/'
+        },
+        'union_mask': {
+            '30m': pp.join(
+                processed_dir, 'peat_mask', 'union', '30m', 'tiles'
+            )
+            + '/',
+            '1km': pp.join(
+                processed_dir, 'peat_mask', 'union', '1km', 'tiles'
+            )
+            + '/',
+            '1km_3395': pp.join(processed_dir, 'peat_mask','union','1km_3395',
+            )
+            + '/',
+        }
+    }
+}
+# ---------------------------------------------------------------------
+# 3. General paths / constants
+# ---------------------------------------------------------------------
+lc_uri = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/inputs/LC"
 
-Dependencies:
-- geopandas
-- pandas
-- shapely
-- numpy
-- dask
-- dask.distributed
-- dask.diagnostics
+file_patterns = {
+    'land_cover': "IPCC_basic_classes",
+    'vegetation_height': "vegetation_height",
+    'planted_forest_type_layer': "planted_forest_type",
+    'planted_forest_tree_crop_layer': "planted_forest_tree_crop",
+    'peat': "peat",
+    'peat_gpd': "peat_gpd",
+    'peat_peatmap': "peat_peatmap",
+    'peat_peatml': "peat_peatml",
+    'peat_ogh': "peat_ogh",
+    'peat_ogh_unthresholded': "peat_ogh_unthresholded",
+    'dadap': "dadap",
+    'engert': "engert",
+    'grip': "grip",
+    'osm_roads': "osm_roads",
+    'osm_canals': "osm_canals",
+}
 
-Note: The script assumes the presence of the required shapefiles and directories.
-"""
+download_dict = {}
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+sig_height_loss_threshold = 5
+tree_threshold = 5
 
-os.makedirs(cn.datasets['grip']['roads']['local_processed'], exist_ok=True)
+# ---------------------------------------------------------------------
+# 4. Helper function
+# ---------------------------------------------------------------------
 
-def read_tiles_shapefile():
-    """
-    Reads the tile index shapefile from S3 and returns it as a GeoDataFrame.
-
-    Returns:
-        gpd.GeoDataFrame: GeoDataFrame containing the tiles.
-    """
-    logging.info("Downloading tiles shapefile from S3 to local directory")
-    uutil.read_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
-    shapefile_path = os.path.join(cn.local_temp_dir, 'Global_Peatlands.shp')
-    logging.info("Reading tiles shapefile from local directory")
-    tiles_gdf = gpd.read_file(shapefile_path)
-    logging.info(f"Columns in tiles shapefile: {tiles_gdf.columns}")
-    return tiles_gdf
-
-def download_regional_shapefiles():
-    """
-    Downloads regional shapefiles from S3 to the local directory if they do not already exist.
-
-    Returns:
-        list: List of local paths to the downloaded shapefiles.
-    """
-    downloaded_shapefiles = []
-    for s3_path in cn.grip_regional_shapefiles:
-        local_shapefile_path = os.path.join(cn.local_temp_dir, os.path.splitext(os.path.basename(s3_path))[0])
-
-        # Check if the shapefile already exists locally
-        if all(os.path.exists(local_shapefile_path + ext) for ext in ['.shp', '.shx', '.dbf', '.prj']):
-            logging.info(f"Shapefile {local_shapefile_path} already exists locally. Skipping download.")
-            downloaded_shapefiles.append(local_shapefile_path + '.shp')
-            continue
-
-        logging.info(f"Downloading regional shapefile {s3_path}")
-        s3_file_path = f"/vsis3/{cn.s3_bucket_name}/{s3_path}"
-        try:
-            gdf = gpd.read_file(s3_file_path)
-            gdf.to_file(f"{local_shapefile_path}.shp")
-            downloaded_shapefiles.append(f"{local_shapefile_path}.shp")
-            logging.info(f"Downloaded and saved regional shapefile to {local_shapefile_path}.shp")
-        except Exception as e:
-            logging.error(f"Error downloading shapefile from S3: {e}")
-            continue
-
-    return downloaded_shapefiles
-
-@dask.delayed
-def process_tile(tile, regional_shapefiles):
-    """
-    Processes a single tile by reading and clipping road data within the tile's bounds.
-
-    Args:
-        tile (gpd.GeoSeries): GeoSeries containing the tile data.
-        regional_shapefiles (list): List of local paths to the regional shapefiles.
-
-    Returns:
-        str: Path to the processed shapefile, or None if no processing was done.
-    """
-    tile_id = tile['tile_id']  # Assuming the tile ID is stored in a column named 'tile_id'
-    output_path = os.path.join(cn.datasets['grip']['roads']['local_processed'], f"roads_{tile_id}.shp")
-
-    if os.path.exists(output_path):
-        logging.info(f"Output file {output_path} already exists. Skipping tile {tile_id}.")
-        return None
-
-    tile_bounds = tile.geometry.bounds
-    logging.info(f"Processing tile {tile_id} with bounds {tile_bounds}")
-
-    combined_roads = []
-
+def check_s3_path_exists(s3_client, bucket, path):
     try:
-        for region_shapefile in regional_shapefiles:
-            logging.info(f"Reading roads shapefile {region_shapefile} within bounds {tile_bounds}")
-            roads_gdf = gpd.read_file(region_shapefile, bbox=tile_bounds)
-            logging.info(f"Number of roads read within bounds from {region_shapefile} for tile {tile_id}: {len(roads_gdf)}")
-
-            if not roads_gdf.empty:
-                roads_in_tile = gpd.clip(roads_gdf, tile.geometry)
-                logging.info(f"Number of roads after clipping from {region_shapefile} for tile {tile_id}: {len(roads_in_tile)}")
-                combined_roads.append(roads_in_tile)
-
-        if not combined_roads:
-            logging.info(f"No roads found for tile {tile_id}. Skipping.")
-            return None
-
-        combined_roads_gdf = pd.concat(combined_roads, ignore_index=True)
-        combined_roads_gdf.to_file(output_path)
-        logging.info(f"Saved combined roads for tile {tile_id} to {output_path}")
-        return output_path
+        s3_client.head_object(Bucket=bucket, Key=path)
+        return True
     except Exception as e:
-        logging.error(f"Error processing tile {tile_id}: {e}")
-        return None
+        print(f"S3 path check failed: {e}")
+        return False
 
-def process_all_tiles(tiles_gdf):
-    """
-    Processes all tiles using Dask for parallelization.
+# -----------------------------------------------------------------
+# 5. Make sure local_processed folders exist
+# -----------------------------------------------------------------
 
-    Args:
-        tiles_gdf (gpd.GeoDataFrame): GeoDataFrame containing the tiles.
+def _walk(d):
+    if isinstance(d, dict):
+        yield d
+        for v in d.values():
+            yield from _walk(v)
 
-    Returns:
-        list: List of paths to the processed shapefiles.
-    """
-    regional_shapefiles = download_regional_shapefiles()
-    tasks = [process_tile(tile, regional_shapefiles) for idx, tile in tiles_gdf.iterrows()]
-    with ProgressBar():
-        results = dask.compute(*tasks)
-    return results
+for subdict in _walk(datasets):
+    loc = subdict.get("local_processed")
+    if loc:
+        Path(loc).mkdir(parents=True, exist_ok=True)
 
-def upload_final_output_to_s3(output_path):
-    """
-    Uploads the final output shapefile to S3.
+# List of available tile IDs
 
-    Args:
-        output_path (str): Path to the local shapefile to upload.
-    """
-    if output_path is None:
-        return
-
-    local_file_path = output_path
-    tile_id = os.path.basename(local_file_path).replace("roads_", "").replace(".shp", "")
-    s3_file_path = os.path.join(cn.datasets['grip']['roads']['s3_processed'], f"roads_{tile_id}.shp")
-
-    if os.path.exists(local_file_path):
-        uutil.upload_file_to_s3(local_file_path, cn.s3_bucket_name, s3_file_path)
-        logging.info(f"Uploaded {local_file_path} to s3://{cn.s3_bucket_name}/{s3_file_path}")
-        os.remove(local_file_path)  # Remove local file after upload
-        logging.info(f"Removed local file {local_file_path}")
-    else:
-        logging.warning(f"Local file {local_file_path} does not exist. Skipping upload.")
-
-def main(tile_id=None):
-    """
-    Main function to orchestrate the processing based on the provided arguments.
-
-    Args:
-        tile_id (str, optional): ID of the tile to process. If None, all tiles will be processed.
-    """
-    tiles_gdf = read_tiles_shapefile()
-    if tile_id:
-        tile = tiles_gdf[tiles_gdf['tile_id'] == tile_id].iloc[0]
-        regional_shapefiles = download_regional_shapefiles()
-        output_path = process_tile(tile, regional_shapefiles).compute()
-        upload_final_output_to_s3(output_path)
-    else:
-        results = process_all_tiles(tiles_gdf)
-        for output_path in results:
-            upload_final_output_to_s3(output_path)
-
-if __name__ == '__main__':
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description='Process GRIP roads by tiles.')
-    parser.add_argument('--tile_id', type=str, help='Tile ID to process')
-    parser.add_argument('--client', type=str, choices=['local', 'coiled'], default='local', help='Dask client type to use (local or coiled)')
-    args = parser.parse_args()
-
-    if not any(sys.argv[1:]):  # Check if there are no command-line arguments
-        # Direct execution examples for PyCharm
-        # Example usage for processing a specific tile with the local Dask client
-        tile_id = '00N_110E'  # Replace with your desired tile ID
-        client_type = 'local'  # Replace with 'coiled' if you want to use the Coiled cluster
-
-        # Initialize Dask client based on the direct execution setup
-        if client_type == 'coiled':
-            cluster, client = uutil.connect_to_cluster(
-                cluster_name="roads_canals",
-                n_workers=20,
-                region="us-east-1",
-            )
-        else:
-            cluster = LocalCluster()
-            client = Client(cluster)
-
-        logging.info(f"Dask client initialized with {client_type} cluster")
-
-        try:
-            main(tile_id=tile_id)
-        finally:
-            client.close()
-            logging.info("Dask client closed")
-            if client_type == 'coiled':
-                cluster.close()
-                logging.info("Coiled cluster closed")
-
-        # Example usage for processing all tiles with the local Dask client
-        client_type = 'local'  # Replace with 'coiled' if you want to use the Coiled cluster
-
-        # Initialize Dask client based on the direct execution setup
-        if client_type == 'coiled':
-            client, cluster = uutil.connect_to_cluster(
-                cluster_name="roads_canals",
-                n_workers=20,
-                region="us-east-1",
-            )
-        else:
-            cluster = LocalCluster()
-            client = Client(cluster)
-
-        logging.info(f"Dask client initialized with {client_type} cluster")
-
-        try:
-            main()
-        finally:
-            client.close()
-            logging.info("Dask client closed")
-            if client_type == 'coiled':
-                cluster.close()
-                logging.info("Coiled cluster closed")
-    else:
-        # Initialize Dask client based on the argument
-        if args.client == 'coiled':
-            client, cluster = uutil.connect_to_cluster(
-                cluster_name="roads_canals",
-                n_workers=20,
-                region="us-east-1",
-            )
-        else:
-            cluster = LocalCluster()
-            client = Client(cluster)
-
-        logging.info(f"Dask client initialized with {args.client} cluster")
-
-        try:
-            main(tile_id=args.tile_id)
-        finally:
-            client.close()
-            logging.info("Dask client closed")
-            if args.client == 'coiled':
-                cluster.close()
-                logging.info("Coiled cluster closed")
+tile_id_list = list(master_tile_id_list)

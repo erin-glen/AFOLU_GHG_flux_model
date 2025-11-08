@@ -899,6 +899,43 @@ def run_drainage_model(
         stage=stage,
     )
 
+    tile_ids = list(tile_ids) if tile_ids else []
+
+    if tile_ids:
+        unique_tile_ids = list(dict.fromkeys(tile_ids))
+        if len(unique_tile_ids) != len(tile_ids):
+            main_logger.warning(
+                "Received %d tile IDs with duplicates; reducing to %d unique tiles.",
+                len(tile_ids),
+                len(unique_tile_ids),
+            )
+            tile_ids = unique_tile_ids
+        else:
+            tile_ids = unique_tile_ids
+
+        if len(tile_ids) == len(cn.tile_id_list) and set(tile_ids) == set(cn.tile_id_list):
+            main_logger.info(
+                "Full-model tile roster resolved to %d tiles from %s",
+                len(tile_ids),
+                cn.tile_id_list_source,
+            )
+        else:
+            main_logger.info(
+                "Processing %d explicitly-specified 10x10 degree tiles.",
+                len(tile_ids),
+            )
+    elif bounding_box:
+        main_logger.info(
+            "No tile IDs supplied; deriving extent from bounding box %s.",
+            bounding_box,
+        )
+    else:
+        main_logger.info(
+            "No tile IDs supplied; default roster contains %d tiles from %s.",
+            len(cn.tile_id_list),
+            cn.tile_id_list_source,
+        )
+
     threshold_msg = "none" if peat_threshold is None else f"> {peat_threshold}"
     main_logger.info(
         "Peat dataset set to %s with threshold %s",
@@ -1232,11 +1269,10 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2021 \
   --end_year 2024 \
-  --interval_type five_year \
+  --all_five_year_periods \
   --mark_missing_factors \
   --count_burned_years \
-  --run_name ogh_sensitivity_1km \
-  --peat_threshold 10.0
+  --run_name ogh_sensitivity_1km
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
@@ -1248,8 +1284,8 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --count_burned_years \
   --run_name ogh_sensitivity_1km \
   --interval_type five_year \
-  --peat_dataset ogh \
-  --run_name ogh_standard_model_1km
+  --peat_dataset gfw \
+  --run_name gfw_standard_model_1km
   
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \

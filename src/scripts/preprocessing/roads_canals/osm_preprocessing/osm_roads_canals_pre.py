@@ -77,7 +77,9 @@ def read_tiles_shapefile():
     """
     logging.info("Downloading tiles shapefile from S3 to local directory")
     uutil.read_shapefile_from_s3(index_shapefile_prefix, local_temp_dir, s3_bucket_name)
-    shapefile_path = os.path.join(local_temp_dir, 'Global_Peatlands.shp')
+    shapefile_path = os.path.join(
+        local_temp_dir, f"{os.path.basename(index_shapefile_prefix)}.shp"
+    )
     logging.info("Reading tiles shapefile from local directory")
     tiles_gdf = gpd.read_file(shapefile_path)
     logging.info(f"Columns in tiles shapefile: {tiles_gdf.columns}")

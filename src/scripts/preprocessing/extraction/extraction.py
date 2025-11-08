@@ -204,14 +204,14 @@ def process_vector_dataset(dataset, tile_id=None, run_mode='default'):
         gdf_dataset = gdf_dataset.explode(index_parts=False)
 
         # Load tile index shapefile
-        index_shapefile = os.path.join(cn.local_temp_dir, os.path.basename(cn.index_shapefile_prefix) + '.shp')
-        if not os.path.exists(index_shapefile):
-            logging.info("Global peatlands index not found locally. Downloading...")
+        tile_index_path = os.path.join(cn.local_temp_dir, os.path.basename(cn.index_shapefile_prefix) + '.shp')
+        if not os.path.exists(tile_index_path):
+            logging.info("Global tile index shapefile not found locally. Downloading...")
             uutil.download_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
-            if not os.path.exists(index_shapefile):
-                logging.error("Failed to download global peatlands index. Exiting.")
+            if not os.path.exists(tile_index_path):
+                logging.error("Failed to download global tile index shapefile. Exiting.")
                 return
-        gdf_tiles = gpd.read_file(index_shapefile)
+        gdf_tiles = gpd.read_file(tile_index_path)
 
         # Reproject dataset to match tiles CRS if necessary
         if gdf_dataset.crs != gdf_tiles.crs:
@@ -422,11 +422,11 @@ def process_raster_dataset(dataset, tile_id=None, run_mode='default'):
             logging.info(f"Raster bounds in EPSG:4326: {raster_bounds_4326}")
 
         # Load tile index shapefile (in EPSG:4326)
-        index_shapefile = os.path.join(cn.local_temp_dir, os.path.basename(cn.index_shapefile_prefix) + '.shp')
-        if not os.path.exists(index_shapefile):
-            logging.info("Global peatlands index not found locally. Downloading...")
+        tile_index_path = os.path.join(cn.local_temp_dir, os.path.basename(cn.index_shapefile_prefix) + '.shp')
+        if not os.path.exists(tile_index_path):
+            logging.info("Global tile index shapefile not found locally. Downloading...")
             uutil.download_shapefile_from_s3(cn.index_shapefile_prefix, cn.local_temp_dir, cn.s3_bucket_name)
-        gdf_tiles = gpd.read_file(index_shapefile)
+        gdf_tiles = gpd.read_file(tile_index_path)
         logging.info(f"Tile index shapefile CRS: {gdf_tiles.crs}")
 
         # Ensure tile index is in EPSG:4326

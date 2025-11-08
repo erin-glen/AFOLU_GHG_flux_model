@@ -396,6 +396,12 @@ def aggregate_main(
     # Recompute is_final if connect_to_cluster forces local
     is_final = not run_local
 
+    logger.info(
+        "Aggregating organic-soils outputs across %d tiles sourced from %s",
+        len(cn.tile_id_list),
+        cn.tile_id_list_source,
+    )
+
     download_upload_dictionary = build_download_upload_dict(
         pixel_resolution=pixel_resolution,
         run_name=run_name,

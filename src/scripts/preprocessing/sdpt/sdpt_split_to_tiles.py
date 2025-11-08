@@ -5,6 +5,9 @@ import pandas as pd
 from packaging.version import Version, InvalidVersion
 import geopandas.io.file
 
+import src.scripts.preprocessing.preprocessing_constants as cn
+from src.scripts.utilities import universal_utilities as uutil
+
 # --- Robust GDAL Version Patch for ArcGIS Pro Environment ---
 # This patch resolves the "Invalid version: '3.8.1e'" error that arises due to ArcGIS Pro's non-standard GDAL versioning.
 original_to_file_fiona = geopandas.io.file._to_file_fiona
@@ -125,13 +128,28 @@ def split_sdpt_by_tiles(tile_grid_path, countries_gdb, out_dir, tile_id_field="t
         else:
             print(f"Tile {tile_id}: no features after clipping.")
 
+def resolve_tile_grid_path() -> str:
+    """Ensure the shared 10x10 degree tile index is available locally."""
+
+    local_dir = os.path.join(cn.local_temp_dir, "tile_index")
+    os.makedirs(local_dir, exist_ok=True)
+    shapefile_path = os.path.join(local_dir, cn.index_shapefile_name)
+
+    if not os.path.exists(shapefile_path):
+        uutil.read_shapefile_from_s3(
+            cn.index_shapefile_prefix, local_dir, cn.s3_bucket_name
+        )
+
+    return shapefile_path
+
 def main():
-    tile_grid_path = r"C:\tmp\peat_index\Global_Peatlands_project.shp"
+    tile_grid_path = resolve_tile_grid_path()
     countries_gdb = r"C:\tmp\sdpt_v3_final.gdb\sdpt_v3_final.gdb"
     out_dir = r"C:\GIS\Data\Global\Plantation\sdpt_by_tiles"
     tile_id_field = "tile_id"
 
     split_sdpt_by_tiles(tile_grid_path, countries_gdb, out_dir, tile_id_field)
+
 
 if __name__ == "__main__":
     main()
