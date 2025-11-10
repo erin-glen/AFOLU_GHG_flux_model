@@ -244,7 +244,7 @@ land_cover_ipcc_dates = {
 # End years that correspond to available five year land cover composites
 five_year_land_cover_years = [2005, 2010, 2015, 2020, 2024]
 
-# Convenience list of five year inventory periods. The first period now uses the 2005 land cover composite (2000–2004). The final period still uses the 2023 land cover composite and spans 2020–2023.
+# Convenience list of five year inventory periods. The first period now uses the 2005 land cover composite (2000–2004). The final period uses the 2024 land cover composite for the 2024 inventory year.
 five_year_inventory_periods = [
     (2001, 2005),
     (2006, 2010),
@@ -377,8 +377,8 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
         interval_end_year = interval_start_year
 
     lc_year = interval_end_year
-    if lc_year == 2024:
-        # 2023 land cover composite is stored in the annual directory
+    if lc_year in {2015, 2020, 2024}:
+        # These inventory years are backed by the annual land cover composites
         interval_type = intervals_annual
     elif lc_year in five_year_land_cover_years:
         interval_type = intervals_five_year
