@@ -195,7 +195,7 @@ datasets = {
             's3_raw': pp.join(raw_dir, 'soils', 'OGH','20251103' 'organic_soils_extent.tif'),
             's3_processed': pp.join(processed_dir, 'peat_mask', 'OGH', 'tiles') + '/',
             'local_processed': pp.join(local_temp_dir, 'peat', 'ogh', 'tiles') + '/',
-            'threshold': 23
+            'threshold': 10
         },
         'ogh_unthresholded': {
             'input_type': 'raster',
