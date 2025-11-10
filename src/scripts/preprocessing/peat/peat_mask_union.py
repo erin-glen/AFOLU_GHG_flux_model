@@ -320,18 +320,26 @@ def main(tile_id=None, dataset_list=None, client="coiled", run_mode="default", r
         log.warning("[union] No valid datasets remain after filtering; exiting without work.")
         return
 
+    run_local_flag = client == "local"
     if client == "local":
         cluster = LocalCluster(processes=False, dashboard_address=None)
         client_obj = Client(cluster)
         log.info("Running locally.")
     else:
-        cluster, client_obj = uu.connect_to_cluster(
+        cluster, client_obj, run_local_flag = uu.connect_to_cluster(
             cluster_name="peat_union",
             n_workers=40,
             region="us-east-1",
             worker_memory="64GiB",
         )
-        log.info(f"Running on Coiled: {cluster.name}")
+        if run_local_flag:
+            log.warning("Coiled cluster unavailable or run_local requested; falling back to local execution.")
+            if client_obj is None:
+                cluster = LocalCluster(processes=False, dashboard_address=None)
+                client_obj = Client(cluster)
+            log.info("Running locally.")
+        else:
+            log.info(f"Running on Coiled: {cluster.name}")
 
     tile_ids = [tile_id] if tile_id else cn.tile_id_list
     do_resample_1km = (resample == "1km")
@@ -340,8 +348,9 @@ def main(tile_id=None, dataset_list=None, client="coiled", run_mode="default", r
     tasks = build_tasks(tile_ids, ds_list, run_mode, do_resample_1km)
     dask.compute(*tasks)
 
-    client_obj.close()
-    if client == "coiled":
+    if client_obj is not None:
+        client_obj.close()
+    if cluster is not None:
         cluster.close()
     log.info("All union tasks completed.")
 
