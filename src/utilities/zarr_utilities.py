@@ -392,6 +392,9 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     # Identifies rows (chunks) which have stats that differ between model and zarr
     mask = merged_table['maximum_diff_value'] > cn.zarr_difference_tolerance
 
+    # Number of rows from model output without matching zarr pixel counts
+    main_logger.info(f"Rows without pixel count comparison: {merged_table['count_value_diff'].isna().sum()}")
+
     # Applies the mask to filter those rows
     differences_exceeding_tolerance = merged_table[mask]
 

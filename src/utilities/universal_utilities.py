@@ -1741,16 +1741,13 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
 
 
 
-def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
+def aggregate_10x10_chunk_stats(counts_10x10_df, stage, no_upload, main_logger):
 
     ### Part 1: Organizes chunk stats for 1x1 degree chunks (inputs and outputs)
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
 
     main_logger.info(f"Starting to aggregate and export tile stats: {timestr()}")
-
-    # Converts accumulated 1x1 chunk statistics to a DataFrame
-    df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
 
     # Writes the data to a single Excel file with separate sheets.
     # Should continue with model post-processing even if chunk stats don't work for some reason
@@ -1762,9 +1759,9 @@ def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
     try:
         with pd.ExcelWriter(local_spreadsheet) as writer:
 
-            df_all_10x10_stats.to_excel(writer, sheet_name='pix_counts_compa_10x10_1x1', index=False)
+            counts_10x10_df.to_excel(writer, sheet_name='pix_counts_compa_10x10_1x1', index=False)
 
-        main_logger.info(df_all_10x10_stats.head())  # Show first few rows of the stats DataFrame for inspection
+        main_logger.info(counts_10x10_df.head())  # Show first few rows of the stats DataFrame for inspection
 
         main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
 

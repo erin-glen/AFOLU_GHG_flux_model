@@ -31,6 +31,7 @@ Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/690a21cd-2ea0-8333
 
 import argparse
 import numpy as np
+import pandas as pd
 import rasterio
 import tempfile
 import fsspec
@@ -153,11 +154,11 @@ def extract_10x10(var, year_idx, tile_id, raw_path, output_base, no_upload):
 
     pixel_area = pixel_area_zarr_store['band_data'][y0_pixel_area:y1_pixel_area, x0_pixel_area:x1_pixel_area]
     # pixel_area = pixel_area_zarr_store['pixel_area'][y0_pixel_area:y1_pixel_area, x0_pixel_area:x1_pixel_area]
-    print("y0:", y0_pixel_area)
-    print("y1:", y1_pixel_area)
-    print("x0:", x0_pixel_area)
-    print("x1:", x1_pixel_area)
-    print(pixel_area)
+    # print("y0:", y0_pixel_area)
+    # print("y1:", y1_pixel_area)
+    # print("x0:", x0_pixel_area)
+    # print("x1:", x1_pixel_area)
+    # print(pixel_area)
     # sys.quit()
 
     # Converts per-ha to per-pixel
@@ -352,7 +353,21 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
     main_logger.info(f"Core output path for aggregation: {output_base}")
 
 
-    ### Step 2: Create 10x10 deg outputs
+    ### Step 2: Prepare model chunk stats for comparison with zarr chunk stats
+
+    main_logger.info(f"Reading local model chunk stats tables: {uu.timestr()}")
+    model_chunk_stats_path = os.path.join(cn.local_chunk_stats_path, model_chunk_stats_table_name)
+
+    # Text added to output chunk stats table name(s) (Excel or Parquet)
+    comparison_insert = "_10x10_deg_aggregation_comparison"
+
+    tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
+        comparison_insert, main_logger, model_chunk_stats_path)
+
+    model_10x10_counts_df = tables_to_compare_dict[cn.counts_1x1_in_10x10]
+
+
+    ### Step 3: Create 10x10 deg outputs
 
     futures = []
 
@@ -374,7 +389,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
-    ### Step 3: Chunk stats (i.e. pixel counts) for 10x10 degree outputs, aggregates logs
+    ### Step 3: Compares pixel counts in original 1x1 deg geotifs to pixel counts in 10x10 deg geotifs
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
@@ -389,10 +404,30 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
     # Flattens the tile-level lists of chunk stat dictionaries into a single list.
-    all_10x10_stats = [item for sublist in results for item in sublist]
+    counts_10x10_stats_list = [item for sublist in results for item in sublist]
+
+    # Converts the pixel counts in the 10x10s into a dataframe
+    counts_10x10_df = pd.DataFrame(counts_10x10_stats_list)
+
+    # Merges the pixel counts for the 10x10 tiles against the pixel counts for the 1x1s
+    merged_10x10_counts_df = model_10x10_counts_df.merge(counts_10x10_df, on='tile_name', how='left')
+
+    # Gets the difference between pixel counts in 10x10s and 1x1s for each tile
+    merged_10x10_counts_df['pixel_count_diff'] = merged_10x10_counts_df['total_count'] - merged_10x10_counts_df['count_value']
+    max_pixel_count_diff = merged_10x10_counts_df['pixel_count_diff'].abs().max()
+    if max_pixel_count_diff > 0:
+        main_logger.warning(f"WARNING: at least one tile has a difference in pixel counts between 1x1s and 10x10s! Max difference is {max_pixel_count_diff}: {uu.timestr()}")
+    else:
+        main_logger.info(f"No tiles have a difference in pixel counts between 1x1s and 10x10s.")
+
+    # Number of rows from model output without matching 10x10 aggregation pixel counts
+    main_logger.info(f"Rows without pixel count comparison: {merged_10x10_counts_df['pixel_count_diff'].isna().sum()}")
 
     # Prepares 10x10 deg chunk stats spreadsheet: pixel count for outputs
-    uu.aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger)
+    uu.aggregate_10x10_chunk_stats(merged_10x10_counts_df, stage, no_upload, main_logger)
+
+
+    ### Step 4: Aggregates logs
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 

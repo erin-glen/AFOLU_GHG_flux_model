@@ -2303,7 +2303,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         raw_mega_zarr_path = zu.create_mega_zarr_paths(chunk_size_pixels, interval_type, model_type, run_date)
 
         # Add the variables listed here to the mega-zarr
-        outputs_to_zarr = cn.full_outputs_to_zarr # [0:2] # For testing
+        outputs_to_zarr = cn.core_veg_outputs_to_zarr # [0:2] # For testing
 
         # Creates the global mega-zarr with metadata only
         zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),

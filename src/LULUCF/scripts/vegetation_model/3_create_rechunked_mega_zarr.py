@@ -207,7 +207,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     fs = fsspec.filesystem("s3", anon=False)
     source_mapper = fs.get_mapper(rechunked_mega_zarr_path)
     ds = xr.open_zarr(source_mapper, consolidated=False)
-    print(ds)
+    main_logger.info(f"rechunked zarr: {ds}")
 
 
     ### Step 3: Prepare model chunk stats for comparison with zarr chunk stats
