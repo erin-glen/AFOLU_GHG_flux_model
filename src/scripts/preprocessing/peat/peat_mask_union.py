@@ -31,6 +31,7 @@ from rasterio.warp import Resampling
 from dask import delayed
 from dask.distributed import Client, LocalCluster
 import dask
+import posixpath as pp
 
 import src.scripts.preprocessing.preprocessing_constants as cn
 from src.scripts.utilities import universal_utilities as uu
@@ -39,21 +40,51 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 log = logging.getLogger("peat-union")
 
 BUCKET = cn.s3_bucket_name
+TODAY = cn.today_date
+
+# Specific input dates for peat datasets. ``None`` indicates the dataset keeps
+# its historical undated layout (e.g., GFW tiles live directly in the processed
+# directory).
+DATASET_DATES = {
+    "gfw": None,
+    "gpd": "20251110",
+    "peatmap": "20251110",
+    "peatml": "20251110",
+    "ogh": "20251110",
+}
 
 # Sample tile for 1 km alignment
 SAMPLE_1KM_TILE = f"/vsis3/{BUCKET}/{cn.peat_tiles_prefix_1km}00N_110E_peat_mask_processed.tif"
 
 
-def get_tile_path(ds_key, tile_id):
-    ds = cn.datasets["peat"][ds_key]
-    s3_base = ds["s3_processed"]
-    tile_name = f"{tile_id}_{ds_key}_mask.tif"
-    tile_path = os.path.join(s3_base, tile_name).replace("\\", "/")
-    if not tile_path.startswith("s3://"):
-        tile_path = f"s3://{BUCKET}/{tile_path.lstrip('/')}"
-    return tile_path
+def _build_s3_path(base, *parts):
+    """Join S3 path fragments, ensuring the bucket prefix is present."""
+    base_clean = base.replace("\\", "/").rstrip("/")
+    if base_clean.startswith("s3://"):
+        bucket_and_key = base_clean[5:]
+        joined = pp.join(bucket_and_key, *parts)
+        return f"s3://{joined}"
 
-def get_union_output_path(tile_id, resolution="30m"):
+    joined = pp.join(base_clean, *parts)
+    return f"s3://{BUCKET}/{joined.lstrip('/')}"
+
+
+def _s3_key_from_uri(uri):
+    return uri.replace(f"s3://{BUCKET}/", "", 1)
+
+
+def get_dataset_tile_path(ds_key, tile_id, dated=True, dataset_config=None):
+    ds = dataset_config or cn.datasets["peat"].get(ds_key)
+    if ds is None:
+        return None
+    tile_name = f"{tile_id}_{ds_key}_mask.tif"
+    dataset_date = DATASET_DATES.get(ds_key)
+    if dated and dataset_date:
+        return _build_s3_path(ds["s3_processed"], dataset_date, tile_name)
+    return _build_s3_path(ds["s3_processed"], tile_name)
+
+
+def get_union_output_path(tile_id, resolution="30m", dated=True):
     if resolution == "1km":
         union_dir = cn.datasets["peat"]["union_mask"]["1km"]
         out_name = f"{tile_id}_union_mask_1km.tif"
@@ -61,10 +92,9 @@ def get_union_output_path(tile_id, resolution="30m"):
         union_dir = cn.datasets["peat"]["union_mask"]["30m"]
         out_name = f"{tile_id}_union_mask.tif"
 
-    out_path = os.path.join(union_dir, out_name).replace("\\", "/")
-    if not out_path.startswith("s3://"):
-        out_path = f"s3://{BUCKET}/{out_path.lstrip('/')}"
-    return out_path
+    if dated:
+        return _build_s3_path(union_dir, TODAY, out_name)
+    return _build_s3_path(union_dir, out_name)
 
 
 @dask.delayed
@@ -76,8 +106,10 @@ def union_tile(tile_id, ds_list, run_mode="default", do_resample=False):
        by downloading the existing 30 m union from S3 if it was found.
     """
     log.info(f"[union|{tile_id}] Checking 30m union presence, do_resample={do_resample}")
-    out_30m_path = get_union_output_path(tile_id, "30m")
-    s3_30m_key = out_30m_path.replace(f"s3://{BUCKET}/", "", 1)
+    out_30m_path = get_union_output_path(tile_id, "30m", dated=True)
+    s3_30m_key = _s3_key_from_uri(out_30m_path)
+    legacy_30m_path = get_union_output_path(tile_id, "30m", dated=False)
+    legacy_30m_key = _s3_key_from_uri(legacy_30m_path)
 
     local_temp = Path(tempfile.gettempdir()) / "union_peat"
     local_temp.mkdir(parents=True, exist_ok=True)
@@ -85,6 +117,11 @@ def union_tile(tile_id, ds_list, run_mode="default", do_resample=False):
 
     # Check if union tile already on S3
     union_exists = uu.s3_file_exists(BUCKET, s3_30m_key)
+    if not union_exists:
+        if uu.s3_file_exists(BUCKET, legacy_30m_key):
+            log.info(
+                f"[union|{tile_id}] legacy 30m union found at {legacy_30m_path}; rebuilding in dated directory."
+            )
 
     if union_exists and run_mode != "test":
         log.info(f"[union|{tile_id}] 30m union already exists => skipping union step.")
@@ -101,10 +138,44 @@ def union_tile(tile_id, ds_list, run_mode="default", do_resample=False):
         arrays = []
         profile = None
         for ds_key in ds_list:
-            tile_path = get_tile_path(ds_key, tile_id)
-            s3_key_for_check = tile_path.replace(f"s3://{BUCKET}/", "", 1)
-            if not uu.s3_file_exists(BUCKET, s3_key_for_check):
-                log.warning(f"[union|{tile_id}] MISSING tile for {ds_key}: {tile_path}")
+            dataset_cfg = cn.datasets["peat"].get(ds_key)
+            if dataset_cfg is None:
+                log.warning(
+                    f"[union|{tile_id}] Dataset '{ds_key}' is not configured; skipping this dataset."
+                )
+                continue
+
+            tile_candidates = list(
+                dict.fromkeys(
+                    [
+                        path
+                        for path in (
+                            get_dataset_tile_path(
+                                ds_key, tile_id, dated=True, dataset_config=dataset_cfg
+                            ),
+                            get_dataset_tile_path(
+                                ds_key, tile_id, dated=False, dataset_config=dataset_cfg
+                            ),
+                        )
+                        if path is not None
+                    ]
+                )
+            )
+            tile_path = None
+            for candidate in tile_candidates:
+                candidate_key = _s3_key_from_uri(candidate)
+                if uu.s3_file_exists(BUCKET, candidate_key):
+                    tile_path = candidate
+                    break
+
+            if tile_path is None:
+                if tile_candidates:
+                    candidates_msg = ", ".join(tile_candidates)
+                else:
+                    candidates_msg = "<no candidate paths resolved>"
+                log.warning(
+                    f"[union|{tile_id}] No data found for dataset '{ds_key}'. Checked: {candidates_msg}. Proceeding without it."
+                )
                 continue
 
             vsis3_path = tile_path.replace("s3://", "/vsis3/")
@@ -158,8 +229,8 @@ def union_tile(tile_id, ds_list, run_mode="default", do_resample=False):
             output_path=str(local_1km)
         )
 
-        out_1km_path = get_union_output_path(tile_id, "1km")
-        s3_1km_key = out_1km_path.replace(f"s3://{BUCKET}/", "", 1)
+        out_1km_path = get_union_output_path(tile_id, "1km", dated=True)
+        s3_1km_key = _s3_key_from_uri(out_1km_path)
 
         if run_mode != "test":
             uu.upload_file_to_s3(str(local_1km), BUCKET, s3_1km_key)
@@ -236,7 +307,18 @@ def main(tile_id=None, dataset_list=None, client="coiled", run_mode="default", r
     If 30m union exists, skip re-union. If --resample=1km, do 1km step from
     existing or newly created 30m. 'none' => no resample.
     """
-    ds_list = dataset_list or ["gfw", "gpd", "peatmap", "peatml", "ogh"]
+    requested_ds_list = dataset_list or ["gfw", "gpd", "peatmap", "peatml", "ogh"]
+    configured_datasets = cn.datasets["peat"].keys()
+    missing_datasets = [ds for ds in requested_ds_list if ds not in configured_datasets]
+    if missing_datasets:
+        log.warning(
+            f"[union] Dataset configuration not found for: {', '.join(missing_datasets)}. They will be skipped."
+        )
+    ds_list = [ds for ds in requested_ds_list if ds in configured_datasets]
+
+    if not ds_list:
+        log.warning("[union] No valid datasets remain after filtering; exiting without work.")
+        return
 
     if client == "local":
         cluster = LocalCluster(processes=False, dashboard_address=None)
