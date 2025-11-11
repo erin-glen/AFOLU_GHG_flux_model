@@ -1993,6 +1993,223 @@ def get_cluster_info(client, cluster):
     return worker_memory, n_workers, nthreads
 
 
+
+# Write single GeoTIFF to S3 using in-memory buffer
+def write_single_geotiff_to_s3(var, year_idx, tile_id, data, transform, s3_path, logger_worker):
+
+    fs = fsspec.filesystem("s3", anon=False)
+
+    year = cn.interval_end_years_annual[year_idx]
+
+    lu.print_and_log(f"  Writing {var} for year {year} for {tile_id} to {s3_path}: {timestr()}", False, logger_worker)
+    upload_start_time = time.time()
+
+    height, width = data.shape
+
+    profile = {
+        "driver": "GTiff",
+        "height": height,
+        "width": width,
+        "count": 1,
+        "dtype": data.dtype,
+        "crs": "EPSG:4326",
+        "transform": transform,
+        "compress": "LZW",
+        "nodata": 0,
+        "tiled": True,
+        "blockxsize": 400,
+        "blockysize": 400,
+    }
+
+    # Counts non-zero pixels for comparison with 1x1 dego geotifs
+    valid_pixel_count = int(np.count_nonzero(data != 0))
+    # print("pixel count:", valid_pixel_count)
+
+    # Writes to temporary file on disk
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=True) as tmpfile:
+        with rasterio.open(tmpfile.name, "w", **profile) as dst:
+            dst.write(data, 1)
+
+        # Uploads efficiently using multipart S3 upload
+        fs.put_file(tmpfile.name, s3_path)
+
+    upload_end_time = time.time()
+    lu.print_and_log(f"  Wrote {var} for year {year} for {tile_id} to {s3_path} in {round(upload_end_time-upload_start_time)} seconds: {timestr()}", False, logger_worker)
+
+    return valid_pixel_count
+
+
+# Extracts a 10x10° tile from a Zarr store and writes to GeoTIFF on S3
+def extract_10x10(var, year_idx, tile_id, raw_path, output_base, no_upload):
+
+    process = psutil.Process(os.getpid())
+
+    logger_worker = lu.setup_logging_worker()
+
+    # Convert tile_id to bounding box (W, S, E, N)
+    min_x, min_y, max_x, max_y = get_10x10_tile_bounds(tile_id)
+
+    year = cn.interval_end_years_annual[year_idx]
+
+    # Open Zarr group using fsspec mapper
+    fs = fsspec.filesystem("s3", anon=False)
+    model_zarr_store = zarr.open_group(fs.get_mapper(raw_path), mode="r")
+
+    # Determine pixel indices (applies to model outputs and pixel area)
+    lat_array_model = model_zarr_store["y"][:]
+    lon_array_model = model_zarr_store["x"][:]
+
+    # Get index ranges (applies to model outputs and pixel area)
+    y0_model = np.searchsorted(lat_array_model[::-1], max_y, side='right')
+    y1_model = np.searchsorted(lat_array_model[::-1], min_y, side='left')
+    x0_model = np.searchsorted(lon_array_model, min_x, side='left')
+    x1_model = np.searchsorted(lon_array_model, max_x, side='right')
+
+    # Flips y indices since lat is descending
+    y0_model, y1_model = len(lat_array_model) - y1_model, len(lat_array_model) - y0_model
+    if y0_model > y1_model:
+        y0_model, y1_model = y1_model, y0_model
+
+    lu.print_and_log(f"Extracting {var} for {year} for {tile_id}: {timestr()}", False, logger_worker)
+    extract_start_time = time.time()
+
+    # Loads model output data block
+    data_per_ha = model_zarr_store[var][year_idx, y0_model:y1_model, x0_model:x1_model]
+
+    # Calculates per-pixel output (for numeric outputs only)
+    # pixel_area_zarr_store = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
+    pixel_area_zarr_store = zarr.open_group(fs.get_mapper('s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20251106/global_pixel_area_20251106.zarr'), mode="r")
+    # pixel_area_zarr_store = zarr.open_group(fs.get_mapper('s3://gfw2-data/climate/AFOLU_flux_model/global_contextual_zarrs/pixel_area/20250925/global_pixel_area_20250925.zarr'), mode="r")
+
+    # Determine pixel indices (applies to model outputs and pixel area)
+    lat_array_pixel_area = pixel_area_zarr_store["y"][:]
+    lon_array_pixel_area = pixel_area_zarr_store["x"][:]
+
+    # Get index ranges (applies to model outputs and pixel area)
+    y0_pixel_area = np.searchsorted(lat_array_pixel_area[::-1], max_y, side='right')
+    y1_pixel_area = np.searchsorted(lat_array_pixel_area[::-1], min_y, side='left')
+    x0_pixel_area = np.searchsorted(lon_array_pixel_area, min_x, side='left')
+    x1_pixel_area = np.searchsorted(lon_array_pixel_area, max_x, side='right')
+
+    # Flips y indices since lat is descending
+    y0_pixel_area, y1_pixel_area = len(lat_array_pixel_area) - y1_pixel_area, len(lat_array_pixel_area) - y0_pixel_area
+    if y0_pixel_area > y1_pixel_area:
+        y0_pixel_area, y1_pixel_area = y1_pixel_area, y0_pixel_area
+
+    pixel_area = pixel_area_zarr_store['band_data'][y0_pixel_area:y1_pixel_area, x0_pixel_area:x1_pixel_area]
+    # pixel_area = pixel_area_zarr_store['pixel_area'][y0_pixel_area:y1_pixel_area, x0_pixel_area:x1_pixel_area]
+    # print("y0:", y0_pixel_area)
+    # print("y1:", y1_pixel_area)
+    # print("x0:", x0_pixel_area)
+    # print("x1:", x1_pixel_area)
+    # print(pixel_area)
+    # sys.quit()
+
+    # Converts per-ha to per-pixel
+    data_per_pixel = data_per_ha * pixel_area / 10000
+
+    # GeoTransform (top-left corner)
+    transform = from_origin(min_x, max_y, cn.resolution, cn.resolution)
+
+    extract_end_time = time.time()
+    lu.print_and_log(f"  Extracted {var} for year {year} for {tile_id} in {round(extract_end_time - extract_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"  Memory usage after 10x10 extraction for {var} for year {year} for {tile_id}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+
+    # Establishes year/year range and units for dataset
+    if "density" in var:
+        year_or_range = f"{year}"
+        per_ha_units = "_ha"
+        per_pixel_units = "_pixel"
+    elif "emis" in var:
+        year_or_range = f"{year - 1}_{year}"
+        per_ha_units = "_ha_yr"
+        per_pixel_units = "_pixel_yr"
+    elif "removals" in var:
+        year_or_range = f"{year - 1}_{year}"
+        per_ha_units = "_ha_yr"
+        per_pixel_units = "_pixel_yr"
+    elif "net" in var:
+        year_or_range = f"{year - 1}_{year}"
+        per_ha_units = "_ha_yr"
+        per_pixel_units = "_pixel_yr"
+    elif cn.land_state_pattern in var:
+        year_or_range = f"{year - 1}_{year}"
+        per_ha_units = ""
+        per_pixel_units = ""
+    else:
+        year_or_range = f"{year}"
+        per_ha_units = ""
+        per_pixel_units = ""
+
+    # Output names and paths for per-ha and per-pixel outputs
+    output_path = output_base.replace("PATTERN", var)
+    output_path = output_path.replace("START_END", year_or_range)
+    output_path_per_ha = output_path.replace("PER_HA_OR_PIXEL", per_ha_units)
+    output_name_per_ha = f"{tile_id}__{var}{per_ha_units}_{year_or_range}.tif"
+    s3_filename_per_ha = f"{output_path_per_ha}{output_name_per_ha}"
+
+    output_path_per_pixel = output_path.replace("PER_HA_OR_PIXEL", per_pixel_units)
+    output_name_per_pixel = f"{tile_id}__{var}{per_pixel_units}_{year_or_range}.tif"
+    s3_filename_per_pixel = f"{output_path_per_pixel}{output_name_per_pixel}"
+
+    # Uploads to s3 if requested
+    if no_upload == False:
+
+        # Writes geotif to S3
+        valid_pixel_count_per_ha = write_single_geotiff_to_s3(var, year_idx, tile_id, data_per_ha, transform, s3_filename_per_ha, logger_worker)
+
+        # Conditionally writes per-pixel output (only if dataset is float32, i.e. numeric output from model).
+        # Pixel count from per-pixel outputs is not used.
+        if model_zarr_store[var].dtype == np.float32:
+            valid_pixel_count_per_pixel = write_single_geotiff_to_s3(
+                var, year_idx, tile_id, data_per_pixel, transform, s3_filename_per_pixel, logger_worker
+            )
+        else:
+            valid_pixel_count_per_pixel = None
+
+        # Most stats for the 10x10 deg outputs aren't calculated.
+        # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
+        # Dictionary is in a list because it's necessary for chunk stats processing later.
+        chunk_stats = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': output_name_per_ha,
+            'tile_name': output_name_per_ha,
+            'in_out': 'output_layer',
+            'pattern': var,
+            'years': year_or_range,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': valid_pixel_count_per_ha,
+            'sum_value': 'no data',
+            'data_type': 'no data'
+        }]
+
+    else:
+
+        # Most stats for the 10x10 aren't calculated.
+        # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
+        # Dictionary is in a list because it's necessary for chunk stats processing later.
+        chunk_stats = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': output_name_per_ha,
+            'tile_name': output_name_per_ha,
+            'in_out': 'output_layer',
+            'pattern': var,
+            'years': year_or_range,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': 'not calculated',
+            'sum_value': 'no data',
+            'data_type': 'no data'
+        }]
+
+    return chunk_stats
+
+
 # Creates an empty txt file for each chunk in s3.
 # Uses concurrent.futures to parallelize the txt creation. Otherwise, it's very slow.
 # Based on https://chatgpt.com/share/e/67bf0fd9-7cb0-800a-8666-2becd97d45a7
