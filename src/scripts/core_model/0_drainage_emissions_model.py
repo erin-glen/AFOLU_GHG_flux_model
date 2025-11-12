@@ -65,8 +65,10 @@ oil_palm_code = cn.plantation_type_codes["oil_palm"]
 
 # helpers for numba dict lookups
 @jit(nopython=True)
-def lookup_efs(key, table):
+def lookup_efs(key, table, coastal_code=0):
     """Return (values, is_missing) from drainage factor table."""
+    if coastal_code == 1 or coastal_code == 2:
+        return defac.ZERO_ARRAY, False
     if key in table:
         return table[key], False
     return defac.ZERO_ARRAY, True
@@ -242,6 +244,10 @@ def calculate_drainage_and_emissions(
                     if coastal_code:
                         emission_node = nu.accrete_node(category_node, 9)
                         emission_node = nu.accrete_node(emission_node, coastal_code)
+                        if coastal_code == 1:
+                            key = "coastal_mangrove"
+                        else:
+                            key = "coastal_tidal_marsh"
                     elif extraction > 0:
                         emission_node = nu.accrete_node(category_node, 1)
                         key = "boreal_extraction"
@@ -270,8 +276,7 @@ def calculate_drainage_and_emissions(
                         emission_node = nu.accrete_node(category_node, 8)
                         key = "boreal_otherland"
 
-                    if not coastal_code:
-                        vals, missing = lookup_efs(key, drainage_table)
+                    vals, missing = lookup_efs(key, drainage_table, coastal_code)
 
                 # TEMPERATE -----------------------------------------------
                 elif ecozone == temperate_code:
@@ -280,6 +285,10 @@ def calculate_drainage_and_emissions(
                     if coastal_code:
                         emission_node = nu.accrete_node(category_node, 9)
                         emission_node = nu.accrete_node(emission_node, coastal_code)
+                        if coastal_code == 1:
+                            key = "coastal_mangrove"
+                        else:
+                            key = "coastal_tidal_marsh"
                     elif extraction > 0:
                         emission_node = nu.accrete_node(category_node, 1)
                         key = "temperate_extraction"
@@ -308,8 +317,7 @@ def calculate_drainage_and_emissions(
                         emission_node = nu.accrete_node(category_node, 8)
                         key = "temperate_otherland"
 
-                    if not coastal_code:
-                        vals, missing = lookup_efs(key, drainage_table)
+                    vals, missing = lookup_efs(key, drainage_table, coastal_code)
 
                 # TROPICAL -------------------------------------------------
                 elif ecozone == tropical_code:
@@ -318,6 +326,10 @@ def calculate_drainage_and_emissions(
                     if coastal_code:
                         emission_node = nu.accrete_node(category_node, 9)
                         emission_node = nu.accrete_node(emission_node, coastal_code)
+                        if coastal_code == 1:
+                            key = "coastal_mangrove"
+                        else:
+                            key = "coastal_tidal_marsh"
                     elif extraction > 0:
                         emission_node = nu.accrete_node(category_node, 1)
                         key = "tropical_extraction"
@@ -352,14 +364,17 @@ def calculate_drainage_and_emissions(
                         emission_node = nu.accrete_node(category_node, 8)
                         key = "tropical_otherland"
 
-                    if not coastal_code:
-                        vals, missing = lookup_efs(key, drainage_table)
+                    vals, missing = lookup_efs(key, drainage_table, coastal_code)
 
                 else:
                     if coastal_code:
                         emission_node = nu.accrete_node(emission_node, 9)
                         emission_node = nu.accrete_node(emission_node, coastal_code)
-                        missing = False
+                        if coastal_code == 1:
+                            key = "coastal_mangrove"
+                        else:
+                            key = "coastal_tidal_marsh"
+                        vals, missing = lookup_efs(key, drainage_table, coastal_code)
                     else:
                         missing = True
                 ef_co2 = vals[0]

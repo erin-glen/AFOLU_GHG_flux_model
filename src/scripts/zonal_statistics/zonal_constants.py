@@ -18,74 +18,94 @@ _drain_root = {
     "2":  "non_peat",
 }
 
-_drain_emit = {
-    # BOREAL
-    "1111": "boreal_forest_poor",
-    "1112": "boreal_forest_rich",
-    "112":  "boreal_grassland",
-    "113":  "boreal_cropland",
-    "114":  "boreal_extraction",
-    "115":  "boreal_settlement",
-    "116":  "boreal_wetland",
-    "117":  "boreal_otherland",
-    # TEMPERATE
-    "121":  "temperate_forest",
-    "1221": "temperate_grassland_poor",
-    "1222": "temperate_grassland_rich",
-    "123":  "temperate_cropland",
-    "124":  "temperate_extraction",
-    "125":  "temperate_settlement",
-    "126":  "temperate_wetland",
-    "127":  "temperate_otherland",
-    # TROPICAL
-    "1311": "tropical_long_rotation",
-    "1312": "tropical_short_rotation",
-    "1313": "tropical_oil_palm",
-    "132":  "tropical_forest",
-    "133":  "tropical_grassland",
-    "134":  "tropical_cropland",
-    "135":  "tropical_extraction",
-    "138":  "tropical_settlement",
-    "139":  "tropical_wetland",
-    "13":  "tropical_otherland",
+_classification_suffix_labels = {
+    "": "",
+    "91": "__coastal_mangrove",
+    "92": "__coastal_tidal_marsh",
 }
 
-_burn_root = {
-    "1": "boreal",
-    "2": "temperate",
-    "3": "tropical",
-    "4": "other_domain",
-}
-
-_burn_emit = {
-    "1": {"11": "drained", "12": "undrained"},
-    "2": {"21": "drained", "22": "undrained"},
-    "3": {
-        "31": "drained_crop_or_plantation",
-        "32": "drained_other",
-        "33": "undrained",
+_emissions_by_suffix = {
+    "": {
+        # BOREAL
+        "111": "boreal_extraction",
+        "1131": "boreal_forest_poor",
+        "1132": "boreal_forest_rich",
+        "114": "boreal_grassland",
+        "115": "boreal_cropland",
+        "116": "boreal_settlement",
+        "117": "boreal_wetland",
+        "118": "boreal_otherland",
+        # TEMPERATE
+        "121": "temperate_extraction",
+        "123": "temperate_forest",
+        "1241": "temperate_grassland_poor",
+        "1242": "temperate_grassland_rich",
+        "125": "temperate_cropland",
+        "126": "temperate_settlement",
+        "127": "temperate_wetland",
+        "128": "temperate_otherland",
+        # TROPICAL
+        "131": "tropical_extraction",
+        "1321": "tropical_long_rotation",
+        "1322": "tropical_short_rotation",
+        "1323": "tropical_oil_palm",
+        "133": "tropical_forest",
+        "134": "tropical_grassland",
+        "135": "tropical_cropland",
+        "136": "tropical_settlement",
+        "137": "tropical_wetland",
+        "138": "tropical_otherland",
     },
-    "4": {"4": "other"},
+    "91": {
+        "1191": "boreal_coastal_mangrove",
+        "1291": "temperate_coastal_mangrove",
+        "1391": "tropical_coastal_mangrove",
+        "191": "other_domain_coastal_mangrove",
+    },
+    "92": {
+        "1192": "boreal_coastal_tidal_marsh",
+        "1292": "temperate_coastal_tidal_marsh",
+        "1392": "tropical_coastal_tidal_marsh",
+        "192": "other_domain_coastal_tidal_marsh",
+    },
 }
 
-## ── lookup tables ───────────────────────────────────────────────────
-DRAINED_STATE_NODE_MEANINGS: dict[str, str] = {
-    _pad_right(code): label
-    for code, label in _drain_root.items()
-    if code in ("16", "2")
+def _build_drained_state_mapping() -> dict[str, str]:
+    mapping: dict[str, str] = {}
+
+    for root in ("16", "2"):
+        base_label = _drain_root[root]
+        for suffix, suffix_label in _classification_suffix_labels.items():
+            code = root + suffix
+            mapping[_pad_right(code)] = base_label + suffix_label
+
+    for root in ("11", "12", "13", "14", "15"):
+        base_label = _drain_root[root]
+        for suffix in _classification_suffix_labels.keys():
+            class_code = root + suffix
+            for emit_code, emit_label in _emissions_by_suffix[suffix].items():
+                mapping[_pad_right(class_code + emit_code)] = (
+                    f"{base_label}__{emit_label}"
+                )
+
+    return mapping
+
+
+DRAINED_STATE_NODE_MEANINGS = _build_drained_state_mapping()
+
+_burn_state_labels = {
+    "111": "boreal__drained",
+    "112": "boreal__undrained",
+    "221": "temperate__drained",
+    "222": "temperate__undrained",
+    "331": "tropical__drained_crop_or_plantation",
+    "332": "tropical__drained_other",
+    "333": "tropical__undrained",
+    "44": "other_domain__other",
 }
-DRAINED_STATE_NODE_MEANINGS.update(
-    {
-        _pad_right(root + emit_code): f"{_drain_root[root]}__{emit_label}"
-        for root in ("11", "12", "13", "14", "15")
-        for emit_code, emit_label in _drain_emit.items()
-    }
-)
 
 BURNED_STATE_NODE_MEANINGS: dict[str, str] = {
-    _pad_right(root + sub): f"{_burn_root[root]}__{label}"
-    for root, sub_dict in _burn_emit.items()
-    for sub, label in sub_dict.items()
+    _pad_right(code): label for code, label in _burn_state_labels.items()
 }
 
 ALL_DRAINED_STATE_CODES = frozenset(DRAINED_STATE_NODE_MEANINGS.keys())
