@@ -15,7 +15,7 @@ _drain_root = {
     "14": "peat_drained_plantation",
     "15": "peat_drained_extraction",
     "16": "peat_undrained",
-    "2":  "non_peat",
+    "0":  "non_peat",
 }
 
 _classification_suffix_labels = {
@@ -73,10 +73,13 @@ _emissions_by_suffix = {
 def _build_drained_state_mapping() -> dict[str, str]:
     mapping: dict[str, str] = {}
 
-    for root in ("16", "2"):
+    for root in ("16", "0"):
         base_label = _drain_root[root]
         for suffix, suffix_label in _classification_suffix_labels.items():
-            code = root + suffix
+            if suffix:
+                code = suffix if root == "0" else root + suffix
+            else:
+                code = root
             mapping[_pad_right(code)] = base_label + suffix_label
 
     for root in ("11", "12", "13", "14", "15"):
