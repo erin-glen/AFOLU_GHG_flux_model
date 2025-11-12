@@ -41,7 +41,7 @@ combustion_factor = np.float32(cn.combustion_factor)
 
 # Default peat probability threshold for the OGH dataset. This matches the
 # preprocessing threshold previously applied during tiling.
-DEFAULT_OGH_THRESHOLD = 23.0
+DEFAULT_OGH_THRESHOLD = 10.0
 
 forest_code = cn.ipcc_codes["forest"]
 cropland_code = cn.ipcc_codes["cropland"]
