@@ -159,12 +159,24 @@ dirs = {
 peat_mask_dirs = {
     # TODO add full gfw path here, change all references
     'gfw': dirs['peat'],
-    'gpd': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/GPD/tiles'),
+    'gpd': posixpath.join(
+        full_bucket_prefix,
+        processed_dir,
+        'peat_mask/GPD/tiles/20251110',
+    ),
     'peatmap': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/PEATMAP/tiles'),
     'peatml': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/PEATML/tiles'),
     'ogh': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/OGH/tiles'),
-    'ogh_unthresholded': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/OGH/tiles_unthresholded'),
-    'union_mask': posixpath.join(full_bucket_prefix, processed_dir, 'peat_mask/union/30m/tiles'),
+    'ogh_unthresholded': posixpath.join(
+        full_bucket_prefix,
+        processed_dir,
+        'peat_mask/OGH/tiles_unthresholded/20251110',
+    ),
+    'union_mask': posixpath.join(
+        full_bucket_prefix,
+        processed_dir,
+        'peat_mask/union/30m/tiles/20251110',
+    ),
 }
 
 peat_dataset_choices = tuple(peat_mask_dirs.keys())
