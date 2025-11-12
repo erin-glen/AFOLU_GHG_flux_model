@@ -122,6 +122,8 @@ def calculate_drainage_and_emissions(
     extraction_block = in_dict_uint8["extraction"]
     ecozone_block = in_dict_int16["climate_domain"]
     descals_type_block = in_dict_int16["descals_type"]
+    mangrove_block = in_dict_uint8["mangrove_extent"]
+    tidal_marsh_block = in_dict_uint8["tidal_marsh"]
 
     # optional burned‑area mask
     burned_block = None
@@ -166,6 +168,8 @@ def calculate_drainage_and_emissions(
             extraction = extraction_block[row, col]
             ecozone = ecozone_block[row, col]
             descals_type = descals_type_block[row, col]
+            mangrove = mangrove_block[row, col]
+            tidal_marsh = tidal_marsh_block[row, col]
 
             # default nutrient status by ecozone
             if ecozone == boreal_code:
@@ -174,6 +178,13 @@ def calculate_drainage_and_emissions(
                 nutrient = rich_nutrient_code
             else:
                 nutrient = unknown_nutrient_code
+
+            if mangrove > 0:
+                coastal_code = 1
+            elif tidal_marsh > 0:
+                coastal_code = 2
+            else:
+                coastal_code = 0
 
             # initialize
             ef_co2 = np.float32(0.0)
@@ -212,17 +223,26 @@ def calculate_drainage_and_emissions(
                 node = nu.accrete_node(node, 2)
                 soil_block[row, col] = 0  # not peat
 
+            if coastal_code:
+                node = nu.accrete_node(node, 9)
+                node = nu.accrete_node(node, coastal_code)
+
 
             # B) Drainage emission factors --------------------------------
             if soil_block[row, col] == 2:  # only if drained
                 emission_node = nu.accrete_node(emission_node, 1)
                 key = ""
+                vals = defac.ZERO_ARRAY
+                missing = False
 
                 # BOREAL ---------------------------------------------------
                 if ecozone == boreal_code:
                     emission_node = nu.accrete_node(emission_node, 1)
                     category_node = emission_node
-                    if extraction > 0:
+                    if coastal_code:
+                        emission_node = nu.accrete_node(category_node, 9)
+                        emission_node = nu.accrete_node(emission_node, coastal_code)
+                    elif extraction > 0:
                         emission_node = nu.accrete_node(category_node, 1)
                         key = "boreal_extraction"
                     elif land_cover == forest_code:
@@ -250,11 +270,17 @@ def calculate_drainage_and_emissions(
                         emission_node = nu.accrete_node(category_node, 8)
                         key = "boreal_otherland"
 
+                    if not coastal_code:
+                        vals, missing = lookup_efs(key, drainage_table)
+
                 # TEMPERATE -----------------------------------------------
                 elif ecozone == temperate_code:
                     emission_node = nu.accrete_node(emission_node, 2)
                     category_node = emission_node
-                    if extraction > 0:
+                    if coastal_code:
+                        emission_node = nu.accrete_node(category_node, 9)
+                        emission_node = nu.accrete_node(emission_node, coastal_code)
+                    elif extraction > 0:
                         emission_node = nu.accrete_node(category_node, 1)
                         key = "temperate_extraction"
                     elif land_cover == forest_code:
@@ -282,11 +308,17 @@ def calculate_drainage_and_emissions(
                         emission_node = nu.accrete_node(category_node, 8)
                         key = "temperate_otherland"
 
+                    if not coastal_code:
+                        vals, missing = lookup_efs(key, drainage_table)
+
                 # TROPICAL -------------------------------------------------
                 elif ecozone == tropical_code:
                     emission_node = nu.accrete_node(emission_node, 3)
                     category_node = emission_node
-                    if extraction > 0:
+                    if coastal_code:
+                        emission_node = nu.accrete_node(category_node, 9)
+                        emission_node = nu.accrete_node(emission_node, coastal_code)
+                    elif extraction > 0:
                         emission_node = nu.accrete_node(category_node, 1)
                         key = "tropical_extraction"
                     elif planted_forest_type > 0:
@@ -320,7 +352,16 @@ def calculate_drainage_and_emissions(
                         emission_node = nu.accrete_node(category_node, 8)
                         key = "tropical_otherland"
 
-                vals, missing = lookup_efs(key, drainage_table)
+                    if not coastal_code:
+                        vals, missing = lookup_efs(key, drainage_table)
+
+                else:
+                    if coastal_code:
+                        emission_node = nu.accrete_node(emission_node, 9)
+                        emission_node = nu.accrete_node(emission_node, coastal_code)
+                        missing = False
+                    else:
+                        missing = True
                 ef_co2 = vals[0]
                 ef_n2o = vals[1]
                 ef_ch4_land = vals[2]
@@ -631,6 +672,8 @@ def calculate_and_upload_drainage(
         "planted_forest_type",
         "extraction",
         "land_cover",
+        "mangrove_extent",
+        "tidal_marsh",
     ]
     uint8 += [
         f"{cn.burned_area_final_pattern}_{yr}"
