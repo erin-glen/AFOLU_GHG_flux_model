@@ -1998,11 +1998,9 @@ def get_cluster_info(client, cluster):
 
 
 # Write single GeoTIFF to S3 using in-memory buffer
-def write_single_geotiff_to_s3(var, year_idx, tile_id, data, transform, s3_path, logger_worker):
+def write_single_geotiff_to_s3(var, year, tile_id, data, transform, s3_path, logger_worker):
 
     fs = fsspec.filesystem("s3", anon=False)
-
-    year = cn.interval_end_years_annual[year_idx]
 
     lu.print_and_log(f"  Writing {var} for year {year} for {tile_id} to {s3_path}: {timestr()}", False, logger_worker)
     upload_start_time = time.time()
@@ -2043,7 +2041,7 @@ def write_single_geotiff_to_s3(var, year_idx, tile_id, data, transform, s3_path,
 
 
 # Extracts a 10x10° tile from a Zarr store and writes to GeoTIFF on S3
-def extract_10x10(var, year_idx, tile_id, raw_path, output_base, no_upload):
+def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_base, no_upload):
 
     process = psutil.Process(os.getpid())
 
@@ -2109,7 +2107,7 @@ def extract_10x10(var, year_idx, tile_id, raw_path, output_base, no_upload):
     # sys.quit()
 
     # Converts per-ha to per-pixel
-    data_per_pixel = data_per_ha * pixel_area / 10000
+    data_per_pixel = data_per_ha * pixel_area / cn.m2_to_ha
 
     # GeoTransform (top-left corner)
     transform = from_origin(min_x, max_y, cn.resolution, cn.resolution)
@@ -2159,13 +2157,13 @@ def extract_10x10(var, year_idx, tile_id, raw_path, output_base, no_upload):
     if no_upload == False:
 
         # Writes geotif to S3
-        valid_pixel_count_per_ha = write_single_geotiff_to_s3(var, year_idx, tile_id, data_per_ha, transform, s3_filename_per_ha, logger_worker)
+        valid_pixel_count_per_ha = write_single_geotiff_to_s3(var, year, tile_id, data_per_ha, transform, s3_filename_per_ha, logger_worker)
 
         # Conditionally writes per-pixel output (only if dataset is float32, i.e. numeric output from model).
         # Pixel count from per-pixel outputs is not used.
         if model_zarr_store[var].dtype == np.float32:
             valid_pixel_count_per_pixel = write_single_geotiff_to_s3(
-                var, year_idx, tile_id, data_per_pixel, transform, s3_filename_per_pixel, logger_worker
+                var, year, tile_id, data_per_pixel, transform, s3_filename_per_pixel, logger_worker
             )
         else:
             valid_pixel_count_per_pixel = None

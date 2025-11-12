@@ -186,6 +186,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
         vars_to_process = cn.full_outputs_to_zarr
     main_logger.info(f"Variables to rechunk and compare chunk stats for: {vars_to_process} out of {len(cn.full_outputs_to_zarr)}")
 
+    # Limits the processed years to the supplied number (for testing)
     if first_years_to_process:
         years_to_process = first_years_to_process
     else:
@@ -310,7 +311,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
             chunks_count_exceeding_total += chunks_count_exceeding
 
         var_end_time = time.time()
-        main_logger.info(f"  Processed {var_name}  in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
+        main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
 
     ### Step 5: All iterations done. Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.

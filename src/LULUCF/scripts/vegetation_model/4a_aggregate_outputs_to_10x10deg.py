@@ -35,16 +35,9 @@ Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/690a21cd-2ea0-8333
 """
 
 import argparse
-import numpy as np
 import pandas as pd
-import rasterio
-import tempfile
-import fsspec
-import time
-import psutil
 import os
 from dask.distributed import print
-import zarr
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -103,6 +96,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
         vars_to_process = cn.full_outputs_to_zarr
     main_logger.info(f"Variables to aggregate to 10x10 deg and compare chunk stats for: {vars_to_process} ({len(vars_to_process)} out of {len(cn.full_outputs_to_zarr)})")
 
+    # Limits the processed years to the supplied number (for testing)
     if first_years_to_process:
         years_to_process = first_years_to_process
     else:
@@ -123,8 +117,8 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
         main_logger.info(f"Running as large-scale run model: {is_large_run}")
 
     # The zarr path that's being used (rechunked zarr)
-    zarr_path = zu.create_mega_zarr_paths(cn.zarr_pixel_chunks, 'annual', model_type, input_date)
-    main_logger.info(f"Aggregating from rechunked zarr (10000 pixel chunks): {zarr_path}")
+    rechunked_mega_zarr_path = zu.create_mega_zarr_paths(cn.zarr_pixel_chunks, 'annual', model_type, input_date)
+    main_logger.info(f"Aggregating from rechunked zarr (10000 pixel chunks): {rechunked_mega_zarr_path}")
 
     output_base = f"{cn.outputs_path}PATTERN/{model_type}/annual_intervals/START_END/PER_HA_OR_PIXEL/{cn.full_raster_dims}_pixels/{input_date}/"
     main_logger.info(f"Core output path for aggregation: {output_base}")
@@ -150,14 +144,14 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
 
     main_logger.info(f"Starting processing: {uu.timestr()}")
 
-    for var in vars_to_process:
+    for var_name in vars_to_process:
 
         for year_idx in range(years_to_process):
 
             for tile_id in tile_ids_to_process:
 
-                future = client.submit(uu.extract_10x10,
-                                       var, year_idx, tile_id, zarr_path, output_base, no_upload)
+                future = client.submit(uu.create_10x10_deg_geotif_from_zarr,
+                                       var_name, year_idx, tile_id, rechunked_mega_zarr_path, output_base, no_upload)
                 futures.append(future)
 
     # Results is a list of single-element lists, each with a dictionary of chunk stats for a single variable-year-tile.
