@@ -66,9 +66,8 @@ oil_palm_code = cn.plantation_type_codes["oil_palm"]
 # helpers for numba dict lookups
 @jit(nopython=True)
 def lookup_efs(key, table, coastal_code=0):
-    """Return (values, is_missing) from drainage factor table."""
-    if coastal_code == 1 or coastal_code == 2:
-        return defac.ZERO_ARRAY, False
+    """Return (values, is_missing) from drainage factor table.
+    Note: allow coastal keys to resolve to their factors (no short-circuit)."""
     if key in table:
         return table[key], False
     return defac.ZERO_ARRAY, True

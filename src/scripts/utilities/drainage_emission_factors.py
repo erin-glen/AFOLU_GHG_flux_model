@@ -111,8 +111,8 @@ LOW = {
     "tropical_wetland":          [ 0.06,0.2,   0.0,   599.0, 0.56, 0.02],
     "tropical_otherland":        [ 4.5, 2.3,   0.3,   599.0, 0.56, 0.02],
 
-    "coastal_mangrove":          [ 5.1, 0.0,   0.0,     0.0, 0.0, 0.0],
-    "coastal_tidal_marsh":       [ 5.1, 0.0,   0.0,     0.0, 0.0, 0.0],
+    "coastal_mangrove":          [ 5.2, 0.0,   0.0,     0.0, 0.0, 0.0],
+    "coastal_tidal_marsh":       [ 5.2, 0.0,   0.0,     0.0, 0.0, 0.0],
 }
 
 HIGH = {
