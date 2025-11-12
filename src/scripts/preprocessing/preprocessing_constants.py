@@ -158,6 +158,12 @@ datasets = {
                                        'extent', '20240823')
         }
     },
+    'mangrove_extent': {
+        's3_raw_root': pp.join('global-mangrove-extent', 'version3', 'smoothed', 'raster'),
+        's3_processed_base': pp.join(processed_dir, 'mangrove_extent', 'hansen'),
+        's3_processed': pp.join(processed_dir, 'mangrove_extent', 'hansen', today_date),
+        'local_processed': pp.join(local_temp_dir, 'mangrove_extent', 'hansen', today_date)
+    },
     'land_cover_ipcc': {
         's3_processed_base': pp.join(processed_dir, 'land_cover_ipcc'),
         's3_processed': pp.join(processed_dir, 'land_cover_ipcc', today_date),
