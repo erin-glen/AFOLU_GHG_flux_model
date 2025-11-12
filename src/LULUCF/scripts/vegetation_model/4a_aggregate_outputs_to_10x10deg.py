@@ -44,7 +44,6 @@ import time
 import psutil
 import os
 from dask.distributed import print
-from rasterio.transform import from_origin
 import zarr
 
 # Project imports

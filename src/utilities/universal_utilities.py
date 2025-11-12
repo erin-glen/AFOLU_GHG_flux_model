@@ -28,8 +28,11 @@ from io import BytesIO
 import xarray as xr
 from numba import jit
 from osgeo import gdal
+from rasterio.transform import from_origin
 from rasterio.session import AWSSession
 import random
+import zarr
+import tempfile
 import rasterio.errors
 
 
@@ -2112,7 +2115,7 @@ def extract_10x10(var, year_idx, tile_id, raw_path, output_base, no_upload):
     transform = from_origin(min_x, max_y, cn.resolution, cn.resolution)
 
     extract_end_time = time.time()
-    lu.print_and_log(f"  Extracted {var} for year {year} for {tile_id} in {round(extract_end_time - extract_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"  Extracted {var} for year {year} for {tile_id} in {round(extract_end_time - extract_start_time)} seconds: {timestr()}", False, logger_worker)
     lu.print_and_log(f"  Memory usage after 10x10 extraction for {var} for year {year} for {tile_id}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
 
     # Establishes year/year range and units for dataset

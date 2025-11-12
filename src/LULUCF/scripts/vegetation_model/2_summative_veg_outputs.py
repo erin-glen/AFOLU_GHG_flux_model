@@ -407,6 +407,8 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
 
+    #TODO Add code to add datasets/variables to the mega-zarr
+
     # Establishes the location in s3 of the mega-zarr
     if create_zarr:
         # Creates s3 paths for the raw mega-zarr
