@@ -123,6 +123,8 @@ patterns = {
     'extraction': "{tile_id}_extraction.tif",
     'climate_domain': f"{{tile_id}}_{lulucf_climate_domain_pattern}.tif",
     'descals_type': "plantation_type_{tile_id}.tif",
+    'mangrove_extent': "{tile_id}__gmw_mangrove_any_year.tif",
+    'tidal_marsh': "{tile_id}.tif",
     'ogh': "{tile_id}_ogh_mask.tif",
     'burned_area_final': "{tile_id}_burned_area_final_{year}.tif"
 }
@@ -148,6 +150,8 @@ dirs = {
     'extraction': posixpath.join(full_bucket_prefix, processed_dir, 'extraction/20241021'),
     'climate_domain': lulucf_climate_domain_dir,
     'descals_type': posixpath.join(full_bucket_prefix, processed_dir, 'descals_plantation/extent/20241105'),
+    'mangrove_extent': posixpath.join(full_bucket_prefix, processed_dir, 'mangrove_extent/hansen/20251112'),
+    'tidal_marsh': posixpath.join(full_bucket_prefix, processed_dir, 'tidal_marshes/hansen/20251112'),
     'burned_area_final': posixpath.join(full_bucket_prefix, processed_dir, 'fires/{year}')
 }
 
@@ -440,6 +444,8 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
             patterns['climate_domain'].format(tile_id=tile_id),
         ),
         'descals_type': posixpath.join(dirs['descals_type'], patterns['descals_type'].format(tile_id=tile_id)),
+        'mangrove_extent': posixpath.join(dirs['mangrove_extent'], patterns['mangrove_extent'].format(tile_id=tile_id)),
+        'tidal_marsh': posixpath.join(dirs['tidal_marsh'], patterns['tidal_marsh'].format(tile_id=tile_id)),
         'ogh': posixpath.join(
             peat_mask_dirs['ogh_unthresholded'],
             f"{tile_id}_ogh_unthresholded_mask.tif",
