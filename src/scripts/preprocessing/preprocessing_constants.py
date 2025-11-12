@@ -164,6 +164,20 @@ datasets = {
         's3_processed': pp.join(processed_dir, 'mangrove_extent', 'hansen', today_date),
         'local_processed': pp.join(local_temp_dir, 'mangrove_extent', 'hansen', today_date)
     },
+    'tidal_marshes': {
+        's3_raw': pp.join(
+            'climate',
+            'AFOLU_flux_model',
+            'organic_soils',
+            'inputs',
+            'raw',
+            'coastal',
+            'tidal_marsh',
+        ),
+        's3_processed_base': pp.join(processed_dir, 'tidal_marshes', 'hansen'),
+        's3_processed': pp.join(processed_dir, 'tidal_marshes', 'hansen', today_date),
+        'local_processed': pp.join(local_temp_dir, 'tidal_marshes', 'hansen', today_date),
+    },
     'land_cover_ipcc': {
         's3_processed_base': pp.join(processed_dir, 'land_cover_ipcc'),
         's3_processed': pp.join(processed_dir, 'land_cover_ipcc', today_date),
