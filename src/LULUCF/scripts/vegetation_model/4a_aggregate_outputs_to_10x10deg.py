@@ -1,5 +1,17 @@
 """
-Creates 10x10 deg geotifs from global rechunked zarr.
+Creates 10x10 deg per-hectare and per-pixel geotifs from global rechunked zarr for numeric model outputs.
+Coded to run for summative outputs + land state nodes but can change code to run for more or less variables.
+Limited to just summative + land state nodes for now because it is quite expensive for just these variables.
+It creates a task list for all datasets, years, and 10x10 deg tiles for the variables, years, and area of interest,
+then runs that giant task list in parallel.
+
+Providing a bounding box with -bb or a chunk shapefile limits the 10x10 deg creation
+to the 10x10 deg tiles that contain the bounding box or shapefile.
+The entire 10x10 deg tile that contains the selected chunks will be processed (not just the parts with the selected chunks).
+
+The chunk stats table argument (xlsx or Parquet) allows the pixel counts in the 10x10 deg tiles to be compared to
+the pixel counts in the constituent 1x1 deg tiles to make sure that pixels aren't being lost during 10x10 deg tile
+creation.
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
@@ -8,13 +20,13 @@ python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -
 
 Coiled small tests (needs 64 GB because of per-ha and per-pixel outputs):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 64 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -bb 10 49 11 50 fy 2 -fv 2 -ft 2 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -bb 10 49 11 50 fy 2 -fv 2 -ft 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -bb 10 49 11 50 fy 2 -fv 2 -ft 2 -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx  --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -bb 10 49 11 50 fy 2 -fv 2 -ft 2 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 64 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ --input_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 64 -cn vegetation_model
@@ -89,12 +101,16 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
 
     unique_tile_ids = list(set(tile_ids))
 
+    # Outputs to turn into 10x10 tile
+    # full_list_of_vars = cn.full_outputs_to_zarr   # If all variables are to be made into 10x10s (but very expensive)
+    full_list_of_vars = cn.veg_summative_output_patterns + [cn.land_state_pattern] # Summative outputs + land state nodes
+
     # Limits the processed variables to the supplied number (for testing)
     if first_variables_to_process:
-        vars_to_process = cn.full_outputs_to_zarr[0:first_variables_to_process]
+        vars_to_process = full_list_of_vars[0:first_variables_to_process]
     else:
-        vars_to_process = cn.full_outputs_to_zarr
-    main_logger.info(f"Variables to aggregate to 10x10 deg and compare chunk stats for: {vars_to_process} ({len(vars_to_process)} out of {len(cn.full_outputs_to_zarr)})")
+        vars_to_process = full_list_of_vars
+    main_logger.info(f"Variables to create 10x10 deg tiles for: {vars_to_process} ({len(vars_to_process)} out of {len(full_list_of_vars)})")
 
     # Limits the processed years to the supplied number (for testing)
     if first_years_to_process:

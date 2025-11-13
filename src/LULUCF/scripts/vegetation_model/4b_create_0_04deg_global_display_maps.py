@@ -1,5 +1,8 @@
 """
-Creates 10x10 deg geotifs from global rechunked zarr.
+Creates global 0.04x0.04 deg geotifs from numeric model outputs (units: Mg CO2(e)/aggregated pixel/yr).
+It iterates through each dataset-year combination, processing each one using Dask/xarray before moving on to the next one.
+Thus, parallelization is at the level of the dataset-year global map, not across them.
+No chunk stats are created, nor checks for completeness/missing data.
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
@@ -39,8 +42,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import dask.array as da
-import rasterio
-import tempfile
 import fsspec
 import time
 from dask.distributed import print
@@ -57,7 +58,7 @@ from src.utilities import zarr_utilities as zu
 # Converts per-hectare data to per-pixel using pixel area, aggregates to 0.04°,
 # and uploads the resulting GeoTIFF to S3.
 # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d
-def global_map_variable_year(var, year_idx, zarr_path, pixel_area_path, output_base, no_upload, main_logger):
+def global_map_for_variable_year(var, year_idx, zarr_path, pixel_area_path, output_base, no_upload, main_logger):
 
     start_time = time.time()
 
@@ -126,7 +127,7 @@ def global_map_variable_year(var, year_idx, zarr_path, pixel_area_path, output_b
     coarsened_data = coarsened.compute()
     # print(coarsened_data)
 
-    # Uploads to S3 (if enabled) ---
+    # Uploads to S3 (if enabled)
     main_logger.info(f"Uploading global map for {var} for year {year}: {uu.timestr()}")
 
     if not no_upload:
@@ -156,18 +157,25 @@ def global_map_variable_year(var, year_idx, zarr_path, pixel_area_path, output_b
 
         transform = from_origin(-180, lat_model_slice.max(), cn.global_geotif_resolution, cn.global_geotif_resolution)
 
-        # write_global_geotiff_to_s3(coarsened_data.values, transform, s3_filename, logger_worker, year, var)
-        valid_pixel_count_per_ha = uu.write_single_geotiff_to_s3(var, year, "global", coarsened_data.values, transform, s3_filename, main_logger)
+        data_vals = coarsened_data.values
+
+        valid_pixel_count_per_ha = uu.write_single_geotiff_to_s3(var, year, "global", data_vals, transform, s3_filename, main_logger)
         print(f"valid_pixel_count_per_ha: {valid_pixel_count_per_ha}")
 
     end_time = time.time()
     main_logger.info(f"  Created global geotif for {var} for {year} in {round(end_time - start_time)} seconds: {uu.timestr()}")
 
-    return {"var": var, "year": year, "status": "done"}
+    # Compute summary statistics
+    nonzero_vals = data_vals[data_vals != 0]
+    data_min = float(np.min(nonzero_vals))
+    data_mean = float(np.mean(nonzero_vals))
+    data_max = float(np.max(nonzero_vals))
+
+    return {"var": var, "year": year, "status": "done", "min": data_min, "mean": data_mean, "max": data_max}
 
 
 
-def main(cluster_name, input_date, run_local, no_log, no_upload, chunk_shapefile_uri=False, bounding_box=None,
+def main(cluster_name, input_date, run_local, no_log, no_upload,
          first_variables_to_process=None, first_years_to_process=None, log_note=None):
 
 
@@ -179,10 +187,6 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, chunk_shapefile
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
-
-    # Shapefile of chunk footprints to use if none is supplied on the command line
-    if not chunk_shapefile_uri:
-        chunk_shapefile_uri = cn.fishnet_1x1deg_uri
 
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
@@ -199,13 +203,15 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, chunk_shapefile
     main_logger.info(f"Pixel area zarr: {pixel_area_zarr_path}")
     main_logger.info(f"Core output path for global maps: {output_base}")
 
+    # Outputs to turn into 10x10 tile
+    # full_list_of_vars = cn.full_outputs_to_zarr    # If all variables are to be made into 10x10s (but very expensive)
+    full_list_of_vars = cn.veg_summative_output_patterns # Summative outputs only
+
     # Limits the processed variables to the supplied number (for testing)
     if first_variables_to_process:
-        # vars_to_process = cn.full_outputs_to_zarr[0:first_variables_to_process]
-        vars_to_process = cn.veg_summative_output_patterns[0:first_variables_to_process]   #TODO for testing
+        vars_to_process = full_list_of_vars[0:first_variables_to_process]
     else:
-        # vars_to_process = cn.full_outputs_to_zarr
-        vars_to_process = cn.veg_summative_output_patterns   #TODO for testing
+        vars_to_process = full_list_of_vars
     main_logger.info(f"Variables to create global maps for: {vars_to_process} ({len(vars_to_process)} out of {len(cn.full_outputs_to_zarr)})")
 
     # Limits the processed years to the supplied number (for testing)
@@ -226,7 +232,8 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, chunk_shapefile
 
         for year_idx in range(years_to_process):
 
-                global_map_variable_year(var_name, year_idx, rechunked_mega_zarr_path, pixel_area_zarr_path, output_base, no_upload, main_logger)
+                map_stats = global_map_for_variable_year(var_name, year_idx, rechunked_mega_zarr_path, pixel_area_zarr_path, output_base, no_upload, main_logger)
+                main_logger.info(map_stats)
 
         var_end_time = time.time()
         main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
@@ -256,9 +263,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create a global rechunked mega-zarr.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-rd', '--input_date', help='Date of run, in YYYYMMDD')
-    parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-fv', '--first_variables_to_process', type=int, help='Number of variables to process from raw mega-zarr (for testing)')
-    parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-fy', '--first_years_to_process', type=int, help='Number of years to process from raw mega-zarr (for testing)')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
@@ -270,8 +275,6 @@ if __name__ == "__main__":
 
     cluster_name = args.cluster_name
     input_date = args.input_date
-    bounding_box = args.bounding_box
-    chunk_shapefile_uri = args.chunk_shapefile_uri
     first_variables_to_process = args.first_variables_to_process
     first_years_to_process = args.first_years_to_process
     log_note = args.log_note
@@ -281,5 +284,5 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, input_date, run_local, no_log, no_upload, chunk_shapefile_uri, bounding_box=bounding_box,
+    main(cluster_name, input_date, run_local, no_log, no_upload,
          first_variables_to_process=first_variables_to_process, first_years_to_process=first_years_to_process, log_note=log_note)

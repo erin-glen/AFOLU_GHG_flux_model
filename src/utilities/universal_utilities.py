@@ -2208,6 +2208,9 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
             'data_type': 'no data'
         }]
 
+    tile_end_time = time.time()
+    lu.print_and_log(f"  Tile {var} for year {year} for {tile_id} in {round(tile_end_time - extract_start_time)} seconds: {timestr()}", False, logger_worker)
+
     return chunk_stats
 
 
