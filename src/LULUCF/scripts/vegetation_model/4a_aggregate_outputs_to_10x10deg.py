@@ -8,27 +8,27 @@ python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -
 
 Coiled small tests (needs 64 GB because of per-ha and per-pixel outputs):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 64 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP.xlsx -bb 10 49 11 50 fy 2 -fv 2 -ft 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -bb 10 49 11 50 fy 2 -fv 2 -ft 2 --input_date YYYYMMDD
 python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -bb 10 49 11 50 fy 2 -fv 2 -ft 2 --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 64 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP.xlsx -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 --input_date YYYYMMDD
 python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 --input_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 64 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
 python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 64 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 64 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
 python -m src.LULUCF.scripts.vegetation_model.4a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/690a21cd-2ea0-8333-9c7f-7091f8016fb3

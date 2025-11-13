@@ -53,42 +53,11 @@ from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 from src.utilities import zarr_utilities as zu
 
-def write_global_geotiff_to_s3(data, transform, s3_path, logger, year, var):
-    fs = fsspec.filesystem("s3", anon=False)
-
-    height, width = data.shape
-    profile = {
-        "driver": "GTiff",
-        "height": height,
-        "width": width,
-        "count": 1,
-        "dtype": "float32",
-        "crs": "EPSG:4326",
-        "transform": transform,
-        "compress": "LZW",
-        "nodata": 0,
-        "tiled": True,
-        "blockxsize": 512,
-        "blockysize": 512,
-    }
-
-    print(f"  Writing {var} for {year} to {s3_path}")
-    start = time.time()
-
-    with tempfile.NamedTemporaryFile(suffix=".tif", delete=True) as tmpfile:
-        with rasterio.open(tmpfile.name, "w", **profile) as dst:
-            dst.write(data.astype("float32"), 1)
-        fs.put_file(tmpfile.name, s3_path)
-
-    print(f"  Finished writing in {round(time.time() - start)} seconds")
-
 # Processes a single variable-year pair from the global rechunked mega-zarr.
 # Converts per-hectare data to per-pixel using pixel area, aggregates to 0.04°,
 # and uploads the resulting GeoTIFF to S3.
 # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d
 def global_map_variable_year(var, year_idx, zarr_path, pixel_area_path, output_base, no_upload, main_logger):
-
-    logger_worker = lu.setup_logging_worker()
 
     start_time = time.time()
 
@@ -96,22 +65,22 @@ def global_map_variable_year(var, year_idx, zarr_path, pixel_area_path, output_b
 
     main_logger.info(f"Processing {var} for year {year}: {uu.timestr()}")
 
-    # --- Open Zarr groups ---
+    # Opens Zarr groups
     fs = fsspec.filesystem("s3", anon=False)
     model_zarr = zarr.open_group(fs.get_mapper(zarr_path), mode="r")
     pixel_area_zarr = zarr.open_group(fs.get_mapper(pixel_area_path), mode="r")
 
-    # --- Coordinate arrays ---
+    # Coordinate arrays
     lat_model = model_zarr["y"][:]
     lon_model = model_zarr["x"][:]
     lat_pixel = pixel_area_zarr["y"][:]
     lon_pixel = pixel_area_zarr["x"][:]
 
-    # --- Determine overlap ---
+    # Determines overlap in latitude between pixel area (80N-60S) and mega-zarr (90N-90S)
     lat_min = max(lat_model.min(), lat_pixel.min())
     lat_max = min(lat_model.max(), lat_pixel.max())
 
-    # --- Model slice indices (lat_model is descending) ---
+    # Model slice indices (lat_model is descending)
     y0_model = np.searchsorted(lat_model[::-1], lat_max, side="right")
     y1_model = np.searchsorted(lat_model[::-1], lat_min, side="left")
     y0_model = len(lat_model) - y1_model
@@ -119,45 +88,45 @@ def global_map_variable_year(var, year_idx, zarr_path, pixel_area_path, output_b
     if y0_model > y1_model:
         y0_model, y1_model = y1_model, y0_model
 
+    # Gets the latitude slice of the mega-zarr from the model
     lat_model_slice = lat_model[y0_model:y1_model]
     # print(f"Model slice indices for {var} for year {year}: {y0_model} to {y1_model} -> {y1_model - y0_model} rows")
 
-    # --- Pixel area slice indices (matched by coordinate values) ---
-    # Round coordinates to avoid floating-point mismatches
+    # Pixel area slice indices (matched by coordinate values).
+    # Rounds coordinates to avoid floating-point mismatches (this was a problem before).
     lat_model_vals = np.round(lat_model_slice, 6)
     lat_pixel_vals = np.round(lat_pixel, 6)
 
-    # Find matching latitudes in pixel area Zarr
+    # Finds matching latitudes in pixel area Zarr
     lat_indices = np.nonzero(np.isin(lat_pixel_vals, lat_model_vals))[0]
 
     y0_pixel = lat_indices.min()
     y1_pixel = lat_indices.max() + 1  # inclusive slice
     # print(f"Pixel area slice indices: {y0_pixel} to {y1_pixel} -> {y1_pixel - y0_pixel} rows")
 
-    # --- Slice arrays from Zarr ---
+    # Slices arrays from Zarrs (overlapping latitude)
     data_ha = da.from_zarr(model_zarr[var])[year_idx, y0_model:y1_model, :]
     pixel_area = da.from_zarr(pixel_area_zarr["band_data"])[y0_pixel:y1_pixel, :]
 
-    # --- Convert to per-pixel values ---
+    # Converts to per-pixel values
     data_pixel = data_ha * pixel_area * cn.m2_to_ha
     # print(data_pixel)
 
-    # --- Create xarray DataArray for aggregation ---
-    lat_subset = lat_model[y0_model:y1_model]
+    # Create xarray DataArray for aggregation to 0.04x0.04 deg
     data_pixel_xr = xr.DataArray(
         data_pixel,
         dims=("lat", "lon"),
-        coords={"lat": lat_subset, "lon": lon_model},
+        coords={"lat": lat_model_slice, "lon": lon_model},
     ).sortby("lat", ascending=False)
     # print(data_pixel_xr)
 
-    # --- Aggregate to 0.04° resolution ---
+    # Aggregates to 0.04x0.04 deg (factor of 160)
     coarsened = data_pixel_xr.coarsen(lat=cn.global_aggregation_factor, lon=cn.global_aggregation_factor, boundary="trim").sum()
     main_logger.info(f"Computing per-pixel values for {var} for year {year}: {uu.timestr()}")
     coarsened_data = coarsened.compute()
     # print(coarsened_data)
 
-    # --- Upload to S3 (if enabled) ---
+    # Uploads to S3 (if enabled) ---
     main_logger.info(f"Uploading global map for {var} for year {year}: {uu.timestr()}")
 
     if not no_upload:
@@ -185,7 +154,7 @@ def global_map_variable_year(var, year_idx, zarr_path, pixel_area_path, output_b
         output_name = f"{var}{global_map_units}_{year_or_range}__global.tif"
         s3_filename = f"{output_path}{output_name}"
 
-        transform = from_origin(-180, lat_subset.max(), cn.global_geotif_resolution, cn.global_geotif_resolution)
+        transform = from_origin(-180, lat_model_slice.max(), cn.global_geotif_resolution, cn.global_geotif_resolution)
 
         # write_global_geotiff_to_s3(coarsened_data.values, transform, s3_filename, logger_worker, year, var)
         valid_pixel_count_per_ha = uu.write_single_geotiff_to_s3(var, year, "global", coarsened_data.values, transform, s3_filename, main_logger)
