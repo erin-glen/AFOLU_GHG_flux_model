@@ -114,7 +114,10 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
         )
 
         # Define encoding (compression, dtype, and chunks)
-        encoding[key] = {"compressor": compressor}
+        encoding[key] = {
+            "compressor": compressor,
+            "_FillValue": None   #TODO NOTE: Untested. Added from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d because of later xarray issues.
+        }
 
     # Constructs dataset
     main_logger.info(f"Constructing megazarr dataset with metadata only: {uu.timestr()}")
@@ -159,14 +162,16 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
     # Open Zarr group in read/write mode
     z = zarr.open_group(store=mapper, mode="r+")
 
-    # Loop through all arrays
-    for key in z.array_keys():
-        arr = z[key]
-        if "_FillValue" in arr.attrs:
-            main_logger.info(f"Removing _FillValue from {key}: {uu.timestr()}")
-            del arr.attrs["_FillValue"]
+    #TODO Untested should be able to delete this with the compression change above
 
-    main_logger.info(f"Cleaned _FillValue from Zarr metadata: {uu.timestr()}")
+    # # Loop through all arrays
+    # for key in z.array_keys():
+    #     arr = z[key]
+    #     if "_FillValue" in arr.attrs:
+    #         main_logger.info(f"Removing _FillValue from {key}: {uu.timestr()}")
+    #         del arr.attrs["_FillValue"]
+    #
+    # main_logger.info(f"Cleaned _FillValue from Zarr metadata: {uu.timestr()}")
 
     end_time = time.time()
     main_logger.info(f"Initialized spatial mega-zarr metadata at {store_url} in {round(end_time-start_time)} seconds: {uu.timestr()}")

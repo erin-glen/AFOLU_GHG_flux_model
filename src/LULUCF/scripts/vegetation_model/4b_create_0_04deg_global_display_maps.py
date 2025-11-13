@@ -17,26 +17,13 @@ python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_m
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -fy 2 -fv 2 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -fy 2 -fv 2 --input_date YYYYMMDD
 
-Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -fy 3 -fv 3 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -fy 3 -fv 3 --input_date YYYYMMDD
-
-Coiled Cerrado test (174 features):
+Coiled large run:
 python -m src.utilities.create_cluster -n 80 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD
-
-Coiled large shapefile test (1884 features):
-python -m src.utilities.create_cluster -n 80 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD
 python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 80 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
 python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d
@@ -62,7 +49,7 @@ from src.utilities import zarr_utilities as zu
 # Converts per-hectare data to per-pixel using pixel area, aggregates to 0.04°,
 # and uploads the resulting GeoTIFF to S3.
 # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d
-def global_map_for_variable_year(var, year_idx, zarr_path, pixel_area_path, output_base, no_upload, main_logger):
+def global_map_for_variable_year(var, year_idx, zarr_path, pixel_area_overlap, output_base, no_upload, main_logger):
 
     start_time = time.time()
 
@@ -72,67 +59,107 @@ def global_map_for_variable_year(var, year_idx, zarr_path, pixel_area_path, outp
 
     # Opens Zarr groups
     fs = fsspec.filesystem("s3", anon=False)
-    model_zarr = zarr.open_group(fs.get_mapper(zarr_path), mode="r")
-    pixel_area_zarr = zarr.open_group(fs.get_mapper(pixel_area_path), mode="r")
 
-    # Code below basically gets the pixel area and model mega-zarr to use the same latitude extent.
-    # It was somewhat convoluted with ChatGPT; the model extent kept not being sliced/clipped correctly.
+    # TODO Try this with revised mega-zarr creation. Try running with both original (4000) chunks and rechunked versions.
+    #This didn't work with the existing mega-zarrs because of that float32/fill value issue, but maybe it will with a pending fix in the zarr creation function.
+    #Can adopt this if it works with the new mega-zarrs. Otherwise, revert to the below.
 
-    # Coordinate arrays
-    lat_model = model_zarr["y"][:]
-    lon_model = model_zarr["x"][:]
-    lat_pixel = pixel_area_zarr["y"][:]
-    lon_pixel = pixel_area_zarr["x"][:]
+    # Load Dask-backed xarray datasets
+    model_ds = xr.open_zarr(fs.get_mapper(zarr_path), chunks={"lat": 10000, "lon": 10000}, consolidated=False)
 
-    # Determines overlap in latitude between pixel area (80N-60S) and mega-zarr (90N-90S)
-    lat_min = max(lat_model.min(), lat_pixel.min())
-    lat_max = min(lat_model.max(), lat_pixel.max())
+    #TODO suggested by ChatGPT to reduce warm-up time for first iterations (https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d). Haven't tested.
+    #=== Warm-up Dask and load metadata (OPTION A) ===
+    _ = model_ds.isel(year=0, y=slice(0, 10), x=slice(0, 10)).to_array().compute()
 
-    # Model slice indices (lat_model is descending)
-    y0_model = np.searchsorted(lat_model[::-1], lat_max, side="right")
-    y1_model = np.searchsorted(lat_model[::-1], lat_min, side="left")
-    y0_model = len(lat_model) - y1_model
-    y1_model = len(lat_model) - y0_model
-    if y0_model > y1_model:
-        y0_model, y1_model = y1_model, y0_model
+    # Select one year of model data
+    data_ha = model_ds[var].isel(time=year_idx)
 
-    # Gets the latitude slice of the mega-zarr from the model
-    lat_model_slice = lat_model[y0_model:y1_model]
-    # print(f"Model slice indices for {var} for year {year}: {y0_model} to {y1_model} -> {y1_model - y0_model} rows")
+    # Ensure lat/lon alignment
+    lat_min = max(data_ha["lat"].min().item(), pixel_area_overlap["lat"].min().item())
+    lat_max = min(data_ha["lat"].max().item(), pixel_area_overlap["lat"].max().item())
+    lat_min = np.round(lat_min, 6)
+    lat_max = np.round(lat_max, 6)
 
-    # Pixel area slice indices (matched by coordinate values).
-    # Rounds coordinates to avoid floating-point mismatches (this was a problem before).
-    lat_model_vals = np.round(lat_model_slice, 6)
-    lat_pixel_vals = np.round(lat_pixel, 6)
+    # Slice both by coordinates
+    data_ha = data_ha.sel(lat=slice(lat_max, lat_min))  # descending
 
-    # Finds matching latitudes in pixel area Zarr
-    lat_indices = np.nonzero(np.isin(lat_pixel_vals, lat_model_vals))[0]
-
-    y0_pixel = lat_indices.min()
-    y1_pixel = lat_indices.max() + 1  # inclusive slice
-    # print(f"Pixel area slice indices: {y0_pixel} to {y1_pixel} -> {y1_pixel - y0_pixel} rows")
-
-    # Slices arrays from Zarrs (overlapping latitude)
-    data_ha = da.from_zarr(model_zarr[var])[year_idx, y0_model:y1_model, :]
-    pixel_area = da.from_zarr(pixel_area_zarr["band_data"])[y0_pixel:y1_pixel, :]
-
-    # Converts to per-pixel values
-    data_pixel = data_ha * pixel_area * cn.m2_to_ha
-    # print(data_pixel)
-
-    # Create xarray DataArray for aggregation to 0.04x0.04 deg
-    data_pixel_xr = xr.DataArray(
-        data_pixel,
-        dims=("lat", "lon"),
-        coords={"lat": lat_model_slice, "lon": lon_model},
-    ).sortby("lat", ascending=False)
-    # print(data_pixel_xr)
-
-    # Aggregates to 0.04x0.04 deg (factor of 160)
-    coarsened = data_pixel_xr.coarsen(lat=cn.global_aggregation_factor, lon=cn.global_aggregation_factor, boundary="trim").sum()
+    # Multiply and coarsen
+    data_pixel = data_ha * pixel_area_overlap * cn.m2_to_ha
+    coarsened = data_pixel.coarsen(lat=cn.global_aggregation_factor, lon=cn.global_aggregation_factor, boundary="trim").sum()
     main_logger.info(f"Computing per-pixel values for {var} for year {year}: {uu.timestr()}")
     coarsened_data = coarsened.compute()
-    # print(coarsened_data)
+
+
+    #TODO The below commented chunk worked using the existing megazarrs (1884 chunk ones) and their fillvalue.
+    # Can revert to this if the above doesn't work.
+
+    # model_zarr = zarr.open_group(fs.get_mapper(zarr_path), mode="r")
+    # pixel_area_zarr = zarr.open_group(fs.get_mapper(pixel_area_path), mode="r")
+    #
+    #TODO suggested by ChatGPT to reduce warm-up time for first iterations (https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d). Haven't tested.
+    #=== Warm-up Dask and load metadata (OPTION A) ===
+    # _ = model_ds.isel(year=0, y=slice(0, 10), x=slice(0, 10)).to_array().compute()
+    # _ = pixel_area_da.isel(y=slice(0, 10), x=slice(0, 10)).compute()
+    #
+    #
+    # # Code below basically gets the pixel area and model mega-zarr to use the same latitude extent.
+    # # It was somewhat convoluted with ChatGPT; the model extent kept not being sliced/clipped correctly.
+    #
+    # # Coordinate arrays
+    # lat_model = model_zarr["y"][:]
+    # lon_model = model_zarr["x"][:]
+    # lat_pixel = pixel_area_zarr["y"][:]
+    # lon_pixel = pixel_area_zarr["x"][:]
+    #
+    # # Determines overlap in latitude between pixel area (80N-60S) and mega-zarr (90N-90S)
+    # lat_min = max(lat_model.min(), lat_pixel.min())
+    # lat_max = min(lat_model.max(), lat_pixel.max())
+    #
+    # # Model slice indices (lat_model is descending)
+    # y0_model = np.searchsorted(lat_model[::-1], lat_max, side="right")
+    # y1_model = np.searchsorted(lat_model[::-1], lat_min, side="left")
+    # y0_model = len(lat_model) - y1_model
+    # y1_model = len(lat_model) - y0_model
+    # if y0_model > y1_model:
+    #     y0_model, y1_model = y1_model, y0_model
+    #
+    # # Gets the latitude slice of the mega-zarr from the model
+    # lat_model_slice = lat_model[y0_model:y1_model]
+    # # print(f"Model slice indices for {var} for year {year}: {y0_model} to {y1_model} -> {y1_model - y0_model} rows")
+    #
+    # # Pixel area slice indices (matched by coordinate values).
+    # # Rounds coordinates to avoid floating-point mismatches (this was a problem before).
+    # lat_model_vals = np.round(lat_model_slice, 6)
+    # lat_pixel_vals = np.round(lat_pixel, 6)
+    #
+    # # Finds matching latitudes in pixel area Zarr
+    # lat_indices = np.nonzero(np.isin(lat_pixel_vals, lat_model_vals))[0]
+    #
+    # y0_pixel = lat_indices.min()
+    # y1_pixel = lat_indices.max() + 1  # inclusive slice
+    # # print(f"Pixel area slice indices: {y0_pixel} to {y1_pixel} -> {y1_pixel - y0_pixel} rows")
+    #
+    # # Slices arrays from Zarrs (overlapping latitude)
+    # data_ha = da.from_zarr(model_zarr[var])[year_idx, y0_model:y1_model, :]
+    # pixel_area = da.from_zarr(pixel_area_zarr["band_data"])[y0_pixel:y1_pixel, :]
+    #
+    # # Converts to per-pixel values
+    # data_pixel = data_ha * pixel_area * cn.m2_to_ha
+    # # print(data_pixel)
+    #
+    # # Create xarray DataArray for aggregation to 0.04x0.04 deg
+    # data_pixel_xr = xr.DataArray(
+    #     data_pixel,
+    #     dims=("lat", "lon"),
+    #     coords={"lat": lat_model_slice, "lon": lon_model},
+    # ).sortby("lat", ascending=False)
+    # # print(data_pixel_xr)
+    #
+    # # Aggregates to 0.04x0.04 deg (factor of 160)
+    # coarsened = data_pixel_xr.coarsen(lat=cn.global_aggregation_factor, lon=cn.global_aggregation_factor, boundary="trim").sum()
+    # main_logger.info(f"Computing per-pixel values for {var} for year {year}: {uu.timestr()}")
+    # coarsened_data = coarsened.compute()
+    # # print(coarsened_data)
 
     # Uploads to S3 (if enabled)
     main_logger.info(f"Uploading global map for {var} for year {year}: {uu.timestr()}")
@@ -202,7 +229,8 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Input date: {input_date}")
 
-    rechunked_mega_zarr_path = zu.create_mega_zarr_paths(cn.zarr_pixel_chunks, "annual", model_type, input_date)
+    # rechunked_mega_zarr_path = zu.create_mega_zarr_paths(cn.zarr_pixel_chunks, "annual", model_type, input_date)
+    rechunked_mega_zarr_path = zu.create_mega_zarr_paths(4000, "annual", model_type, input_date)
     pixel_area_zarr_path = cn.pixel_area_global_zarr
     output_base = f"{cn.outputs_path}PATTERN/{model_type}/annual_intervals/START_END/PER_HA_OR_PIXEL/{input_date}/"
 
@@ -228,6 +256,28 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
         years_to_process = len(cn.interval_end_years_annual)
     main_logger.info(f"Years to create global maps for: {years_to_process} out of {len(cn.interval_end_years_annual)}")
 
+    ### Step 2: Open pixel area once upfront
+
+    # --- Open pixel area Zarr once ---
+    fs = fsspec.filesystem("s3", anon=False)
+    pixel_area_da = xr.open_zarr(fs.get_mapper(pixel_area_zarr_path), chunks={"y": 10000, "x": 10000})["band_data"]
+
+    # --- Get lat bounds for overlap with model ---
+    model_lat_min = -90  # or read from model Zarr if needed
+    model_lat_max = 90
+    pixel_lat_min = pixel_area_da["y"].min().item()
+    pixel_lat_max = pixel_area_da["y"].max().item()
+
+    lat_min = max(model_lat_min, pixel_lat_min)
+    lat_max = min(model_lat_max, pixel_lat_max)
+
+    # Round to avoid floating point mismatch
+    lat_min = np.round(lat_min, 6)
+    lat_max = np.round(lat_max, 6)
+
+    # --- Slice & persist ---
+    pixel_area_overlap = pixel_area_da.sel(y=slice(lat_max, lat_min))
+    pixel_area_overlap = pixel_area_overlap.persist()
 
     ### Step 2: Create global 0.04x0.04 deg geotifs (one for each dataset-year).
     ### Each dataset-year is processed sequentially but using Dask to parallelize each one
@@ -239,7 +289,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
 
         for year_idx in range(years_to_process):
 
-                map_stats = global_map_for_variable_year(var_name, year_idx, rechunked_mega_zarr_path, pixel_area_zarr_path, output_base, no_upload, main_logger)
+                map_stats = global_map_for_variable_year(var_name, year_idx, rechunked_mega_zarr_path, pixel_area_overlap, output_base, no_upload, main_logger)
                 main_logger.info(map_stats)
 
         var_end_time = time.time()
