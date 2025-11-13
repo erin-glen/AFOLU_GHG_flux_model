@@ -4,42 +4,46 @@ It iterates through each dataset-year combination, processing each one using Das
 Thus, parallelization is at the level of the dataset-year global map, not across them.
 No chunk stats are created, nor checks for completeness/missing data.
 
+Note that this can only be run globally; there's no way to run it on just a part of the world.
+Thus, making global geotifs from even small test areas (e.g., Cerrado) needs a full set of workers to finish in a timely manner.
+It takes the same amount of time/workers to create a geotif for all land chunks as it does for any subset because
+it's running the entire planet regardless.
+
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -bb 10 49 11 50 --run_local --no_upload -fy 1 -fv 1 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps --run_local --no_upload -fy 1 -fv 1 --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -bb 10 49 11 50 fy 2 -fv 2 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -bb 10 49 11 50 fy 2 -fv 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -fy 2 -fv 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -fy 2 -fv 2 --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -bb -64 -22 -63 -21 fy 3 -fv 3 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -bb -64 -22 -63 -21 fy 3 -fv 3 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -fy 3 -fv 3 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -fy 3 -fv 3 --input_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
-python -m src.utilities.create_cluster -n 50 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 80 -t 1 -m 8 -cn vegetation_model
+python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
-python -m src.utilities.create_cluster -n 15 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 80 -t 1 -m 8 -cn vegetation_model
+python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD
 
 Full run:
-python -m src.utilities.create_cluster -n 15 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.utilities.create_cluster -n 80 -t 1 -m 8 -cn vegetation_model
+python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d
 """
 
 import argparse
 import numpy as np
-import pandas as pd
 import xarray as xr
 import dask.array as da
 import fsspec
@@ -70,6 +74,9 @@ def global_map_for_variable_year(var, year_idx, zarr_path, pixel_area_path, outp
     fs = fsspec.filesystem("s3", anon=False)
     model_zarr = zarr.open_group(fs.get_mapper(zarr_path), mode="r")
     pixel_area_zarr = zarr.open_group(fs.get_mapper(pixel_area_path), mode="r")
+
+    # Code below basically gets the pixel area and model mega-zarr to use the same latitude extent.
+    # It was somewhat convoluted with ChatGPT; the model extent kept not being sliced/clipped correctly.
 
     # Coordinate arrays
     lat_model = model_zarr["y"][:]
@@ -212,7 +219,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
         vars_to_process = full_list_of_vars[0:first_variables_to_process]
     else:
         vars_to_process = full_list_of_vars
-    main_logger.info(f"Variables to create global maps for: {vars_to_process} ({len(vars_to_process)} out of {len(cn.full_outputs_to_zarr)})")
+    main_logger.info(f"Variables to create global maps for: {vars_to_process} ({len(vars_to_process)} out of {len(full_list_of_vars)})")
 
     # Limits the processed years to the supplied number (for testing)
     if first_years_to_process:
