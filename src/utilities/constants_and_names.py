@@ -568,7 +568,7 @@ From Radost Stanimirova via Slack 2024-10-18:
 //2: Hard commodities
 //3: Shifting cultivation
 //4: Forest management
-//5: "Wildfire
+//5: Wildfire
 //6: Settlements & Infrastructure
 //7: Other natural disturbances
 '''
