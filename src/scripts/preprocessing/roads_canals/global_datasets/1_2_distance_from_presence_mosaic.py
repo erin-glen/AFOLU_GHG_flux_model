@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-1.2_distance_from_presence_mosaic.py
+1_2_distance_from_presence_mosaic.py
 Stage-2 distance computation from 30 m binary presence rasters (roads/canals).
 
 Key behavior
@@ -16,7 +16,7 @@ Key behavior
 Assumptions matched to your logs
 --------------------------------
 - Presence rasters are written under:
-    s3://{cn.s3_bucket_name}/<s3_processed_base>/<chunk_px>_pixels/<date>/
+    s3://{cn.s3_bucket_name}/<s3_processed_base>/presence/<chunk_px>_pixels/<date>/
   with filenames:
     {tile_id}__{minx}_{miny}_{maxx}_{maxy}__{feature_type}_presence.tif
   e.g.
@@ -30,14 +30,19 @@ Assumptions matched to your logs
 CLI examples
 ------------
 # Compute distance for a single 1° chunk (with 1 km halo) within a tile:
-python -m src.scripts.preprocessing.roads_canals.global_datasets.distance_from_presence_mosaic \
+python -m src.scripts.preprocessing.roads_canals.global_datasets.1_2_distance_from_presence_mosaic \
   --tile_id 00N_110E --feature_type osm_roads --client coiled \
   --chunk_bounds "116,-4,117,-3" --halo_m 1000 --date 20251113 --loglevel INFO
 
 # Compute distance for *all* 1° chunks of a tile (default halo 1000 m):
-python -m src.scripts.preprocessing.roads_canals.global_datasets.distance_from_presence_mosaic \
+python -m src.scripts.preprocessing.roads_canals.global_datasets.1_2_distance_from_presence_mosaic \
   --tile_id 00N_110E --feature_type osm_roads --client coiled \
   --date 20251113 --batch_size 20 --loglevel INFO
+
+Outputs are written to:
+    s3://{cn.s3_bucket_name}/<s3_processed_base>/distance/<chunk_px>_pixels/<date>/
+e.g. climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_roads_density/distance/4000_pixels/20251113/
+matching the presence hierarchy.
 """
 
 import os
@@ -48,7 +53,6 @@ import posixpath
 import tempfile
 from typing import List, Optional, Tuple
 
-import boto3
 import numpy as np
 import dask
 from dask import delayed
@@ -57,7 +61,6 @@ import rasterio
 from rasterio.merge import merge as rio_merge
 from rasterio.windows import from_bounds as window_from_bounds
 from rasterio.transform import Affine
-import rioxarray as rxr
 import xarray as xr
 
 try:
@@ -66,20 +69,15 @@ try:
 except Exception:
     _HAVE_SCIPY = False
 
+from src.scripts.preprocessing.hansenize.hansenize_coiled import warp_to_hansen_coiled
+from src.scripts.preprocessing.roads_canals.global_datasets import roads_io
 from src.scripts.utilities import universal_utilities as uutil
 import src.scripts.preprocessing.preprocessing_constants as cn
-from src.scripts.preprocessing.hansenize.hansenize_coiled import warp_to_hansen_coiled
 
 LOG = logging.getLogger("rc_distance")
 
-PEAT_30M_PATTERN = "_union_mask.tif"
-
 
 # ------------------------------ Utilities ------------------------------
-
-def _fmt_deg(x: float) -> str:
-    # filenames in presence use one decimal (e.g., 116.0_-4.0_117.0_-3.0)
-    return f"{float(x):.1f}"
 
 def _chunk_bounds_iter(tile_bounds: Tuple[float, float, float, float], chunk_size: float = 1.0):
     minx, miny, maxx, maxy = tile_bounds
@@ -91,44 +89,6 @@ def _chunk_bounds_iter(tile_bounds: Tuple[float, float, float, float], chunk_siz
             yield [x, y, x + chunk_size, y + chunk_size]
             x += chunk_size
         y += chunk_size
-
-def _tile_id_from_cell(lon_w: int, lat_s: int) -> str:
-    """
-    Infer 10x10 tile_id using the conventions evident in your logs:
-    - tile bounds example: 00N_110E => [110, -10, 120, 0]
-      => north edge = 0, west edge = 110.
-    Given a 1° cell [lon_w, lat_s, lon_w+1, lat_s+1], the 10° tile north edge is ceil(lat_s+1 to next 10),
-    the west edge is floor(lon_w to previous 10). But in practice, presence filenames use the tile_id
-    that *contains* the 1° cell. A simpler rule that matches your 00N_110E case:
-      - tile north edge is (lat_s + 1) rounded up to the next multiple of 10.
-      - tile west edge is lon_w rounded down to the previous multiple of 10.
-    """
-    lat_n = lat_s + 1  # north edge of the 1° cell
-    # snap to 10° grid
-    tile_north = int(math.ceil(lat_n / 10.0) * 10)
-    tile_west = int(math.floor(lon_w / 10.0) * 10)
-
-    # encode strings
-    lat_code = f"{abs(tile_north):02d}{'N' if tile_north >= 0 else 'S'}"
-    ew = 'E' if tile_west >= 0 else 'W'
-    lon_code = f"{abs(tile_west):03d}{ew}"
-    return f"{lat_code}_{lon_code}"
-
-def _presence_prefix(group: str, sub: str, chunk_px: int, date_str: str) -> str:
-    """
-    S3 prefix that holds presence and distance rasters for this dataset/date.
-    Mirrors your current uploader convention.
-    """
-    base = cn.datasets[group][sub]['s3_processed_base']    # e.g. "climate/.../osm_roads_density"
-    return posixpath.join(base, f"{chunk_px}_pixels", date_str)
-
-def _presence_key_for_cell(tile_id: str, lon_w: int, lat_s: int, feature_type: str) -> str:
-    chunk_str = f"{_fmt_deg(lon_w)}_{_fmt_deg(lat_s)}_{_fmt_deg(lon_w+1)}_{_fmt_deg(lat_s+1)}"
-    return f"{tile_id}__{chunk_str}__{feature_type}_presence.tif"
-
-def _distance_key_for_cell(tile_id: str, lon_w: int, lat_s: int, feature_type: str) -> str:
-    chunk_str = f"{_fmt_deg(lon_w)}_{_fmt_deg(lat_s)}_{_fmt_deg(lon_w+1)}_{_fmt_deg(lat_s+1)}"
-    return f"{tile_id}__{chunk_str}__{feature_type}_distance.tif"
 
 def _s3_exists(client, bucket: str, key: str) -> bool:
     try:
@@ -196,8 +156,9 @@ def _collect_presence_sources_for_roi(
     paths = []
     for lon_w in range(lon_start, lon_end):
         for lat_s in range(lat_start, lat_end):
-            tile_id = _tile_id_from_cell(lon_w, lat_s)
-            fname = _presence_key_for_cell(tile_id, lon_w, lat_s, feature_type)
+            tile_id = roads_io.tile_id_from_cell(lon_w, lat_s)
+            chunk_bounds = [lon_w, lat_s, lon_w + 1, lat_s + 1]
+            fname = roads_io.presence_raster_name(tile_id, chunk_bounds, feature_type)
             key = posixpath.join(prefix, fname)
             if _s3_exists(s3_client, bucket, key):
                 paths.append(f"/vsis3/{bucket}/{key}")
@@ -224,22 +185,18 @@ def _mosaic_presence(bounds_wgs84: List[float],
     # Derive tile_id from center:
     lon_w = int(math.floor(cx))
     lat_s = int(math.floor(cy))
-    tile_id_ref = _tile_id_from_cell(lon_w, lat_s)
+    tile_id_ref = roads_io.tile_id_from_cell(lon_w, lat_s)
 
-    # Open union mask to obtain resolution/transform (Hansen grid footprint)
-    mask_prefix = cn.datasets["peat"]["union_mask"]["30m"]
-    mask_path = f"/vsis3/{cn.s3_bucket_name}/{mask_prefix}{tile_id_ref}{PEAT_30M_PATTERN}"
-    da_ref = rxr.open_rasterio(mask_path, masked=True)
-    transform_ref = da_ref.rio.transform()  # Affine
+    da_ref = roads_io.load_mask_tile(tile_id_ref)
+    transform_ref = da_ref.rio.transform()
     da_ref.close()
 
     # 2) Expand bounds by halo in meters -> degrees (via transform at center latitude)
     expanded_bounds, _, _ = _expanded_bounds(bounds_wgs84, transform_ref, halo_m)
 
     # 3) Collect presence sources intersecting expanded ROI
-    group, sub = feature_type.split("_", 1)
-    prefix = _presence_prefix(group, sub, chunk_px, date_str)
-    s3_client = boto3.client("s3")
+    prefix = roads_io.product_prefix(feature_type, "presence", chunk_px, date_str)
+    s3_client = roads_io.ensure_s3_client()
     srcs = _collect_presence_sources_for_roi(
         s3_client, cn.s3_bucket_name, prefix, feature_type, expanded_bounds
     )
@@ -278,7 +235,7 @@ def _process_chunk_distance(
     Build presence mosaic with halo, compute distance in meters, crop to interior,
     mask to peat, and upload.
     """
-    chunk_str = "_".join([_fmt_deg(v) for v in chunk_bounds])
+    chunk_str = roads_io.chunk_bounds_to_str(chunk_bounds)
     LOG.info("[tile %s | %s] distance-from-presence start", tile_id, chunk_str)
 
     if not _HAVE_SCIPY:
@@ -287,15 +244,8 @@ def _process_chunk_distance(
         return dict(tile=tile_id, bounds=chunk_bounds, status="error", s3=[], msgs=msg)
 
     # 0) Where to write
-    group, sub = feature_type.split("_", 1)
     chunk_px = uutil.calc_chunk_length_pixels(chunk_bounds)
-    s3_dir = posixpath.join(
-        cn.datasets[group][sub]['s3_processed_base'],
-        f"{chunk_px}_pixels",
-        date_str,
-    )
-    local_dir = cn.datasets[group][sub]['local_processed']
-    os.makedirs(local_dir, exist_ok=True)
+    local_dir = roads_io.local_product_dir(feature_type, "distance")
 
     # 1) Presence mosaic with halo
     presence, mosaic_transform = _mosaic_presence(
@@ -340,14 +290,12 @@ def _process_chunk_distance(
     # 4) Mask to peat (union 30 m) for *this tile's* interior chunk
     #    We only need the interior chunk mask; no need to mosaic masks since
     #    output is a single 1° cell for this tile.
-    mask_prefix = cn.datasets["peat"]["union_mask"]["30m"]
-    mask_path = f"/vsis3/{cn.s3_bucket_name}/{mask_prefix}{tile_id}{PEAT_30M_PATTERN}"
-    da_mask_tile = rxr.open_rasterio(mask_path, masked=True)
-    da_mask_interior = da_mask_tile.rio.clip_box(minx=minx, miny=miny, maxx=maxx, maxy=maxy)
-    da_mask_tile.close()
+    da_mask_interior, peat_bool = roads_io.load_mask_chunk(tile_id, chunk_bounds)
+    if peat_bool is None:
+        msg = "peat mask empty for chunk"
+        LOG.info("[tile %s | %s] %s", tile_id, chunk_str, msg)
+        return dict(tile=tile_id, bounds=chunk_bounds, status="skip", s3=[], msgs=msg)
 
-    # da_mask_interior is aligned to Hansen grid; select band 0 and create boolean
-    peat_bool = (da_mask_interior[0].data == 1)
     # Align dimensions just in case (should already match)
     if peat_bool.shape != dist_crop.shape:
         # Re-open as xarray with coords to reindex; but shapes should match when all aligned.
@@ -362,75 +310,77 @@ def _process_chunk_distance(
     dist_crop_masked = np.where(peat_bool, dist_crop, 0.0).astype(np.float32)
 
     # 5) Save, hansenize, upload
-    y_coords = da_mask_interior.y.values
-    x_coords = da_mask_interior.x.values
-    out_da = xr.DataArray(
-        dist_crop_masked,
-        dims=("y", "x"),
-        coords={"y": y_coords, "x": x_coords}
-    )
-    out_da = out_da.rio.write_crs(da_mask_interior.rio.crs, inplace=True)
-    out_da = out_da.rio.write_transform(crop_transform, inplace=True)
-
-    out_name = _distance_key_for_cell(
+    out_name = roads_io.distance_raster_name(
         tile_id=tile_id,
-        lon_w=int(math.floor(minx)),
-        lat_s=int(math.floor(miny)),
-        feature_type=feature_type
+        bounds=chunk_bounds,
+        feature_type=feature_type,
     )
     local_out = os.path.join(local_dir, out_name)
-    out_da.rio.to_raster(local_out, compress="lzw")
+
+    # Use rasterio to avoid dimension mismatches from inherited coordinates.
+    mask_crs = da_mask_interior.rio.crs
+    raster_meta = {
+        "driver": "GTiff",
+        "height": dist_crop_masked.shape[0],
+        "width": dist_crop_masked.shape[1],
+        "count": 1,
+        "dtype": "float32",
+        "crs": mask_crs,
+        "transform": crop_transform,
+        "nodata": 0.0,
+        "compress": "lzw",
+    }
+    with rasterio.Env():
+        with rasterio.open(local_out, "w", **raster_meta) as dst:
+            dst.write(dist_crop_masked, 1)
+    if hasattr(da_mask_interior, "close"):
+        da_mask_interior.close()
 
     # Hansenize/retile and upload (keep same pattern as your stage-1 script)
-    # NOTE: We pass output_raster_s3_path_and_name=None and then upload via boto3, as in your script;
-    # if your warp function is configured to upload directly, that's fine too.
-    warp_to_hansen_coiled(
-        source_vrt_path=local_out,
-        filename=out_name,
-        output_raster_s3_path_and_name=None,
-        xmin=minx, ymin=miny, xmax=maxx, ymax=maxy,
-        dt=uutil.string_to_gdal_dtype_mapping["Float32"],
-        no_data=0,
-        tiled=True,
-        x_pixel_window=400,
-        y_pixel_window=400,
+    s3_uri, s3_key = roads_io.build_s3_uri(
+        feature_type, "distance", chunk_px, date_str, out_name
     )
-
-    # Upload to the same processed path used for presence
-    s3_client = boto3.client("s3")
-    s3_key = posixpath.join(s3_dir, out_name)
-    # hansenize writes to /tmp (or user tmp); try both locations
     hansen_local = os.path.join(tempfile.gettempdir(), out_name)
-    if not os.path.exists(hansen_local):
-        hansen_local = os.path.join(os.path.expanduser("~"), "tmp", out_name)
-
-    if os.path.exists(hansen_local):
-        s3_client.upload_file(hansen_local, cn.s3_bucket_name, s3_key)
-        s3_uri = f"s3://{cn.s3_bucket_name}/{s3_key}"
-        LOG.info("[tile %s | %s] uploaded => %s", tile_id, chunk_str, s3_uri)
+    try:
+        warp_to_hansen_coiled(
+            source_vrt_path=local_out,
+            filename=out_name,
+            output_raster_s3_path_and_name=s3_uri,
+            xmin=minx, ymin=miny, xmax=maxx, ymax=maxy,
+            dt=uutil.string_to_gdal_dtype_mapping["Float32"],
+            no_data=0,
+            tiled=True,
+            x_pixel_window=400,
+            y_pixel_window=400,
+        )
+        roads_io.upload_file(hansen_local, s3_key)
+    except Exception as exc:
+        LOG.error("[tile %s | %s] distance upload failed: %s", tile_id, chunk_str, exc)
+        try:
+            if os.path.exists(local_out):
+                os.remove(local_out)
+        except Exception:
+            pass
+        try:
+            if os.path.exists(hansen_local):
+                os.remove(hansen_local)
+        except Exception:
+            pass
+        return dict(tile=tile_id, bounds=chunk_bounds, status="error", s3=[], msgs=f"upload_failed:{exc}")
     else:
-        # Fall back to uploading the non-hansenized local copy (should rarely happen)
-        s3_client.upload_file(local_out, cn.s3_bucket_name, s3_key)
-        s3_uri = f"s3://{cn.s3_bucket_name}/{s3_key}"
-        LOG.warning("[tile %s | %s] hansenized file not found; uploaded non-hansenized %s",
-                    tile_id, chunk_str, s3_uri)
-
-    # Clean up locals
-    try:
-        if os.path.exists(local_out):
-            os.remove(local_out)
-    except Exception:
-        pass
-    try:
-        if os.path.exists(hansen_local):
-            os.remove(hansen_local)
-    except Exception:
-        pass
+        s3_result = [s3_uri]
+    finally:
+        for path in (local_out, hansen_local):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
 
     del presence, dist_m, dist_crop, dist_crop_masked, da_mask_interior
     gc.collect()
 
-    return dict(tile=tile_id, bounds=chunk_bounds, status="ok", s3=[s3_uri], msgs="ok")
+    return dict(tile=tile_id, bounds=chunk_bounds, status="ok", s3=s3_result, msgs="ok")
 
 
 # ------------------------------ Orchestrator ------------------------------

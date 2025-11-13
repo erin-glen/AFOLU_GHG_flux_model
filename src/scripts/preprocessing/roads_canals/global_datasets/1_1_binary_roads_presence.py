@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-1.1_binary_roads_presence.py — 30 m presence / (optional) distance / (density stub)
+1_1_binary_roads_presence.py — 30 m presence (plus optional diagnostic distance)
 
 Assumptions per ops:
 - Vectors exist ONLY as shapefiles and ONLY in one projection: EPSG:3395
@@ -15,22 +15,25 @@ Fixes:
 - Log clean [result] lines for each processed chunk.
 
 Products:
-- presence: 0/1 raster within peat mask (==1)
-- distance: optional Euclidean distance (pixel units if mask CRS is geographic)
+- presence: 0/1 raster within peat mask (==1) written to presence/<chunk_px>_pixels/<date>/
+- distance: optional Euclidean distance written to distance/<chunk_px>_pixels/<date>/ for diagnostics
 - density: placeholder at 30 m; warn to use the 1 km workflow
+
+Example path layout on S3/local scratch (osm_roads, 30 m, 4000 px chunk):
+    climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_roads_density/presence/4000_pixels/20251113/
+    climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_roads_density/distance/4000_pixels/20251113/
 
 """
 
 import os
 import logging
 import gc
-import posixpath
+import tempfile
 import numpy as np
 import dask
 import dask_geopandas as dgpd
 import geopandas as gpd
 import xarray as xr
-import rioxarray as rxr
 
 from shapely.geometry import box
 from rasterio.features import rasterize
@@ -45,13 +48,14 @@ except Exception:
     _HAVE_SCIPY = False
 
 from src.scripts.preprocessing.hansenize.hansenize_coiled import warp_to_hansen_coiled
+from src.scripts.preprocessing.roads_canals.global_datasets import roads_io
 from src.scripts.utilities import universal_utilities as uutil
 import src.scripts.preprocessing.preprocessing_constants as cn
 
 LOG = logging.getLogger("roads_canals_30m")
 
-PEAT_30M_PATTERN = "_union_mask.tif"
 VECTORS_EPSG = "EPSG:3395"  # single known projection
+DISTANCE_PRODUCT = "distance"
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -119,20 +123,8 @@ def _read_lines_3395_to_mask_crs(tile_id, feature_type, dst_crs):
 
 
 def _open_clip_mask(tile_id, bounds_wgs84):
-    """Open 30 m union mask for tile_id, clip to bounds_wgs84 (WGS84), return (da_chunk, mask_bool)."""
-    prefix_30m = cn.datasets["peat"]["union_mask"]["30m"]
-    raster_path = f"/vsis3/{cn.s3_bucket_name}/{prefix_30m}{tile_id}{PEAT_30M_PATTERN}"
-    da = rxr.open_rasterio(raster_path, masked=True)
-
-    minx, miny, maxx, maxy = transform_bounds("EPSG:4326", da.rio.crs, *bounds_wgs84, densify_pts=21)
-    da_chunk = da.rio.clip_box(minx=minx, miny=miny, maxx=maxx, maxy=maxy)
-    if da_chunk.isnull().all():
-        return da_chunk, None
-
-    mask_bool = (da_chunk[0].data == 1)
-    if np.all(mask_bool == 0):
-        return da_chunk, None
-    return da_chunk, mask_bool
+    """Open 30 m union mask for tile_id, clip to bounds_wgs84 (WGS84)."""
+    return roads_io.load_mask_chunk(tile_id, bounds_wgs84)
 
 
 def _rasterize_presence(da_chunk, mask_bool, lines_gdf):
@@ -200,16 +192,8 @@ def _process_chunk(bounds_wgs84, tile_id, feature_type, products, maxdist):
     except FeatureError as exc:
         return dict(tile=tile_id, bounds=bounds_wgs84, status="skip", s3=[], msgs=f"FeatureError: {exc}")
 
-    group, sub = feature_type.split("_", 1)
-    # S3 folder structure consistent with other preprocessors
     chunk_px = uutil.calc_chunk_length_pixels(bounds_wgs84)
-    s3_dir = posixpath.join(
-        cn.datasets[group][sub]['s3_processed_base'],
-        f"{chunk_px}_pixels",
-        cn.today_date,
-    )
-    local_dir = cn.datasets[group][sub]['local_processed']
-    os.makedirs(local_dir, exist_ok=True)
+    presence_local_dir = roads_io.local_product_dir(feature_type, "presence")
 
     transform = da_chunk.rio.transform()
     y, x = da_chunk.y, da_chunk.x
@@ -220,31 +204,41 @@ def _process_chunk(bounds_wgs84, tile_id, feature_type, products, maxdist):
     if "presence" in products:
         arr = _rasterize_presence(da_chunk, mask_bool, lines_gdf)
         if np.any(arr > 0):
-            fn = f"{tile_id}__{chunk_str}__{feature_type}_presence.tif"
-            local_out = os.path.join(local_dir, fn)
+            fn = roads_io.presence_raster_name(tile_id, bounds_wgs84, feature_type)
+            local_out = os.path.join(presence_local_dir, fn)
             xr.DataArray(arr, dims=("y","x"), coords={"y": y, "x": x})\
               .rio.write_crs(dst_crs, inplace=True)\
               .rio.write_transform(transform, inplace=True)\
               .rio.to_raster(local_out, compress="lzw")
 
-            s3_key = f"{s3_dir}/{fn}"
-            s3_uri = f"s3://{cn.s3_bucket_name}/{s3_key}"
-            # Hansenize + upload via hansenizer (eliminates "uploaded to None")
-            warp_to_hansen_coiled(
-                source_vrt_path=local_out,
-                filename=fn,
-                output_raster_s3_path_and_name=s3_uri,
-                xmin=bounds_wgs84[0], ymin=bounds_wgs84[1],
-                xmax=bounds_wgs84[2], ymax=bounds_wgs84[3],
-                dt=uutil.string_to_gdal_dtype_mapping["Byte"],
-                no_data=0,
-                tiled=True, x_pixel_window=400, y_pixel_window=400,
+            s3_uri, s3_key = roads_io.build_s3_uri(
+                feature_type, "presence", chunk_px, cn.today_date, fn
             )
-            s3_uploaded.append(s3_uri)
+            hansen_local = os.path.join(tempfile.gettempdir(), fn)
             try:
-                os.remove(local_out)
-            except Exception:
-                pass
+                warp_to_hansen_coiled(
+                    source_vrt_path=local_out,
+                    filename=fn,
+                    output_raster_s3_path_and_name=s3_uri,
+                    xmin=bounds_wgs84[0], ymin=bounds_wgs84[1],
+                    xmax=bounds_wgs84[2], ymax=bounds_wgs84[3],
+                    dt=uutil.string_to_gdal_dtype_mapping["Byte"],
+                    no_data=0,
+                    tiled=True, x_pixel_window=400, y_pixel_window=400,
+                )
+                roads_io.upload_file(hansen_local, s3_key)
+            except Exception as exc:
+                LOG.error("[tile %s | %s] presence upload failed: %s", tile_id, chunk_str, exc)
+                msgs.append(f"presence_upload_failed:{exc}")
+            else:
+                s3_uploaded.append(s3_uri)
+            finally:
+                for path in (local_out, hansen_local):
+                    try:
+                        if os.path.exists(path):
+                            os.remove(path)
+                    except Exception:
+                        pass
         else:
             msgs.append("presence_all_zero")
 
@@ -252,30 +246,42 @@ def _process_chunk(bounds_wgs84, tile_id, feature_type, products, maxdist):
     if "distance" in products:
         dist = _rasterize_distance(da_chunk, mask_bool, lines_gdf, maxdist=maxdist)
         if dist is not None and np.any(dist > 0):
-            fn = f"{tile_id}__{chunk_str}__{feature_type}_distance.tif"
-            local_out = os.path.join(local_dir, fn)
+            quicklook_local_dir = roads_io.local_product_dir(feature_type, DISTANCE_PRODUCT)
+            fn = roads_io.distance_raster_name(tile_id, bounds_wgs84, feature_type)
+            local_out = os.path.join(quicklook_local_dir, fn)
             xr.DataArray(dist, dims=("y","x"), coords={"y": y, "x": x})\
               .rio.write_crs(dst_crs, inplace=True)\
               .rio.write_transform(transform, inplace=True)\
               .rio.to_raster(local_out, compress="lzw")
 
-            s3_key = f"{s3_dir}/{fn}"
-            s3_uri = f"s3://{cn.s3_bucket_name}/{s3_key}"
-            warp_to_hansen_coiled(
-                source_vrt_path=local_out,
-                filename=fn,
-                output_raster_s3_path_and_name=s3_uri,
-                xmin=bounds_wgs84[0], ymin=bounds_wgs84[1],
-                xmax=bounds_wgs84[2], ymax=bounds_wgs84[3],
-                dt=uutil.string_to_gdal_dtype_mapping["Float32"],
-                no_data=0,
-                tiled=True, x_pixel_window=400, y_pixel_window=400,
+            s3_uri, s3_key = roads_io.build_s3_uri(
+                feature_type, DISTANCE_PRODUCT, chunk_px, cn.today_date, fn
             )
-            s3_uploaded.append(s3_uri)
+            hansen_local = os.path.join(tempfile.gettempdir(), fn)
             try:
-                os.remove(local_out)
-            except Exception:
-                pass
+                warp_to_hansen_coiled(
+                    source_vrt_path=local_out,
+                    filename=fn,
+                    output_raster_s3_path_and_name=s3_uri,
+                    xmin=bounds_wgs84[0], ymin=bounds_wgs84[1],
+                    xmax=bounds_wgs84[2], ymax=bounds_wgs84[3],
+                    dt=uutil.string_to_gdal_dtype_mapping["Float32"],
+                    no_data=0,
+                    tiled=True, x_pixel_window=400, y_pixel_window=400,
+                )
+                roads_io.upload_file(hansen_local, s3_key)
+            except Exception as exc:
+                LOG.error("[tile %s | %s] distance upload failed: %s", tile_id, chunk_str, exc)
+                msgs.append(f"distance_upload_failed:{exc}")
+            else:
+                s3_uploaded.append(s3_uri)
+            finally:
+                for path in (local_out, hansen_local):
+                    try:
+                        if os.path.exists(path):
+                            os.remove(path)
+                    except Exception:
+                        pass
         else:
             msgs.append("distance_all_zero_or_missing_scipy")
 
@@ -330,8 +336,8 @@ def _process_all_tiles(feature_type, chunk_size=2.0, products=("presence",), max
     for page in paginator.paginate(Bucket=cn.s3_bucket_name, Prefix=prefix):
         for obj in page.get("Contents", []):
             key = obj["Key"]
-            if key.endswith(PEAT_30M_PATTERN):
-                tile_id = os.path.basename(key).replace(PEAT_30M_PATTERN, "")
+            if key.endswith(roads_io.PEAT_30M_PATTERN):
+                tile_id = os.path.basename(key).replace(roads_io.PEAT_30M_PATTERN, "")
                 tasks.extend(_process_tile(tile_id, feature_type, chunk_size=chunk_size,
                                            products=products, maxdist=maxdist))
     return tasks
@@ -406,7 +412,8 @@ if __name__ == "__main__":
     parser.add_argument("--chunk_size", type=float, default=2.0, help="Chunk size in degrees")
     parser.add_argument("--client", default="local", choices=["local","coiled"])
     parser.add_argument("--resolution", default="30m", help="Fixed at 30m for this script")
-    parser.add_argument("--product", default="presence", help="Comma list: presence,distance[,density]")
+    parser.add_argument("--product", default="presence",
+                        help="Comma list: presence,distance[,density] (distance uploads under distance/)")
     parser.add_argument("--maxdist", default=1000, help="Cap distance (meters) for distance (pixel-units if geographic)")
     parser.add_argument("--batch_size", default=20, help="Dask submission batch size")
     parser.add_argument("--loglevel", default="INFO", help="DEBUG, INFO, ...")
@@ -424,24 +431,34 @@ if __name__ == "__main__":
          loglevel=args.loglevel)
 
 """
-1x1 degree test run: 
+Example runs
+============
 
-python -m src.scripts.preprocessing.roads_canals.global_datasets.testing_roads_canals   --tile_id 00N_110E --feature_type osm_roads --client coiled   --resolution 30m --product presence,distance,density   --maxdist 1000 --chunk_bounds "116,-4,117,-3" --chunk_size 1.0   --batch_si
-ze 1 --loglevel INFO
+Single 1° chunk (presence + diagnostic distance preview):
 
-Full tile test run: 
-
-python -m src.scripts.preprocessing.roads_canals.global_datasets.testing_roads_canals \
+python -m src.scripts.preprocessing.roads_canals.global_datasets.1_1_binary_roads_presence \
   --tile_id 00N_110E \
   --feature_type osm_roads \
   --client coiled \
   --resolution 30m \
   --product presence,distance \
   --maxdist 1000 \
+  --chunk_bounds "116,-4,117,-3" \
+  --chunk_size 1.0 \
+  --batch_size 1 \
+  --loglevel INFO
+
+Full tile (presence only):
+
+python -m src.scripts.preprocessing.roads_canals.global_datasets.1_1_binary_roads_presence \
+  --tile_id 00N_110E \
+  --feature_type osm_roads \
+  --client coiled \
+  --resolution 30m \
+  --product presence \
+  --maxdist 1000 \
   --chunk_size 1.0 \
   --batch_size 20 \
   --loglevel INFO
-
-
 
 """

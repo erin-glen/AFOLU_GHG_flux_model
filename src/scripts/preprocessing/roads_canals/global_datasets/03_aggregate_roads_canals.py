@@ -1,35 +1,45 @@
 import argparse
 import posixpath
+import re
+
 import dask
 
+from src.scripts.preprocessing.roads_canals.global_datasets import roads_io
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
-from src.scripts.preprocessing import preprocessing_constants as pcn
 from src.scripts.utilities.constants_and_names import (
     today_date,
     full_bucket_prefix,
 )
 
 DEFAULT_FEATURE_TYPES = ["osm_roads", "osm_canals", "grip_roads"]
+DEFAULT_PRODUCTS = ("presence", "distance")
+
+
+def _parse_pixel_resolution(pixel_resolution: str) -> int:
+    """Return integer pixel dimension from values like ``"4000_pixels"``."""
+
+    match = re.fullmatch(r"(\d+)_pixels", pixel_resolution)
+    if not match:
+        raise ValueError(
+            "pixel_resolution must look like '<int>_pixels' (got %r)" % pixel_resolution
+        )
+    return int(match.group(1))
 
 
 def get_input_datasets(
     feature_types=DEFAULT_FEATURE_TYPES,
-    pixel_resolution: str = "8000_pixels",
+    products: tuple = DEFAULT_PRODUCTS,
+    pixel_resolution: str = "4000_pixels",
     date: str = today_date,
 ) -> list:
     """Return list of S3 folders for road and canal outputs."""
+    chunk_px = _parse_pixel_resolution(pixel_resolution)
     paths = []
     for ft in feature_types:
-        group, sub = ft.split("_", 1)
-        paths.append(
-            posixpath.join(
-                full_bucket_prefix,
-                pcn.datasets[group][sub]["s3_processed_base"],
-                pixel_resolution,
-                date,
-            )
-        )
+        for product in products:
+            prefix = roads_io.product_prefix(ft, product, chunk_px, date)
+            paths.append(posixpath.join(full_bucket_prefix, prefix))
     return paths
 
 
@@ -49,10 +59,11 @@ def robust_merge_small_tiles(s3_name_dict, is_final, no_upload, no_log, logger):
 def main(
     cluster_name,
     feature_types=DEFAULT_FEATURE_TYPES,
+    products: tuple = DEFAULT_PRODUCTS,
     run_local: bool = False,
     no_upload: bool = False,
     no_log: bool = False,
-    pixel_resolution: str = "8000_pixels",
+    pixel_resolution: str = "4000_pixels",
     date: str = today_date,
 ):
     logger = lu.setup_logging_main()
@@ -70,7 +81,7 @@ def main(
     start_time = uu.timestr()
     lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
 
-    input_datasets = get_input_datasets(feature_types, pixel_resolution, date)
+    input_datasets = get_input_datasets(feature_types, products, pixel_resolution, date)
 
     list_of_s3_name_dicts_total = uu.create_list_for_aggregation(input_datasets, logger)
 
@@ -123,12 +134,19 @@ if __name__ == "__main__":
         help="Feature types to process (e.g., osm_roads osm_canals grip_roads)",
     )
 
+    parser.add_argument(
+        "--products",
+        nargs="+",
+        default=list(DEFAULT_PRODUCTS),
+        help="Products to aggregate (e.g., presence distance)",
+    )
+
     parser.add_argument("--run_local", action="store_true", help="Run locally without Dask/Coiled")
     parser.add_argument("--no_log", action="store_true", help="Do not create the combined log")
     parser.add_argument("--no_upload", action="store_true", help="Do not save and upload outputs to S3")
     parser.add_argument(
         "--pixel_resolution",
-        default="8000_pixels",
+        default="4000_pixels",
         help="Input raster resolution to process",
     )
 
@@ -137,6 +155,7 @@ if __name__ == "__main__":
     main(
         args.cluster_name,
         args.feature_types,
+        tuple(args.products),
         args.run_local,
         args.no_upload,
         args.no_log,
@@ -145,5 +164,5 @@ if __name__ == "__main__":
     )
 
 """
-python -m src.scripts.preprocessing.roads_canals.global_datasets.03_aggregate_roads_canals -cn aggregate
+python -m src.scripts.preprocessing.roads_canals.global_datasets.03_aggregate_roads_canals -cn aggregate --products presence distance --pixel_resolution 4000_pixels
 """
