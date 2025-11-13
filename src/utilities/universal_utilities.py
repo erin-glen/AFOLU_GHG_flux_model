@@ -2079,8 +2079,7 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
 
     # Calculates per-pixel output (for numeric outputs only)
     # pixel_area_zarr_store = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
-    pixel_area_zarr_store = zarr.open_group(fs.get_mapper('s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20251106/global_pixel_area_20251106.zarr'), mode="r")
-    # pixel_area_zarr_store = zarr.open_group(fs.get_mapper('s3://gfw2-data/climate/AFOLU_flux_model/global_contextual_zarrs/pixel_area/20250925/global_pixel_area_20250925.zarr'), mode="r")
+    pixel_area_zarr_store = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
 
     # Determine pixel indices (applies to model outputs and pixel area)
     lat_array_pixel_area = pixel_area_zarr_store["y"][:]
