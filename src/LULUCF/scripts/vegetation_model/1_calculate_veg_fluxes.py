@@ -888,7 +888,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                             nu.calc_mang_loss(interval_length, first_mang_gain_year, first_mang_loss_year, interval_start_year,
                                 mang_c_pools_EF_no_fire, mang_loss_year_in_interval, mang_gain_year_count_pre_loss, mang_gain_year_count_post_loss,
                                 RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio_mang, litter_c_ratio_mang))
-                        # print(f"Node code is {state_out}, gain of mangroves with temporary disturbace of mangroves that emits biomass C pools only (111)")
+                        # print(f"Node code is {state_out}, gain of mangroves with temporary disturbance of mangroves that emits biomass C pools only (111)")
 
                     else:
                         state_out = nu.accrete_node(node, 2)  # Gain of mangroves, no loss in interval (112)
