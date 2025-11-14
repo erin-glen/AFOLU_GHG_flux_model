@@ -33,9 +33,14 @@ def _split_feature_type(feature_type: str) -> Tuple[str, str]:
 
 
 def fmt_deg(value: float, precision: int = 1) -> str:
-    """Format coordinates exactly as used in chunk identifiers (e.g., ``116.0``)."""
+    """Format coordinates for chunk identifiers without unnecessary decimals."""
 
-    return f"{float(value):.{precision}f}"
+    formatted = f"{float(value):.{precision}f}"
+    if "." in formatted:
+        formatted = formatted.rstrip("0").rstrip(".")
+    if formatted == "-0":
+        formatted = "0"
+    return formatted
 
 
 def chunk_bounds_to_str(bounds: Iterable[float], precision: int = 1) -> str:

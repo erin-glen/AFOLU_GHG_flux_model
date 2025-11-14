@@ -20,7 +20,7 @@ Assumptions matched to your logs
   with filenames:
     {tile_id}__{minx}_{miny}_{maxx}_{maxy}__{feature_type}_presence.tif
   e.g.
-    00N_110E__116.0_-4.0_117.0_-3.0__osm_roads_presence.tif
+    00N_110E__116_-4_117_-3__osm_roads_presence.tif
 - Vectors used to generate presence were shapefiles (EPSG:3395 or EPSG:4326); this
   script never touches vectors. It only consumes the presence rasters.
 - Union 30 m peat mask tiles live at:

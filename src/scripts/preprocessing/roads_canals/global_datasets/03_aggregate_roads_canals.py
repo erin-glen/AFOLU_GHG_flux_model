@@ -164,5 +164,5 @@ if __name__ == "__main__":
     )
 
 """
-python -m src.scripts.preprocessing.roads_canals.global_datasets.03_aggregate_roads_canals -cn aggregate --products presence distance --pixel_resolution 4000_pixels
+python -m src.scripts.preprocessing.roads_canals.global_datasets.03_aggregate_roads_canals -cn aggregate --products presence distance --pixel_resolution 4000_pixels --date 20251114
 """

@@ -164,7 +164,7 @@ def _process_chunk(bounds_wgs84, tile_id, feature_type, products, maxdist):
     - rasterize presence (+ optional distance)
     - warp to Hansen grid, upload via hansenizer
     """
-    chunk_str = "_".join(map(str, bounds_wgs84))
+    chunk_str = roads_io.chunk_bounds_to_str(bounds_wgs84)
     LOG.info("[tile %s | %s] start", tile_id, chunk_str)
 
     try:
