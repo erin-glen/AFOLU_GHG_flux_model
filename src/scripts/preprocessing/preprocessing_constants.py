@@ -21,13 +21,24 @@ from src.scripts.utilities.constants_and_names import (
     tile_index_shapefile_prefix,
     tile_index_shapefile_name,
     tile_id_list as master_tile_id_list,
+    peat_mask_dirs,
 )
+
+
+def _relative_peat_path(path: str) -> str:
+    """Remove the bucket prefix and normalise a peat mask S3 directory."""
+
+    prefix = f"s3://{s3_bucket_name}/"
+    if path.startswith(prefix):
+        path = path[len(prefix) :]
+    return path.rstrip("/") + "/"
 
 # Peat mask related paths
 peat_pattern = "_peat_mask_processed.tif"
-peat_tiles_prefix_1km = pp.join(processed_dir, "peat_mask", "GFW", "1km") + "/"
-peat_tiles_prefix_1km_3395 = pp.join(processed_dir, "peat_mask", "1km_3395") + "/"
-peat_tiles_prefix = "climate/carbon_model/other_emissions_inputs/peatlands/processed/20230315/"
+union_30m_prefix = _relative_peat_path(peat_mask_dirs["union_mask"])
+peat_tiles_prefix = _relative_peat_path(peat_mask_dirs["gpd"])
+peat_tiles_prefix_1km = union_30m_prefix.replace("/30m/", "/1km/")
+peat_tiles_prefix_1km_3395 = union_30m_prefix.replace("/30m/", "/1km_3395/")
 
 # Global tile index (no extension)
 index_shapefile_prefix = tile_index_shapefile_prefix
@@ -185,13 +196,13 @@ datasets = {
     },
     'peat': {
         'gfw': {
-            's3_processed': 'climate/AFOLU_flux_model/organic_soils/inputs/raw/soils/GFW_Global_Peatlands/'
+            's3_processed': _relative_peat_path(peat_mask_dirs['gfw'])
         },
         'gpd': {
             'input_type': 'raster',
             's3_raw': pp.join(raw_dir, 'soils', 'GPD', 'peatGPA22WGS_2cl.tif'),
-            's3_processed': pp.join(processed_dir, 'peat_mask', 'GPD', 'tiles') + '/',
-            'local_processed': pp.join(local_temp_dir, 'peat', 'gpd', 'tiles') + '/'
+            's3_processed': _relative_peat_path(peat_mask_dirs['gpd']),
+            'local_processed': pp.join(local_temp_dir, 'peat', 'gpd', 'tiles', '20251110') + '/'
         },
         'peatmap': {
             'input_type': 'vector',
@@ -212,7 +223,7 @@ datasets = {
         },
         'ogh': {
             'input_type': 'raster',
-            's3_raw': pp.join(raw_dir, 'soils', 'OGH','20251103' 'organic_soils_extent.tif'),
+            's3_raw': pp.join(raw_dir, 'soils', 'OGH', '20251103', 'organic_soils_extent.tif'),
             's3_processed': pp.join(processed_dir, 'peat_mask', 'OGH', 'tiles') + '/',
             'local_processed': pp.join(local_temp_dir, 'peat', 'ogh', 'tiles') + '/',
             'threshold': 10
@@ -220,21 +231,13 @@ datasets = {
         'ogh_unthresholded': {
             'input_type': 'raster',
             's3_raw': pp.join(raw_dir, 'soils', 'OGH', 'organic_soils_extent.tif'),
-            's3_processed': pp.join(processed_dir, 'peat_mask', 'OGH', 'tiles_unthresholded') + '/',
-            'local_processed': pp.join(local_temp_dir, 'peat', 'ogh_unthresholded', 'tiles') + '/'
+            's3_processed': _relative_peat_path(peat_mask_dirs['ogh_unthresholded']),
+            'local_processed': pp.join(local_temp_dir, 'peat', 'ogh_unthresholded', 'tiles', '20251110') + '/'
         },
         'union_mask': {
-            '30m': pp.join(
-                processed_dir, 'peat_mask', 'union', '30m', 'tiles'
-            )
-            + '/',
-            '1km': pp.join(
-                processed_dir, 'peat_mask', 'union', '1km', 'tiles'
-            )
-            + '/',
-            '1km_3395': pp.join(processed_dir, 'peat_mask','union','1km_3395',
-            )
-            + '/',
+            '30m': union_30m_prefix,
+            '1km': union_30m_prefix.replace('/30m/', '/1km/'),
+            '1km_3395': union_30m_prefix.replace('/30m/', '/1km_3395/'),
         }
     }
 }
