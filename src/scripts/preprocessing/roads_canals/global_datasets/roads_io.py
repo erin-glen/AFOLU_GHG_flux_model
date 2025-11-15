@@ -32,21 +32,27 @@ def _split_feature_type(feature_type: str) -> Tuple[str, str]:
         raise ValueError(f"feature_type must contain '_' (got {feature_type!r})") from exc
 
 
-def fmt_deg(value: float, precision: int = 1) -> str:
-    """Format coordinates for chunk identifiers without unnecessary decimals."""
+def fmt_deg(value: float, precision: int = 1, *, trim: bool = True) -> str:
+    """Format coordinates for chunk identifiers, optionally trimming decimals."""
 
     formatted = f"{float(value):.{precision}f}"
-    if "." in formatted:
+    if trim and "." in formatted:
         formatted = formatted.rstrip("0").rstrip(".")
     if formatted == "-0":
         formatted = "0"
     return formatted
 
 
-def chunk_bounds_to_str(bounds: Iterable[float], precision: int = 1) -> str:
+def chunk_bounds_to_str(bounds: Iterable[float], precision: int = 1, *, trim: bool = True) -> str:
     """Join bounds into the canonical ``minx_miny_maxx_maxy`` string."""
 
-    return "_".join(fmt_deg(v, precision=precision) for v in bounds)
+    return "_".join(fmt_deg(v, precision=precision, trim=trim) for v in bounds)
+
+
+def legacy_chunk_bounds_to_str(bounds: Iterable[float], precision: int = 1) -> str:
+    """Return the legacy chunk string with fixed decimal places (e.g., ``116.0``)."""
+
+    return chunk_bounds_to_str(bounds, precision=precision, trim=False)
 
 
 def product_prefix(feature_type: str, product: str, chunk_px: int, date_str: str) -> str:
@@ -75,6 +81,11 @@ def local_product_dir(feature_type: str, product: str) -> str:
 
 def presence_raster_name(tile_id: str, bounds: Iterable[float], feature_type: str) -> str:
     chunk_str = chunk_bounds_to_str(bounds)
+    return f"{tile_id}__{chunk_str}__{feature_type}_presence.tif"
+
+
+def legacy_presence_raster_name(tile_id: str, bounds: Iterable[float], feature_type: str) -> str:
+    chunk_str = legacy_chunk_bounds_to_str(bounds)
     return f"{tile_id}__{chunk_str}__{feature_type}_presence.tif"
 
 

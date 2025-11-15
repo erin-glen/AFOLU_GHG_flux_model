@@ -162,6 +162,18 @@ def _collect_presence_sources_for_roi(
             key = posixpath.join(prefix, fname)
             if _s3_exists(s3_client, bucket, key):
                 paths.append(f"/vsis3/{bucket}/{key}")
+                continue
+
+            legacy_fname = roads_io.legacy_presence_raster_name(tile_id, chunk_bounds, feature_type)
+            legacy_key = posixpath.join(prefix, legacy_fname)
+            if legacy_fname != fname and _s3_exists(s3_client, bucket, legacy_key):
+                LOG.debug(
+                    "[presence] using legacy-named raster for %s: s3://%s/%s",
+                    chunk_bounds,
+                    bucket,
+                    legacy_key,
+                )
+                paths.append(f"/vsis3/{bucket}/{legacy_key}")
             else:
                 LOG.debug("[presence] missing: s3://%s/%s", bucket, key)
     return paths
@@ -284,6 +296,7 @@ def _process_chunk_distance(
     width = int(win_interior.width)
 
     dist_crop = dist_m[row_off:row_off+height, col_off:col_off+width]
+    presence_crop = presence[row_off:row_off+height, col_off:col_off+width]
     # Compute transform for the crop
     crop_transform = mosaic_transform * Affine.translation(col_off, row_off)
 
@@ -305,6 +318,12 @@ def _process_chunk_distance(
         w = min(peat_bool.shape[1], dist_crop.shape[1])
         peat_bool = peat_bool[:h, :w]
         dist_crop = dist_crop[:h, :w]
+        presence_crop = presence_crop[:h, :w]
+
+    # Ensure cells overlapping the road/canal (presence==1) are stored as distance 1
+    # rather than 0. The downstream consumer expects strictly positive distances
+    # inside the raster, reserving 0 for nodata outside peat.
+    dist_crop[presence_crop > 0] = 1.0
 
     # Zero-out outside peat (retain 0 as no-data consistent with prior pipeline)
     dist_crop_masked = np.where(peat_bool, dist_crop, 0.0).astype(np.float32)
@@ -416,8 +435,42 @@ def _process_tile(
     return tasks
 
 
+def _process_all_tiles(
+    feature_type: str,
+    date_str: str,
+    chunk_size: float = 1.0,
+    halo_m: float = 1000.0,
+    maxdist_m: Optional[float] = 1000.0,
+) -> List[delayed]:
+    s3 = roads_io.ensure_s3_client()
+    prefix = cn.datasets["peat"]["union_mask"]["30m"]
+
+    tasks: List[delayed] = []
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=cn.s3_bucket_name, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if not key.endswith(roads_io.PEAT_30M_PATTERN):
+                continue
+
+            tile_id = os.path.basename(key).replace(roads_io.PEAT_30M_PATTERN, "")
+            tasks.extend(
+                _process_tile(
+                    tile_id=tile_id,
+                    feature_type=feature_type,
+                    date_str=date_str,
+                    chunk_size=chunk_size,
+                    chunk_bounds=None,
+                    halo_m=halo_m,
+                    maxdist_m=maxdist_m,
+                )
+            )
+
+    return tasks
+
+
 def main(
-    tile_id: str,
+    tile_id: Optional[str] = None,
     feature_type: str = "osm_roads",
     date: Optional[str] = None,
     chunk_bounds: Optional[str] = None,
@@ -433,9 +486,6 @@ def main(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
     )
     LOG.info("Log level set to %s", str(loglevel).upper())
-
-    if not tile_id:
-        raise SystemExit("--tile_id is required for this stage-2 script.")
 
     if date is None or str(date).strip().lower() in ("", "today", "now"):
         # Default to cn.today_date to match stage-1 outputs
@@ -457,19 +507,31 @@ def main(
         LOG.info("Using coiled cluster: %s", cluster.name)
 
     try:
-        cb = None
-        if chunk_bounds:
-            cb = [float(x) for x in str(chunk_bounds).split(",")]
+        if tile_id:
+            cb = None
+            if chunk_bounds:
+                cb = [float(x) for x in str(chunk_bounds).split(",")]
 
-        tasks = _process_tile(
-            tile_id=tile_id,
-            feature_type=feature_type,
-            date_str=date_str,
-            chunk_size=chunk_size,
-            chunk_bounds=cb,
-            halo_m=halo_m,
-            maxdist_m=maxdist,
-        )
+            tasks = _process_tile(
+                tile_id=tile_id,
+                feature_type=feature_type,
+                date_str=date_str,
+                chunk_size=chunk_size,
+                chunk_bounds=cb,
+                halo_m=halo_m,
+                maxdist_m=maxdist,
+            )
+        else:
+            if chunk_bounds:
+                LOG.warning("Ignoring --chunk_bounds because no --tile_id was provided.")
+
+            tasks = _process_all_tiles(
+                feature_type=feature_type,
+                date_str=date_str,
+                chunk_size=chunk_size,
+                halo_m=halo_m,
+                maxdist_m=maxdist,
+            )
 
         if not tasks:
             LOG.warning("No tasks generated; nothing to compute.")
@@ -493,7 +555,7 @@ def main(
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser("Seamless 30 m distance from presence mosaics with halo (cross-tile aware).")
-    p.add_argument("--tile_id", required=True, help="10x10 tile ID, e.g. 00N_110E")
+    p.add_argument("--tile_id", help="10x10 tile ID, e.g. 00N_110E")
     p.add_argument("--feature_type", default="osm_roads",
                    choices=["osm_roads", "osm_canals", "grip_roads"])
     p.add_argument("--date", default=None, help="Date folder of presence products (e.g., 20251113). Default: cn.today_date")
