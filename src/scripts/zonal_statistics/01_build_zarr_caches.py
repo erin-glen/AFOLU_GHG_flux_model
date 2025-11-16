@@ -2,11 +2,11 @@
 """Build aligned Zarr caches for organic-soils zonal statistics (canonical grid = pixel_area).
 
 python -m src.scripts.zonal_statistics.01_build_zarr_caches \
-  --interval_end_years 2005 \
+  --interval_end_years 2021 \
   --cluster_name zonal_stats \
-  --run_date 20251010 \
-  --model_version 0_8_5 \
-  --run_name gfw_standard_model_1km \
+  --run_date 20251116 \
+  --model_version 0_9_0 \
+  --run_name ogh_sensitivity_1km \
   --tile_pixels 40000 \
   --chunk_size 8000
 
