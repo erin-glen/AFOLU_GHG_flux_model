@@ -15,7 +15,7 @@ from src.scripts.utilities.lulucf_constants_and_names import (
 # ---------------------------------------------------
 
 # ── version helpers ──────────────────────────────────────────────
-model_version = "0.8.5"              # dotted string
+model_version = "0.9.0"              # dotted string
 model_version_underscore = model_version.replace(".", "_")   # "0_3_0"
 
 s3_bucket_name = 'gfw2-data'
@@ -116,9 +116,9 @@ patterns = {
     'peat': "{tile_id}.tif",
     'dadap': "dadap_{tile_id}.tif",
     'engert': "engert_{tile_id}.tif",
-    'grip': "{tile_id}__grip_roads_density.tif",
-    'osm_roads': "{tile_id}__osm_roads_density.tif",
-    'osm_canals': "{tile_id}__osm_canals_density.tif",
+    'grip': "{tile_id}__grip_roads_distance.tif",
+    'osm_roads': "{tile_id}__osm_roads_distance.tif",
+    'osm_canals': "{tile_id}__osm_canals_distance.tif",
     'planted_forest_type': "{tile_id}__sdpt.tif",
     'extraction': "{tile_id}_extraction.tif",
     'climate_domain': f"{{tile_id}}_{lulucf_climate_domain_pattern}.tif",
@@ -143,9 +143,9 @@ dirs = {
     'peat': posixpath.join(full_bucket_prefix, raw_dir, 'soils/GFW_Global_Peatlands'),
     'dadap': posixpath.join(full_bucket_prefix, processed_dir, 'dadap_density/30m/20240925'),
     'engert': posixpath.join(full_bucket_prefix, processed_dir, 'engert_density/30m/20240925'),
-    'grip': posixpath.join(full_bucket_prefix, processed_dir, f'grip_density/{full_raster_dims}_pixels/20250526'),
-    'osm_roads': posixpath.join(full_bucket_prefix, processed_dir, f'osm_roads_density/{full_raster_dims}_pixels/20250526'),
-    'osm_canals': posixpath.join(full_bucket_prefix, processed_dir, f'osm_canals_density/{full_raster_dims}_pixels/20250526'),
+    'grip': posixpath.join(full_bucket_prefix, processed_dir, f'grip_density/distance/{full_raster_dims}_pixels/20251115'),
+    'osm_roads': posixpath.join(full_bucket_prefix, processed_dir, f'osm_roads_density/distance/{full_raster_dims}_pixels/20251114'),
+    'osm_canals': posixpath.join(full_bucket_prefix, processed_dir, f'osm_canals_density/distance/{full_raster_dims}_pixels/20251115'),
     'planted_forest_type': posixpath.join(full_bucket_prefix, processed_dir, f'sdpt/{full_raster_dims}_pixels/20250531'),
     'extraction': posixpath.join(full_bucket_prefix, processed_dir, 'extraction/20241021'),
     'climate_domain': lulucf_climate_domain_dir,
