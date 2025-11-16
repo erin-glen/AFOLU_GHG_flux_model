@@ -201,10 +201,10 @@ def calculate_drainage_and_emissions(
             # A) Drainage classification ----------------------------------
             if peat > 0:
                 node = nu.accrete_node(node, 1)
-                if dadap > 1 or osm_canals > 1:
+                if dadap > 1 or osm_canals < 1000:
                     node = nu.accrete_node(node, 1)
                     drained = True
-                elif engert > 1 or grip > 1 or osm_roads > 1:
+                elif engert > 1 or grip < 1000 or osm_roads < 1000:
                     node = nu.accrete_node(node, 2)
                     drained = True
                 elif land_cover in (cropland_code, settlement_code):
