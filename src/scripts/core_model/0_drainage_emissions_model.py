@@ -43,6 +43,14 @@ combustion_factor = np.float32(cn.combustion_factor)
 # preprocessing threshold previously applied during tiling.
 DEFAULT_OGH_THRESHOLD = 10.0
 
+# ----------------------------------------------------------------------
+# model-wide constants for classification encoding & thresholds
+# ----------------------------------------------------------------------
+# We keep 8 digits now that `drained_state` holds only the classification path.
+MAX_STATE_DIGITS = 8
+# Distance threshold (meters) used by canals/roads/GRIP proximity rules.
+DIST_THR = np.float32(500.0)
+
 forest_code = cn.ipcc_codes["forest"]
 cropland_code = cn.ipcc_codes["cropland"]
 settlement_code = cn.ipcc_codes["settlement"]
@@ -109,7 +117,7 @@ def calculate_drainage_and_emissions(
     out_dict_float32 = Dict.empty(types.unicode_type, types.float32[:, :])
 
     # The maximum allowed digits for classification nodes.
-    max_digits_state = 8
+    max_digits_state = MAX_STATE_DIGITS
 
     # required inputs --------------------------------------------------
     peat_block = in_dict_uint8["peat"]
@@ -152,6 +160,9 @@ def calculate_drainage_and_emissions(
     burned_ch4_out = np.zeros((rows, cols), dtype=np.float32)
     burned_total_co2e_out = np.zeros((rows, cols), dtype=np.float32)
     burned_years_count_out = np.zeros((rows, cols), dtype=np.uint32)
+    # simplified classification helpers
+    coastal_mask_out = np.zeros((rows, cols), dtype=np.uint32)
+    drain_source_out = np.zeros((rows, cols), dtype=np.uint32)
 
     # main pixel loop --------------------------------------------------
     for row in range(rows):
@@ -197,29 +208,39 @@ def calculate_drainage_and_emissions(
             node = 0
             emission_node = 0
             drained = False
+            source_code = np.uint32(0)  # 0=non-peat; set below for peat
 
             # A) Drainage classification ----------------------------------
             if peat > 0:
                 node = nu.accrete_node(node, 1)
-                if (osm_canals > 0 and osm_canals < 500):
+                if (osm_canals > 0 and osm_canals < DIST_THR):
                     node = nu.accrete_node(node, 1)
                     drained = True
-                elif (grip > 0 and grip < 500) or (osm_roads > 0 and osm_roads < 500):
+                    source_code = np.uint32(1)  # canals
+                elif (grip > 0 and grip < DIST_THR) or (osm_roads > 0 and osm_roads < DIST_THR):
                     node = nu.accrete_node(node, 2)
                     drained = True
+                    source_code = np.uint32(2)  # roads/GRIP
                 elif land_cover in (cropland_code, settlement_code):
                     node = nu.accrete_node(node, 3)
                     drained = True
+                    source_code = np.uint32(3)  # cropland/settlement
                 elif planted_forest_type > 0 or descals_type > 0:
                     node = nu.accrete_node(node, 4)
                     drained = True
+                    source_code = np.uint32(4)  # plantation/DeScals
                 elif extraction > 0:
                     node = nu.accrete_node(node, 5)
                     drained = True
+                    source_code = np.uint32(5)  # extraction
                 else:
                     node = nu.accrete_node(node, 6)
+                    source_code = np.uint32(6)  # undrained peat
 
                 soil_block[row, col] = 2 if drained else 1
+                # record simplified outputs for peat pixels
+                coastal_mask_out[row, col] = np.uint32(coastal_code)
+                drain_source_out[row, col] = source_code
             else:
                 node = 0  # non-peat root uses explicit zero code
                 soil_block[row, col] = 0  # not peat
@@ -414,12 +435,10 @@ def calculate_drainage_and_emissions(
                 # Optional sentinel for missing drainage EF
                 if missing and mark_missing:
                     sentinel = 90 + int(ecozone)
-                    emission_node = nu.accrete_node(
-                        emission_node, sentinel
-                    )
+                    emission_node = nu.accrete_node(emission_node, sentinel)
 
-            if emission_node > 0:
-                node = nu.accrete_node(node, emission_node)
+            # SIMPLIFICATION: do not append emission path (or sentinel) to the state code.
+            # `drained_state` now encodes only classification (+ optional coastal tag).
 
             if node > (10 ** max_digits_state) - 1:
                 raise ValueError("Maximum state digits exceeded")
@@ -531,6 +550,9 @@ def calculate_drainage_and_emissions(
     out_dict_uint32["drained_state"] = state_block
     out_dict_uint32["burned_state"] = burned_state_out
     out_dict_uint32["burned_years_count"] = burned_years_count_out
+    # simplified classification outputs
+    out_dict_uint32["coastal_mask"] = coastal_mask_out   # 0,1,2
+    out_dict_uint32["drain_source"] = drain_source_out   # 0..6 (see comments above)
 
     out_dict_float32["drained_co2_Mg_CO2_ha_yr"] = drained_co2_out
     out_dict_float32["drained_n2o_Mg_CO2e_ha_yr"] = drained_n2o_out
@@ -750,7 +772,8 @@ def calculate_and_upload_drainage(
         # Node roots (first one or two digits) distinguish peat vs non-peat states.
         # Keep tiles containing any drained peat (11–15) or undrained peat (16) and
         # drop tiles that are entirely non-peat (root code 20 after padding).
-        roots = np.unique(drained_state // 1_000_000)
+        root_divisor = 10 ** (MAX_STATE_DIGITS - 2)  # keep first two digits
+        roots = np.unique(drained_state // root_divisor)
         meaningful_roots = {11, 12, 13, 14, 15, 16}
         if not any(int(root) in meaningful_roots for root in roots):
             outputs.pop("drained_state")
@@ -773,7 +796,7 @@ def calculate_and_upload_drainage(
             outputs[new] = outputs.pop(old) / interval_length
 
     # stats for outputs, with explicit layer categorization
-    drainage_classification_layers = ["drained_soil", "drained_state"]
+    drainage_classification_layers = ["drained_soil", "drained_state", "coastal_mask", "drain_source"]
     burned_classification_layers = ["burned_state"]
     numeric_layers = ["burned_years_count"]
 
