@@ -41,7 +41,7 @@ combustion_factor = np.float32(cn.combustion_factor)
 
 # Default peat probability threshold for the OGH dataset. This matches the
 # preprocessing threshold previously applied during tiling.
-DEFAULT_OGH_THRESHOLD = 10.0
+DEFAULT_OGH_THRESHOLD = 23.0
 
 # ----------------------------------------------------------------------
 # model-wide constants for classification encoding & thresholds
@@ -1358,7 +1358,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --interval_type five_year \
   --mark_missing_factors \
   --count_burned_years \
-  --run_name ogh_sensitivity_1km
+  --run_name ogh_sensitivity_500m
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
