@@ -1,4 +1,8 @@
 """
+Calculates annual gross and net fluxes from vegetation by carbon pool (AGC, BGC, deadwood, litter) and gas (CO2, CH4, N2O).
+Also, calculates associated non-soil carbon densities. Reports land state node classification and various intermediate
+outputs that are useful for QC and potentially as contextual layers (e.g., composite primary forest extent).
+
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
