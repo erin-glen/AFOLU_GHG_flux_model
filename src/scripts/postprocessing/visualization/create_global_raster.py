@@ -131,21 +131,36 @@ def _reaggregate_mode_binary(arr01_nan: np.ndarray, native_deg: float, target_de
 def _reclass_drained_to_binary(arr: np.ndarray) -> np.ndarray:
     """
     Reclass drained_state values to binary with NaN for nodata:
-      0 -> nodata
-      20,000,000 -> nodata
-      16,000,000 -> 0 (UNDRAINED)
-      all other values -> 1 (DRAINED)
-    Returns float32 array with values {0,1,NaN}.
+
+      non-peat  : nodata (NaN)
+      peat root 16 (undrained): 0
+      peat root 11..15 (drained): 1
+
+    Works with 8- or 10-digit padded node codes and ignores any trailing
+    coastal suffix digits (e.g., '1691' for undrained coastal).
     """
     a = arr.astype(np.int64, copy=False)
-    nodata_mask = (a == 0) | (a == 20_000_000)
-    undrained   = (a == 16_000_000)
-    drained     = (~nodata_mask) & (~undrained)
+
+    # Detect padding by magnitude (>=1e9 → 10-digit; else assume 8-digit).
+    # We protect against all-NaN tiles by forcing max to 0 in that case.
+    max_val = int(np.nanmax(a)) if np.any(~np.isnan(arr)) else 0
+    pad = 10 if max_val >= 1_000_000_000 else 8
+    div = 10 ** (pad - 2)
+
+    root = (a // div).astype(np.int64)
+
+    # Non-peat nodata: explicit zero, or padded root == 20 (common non-peat root)
+    nodata_mask = (a == 0) | (root == 20)
+
+    undrained = (root == 16)
+    drained   = (root >= 11) & (root <= 15)
 
     out = np.full(a.shape, np.nan, dtype=np.float32)
     out[undrained] = 0.0
     out[drained]   = 1.0
+    # everything else stays NaN (nodata)
     return out
+
 
 
 def _per_pixel_tile_path(items: dict, tile_id: str) -> str:
