@@ -208,7 +208,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
         main_logger.info(f"No tiles have a difference in pixel counts between 1x1s and 10x10s.")
 
     # Number of rows from model output without matching 10x10 aggregation pixel counts
-    main_logger.info(f"Rows without pixel count comparison: {merged_10x10_counts_df['pixel_count_diff'].isna().sum()}")
+    main_logger.info(f"    Rows without pixel count comparison: {merged_10x10_counts_df['pixel_count_diff'].isna().sum()}")
 
     # Prepares 10x10 deg chunk stats spreadsheet: pixel count for outputs
     uu.aggregate_10x10_chunk_stats(merged_10x10_counts_df, stage, no_upload, main_logger)

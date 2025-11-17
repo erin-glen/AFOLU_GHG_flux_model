@@ -142,24 +142,16 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
 
     # Writes only metadata to s3 (lazy), not values
     main_logger.info(f"Writing metadata for mega-zarr: {uu.timestr()}")
-    # fs = fsspec.filesystem("s3", anon=False)
-    # mapper = fs.get_mapper(store_url)
-    # ds.to_zarr(
-    #     store=mapper,
-    #     mode="w",
-    #     compute=False,
-    #     encoding=encoding,
-    #     zarr_format=3
-    # )
-    # Create Zarr-compatible store for S3 using FSStore (Zarr v3-compliant)
-    store = FSStore(store_url, mode="w", anon=False)
+    fs = fsspec.filesystem("s3", anon=False)
+    mapper = fs.get_mapper(store_url)
     ds.to_zarr(
-        store=store,
+        store=mapper,
         mode="w",
         compute=False,
         encoding=encoding,
         zarr_format=3
     )
+
     main_logger.info(f"Created metadata for mega-zarr: {uu.timestr()}")
 
     z = zarr.open_group(mapper, mode="r")
@@ -177,14 +169,14 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
 
     #TODO Should be able to delete this with the compression change above
 
-    # # Loop through all arrays
-    # for key in z.array_keys():
-    #     arr = z[key]
-    #     if "_FillValue" in arr.attrs:
-    #         main_logger.info(f"Removing _FillValue from {key}: {uu.timestr()}")
-    #         del arr.attrs["_FillValue"]
-    #
-    # main_logger.info(f"Cleaned _FillValue from Zarr metadata: {uu.timestr()}")
+    # Loop through all arrays
+    for key in z.array_keys():
+        arr = z[key]
+        if "_FillValue" in arr.attrs:
+            main_logger.info(f"Removing _FillValue from {key}: {uu.timestr()}")
+            del arr.attrs["_FillValue"]
+
+    main_logger.info(f"Cleaned _FillValue from Zarr metadata: {uu.timestr()}")
 
     end_time = time.time()
     main_logger.info(f"Initialized spatial mega-zarr metadata at {store_url} in {round(end_time-start_time)} seconds: {uu.timestr()}")
@@ -357,24 +349,27 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     # The formatting of the year depends on the variable.
     if "gross" in var_name:
         model_table = tables_to_compare_dict[cn.gross_outputs_1x1]
-        year = f"{int(year) - 1}_{year}"
+        year = year
     elif "net" in var_name:
         model_table = tables_to_compare_dict[cn.net_outputs_1x1]
-        year = f"{int(year) - 1}_{year}"
+        year = year
     else:
         model_table = tables_to_compare_dict[cn.other_outputs_1x1]
-        # year = str(year)  # May need for vegetation model, but messed up the summative output results. So, not sure what to do.
-        year = year
+        # For reasons I can't really trace back, the year datatype for C densities is object, not int.
+        # So, it needs to be recast to a str or int to match the chunk_stats table.
+        year = str(year)
 
     # Converts zarr chunk stats from dictionary to dataframe
     zarr_df = pd.DataFrame(chunk_stats_variable_year_zarr)
 
     # Subsets model chunk stats to relevant pattern and year.
     subset_model_table = model_table[(model_table['pattern'].str.contains(var_name, na=False)) & (model_table['years'] == year)]
+    # print("subset_model_table", subset_model_table)
 
     # Selects only the needed columns from rechunked_zarr_table
     main_logger.info(f"    Subsetting zarr table to numeric columns for {var_name} for {year}: {uu.timestr()}")
     zarr_subset_table = zarr_df[['chunk_name', 'min_value', 'mean_value', 'max_value', 'count_value']].copy()
+    # print("zarr_subset_table", zarr_subset_table)
 
     # Renames columns in raw_subset to distinguish them after merge
     main_logger.info(f"    Renaming zarr columns for {var_name} for {year}: {uu.timestr()}")
@@ -384,6 +379,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
         'max_value': 'max_value_zarr',
         'count_value': 'count_value_zarr'
     })
+    # print("zarr_subset_table", zarr_subset_table)
 
     # Converts all zarr value columns to numeric, coercing errors to NaN
     main_logger.info(f"    Converting zarr columns to numeric for {var_name} for {year}: {uu.timestr()}")
@@ -395,7 +391,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     merged_table = subset_model_table.merge(zarr_subset_table, on='chunk_name', how='left')
 
     # Calculates differences for four metrics and stores in new columns
-    main_logger.info(f"    Calculating differences for {var_name} for {year}: {uu.timestr()}")
+    main_logger.info(f"    Calculating differences for {var_name} for {year} ({merged_table['count_value_zarr'].item()} pixels in zarr): {uu.timestr()}")
     merged_table['min_value_diff'] = merged_table['min_value'] - merged_table['min_value_zarr']
     merged_table['mean_value_diff'] = merged_table['mean_value'] - merged_table['mean_value_zarr']
     merged_table['max_value_diff'] = merged_table['max_value'] - merged_table['max_value_zarr']
@@ -411,7 +407,8 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     mask = merged_table['maximum_diff_value'] > cn.zarr_difference_tolerance
 
     # Number of rows from model output without matching zarr pixel counts
-    main_logger.info(f"Rows without pixel count comparison: {merged_table['count_value_diff'].isna().sum()}")
+    chunks_without_zarr_stats = merged_table['count_value_diff'].isna().sum().item()
+    main_logger.info(f"    Rows without pixel count comparison: {chunks_without_zarr_stats}")
 
     # Applies the mask to filter those rows
     differences_exceeding_tolerance = merged_table[mask]
@@ -471,7 +468,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
 
 
     # Need to return the combined table so that it can be added to in the next iteration
-    return all_merged_tables, len(differences_exceeding_tolerance)
+    return all_merged_tables, len(differences_exceeding_tolerance), chunks_without_zarr_stats
 
 
 # Gets the names of the gross, other, and net chunk stats tables that should be compared against
@@ -529,13 +526,13 @@ def add_units_year_to_pattern(core_pattern, year):
     if "density" in core_pattern:
         pattern_with_units = f"{core_pattern}_ha_{year}"
     elif "emis" in core_pattern:
-        pattern_with_units = f"{core_pattern}_ha_yr_{year - 1}_{year}"
+        pattern_with_units = f"{core_pattern}_ha_yr_{year}"
     elif "removals" in core_pattern:
-        pattern_with_units = f"{core_pattern}_ha_yr_{year - 1}_{year}"
+        pattern_with_units = f"{core_pattern}_ha_yr_{year}"
     elif "net" in core_pattern:
-        pattern_with_units = f"{core_pattern}_ha_yr_{year - 1}_{year}"
+        pattern_with_units = f"{core_pattern}_ha_yr_{year}"
     elif cn.land_state_pattern in core_pattern:
-        pattern_with_units = f"{core_pattern}_{year - 1}_{year}"
+        pattern_with_units = f"{core_pattern}_{year}"
     elif cn.composite_primary_forest in core_pattern:
         pattern_with_units = f"{core_pattern}_{year}"
     elif cn.forest_age_output_pattern in core_pattern:
@@ -546,13 +543,20 @@ def add_units_year_to_pattern(core_pattern, year):
     return pattern_with_units
 
 
-def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger, model_chunk_stats_table_name, stage,
+def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_without_zarr_stats_total,
+                                       main_logger, model_chunk_stats_table_name, stage,
                                        start_time, zarr_comparison_stats_name, zarr_comparison_stats_path):
 
     if chunks_count_exceeding_total > 0:
         main_logger.warning(f"WARNING: {chunks_count_exceeding_total} chunks exceeded difference tolerance! Check log!")
     else:
-        main_logger.info(f"{chunks_count_exceeding_total} chunks exceeded the difference tolerance.")
+        main_logger.info(f"{chunks_count_exceeding_total} chunks exceeded the difference tolerance for one or more chunk stat metrics.")
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with zarr chunk stat comparison", main_logger)
+
+    if chunks_without_zarr_stats_total > 0:
+        main_logger.warning(f"WARNING: {chunks_without_zarr_stats_total} chunks are missing corresponding zarr chunk stats! Check log!")
+    else:
+        main_logger.info(f"{chunks_without_zarr_stats_total} chunks were missing corresponding zarr chunk stats.")
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with zarr chunk stat comparison", main_logger)
 
     s3_client = boto3.client("s3")
@@ -573,10 +577,10 @@ def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger
         for parquet_name, parquet_path in zip(zarr_comparison_stats_name, zarr_comparison_stats_path):
             parquet_folder = parquet_path.split('/')[1]   # parquet_YYYYMMDD_HH_MM_SS
             s3_key = f"{cn.s3_chunk_stats_path}{parquet_folder}/{parquet_name}"
-            print(cn.s3_chunk_stats_path)
-            print(parquet_folder)
-            print(parquet_name)
-            print(s3_key)
+            # print(cn.s3_chunk_stats_path)
+            # print(parquet_folder)
+            # print(parquet_name)
+            # print(s3_key)
             main_logger.info(f"Uploading {parquet_path} to {s3_key}: {uu.timestr()}")
             s3_client.upload_file(parquet_path, cn.short_bucket_prefix, Key=s3_key)
 
