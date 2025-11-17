@@ -2,12 +2,15 @@
 Stage 02: Render Robinson-projected JPEGs for aggregated global rasters.
 
 This version:
-  - Assumes non-integer layers are **gross emissions (positive-only)**; values <= 0 are masked.
-  - Renders **three profiles** per layer: asinh, linear, and stepped percentiles.
-  - Uses **land-only percentile statistics** by default (more stable on sparse signals).
+  - Preserves source nodata during reprojection (important for UInt8 255 nodata).
+  - Treats aggregated `drained_state` as binary (UInt8): 1=peat_drained, 0=peat_undrained, 255=nodata.
+    If a non-binary `drained_state` is detected (e.g., un-aggregated tiles), it auto-falls back
+    to categorical rendering using zonal constants.
+  - Uses land-only percentile statistics by default (stable on sparse signals).
+  - Renders three profiles for gross layers: asinh, linear, and stepped percentiles.
   - Optional speckle cleanup (min connected pixels) and light Gaussian smoothing.
-  - Adds a **derived gross layer**: drained + burned total (per-pixel), rendered like other gross layers.
-  - Supports categorical maps for drained_state / burned_state (discrete palette).
+  - Adds a derived gross layer: drained + burned totals.
+  - Legend units for gross layers are in **Mg yr⁻¹** (matches inputs; no rescaling here).
 
 Examples
 --------
@@ -136,10 +139,11 @@ def _rgb_palette_to_mpl(rgb_palette):
 
 
 def _reproject_if_needed(out_tif: str, in_tif: str, target_crs: str):
-    """Reproject to ``target_crs`` if ``out_tif`` does not exist; set nodata=0."""
+    """Reproject to ``target_crs`` if ``out_tif`` does not exist; **preserve** nodata."""
     if Path(out_tif).exists():
         return out_tif
     with rasterio.open(in_tif) as src:
+        src_nodata = src.nodata
         transform, width, height = calculate_default_transform(
             src.crs, target_crs, src.width, src.height, *src.bounds
         )
@@ -150,7 +154,7 @@ def _reproject_if_needed(out_tif: str, in_tif: str, target_crs: str):
             transform=transform,
             width=width,
             height=height,
-            nodata=0,
+            nodata=src_nodata,            # preserve nodata
             compress=compression,
             tiled=True,
             blockxsize=min(512, width),
@@ -166,8 +170,8 @@ def _reproject_if_needed(out_tif: str, in_tif: str, target_crs: str):
                 dst_transform=transform,
                 dst_crs=target_crs,
                 resampling=Resampling.nearest,
-                src_nodata=0,
-                dst_nodata=0,
+                src_nodata=src_nodata,      # preserve nodata in reprojection
+                dst_nodata=src_nodata,
                 init_dest_nodata=True,
             )
     return out_tif
@@ -222,33 +226,32 @@ def _format_category_label(label: str) -> str:
 
 
 def _build_categorical_config() -> Dict[str, Dict[str, object]]:
+    """
+    Categorical configuration for display. For aggregated global rasters:
+      - drained_state is binary (UInt8): 1=peat_drained, 0=peat_undrained, nodata=255.
+      - burned_state remains a multi-code categorical (use zc if available).
+    If later we detect drained_state is actually non-binary, we will rebuild its mapping on the fly.
+    """
     base: Dict[str, Dict[str, object]] = {
         "drained_state": {
-            "legend_title": "Drainage state",
-            "code_to_label": {},  # filled from zc if available
-            "order": ["drained", "undrained", "non_peat"],
+            "legend_title": "Drainage State (Peat Only)",
+            "code_to_label": {1: "peat_drained", 0: "peat_undrained"},
+            "order": ["peat_drained", "peat_undrained"],
             "cmap": "tab20",
-            "nodata": 0,
+            "nodata": 255,  # UInt8 nodata used by Stage 01 aggregation
         },
         "burned_state": {
-            "legend_title": "Burned state",
-            "code_to_label": {},  # filled from zc if available
+            "legend_title": "Burned State",
+            "code_to_label": {},
             "order": [],
             "cmap": "tab20",
             "nodata": 0,
         },
     }
+
+    # Keep burned_state labels from zonal_constants if available.
     try:
         from src.scripts.zonal_statistics import zonal_constants as zc  # type: ignore
-
-        drained_lookup: Dict[int, str] = {}
-        for code, meaning in zc.DRAINED_STATE_NODE_MEANINGS.items():
-            try:
-                drained_lookup[int(code)] = meaning.split("__")[0]
-            except ValueError:
-                continue
-        base["drained_state"]["code_to_label"] = drained_lookup
-
         burned_lookup: Dict[int, str] = {}
         for code, meaning in zc.BURNED_STATE_NODE_MEANINGS.items():
             try:
@@ -454,6 +457,17 @@ def _map_categorical_values(
     return masked, ordered_labels
 
 
+def _is_binary_drained_state(data: np.ndarray, nodata: Optional[int | float]) -> bool:
+    """Return True if non-nodata set ⊆ {0,1}."""
+    if data.size == 0:
+        return True
+    mask = np.ones(data.shape, dtype=bool)
+    if nodata is not None:
+        mask &= data != nodata
+    vals = np.unique(data[mask])
+    return set(map(int, vals.tolist())) <= {0, 1}
+
+
 def make_categorical_displays_for_dataset(
     *,
     dataset_name: str,
@@ -486,17 +500,38 @@ def make_categorical_displays_for_dataset(
         bounds = src.bounds
         nodata_val = src.nodata
 
-    mapped, raw_labels = _map_categorical_values(data, config, nodata_val)
+    # If this is drained_state but not binary, rebuild mapping from zonal constants (fallback)
+    cfg = dict(config)
+    if dataset_name == "drained_state" and not _is_binary_drained_state(data, nodata_val):
+        try:
+            from src.scripts.zonal_statistics import zonal_constants as zc  # type: ignore
+            drained_lookup: Dict[int, str] = {}
+            for code, meaning in zc.DRAINED_STATE_NODE_MEANINGS.items():
+                try:
+                    # Use root label only (before any '__' suffix)
+                    drained_lookup[int(code)] = meaning.split("__")[0]
+                except ValueError:
+                    continue
+            cfg["code_to_label"] = drained_lookup
+            # Prefer the source nodata if present (tiles may not use 255)
+            if nodata_val is not None:
+                cfg["nodata"] = int(nodata_val)
+            logger.info("Drained_state detected as non-binary; using zonal-constants mapping (%d classes).",
+                        len(drained_lookup))
+        except Exception:
+            logger.warning("Failed to import zonal_constants for non-binary drained_state; showing raw codes.")
+
+    mapped, raw_labels = _map_categorical_values(data, cfg, nodata_val)
     if not raw_labels:
         logger.warning("No valid categories found for dataset=%s interval=%s; skipping", dataset_name, interval)
         return created_files
 
-    formatter = config.get("label_formatter")
+    formatter = cfg.get("label_formatter")
     if not callable(formatter):
         formatter = _format_category_label
     display_labels = [formatter(label) for label in raw_labels]
 
-    cmap_name = str(config.get("cmap", "tab20"))
+    cmap_name = str(cfg.get("cmap", "tab20"))
     base_cmap = cm.get_cmap(cmap_name, max(len(display_labels), 1))
     colors = base_cmap(np.linspace(0, 1, base_cmap.N))
     cmap = ListedColormap(colors)
@@ -515,14 +550,15 @@ def make_categorical_displays_for_dataset(
         interpolation="nearest",
     )
 
-    legend_title = str(config.get("legend_title", dataset_name.replace("_", " ").title()))
+    legend_title = str(cfg.get("legend_title", dataset_name.replace("_", " ").title()))
     _categorical_legend(fig, img, display_labels, legend_title)
 
     base_out = Path(out_dir_local) / out_name_base
     out_img = _save_single(ax, base_out, interval, "prof-categorical")
     created_files.append(out_img)
 
-    logger.info("Rendered categorical dataset=%s interval=%s (categories=%d)", dataset_name, interval, len(display_labels))
+    logger.info("Rendered categorical dataset=%s interval=%s (categories=%d)",
+                dataset_name, interval, len(display_labels))
     return created_files
 
 
@@ -580,7 +616,6 @@ def make_displays_for_dataset(
 
     # Colormap: custom warm ramp, or a perceptual sequential ramp
     if cmap_choice.lower() == "custom":
-        # warm half of BrBG palette used earlier
         net_palette = [
             (0, 60, 48),
             (1, 102, 94),
@@ -617,10 +652,11 @@ def make_displays_for_dataset(
     created_files: List[Path] = []
     labels = years or [interval]
 
+    # Legend units reflect data units (Mg yr^-1)
     legend_title = (
-        "Gross greenhouse gas emissions\nkt CO$_2$e yr$^{-1}$"
+        "Gross greenhouse gas emissions\nMg CO$_2$e yr$^{-1}$"
         if "co2" not in dataset_name.lower()
-        else "Gross CO$_2$ emissions\nkt CO$_2$ yr$^{-1}$"
+        else "Gross CO$_2$ emissions\nMg CO$_2$ yr$^{-1}$"
     )
 
     # Load / reproject once
@@ -812,7 +848,7 @@ def _render_sum_drained_burned(
         interval=interval,
         tif_path_noext_candidates=[str(sum_tif)[:-4]],  # base without .tif
         out_dir_local=out_jpeg_dir_local,
-        palette_rgb=[],  # ignored when cmap_choice != 'custom' inside function
+        palette_rgb=[],  # ignored when cmap_choice != 'custom'
         shapefile_gdf=shapefile_gdf,
         out_name_base=f"{SUM_DATASET_NAME}__{interval}",
         years=None,
@@ -943,6 +979,13 @@ def display_main(
             )
             if upload_to_s3:
                 _upload_display_outputs(created_files, Path(out_jpeg_dir_local), out_jpeg_dir_base, logger)
+            # Record candidates for SUM layer if applicable
+            if include_sum_layer:
+                plan = sum_plan.setdefault(interval, {"drained": [], "burned": []})
+                if dataset == DRAINED_DATASET:
+                    plan["drained"] = [canonical_noext, versioned_noext]
+                if dataset == BURNED_DATASET:
+                    plan["burned"] = [canonical_noext, versioned_noext]
             continue
 
         # Gross emissions datasets (positive-only signal)
