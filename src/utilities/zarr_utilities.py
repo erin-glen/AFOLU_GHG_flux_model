@@ -9,6 +9,7 @@ from dask.distributed import print
 import dask.array as da
 import xarray as xr
 import zarr
+# from zarr.storage import FSStore
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -16,13 +17,15 @@ from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 
 # Creates the s3 paths for the raw and rechunked mega-zarrs
-def create_mega_zarr_paths(chunk_size_pixels, interval_type, model_type, run_date):
+def create_mega_zarr_path(chunk_size_pixels, interval_type, model_type, run_date, main_logger):
 
     # Sets the output zarr location based on the model run
     mega_zarr_path = cn.outputs_path_mega_zarr.replace(cn.model_type_placeholder, model_type)
     mega_zarr_path = mega_zarr_path.replace("MODEL_INTERVAL_TYPE", interval_type)
     mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
     mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
+
+    main_logger.info(f"Zarr path created: {mega_zarr_path}")
 
     return mega_zarr_path
 
@@ -115,7 +118,7 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
 
         # Define encoding (compression, dtype, and chunks)
         encoding[key] = {
-            "compressor": compressor,
+            "compressors": compressor,
             "_FillValue": None   #TODO NOTE: Untested. Added from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d because of later xarray issues.
         }
 
@@ -139,15 +142,25 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
 
     # Writes only metadata to s3 (lazy), not values
     main_logger.info(f"Writing metadata for mega-zarr: {uu.timestr()}")
-    fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(store_url)
+    # fs = fsspec.filesystem("s3", anon=False)
+    # mapper = fs.get_mapper(store_url)
+    # ds.to_zarr(
+    #     store=mapper,
+    #     mode="w",
+    #     compute=False,
+    #     encoding=encoding,
+    #     zarr_format=3
+    # )
+    # Create Zarr-compatible store for S3 using FSStore (Zarr v3-compliant)
+    store = FSStore(store_url, mode="w", anon=False)
     ds.to_zarr(
-        store=mapper,
+        store=store,
         mode="w",
         compute=False,
         encoding=encoding,
         zarr_format=3
     )
+    main_logger.info(f"Created metadata for mega-zarr: {uu.timestr()}")
 
     z = zarr.open_group(mapper, mode="r")
     main_logger.info(f"Mega-zarr group info: {z.info}: {uu.timestr()}")
@@ -162,7 +175,7 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
     # Open Zarr group in read/write mode
     z = zarr.open_group(store=mapper, mode="r+")
 
-    #TODO Untested should be able to delete this with the compression change above
+    #TODO Should be able to delete this with the compression change above
 
     # # Loop through all arrays
     # for key in z.array_keys():

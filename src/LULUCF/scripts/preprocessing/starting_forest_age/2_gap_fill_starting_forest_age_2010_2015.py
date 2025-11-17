@@ -86,7 +86,7 @@ from src.utilities import resize_cluster
 
 
 def gap_fill_starting_forest_age(bounds, input_dir, input_pattern, output_pattern,
-                                    is_final, no_upload, output_dir_list, stage):
+                                    is_large_run, no_upload, output_dir_list, stage):
 
     chunk_stats = []
 
@@ -96,7 +96,7 @@ def gap_fill_starting_forest_age(bounds, input_dir, input_pattern, output_patter
 
     try:
 
-        uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
+        uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_large_run, logger_worker)
 
         bounds_str = uu.boundstr(bounds)
         tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])
@@ -145,10 +145,10 @@ def gap_fill_starting_forest_age(bounds, input_dir, input_pattern, output_patter
                 # Logs when a chunk can't be opened. Doesn't fail when no chunks are found, because that chunk might not exist.
                 lu.print_and_log(f"Tile not found or error opening {tile_path}: {e}: {uu.timestr()}", False, logger_worker)
 
-        lu.print_and_log(f"{len(src_datasets)} chunks found for {bounds_str} (including the focal chunk): {uu.timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"{len(src_datasets)} chunks found for {bounds_str} (including the focal chunk): {uu.timestr()}", is_large_run, logger_worker)
 
         if not src_datasets:
-            lu.print_and_log(f"Focal chunk {bounds_str} and adjacent chunks do not have data: {uu.timestr()}", is_final, logger_worker)
+            lu.print_and_log(f"Focal chunk {bounds_str} and adjacent chunks do not have data: {uu.timestr()}", is_large_run, logger_worker)
 
 
         ### Part 2: Merges focal and adjacent age rasters, interpolates to fill in all missing pixels, and clips to focal chunk extent
@@ -156,7 +156,7 @@ def gap_fill_starting_forest_age(bounds, input_dir, input_pattern, output_patter
         ### isolated as inputs; they are merged with adjacent chunks. Thus, there is never really a chance
         ### to calculate input chunk stats, and it's not worth revising the workflow to include that.
 
-        uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
+        uu.rename_s3_task_file(stage, bounds, "calculating_", is_large_run, logger_worker)
 
         # Merges the focal and adjacent chunks into a mosaic
         mosaic_data, mosaic_transform = rasterio.merge.merge(src_datasets, bounds=buffered_bounds)
@@ -213,15 +213,15 @@ def gap_fill_starting_forest_age(bounds, input_dir, input_pattern, output_patter
         )
 
         lu.print_and_log(f"Done gap-filling starting age in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-        lu.print_and_log(f"Memory usage after gap-filling starting age for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", is_final, logger_worker)
+        lu.print_and_log(f"Memory usage after gap-filling starting age for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", is_large_run, logger_worker)
 
 
         ### Part 3: Saves and uploads the output raster
 
-        lu.print_and_log(f" Saving and uploading {bounds_str}: {uu.timestr()}", is_final, logger_worker)
-        uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
+        lu.print_and_log(f" Saving and uploading {bounds_str}: {uu.timestr()}", is_large_run, logger_worker)
+        uu.rename_s3_task_file(stage, bounds, "uploading_", is_large_run, logger_worker)
 
-        if is_final:
+        if is_large_run:
             file_name = f"{tile_id}__{bounds_str}__{output_pattern}.tif"
         else:
             file_name = f"{tile_id}__{bounds_str}__{output_pattern}__{uu.timestr()}.tif"
@@ -251,14 +251,14 @@ def gap_fill_starting_forest_age(bounds, input_dir, input_pattern, output_patter
             os.remove(output_tmp_path)
 
         # Removes task tracking file from S3 once task is successful
-        uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
+        uu.delete_s3_task_file(stage, bounds, is_large_run, logger_worker)
 
     except Exception as e:
 
         return_message = f"Error processing chunk {bounds}: {e}: {uu.timestr()}"
 
         lu.print_and_log(return_message, False, logger_worker)
-        uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
+        uu.rename_s3_task_file(stage, bounds, "error_", is_large_run, logger_worker)
 
     return return_message, chunk_stats
 
@@ -298,9 +298,9 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
-    is_final = False
+    is_large_run = False
     if len(chunk_list) > 20:
-        is_final = True
+        is_large_run = True
         main_logger.info("Running as final model.")
 
     # Sets inputs and outputs
@@ -335,13 +335,13 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     uu.create_s3_task_files(stage, chunk_list)
 
     delayed_results_1x1_deg = [dask.delayed(gap_fill_starting_forest_age)
-                       (chunk, input_dir, input_pattern, output_pattern, is_final, no_upload, output_dir_list, stage)
+                       (chunk, input_dir, input_pattern, output_pattern, is_large_run, no_upload, output_dir_list, stage)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results
     results_1x1_deg = dask.compute(*delayed_results_1x1_deg)
 
-    success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, results_1x1_deg)
+    success_count_1x1, all_1x1_stats = uu.count_successful_chunks(chunk_list, is_large_run, main_logger, results_1x1_deg)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
     if not no_upload:

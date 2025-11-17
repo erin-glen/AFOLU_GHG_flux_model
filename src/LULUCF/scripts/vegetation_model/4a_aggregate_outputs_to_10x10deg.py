@@ -133,7 +133,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
         main_logger.info(f"Running as large-scale run model: {is_large_run}")
 
     # The zarr path that's being used (rechunked zarr)
-    rechunked_mega_zarr_path = zu.create_mega_zarr_paths(cn.zarr_pixel_chunks, 'annual', model_type, input_date)
+    rechunked_mega_zarr_path = zu.create_mega_zarr_path(cn.zarr_pixel_chunks, 'annual', model_type, input_date, main_logger)
     main_logger.info(f"Aggregating from rechunked zarr (10000 pixel chunks): {rechunked_mega_zarr_path}")
 
     output_base = f"{cn.outputs_path}PATTERN/{model_type}/annual_intervals/START_END/PER_HA_OR_PIXEL/{cn.full_raster_dims}_pixels/{input_date}/"

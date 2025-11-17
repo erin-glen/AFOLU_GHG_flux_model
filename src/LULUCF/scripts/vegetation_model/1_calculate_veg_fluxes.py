@@ -22,12 +22,12 @@ python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetat
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn LULUCF_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --create_zarr --run_date 20250921 --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --create_zarr --run_date 20250921 --log_note "This is a global run for model v1.0.0 (2016-2024)."
 
 To download all outputs locally:
 python src/utilities/download_outputs_local.py v1_test_name 23_-4_24_-3
 
-Using more than 1 thread/worker slows down processing a lot when there are more tasks than workers for the core LULUCF model,
+Using more than 1 thread/worker slows down processing a lot when there are more tasks than workers for the core vegetation model,
 which is the situation for large analyses, obviously.
 https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210641504248464?focus=true
 
@@ -42,12 +42,10 @@ import time
 import sys
 import pandas as pd
 import numpy as np
-
 import fsspec
 import xarray as xr
 
 from concurrent.futures import ThreadPoolExecutor
-
 from dask.distributed import print
 from numba import jit
 
@@ -66,12 +64,12 @@ from src.utilities import resize_cluster
 os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
 
-# Function to calculate LULUCF fluxes and carbon densities
+# Function to calculate vegetation fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
 @jit(nopython=True)
-def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, in_dict_float32,
-                  primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
-                  model_start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_large_run):
+def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, in_dict_float32,
+                      primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
+                      model_start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_large_run):
 
     # Separate dictionaries for output numpy arrays of each datatype, named by output data type.
     # This is because a dictionary in a Numba function cannot have arrays with multiple data types, so each dictionary has to store only one data type,
@@ -491,7 +489,7 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
                 # Trees outside forests: no deadwood or litter carbon
                 c_dens_in_ToF = [agc_dens_in, bgc_dens_in, np.float32(0), np.float32(0)]
                 # Cropland: only AGC
-                c_dens_in_cropland = [cn.cropland_agc_dens, np.float32(0), np.float32(0), np.float32(0)]
+                c_dens_in_cropland = [np.float32(cn.cropland_agc_dens), np.float32(0), np.float32(0), np.float32(0)]
                 # Short vegetation: no deadwood or litter carbon
                 c_dens_in_short_veg = [agc_dens_in, bgc_dens_in, np.float32(0), np.float32(0)]
                 # No starting carbon
@@ -1761,27 +1759,26 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
         # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
         # This applies even for the outputs that aren't reused in the next interval;
         # they will still get overwritten with the final interval's values, I believe.
-        year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
 
-        out_dict_uint32[f"{cn.land_state_pattern}_{year_range}"] = state_out_block.copy()
+        out_dict_uint32[f"{cn.land_state_pattern}_{interval_end_year}"] = state_out_block.copy()
 
-        out_dict_float32[f"{cn.agc_rf_pre_dist_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = agc_rf_pre_dist_out_block.copy()
+        out_dict_float32[f"{cn.agc_rf_pre_dist_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = agc_rf_pre_dist_out_block.copy()
 
         # Converts carbon pool fluxes from Mg C/ha/interval to Mg CO2/ha/yr.
         # Gross emissions are positive. Gross removals are negative.
-        out_dict_float32[f"{cn.agc_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (agc_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
-        out_dict_float32[f"{cn.bgc_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (bgc_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
-        out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (deadwood_c_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
-        out_dict_float32[f"{cn.litter_c_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (litter_c_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.agc_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (agc_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.bgc_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (bgc_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (deadwood_c_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.litter_c_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (litter_c_gross_emis_out_block * cn.C_to_CO2_numba / interval_length).copy()
 
-        out_dict_float32[f"{cn.agc_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (agc_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
-        out_dict_float32[f"{cn.bgc_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (bgc_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
-        out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (deadwood_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
-        out_dict_float32[f"{cn.litter_c_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (litter_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.agc_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (agc_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.bgc_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (bgc_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (deadwood_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
+        out_dict_float32[f"{cn.litter_c_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (litter_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
 
         # Converts non-CO2 emissions from Mg CO2e/ha/interval to Mg CO2e/ha/yr. No conversion of Mg C/ha to Mg CO2 because these are already in Mg CO2e/ha.
-        out_dict_float32[f"{cn.ch4_flux_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (ch4_gross_emis_out_block / interval_length).copy()
-        out_dict_float32[f"{cn.n2o_flux_pattern}{cn.flux_density_pixel_meaning}_{year_range}"] = (n2o_gross_emis_out_block / interval_length).copy()
+        out_dict_float32[f"{cn.ch4_flux_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (ch4_gross_emis_out_block / interval_length).copy()
+        out_dict_float32[f"{cn.n2o_flux_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (n2o_gross_emis_out_block / interval_length).copy()
 
         # Still Mg C/ha at the interval end year
         out_dict_float32[f"{cn.agc_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = agc_dens_block.copy()
@@ -1789,26 +1786,85 @@ def LULUCF_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, i
         out_dict_float32[f"{cn.deadwood_c_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = deadwood_c_dens_block.copy()
         out_dict_float32[f"{cn.litter_c_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = litter_c_dens_block.copy()
 
+        # Summative outputs (Mg CO2/ha/yr)
+        # Gross emissions across all carbon pools
+        out_dict_float32[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
+                out_dict_float32[f"{cn.agc_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.bgc_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.litter_c_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"])
+
+        # Gross emissions for non-CO2 emissions
+        out_dict_float32[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
+                out_dict_float32[f"{cn.ch4_flux_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.n2o_flux_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"])
+
+        # Gross emissions for all carbon pools and all gases
+        out_dict_float32[f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
+            out_dict_float32[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+            + out_dict_float32[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+        )
+
+        # Gross removals across all carbon pools
+        out_dict_float32[f"{cn.gross_removals_all_C_pools_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
+                out_dict_float32[f"{cn.agc_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.bgc_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.litter_c_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"])
+
+        # Net flux for each carbon pool
+        out_dict_float32[f"{cn.net_flux_agc_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
+                out_dict_float32[f"{cn.agc_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.agc_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"])
+        out_dict_float32[f"{cn.net_flux_bgc_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
+                out_dict_float32[f"{cn.bgc_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.bgc_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"])
+        out_dict_float32[f"{cn.net_flux_deadwood_c_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
+                out_dict_float32[f"{cn.deadwood_c_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.deadwood_c_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"])
+        out_dict_float32[f"{cn.net_flux_litter_c_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
+                out_dict_float32[f"{cn.litter_c_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.litter_c_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"])
+
+        # Net flux across all carbon pools but for CO2 only
+        out_dict_float32[f"{cn.net_flux_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
+                out_dict_float32[f"{cn.net_flux_agc_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.net_flux_bgc_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.net_flux_deadwood_c_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.net_flux_litter_c_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"])
+
+        # Net flux across all carbon pools, plus non-pool non-CO2 emissions
+        out_dict_float32[f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
+                out_dict_float32[f"{cn.net_flux_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"])
+
+        # Carbon density for all non-soil C pools (Mg C)
+        out_dict_float32[f"{cn.non_soil_c_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = (
+                out_dict_float32[f"{cn.agc_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.bgc_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.deadwood_c_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.litter_c_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"])
+
         # Intermediate outputs
         out_dict_uint16[f"{cn.forest_age_output_pattern}_{interval_end_year}"] = forest_age_end_of_interval_block.copy()
-        out_dict_uint8[f"{cn.gain_year_count_pattern}_{year_range}"] = gain_year_count_out_block.copy()
+        out_dict_uint8[f"{cn.gain_year_count_pattern}_{interval_end_year}"] = gain_year_count_out_block.copy()
         out_dict_uint16[f"{cn.most_recent_year_not_tall_veg}_{model_start_year}_{interval_end_year}"] = most_recent_year_not_tall_veg_block.copy()    # Years represent from model start to current interval end
-        out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{year_range}"] = max_height_since_last_time_not_tall_veg_block.copy()
-        out_dict_uint8[f"{cn.first_time_sig_loss_from_max_height}_{year_range}"] = first_time_sig_loss_from_max_height_block.copy()
-        out_dict_uint8[f"{cn.part_or_full_dist_in_earlier_intervals}_{year_range}"] = part_or_full_dist_in_earlier_intervals_block.copy()
-        out_dict_uint8[f"{cn.part_or_full_dist_in_curr_interval}_{year_range}"] = part_or_full_dist_in_curr_interval_block.copy()
-        out_dict_uint8[f"{cn.times_burned_in_interval}_{year_range}"] = times_burned_in_interval_block.copy()
-        out_dict_float32[f"{cn.agc_emission_factor}_{year_range}"] = agc_ef_out_block.copy()
+        out_dict_uint8[f"{cn.max_height_since_last_time_not_tall_veg}_{interval_end_year}"] = max_height_since_last_time_not_tall_veg_block.copy()
+        out_dict_uint8[f"{cn.first_time_sig_loss_from_max_height}_{interval_end_year}"] = first_time_sig_loss_from_max_height_block.copy()
+        out_dict_uint8[f"{cn.part_or_full_dist_in_earlier_intervals}_{interval_end_year}"] = part_or_full_dist_in_earlier_intervals_block.copy()
+        out_dict_uint8[f"{cn.part_or_full_dist_in_curr_interval}_{interval_end_year}"] = part_or_full_dist_in_curr_interval_block.copy()
+        out_dict_uint8[f"{cn.times_burned_in_interval}_{interval_end_year}"] = times_burned_in_interval_block.copy()
+        out_dict_float32[f"{cn.agc_emission_factor}_{interval_end_year}"] = agc_ef_out_block.copy()
         out_dict_uint8[f"{cn.composite_primary_forest}_{interval_end_year}"] = composite_primary_block.copy()
 
     return out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32
 
 
-# Downloads inputs, prepares data, calculates LULUCF stocks and fluxes, and uploads outputs to s3
-def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
-                                       download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                                       interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
-                                       output_folders, stage, model_type, mega_zarr_path=None, outputs_to_zarr=None):
+# Downloads inputs, prepares data, calculates vegetation stocks and fluxes, and uploads outputs to s3
+def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
+                                           download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
+                                           interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
+                                           output_folders, stage, model_type, mega_zarr_path=None, outputs_to_zarr=None):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -1894,21 +1950,21 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     gc.collect()
 
 
-    ### Part 4: Calculates LULUCF fluxes and densities
+    ### Part 4: Calculates vegetation fluxes and densities
 
-    lu.print_and_log(f"Calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Calculating vegetation fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_large_run, logger_worker)
     numba_start = time.time()
 
-    out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = LULUCF_fluxes(
+    out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = vegetation_fluxes(
         typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32,
         primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
         start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_large_run)
 
     numba_end = time.time()
-    lu.print_and_log(f"Done calculating LULUCF fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Done calculating vegetation fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     lu.print_and_log(f"Memory usage after numba calculations completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
-    lu.print_and_log(f"Calculated LULUCF fluxes and carbon densities in {bounds_str} in {tile_id} in {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Calculated vegetation fluxes and carbon densities in {bounds_str} in {tile_id} in {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
 
     # print("out_dict_uint8:", out_dict_uint8)
     # print("out_dict_uint32:", out_dict_uint32)
@@ -1919,7 +1975,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
     # The dictionaries by datatype that are returned from the numba function have limitations on them,
     # e.g., they can't be combined with other datatypes. This prevents the addition of attributes needed for uploading to s3.
     # So the trick here is to copy the numba-exported arrays into normal Python arrays to which we can do anything in Python.
-    # Everything in out_dict also needs to be in cn.LULUCF_core_output_dirs
+    # Everything in out_dict also needs to be in cn.veg_core_output_dirs
     # because that has the list of basic output directories which are customized for this run
     out_dict_all_dtypes = {}
 
@@ -1990,9 +2046,9 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
             # print("data_type:", data_type)
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
-            out_pattern, year_range = uu.strip_and_extract_years(key)
+            out_pattern, interval_end_year = uu.strip_and_extract_years(key)
             # print("out_pattern:", out_pattern)
-            # print("year_range:", year_range)
+            # print("interval_end_year:", interval_end_year)
 
             # Gets the core filename pattern and pixel meaning
             out_pattern_without_pixel_meaning, pixel_meaning = uu.strip_pixel_meaning(out_pattern)
@@ -2013,7 +2069,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
                 # print("matched_output_s3_folders with starting one:", matched_output_s3_folders)
 
             # Second, finds the output folder with the right interval for that pattern
-            matched_output_s3_folder_list = [item for item in matched_output_s3_folders if year_range in item]
+            matched_output_s3_folder_list = [item for item in matched_output_s3_folders if interval_end_year in item]
             # print("matched_output_s3_folder_list:", matched_output_s3_folder_list)
 
             # Output paths without bucket (s3://gfw2-data).
@@ -2022,7 +2078,7 @@ def calculate_and_upload_LULUCF_fluxes(bounds, primary_forest_RF_array, partial_
             # print("s3_path_without_bucket:", s3_path_without_bucket)
 
             # Dictionary with metadata for each array
-            out_dict_all_dtypes[key] = [value, data_type, out_pattern, year_range, s3_path_without_bucket]
+            out_dict_all_dtypes[key] = [value, data_type, out_pattern, interval_end_year, s3_path_without_bucket]
 
 
         # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
@@ -2260,7 +2316,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
             main_logger.info(f"  {key}: {value}")
 
     # Creates a list of output directories (core and intermediates) for all outputs and intervals based on specifics of the model run
-    output_dir_list_core_intermediate = cn.veg_core_output_dirs + cn.veg_intermediate_output_dirs
+    output_dir_list_core_intermediate = cn.veg_core_output_dirs + cn.veg_intermediate_output_dirs + cn.veg_summative_output_dirs
     output_dir_list = uu.create_output_dir_name_list(output_dir_list_core_intermediate, interval_type, start_year,
                                                      chunk_size_pixels, model_type, interval_end_years,
                                                      interval_year_diff_list, run_date, False, "per_ha")
@@ -2300,10 +2356,11 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     if create_zarr:
 
         # Creates s3 paths for the raw mega-zarr
-        raw_mega_zarr_path = zu.create_mega_zarr_paths(chunk_size_pixels, interval_type, model_type, run_date)
+        raw_mega_zarr_path = zu.create_mega_zarr_path(chunk_size_pixels, interval_type, model_type, run_date, main_logger)
 
         # Add the variables listed here to the mega-zarr
-        outputs_to_zarr = cn.core_veg_outputs_to_zarr # [0:2] # For testing
+        outputs_to_zarr = cn.full_outputs_to_zarr
+        # outputs_to_zarr = cn.core_veg_outputs_to_zarr[0:2] # For testing
 
         # Creates the global mega-zarr with metadata only
         zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
@@ -2313,6 +2370,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         fs = fsspec.filesystem("s3", anon=False)
         mapper = fs.get_mapper(raw_mega_zarr_path)
         ds = xr.open_zarr(mapper, consolidated=False)
+        # ds = xr.open_zarr(mapper)
         print(ds.coords)
         print("y range:", ds.y.values.min(), ds.y.values.max())
         print("x range:", ds.x.values.min(), ds.x.values.max())
@@ -2343,10 +2401,10 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         main_logger.info("Creating batch task txts in s3...")
         uu.create_s3_task_files(stage, chunk_batch)
 
-        # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_LULUCF_fluxes ... )]
+        # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_vegetation_fluxes ... )]
         futures = []
         for chunk in chunk_batch:
-            future = client.submit(calculate_and_upload_LULUCF_fluxes,
+            future = client.submit(calculate_and_upload_vegetation_fluxes,
                                    chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                    download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
                                    interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
@@ -2487,8 +2545,10 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     ### Step 6: All chunk stats comparison iterations done.
     ### Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
 
-    zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger, model_chunk_stats_table_name,
-                                          stage, start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
+    if create_zarr:
+
+        zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger, model_chunk_stats_table_name,
+                                              stage, start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
 
 
     ### Step 7: Aggregates logs
@@ -2496,8 +2556,11 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Worker logs are not aggregated if doing a local run (since there are no workers)
     if not run_local:
 
-        main_logger.info("Resizing cluster to 1 worker")
-        resize_cluster.resize_coiled_cluster(cluster_name, 1)
+        # Resizes down to 1 worker if it's a large run
+        if is_large_run:
+
+            main_logger.info("Resizing cluster to 1 worker")
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
         # Creates combined log from all workers if not deactivated
         worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
@@ -2513,7 +2576,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Calculate LULUCF fluxes.")
+    parser = argparse.ArgumentParser(description="Calculate vegetation fluxes.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-rd', '--run_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')

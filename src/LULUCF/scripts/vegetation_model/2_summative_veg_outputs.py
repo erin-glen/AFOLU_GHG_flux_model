@@ -412,7 +412,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Establishes the location in s3 of the mega-zarr
     if create_zarr:
         # Creates s3 paths for the raw mega-zarr
-        raw_mega_zarr_path = zu.create_mega_zarr_paths(chunk_size_pixels, interval_type, model_type, input_date)
+        raw_mega_zarr_path = zu.create_mega_zarr_path(chunk_size_pixels, interval_type, model_type, input_date, main_logger)
         outputs_to_zarr = cn.veg_summative_output_patterns   # [0:2] # For testing
 
     else:

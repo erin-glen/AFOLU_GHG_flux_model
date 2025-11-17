@@ -153,8 +153,8 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     main_logger.info(f"Input date: {input_date}")
 
     # Creates s3 paths for the raw and rechunked mega-zarrs
-    raw_mega_zarr_path = zu.create_mega_zarr_paths(cn.chunk_dims, 'annual', model_type, input_date)
-    rechunked_mega_zarr_path = zu.create_mega_zarr_paths(cn.zarr_pixel_chunks, 'annual', model_type, input_date)
+    raw_mega_zarr_path = zu.create_mega_zarr_path(cn.chunk_dims, 'annual', model_type, input_date, main_logger)
+    rechunked_mega_zarr_path = zu.create_mega_zarr_path(cn.zarr_pixel_chunks, 'annual', model_type, input_date, main_logger)
 
     main_logger.info(f"Raw mega-zarr path: {raw_mega_zarr_path}")
     main_logger.info(f"Rechunked mega-zarr path: {rechunked_mega_zarr_path}")

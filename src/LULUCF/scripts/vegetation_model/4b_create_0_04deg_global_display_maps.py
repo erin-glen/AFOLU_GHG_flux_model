@@ -230,7 +230,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
     main_logger.info(f"Input date: {input_date}")
 
     # rechunked_mega_zarr_path = zu.create_mega_zarr_paths(cn.zarr_pixel_chunks, "annual", model_type, input_date)
-    rechunked_mega_zarr_path = zu.create_mega_zarr_paths(4000, "annual", model_type, input_date)
+    rechunked_mega_zarr_path = zu.create_mega_zarr_path(4000, "annual", model_type, input_date, main_logger)
     pixel_area_zarr_path = cn.pixel_area_global_zarr
     output_base = f"{cn.outputs_path}PATTERN/{model_type}/annual_intervals/START_END/PER_HA_OR_PIXEL/{input_date}/"
 

@@ -7,7 +7,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "1.0.3_1884_chunks"
+model_version = "1.0.2_WWF_area"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets
@@ -231,7 +231,7 @@ primary_age_threshold = 100
 
 ##### Miscellaneous
 
-# Pattern for date (XXXX), date range (XXXX_YYYY), or date range (XXXX_YYYY_XXXX_YYYY, SOC only) with 1 or 2 leading _ in output file names
+# Pattern for date (XXXX) or date range (XXXX_YYYY_XXXX_YYYY, SOC only) with 1 or 2 leading _ in output file names
 date_date_range_pattern = r'_{1,2}(?:\d{4}(?:_\d{4})*)'
 
 AFOLU_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/"
