@@ -33,8 +33,8 @@ python -m src.scripts.postprocessing.visualization.create_global_raster \
 
 # Aggregate to 0.005° (factor must be integer vs native_deg, e.g., 0.0025 -> factor 2)
 python -m src.scripts.postprocessing.visualization.create_global_raster \
-  -cn create_maps --run_name gfw_standard_model_1km \
-  --model_version 0_8_5 --date_tag 20251010 --native_deg 0.0025 --target_deg 0.005
+  -cn create_maps --run_name ogh_sensitivity_500m \
+  --model_version 0_9_0 --date_tag 20251117 --target_deg 0.005
 """
 
 from __future__ import annotations

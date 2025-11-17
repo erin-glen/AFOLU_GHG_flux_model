@@ -19,10 +19,10 @@ Usage examples:
   cd /mnt/c/gis/git/AFOLU_GHG_flux_model
 
   python -m src.scripts.zonal_statistics.pub_assets \
-    --model_version 0_8_0 \
+    --model_version 0_9_0 \
     --run_name ogh_sensitivity_1km \
-    --run_date 20250923 \
-    --years 2005 2010 2015 2020 2024 \
+    --run_date 20251116 \
+    --years 2024 \
     --topn 10
 """
 

@@ -201,10 +201,10 @@ def calculate_drainage_and_emissions(
             # A) Drainage classification ----------------------------------
             if peat > 0:
                 node = nu.accrete_node(node, 1)
-                if dadap > 1 or osm_canals < 1000:
+                if  osm_canals < 500:
                     node = nu.accrete_node(node, 1)
                     drained = True
-                elif engert > 1 or grip < 1000 or osm_roads < 1000:
+                elif grip < 500 or osm_roads < 500:
                     node = nu.accrete_node(node, 2)
                     drained = True
                 elif land_cover in (cropland_code, settlement_code):
@@ -1332,7 +1332,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2021 \
   --end_year 2024 \
-  --all_five_year_periods \
+  --interval_type five_year \
   --mark_missing_factors \
   --count_burned_years \
   --run_name ogh_sensitivity_1km
