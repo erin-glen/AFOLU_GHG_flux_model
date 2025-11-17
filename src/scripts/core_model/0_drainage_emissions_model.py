@@ -224,7 +224,7 @@ def calculate_drainage_and_emissions(
                 node = 0  # non-peat root uses explicit zero code
                 soil_block[row, col] = 0  # not peat
 
-            if coastal_code:
+            if peat > 0 and coastal_code:
                 node = nu.accrete_node(node, 9)
                 node = nu.accrete_node(node, coastal_code)
 
