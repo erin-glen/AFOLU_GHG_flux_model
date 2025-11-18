@@ -27,8 +27,8 @@ Examples
 --------
 # Aggregate to 0.01° on a running Dask cluster
 python -m src.scripts.postprocessing.visualization.create_global_raster \
-  -cn drainage_cluster --run_name ogh_sensitivity_500m_10 \
-  --model_version 0_9_5 --date_tag 20251118 --target_deg 0.01 --native_deg 0.00025
+  -cn create_maps --run_name ogh_sensitivity_500m \
+  --model_version 0_9_5 --date_tag 20251117 --target_deg 0.01 --native_deg 0.00025
 
 # Aggregate at 0.01° using a local Dask scheduler (smaller local batch by default)
 AGG_LOCAL_BATCH=8 \
@@ -56,6 +56,7 @@ from rasterio.transform import from_bounds
 from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import log_utilities as lu
 from src.scripts.utilities import universal_utilities as uu
+from src.scripts.zonal_statistics import zonal_constants as zc
 
 from src.scripts.postprocessing.visualization.create_global_map_common import (
     DEFAULT_DATE_TAG,
@@ -76,6 +77,8 @@ from src.scripts.postprocessing.visualization.create_global_map_common import (
 
 # Nodata flag for binary outputs we write as UInt8
 UINT8_NODATA = np.uint8(255)
+STATE_PAD_DIGITS = len(next(iter(zc.ALL_DRAINED_STATE_CODES)))
+UNDRAINED_ROOT_CODE = int("16".ljust(STATE_PAD_DIGITS, "0"))
 
 
 def _reaggregate_sum(arr: np.ndarray, native_deg: float, target_deg: float) -> np.ndarray:
@@ -137,22 +140,15 @@ def _reclass_drained_to_binary(arr: np.ndarray) -> np.ndarray:
       - drained roots (11..15) -> 1.0
       - everything else (incl. non-peat 0) -> NaN (masked)
 
-    Assumes 8-digit right-padding (e.g., 1691 -> 16,910,000). If legacy 10-digit
-    tiles are ever present, set `div = 1e8` instead of 1e6 (see note below).
+    Uses the zonal_constants padding (currently 8 digits; legacy 10-digit tiles
+    are also supported).
     """
     # Single float32 view; no float64/int64 upcasts
     a = np.asarray(arr, dtype=np.float32)
 
-    # Choose divisor based on magnitude (supports legacy 10-digit if present)
-    # NOTE: Your current constants set _PAD_DIGITS = 8, so this will almost
-    # always pick 1e6.
-    finite_any = np.isfinite(a).any()
-    if finite_any:
-        max_val = float(np.nanmax(a))
-    else:
-        max_val = 0.0
-
-    div = 1_000_000.0 if max_val < 1_000_000_000.0 else 100_000_000.0
+    pad_divisor = float(10 ** (STATE_PAD_DIGITS - len("16")))
+    legacy_divisor = 100_000_000.0  # supports 10-digit legacy tiles if present
+    div = pad_divisor if pad_divisor < legacy_divisor else legacy_divisor
 
     und_lo, und_hi = 16.0 * div, 17.0 * div
     drn_lo, drn_hi = 11.0 * div, 16.0 * div
@@ -288,9 +284,17 @@ def agg_tile_to_target(
     # Integer datasets are read as Int32; floats as Float32
     dtype_hint = "Int32" if dataset_name in INTEGER_DATASETS else "Float32"
 
-    arr = uu.get_tile_dataset_rio(
+    arr, success = uu.get_tile_dataset_rio(
         per_pixel_total_or_state_tile, dtype_hint, bounds, chunk_length_pixels, is_final, logger
-    )[0]
+    )
+
+    if dataset_name == "drained_state" and not success:
+        logger.warning(
+            "Tile %s missing drained_state; filling with undrained padding (%d).",
+            tile_id,
+            UNDRAINED_ROOT_CODE,
+        )
+        arr = np.full((chunk_length_pixels, chunk_length_pixels), UNDRAINED_ROOT_CODE, dtype=np.int32)
 
     if dataset_name in INTEGER_DATASETS:
         if dataset_name == "drained_state":
