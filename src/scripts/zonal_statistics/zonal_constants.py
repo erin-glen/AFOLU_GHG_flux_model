@@ -1,31 +1,16 @@
 import numpy as np
 
-"""Node code utilities for organic soils zonal statistics.
+"""Node code utilities for organic soils zonal statistics."""
 
-Updated for the simplified decision tree:
-- `drained_state` encodes *only* classification (peat drained trigger or undrained)
-  with an optional coastal tag (91=coastal_mangrove, 92=coastal_tidal_marsh).
-- Emission-path digits are no longer present in `drained_state`.
-- Two explicit categorical outputs now exist and are described here:
-  * `coastal_mask`: 0=non_coastal, 1=mangrove, 2=tidal_marsh
-  * `drain_source`: 0=non_peat, 1=canals, 2=roads_grip, 3=crop_settlement,
-                   4=plantation_descals, 5=extraction, 6=peat_undrained
-"""
-
-# Must match the model's MAX_STATE_DIGITS (kept at 8 in the simplified tree).
 _PAD_DIGITS = 8
-
 
 def _pad_right(code: str) -> str:
     """Right‑pad ``code`` with zeros to the standard length."""
     return code.ljust(_PAD_DIGITS, "0")
 
-
-# Root meanings (classification only)
-# 11..15 are drained peat triggers; 16 is undrained peat; 0 is non‑peat.
 _drain_root = {
-    "11": "peat_drained_primary_infra",          # canals
-    "12": "peat_drained_secondary_infra",        # roads / GRIP
+    "11": "peat_drained_primary_infra",          # dadap / canals
+    "12": "peat_drained_secondary_infra",        # roads / ENGERT / GRIP
     "13": "peat_drained_cropland_settlement",
     "14": "peat_drained_plantation",
     "15": "peat_drained_extraction",
@@ -33,45 +18,84 @@ _drain_root = {
     "0":  "non_peat",
 }
 
-# Optional classification suffix (only present for peat pixels)
 _classification_suffix_labels = {
     "": "",
     "91": "__coastal_mangrove",
     "92": "__coastal_tidal_marsh",
 }
 
+_emissions_by_suffix = {
+    "": {
+        # BOREAL
+        "111": "boreal_extraction",
+        "1131": "boreal_forest_poor",
+        "1132": "boreal_forest_rich",
+        "114": "boreal_grassland",
+        "115": "boreal_cropland",
+        "116": "boreal_settlement",
+        "117": "boreal_wetland",
+        "118": "boreal_otherland",
+        # TEMPERATE
+        "121": "temperate_extraction",
+        "123": "temperate_forest",
+        "1241": "temperate_grassland_poor",
+        "1242": "temperate_grassland_rich",
+        "125": "temperate_cropland",
+        "126": "temperate_settlement",
+        "127": "temperate_wetland",
+        "128": "temperate_otherland",
+        # TROPICAL
+        "131": "tropical_extraction",
+        "1321": "tropical_long_rotation",
+        "1322": "tropical_short_rotation",
+        "1323": "tropical_oil_palm",
+        "133": "tropical_forest",
+        "134": "tropical_grassland",
+        "135": "tropical_cropland",
+        "136": "tropical_settlement",
+        "137": "tropical_wetland",
+        "138": "tropical_otherland",
+    },
+    "91": {
+        "1191": "boreal_coastal_mangrove",
+        "1291": "temperate_coastal_mangrove",
+        "1391": "tropical_coastal_mangrove",
+        "191": "other_domain_coastal_mangrove",
+    },
+    "92": {
+        "1192": "boreal_coastal_tidal_marsh",
+        "1292": "temperate_coastal_tidal_marsh",
+        "1392": "tropical_coastal_tidal_marsh",
+        "192": "other_domain_coastal_tidal_marsh",
+    },
+}
 
 def _build_drained_state_mapping() -> dict[str, str]:
-    """
-    Build the mapping for classification‑only `drained_state`.
-
-    Codes emitted by the simplified tree:
-      - '0' (non‑peat)
-      - '11','12','13','14','15' (drained peat by trigger), '16' (undrained peat)
-      - Optional coastal suffix appended as '9{1|2}', e.g., '1191', '1692'
-    All keys are right‑padded to _PAD_DIGITS with zeros.
-    """
     mapping: dict[str, str] = {}
 
-    # Non‑peat root (no coastal suffix on non‑peat in the simplified tree)
-    mapping[_pad_right("0")] = _drain_root["0"]
-
-    # Peat roots with and without coastal suffix
-    for root in ("11", "12", "13", "14", "15", "16"):
+    for root in ("16", "0"):
         base_label = _drain_root[root]
-        # Without coastal suffix
-        mapping[_pad_right(root)] = base_label
-        # With coastal suffix (only if suffix is non‑empty)
         for suffix, suffix_label in _classification_suffix_labels.items():
             if suffix:
-                mapping[_pad_right(root + suffix)] = base_label + suffix_label
+                code = suffix if root == "0" else root + suffix
+            else:
+                code = root
+            mapping[_pad_right(code)] = base_label + suffix_label
+
+    for root in ("11", "12", "13", "14", "15"):
+        base_label = _drain_root[root]
+        for suffix in _classification_suffix_labels.keys():
+            class_code = root + suffix
+            for emit_code, emit_label in _emissions_by_suffix[suffix].items():
+                mapping[_pad_right(class_code + emit_code)] = (
+                    f"{base_label}__{emit_label}"
+                )
 
     return mapping
 
 
-DRAINED_STATE_NODE_MEANINGS: dict[str, str] = _build_drained_state_mapping()
+DRAINED_STATE_NODE_MEANINGS = _build_drained_state_mapping()
 
-# Burned-state meanings are unchanged (emission logic unaffected by the simplification)
 _burn_state_labels = {
     "111": "boreal__drained",
     "112": "boreal__undrained",
@@ -87,38 +111,9 @@ BURNED_STATE_NODE_MEANINGS: dict[str, str] = {
     _pad_right(code): label for code, label in _burn_state_labels.items()
 }
 
-# Convenience sets of all valid state codes (padded)
 ALL_DRAINED_STATE_CODES = frozenset(DRAINED_STATE_NODE_MEANINGS.keys())
 ALL_BURNED_STATE_CODES = frozenset(BURNED_STATE_NODE_MEANINGS.keys())
 
-# --- New: explicit categorical layer meanings from the simplified model ---
-
-# drain_source layer (uint), values defined by the decision tree:
-# 0=non_peat, 1=canals, 2=roads/GRIP, 3=crop/settlement,
-# 4=plantation/DeScals, 5=extraction, 6=peat_undrained
-DRAIN_SOURCE_MEANINGS: dict[int, str] = {
-    0: "non_peat",
-    1: "canals",
-    2: "roads_grip",
-    3: "cropland_settlement",
-    4: "plantation_descals",
-    5: "extraction",
-    6: "peat_undrained",
-}
-
-# coastal_mask layer (uint), values defined by the decision tree:
-# 0=non_coastal, 1=coastal_mangrove, 2=coastal_tidal_marsh
-COASTAL_MASK_MEANINGS: dict[int, str] = {
-    0: "non_coastal",
-    1: "coastal_mangrove",
-    2: "coastal_tidal_marsh",
-}
-
-# Optional helper arrays if you need fast membership checks / histogram bins
-ALL_DRAIN_SOURCE_CODES = np.array(sorted(DRAIN_SOURCE_MEANINGS.keys()), dtype=np.uint8)
-ALL_COASTAL_MASK_CODES = np.array(sorted(COASTAL_MASK_MEANINGS.keys()), dtype=np.uint8)
-
-# GADM IDs unchanged
 GADM_ADM0_IDS = np.array(sorted({
     0, 4, 8, 10, 12, 16, 20, 24, 28, 31, 32, 36,
     40, 44, 48, 50, 51, 52, 56, 60, 64, 68, 70, 72,
