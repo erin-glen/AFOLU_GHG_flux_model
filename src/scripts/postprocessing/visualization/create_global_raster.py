@@ -9,32 +9,30 @@ What's new in this drop-in update
 - **FIX 1 (GeoTransform)**: Use rasterio.transform.from_bounds (rows & cols) so pixel size Y == X.
 - **FIX 2 (S3 writing)**: When writing to s3:// paths, enable GDAL spooling:
     CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE=YES and CPL_TMPDIR=<our working tmpdir>.
+- **FIX 3 (OOM on drained_state)**: Memory-tight reclassification (no float64/int64 upcasts; one
+    boolean mask at a time; range checks based on 8-digit padding).
+- **Typed reads**: Choose "Int32" for integer datasets (burned_state, drained_state), "Float32" otherwise.
+- **Local batch knob**: AGG_LOCAL_BATCH env var controls local batch size (default 8) for iterate_tiles.
 
 Assumptions (this version)
 --------------------------
 - All non-integer inputs are **per-pixel totals** (e.g., Mg yr^-1 per native pixel).
 - Aggregation for float datasets is **SUM** to the target grid.
 - Aggregation for integer datasets is **MODE** (categorical majority).
-- For drained_state specifically: we **reclass to binary** (0 undrained, 1 drained; nodata masked)
+- For drained_state specifically: we **reclass to binary** (0 undrained, 1 drained; non-peat masked)
   *before* aggregation, then take a binary mode and write UInt8 with nodata=255.
 - No unit conversions are performed; no input tiles are modified or overwritten.
 
 Examples
 --------
-# Aggregate to 0.01° using AWS Batch/ECS style cluster
-python -m src.scripts.postprocessing.visualization.create_global_raster \
-  -cn create_maps --run_name ogh_sensitivity_1km_10 \
-  --model_version 0_8_5 --date_tag 20251105 --target_deg 0.01
+# Aggregate to 0.01° on a running Dask cluster
+cond
 
-# Aggregate at 0.01° using a local Dask cluster:
+# Aggregate at 0.01° using a local Dask scheduler (smaller local batch by default)
+AGG_LOCAL_BATCH=8 \
 python -m src.scripts.postprocessing.visualization.create_global_raster \
-  -cn local --run_name ogh_sensitivity_1km --run_local \
-  --model_version 0_8_0 --date_tag 20250923 --target_deg 0.01
-
-# Aggregate to 0.005° (factor must be integer vs native_deg, e.g., 0.0025 -> factor 2)
-python -m src.scripts.postprocessing.visualization.create_global_raster \
-  -cn create_maps --run_name ogh_sensitivity_500m \
-  --model_version 0_9_5 --date_tag 20251117 --target_deg 0.01
+  -cn local --run_name ogh_sensitivity_500m --run_local \
+  --model_version 0_9_5 --date_tag 20251117 --target_deg 0.01 --native_deg 0.00025
 """
 
 from __future__ import annotations
@@ -80,7 +78,7 @@ UINT8_NODATA = np.uint8(255)
 
 def _reaggregate_sum(arr: np.ndarray, native_deg: float, target_deg: float) -> np.ndarray:
     """
-    Downsample by summing factor×factor blocks (preserve NaNs).
+    Downsample by summing factor×factor blocks (preserves NaNs).
     If a block has 0 valid cells, output is NaN.
     """
     factor_f = target_deg / native_deg
@@ -103,7 +101,7 @@ def _reaggregate_sum(arr: np.ndarray, native_deg: float, target_deg: float) -> n
 
 def _reaggregate_mode_binary(arr01_nan: np.ndarray, native_deg: float, target_deg: float) -> np.ndarray:
     """
-    Binary 'mode' via block sums (ties -> 1). `arr01_nan` contains {0,1} and NaN for nodata.
+    Binary 'mode' via block sums (ties -> 1). `arr01_nan` contains {0,1} and NaN for masked.
     Returns float32 with {0,1,NaN}.
     """
     factor_f = target_deg / native_deg
@@ -119,48 +117,56 @@ def _reaggregate_mode_binary(arr01_nan: np.ndarray, native_deg: float, target_de
     a4 = a.reshape(H // f, f, W // f, f)
 
     valid = np.sum(~np.isnan(a4), axis=(1, 3)).astype(np.float32)
-    ones  = np.nansum(a4, axis=(1, 3)).astype(np.float32)
+    ones  = np.nansum(a4, axis=(1, 3)).astype(np.float32)  # sum of 1s
     zeros = valid - ones
 
     out = np.full((H // f, W // f), np.nan, dtype=np.float32)
     has = valid > 0
+    # ties resolve to 1 (favor drained when equal)
     out[has] = (ones[has] >= zeros[has]).astype(np.float32)
     return out
 
 
 def _reclass_drained_to_binary(arr: np.ndarray) -> np.ndarray:
     """
-    Reclass drained_state values to binary with NaN for nodata:
+    Memory-tight reclass of classification-only `drained_state` to binary:
 
-      non-peat  : nodata (NaN)
-      peat root 16 (undrained): 0
-      peat root 11..15 (drained): 1
+      - undrained root (16) -> 0.0
+      - drained roots (11..15) -> 1.0
+      - everything else (incl. non-peat 0) -> NaN (masked)
 
-    Works with 8- or 10-digit padded node codes and ignores any trailing
-    coastal suffix digits (e.g., '1691' for undrained coastal).
+    Assumes 8-digit right-padding (e.g., 1691 -> 16,910,000). If legacy 10-digit
+    tiles are ever present, set `div = 1e8` instead of 1e6 (see note below).
     """
-    a = arr.astype(np.int64, copy=False)
+    # Single float32 view; no float64/int64 upcasts
+    a = np.asarray(arr, dtype=np.float32)
 
-    # Detect padding by magnitude (>=1e9 → 10-digit; else assume 8-digit).
-    # We protect against all-NaN tiles by forcing max to 0 in that case.
-    max_val = int(np.nanmax(a)) if np.any(~np.isnan(arr)) else 0
-    pad = 10 if max_val >= 1_000_000_000 else 8
-    div = 10 ** (pad - 2)
+    # Choose divisor based on magnitude (supports legacy 10-digit if present)
+    # NOTE: Your current constants set _PAD_DIGITS = 8, so this will almost
+    # always pick 1e6.
+    finite_any = np.isfinite(a).any()
+    if finite_any:
+        max_val = float(np.nanmax(a))
+    else:
+        max_val = 0.0
 
-    root = (a // div).astype(np.int64)
+    div = 1_000_000.0 if max_val < 1_000_000_000.0 else 100_000_000.0
 
-    # Non-peat nodata: explicit zero, or padded root == 20 (common non-peat root)
-    nodata_mask = (a == 0) | (root == 20)
-
-    undrained = (root == 16)
-    drained   = (root >= 11) & (root <= 15)
+    und_lo, und_hi = 16.0 * div, 17.0 * div
+    drn_lo, drn_hi = 11.0 * div, 16.0 * div
 
     out = np.full(a.shape, np.nan, dtype=np.float32)
-    out[undrained] = 0.0
-    out[drained]   = 1.0
-    # everything else stays NaN (nodata)
-    return out
 
+    # Build one boolean at a time to keep peak memory low
+    und = (a >= und_lo) & (a < und_hi)
+    out[und] = 0.0
+    del und
+
+    drn = (a >= drn_lo) & (a < drn_hi)
+    out[drn] = 1.0
+    del drn
+
+    return out
 
 
 def _per_pixel_tile_path(items: dict, tile_id: str) -> str:
@@ -264,10 +270,7 @@ def agg_tile_to_target(
     logger = lu.setup_logging()
     logger.info("Reading tile %s\ninput: %s", tile_id, per_pixel_total_or_state_tile)
 
-    arr = uu.get_tile_dataset_rio(
-        per_pixel_total_or_state_tile, "Float32", bounds, chunk_length_pixels, is_final, logger
-    )[0]
-
+    # Determine dataset name up front (so we can choose the read dtype)
     parts = posixpath.basename(per_pixel_total_or_state_tile).split("__")
     if len(parts) == 3:
         _, dataset_name, _ = parts
@@ -280,15 +283,27 @@ def agg_tile_to_target(
             f"got: {posixpath.basename(per_pixel_total_or_state_tile)}"
         )
 
+    # Integer datasets are read as Int32; floats as Float32
+    dtype_hint = "Int32" if dataset_name in INTEGER_DATASETS else "Float32"
+
+    arr = uu.get_tile_dataset_rio(
+        per_pixel_total_or_state_tile, dtype_hint, bounds, chunk_length_pixels, is_final, logger
+    )[0]
+
     if dataset_name in INTEGER_DATASETS:
         if dataset_name == "drained_state":
+            # Reclass to {0,1,NaN} in float32 with minimal temporaries, then binary mode
             arr01_nan = _reclass_drained_to_binary(arr)
             out = _reaggregate_mode_binary(arr01_nan, native_deg, target_deg)  # float32 {0,1,NaN}
             return np.where(np.isnan(out), UINT8_NODATA, out.astype(np.uint8, copy=False))
         else:
-            return uu.reaggregate_mode(arr.astype(np.int32, copy=False), native_deg, target_deg)
+            # e.g., burned_state: keep native codes, aggregate by mode
+            return uu.reaggregate_mode(
+                arr.astype(np.int32, copy=False), native_deg, target_deg
+            )
 
-    return _reaggregate_sum(arr, native_deg, target_deg)
+    # Continuous totals → explicit SUM to target resolution (no unit conversions)
+    return _reaggregate_sum(arr.astype(np.float32, copy=False), native_deg, target_deg)
 
 
 # --------------------------------------------------------------------
@@ -348,7 +363,8 @@ def iterate_tiles(
     if not delayed_results:
         return
     if client is None:
-        B = 64
+        # Smaller, configurable local batch to avoid long stalls
+        B = int(os.environ.get("AGG_LOCAL_BATCH", "8"))
         for i in range(0, len(delayed_results), B):
             batch = delayed_results[i:i + B]
             results = dask.compute(*batch)
