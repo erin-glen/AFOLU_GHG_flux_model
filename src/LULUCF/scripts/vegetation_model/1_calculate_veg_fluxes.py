@@ -2302,22 +2302,22 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     for key, item in download_dict.items():
         print(f"{key}: {item}")
 
-    # # Returns the first tile in each input so that the datatype can be determined.
-    # # This is done up front, once per tile set, rather than on each chunk, since
-    # # all tiles have the same datatype for each input-- it only needs to be done once at the very beginning of the stage.
-    # main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
-    # first_tiles = uu.first_file_name_in_s3_folder(download_dict)
-    #
-    # # Creates a download dictionary with the datatype of each input in the values.
-    # # This is supplied to each chunk that is being analyzed.
-    # # This also serves as a check of whether all inputs are being found (s3 paths correct)
-    # main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
-    # download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
-    #
-    # if is_large_run:
-    #     main_logger.info(f"download_dict_with_data_types for {stage}:")
-    #     for key, value in download_dict_with_data_types.items():
-    #         main_logger.info(f"  {key}: {value}")
+    # Returns the first tile in each input so that the datatype can be determined.
+    # This is done up front, once per tile set, rather than on each chunk, since
+    # all tiles have the same datatype for each input-- it only needs to be done once at the very beginning of the stage.
+    main_logger.info(f"Getting tile_id of first tile in each tile set: {uu.timestr()}")
+    first_tiles = uu.first_file_name_in_s3_folder(download_dict)
+
+    # Creates a download dictionary with the datatype of each input in the values.
+    # This is supplied to each chunk that is being analyzed.
+    # This also serves as a check of whether all inputs are being found (s3 paths correct)
+    main_logger.info(f"Getting datatype of first tile in each tile set: {uu.timestr()}")
+    download_dict_with_data_types = uu.add_file_type_to_dict(first_tiles)
+
+    if is_large_run:
+        main_logger.info(f"download_dict_with_data_types for {stage}:")
+        for key, value in download_dict_with_data_types.items():
+            main_logger.info(f"  {key}: {value}")
 
     # Creates a list of output directories (core and intermediates) for all outputs and intervals based on specifics of the model run
     output_dir_list_core_intermediate = cn.veg_core_output_dirs + cn.veg_intermediate_output_dirs + cn.veg_summative_output_dirs
@@ -2366,9 +2366,9 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         outputs_to_zarr = cn.full_outputs_to_zarr
         # outputs_to_zarr = cn.full_outputs_to_zarr[0:2] # For testing
 
-    #     # Creates the global mega-zarr with metadata only
-    #     zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
-    #                                 (1, chunk_size_pixels, chunk_size_pixels), main_logger)
+        # Creates the global mega-zarr with metadata only
+        zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+                                    (1, chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
@@ -2384,89 +2384,89 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         outputs_to_zarr = False
 
 
-    # ### Step 3: Create 1x1 degree outputs
-    #
-    # # Creates list of tasks to run (1 task = 1 chunk)
-    # main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
-    # main_logger.info("Workers' logs to be appended after main function log"+ "\n")
-    #
-    # chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
-    # main_logger.info(f"There are {len(chunk_batches)} batches to process: {uu.timestr()}")
-    #
-    # # Accumulates all output messages and statistics across batches
-    # # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-    # all_results = []
-    # all_1x1_stats = []
-    # success_count = 0  # Count of successful chunks
-    #
-    # # Iterates through the batches
-    # for i, chunk_batch in enumerate(chunk_batches):
-    #     main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks): {uu.timestr()}")
-    #     main_logger.info("Creating batch task txts in s3...")
-    #     uu.create_s3_task_files(stage, chunk_batch)
-    #
-    #     # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_vegetation_fluxes ... )]
-    #     futures = []
-    #     for chunk in chunk_batch:
-    #         future = client.submit(calculate_and_upload_vegetation_fluxes,
-    #                                chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
-    #                                download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-    #                                interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
-    #                                output_dir_list, stage, model_type, raw_mega_zarr_path, outputs_to_zarr)
-    #         futures.append(future)
-    #
-    #     batch_results = client.gather(futures)
-    #
-    #     all_results.extend(batch_results)
-    #
-    #     success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_large_run, main_logger, batch_results)
-    #     all_1x1_stats.extend(batch_stats)
-    #
-    #     # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
-    #     # That way there are some basic chunk stats (not sorted or anything) to fall back on.
-    #     if len(chunk_batches) > 1:
-    #         main_logger.info(f"Writing batch stats to spreadsheet: {uu.timestr()}")
-    #         df_batch_stats = pd.DataFrame(batch_stats)
-    #         out_spreadsheet = f'TEMP_BATCH_{stage}__batch_{i}_{uu.timestr()}.xlsx'
-    #         local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
-    #         with pd.ExcelWriter(local_spreadsheet) as writer:
-    #             df_batch_stats.to_excel(writer, sheet_name=f'stats__batch_{i}', index=False)
-    #
-    #     del futures
-    #     del batch_results
-    #     client.run(gc.collect)
-    #
-    #     uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
-    #
-    #
-    # ### Step 4: Counts files in output folders, aggregates chunk stats for 1x1 degree outputs
-    #
-    # # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
-    # # cluster, not all the workers.
-    # if not run_local:
-    #     workers = client.scheduler_info()["workers"]
-    #     n_workers = len(workers)
-    #
-    #     # Reduces number of workers in the cluster down to 1 if there is more than 10
-    #     if n_workers > 10:
-    #         main_logger.info("Resizing cluster to 1 worker")
-    #         resize_cluster.resize_coiled_cluster(cluster_name, 2)
-    #
-    # # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
-    # if not no_upload and is_large_run:
-    #     for output_folder in output_dir_list:
-    #         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-    #         main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-    #         # print(geotiff_files)
-    #
-    # # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
-    # # and min and max values across all chunks for all inputs and outputs
-    # # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
-    # if (not no_stats) and (success_count > 0):
-    #     model_chunk_stats_path = uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
-    #     print(model_chunk_stats_path)
-    #
-    #     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+    ### Step 3: Create 1x1 degree outputs
+
+    # Creates list of tasks to run (1 task = 1 chunk)
+    main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
+    main_logger.info("Workers' logs to be appended after main function log"+ "\n")
+
+    chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
+    main_logger.info(f"There are {len(chunk_batches)} batches to process: {uu.timestr()}")
+
+    # Accumulates all output messages and statistics across batches
+    # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
+    all_results = []
+    all_1x1_stats = []
+    success_count = 0  # Count of successful chunks
+
+    # Iterates through the batches
+    for i, chunk_batch in enumerate(chunk_batches):
+        main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks): {uu.timestr()}")
+        main_logger.info("Creating batch task txts in s3...")
+        uu.create_s3_task_files(stage, chunk_batch)
+
+        # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_vegetation_fluxes ... )]
+        futures = []
+        for chunk in chunk_batch:
+            future = client.submit(calculate_and_upload_vegetation_fluxes,
+                                   chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
+                                   download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
+                                   interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
+                                   output_dir_list, stage, model_type, raw_mega_zarr_path, outputs_to_zarr)
+            futures.append(future)
+
+        batch_results = client.gather(futures)
+
+        all_results.extend(batch_results)
+
+        success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_large_run, main_logger, batch_results)
+        all_1x1_stats.extend(batch_stats)
+
+        # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
+        # That way there are some basic chunk stats (not sorted or anything) to fall back on.
+        if len(chunk_batches) > 1:
+            main_logger.info(f"Writing batch stats to spreadsheet: {uu.timestr()}")
+            df_batch_stats = pd.DataFrame(batch_stats)
+            out_spreadsheet = f'TEMP_BATCH_{stage}__batch_{i}_{uu.timestr()}.xlsx'
+            local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+            with pd.ExcelWriter(local_spreadsheet) as writer:
+                df_batch_stats.to_excel(writer, sheet_name=f'stats__batch_{i}', index=False)
+
+        del futures
+        del batch_results
+        client.run(gc.collect)
+
+        uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
+
+
+    ### Step 4: Counts files in output folders, aggregates chunk stats for 1x1 degree outputs
+
+    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    # cluster, not all the workers.
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
+
+        # Reduces number of workers in the cluster down to 1 if there is more than 10
+        if n_workers > 10:
+            main_logger.info("Resizing cluster to 1 worker")
+            resize_cluster.resize_coiled_cluster(cluster_name, 2)
+
+    # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
+    if not no_upload and is_large_run:
+        for output_folder in output_dir_list:
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+            # print(geotiff_files)
+
+    # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
+    # and min and max values across all chunks for all inputs and outputs
+    # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
+    if (not no_stats) and (success_count > 0):
+        model_chunk_stats_path = uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+        print(model_chunk_stats_path)
+
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
 
     ### Step 5: Compares model output chunk stats to zarr chunk stats for each variable-year (only if chunk stats created)
