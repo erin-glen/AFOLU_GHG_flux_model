@@ -40,7 +40,13 @@ gwp_ch4 = np.float32(cn.gwp_ch4)
 gwp_n2o = np.float32(cn.gwp_n2o)
 combustion_factor = np.float32(cn.combustion_factor)
 
-STATE_PAD_DIGITS = len(next(iter(zc.ALL_DRAINED_STATE_CODES)))
+# Determine the width of finalized (padded) state codes robustly, then derive a
+# divisor that extracts the two-digit "root" (peat/non-peat and peat class)
+# from any padded code. This makes root extraction independent of whether the
+# states are 6-digit, 8-digit, etc.
+STATE_PAD_DIGITS = max(len(str(code)) for code in zc.ALL_DRAINED_STATE_CODES)
+ROOT_DIVISOR = 10 ** (STATE_PAD_DIGITS - 2)
+
 VALID_DRAINED_STATE_CODES = np.array(
     [np.uint32(int(code)) for code in zc.ALL_DRAINED_STATE_CODES], dtype=np.uint32
 )
@@ -733,7 +739,10 @@ def calculate_and_upload_drainage(
         # Node roots (first one or two digits) distinguish peat vs non-peat states.
         # Keep tiles containing any drained peat (11–15) or undrained peat (16) and
         # drop tiles that are entirely non-peat (root code 20 after padding).
-        roots = np.unique(drained_state // 1_000_000)
+        # Use the divisor derived from the configured pad width; hard-coding 1_000_000
+        # breaks when codes are 6-digit (it collapses to 0). ROOT_DIVISOR yields the
+        # correct first two digits regardless of pad width.
+        roots = np.unique(drained_state // ROOT_DIVISOR)
         meaningful_roots = {11, 12, 13, 14, 15, 16}
         if not any(int(root) in meaningful_roots for root in roots):
             outputs.pop("drained_state")
