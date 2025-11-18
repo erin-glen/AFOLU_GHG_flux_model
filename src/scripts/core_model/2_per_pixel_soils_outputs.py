@@ -310,7 +310,7 @@ python -m src.scripts.core_model.2_per_pixel_soils_outputs \
 python -m src.scripts.core_model.2_per_pixel_soils_outputs \
   --cluster_name per_pixel \
   --chunk_size 1 \
-  --run_name ogh_sensitivity_1km\
-  --output_date 20251116
+  --run_name ogh_sensitivity_500m_23\
+  --output_date 20251118
 
     """

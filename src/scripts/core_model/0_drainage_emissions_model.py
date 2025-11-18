@@ -45,6 +45,7 @@ combustion_factor = np.float32(cn.combustion_factor)
 # from any padded code. This makes root extraction independent of whether the
 # states are 6-digit, 8-digit, etc.
 STATE_PAD_DIGITS = max(len(str(code)) for code in zc.ALL_DRAINED_STATE_CODES)
+# Default root divisor for the configured pad width (e.g., 10**6 for 8-digit states)
 ROOT_DIVISOR = 10 ** (STATE_PAD_DIGITS - 2)
 
 VALID_DRAINED_STATE_CODES = np.array(
@@ -736,29 +737,43 @@ def calculate_and_upload_drainage(
 
     drained_state = outputs.get("drained_state")
     if drained_state is not None:
-        # Node roots (first one or two digits) distinguish peat vs non-peat states.
-        # Keep tiles containing any drained peat (11–15) or undrained peat (16) and
-        # drop tiles that are entirely non-peat (root code 20 after padding).
-        # Use the divisor derived from the configured pad width; hard-coding 1_000_000
-        # breaks when codes are 6-digit (it collapses to 0). ROOT_DIVISOR yields the
-        # correct first two digits regardless of pad width.
-        roots = np.unique(drained_state // ROOT_DIVISOR)
-        meaningful_roots = {11, 12, 13, 14, 15, 16}
-        if not any(int(root) in meaningful_roots for root in roots):
+        # A) Decide keep/drop using the *actual peat mask* (robust across widths)
+        drained_soil = outputs.get("drained_soil")
+        has_peat = bool(np.any(drained_soil > 0)) if drained_soil is not None else True
+        if not has_peat:
             outputs.pop("drained_state")
         else:
+            # B) Normalize width to the declared pad (e.g., 8 digits) if narrower
+            m = int(drained_state.max())
+            observed_width = (0 if m == 0 else int(np.floor(np.log10(m))) + 1)
+            if observed_width and observed_width < STATE_PAD_DIGITS:
+                scale = 10 ** (STATE_PAD_DIGITS - observed_width)
+                drained_state = (drained_state.astype(np.uint64) * np.uint64(scale)).astype(np.uint32)
+                outputs["drained_state"] = drained_state
+                lu.print_and_log(
+                    f"[state] normalized drained_state width {observed_width}→{STATE_PAD_DIGITS} in {tid}",
+                    is_final, logger,
+                )
+
+            # C) Validation / diagnostics (unknown nodes, width mismatch)
+            eff_width = STATE_PAD_DIGITS if observed_width == 0 else max(observed_width, STATE_PAD_DIGITS)
+            root_div = 10 ** (eff_width - 2)
+            roots = np.unique(drained_state // root_div)
+            if observed_width and observed_width != STATE_PAD_DIGITS:
+                lu.print_and_log(
+                    f"[state] width mismatch: observed={observed_width}, declared={STATE_PAD_DIGITS} (roots={roots[:5]})",
+                    is_final, logger,
+                )
+
             unknown_nodes = np.setdiff1d(
                 np.unique(drained_state[drained_state > 0]),
                 VALID_DRAINED_STATE_CODES,
             )
             if unknown_nodes.size:
                 lu.print_and_log(
-                    (
-                        "Drained-state codes not registered in zonal_constants: "
-                        f"{unknown_nodes[:10]}"
-                    ),
-                    is_final,
-                    logger,
+                    "Drained-state codes not registered in zonal_constants: "
+                    f"{unknown_nodes[:10]}",
+                    is_final, logger,
                 )
 
     burned_state = outputs.get("burned_state")
