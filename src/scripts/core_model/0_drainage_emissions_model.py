@@ -29,6 +29,7 @@ from src.scripts.utilities import log_utilities as lu
 from src.scripts.utilities import numba_utilities as nu
 from src.scripts.utilities import drainage_emission_factors as defac
 from src.scripts.utilities import burned_area_emission_factors as baf
+from src.scripts.zonal_statistics import zonal_constants as zc
 
 # ----------------------------------------------------------------------
 # constants pulled into locals for Numba speed
@@ -39,9 +40,17 @@ gwp_ch4 = np.float32(cn.gwp_ch4)
 gwp_n2o = np.float32(cn.gwp_n2o)
 combustion_factor = np.float32(cn.combustion_factor)
 
+STATE_PAD_DIGITS = len(next(iter(zc.ALL_DRAINED_STATE_CODES)))
+VALID_DRAINED_STATE_CODES = np.array(
+    [np.uint32(int(code)) for code in zc.ALL_DRAINED_STATE_CODES], dtype=np.uint32
+)
+VALID_BURNED_STATE_CODES = np.array(
+    [np.uint32(int(code)) for code in zc.ALL_BURNED_STATE_CODES], dtype=np.uint32
+)
+
 # Default peat probability threshold for the OGH dataset. This matches the
 # preprocessing threshold previously applied during tiling.
-DEFAULT_OGH_THRESHOLD = 10.0
+DEFAULT_OGH_THRESHOLD = 23.0
 
 forest_code = cn.ipcc_codes["forest"]
 cropland_code = cn.ipcc_codes["cropland"]
@@ -90,7 +99,6 @@ def calculate_drainage_and_emissions(
     in_dict_float32,
     drainage_table,
     burned_table,
-    mark_missing,
     count_burned_years,
 ):
     """
@@ -109,7 +117,7 @@ def calculate_drainage_and_emissions(
     out_dict_float32 = Dict.empty(types.unicode_type, types.float32[:, :])
 
     # The maximum allowed digits for classification nodes.
-    max_digits_state = 8
+    max_digits_state = STATE_PAD_DIGITS
 
     # required inputs --------------------------------------------------
     peat_block = in_dict_uint8["peat"]
@@ -411,13 +419,6 @@ def calculate_drainage_and_emissions(
                 drained_co2_offsite_out[row, col] = co2_off
                 drained_total_co2e_out[row, col] = total_co2e
 
-                # Optional sentinel for missing drainage EF
-                if missing and mark_missing:
-                    sentinel = 90 + int(ecozone)
-                    emission_node = nu.accrete_node(
-                        emission_node, sentinel
-                    )
-
             if emission_node > 0:
                 node = nu.accrete_node(node, emission_node)
 
@@ -504,20 +505,6 @@ def calculate_drainage_and_emissions(
                     burned_ch4_out[row, col] = burn_ch4
                     burned_total_co2e_out[row, col] = burn_total_co2e
 
-                    # Optional sentinel for missing burned EFs
-                    if bmissing and mark_missing:
-                        if ecozone == boreal_code:
-                            sentinel = 94
-                        elif ecozone == temperate_code:
-                            sentinel = 95
-                        elif ecozone == tropical_code:
-                            sentinel = 96
-                        else:
-                            sentinel = 97
-                        burned_emission_node = nu.accrete_node(
-                            burned_emission_node, sentinel
-                        )
-
             if burned_emission_node > 0:
                 burned_node = nu.accrete_node(burned_node, burned_emission_node)
 
@@ -596,7 +583,6 @@ def calculate_and_upload_drainage(
     peat_dataset="ogh",
     run_name="ogh_standard_model",
     peat_threshold: Optional[float] = None,
-    mark_missing=False,
     count_burned_years=False,
 ):
     """Process a single chunk for a given interval.
@@ -623,8 +609,6 @@ def calculate_and_upload_drainage(
         Threshold applied to the peat probability layer when using the OGH
         dataset. Values strictly greater than the threshold are treated as
         peat. ``None`` disables thresholding and uses the raw probabilities.
-    mark_missing : bool, optional
-        Append sentinel digits for missing emission factors if ``True``.
     count_burned_years : bool, optional
         If ``True``, count the number of burned years within the interval and
         multiply burned emissions accordingly.
@@ -740,7 +724,6 @@ def calculate_and_upload_drainage(
         td32f,
         defac.DEFAULT_TABLE,
         baf.DEFAULT_TABLE,
-        mark_missing,
         count_burned_years,
     )
     outputs = {**out_u32, **out_f32}
@@ -754,10 +737,38 @@ def calculate_and_upload_drainage(
         meaningful_roots = {11, 12, 13, 14, 15, 16}
         if not any(int(root) in meaningful_roots for root in roots):
             outputs.pop("drained_state")
+        else:
+            unknown_nodes = np.setdiff1d(
+                np.unique(drained_state[drained_state > 0]),
+                VALID_DRAINED_STATE_CODES,
+            )
+            if unknown_nodes.size:
+                lu.print_and_log(
+                    (
+                        "Drained-state codes not registered in zonal_constants: "
+                        f"{unknown_nodes[:10]}"
+                    ),
+                    is_final,
+                    logger,
+                )
 
     burned_state = outputs.get("burned_state")
     if burned_state is not None and not np.any(burned_state):
         outputs.pop("burned_state")
+    elif burned_state is not None:
+        unknown_burned_nodes = np.setdiff1d(
+            np.unique(burned_state[burned_state > 0]),
+            VALID_BURNED_STATE_CODES,
+        )
+        if unknown_burned_nodes.size:
+            lu.print_and_log(
+                (
+                    "Burned-state codes not registered in zonal_constants: "
+                    f"{unknown_burned_nodes[:10]}"
+                ),
+                is_final,
+                logger,
+            )
 
     # burned-area emissions are totals for the whole inventory period; convert
     # to annual values based on the number of years in the period
@@ -938,7 +949,6 @@ def run_drainage_model(
     peat_dataset="ogh",
     run_name="ogh_standard_model",
     peat_threshold: Optional[float] = DEFAULT_OGH_THRESHOLD,
-    mark_missing=False,
     count_burned_years=False,
 ):
 
@@ -1083,7 +1093,6 @@ def run_drainage_model(
             peat_dataset,
             run_name,
             peat_threshold,
-            mark_missing,
             count_burned_years,
         )
 
@@ -1145,7 +1154,6 @@ def main(argv=None):
             peat_dataset="ogh",
             run_name="ogh_standard_model",
             peat_threshold=DEFAULT_OGH_THRESHOLD,
-            mark_missing=False,
             count_burned_years=False,
         )
         return
@@ -1223,14 +1231,6 @@ def main(argv=None):
         help="Run name used to label output directories",
     )
     p.add_argument(
-        "--mark_missing_factors",
-        action="store_true",
-        help=(
-            "Append sentinel digits (91-97) to state codes when EF "
-            "look-ups are missing; emissions remain zero."
-        ),
-    )
-    p.add_argument(
         "--count_burned_years",
         action="store_true",
         help="Multiply burned emissions by the number of burned years in each interval",
@@ -1262,7 +1262,6 @@ def main(argv=None):
         peat_dataset=args.peat_dataset,
         run_name=args.run_name,
         peat_threshold=args.peat_threshold,
-        mark_missing=args.mark_missing_factors,
         count_burned_years=args.count_burned_years,
     )
 
@@ -1275,8 +1274,8 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --bounding_box 110 -10 120 0 \
   --chunk_size 1 \
-  --start_year 2016 \
-  --end_year 2020 \
+  --start_year 2021 \
+  --end_year 2024 \
   --interval_type five_year \
   --run_name custom_run
 
@@ -1304,8 +1303,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2001 \
   --end_year 2024 \
-  --interval_type five_year \
-  --mark_missing_factors
+  --interval_type five_year
   
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
@@ -1323,8 +1321,8 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --start_year 2001 \
   --end_year 2024 \
   --all_five_year_periods \
-  --mark_missing_factors \
-  --count_burned_years
+  --count_burned_years \
+  --run_name test
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
@@ -1333,9 +1331,9 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --start_year 2021 \
   --end_year 2024 \
   --interval_type five_year \
-  --mark_missing_factors \
+  --all_five_year_periods \
   --count_burned_years \
-  --run_name ogh_sensitivity_1km
+  --run_name ogh_sensitivity_500m_10
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
@@ -1343,7 +1341,6 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --chunk_size 1 \
   --start_year 2021 \
   --end_year 2024 \
-  --mark_missing_factors \
   --count_burned_years \
   --run_name ogh_sensitivity_1km \
   --interval_type five_year \
@@ -1357,7 +1354,6 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --start_year 2001 \
   --end_year 2024 \
   --all_five_year_periods \
-  --mark_missing_factors \
   --count_burned_years \
   --peat_dataset gpd \
   --run_name gpd_standard_model_1km
@@ -1369,7 +1365,6 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --start_year 2001 \
   --end_year 2024 \
   --all_five_year_periods \
-  --mark_missing_factors \
   --count_burned_years \
   --peat_dataset gfw \
   --run_name gfw_standard_model_1km

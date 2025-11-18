@@ -175,5 +175,5 @@ if __name__ == "__main__":
     )
 
 """
-python -m src.scripts.core_model.3_aggregate_soils_outputs -cn aggregate --run_name test --output_date 20251117
+python -m src.scripts.core_model.3_aggregate_soils_outputs -cn aggregate --run_name ogh_sensitivity_500m_10 --output_date 20251118
 """

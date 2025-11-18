@@ -27,8 +27,8 @@ Examples
 --------
 # Aggregate to 0.01° on a running Dask cluster
 python -m src.scripts.postprocessing.visualization.create_global_raster \
-  -cn create_maps --run_name ogh_sensitivity_500m \
-  --model_version 0_9_5 --date_tag 20251117 --target_deg 0.01 --native_deg 0.00025
+  -cn drainage_cluster --run_name ogh_sensitivity_500m_10 \
+  --model_version 0_9_5 --date_tag 20251118 --target_deg 0.01 --native_deg 0.00025
 
 # Aggregate at 0.01° using a local Dask scheduler (smaller local batch by default)
 AGG_LOCAL_BATCH=8 \
