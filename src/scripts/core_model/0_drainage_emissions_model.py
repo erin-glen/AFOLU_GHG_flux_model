@@ -57,7 +57,7 @@ VALID_BURNED_STATE_CODES = np.array(
 
 # Default peat probability threshold for the OGH dataset. This matches the
 # preprocessing threshold previously applied during tiling.
-DEFAULT_OGH_THRESHOLD = 23.0
+DEFAULT_OGH_THRESHOLD = 10.0
 
 forest_code = cn.ipcc_codes["forest"]
 cropland_code = cn.ipcc_codes["cropland"]
@@ -1353,6 +1353,17 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --full_model \
   --chunk_size 1 \
   --start_year 2021 \
+  --end_year 2024 \
+  --interval_type five_year \
+  --all_five_year_periods \
+  --count_burned_years \
+  --run_name ogh_sensitivity_500m_10
+  
+python -m src.scripts.core_model.0_drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --full_model \
+  --chunk_size 1 \
+  --start_year 2001 \
   --end_year 2024 \
   --interval_type five_year \
   --all_five_year_periods \
