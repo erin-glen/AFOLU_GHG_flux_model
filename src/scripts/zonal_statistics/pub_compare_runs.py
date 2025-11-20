@@ -43,6 +43,28 @@ Usage example:
     --run "gpd_standard_model_1km=0_8_5:20251007|GPD 1 km" \
     --run "gpd_standard_model_1km_pml=0_8_5:20251007|GPD 1 km (PML)"
 
+OGH sensitivity comparisons default to chunk-statistics inputs instead of zonal
+statistics. If you need to override those defaults, pass the alternative path
+per run via ``--chunk-stats`` (``run_name=/path/to/chunk_stats``). Only the
+specified run will use the override; other runs continue to rely on their
+defaults. Chunk stats are expected to be Excel outputs containing an
+``other_outputs_1x1`` sheet with ``layer_name`` columns for
+``drained_total_Mg_CO2e_ha_yr`` and ``burned_total_Mg_CO2e_ha_yr``; the script
+automatically extracts the ``sum_value`` totals (converted from Mg to Gt).
+
+To explicitly point the OGH sensitivity distance comparison at chunk-stats Excel
+inputs, include the run-specific paths when invoking the script (one entry per
+``--chunk-stats`` argument):
+
+  python -m src.scripts.zonal_statistics.pub_compare_runs \
+    --years 2024 \
+    --run ogh_sensitivity_250m=0_9_7:20231231 \
+    --run ogh_sensitivity_500m=0_9_7:20231231 \
+    --run ogh_sensitivity_750m=0_9_7:20231231 \
+    --chunk-stats ogh_sensitivity_250m=gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_250m_10.xlsx \
+    --chunk-stats ogh_sensitivity_500m=gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_500m_10.xlsx \
+    --chunk-stats ogh_sensitivity_750m=gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_750m_10.xlsx
+
 To generate a subset, provide only the runs required for the comparisons
 you care about. For example, the following command builds the inventory
 input comparison while skipping the OGH sensitivity plots:
@@ -104,6 +126,17 @@ STACK_COMPONENT_COLORS = {"Drained": "#4f81bd", "Burned": "#c0504d"}
 # Default categorical palette for run-level comparisons. Update this constant to
 # swap palettes without plumbing a CLI flag (palette names mirror pc.PALETTES).
 RUN_COLOR_PALETTE = "tol_bright"
+
+# Default chunk_stats inputs for OGH sensitivity runs. These supersede zonal
+# stats for the distance and high/low sensitivity comparisons but can be
+# overridden per run with --chunk-stats.
+DEFAULT_CHUNK_STATS: Mapping[str, str] = {
+    "ogh_sensitivity_250m": "gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_250m_10",
+    "ogh_sensitivity_500m": "gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_500m_10",
+    "ogh_sensitivity_750m": "gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_750m_10",
+    "ogh_sensitivity_low": "gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_500m_10_low",
+    "ogh_sensitivity_high": "gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_500m_10_high",
+}
 
 
 @dataclass(frozen=True)
@@ -693,23 +726,60 @@ def _component_stats(row: pd.Series) -> tuple[float | None, float | None, float 
 
 def _load_chunk_stats_bounds(path: str, years: Sequence[int]) -> tuple[dict[str, float], MetricUncertainty] | None:
     """
-    Load per-component mean/min/max emissions (Gt CO2e/yr) from a chunk_stats CSV/Parquet.
+    Load per-component mean/min/max emissions (Gt CO2e/yr) from a chunk_stats Excel/CSV/Parquet.
     Returns (metrics_override, uncertainty) keyed by component name.
     """
 
-    try:
-        if path.lower().endswith(".parquet"):
-            df = pd.read_parquet(path)
-        else:
-            df = pd.read_csv(path)
-    except Exception as exc:  # pragma: no cover - file handling
-        print(f"[chunk_stats] Failed to read {path}: {exc}")
-        return None
+    def _read_chunk_table(chunk_path: str) -> pd.DataFrame | None:
+        """Prefer Excel sheet "other_outputs_1x1", fall back to Parquet/CSV."""
+        try:
+            return pd.read_excel(chunk_path, sheet_name="other_outputs_1x1")
+        except Exception:
+            pass
 
+        try:
+            if chunk_path.lower().endswith(".parquet"):
+                return pd.read_parquet(chunk_path)
+            return pd.read_csv(chunk_path)
+        except Exception as exc:  # pragma: no cover - file handling
+            print(f"[chunk_stats] Failed to read {chunk_path}: {exc}")
+            return None
+
+    df = _read_chunk_table(path)
     if df is None or df.empty:
         return None
 
     df = _latest_period_filter(df, years)
+
+    # Excel chunk stats: filter by layer_name and use sum_value totals (Mg → Gt)
+    layer_col = _first_present_col(df, ["layer_name", "layer", "metric"])
+    if layer_col and "sum_value" in df.columns:
+        keep_layers = {
+            "drained_total_Mg_CO2e_ha_yr": "drained_emissions_gt",
+            "burned_total_Mg_CO2e_ha_yr": "burned_emissions_gt",
+        }
+        lower = df[layer_col].astype(str).str.lower()
+        stats: dict[str, float] = {}
+        bounds = MetricUncertainty()
+
+        for raw_name, key in keep_layers.items():
+            subset = df[lower == raw_name.lower()]
+            if subset.empty:
+                continue
+            total_mg = float(subset["sum_value"].sum())
+            stats[key] = total_mg / 1_000_000_000.0
+
+        if not stats:
+            print(
+                f"[chunk_stats] No drained/burned layers found in {path}; "
+                f"available layers={sorted(df[layer_col].dropna().unique())}"
+            )
+            return None
+
+        if {"drained_emissions_gt", "burned_emissions_gt"} <= set(stats):
+            stats["total_emissions_gt"] = stats["drained_emissions_gt"] + stats["burned_emissions_gt"]
+
+        return stats, bounds
 
     comp_col = _first_present_col(df, ["component", "metric", "flux_component", "name"])
     if not comp_col:
@@ -1150,7 +1220,11 @@ def main(argv: Sequence[str] | None = None):
         raise SystemExit("At least one inventory year must be provided")
 
     run_specs = _parse_run_specs(args.run)
-    chunk_stat_paths = _parse_chunk_stat_paths(args.chunk_stats)
+    user_chunk_stat_paths = _parse_chunk_stat_paths(args.chunk_stats)
+    default_chunk_stat_paths = {
+        run_name: path for run_name, path in DEFAULT_CHUNK_STATS.items() if run_name in run_specs
+    }
+    chunk_stat_paths = {**default_chunk_stat_paths, **user_chunk_stat_paths}
     out_dir = _comparison_out_dir(run_specs)
     active_comparisons, skipped_comparisons = _partition_comparisons(run_specs)
     if skipped_comparisons:
