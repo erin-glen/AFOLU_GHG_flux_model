@@ -99,6 +99,8 @@ _interval_folder_strings = pa._interval_folder_strings
 _make_base_prefixes = pa._make_base_prefixes
 _make_globs_for_components = pa._make_globs_for_components
 
+STACK_COMPONENT_COLORS = {"Drained": "#4f81bd", "Burned": "#c0504d"}
+
 
 @dataclass(frozen=True)
 class RunSpec:
@@ -134,11 +136,35 @@ class RunBreakouts:
 
 
 @dataclass(frozen=True)
+class MetricUncertainty:
+    drained_low: float | None = None
+    drained_high: float | None = None
+    burned_low: float | None = None
+    burned_high: float | None = None
+    total_low: float | None = None
+    total_high: float | None = None
+
+    def has_bounds(self) -> bool:
+        return any(
+            v is not None
+            for v in (
+                self.drained_low,
+                self.drained_high,
+                self.burned_low,
+                self.burned_high,
+                self.total_low,
+                self.total_high,
+            )
+        )
+
+
+@dataclass(frozen=True)
 class RunRecord:
     spec: RunSpec
     metrics: RunMetrics
     breakouts: RunBreakouts
     color: str
+    uncertainty: MetricUncertainty | None = None
 
 
 @dataclass(frozen=True)
@@ -275,6 +301,23 @@ def _parse_run_specs(entries: Sequence[str]) -> Mapping[str, RunSpec]:
     return specs
 
 
+def _parse_chunk_stat_paths(entries: Sequence[str] | None) -> Mapping[str, str]:
+    mapping: dict[str, str] = {}
+    if not entries:
+        return mapping
+
+    for entry in entries:
+        if "=" not in entry:
+            raise ValueError("Invalid --chunk-stats specification (expected run_name=path)")
+        run_name, path = entry.split("=", 1)
+        run_name = run_name.strip()
+        path = path.strip()
+        if not run_name or not path:
+            raise ValueError("Invalid --chunk-stats specification (expected run_name=path)")
+        mapping[run_name] = path
+    return mapping
+
+
 def _assign_colors(run_names: Iterable[str]) -> Mapping[str, str]:
     cmap = plt.get_cmap("tab10")
     ordered = sorted(dict.fromkeys(run_names))
@@ -296,13 +339,14 @@ def _add_run_columns(df: pd.DataFrame, spec: RunSpec) -> pd.DataFrame:
 
 
 def _compute_run_data(
-    spec: RunSpec, years: Sequence[int], aws_region: str | None
-) -> tuple[RunMetrics, RunBreakouts]:
+    spec: RunSpec, years: Sequence[int], aws_region: str | None, chunk_stats_path: str | None
+) -> tuple[RunMetrics, RunBreakouts, MetricUncertainty | None]:
     interval_folders = _interval_folder_strings(years)
     base_prefixes = _make_base_prefixes(spec.model_version, spec.run_name, spec.run_date, interval_folders)
     drained_globs, burned_globs = _make_globs_for_components(base_prefixes)
 
     con = duckdb.connect()
+    uncertainty: MetricUncertainty | None = None
     try:
         _register_components(con, drained_globs, burned_globs, aws_region=aws_region)
         _register_state_context_views(con)
@@ -329,6 +373,14 @@ def _compute_run_data(
         by_country_burned_state = con.execute(
             pc.table_by_country_burned_state_sql(with_lookup=have_lookup)
         ).df()
+
+        if chunk_stats_path:
+            loaded = _load_chunk_stats_bounds(chunk_stats_path, years)
+            if loaded is not None:
+                stats_override, bounds = loaded
+                uncertainty = bounds if bounds.has_bounds() else None
+                drained_emissions = float(stats_override.get("drained_emissions_gt", drained_emissions))
+                burned_emissions = float(stats_override.get("burned_emissions_gt", burned_emissions))
     finally:
         con.close()
 
@@ -347,7 +399,7 @@ def _compute_run_data(
         by_country_burned_state=_add_run_columns(by_country_burned_state, spec),
     )
 
-    return metrics, breakouts
+    return metrics, breakouts, uncertainty
 
 
 def _summary_column(metric: MetricSpec) -> str:
@@ -399,6 +451,121 @@ def _plot_metric(df: pd.DataFrame, metric: MetricSpec, comp: ComparisonSpec, col
         ax.text(val + pad, ypos, f"{val:.2f}", ha="left", va="center", fontsize=9)
 
     fig.tight_layout(rect=(0, 0, 1, 0.95))
+    return fig
+
+
+def _build_emission_stack_df(comp: ComparisonSpec, records: Mapping[str, RunRecord]) -> pd.DataFrame:
+    rows: list[dict[str, float | str]] = []
+    for run_name in comp.run_names:
+        record = records[run_name]
+        drained = record.metrics.drained_emissions_gt
+        burned = record.metrics.burned_emissions_gt
+        total = drained + burned
+        unc = record.uncertainty
+        rows.append(
+            {
+                "run_key": run_name,
+                "Run": record.spec.label,
+                "Drained": drained,
+                "Burned": burned,
+                "Total": total,
+                "Total_low": unc.total_low if unc else None,
+                "Total_high": unc.total_high if unc else None,
+                "Drained_low": unc.drained_low if unc else None,
+                "Drained_high": unc.drained_high if unc else None,
+                "Burned_low": unc.burned_low if unc else None,
+                "Burned_high": unc.burned_high if unc else None,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _plot_stacked_total_with_error(df: pd.DataFrame, comp: ComparisonSpec) -> plt.Figure:
+    x = list(range(len(df)))
+    fig, ax = plt.subplots(figsize=(max(6.5, 1.8 * len(x)), 5.0))
+
+    drained = ax.bar(x, df["Drained"], color=STACK_COMPONENT_COLORS["Drained"], label="Drained")
+    burned = ax.bar(
+        x,
+        df["Burned"],
+        bottom=df["Drained"],
+        color=STACK_COMPONENT_COLORS["Burned"],
+        label="Burned",
+    )
+
+    if df[["Total_low", "Total_high"]].notna().any().any():
+        totals = df["Total"]
+        lower = totals - df["Total_low"].fillna(totals)
+        upper = df["Total_high"].fillna(totals) - totals
+        ax.errorbar(
+            x,
+            totals,
+            yerr=[lower, upper],
+            fmt="none",
+            ecolor="black",
+            elinewidth=1.2,
+            capsize=4,
+        )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(df["Run"], rotation=20, ha="right")
+    ax.set_ylabel("Gt CO₂e/year")
+    ax.set_title(f"{comp.label}: Total emissions with uncertainty")
+    ax.legend()
+    ax.set_ylim(bottom=0)
+    ax.bar_label(drained, fmt="{:.2f}", label_type="center", color="white", fontsize=8)
+    ax.bar_label(burned, fmt="{:.2f}", label_type="center", color="white", fontsize=8)
+
+    fig.tight_layout()
+    return fig
+
+
+def _plot_small_multiple_stacks(df: pd.DataFrame, comp: ComparisonSpec) -> plt.Figure:
+    metrics = (
+        ("Drained", "Drained emissions"),
+        ("Burned", "Burned emissions"),
+        ("Total", "Total emissions"),
+    )
+    fig, axes = plt.subplots(1, len(metrics), figsize=(max(9.0, 2.6 * len(df)), 4.8), sharey=False)
+    if len(metrics) == 1:
+        axes = [axes]
+
+    for ax, (col, label) in zip(axes, metrics):
+        x = list(range(len(df)))
+        if col == "Total":
+            ax.bar(x, df["Drained"], color=STACK_COMPONENT_COLORS["Drained"], label="Drained")
+            ax.bar(
+                x,
+                df["Burned"],
+                bottom=df["Drained"],
+                color=STACK_COMPONENT_COLORS["Burned"],
+                label="Burned",
+            )
+            if df[["Total_low", "Total_high"]].notna().any().any():
+                totals = df["Total"]
+                lower = totals - df["Total_low"].fillna(totals)
+                upper = df["Total_high"].fillna(totals) - totals
+                ax.errorbar(x, totals, yerr=[lower, upper], fmt="none", ecolor="black", capsize=4)
+        else:
+            color = STACK_COMPONENT_COLORS[col]
+            ax.bar(x, df[col], color=color)
+            low_col = f"{col}_low"
+            high_col = f"{col}_high"
+            if df[[low_col, high_col]].notna().any().any():
+                lower = df[col] - df[low_col].fillna(df[col])
+                upper = df[high_col].fillna(df[col]) - df[col]
+                ax.errorbar(x, df[col], yerr=[lower, upper], fmt="none", ecolor="black", capsize=4)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(df["Run"], rotation=20, ha="right")
+        ax.set_title(label)
+        ax.set_ylabel("Gt CO₂e/year")
+        ax.set_ylim(bottom=0)
+        if col == "Total":
+            ax.legend()
+
+    fig.suptitle(f"{comp.label}: Drained vs. burned uncertainty panels")
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
     return fig
 
 
@@ -471,6 +638,122 @@ def _latest_period_filter(df: pd.DataFrame, years: Sequence[int]) -> pd.DataFram
             return df[order == max_order].copy()
 
     return df
+
+
+def _get_first_value(row: pd.Series, candidates: Sequence[str]) -> float | None:
+    for col in candidates:
+        if col in row.index and pd.notna(row[col]):
+            try:
+                return float(row[col])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _component_stats(row: pd.Series) -> tuple[float | None, float | None, float | None]:
+    mean = _get_first_value(row, [
+        "mean_gtco2e_per_yr",
+        "avg_gtco2e_per_yr",
+        "mean",
+        "average",
+        "median",
+        "value",
+    ])
+    vmin = _get_first_value(row, ["min", "lower", "low", "p05", "p5"])
+    vmax = _get_first_value(row, ["max", "upper", "high", "p95", "p90"])
+    return mean, vmin, vmax
+
+
+def _load_chunk_stats_bounds(path: str, years: Sequence[int]) -> tuple[dict[str, float], MetricUncertainty] | None:
+    """
+    Load per-component mean/min/max emissions (Gt CO2e/yr) from a chunk_stats CSV/Parquet.
+    Returns (metrics_override, uncertainty) keyed by component name.
+    """
+
+    try:
+        if path.lower().endswith(".parquet"):
+            df = pd.read_parquet(path)
+        else:
+            df = pd.read_csv(path)
+    except Exception as exc:  # pragma: no cover - file handling
+        print(f"[chunk_stats] Failed to read {path}: {exc}")
+        return None
+
+    if df is None or df.empty:
+        return None
+
+    df = _latest_period_filter(df, years)
+
+    comp_col = _first_present_col(df, ["component", "metric", "flux_component", "name"])
+    if not comp_col:
+        print(f"[chunk_stats] No component column detected in {path}; columns={list(df.columns)}")
+        return None
+
+    stats: dict[str, float] = {}
+    bounds = MetricUncertainty()
+
+    comp_series = df[comp_col].astype(str).str.lower() if comp_col in df.columns else pd.Series(dtype=str)
+    for comp_name, label in (("drained", "Drained"), ("burned", "Burned"), ("total", "Total")):
+        subset = df[comp_series.str.contains(comp_name)] if comp_col in df.columns else pd.DataFrame()
+        if subset.empty:
+            continue
+        row = subset.iloc[0]
+        mean, vmin, vmax = _component_stats(row)
+        key_mean = f"{label.lower()}_emissions_gt" if label != "Total" else "total_emissions_gt"
+        if mean is not None:
+            stats[key_mean] = mean
+        if label == "Drained":
+            bounds = MetricUncertainty(
+                drained_low=vmin,
+                drained_high=vmax,
+                burned_low=bounds.burned_low,
+                burned_high=bounds.burned_high,
+                total_low=bounds.total_low,
+                total_high=bounds.total_high,
+            )
+        elif label == "Burned":
+            bounds = MetricUncertainty(
+                drained_low=bounds.drained_low,
+                drained_high=bounds.drained_high,
+                burned_low=vmin,
+                burned_high=vmax,
+                total_low=bounds.total_low,
+                total_high=bounds.total_high,
+            )
+        else:
+            bounds = MetricUncertainty(
+                drained_low=bounds.drained_low,
+                drained_high=bounds.drained_high,
+                burned_low=bounds.burned_low,
+                burned_high=bounds.burned_high,
+                total_low=vmin,
+                total_high=vmax,
+            )
+
+    # Derive totals if only components are present
+    if "total_emissions_gt" not in stats and {"drained_emissions_gt", "burned_emissions_gt"} <= set(stats):
+        stats["total_emissions_gt"] = stats["drained_emissions_gt"] + stats["burned_emissions_gt"]
+
+    if bounds.total_low is None and bounds.drained_low is not None and bounds.burned_low is not None:
+        bounds = MetricUncertainty(
+            drained_low=bounds.drained_low,
+            drained_high=bounds.drained_high,
+            burned_low=bounds.burned_low,
+            burned_high=bounds.burned_high,
+            total_low=bounds.drained_low + bounds.burned_low,
+            total_high=bounds.total_high,
+        )
+    if bounds.total_high is None and bounds.drained_high is not None and bounds.burned_high is not None:
+        bounds = MetricUncertainty(
+            drained_low=bounds.drained_low,
+            drained_high=bounds.drained_high,
+            burned_low=bounds.burned_low,
+            burned_high=bounds.burned_high,
+            total_low=bounds.total_low,
+            total_high=bounds.drained_high + bounds.burned_high,
+        )
+
+    return stats, bounds
 
 
 def _normalize_country_keys(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
@@ -821,6 +1104,14 @@ def main(argv: Sequence[str] | None = None):
         default=10.0,
         help="Relative spread flag threshold as fold-change (default 10x).",
     )
+    parser.add_argument(
+        "--chunk-stats",
+        action="append",
+        help=(
+            "Optional path to chunk_stats summary per run (run_name=path). "
+            "When provided, drained/burned totals and error bars will use these values."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -832,6 +1123,7 @@ def main(argv: Sequence[str] | None = None):
         raise SystemExit("At least one inventory year must be provided")
 
     run_specs = _parse_run_specs(args.run)
+    chunk_stat_paths = _parse_chunk_stat_paths(args.chunk_stats)
     out_dir = _comparison_out_dir(run_specs)
     active_comparisons, skipped_comparisons = _partition_comparisons(run_specs)
     if skipped_comparisons:
@@ -850,12 +1142,15 @@ def main(argv: Sequence[str] | None = None):
 
     records: dict[str, RunRecord] = {}
     for run_name, spec in run_specs.items():
-        metrics, breakouts = _compute_run_data(spec, years, args.aws_region)
+        metrics, breakouts, uncertainty = _compute_run_data(
+            spec, years, args.aws_region, chunk_stat_paths.get(run_name)
+        )
         records[run_name] = RunRecord(
             spec=spec,
             metrics=metrics,
             breakouts=breakouts,
             color=color_map[run_name],
+            uncertainty=uncertainty,
         )
 
     out_data_dir = _join(out_dir, "figures", "comparisons", "data")
@@ -880,6 +1175,24 @@ def main(argv: Sequence[str] | None = None):
                 fig_path = _join(out_dir, "figures", "comparisons", f"{comp.key}_{metric.key}.png")
                 _save_png(fig, fig_path, dpi=300)
                 plt.close(fig)
+
+            if comp.key == "ogh_sensitivity_range":
+                stack_df = _build_emission_stack_df(comp, records)
+                stack_path = _join(out_data_dir, f"{comp.key}_drained_burned_stack.csv")
+                _write_csv_df(writer_con, stack_df, stack_path)
+
+                if args.data_only:
+                    continue
+
+                stack_fig = _plot_stacked_total_with_error(stack_df, comp)
+                stack_fig_path = _join(out_dir, "figures", "comparisons", f"{comp.key}_total_stack_error.png")
+                _save_png(stack_fig, stack_fig_path, dpi=300)
+                plt.close(stack_fig)
+
+                small_fig = _plot_small_multiple_stacks(stack_df, comp)
+                small_fig_path = _join(out_dir, "figures", "comparisons", f"{comp.key}_small_multiples.png")
+                _save_png(small_fig, small_fig_path, dpi=300)
+                plt.close(small_fig)
 
         breakout_specs = (
             ("by_country_period", "by_country"),
