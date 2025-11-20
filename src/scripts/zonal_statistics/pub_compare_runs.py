@@ -34,9 +34,9 @@ Usage example:
 
   python -m src.scripts.zonal_statistics.pub_compare_runs \
     --years 2005 2010 2015 2020 2024 \
-    --run ogh_sensitivity_0km=0_8_5:20251006 \
-    --run ogh_sensitivity_1km=0_8_5:20251006 \
-    --run ogh_sensitivity_2km=0_8_5:20251006 \
+    --run ogh_sensitivity_250m=0_8_5:20251006 \
+    --run ogh_sensitivity_500m=0_8_5:20251006 \
+    --run ogh_sensitivity_750m=0_8_5:20251006 \
     --run "ogh_sensitivity_high=0_8_5:20251006|OGH High" \
     --run "ogh_sensitivity_low=0_8_5:20251006|OGH Low" \
     --run "gfw_standard_model_1km=0_8_5:20251006|GFW 1 km" \
@@ -49,7 +49,7 @@ input comparison while skipping the OGH sensitivity plots:
 
   python -m src.scripts.zonal_statistics.pub_compare_runs \
     --years 2024 \
-    --run ogh_sensitivity_1km=0_8_5:20251002 \
+    --run ogh_sensitivity_500m=0_8_5:20251002 \
     --run "gfw_standard_model_1km=0_8_5:20251006|GFW 1 km" \
     --run "gpd_standard_model_1km=0_8_5:20251007|GPD 1 km" \
     --run "gpd_standard_model_1km_pml=0_8_5:20251008|GPD 1 km (PML)"
@@ -233,9 +233,13 @@ METRIC_SPECS: Mapping[str, MetricSpec] = {
 
 COMPARISONS: Sequence[ComparisonSpec] = (
     ComparisonSpec(
-        key="ogh_resolution",
-        label="OGH Sensitivity (Spatial Resolution)",
-        run_names=("ogh_sensitivity_1km", "ogh_sensitivity_2km", "ogh_sensitivity_0km"),
+        key="ogh_distance",
+        label="OGH Sensitivity (Distance Threshold)",
+        run_names=(
+            "ogh_sensitivity_250m",
+            "ogh_sensitivity_500m",
+            "ogh_sensitivity_750m",
+        ),
         metric_keys=("peat_drained_area", "drained_emissions"),
     ),
     ComparisonSpec(
