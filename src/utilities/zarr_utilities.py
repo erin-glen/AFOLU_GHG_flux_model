@@ -119,8 +119,7 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
         # Define encoding (compression, dtype, and chunks)
         encoding[key] = {
             "compressors": compressor,
-            "_FillValue": None   #TODO NOTE: Untested. Added from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d because of later xarray issues.
-        }
+         }
 
     # Constructs dataset
     main_logger.info(f"Constructing megazarr dataset with metadata only: {uu.timestr()}")
@@ -166,8 +165,6 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
 
     # Open Zarr group in read/write mode
     z = zarr.open_group(store=mapper, mode="r+")
-
-    #TODO Should be able to delete this with the compression change above
 
     # Loop through all arrays
     for key in z.array_keys():
@@ -245,9 +242,9 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
         #         if "density__AGC" in output_to_zarr_pattern:  # Just calculates and prints for AGC density for QC purposes
         #             check_region_stats(mega_zarr_path, output_to_zarr_pattern, year_idx, target_box, logger_worker)
         #
-        # zarr_end = time.time()
+        zarr_end = time.time()
         # lu.print_and_log(f"Memory usage after writing to zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
-        # lu.print_and_log(f"Wrote outputs for {bounds_str} in {tile_id} to global zarrs in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}",False, logger_worker)
+        lu.print_and_log(f"Wrote outputs to global zarrs for {bounds_str} in {tile_id} in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}",False, logger_worker)
 
     else:
         lu.print_and_log(f"Not writing outputs for {bounds_str} in {tile_id} to global zarrs: {uu.timestr()}",False, logger_worker)
@@ -391,7 +388,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     merged_table = subset_model_table.merge(zarr_subset_table, on='chunk_name', how='left')
 
     # Calculates differences for four metrics and stores in new columns
-    main_logger.info(f"    Calculating differences for {var_name} for {year} ({merged_table['count_value_zarr'].item()} pixels in zarr): {uu.timestr()}")
+    main_logger.info(f"    Calculating differences for {var_name} for {year} ({merged_table['count_value_zarr'].sum().item()} pixels in zarr): {uu.timestr()}")
     merged_table['min_value_diff'] = merged_table['min_value'] - merged_table['min_value_zarr']
     merged_table['mean_value_diff'] = merged_table['mean_value'] - merged_table['mean_value_zarr']
     merged_table['max_value_diff'] = merged_table['max_value'] - merged_table['max_value_zarr']

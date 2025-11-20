@@ -61,7 +61,7 @@ def populate_main_log_header(client, cluster, log_note, run_local, model_type, s
     main_logger.info(f"Threads per worker: {nthreads}")
     main_logger.info(f"Log note: {log_note}\n")
 
-    return main_logger, main_log_local_path
+    return main_logger, main_log_local_path, n_workers
 
 # Configure logging for the distributed workers
 # https://chatgpt.com/share/e/6f80ccde-6a85-4837-94a0-4fcf09b96e43
@@ -149,22 +149,45 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
         with open(combined_local_log, "r") as logfile:
             log_content = logfile.read()
 
-        # Processing times for numba code and entire chunks
-        numba_proc_times__sec = [int(m) for m in re.findall(r'in (\d+) seconds', log_content)]
-        total_chunk_proc_times__sec = [int(m) for m in re.findall(r'took (\d+) seconds', log_content)]
+        # Time extraction from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/691f42e3-cd2c-800a-b9e1-715190ad3024
+        # Extracts seconds from lines for core calculation processing
+        numba_proc_times__sec = [int(m) for m in re.findall(r'Calculated using numba.*?(\d+) seconds', log_content)]
+        print(numba_proc_times__sec)
+
+        # Extract seconds from lines for zarr insertion
+        zarr_insert_proc_times__sec = [int(m) for m in re.findall(r'Wrote outputs to global zarrs.*?(\d+) seconds', log_content)]
+        print(zarr_insert_proc_times__sec)
+
+        # Extract seconds from lines for geotif uploads
+        uploads_proc_times__sec = [int(m) for m in re.findall(r'Uploads completed for.*?(\d+) seconds', log_content)]
+        print(uploads_proc_times__sec)
+
+        # Extract seconds from lines for total chunk processing
+        total_chunk_proc_times__sec = [int(m) for m in re.findall(r'Total chunk processing.*?(\d+) seconds', log_content)]
+        print(total_chunk_proc_times__sec)
 
         # Averages
         avg_numba_proc_times__sec = sum(numba_proc_times__sec) / len(numba_proc_times__sec) if numba_proc_times__sec else 0
+        avg_zarr_pop_proc_times__sec = sum(zarr_insert_proc_times__sec) / len(zarr_insert_proc_times__sec) if zarr_insert_proc_times__sec else 0
+        avg_uploads_proc_times__sec = sum(uploads_proc_times__sec) / len(uploads_proc_times__sec) if uploads_proc_times__sec else 0
         avg_total_chunk_proc_times__sec = sum(total_chunk_proc_times__sec) / len(total_chunk_proc_times__sec) if total_chunk_proc_times__sec else 0
 
         # Standard deviations
         stdev_numba_proc_times__sec = statistics.stdev(numba_proc_times__sec) if len(numba_proc_times__sec) > 1 else 0
+        stdev_zarr_pop_proc_times__sec = statistics.stdev(zarr_insert_proc_times__sec) if len(zarr_insert_proc_times__sec) > 1 else 0
+        stdev_uploads_proc_times__sec = statistics.stdev(uploads_proc_times__sec) if len(uploads_proc_times__sec) > 1 else 0
         stdev_total_chunk_proc_times__sec = statistics.stdev(total_chunk_proc_times__sec) if len(total_chunk_proc_times__sec) > 1 else 0
 
+        # Mins
         min_numba_proc_times__sec = min(numba_proc_times__sec) if numba_proc_times__sec else 0
-        max_numba_proc_times__sec = max(numba_proc_times__sec) if numba_proc_times__sec else 0
-
+        min_zarr_pop_proc_times__sec = min(zarr_insert_proc_times__sec) if zarr_insert_proc_times__sec else 0
+        min_uploads_proc_times__sec = min(uploads_proc_times__sec) if uploads_proc_times__sec else 0
         min_total_chunk_proc_times__sec = min(total_chunk_proc_times__sec) if total_chunk_proc_times__sec else 0
+
+        # Maxes
+        max_numba_proc_times__sec = max(numba_proc_times__sec) if numba_proc_times__sec else 0
+        max_zarr_pop_proc_times__sec = max(zarr_insert_proc_times__sec) if zarr_insert_proc_times__sec else 0
+        max_uploads_proc_times__sec = max(uploads_proc_times__sec) if uploads_proc_times__sec else 0
         max_total_chunk_proc_times__sec = max(total_chunk_proc_times__sec) if total_chunk_proc_times__sec else 0
 
         # Step 3: Append results to the log file
@@ -174,6 +197,15 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
             outfile.write(f"Processing stats for numba code ({len(numba_proc_times__sec)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_numba_proc_times__sec:.0f} seconds (stdev: {stdev_numba_proc_times__sec:.0f})\n")
             outfile.write(f"  Min and max: {min_numba_proc_times__sec:.0f} - {max_numba_proc_times__sec:.0f}\n")
+
+            outfile.write(f"Processing stats for zarr insertion code ({len(zarr_insert_proc_times__sec)} tasks):\n")
+            outfile.write(f"  Average and stdev: {avg_zarr_pop_proc_times__sec:.0f} seconds (stdev: {stdev_zarr_pop_proc_times__sec:.0f})\n")
+            outfile.write(f"  Min and max: {min_zarr_pop_proc_times__sec:.0f} - {max_zarr_pop_proc_times__sec:.0f}\n")
+
+            outfile.write(f"Processing stats for geotif upload code ({len(zarr_insert_proc_times__sec)} tasks):\n")
+            outfile.write(f"  Average and stdev: {avg_uploads_proc_times__sec:.0f} seconds (stdev: {stdev_uploads_proc_times__sec:.0f})\n")
+            outfile.write(f"  Min and max: {min_uploads_proc_times__sec:.0f} - {max_uploads_proc_times__sec:.0f}\n")
+
             outfile.write(f"Processing stats for full tasks ({len(total_chunk_proc_times__sec)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_total_chunk_proc_times__sec:.0f} seconds (stdev: {stdev_total_chunk_proc_times__sec:.0f})\n")
             outfile.write(f"  Min and max: {min_total_chunk_proc_times__sec:.0f} - {max_total_chunk_proc_times__sec:.0f}\n")

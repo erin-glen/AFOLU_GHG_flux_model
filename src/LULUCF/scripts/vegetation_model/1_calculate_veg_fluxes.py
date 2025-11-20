@@ -1968,7 +1968,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     numba_end = time.time()
     lu.print_and_log(f"Done calculating vegetation fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     lu.print_and_log(f"Memory usage after numba calculations completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
-    lu.print_and_log(f"Calculated vegetation fluxes and carbon densities in {bounds_str} in {tile_id} in {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Calculated using numba in {bounds_str} in {tile_id} in {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
 
     # print("out_dict_uint8:", out_dict_uint8)
     # print("out_dict_uint32:", out_dict_uint32)
@@ -2002,7 +2002,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # print(out_dict_all_dtypes)
 
 
-    ### Part 5: Writes outputs to pre-existing global mega-zarr (only if requested)
+    ### Part 5: Writes outputs to pre-existing global mega-zarr (only if activated)
 
     zu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
                   out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
@@ -2040,6 +2040,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     if no_upload == False:
 
         out_no_data_val = 0  # NoData value for output raster (optional)
+        upload_start_time = time.time()
 
         # print("output_folders:", output_folders)
 
@@ -2095,10 +2096,11 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
         with ThreadPoolExecutor(max_workers=5) as executor:
             executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
-        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}", is_large_run, logger_worker)
+        upload_end_time = time.time()
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path} in {round(upload_end_time - upload_start_time)} seconds: {uu.timestr()}", is_large_run, logger_worker)
 
     chunk_end_time = time.time()
-    lu.print_and_log(f"{bounds_str} took {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Total chunk processing for {bounds_str} in {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
     return_message = f"Success for {bounds_str}: {uu.timestr()}"
 
@@ -2140,7 +2142,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         chunk_shapefile_uri = cn.fishnet_1x1deg_uri
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
+    main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
@@ -2368,16 +2370,16 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
         # Creates the global mega-zarr with metadata only
         zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
-                                    (1, chunk_size_pixels, chunk_size_pixels), main_logger)
+                                    ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
         mapper = fs.get_mapper(raw_mega_zarr_path)
         ds = xr.open_zarr(mapper, consolidated=False)
-        # ds = xr.open_zarr(mapper)
-        print(ds.coords)
-        print("y range:", ds.y.values.min(), ds.y.values.max())
-        print("x range:", ds.x.values.min(), ds.x.values.max())
+        main_logger.info(f"mega-zarr coords: {ds.coords}")
+        main_logger.info(f"y range: {ds.y.values.min()}, {ds.y.values.max()}")
+        main_logger.info(f"x range: {ds.x.values.min()}, {ds.x.values.max()}")
+        main_logger.info(f"mega-zarr chunk size (years, y, x): {ds.chunksizes}")
 
     else:
         raw_mega_zarr_path = None
@@ -2464,7 +2466,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
     if (not no_stats) and (success_count > 0):
         model_chunk_stats_path = uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
-        print(model_chunk_stats_path)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
@@ -2479,19 +2480,21 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         comparison_insert = "_original_zarr_comparison"
 
         # The name of the chunk stats table from the model
-        model_chunk_stats_path = 'chunk_stats/vegetation_fluxes_1x1_chunk_statistics_20251117_13_01_01.xlsx'  #TODO for testing
         model_chunk_stats_table_name = os.path.basename(model_chunk_stats_path)
         # print(model_chunk_stats_table_name)
 
         tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
             comparison_insert, main_logger, model_chunk_stats_path)
 
-        # Resizes cluster up to 50 workers for zarr chunk stat comparison only if a large-scale run
-        if (not run_local) and (is_large_run == True):
+        # Resizes cluster if more than 1 chunk is being processed.
+        # Uses the minimum of the initial number of workers requested and 50
+        if (not run_local) and (len(chunk_list) > 1):
 
-            main_logger.info("Resizing cluster to 50 workers")
+            zarr_chunk_stats_workers = min(50, n_workers)
 
-            resize_cluster.resize_coiled_cluster(cluster_name, 50)
+            main_logger.info(f"Resizing cluster {zarr_chunk_stats_workers} workers")
+
+            resize_cluster.resize_coiled_cluster(cluster_name, zarr_chunk_stats_workers)
 
         # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
         all_merged_tables = []
@@ -2571,7 +2574,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
             main_logger.info("Resizing cluster to 1 worker")
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
-        # Creates combined log from all workers if not deactivated
+        # # Creates combined log from all workers if not deactivated
         worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
 
         # Adds the workers' logs to the main log and uploads to s3

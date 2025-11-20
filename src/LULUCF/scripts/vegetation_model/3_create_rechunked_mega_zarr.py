@@ -146,7 +146,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
         chunk_shapefile_uri = cn.fishnet_1x1deg_uri
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
+    main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
@@ -203,7 +203,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
 
     # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
     zu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, years_to_process,
-                                   (1, cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
+                                   ((len(cn.interval_end_years_annual)), cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
 
     fs = fsspec.filesystem("s3", anon=False)
     source_mapper = fs.get_mapper(rechunked_mega_zarr_path)
