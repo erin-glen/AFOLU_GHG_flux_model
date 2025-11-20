@@ -101,6 +101,10 @@ _make_globs_for_components = pa._make_globs_for_components
 
 STACK_COMPONENT_COLORS = {"Drained": "#4f81bd", "Burned": "#c0504d"}
 
+# Default categorical palette for run-level comparisons. Update this constant to
+# swap palettes without plumbing a CLI flag (palette names mirror pc.PALETTES).
+RUN_COLOR_PALETTE = "tol_bright"
+
 
 @dataclass(frozen=True)
 class RunSpec:
@@ -319,8 +323,14 @@ def _parse_chunk_stat_paths(entries: Sequence[str] | None) -> Mapping[str, str]:
 
 
 def _assign_colors(run_names: Iterable[str]) -> Mapping[str, str]:
-    cmap = plt.get_cmap("tab10")
+    """Stable, readable colors for runs using the shared publication palette."""
+
     ordered = sorted(dict.fromkeys(run_names))
+
+    if RUN_COLOR_PALETTE:
+        return pc.resolve_colors(ordered, palette=RUN_COLOR_PALETTE)
+
+    cmap = plt.get_cmap("tab10")
     return {run: mcolors.to_hex(cmap(i % cmap.N)) for i, run in enumerate(ordered)}
 
 
@@ -437,21 +447,26 @@ def _plot_metric(df: pd.DataFrame, metric: MetricSpec, comp: ComparisonSpec, col
     values = df["Value"].tolist()
     y_positions = list(range(len(labels)))
     height = max(3.2, 0.55 * len(labels) + 1.0)
-    fig, ax = plt.subplots(figsize=(7.5, height))
-    ax.barh(y_positions, values, color=colors)
-    ax.set_yticks(y_positions)
-    ax.set_yticklabels(labels)
-    ax.invert_yaxis()
-    ax.set_xlabel(f"{metric.label} ({metric.units})")
-    ax.set_title(comp.label)
+    theme = {**pc.THEME_LIGHT_GRID, "axes.grid.axis": "x"}
+    with pc.use_theme(theme):
+        fig, ax = plt.subplots(figsize=(7.5, height))
+        ax.barh(y_positions, values, color=colors)
+        ax.set_yticks(y_positions)
+        ax.set_yticklabels(labels)
+        ax.invert_yaxis()
+        ax.set_xlabel(f"{metric.label} ({metric.units})")
+        ax.set_title(comp.label)
+        ax.set_axisbelow(True)
+        pc.tidy_axes(ax, grid="x")
+        pc.fmt_si(ax, axis="x")
 
-    x_max = max(values) if values else 0.0
-    pad = x_max * 0.03 if x_max else 0.05
-    for ypos, val in zip(y_positions, values):
-        ax.text(val + pad, ypos, f"{val:.2f}", ha="left", va="center", fontsize=9)
+        x_max = max(values) if values else 0.0
+        pad = x_max * 0.03 if x_max else 0.05
+        for ypos, val in zip(y_positions, values):
+            ax.text(val + pad, ypos, f"{val:.2f}", ha="left", va="center", fontsize=9)
 
-    fig.tight_layout(rect=(0, 0, 1, 0.95))
-    return fig
+        fig.tight_layout(rect=(0, 0, 1, 0.95))
+        return fig
 
 
 def _build_emission_stack_df(comp: ComparisonSpec, records: Mapping[str, RunRecord]) -> pd.DataFrame:
@@ -482,42 +497,46 @@ def _build_emission_stack_df(comp: ComparisonSpec, records: Mapping[str, RunReco
 
 def _plot_stacked_total_with_error(df: pd.DataFrame, comp: ComparisonSpec) -> plt.Figure:
     x = list(range(len(df)))
-    fig, ax = plt.subplots(figsize=(max(6.5, 1.8 * len(x)), 5.0))
+    with pc.use_theme(pc.THEME_LIGHT_GRID):
+        fig, ax = plt.subplots(figsize=(max(6.5, 1.8 * len(x)), 5.0))
 
-    drained = ax.bar(x, df["Drained"], color=STACK_COMPONENT_COLORS["Drained"], label="Drained")
-    burned = ax.bar(
-        x,
-        df["Burned"],
-        bottom=df["Drained"],
-        color=STACK_COMPONENT_COLORS["Burned"],
-        label="Burned",
-    )
-
-    if df[["Total_low", "Total_high"]].notna().any().any():
-        totals = df["Total"]
-        lower = totals - df["Total_low"].fillna(totals)
-        upper = df["Total_high"].fillna(totals) - totals
-        ax.errorbar(
+        drained = ax.bar(x, df["Drained"], color=STACK_COMPONENT_COLORS["Drained"], label="Drained")
+        burned = ax.bar(
             x,
-            totals,
-            yerr=[lower, upper],
-            fmt="none",
-            ecolor="black",
-            elinewidth=1.2,
-            capsize=4,
+            df["Burned"],
+            bottom=df["Drained"],
+            color=STACK_COMPONENT_COLORS["Burned"],
+            label="Burned",
         )
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(df["Run"], rotation=20, ha="right")
-    ax.set_ylabel("Gt CO₂e/year")
-    ax.set_title(f"{comp.label}: Total emissions with uncertainty")
-    ax.legend()
-    ax.set_ylim(bottom=0)
-    ax.bar_label(drained, fmt="{:.2f}", label_type="center", color="white", fontsize=8)
-    ax.bar_label(burned, fmt="{:.2f}", label_type="center", color="white", fontsize=8)
+        if df[["Total_low", "Total_high"]].notna().any().any():
+            totals = df["Total"]
+            lower = totals - df["Total_low"].fillna(totals)
+            upper = df["Total_high"].fillna(totals) - totals
+            ax.errorbar(
+                x,
+                totals,
+                yerr=[lower, upper],
+                fmt="none",
+                ecolor="black",
+                elinewidth=1.2,
+                capsize=4,
+            )
 
-    fig.tight_layout()
-    return fig
+        ax.set_xticks(x)
+        ax.set_xticklabels(df["Run"], rotation=20, ha="right")
+        ax.set_ylabel("Gt CO₂e/year")
+        ax.set_title(f"{comp.label}: Total emissions with uncertainty")
+        ax.set_axisbelow(True)
+        pc.tidy_axes(ax, grid="y")
+        pc.fmt_si(ax, axis="y")
+        ax.legend(frameon=False)
+        ax.set_ylim(bottom=0)
+        ax.bar_label(drained, fmt="{:.2f}", label_type="center", color="white", fontsize=8)
+        ax.bar_label(burned, fmt="{:.2f}", label_type="center", color="white", fontsize=8)
+
+        fig.tight_layout()
+        return fig
 
 
 def _plot_small_multiple_stacks(df: pd.DataFrame, comp: ComparisonSpec) -> plt.Figure:
@@ -526,47 +545,51 @@ def _plot_small_multiple_stacks(df: pd.DataFrame, comp: ComparisonSpec) -> plt.F
         ("Burned", "Burned emissions"),
         ("Total", "Total emissions"),
     )
-    fig, axes = plt.subplots(1, len(metrics), figsize=(max(9.0, 2.6 * len(df)), 4.8), sharey=False)
-    if len(metrics) == 1:
-        axes = [axes]
+    with pc.use_theme(pc.THEME_LIGHT_GRID):
+        fig, axes = plt.subplots(1, len(metrics), figsize=(max(9.0, 2.6 * len(df)), 4.8), sharey=False)
+        if len(metrics) == 1:
+            axes = [axes]
 
-    for ax, (col, label) in zip(axes, metrics):
-        x = list(range(len(df)))
-        if col == "Total":
-            ax.bar(x, df["Drained"], color=STACK_COMPONENT_COLORS["Drained"], label="Drained")
-            ax.bar(
-                x,
-                df["Burned"],
-                bottom=df["Drained"],
-                color=STACK_COMPONENT_COLORS["Burned"],
-                label="Burned",
-            )
-            if df[["Total_low", "Total_high"]].notna().any().any():
-                totals = df["Total"]
-                lower = totals - df["Total_low"].fillna(totals)
-                upper = df["Total_high"].fillna(totals) - totals
-                ax.errorbar(x, totals, yerr=[lower, upper], fmt="none", ecolor="black", capsize=4)
-        else:
-            color = STACK_COMPONENT_COLORS[col]
-            ax.bar(x, df[col], color=color)
-            low_col = f"{col}_low"
-            high_col = f"{col}_high"
-            if df[[low_col, high_col]].notna().any().any():
-                lower = df[col] - df[low_col].fillna(df[col])
-                upper = df[high_col].fillna(df[col]) - df[col]
-                ax.errorbar(x, df[col], yerr=[lower, upper], fmt="none", ecolor="black", capsize=4)
+        for ax, (col, label) in zip(axes, metrics):
+            x = list(range(len(df)))
+            if col == "Total":
+                ax.bar(x, df["Drained"], color=STACK_COMPONENT_COLORS["Drained"], label="Drained")
+                ax.bar(
+                    x,
+                    df["Burned"],
+                    bottom=df["Drained"],
+                    color=STACK_COMPONENT_COLORS["Burned"],
+                    label="Burned",
+                )
+                if df[["Total_low", "Total_high"]].notna().any().any():
+                    totals = df["Total"]
+                    lower = totals - df["Total_low"].fillna(totals)
+                    upper = df["Total_high"].fillna(totals) - totals
+                    ax.errorbar(x, totals, yerr=[lower, upper], fmt="none", ecolor="black", capsize=4)
+            else:
+                color = STACK_COMPONENT_COLORS[col]
+                ax.bar(x, df[col], color=color)
+                low_col = f"{col}_low"
+                high_col = f"{col}_high"
+                if df[[low_col, high_col]].notna().any().any():
+                    lower = df[col] - df[low_col].fillna(df[col])
+                    upper = df[high_col].fillna(df[col]) - df[col]
+                    ax.errorbar(x, df[col], yerr=[lower, upper], fmt="none", ecolor="black", capsize=4)
 
-        ax.set_xticks(x)
-        ax.set_xticklabels(df["Run"], rotation=20, ha="right")
-        ax.set_title(label)
-        ax.set_ylabel("Gt CO₂e/year")
-        ax.set_ylim(bottom=0)
-        if col == "Total":
-            ax.legend()
+            ax.set_xticks(x)
+            ax.set_xticklabels(df["Run"], rotation=20, ha="right")
+            ax.set_title(label)
+            ax.set_ylabel("Gt CO₂e/year")
+            ax.set_axisbelow(True)
+            pc.tidy_axes(ax, grid="y")
+            pc.fmt_si(ax, axis="y")
+            ax.set_ylim(bottom=0)
+            if col == "Total":
+                ax.legend(frameon=False)
 
-    fig.suptitle(f"{comp.label}: Drained vs. burned uncertainty panels")
-    fig.tight_layout(rect=(0, 0, 1, 0.94))
-    return fig
+        fig.suptitle(f"{comp.label}: Drained vs. burned uncertainty panels")
+        fig.tight_layout(rect=(0, 0, 1, 0.94))
+        return fig
 
 
 def _collect_breakouts(records: Mapping[str, RunRecord], attr: str) -> pd.DataFrame:
