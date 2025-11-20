@@ -51,6 +51,8 @@ defaults. Chunk stats are expected to be Excel outputs containing an
 ``other_outputs_1x1`` sheet with ``layer_name`` columns for
 ``drained_total_Mg_CO2e_ha_yr`` and ``burned_total_Mg_CO2e_ha_yr``; the script
 automatically extracts the ``sum_value`` totals (converted from Mg to Gt).
+The high/low emissions comparison pairs the 500 m baseline run with the high
+and low variants so the mid-point scenario is always represented.
 
 To explicitly point the OGH sensitivity distance comparison at chunk-stats Excel
 inputs, include the run-specific paths when invoking the script (one entry per
@@ -289,7 +291,7 @@ COMPARISONS: Sequence[ComparisonSpec] = (
     ComparisonSpec(
         key="ogh_sensitivity_range",
         label="OGH Sensitivity (High/Low Emissions)",
-        run_names=("ogh_sensitivity_1km", "ogh_sensitivity_high", "ogh_sensitivity_low"),
+        run_names=("ogh_sensitivity_500m", "ogh_sensitivity_high", "ogh_sensitivity_low"),
         metric_keys=("drained_emissions", "burned_emissions", "total_emissions"),
     ),
 )
