@@ -6,11 +6,11 @@ Production-lean defaults:
 - Smart alignment: skip reindex_like if coords already equal to pixel_area.
 
 python -m src.scripts.zonal_statistics.02_run_zonal_stats \
-  --interval_end_years 2021 \
-  --cluster_name zonal_stats \
-  --run_date 20251116 \
-  --model_version 0_9_0 \
-  --run_name ogh_sensitivity_1km \
+  --interval_end_years 2005 2010 2015 2020 \
+  --cluster_name drainage_cluster \
+  --run_date 20251118 \
+  --model_version 0_9_7 \
+  --run_name ogh_sensitivity_500m_10 \
   --chunk_size 10000 \
   --diagnostics off
 

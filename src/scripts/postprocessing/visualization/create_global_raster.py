@@ -601,6 +601,7 @@ def aggregate_main(
 
         dataset_name = items["dataset"]
         is_drained = (dataset_name == "drained_state")
+        is_burned  = (dataset_name == "burned_state")
 
         stage = f"aggregate tiles to {res_label} for {key}"
         lu.print_and_log(f"Stage {stage} started at: {uu.timestr()}", is_final, logger)
@@ -650,6 +651,18 @@ def aggregate_main(
                 is_final=is_final,
                 out_dtype=np.uint8,
                 int_nodata=int(UINT8_NODATA),
+            )
+        elif is_burned:
+            _ = combine_global_raster_streaming(
+                tiles_iter=tiles_iter,
+                bounds_list=bounds_list,
+                res_label=res_label,
+                global_outfile=global_outfile,
+                global_output_path=global_output_path,
+                target_deg=target_deg,
+                is_final=is_final,
+                out_dtype=np.int32,
+                int_nodata=-1,     # not 0; 0 means “no burn”
             )
         else:
             _ = combine_global_raster_streaming(

@@ -32,7 +32,7 @@ INVENTORY_PERIODS = [
     # "2001_2005",
     # "2006_2010",
     # "2011_2015",
-    # "2016_2020",
+    # "2016_2020"
     "2021_2024"
 ]
 
@@ -310,7 +310,7 @@ python -m src.scripts.core_model.2_per_pixel_soils_outputs \
 python -m src.scripts.core_model.2_per_pixel_soils_outputs \
   --cluster_name per_pixel \
   --chunk_size 1 \
-  --run_name ogh_sensitivity_500m_23\
+  --run_name ogh_sensitivity_500m_10\
   --output_date 20251118
 
     """

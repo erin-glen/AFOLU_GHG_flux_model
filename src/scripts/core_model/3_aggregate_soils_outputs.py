@@ -31,7 +31,7 @@ INVENTORY_PERIODS = [
     # "2001_2005",
     # "2006_2010",
     # "2011_2015",
-    # "2016_2020",
+    # "2016_2020"
     "2021_2024"
 ]
 
@@ -175,5 +175,5 @@ if __name__ == "__main__":
     )
 
 """
-python -m src.scripts.core_model.3_aggregate_soils_outputs -cn aggregate --run_name ogh_sensitivity_500m_10 --output_date 20251118
+python -m src.scripts.core_model.3_aggregate_soils_outputs -cn drainage_cluster --run_name ogh_sensitivity_500m_10 --output_date 20251118
 """
