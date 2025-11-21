@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """Build comparison figures across multiple zonal-statistics runs.
 
@@ -10,7 +11,7 @@ Arguments mirror ``pub_assets`` conventions:
   :func:`_make_base_prefixes` and downstream file discovery.
   When adding a custom label (anything after ``|``) quote the entire
   argument so your shell does not treat the pipe character as a command
-  separator; e.g. ``--run "gfw_standard_model_1km=0_9_7:20251006|GFW 1 km"``.
+  separator; e.g. ``--run "gfw_standard_model_500m=0_9_7:20251006|GFW 500 m"``.
 * ``--aws_region`` – optional AWS region for S3 access (mirrors
   ``pub_assets`` default behaviour).
 * ``--data-only`` – skip figure generation and export CSV data only.
@@ -19,7 +20,7 @@ Arguments mirror ``pub_assets`` conventions:
 * ``--flag-rel-fold`` – relative spread threshold (fold-change) for FLAGging
   countries in the disagreement summary (default 10x).
 * ``--chunk-stats`` – *optional* per-run overrides for chunk_stats location;
-  normally not needed for OGH sensitivity runs.
+  see notes below.
 
 Each comparison defined below expects a specific set of run names. When a
 comparison's requirements are not fully met, the script will skip that
@@ -27,8 +28,8 @@ comparison and emit a note summarizing the missing runs. Provide additional
 ``--run`` entries if you need to compare multiple model versions or reruns of
 the same scenario.
 
-Outputs are grouped under ``/mnt/c/tmp/pub_assets/comparisons/<run_names>/`` to
-mirror the main driver folder hierarchy (run_names joined with ``__``).
+Outputs are grouped under ``/mnt/c/tmp/pub_assets/comparisons/<run_names>/``
+where ``<run_names>`` is all run names joined with ``__``.
 
 Usage example (inventory + OGH sensitivity combined):
 
@@ -36,39 +37,64 @@ Usage example (inventory + OGH sensitivity combined):
 
   python -m src.scripts.zonal_statistics.pub_compare_runs \
     --years 2005 2010 2015 2020 2024 \
-    --run ogh_sensitivity_250m=0_9_7:20251006 \
-    --run ogh_sensitivity_500m=0_9_7:20251006 \
-    --run ogh_sensitivity_750m=0_9_7:20251006 \
-    --run "ogh_sensitivity_high=0_9_7:20251006|OGH High" \
-    --run "ogh_sensitivity_low=0_9_7:20251006|OGH Low" \
-    --run "gfw_standard_model_1km=0_9_7:20251006|GFW 1 km" \
-    --run "gpd_standard_model_1km=0_9_7:20251007|GPD 1 km" \
-    --run "gpd_standard_model_1km_pml=0_9_7:20251007|GPD 1 km (PML)"
+    --run ogh_sensitivity_250m=0_9_7:20251120\
+    --run ogh_sensitivity_500m=0_9_7:20251121 \
+    --run ogh_sensitivity_750m=0_9_7:20251120 \
+    --run "ogh_sensitivity_high=0_9_7:20251120|OGH High" \
+    --run "ogh_sensitivity_low=0_9_7:20251121|OGH Low" \
+    --run "ogh_sensitivity_500m_10=0_9_7:20251118|OGH inventory (500 m)" \
+    --run "gfw_standard_model_500m=0_9_7:20251120|GFW 500 m" \
+    --run "gpd_standard_model_500m=0_9_7:20251120|GPD 500 m"
 
-OGH sensitivity comparisons (distance and high/low emissions) are designed to
-use chunk-statistics inputs instead of zonal statistics. This script will
-*auto-discover* the 1×1 chunk_stats Excel file for each OGH run based on
-``run_name``, ``model_version`` and ``run_date``, assuming the standard AFOLU
-output layout:
-
-  s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/
-    version_<model_version>/chunk_stats/<run_name>_10/<run_date>/*.xlsx
-
-For example, distance-only comparison for 0.9.7 runs:
 
   python -m src.scripts.zonal_statistics.pub_compare_runs \
     --years 2024 \
-    --run ogh_sensitivity_250m=0_9_7:20251120 \
-    --run ogh_sensitivity_500m=0_9_7:20251121\
+    --run "ogh_sensitivity_500m_10=0_9_7:20251118|OGH inventory (500 m)" \
+    --run "gfw_standard_model_500m=0_9_7:20251120|GFW 500 m" \
+    --run "gpd_standard_model_500m=0_9_7:20251120|GPD 500 m"
+
+  python -m src.scripts.zonal_statistics.pub_compare_runs \
+    --years 2024 \
+    --run ogh_sensitivity_250m=0_9_7:20251120\
+    --run ogh_sensitivity_500m=0_9_7:20251121 \
     --run ogh_sensitivity_750m=0_9_7:20251120
 
-will automatically look for:
+  python -m src.scripts.zonal_statistics.pub_compare_runs \
+    --years 2024 \
+    --run "ogh_sensitivity_high=0_9_7:20251120|OGH High" \
+    --run "ogh_sensitivity_low=0_9_7:20251121|OGH Low" \
+    --run "ogh_sensitivity_500m=0_9_7:20251121|OGH inventory (500 m)"
 
-  s3://gfw2-data/.../version_0_9_7/chunk_stats/ogh_sensitivity_250m_10/20231231/*.xlsx
-  s3://gfw2-data/.../version_0_9_7/chunk_stats/ogh_sensitivity_500m_10/20231231/*.xlsx
-  s3://gfw2-data/.../version_0_9_7/chunk_stats/ogh_sensitivity_750m_10/20231231/*.xlsx
 
-No ``--chunk-stats`` arguments are needed as long as this layout holds.
+OGH sensitivity comparisons (distance and high/low emissions) are designed to
+prefer chunk-statistics inputs when available. This script will *auto-discover*
+the 1×1 chunk_stats Excel file for the OGH sensitivity runs based on
+``run_name``, ``model_version`` and ``run_date``, assuming the standard AFOLU
+output layout on S3:
+
+  s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/
+    version_<model_version>/chunk_stats/<dir_name>/<run_date>/*.xlsx
+
+where ``dir_name`` is:
+
+  - ``ogh_sensitivity_250m_10``
+  - ``ogh_sensitivity_500m_10``
+  - ``ogh_sensitivity_750m_10``
+  - ``ogh_sensitivity_500m_10_low``   (for ``ogh_sensitivity_low``)
+  - ``ogh_sensitivity_500m_10_high``  (for ``ogh_sensitivity_high``)
+
+If no such Excel file is found for a sensitivity run, the script falls back to
+using zonal statistics only for that run.
+
+The **Inventory Input Source Comparison** uses the following runs and, by
+default, reads *only* zonal-statistics outputs:
+
+  - ``ogh_sensitivity_500m_10``
+  - ``gfw_standard_model_500m``
+  - ``gpd_standard_model_500m``
+
+Chunk stats for these runs are used *only* if you explicitly pass
+``--chunk-stats run_name=...`` for them.
 
 If your chunk_stats live somewhere else (e.g. a different bucket or local
 path), you can either:
@@ -82,45 +108,24 @@ sheet with ``layer_name`` values
 ``drained_total_Mg_CO2e_ha_yr`` and ``burned_total_Mg_CO2e_ha_yr``; the script
 automatically extracts the ``sum_value`` totals (converted from Mg to Gt).
 
-The high/low emissions comparison pairs the 500 m baseline run with the high
-and low variants so the mid-point scenario is always represented.
-
-To explicitly point the OGH sensitivity distance comparison at custom
-chunk-stats locations (for example, if your layout deviates from the standard),
-include the run-specific paths when invoking the script:
+Example OGH high/low comparison:
 
   python -m src.scripts.zonal_statistics.pub_compare_runs \
     --years 2024 \
-    --run ogh_sensitivity_250m=0_9_7:20231231 \
-    --run ogh_sensitivity_500m=0_9_7:20231231 \
-    --run ogh_sensitivity_750m=0_9_7:20231231 \
-    --chunk-stats ogh_sensitivity_250m=s3://my-bucket/custom/ogh_sensitivity_250m_10/20231231 \
-    --chunk-stats ogh_sensitivity_500m=/mnt/custom/ogh_sensitivity_500m_10/20231231 \
-    --chunk-stats ogh_sensitivity_750m=/mnt/custom/ogh_sensitivity_750m_10/20231231
-
-High/low comparison example (baseline in the middle by design):
-
-  python -m src.scripts.zonal_statistics.pub_compare_runs \
-    --years 2024 \
-    --run "ogh_sensitivity_500m=0_9_7:20251121|OGH 500 m baseline" \
+    --run "ogh_sensitivity_500m=0_9_7:20251120|OGH 500 m baseline" \
     --run "ogh_sensitivity_high=0_9_7:20251120|OGH High" \
     --run "ogh_sensitivity_low=0_9_7:20251121|OGH Low"
 
-Each run name may specify a custom label after ``|`` that will be used in
-the exported tables and figure titles. If you skip the custom label the
-script will derive one automatically from the run name. In addition to the
-comparison summaries, the script exports run-level tables mirroring the
-``pub_assets`` outputs (by country, drained state, burned state, and their
-country/state intersections). Country-level tables include the run metadata
-columns (``run_name``, ``Run``, ``model_version``, ``run_date``). Country
-tables also carry best-effort ISO3 and country name lookups using the same
-helper logic as ``pub_assets``.
+For distance and high/low comparisons, this script produces a *single* stacked
+bar chart each, showing total emissions (Gt CO₂e/year) split into drained and
+burned components. The mid-point (500 m baseline) is always plotted in the
+middle, with the lower sensitivity on the left and higher on the right.
 
 For the **Inventory Input Source Comparison**, this script also exports
 per-country **disagreement** tables for total peat area (Mha) across the source
-runs (GFW / GPD / GPD-PML / OGH), including min/median/max, absolute spread,
-fold-change, log10 spread, and the min/max contributing dataset, plus a flagged
-subset based on user-tunable thresholds.
+runs (OGH / GFW / GPD), including min/median/max, absolute spread, fold-change,
+log10 spread, and the min/max contributing dataset, plus a flagged subset based
+on user-tunable thresholds.
 """
 
 from __future__ import annotations
@@ -160,11 +165,21 @@ STACK_COMPONENT_COLORS = {"Drained": "#4f81bd", "Burned": "#c0504d"}
 # swap palettes without plumbing a CLI flag (palette names mirror pc.PALETTES).
 RUN_COLOR_PALETTE = "tol_bright"
 
-# Root location for chunk_stats Excel summaries (S3 by default).
+# Root location for chunk_stats Excel summaries.
+# IMPORTANT: default to the S3 outputs root, not the local pub_assets root.
 CHUNK_STATS_ROOT = os.environ.get(
     "AFOLU_CHUNK_STATS_ROOT",
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs",
 )
+
+# Runs that should auto-prefer chunk_stats (distance + high/low sensitivities)
+SENSITIVITY_CHUNK_RUNS = {
+    "ogh_sensitivity_250m",
+    "ogh_sensitivity_500m",
+    "ogh_sensitivity_750m",
+    "ogh_sensitivity_low",
+    "ogh_sensitivity_high",
+}
 
 
 @dataclass(frozen=True)
@@ -298,24 +313,23 @@ COMPARISONS: Sequence[ComparisonSpec] = (
             "ogh_sensitivity_500m",
             "ogh_sensitivity_750m",
         ),
-        # Keep area & drained emissions for tables; figures will use stacked totals.
+        # summary CSV has drained area + drained + total; figure uses total stack
         metric_keys=("peat_drained_area", "drained_emissions", "total_emissions"),
     ),
     ComparisonSpec(
         key="inventory_source",
         label="Inventory Input Source Comparison",
         run_names=(
-            "ogh_sensitivity_1km",
-            "gfw_standard_model_1km",
-            "gpd_standard_model_1km",
-            "gpd_standard_model_1km_pml",
+            "ogh_sensitivity_500m_10",
+            "gfw_standard_model_500m",
+            "gpd_standard_model_500m",
         ),
         metric_keys=("peat_total_area", "peat_drained_area", "drained_emissions", "burned_emissions"),
     ),
     ComparisonSpec(
         key="ogh_sensitivity_range",
         label="OGH Sensitivity (High/Low Emissions)",
-        # Low – baseline – High so baseline is always in the middle.
+        # Low – Baseline – High so baseline is always in the middle
         run_names=("ogh_sensitivity_low", "ogh_sensitivity_500m", "ogh_sensitivity_high"),
         metric_keys=("drained_emissions", "burned_emissions", "total_emissions"),
     ),
@@ -390,7 +404,7 @@ def _glob_s3_xlsx(prefix: str) -> list[str]:
     """Best-effort S3 glob for *.xlsx under the given prefix directory."""
     try:
         import fsspec  # type: ignore[import]
-    except Exception as exc:
+    except Exception as exc:  # pragma: no cover - environment-specific
         print(f"[chunk_stats] S3 support not available (fsspec import failed): {exc}")
         return []
 
@@ -398,16 +412,16 @@ def _glob_s3_xlsx(prefix: str) -> list[str]:
     pattern = prefix.rstrip("/") + "/*.xlsx"
     try:
         matches = fs.glob(pattern)
-    except Exception as exc:
+    except Exception as exc:  # pragma: no cover - environment-specific
         print(f"[chunk_stats] Failed to glob S3 pattern {pattern!r}: {exc}")
         return []
 
     results: list[str] = []
     for p in matches:
-        if p.startswith("s3://"):
+        if isinstance(p, str) and p.startswith("s3://"):
             results.append(p)
         else:
-            results.append("s3://" + p)
+            results.append("s3://" + str(p))
     return results
 
 
@@ -481,14 +495,18 @@ def _guess_chunk_stats_path(spec: RunSpec) -> str | None:
     Default pattern (most runs):
       {CHUNK_STATS_ROOT}/version_{model_version}/chunk_stats/{run_name}_10/{run_date}/*.xlsx
 
-    Special handling for the 500 m baseline and low/high sensitivity runs:
+    Special handling for the 500 m baseline and low/high sensitivity runs, which store
+    chunk_stats under:
       baseline: .../chunk_stats/ogh_sensitivity_500m_10/<run_date>/*.xlsx
       low:      .../chunk_stats/ogh_sensitivity_500m_10_low/<run_date>/*.xlsx
       high:     .../chunk_stats/ogh_sensitivity_500m_10_high/<run_date>/*.xlsx
+
+    Returns a concrete file path or None if nothing is found.
     """
 
     root = CHUNK_STATS_ROOT.rstrip("/")
 
+    # Map run_name -> "chunk_stats directory name" (without version_*/ prefix)
     if spec.run_name == "ogh_sensitivity_500m":
         dir_name = "ogh_sensitivity_500m_10"
     elif spec.run_name == "ogh_sensitivity_low":
@@ -673,13 +691,15 @@ def _build_metric_long_df(comp: ComparisonSpec, metric: MetricSpec, records: Map
     rows: list[dict[str, float | str]] = []
     for run_name in comp.run_names:
         record = records[run_name]
-        rows.append({
-            "run_key": run_name,
-            "Run": record.spec.label,
-            "Value": metric.extractor(record.metrics),
-            "Metric": metric.label,
-            "Units": metric.units,
-        })
+        rows.append(
+            {
+                "run_key": run_name,
+                "Run": record.spec.label,
+                "Value": metric.extractor(record.metrics),
+                "Metric": metric.label,
+                "Units": metric.units,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -736,24 +756,34 @@ def _build_emission_stack_df(comp: ComparisonSpec, records: Mapping[str, RunReco
     return pd.DataFrame(rows)
 
 
-def _plot_stacked_total_with_error(df: pd.DataFrame, comp: ComparisonSpec) -> plt.Figure:
-    x = list(range(len(df)))
-    with pc.use_theme(pc.THEME_LIGHT_GRID):
-        fig, ax = plt.subplots(figsize=(max(6.5, 1.8 * len(x)), 5.0))
+def _plot_stacked_total(df: pd.DataFrame, comp: ComparisonSpec) -> plt.Figure:
+    """
+    Single vertical stacked bar chart for total emissions split drained/burned.
 
-        drained = ax.bar(x, df["Drained"], color=STACK_COMPONENT_COLORS["Drained"], label="Drained")
-        burned = ax.bar(
+    Bars are ordered exactly as in df; for the sensitivity-range comparison this
+    is Low – Baseline – High so the baseline appears in the middle.
+    """
+    x = list(range(len(df)))
+
+    with pc.use_theme(pc.THEME_LIGHT_GRID):
+        fig, ax = plt.subplots(figsize=(max(6.5, 2.2 * len(x)), 5.0))
+
+        drained_bar = ax.bar(x, df["Drained"], label="Drained", color=STACK_COMPONENT_COLORS["Drained"])
+        burned_bar = ax.bar(
             x,
             df["Burned"],
             bottom=df["Drained"],
-            color=STACK_COMPONENT_COLORS["Burned"],
             label="Burned",
+            color=STACK_COMPONENT_COLORS["Burned"],
         )
 
+        # Optional error bars on Total (if present)
         if df[["Total_low", "Total_high"]].notna().any().any():
             totals = df["Total"]
-            lower = totals - df["Total_low"].fillna(totals)
-            upper = df["Total_high"].fillna(totals) - totals
+            total_low = df["Total_low"].fillna(totals)
+            total_high = df["Total_high"].fillna(totals)
+            lower = totals - total_low
+            upper = total_high - totals
             ax.errorbar(
                 x,
                 totals,
@@ -767,14 +797,40 @@ def _plot_stacked_total_with_error(df: pd.DataFrame, comp: ComparisonSpec) -> pl
         ax.set_xticks(x)
         ax.set_xticklabels(df["Run"], rotation=20, ha="right")
         ax.set_ylabel("Gt CO₂e/year")
-        ax.set_title(f"{comp.label}")
+        ax.set_title(comp.label)
         ax.set_axisbelow(True)
         pc.tidy_axes(ax, grid="y")
         pc.fmt_si(ax, axis="y")
+        ax.set_ylim(bottom=0.0)
         ax.legend(frameon=False)
-        ax.set_ylim(bottom=0)
-        ax.bar_label(drained, fmt="{:.2f}", label_type="center", color="white", fontsize=8)
-        ax.bar_label(burned, fmt="{:.2f}", label_type="center", color="white", fontsize=8)
+
+        # Label drained + burned segments
+        for bar, val in zip(drained_bar, df["Drained"]):
+            height = bar.get_height()
+            if height > 0:
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height * 0.5,
+                    f"{val:.2f}",
+                    ha="center",
+                    va="center",
+                    fontsize=8,
+                    color="white",
+                )
+        for bar, val_d, val_b in zip(burned_bar, df["Drained"], df["Burned"]):
+            if val_b <= 0:
+                continue
+            bottom = val_d
+            height = val_b
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                bottom + height * 0.5,
+                f"{val_b:.2f}",
+                ha="center",
+                va="center",
+                fontsize=8,
+                color="white",
+            )
 
         fig.tight_layout()
         return fig
@@ -791,6 +847,7 @@ def _collect_breakouts(records: Mapping[str, RunRecord], attr: str) -> pd.DataFr
 
 
 # === Helpers for per-country disagreement across runs (inventory_source) ===
+
 
 def _first_present_col(df: pd.DataFrame, candidates: Sequence[str]) -> str | None:
     if df is None or df.empty:
@@ -817,6 +874,7 @@ def _parse_dateish_to_order(series: pd.Series) -> pd.Series:
         if len(digits) >= 4:
             return int(digits[:4]) * 10000
         return pd.NA
+
     return series.map(_one)
 
 
@@ -856,14 +914,17 @@ def _get_first_value(row: pd.Series, candidates: Sequence[str]) -> float | None:
 
 
 def _component_stats(row: pd.Series) -> tuple[float | None, float | None, float | None]:
-    mean = _get_first_value(row, [
-        "mean_gtco2e_per_yr",
-        "avg_gtco2e_per_yr",
-        "mean",
-        "average",
-        "median",
-        "value",
-    ])
+    mean = _get_first_value(
+        row,
+        [
+            "mean_gtco2e_per_yr",
+            "avg_gtco2e_per_yr",
+            "mean",
+            "average",
+            "median",
+            "value",
+        ],
+    )
     vmin = _get_first_value(row, ["min", "lower", "low", "p05", "p5"])
     vmax = _get_first_value(row, ["max", "upper", "high", "p95", "p90"])
     return mean, vmin, vmax
@@ -879,7 +940,7 @@ def _load_chunk_stats_bounds(path: str, years: Sequence[int]) -> tuple[dict[str,
             if chunk_path.lower().endswith(".parquet"):
                 return pd.read_parquet(chunk_path)
             return pd.read_csv(chunk_path)
-        except Exception as exc:
+        except Exception as exc:  # pragma: no cover - IO handling
             print(f"[chunk_stats] Failed to read {chunk_path}: {exc}")
             return None
 
@@ -921,7 +982,7 @@ def _load_chunk_stats_bounds(path: str, years: Sequence[int]) -> tuple[dict[str,
         print(f"[chunk_stats] No component column detected in {path}; columns={list(df.columns)}")
         return None
 
-    stats = {}
+    stats: dict[str, float] = {}
     bounds = MetricUncertainty()
     comp_series = df[comp_col].astype(str).str.lower()
 
@@ -1012,13 +1073,42 @@ def _normalize_country_keys(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
 
 
 def _select_area_column(df: pd.DataFrame) -> tuple[str | None, float]:
-    col = _first_present_col(df, ["peat_area_mha", "total_peat_area_mha", "area_mha", "drained_area_mha", "undrained_area_mha"])
+    col = _first_present_col(
+        df,
+        [
+            "peat_area_mha",
+            "total_peat_area_mha",
+            "area_mha",
+            "drained_area_mha",
+            "undrained_area_mha",
+        ],
+    )
     if col:
         return col, 1.0
-    col = _first_present_col(df, ["peat_area_ha", "total_peat_area_ha", "area_ha", "ha", "drained_area_ha", "undrained_area_ha"])
+    col = _first_present_col(
+        df,
+        [
+            "peat_area_ha",
+            "total_peat_area_ha",
+            "area_ha",
+            "ha",
+            "drained_area_ha",
+            "undrained_area_ha",
+        ],
+    )
     if col:
         return col, 1e-6
-    col = _first_present_col(df, ["area_km2", "km2", "area_km²", "km²", "drained_area_km2", "undrained_area_km2"])
+    col = _first_present_col(
+        df,
+        [
+            "area_km2",
+            "km2",
+            "area_km²",
+            "km²",
+            "drained_area_km2",
+            "undrained_area_km2",
+        ],
+    )
     if col:
         return col, 1.0 / 10000.0
     return None, 1.0
@@ -1036,6 +1126,7 @@ def _normalize_drained_state_values(series: pd.Series) -> pd.Series:
         if s in {"undrained", "u", "false", "f", "0", "no", "n"}:
             return "undrained"
         return "other"
+
     return series.map(_one)
 
 
@@ -1178,11 +1269,20 @@ def _compute_country_disagreement(
         vals = row[run_cols].dropna().astype(float)
         n = int(vals.count())
         if n < 2:
-            return pd.Series({
-                "n_datasets": n, "min_mha": pd.NA, "median_mha": pd.NA, "max_mha": pd.NA,
-                "abs_spread_mha": pd.NA, "fold_change": pd.NA, "log10_spread": pd.NA,
-                "min_run": pd.NA, "max_run": pd.NA, "flag": ""
-            })
+            return pd.Series(
+                {
+                    "n_datasets": n,
+                    "min_mha": pd.NA,
+                    "median_mha": pd.NA,
+                    "max_mha": pd.NA,
+                    "abs_spread_mha": pd.NA,
+                    "fold_change": pd.NA,
+                    "log10_spread": pd.NA,
+                    "min_run": pd.NA,
+                    "max_run": pd.NA,
+                    "flag": "",
+                }
+            )
         vmin = float(vals.min())
         vmax = float(vals.max())
         abs_spread = vmax - vmin
@@ -1190,7 +1290,7 @@ def _compute_country_disagreement(
         if not pos.empty:
             min_pos = float(pos.min())
             fold = (vmax / min_pos) if min_pos > 0.0 else math.inf
-            log10s = (math.log10(fold) if math.isfinite(fold) and fold > 0.0 else pd.NA)
+            log10s = math.log10(fold) if math.isfinite(fold) and fold > 0.0 else pd.NA
         else:
             fold = math.inf if vmax > 0.0 else pd.NA
             log10s = pd.NA
@@ -1198,22 +1298,24 @@ def _compute_country_disagreement(
         min_run = vals.idxmin()
         max_run = vals.idxmax()
 
-        rel_ok = (isinstance(log10s, float)) and (log10s >= math.log10(rel_flag_fold))
+        rel_ok = isinstance(log10s, float) and (log10s >= math.log10(rel_flag_fold))
         abs_ok = abs_spread >= abs_flag_mha
         flag = "FLAG" if (rel_ok or abs_ok) else ""
 
-        return pd.Series({
-            "n_datasets": n,
-            "min_mha": vmin,
-            "median_mha": float(vals.median()),
-            "max_mha": vmax,
-            "abs_spread_mha": abs_spread,
-            "fold_change": fold,
-            "log10_spread": log10s,
-            "min_run": min_run,
-            "max_run": max_run,
-            "flag": flag,
-        })
+        return pd.Series(
+            {
+                "n_datasets": n,
+                "min_mha": vmin,
+                "median_mha": float(vals.median()),
+                "max_mha": vmax,
+                "abs_spread_mha": abs_spread,
+                "fold_change": fold,
+                "log10_spread": log10s,
+                "min_run": min_run,
+                "max_run": max_run,
+                "flag": flag,
+            }
+        )
 
     summary = wide.copy()
     metrics = summary.apply(_row_metrics, axis=1)
@@ -1223,8 +1325,16 @@ def _compute_country_disagreement(
 
     wide = wide[keys + col_order]
     summary_cols = keys + [
-        "n_datasets", "min_mha", "median_mha", "max_mha",
-        "abs_spread_mha", "fold_change", "log10_spread", "min_run", "max_run", "flag"
+        "n_datasets",
+        "min_mha",
+        "median_mha",
+        "max_mha",
+        "abs_spread_mha",
+        "fold_change",
+        "log10_spread",
+        "min_run",
+        "max_run",
+        "flag",
     ]
     summary = summary[summary_cols]
 
@@ -1264,9 +1374,9 @@ def _export_inventory_source_area_disagreement(
         rel_flag_fold=rel_flag_fold,
     )
 
-    _write_csv_df(writer_con, wide,   _join(out_dir, f"{comp.key}_country_peat_area_wide.csv"))
-    _write_csv_df(writer_con, summary,_join(out_dir, f"{comp.key}_country_peat_area_summary.csv"))
-    _write_csv_df(writer_con, flagged,_join(out_dir, f"{comp.key}_country_peat_area_flagged.csv"))
+    _write_csv_df(writer_con, wide, _join(out_dir, f"{comp.key}_country_peat_area_wide.csv"))
+    _write_csv_df(writer_con, summary, _join(out_dir, f"{comp.key}_country_peat_area_summary.csv"))
+    _write_csv_df(writer_con, flagged, _join(out_dir, f"{comp.key}_country_peat_area_flagged.csv"))
     print(
         f"[inventory_source] wrote: "
         f"{comp.key}_country_peat_area_wide.csv, "
@@ -1310,15 +1420,16 @@ def main(argv: Sequence[str] | None = None):
             "for directories/prefixes the script will search for any .xlsx file "
             "in that folder (and a <folder>/<run_date> child for local FS, or "
             "<prefix>/<run_date> on S3). "
-            "If omitted, the script will auto-discover chunk_stats under "
-            "CHUNK_STATS_ROOT/version_<ver>/chunk_stats/<run_name>_10/<run_date>."
+            "If omitted, the script will auto-discover chunk_stats for OGH "
+            "sensitivity runs under "
+            "CHUNK_STATS_ROOT/version_<ver>/chunk_stats/<dir_name>/<run_date>."
         ),
     )
     args = parser.parse_args(argv)
 
     try:
         years = [int(y) for y in args.years]
-    except ValueError as exc:
+    except ValueError as exc:  # pragma: no cover - CLI validation
         raise SystemExit(f"Invalid --years value: {exc}")
 
     if not years:
@@ -1331,13 +1442,14 @@ def main(argv: Sequence[str] | None = None):
 
     for run_name, spec in run_specs.items():
         if run_name in user_chunk_stat_paths_raw:
+            # Explicit override – treat strictly
             raw = user_chunk_stat_paths_raw[run_name]
             try:
                 resolved = _resolve_chunk_stats_path_for_run(spec, raw)
             except FileNotFoundError as exc:
                 raise SystemExit(f"Could not resolve --chunk-stats path for run '{run_name}': {exc}")
             chunk_stat_config[run_name] = (resolved, True)
-        else:
+        elif run_name in SENSITIVITY_CHUNK_RUNS:
             guessed = _guess_chunk_stats_path(spec)
             if guessed:
                 chunk_stat_config[run_name] = (guessed, False)
@@ -1381,37 +1493,33 @@ def main(argv: Sequence[str] | None = None):
             summary_path = _join(out_data_dir, f"{comp.key}_summary.csv")
             _write_csv_df(writer_con, summary_df, summary_path)
 
+            # Per-metric long-form CSVs for all comparisons
             for metric_key in comp.metric_keys:
                 metric = METRIC_SPECS[metric_key]
                 metric_df = _build_metric_long_df(comp, metric, records)
                 metric_path = _join(out_data_dir, f"{comp.key}_{metric.key}.csv")
                 _write_csv_df(writer_con, metric_df, metric_path)
 
+                # Only inventory comparison gets per-metric bar figures
                 if args.data_only:
                     continue
+                if comp.key == "inventory_source":
+                    colors = [records[rn].color for rn in comp.run_names]
+                    fig = _plot_metric(metric_df, metric, comp, colors)
+                    fig_path = _join(out_dir, "figures", "comparisons", f"{comp.key}_{metric.key}.png")
+                    _save_png(fig, fig_path, dpi=300)
+                    plt.close(fig)
 
-                # For distance & high/low comparisons we only want the stacked total chart,
-                # not separate per-metric bar plots.
-                if comp.key in ("ogh_distance", "ogh_sensitivity_range"):
-                    continue
+            if args.data_only:
+                continue
 
-                colors = [records[rn].color for rn in comp.run_names]
-                fig = _plot_metric(metric_df, metric, comp, colors)
-                fig_path = _join(out_dir, "figures", "comparisons", f"{comp.key}_{metric.key}.png")
-                _save_png(fig, fig_path, dpi=300)
-                plt.close(fig)
-
-            # Single stacked total-emissions figure (drained + burned) for
-            # distance and high/low comparisons.
-            if comp.key in ("ogh_distance", "ogh_sensitivity_range"):
+            # Single stacked total-emissions chart for sensitivity comparisons
+            if comp.key in {"ogh_distance", "ogh_sensitivity_range"}:
                 stack_df = _build_emission_stack_df(comp, records)
                 stack_path = _join(out_data_dir, f"{comp.key}_drained_burned_stack.csv")
                 _write_csv_df(writer_con, stack_df, stack_path)
 
-                if args.data_only:
-                    continue
-
-                stack_fig = _plot_stacked_total_with_error(stack_df, comp)
+                stack_fig = _plot_stacked_total(stack_df, comp)
                 stack_fig_path = _join(out_dir, "figures", "comparisons", f"{comp.key}_total_stack.png")
                 _save_png(stack_fig, stack_fig_path, dpi=300)
                 plt.close(stack_fig)
