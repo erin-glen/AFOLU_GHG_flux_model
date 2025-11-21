@@ -159,7 +159,9 @@ _interval_folder_strings = pa._interval_folder_strings
 _make_base_prefixes = pa._make_base_prefixes
 _make_globs_for_components = pa._make_globs_for_components
 
-STACK_COMPONENT_COLORS = {"Drained": "#4f81bd", "Burned": "#c0504d"}
+# Match the drained/burned palette used throughout pub_assets/pub_common
+STACK_COMPONENT_COLORS = pc.PROCESS_COLORS
+STACK_COMPONENT_ORDER = ("Drained", "Burned")
 
 # Default categorical palette for run-level comparisons. Update this constant to
 # swap palettes without plumbing a CLI flag (palette names mirror pc.PALETTES).
@@ -756,7 +758,11 @@ def _build_emission_stack_df(comp: ComparisonSpec, records: Mapping[str, RunReco
     return pd.DataFrame(rows)
 
 
-def _plot_stacked_total(df: pd.DataFrame, comp: ComparisonSpec) -> plt.Figure:
+def _plot_stacked_total(
+    df: pd.DataFrame,
+    comp: ComparisonSpec,
+    component_colors: Mapping[str, str] = STACK_COMPONENT_COLORS,
+) -> plt.Figure:
     """
     Single vertical stacked bar chart for total emissions split drained/burned.
 
@@ -764,17 +770,18 @@ def _plot_stacked_total(df: pd.DataFrame, comp: ComparisonSpec) -> plt.Figure:
     is Low – Baseline – High so the baseline appears in the middle.
     """
     x = list(range(len(df)))
+    colors = pc.resolve_colors(STACK_COMPONENT_ORDER, component_colors)
 
     with pc.use_theme(pc.THEME_LIGHT_GRID):
         fig, ax = plt.subplots(figsize=(max(6.5, 2.2 * len(x)), 5.0))
 
-        drained_bar = ax.bar(x, df["Drained"], label="Drained", color=STACK_COMPONENT_COLORS["Drained"])
+        drained_bar = ax.bar(x, df["Drained"], label="Drained", color=colors["Drained"])
         burned_bar = ax.bar(
             x,
             df["Burned"],
             bottom=df["Drained"],
             label="Burned",
-            color=STACK_COMPONENT_COLORS["Burned"],
+            color=colors["Burned"],
         )
 
         # Optional error bars on Total (if present)
