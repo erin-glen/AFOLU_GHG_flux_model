@@ -7,7 +7,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "1.0.2_WWF_area_1_yr_chunks"
+model_version = "1.0.2_WWF_area"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets

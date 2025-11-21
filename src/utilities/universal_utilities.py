@@ -895,11 +895,11 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
             # For outputs that cover an interval (fluxes)
             else:
                 if interval_type == cn.intervals_five_years:
-                    output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
+                    output_dir = basic_output.replace('START_END', str(output_year))
                 elif interval_type == cn.intervals_annual:
-                    output_dir = basic_output.replace('START_END',f"{str(output_year - interval_duration[count])}_{str(output_year)}")
+                    output_dir = basic_output.replace('START_END', str(output_year))
                 else:  # Hybrid model (2000-2024)
-                    output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
+                    output_dir = basic_output.replace('START_END', str(output_year))
 
             sample_output_dir = basic_output
             output_full_dirs.append(output_dir)

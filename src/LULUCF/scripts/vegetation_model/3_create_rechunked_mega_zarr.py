@@ -183,7 +183,12 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     if first_variables_to_process:
         vars_to_process = cn.full_outputs_to_zarr[0:first_variables_to_process]
     else:
-        vars_to_process = cn.full_outputs_to_zarr
+        # vars_to_process = cn.full_outputs_to_zarr
+        vars_to_process = [  #TODO testing
+            cn.gross_emis_all_C_pools_CO2_only_pattern, cn.gross_emis_all_C_pools_non_CO2_only_pattern, cn.gross_emis_all_C_pools_all_gases_pattern,
+            cn.gross_removals_all_C_pools_pattern,
+            cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
+            cn.non_soil_c_modeled_dens_pattern]
     main_logger.info(f"Variables to rechunk and compare chunk stats for: {vars_to_process} out of {len(cn.full_outputs_to_zarr)}")
 
     # Limits the processed years to the supplied number (for testing)
