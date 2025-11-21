@@ -18,17 +18,19 @@ Arguments mirror ``pub_assets`` conventions:
   in the disagreement summary (default 0.1 = 100,000 ha).
 * ``--flag-rel-fold`` – relative spread threshold (fold-change) for FLAGging
   countries in the disagreement summary (default 10x).
+* ``--chunk-stats`` – *optional* per-run overrides for chunk_stats location;
+  normally not needed for OGH sensitivity runs.
 
 Each comparison defined below expects a specific set of run names. When a
 comparison's requirements are not fully met, the script will skip that
-comparison and emit a note summarizing the missing runs. Provide
-additional ``--run`` entries if you need to compare multiple model
-versions or reruns of the same scenario.
+comparison and emit a note summarizing the missing runs. Provide additional
+``--run`` entries if you need to compare multiple model versions or reruns of
+the same scenario.
 
 Outputs are grouped under ``/mnt/c/tmp/pub_assets/comparisons/<run_dates>/<run_names>/``
 to mirror the main driver folder hierarchy.
 
-Usage example:
+Usage example (inventory + OGH sensitivity combined):
 
   cd /mnt/c/gis/git/AFOLU_GHG_flux_model
 
@@ -43,29 +45,58 @@ Usage example:
     --run "gpd_standard_model_1km=0_8_5:20251007|GPD 1 km" \
     --run "gpd_standard_model_1km_pml=0_8_5:20251007|GPD 1 km (PML)"
 
-OGH sensitivity comparisons default to chunk-statistics inputs instead of zonal
-statistics. If you need to override those defaults, pass the alternative path
-per run via ``--chunk-stats`` (``run_name=/path/to/chunk_stats``). Only the
-specified run will use the override; other runs continue to rely on their
-defaults. Chunk stats are expected to be Excel outputs containing an
-``other_outputs_1x1`` sheet with ``layer_name`` columns for
+OGH sensitivity comparisons (distance and high/low emissions) are designed to
+use chunk-statistics inputs instead of zonal statistics. This script will
+*auto-discover* the 1×1 chunk_stats Excel file for each OGH run based on
+``run_name``, ``model_version`` and ``run_date``, assuming the standard AFOLU
+output layout:
+
+  s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/
+    version_<model_version>/chunk_stats/<run_name>_10/<run_date>/*.xlsx
+
+For example, distance-only comparison for 0.9.7 runs:
+
+  python -m src.scripts.zonal_statistics.pub_compare_runs \
+    --years 2024 \
+    --run ogh_sensitivity_250m=0_9_7:20231231 \
+    --run ogh_sensitivity_500m=0_9_7:20231231 \
+    --run ogh_sensitivity_750m=0_9_7:20231231
+
+will automatically look for:
+
+  s3://gfw2-data/.../version_0_9_7/chunk_stats/ogh_sensitivity_250m_10/20231231/*.xlsx
+  s3://gfw2-data/.../version_0_9_7/chunk_stats/ogh_sensitivity_500m_10/20231231/*.xlsx
+  s3://gfw2-data/.../version_0_9_7/chunk_stats/ogh_sensitivity_750m_10/20231231/*.xlsx
+
+No ``--chunk-stats`` arguments are needed as long as this layout holds.
+
+If your chunk_stats live somewhere else (e.g. a different bucket or local
+path), you can either:
+
+* override the root via ``AFOLU_CHUNK_STATS_ROOT``, or
+* pass explicit paths via ``--chunk-stats run_name=path``. The path may be a
+  specific .xlsx file or a directory/prefix containing a single .xlsx.
+
+Chunk stats are expected to be Excel outputs containing an ``other_outputs_1x1``
+sheet with ``layer_name`` values
 ``drained_total_Mg_CO2e_ha_yr`` and ``burned_total_Mg_CO2e_ha_yr``; the script
 automatically extracts the ``sum_value`` totals (converted from Mg to Gt).
+
 The high/low emissions comparison pairs the 500 m baseline run with the high
 and low variants so the mid-point scenario is always represented.
 
-To explicitly point the OGH sensitivity distance comparison at chunk-stats Excel
-inputs, include the run-specific paths when invoking the script (one entry per
-``--chunk-stats`` argument):
+To explicitly point the OGH sensitivity distance comparison at custom
+chunk-stats locations (for example, if your layout deviates from the standard),
+include the run-specific paths when invoking the script:
 
   python -m src.scripts.zonal_statistics.pub_compare_runs \
     --years 2024 \
     --run ogh_sensitivity_250m=0_9_7:20231231 \
     --run ogh_sensitivity_500m=0_9_7:20231231 \
     --run ogh_sensitivity_750m=0_9_7:20231231 \
-    --chunk-stats ogh_sensitivity_250m=gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_250m_10.xlsx \
-    --chunk-stats ogh_sensitivity_500m=gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_500m_10.xlsx \
-    --chunk-stats ogh_sensitivity_750m=gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_750m_10.xlsx
+    --chunk-stats ogh_sensitivity_250m=s3://my-bucket/custom/ogh_sensitivity_250m_10/20231231 \
+    --chunk-stats ogh_sensitivity_500m=/mnt/custom/ogh_sensitivity_500m_10/20231231 \
+    --chunk-stats ogh_sensitivity_750m=/mnt/custom/ogh_sensitivity_750m_10/20231231
 
 To generate a subset, provide only the runs required for the comparisons
 you care about. For example, the following command builds the inventory
@@ -88,7 +119,7 @@ columns (``run_name``, ``Run``, ``model_version``, ``run_date``). Country
 tables also carry best-effort ISO3 and country name lookups using the same
 helper logic as ``pub_assets``.
 
-NEW: For the **Inventory Input Source Comparison**, this script now also exports
+For the **Inventory Input Source Comparison**, this script also exports
 per-country **disagreement** tables for total peat area (Mha) across the source
 runs (GFW / GPD / GPD-PML / OGH), including min/median/max, absolute spread,
 fold-change, log10 spread, and the min/max contributing dataset, plus a flagged
@@ -101,6 +132,9 @@ import argparse
 from dataclasses import dataclass
 from typing import Callable, Iterable, Mapping, Sequence
 import math
+import os
+from pathlib import Path
+import glob
 
 import duckdb
 import pandas as pd
@@ -129,16 +163,12 @@ STACK_COMPONENT_COLORS = {"Drained": "#4f81bd", "Burned": "#c0504d"}
 # swap palettes without plumbing a CLI flag (palette names mirror pc.PALETTES).
 RUN_COLOR_PALETTE = "tol_bright"
 
-# Default chunk_stats inputs for OGH sensitivity runs. These supersede zonal
-# stats for the distance and high/low sensitivity comparisons but can be
-# overridden per run with --chunk-stats.
-DEFAULT_CHUNK_STATS: Mapping[str, str] = {
-    "ogh_sensitivity_250m": "gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_250m_10",
-    "ogh_sensitivity_500m": "gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_500m_10",
-    "ogh_sensitivity_750m": "gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_750m_10",
-    "ogh_sensitivity_low": "gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_500m_10_low",
-    "ogh_sensitivity_high": "gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/chunk_stats/ogh_sensitivity_500m_10_high",
-}
+# Root location for chunk_stats Excel summaries.
+# IMPORTANT: default to the S3 outputs root, not the local pub_assets root.
+CHUNK_STATS_ROOT = os.environ.get(
+    "AFOLU_CHUNK_STATS_ROOT",
+    "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs",
+)
 
 
 @dataclass(frozen=True)
@@ -223,8 +253,6 @@ class ComparisonSpec:
 
 
 def _comparison_out_dir(run_specs: Mapping[str, RunSpec]) -> str:
-    """Build comparison output directory segmented by run dates and names."""
-
     run_dates = sorted({spec.run_date for spec in run_specs.values()})
     run_names = sorted(run_specs.keys())
     date_slug = "__".join(run_dates) if run_dates else "unspecified_dates"
@@ -361,11 +389,116 @@ def _parse_chunk_stat_paths(entries: Sequence[str] | None) -> Mapping[str, str]:
     return mapping
 
 
+def _glob_s3_xlsx(prefix: str) -> list[str]:
+    """Best-effort S3 glob for *.xlsx under the given prefix directory."""
+    try:
+        import fsspec  # type: ignore[import]
+    except Exception as exc:
+        print(f"[chunk_stats] S3 support not available (fsspec import failed): {exc}")
+        return []
+
+    fs = fsspec.filesystem("s3")
+    pattern = prefix.rstrip("/") + "/*.xlsx"
+    try:
+        matches = fs.glob(pattern)
+    except Exception as exc:
+        print(f"[chunk_stats] Failed to glob S3 pattern {pattern!r}: {exc}")
+        return []
+
+    results: list[str] = []
+    for p in matches:
+        if p.startswith("s3://"):
+            results.append(p)
+        else:
+            results.append("s3://" + p)
+    return results
+
+
+def _resolve_chunk_stats_path_for_run(spec: RunSpec, raw_path: str) -> str:
+    """
+    Resolve a chunk_stats location to a concrete file.
+
+    Accepts:
+      * a direct file path (local or s3://...*.xlsx);
+      * a directory/prefix (local or s3://.../dir[/run_date]);
+      * a prefix without extension.
+    """
+    # S3: treat raw_path as either file or prefix
+    if raw_path.startswith("s3://"):
+        base = raw_path.rstrip("/")
+        if base.lower().endswith(".xlsx"):
+            return base
+
+        candidates = _glob_s3_xlsx(base)
+        if not candidates and spec.run_date:
+            candidates = _glob_s3_xlsx(f"{base}/{spec.run_date}")
+
+        if not candidates:
+            raise FileNotFoundError(
+                f"Could not find any .xlsx chunk_stats file for run '{spec.run_name}' under S3 prefix '{raw_path}'."
+            )
+        return sorted(set(candidates))[-1]
+
+    # Local filesystem
+    base_path = Path(raw_path)
+
+    if base_path.is_file():
+        return str(base_path)
+
+    candidates: list[str] = []
+    search_roots: list[Path] = []
+
+    if base_path.is_dir():
+        search_roots.append(base_path)
+        if spec.run_date:
+            child = base_path / spec.run_date
+            if child.is_dir():
+                search_roots.append(child)
+    else:
+        if spec.run_date:
+            child = base_path / spec.run_date
+            if child.is_dir():
+                search_roots.append(child)
+
+    for root in search_roots:
+        candidates.extend(glob.glob(str(root / "*.xlsx")))
+
+    if not candidates:
+        for ext in (".xlsx", ".parquet", ".csv"):
+            candidate = base_path.with_suffix(ext)
+            if candidate.is_file():
+                candidates.append(str(candidate))
+
+    if not candidates:
+        raise FileNotFoundError(
+            f"Could not find any .xlsx chunk_stats file for run '{spec.run_name}' under '{raw_path}'."
+        )
+
+    return sorted(set(candidates))[-1]
+
+
+def _guess_chunk_stats_path(spec: RunSpec) -> str | None:
+    """
+    Auto-discover chunk_stats under:
+
+      {CHUNK_STATS_ROOT}/version_{model_version}/chunk_stats/{run_name}_10/{run_date}/*.xlsx
+    """
+    base_dir = (
+        f"{CHUNK_STATS_ROOT.rstrip('/')}/version_{spec.model_version}/chunk_stats/{spec.run_name}_10/{spec.run_date}"
+    )
+    try:
+        return _resolve_chunk_stats_path_for_run(spec, base_dir)
+    except FileNotFoundError as exc:
+        print(
+            f"[chunk_stats] Auto-discovery failed for run '{spec.run_name}' "
+            f"(model_version={spec.model_version}, run_date={spec.run_date}) under base '{base_dir}': {exc} "
+            "(continuing without chunk_stats override)"
+        )
+        return None
+
+
 def _assign_colors(run_names: Iterable[str]) -> Mapping[str, str]:
-    """Stable, readable colors for runs using the shared publication palette."""
-
     ordered = sorted(dict.fromkeys(run_names))
-
     if RUN_COLOR_PALETTE:
         return pc.resolve_colors(ordered, palette=RUN_COLOR_PALETTE)
 
@@ -388,50 +521,96 @@ def _add_run_columns(df: pd.DataFrame, spec: RunSpec) -> pd.DataFrame:
 
 
 def _compute_run_data(
-    spec: RunSpec, years: Sequence[int], aws_region: str | None, chunk_stats_path: str | None
+    spec: RunSpec,
+    years: Sequence[int],
+    aws_region: str | None,
+    chunk_stats_path: str | None,
+    chunk_stats_strict: bool = False,
 ) -> tuple[RunMetrics, RunBreakouts, MetricUncertainty | None]:
+    """
+    Load run-level metrics.
+
+    If chunk_stats_path is provided and successfully read, drained/burned emissions (and
+    uncertainties, if available) come from the chunk_stats file, and zonal stats are
+    skipped entirely for that run. If chunk_stats_path is auto-discovered and fails to
+    load, a warning is printed and the run falls back to zonal stats; if it was provided
+    explicitly via --chunk-stats (chunk_stats_strict=True), failures are fatal errors.
+    """
     interval_folders = _interval_folder_strings(years)
     base_prefixes = _make_base_prefixes(spec.model_version, spec.run_name, spec.run_date, interval_folders)
     drained_globs, burned_globs = _make_globs_for_components(base_prefixes)
 
     con = duckdb.connect()
     uncertainty: MetricUncertainty | None = None
+    drained_area = math.nan
+    undrained_area = math.nan
+    drained_emissions = math.nan
+    burned_emissions = math.nan
+    by_country = pd.DataFrame()
+    by_drained_state = pd.DataFrame()
+    by_burned_state = pd.DataFrame()
+    by_country_drained_state = pd.DataFrame()
+    by_country_burned_state = pd.DataFrame()
+
+    stats_override: dict[str, float] | None = None
+    if chunk_stats_path:
+        loaded = _load_chunk_stats_bounds(chunk_stats_path, years)
+        if loaded is None:
+            msg = (
+                f"[chunk_stats] Failed to load chunk_stats for {spec.run_name}; "
+                f"ensure the Excel/CSV/Parquet path exists and contains drained/burned layers. "
+                f"Path={chunk_stats_path}"
+            )
+            if chunk_stats_strict:
+                raise RuntimeError(msg)
+            else:
+                print(msg + " (continuing without chunk_stats override)")
+        else:
+            stats_override, bounds = loaded
+            uncertainty = bounds if bounds.has_bounds() else None
+            drained_emissions = float(stats_override.get("drained_emissions_gt", drained_emissions))
+            burned_emissions = float(stats_override.get("burned_emissions_gt", burned_emissions))
+
     try:
-        _register_components(con, drained_globs, burned_globs, aws_region=aws_region)
-        _register_state_context_views(con)
-        have_lookup = _ensure_adm0_lookup(con, None)
+        if stats_override is None:
+            _register_components(con, drained_globs, burned_globs, aws_region=aws_region)
+            _register_state_context_views(con)
+            have_lookup = _ensure_adm0_lookup(con, None)
 
-        latest_year = max(years)
-        area_df = con.execute(pc.sql_global_peat_area_split(latest_year)).df()
-        area_map = {row["peat_state"]: float(row["area_mha"]) for _, row in area_df.iterrows()}
-        drained_area = float(area_map.get("drained", 0.0))
-        undrained_area = float(area_map.get("undrained", 0.0))
+            latest_year = max(years)
+            area_df = con.execute(pc.sql_global_peat_area_split(latest_year)).df()
+            area_map = {row["peat_state"]: float(row["area_mha"]) for _, row in area_df.iterrows()}
+            drained_area = float(area_map.get("drained", 0.0))
+            undrained_area = float(area_map.get("undrained", 0.0))
 
-        n_periods = len(years)
-        emissions_df = con.execute(pc.sql_global_component_emissions_avg(n_periods)).df()
-        emissions_map = {row["component"]: float(row["avg_GtCO2e_per_yr"]) for _, row in emissions_df.iterrows()}
-        drained_emissions = float(emissions_map.get("Drained", 0.0))
-        burned_emissions = float(emissions_map.get("Burned", 0.0))
+            n_periods = len(years)
+            emissions_df = con.execute(pc.sql_global_component_emissions_avg(n_periods)).df()
+            emissions_map = {row["component"]: float(row["avg_GtCO2e_per_yr"]) for _, row in emissions_df.iterrows()}
+            drained_emissions = float(emissions_map.get("Drained", 0.0))
+            burned_emissions = float(emissions_map.get("Burned", 0.0))
 
-        by_country = con.execute(pc.table_by_country_period_sql(with_lookup=have_lookup)).df()
-        by_drained_state = con.execute(pc.table_by_drained_state_sql()).df()
-        by_burned_state = con.execute(pc.table_by_burned_state_sql()).df()
-        by_country_drained_state = con.execute(
-            pc.table_by_country_drained_state_sql(with_lookup=have_lookup)
-        ).df()
-        by_country_burned_state = con.execute(
-            pc.table_by_country_burned_state_sql(with_lookup=have_lookup)
-        ).df()
-
-        if chunk_stats_path:
-            loaded = _load_chunk_stats_bounds(chunk_stats_path, years)
-            if loaded is not None:
-                stats_override, bounds = loaded
-                uncertainty = bounds if bounds.has_bounds() else None
-                drained_emissions = float(stats_override.get("drained_emissions_gt", drained_emissions))
-                burned_emissions = float(stats_override.get("burned_emissions_gt", burned_emissions))
+            by_country = con.execute(pc.table_by_country_period_sql(with_lookup=have_lookup)).df()
+            by_drained_state = con.execute(pc.table_by_drained_state_sql()).df()
+            by_burned_state = con.execute(pc.table_by_burned_state_sql()).df()
+            by_country_drained_state = con.execute(
+                pc.table_by_country_drained_state_sql(with_lookup=have_lookup)
+            ).df()
+            by_country_burned_state = con.execute(
+                pc.table_by_country_burned_state_sql(with_lookup=have_lookup)
+            ).df()
+        else:
+            print(
+                f"[chunk_stats] Skipping zonal stats for {spec.run_name}; "
+                "using chunk_stats totals only."
+            )
     finally:
         con.close()
+
+    if stats_override is not None and (math.isnan(drained_area) or math.isnan(undrained_area)):
+        print(
+            f"[chunk_stats] Using chunk_stats-only totals for {spec.run_name}; "
+            "zonal stats not loaded for area or country breakouts."
+        )
 
     metrics = RunMetrics(
         drained_area_mha=drained_area,
@@ -641,10 +820,9 @@ def _collect_breakouts(records: Mapping[str, RunRecord], attr: str) -> pd.DataFr
     return pd.concat(frames, ignore_index=True)
 
 
-# === NEW: Helpers for per-country disagreement across runs (inventory_source) ===
+# === Helpers for per-country disagreement across runs (inventory_source) ===
 
 def _first_present_col(df: pd.DataFrame, candidates: Sequence[str]) -> str | None:
-    """Return the first column present in df from candidates (case-insensitive)."""
     if df is None or df.empty:
         return None
     lower = {c.lower(): c for c in df.columns}
@@ -657,7 +835,6 @@ def _first_present_col(df: pd.DataFrame, candidates: Sequence[str]) -> str | Non
 
 
 def _parse_dateish_to_order(series: pd.Series) -> pd.Series:
-    """Convert various year/date strings to an integer order key YYYYMMDD0000-ish."""
     def _one(v):
         if pd.isna(v):
             return pd.NA
@@ -674,10 +851,6 @@ def _parse_dateish_to_order(series: pd.Series) -> pd.Series:
 
 
 def _latest_period_filter(df: pd.DataFrame, years: Sequence[int]) -> pd.DataFrame:
-    """
-    Keep only rows for the latest requested inventory period if we can identify a period column.
-    Tries year columns, then date-ish columns, then run_date; otherwise returns df unchanged.
-    """
     if df is None or df.empty:
         return df
 
@@ -727,23 +900,16 @@ def _component_stats(row: pd.Series) -> tuple[float | None, float | None, float 
 
 
 def _load_chunk_stats_bounds(path: str, years: Sequence[int]) -> tuple[dict[str, float], MetricUncertainty] | None:
-    """
-    Load per-component mean/min/max emissions (Gt CO2e/yr) from a chunk_stats Excel/CSV/Parquet.
-    Returns (metrics_override, uncertainty) keyed by component name.
-    """
-
     def _read_chunk_table(chunk_path: str) -> pd.DataFrame | None:
-        """Prefer Excel sheet "other_outputs_1x1", fall back to Parquet/CSV."""
         try:
             return pd.read_excel(chunk_path, sheet_name="other_outputs_1x1")
         except Exception:
             pass
-
         try:
             if chunk_path.lower().endswith(".parquet"):
                 return pd.read_parquet(chunk_path)
             return pd.read_csv(chunk_path)
-        except Exception as exc:  # pragma: no cover - file handling
+        except Exception as exc:
             print(f"[chunk_stats] Failed to read {chunk_path}: {exc}")
             return None
 
@@ -753,7 +919,6 @@ def _load_chunk_stats_bounds(path: str, years: Sequence[int]) -> tuple[dict[str,
 
     df = _latest_period_filter(df, years)
 
-    # Excel chunk stats: filter by layer_name and use sum_value totals (Mg → Gt)
     layer_col = _first_present_col(df, ["layer_name", "layer", "metric"])
     if layer_col and "sum_value" in df.columns:
         keep_layers = {
@@ -776,24 +941,22 @@ def _load_chunk_stats_bounds(path: str, years: Sequence[int]) -> tuple[dict[str,
                 f"[chunk_stats] No drained/burned layers found in {path}; "
                 f"available layers={sorted(df[layer_col].dropna().unique())}"
             )
-            return None
-
-        if {"drained_emissions_gt", "burned_emissions_gt"} <= set(stats):
-            stats["total_emissions_gt"] = stats["drained_emissions_gt"] + stats["burned_emissions_gt"]
-
-        return stats, bounds
+        else:
+            if {"drained_emissions_gt", "burned_emissions_gt"} <= set(stats):
+                stats["total_emissions_gt"] = stats["drained_emissions_gt"] + stats["burned_emissions_gt"]
+            return stats, bounds
 
     comp_col = _first_present_col(df, ["component", "metric", "flux_component", "name"])
     if not comp_col:
         print(f"[chunk_stats] No component column detected in {path}; columns={list(df.columns)}")
         return None
 
-    stats: dict[str, float] = {}
+    stats = {}
     bounds = MetricUncertainty()
+    comp_series = df[comp_col].astype(str).str.lower()
 
-    comp_series = df[comp_col].astype(str).str.lower() if comp_col in df.columns else pd.Series(dtype=str)
     for comp_name, label in (("drained", "Drained"), ("burned", "Burned"), ("total", "Total")):
-        subset = df[comp_series.str.contains(comp_name)] if comp_col in df.columns else pd.DataFrame()
+        subset = df[comp_series.str.contains(comp_name)]
         if subset.empty:
             continue
         row = subset.iloc[0]
@@ -829,7 +992,6 @@ def _load_chunk_stats_bounds(path: str, years: Sequence[int]) -> tuple[dict[str,
                 total_high=vmax,
             )
 
-    # Derive totals if only components are present
     if "total_emissions_gt" not in stats and {"drained_emissions_gt", "burned_emissions_gt"} <= set(stats):
         stats["total_emissions_gt"] = stats["drained_emissions_gt"] + stats["burned_emissions_gt"]
 
@@ -856,10 +1018,6 @@ def _load_chunk_stats_bounds(path: str, years: Sequence[int]) -> tuple[dict[str,
 
 
 def _normalize_country_keys(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    """
-    Standardize to columns 'iso3' (if available) and 'country' for grouping.
-    Returns the normalized frame and the list of key columns present.
-    """
     if df is None or df.empty:
         return df, []
 
@@ -884,12 +1042,6 @@ def _normalize_country_keys(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
 
 
 def _select_area_column(df: pd.DataFrame) -> tuple[str | None, float]:
-    """
-    Find a column that represents area and return (column_name, to_mha_factor).
-    Priority: *_mha  -> factor 1
-              *_ha   -> factor 1e-6
-              *_km2  -> factor 1/10000
-    """
     col = _first_present_col(df, ["peat_area_mha", "total_peat_area_mha", "area_mha", "drained_area_mha", "undrained_area_mha"])
     if col:
         return col, 1.0
@@ -903,7 +1055,6 @@ def _select_area_column(df: pd.DataFrame) -> tuple[str | None, float]:
 
 
 def _normalize_drained_state_values(series: pd.Series) -> pd.Series:
-    """Map a variety of encodings to {'drained','undrained','other'}."""
     def _one(v):
         if pd.isna(v):
             return "other"
@@ -919,10 +1070,6 @@ def _normalize_drained_state_values(series: pd.Series) -> pd.Series:
 
 
 def _extract_country_peat_area_from_by_country(bc: pd.DataFrame, years: Sequence[int]) -> pd.DataFrame:
-    """
-    Try to read total peat area directly from by-country table.
-    Returns standardized columns: ['iso3?','country?','run_name','Run','value_mha']
-    """
     if bc is None or bc.empty:
         return pd.DataFrame()
 
@@ -977,10 +1124,6 @@ def _extract_country_peat_area_from_by_country(bc: pd.DataFrame, years: Sequence
 
 
 def _extract_country_peat_area_from_drained_state(bcd: pd.DataFrame, years: Sequence[int]) -> pd.DataFrame:
-    """
-    Fallback: use by-country-by-drained-state; sum drained+undrained.
-    Returns standardized columns: ['iso3?','country?','run_name','Run','value_mha']
-    """
     if bcd is None or bcd.empty:
         return pd.DataFrame()
 
@@ -1015,10 +1158,6 @@ def _extract_country_peat_area_from_drained_state(bcd: pd.DataFrame, years: Sequ
 
 
 def _build_country_area_base(records: Mapping[str, RunRecord], years: Sequence[int]) -> pd.DataFrame:
-    """
-    Build a normalized per-country, per-run table with peat area in Mha.
-    Tries multiple breakouts and unit encodings. Returns empty DataFrame if nothing matches.
-    """
     bc = _collect_breakouts(records, "by_country")
     base = _extract_country_peat_area_from_by_country(bc, years)
     if base is not None and not base.empty:
@@ -1043,10 +1182,6 @@ def _compute_country_disagreement(
     abs_flag_mha: float,
     rel_flag_fold: float,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """
-    Given a normalized long table with columns: ['iso3?','country?','run_name','Run','value_mha'],
-    pivot to wide, compute disagreement metrics, and return (wide, summary, flagged).
-    """
     keys = [k for k in ["iso3", "country"] if k in base.columns]
     if not keys:
         keys = ["country"]
@@ -1135,12 +1270,6 @@ def _export_inventory_source_area_disagreement(
     writer_con: duckdb.DuckDBPyConnection,
     out_dir: str,
 ) -> None:
-    """
-    Compute and write CSVs for the inventory_source comparison:
-    - per-country wide table of peat area (Mha) per run (label),
-    - per-country summary disagreement metrics,
-    - flagged subset.
-    """
     sub_records = {rn: records[rn] for rn in comp.run_names if rn in records}
     if len(sub_records) < 2:
         print("Skipping country disagreement export: fewer than two matching runs were provided.")
@@ -1190,7 +1319,6 @@ def main(argv: Sequence[str] | None = None):
     )
     parser.add_argument("--aws_region", default=None, help="Optional AWS region for S3 access")
     parser.add_argument("--data-only", action="store_true", help="Export CSV data only (skip figures)")
-    # NEW thresholds for disagreement flags
     parser.add_argument(
         "--flag-abs-mha",
         type=float,
@@ -1207,26 +1335,44 @@ def main(argv: Sequence[str] | None = None):
         "--chunk-stats",
         action="append",
         help=(
-            "Optional path to chunk_stats summary per run (run_name=path). "
-            "When provided, drained/burned totals and error bars will use these values."
+            "Optional chunk_stats location per run (run_name=path). "
+            "Path may be a specific Excel/CSV/Parquet file or a directory/prefix; "
+            "for directories/prefixes the script will search for any .xlsx file "
+            "in that folder (and a <folder>/<run_date> child for local FS, or "
+            "<prefix>/<run_date> on S3). "
+            "If omitted, the script will auto-discover chunk_stats under "
+            "CHUNK_STATS_ROOT/version_<ver>/chunk_stats/<run_name>_10/<run_date>."
         ),
     )
     args = parser.parse_args(argv)
 
     try:
         years = [int(y) for y in args.years]
-    except ValueError as exc:  # pragma: no cover - CLI validation
+    except ValueError as exc:
         raise SystemExit(f"Invalid --years value: {exc}")
 
     if not years:
         raise SystemExit("At least one inventory year must be provided")
 
     run_specs = _parse_run_specs(args.run)
-    user_chunk_stat_paths = _parse_chunk_stat_paths(args.chunk_stats)
-    default_chunk_stat_paths = {
-        run_name: path for run_name, path in DEFAULT_CHUNK_STATS.items() if run_name in run_specs
-    }
-    chunk_stat_paths = {**default_chunk_stat_paths, **user_chunk_stat_paths}
+
+    user_chunk_stat_paths_raw = _parse_chunk_stat_paths(args.chunk_stats)
+    chunk_stat_config: dict[str, tuple[str | None, bool]] = {}
+
+    for run_name, spec in run_specs.items():
+        if run_name in user_chunk_stat_paths_raw:
+            raw = user_chunk_stat_paths_raw[run_name]
+            try:
+                resolved = _resolve_chunk_stats_path_for_run(spec, raw)
+            except FileNotFoundError as exc:
+                raise SystemExit(f"Could not resolve --chunk-stats path for run '{run_name}': {exc}")
+            chunk_stat_config[run_name] = (resolved, True)
+        else:
+            guessed = _guess_chunk_stats_path(spec)
+            if guessed:
+                chunk_stat_config[run_name] = (guessed, False)
+                print(f"[chunk_stats] Auto-discovered chunk_stats for {run_name}: {guessed}")
+
     out_dir = _comparison_out_dir(run_specs)
     active_comparisons, skipped_comparisons = _partition_comparisons(run_specs)
     if skipped_comparisons:
@@ -1245,8 +1391,9 @@ def main(argv: Sequence[str] | None = None):
 
     records: dict[str, RunRecord] = {}
     for run_name, spec in run_specs.items():
+        cs_path, cs_strict = chunk_stat_config.get(run_name, (None, False))
         metrics, breakouts, uncertainty = _compute_run_data(
-            spec, years, args.aws_region, chunk_stat_paths.get(run_name)
+            spec, years, args.aws_region, cs_path, chunk_stats_strict=cs_strict
         )
         records[run_name] = RunRecord(
             spec=spec,
@@ -1309,7 +1456,6 @@ def main(argv: Sequence[str] | None = None):
             breakout_path = _join(out_data_dir, f"runs_{file_stub}.csv")
             _write_csv_df(writer_con, breakout_df, breakout_path)
 
-        # NEW: per-country disagreement for inventory-source peat area (Mha)
         for comp in active_comparisons:
             if comp.key == "inventory_source":
                 _export_inventory_source_area_disagreement(
@@ -1327,5 +1473,5 @@ def main(argv: Sequence[str] | None = None):
     print("Comparison assets written to:", out_dir)
 
 
-if __name__ == "__main__":  # pragma: no cover - CLI entry point
+if __name__ == "__main__":  # pragma: no cover
     main()
