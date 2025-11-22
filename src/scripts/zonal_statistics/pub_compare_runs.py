@@ -811,6 +811,7 @@ def _build_inventory_climate_component_df(
     comp: ComparisonSpec,
     records: Mapping[str, RunRecord],
     component: str,
+    years: Sequence[int],
 ) -> pd.DataFrame:
     rows: list[pd.DataFrame] = []
     for run_name in comp.run_names:
@@ -819,6 +820,11 @@ def _build_inventory_climate_component_df(
         if df is None or df.empty:
             continue
         sub = df[df["component"].str.lower() == component.lower()].copy()
+        if sub.empty:
+            continue
+        period_col = _first_present_col(sub, ["interval_end", "period_end_year", "inventory_year", "year"])
+        if period_col:
+            sub = sub[sub[period_col].isin(years)]
         if sub.empty:
             continue
         sub["Climate"] = sub["climate_domain"].apply(pc.titlecase_domain)
@@ -841,15 +847,25 @@ def _build_inventory_climate_component_df(
 
 
 def _build_inventory_climate_stack_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build a wide-format dataframe for stacked climate emissions in the
+    Inventory Input Source comparison. Fixes the issue where extra
+    all-zero rows appear because 'Run' is categorical and pivot_table
+    expands to the full cartesian product when observed=False.
+    """
+
     if df is None or df.empty:
         return pd.DataFrame()
 
-    run_order = [
-        r
-        for r in df["Run"].dropna().drop_duplicates().tolist()
-        if isinstance(r, (str,)) or not pd.isna(r)
-    ]
+    # Ensure run order matches the comparison order
+    run_order = (
+        df["Run"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
 
+    # Pivot only on ACTUALLY OBSERVED combinations
     wide = (
         df.pivot_table(
             index=["run_key", "Run"],
@@ -857,16 +873,22 @@ def _build_inventory_climate_stack_df(df: pd.DataFrame) -> pd.DataFrame:
             values="Value",
             aggfunc="sum",
             fill_value=0.0,
-            observed=False,
+            observed=True,  # <-- CRITICAL FIX
         )
         .reindex(columns=pc.CLIMATE_ORDER, fill_value=0.0)
         .reset_index()
     )
+
+    # Enforce run order
     if "Run" in wide.columns:
         wide["Run"] = pd.Categorical(wide["Run"], categories=run_order, ordered=True)
         wide = wide.sort_values("Run")
+
+    # Add total
     wide["Total"] = wide[pc.CLIMATE_ORDER].sum(axis=1)
+
     return wide
+
 
 
 def _plot_inventory_climate_component(df: pd.DataFrame, component_label: str) -> plt.Figure | None:
@@ -1795,7 +1817,7 @@ def main(argv: Sequence[str] | None = None):
                 _write_csv_df(writer_con, area_stack_df, area_stack_path)
 
                 for component in ("Drained", "Burned"):
-                    climate_df = _build_inventory_climate_component_df(comp, records, component)
+                    climate_df = _build_inventory_climate_component_df(comp, records, component, years)
                     climate_stack_df = _build_inventory_climate_stack_df(climate_df)
                     climate_stack_path = _join(
                         out_data_dir,
@@ -1837,7 +1859,7 @@ def main(argv: Sequence[str] | None = None):
                     plt.close(area_stack_fig)
 
                     for component in ("Drained", "Burned"):
-                        climate_df = _build_inventory_climate_component_df(comp, records, component)
+                        climate_df = _build_inventory_climate_component_df(comp, records, component, years)
                         climate_stack_df = _build_inventory_climate_stack_df(climate_df)
                         if climate_stack_df.empty:
                             continue
@@ -1860,7 +1882,7 @@ def main(argv: Sequence[str] | None = None):
                         plt.close(climate_stack_fig)
 
                 for component in ("Drained", "Burned"):
-                    climate_df = _build_inventory_climate_component_df(comp, records, component)
+                    climate_df = _build_inventory_climate_component_df(comp, records, component, years)
                     long_path = _join(
                         out_data_dir,
                         f"{comp.key}_{component.lower()}_by_climate_long.csv",
