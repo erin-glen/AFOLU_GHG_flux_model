@@ -145,6 +145,7 @@ from matplotlib import colors as mcolors
 
 import src.scripts.zonal_statistics.pub_common as pc
 import src.scripts.zonal_statistics.pub_assets as pa
+from src.scripts.zonal_statistics.run_zonal_stats import build_interval_pairs
 
 
 OUT_DIR_ROOT = pa.OUT_DIR_ROOT
@@ -162,6 +163,11 @@ _make_globs_for_components = pa._make_globs_for_components
 # Match the drained/burned palette used throughout pub_assets/pub_common
 STACK_COMPONENT_COLORS = pc.PROCESS_COLORS
 STACK_COMPONENT_ORDER = ("Drained", "Burned")
+
+PEAT_AREA_COLORS = {
+    "Drained": STACK_COMPONENT_COLORS.get("Drained", "#4c78a8"),
+    "Undrained": "#9ca3af",
+}
 
 # Default categorical palette for run-level comparisons. Update this constant to
 # swap palettes without plumbing a CLI flag (palette names mirror pc.PALETTES).
@@ -215,6 +221,10 @@ class RunBreakouts:
     by_burned_state: pd.DataFrame
     by_country_drained_state: pd.DataFrame
     by_country_burned_state: pd.DataFrame
+    by_climate_component: pd.DataFrame
+    by_period_drained_climate: pd.DataFrame
+    by_period_burned_climate: pd.DataFrame
+    by_period_total_climate: pd.DataFrame
 
 
 @dataclass(frozen=True)
@@ -594,6 +604,10 @@ def _compute_run_data(
     by_burned_state = pd.DataFrame()
     by_country_drained_state = pd.DataFrame()
     by_country_burned_state = pd.DataFrame()
+    by_climate_component = pd.DataFrame()
+    by_period_drained_climate = pd.DataFrame()
+    by_period_burned_climate = pd.DataFrame()
+    by_period_total_climate = pd.DataFrame()
 
     stats_override: dict[str, float] | None = None
     if chunk_stats_path:
@@ -641,6 +655,10 @@ def _compute_run_data(
             by_country_burned_state = con.execute(
                 pc.table_by_country_burned_state_sql(with_lookup=have_lookup)
             ).df()
+            by_climate_component = con.execute(pc.sql_component_split_by_climate_avg(n_periods)).df()
+            by_period_drained_climate = con.execute(pc.sql_drained_by_climate()).df()
+            by_period_burned_climate = con.execute(pc.sql_burned_by_climate()).df()
+            by_period_total_climate = con.execute(pc.sql_total_by_climate()).df()
         else:
             print(
                 f"[chunk_stats] Skipping zonal stats for {spec.run_name}; "
@@ -668,6 +686,10 @@ def _compute_run_data(
         by_burned_state=_add_run_columns(by_burned_state, spec),
         by_country_drained_state=_add_run_columns(by_country_drained_state, spec),
         by_country_burned_state=_add_run_columns(by_country_burned_state, spec),
+        by_climate_component=_add_run_columns(by_climate_component, spec),
+        by_period_drained_climate=_add_run_columns(by_period_drained_climate, spec),
+        by_period_burned_climate=_add_run_columns(by_period_burned_climate, spec),
+        by_period_total_climate=_add_run_columns(by_period_total_climate, spec),
     )
 
     return metrics, breakouts, uncertainty
@@ -732,6 +754,227 @@ def _plot_metric(df: pd.DataFrame, metric: MetricSpec, comp: ComparisonSpec, col
         return fig
 
 
+def _plot_horizontal_stack(
+    df: pd.DataFrame,
+    component_order: Sequence[str],
+    component_colors: Mapping[str, str],
+    xlabel: str,
+    title: str,
+    legend_columns: int = 2,
+) -> plt.Figure:
+    labels = df["Run"].tolist()
+    y_positions = list(range(len(labels)))
+    height = max(3.2, 0.55 * len(labels) + 1.0)
+
+    totals = df[list(component_order)].sum(axis=1).tolist()
+    x_max = max(totals) if totals else 0.0
+
+    colors = pc.resolve_colors(component_order, component_colors)
+
+    theme = {**pc.THEME_LIGHT_GRID, "axes.grid.axis": "x"}
+    with pc.use_theme(theme):
+        fig, ax = plt.subplots(figsize=(8.0, height))
+
+        left = [0.0] * len(labels)
+        for component in component_order:
+            vals = df[component].tolist()
+            ax.barh(y_positions, vals, left=left, color=colors[component], label=component)
+            left = [l + v for l, v in zip(left, vals)]
+
+        ax.set_yticks(y_positions)
+        ax.set_yticklabels(labels)
+        ax.invert_yaxis()
+        ax.set_xlabel(xlabel)
+        ax.set_title(title)
+        ax.set_axisbelow(True)
+        pc.tidy_axes(ax, grid="x")
+        pc.fmt_si(ax, axis="x")
+
+        pad = x_max * 0.03 if x_max else 0.05
+        for ypos, total in zip(y_positions, totals):
+            ax.text(total + pad, ypos, f"{total:.2f}", ha="left", va="center", fontsize=9)
+
+        ax.legend(
+            ncol=legend_columns,
+            loc="upper left",
+            bbox_to_anchor=(0.0, 1.10),
+            frameon=False,
+            handlelength=1.6,
+            columnspacing=1.2,
+        )
+
+        fig.tight_layout(rect=(0, 0, 1, 0.9))
+        return fig
+
+
+def _build_inventory_climate_component_df(
+    comp: ComparisonSpec,
+    records: Mapping[str, RunRecord],
+    component: str,
+) -> pd.DataFrame:
+    rows: list[pd.DataFrame] = []
+    for run_name in comp.run_names:
+        record = records[run_name]
+        df = record.breakouts.by_climate_component
+        if df is None or df.empty:
+            continue
+        sub = df[df["component"].str.lower() == component.lower()].copy()
+        if sub.empty:
+            continue
+        sub["Climate"] = sub["climate_domain"].apply(pc.titlecase_domain)
+        sub = sub[sub["Climate"].isin(pc.CLIMATE_ORDER)]
+        sub["run_key"] = run_name
+        sub["Run"] = record.spec.label
+        sub = sub.rename(columns={"avg_GtCO2e_per_yr": "Value"})
+        rows.append(sub[["run_key", "Run", "Climate", "Value"]])
+
+    if not rows:
+        return pd.DataFrame(columns=["run_key", "Run", "Climate", "Value"])
+
+    df_out = pd.concat(rows, ignore_index=True)
+    df_out["Run"] = pd.Categorical(
+        df_out["Run"],
+        [records[rn].spec.label for rn in comp.run_names],
+        ordered=True,
+    )
+    return df_out.sort_values(["Run", "Climate"]).reset_index(drop=True)
+
+
+def _build_inventory_climate_stack_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    run_order = [
+        r
+        for r in df["Run"].dropna().drop_duplicates().tolist()
+        if isinstance(r, (str,)) or not pd.isna(r)
+    ]
+
+    wide = (
+        df.pivot_table(
+            index=["run_key", "Run"],
+            columns="Climate",
+            values="Value",
+            aggfunc="sum",
+            fill_value=0.0,
+            observed=False,
+        )
+        .reindex(columns=pc.CLIMATE_ORDER, fill_value=0.0)
+        .reset_index()
+    )
+    if "Run" in wide.columns:
+        wide["Run"] = pd.Categorical(wide["Run"], categories=run_order, ordered=True)
+        wide = wide.sort_values("Run")
+    wide["Total"] = wide[pc.CLIMATE_ORDER].sum(axis=1)
+    return wide
+
+
+def _plot_inventory_climate_component(df: pd.DataFrame, component_label: str) -> plt.Figure | None:
+    if df is None or df.empty:
+        return None
+
+    theme = {**pc.THEME_LIGHT_GRID, "axes.grid.axis": "y"}
+    with pc.use_theme(theme):
+        fig = pc.stacked_column_by_category(
+            df_long=df,
+            index_col="Run",
+            category_col="Climate",
+            value_col="Value",
+            category_order=pc.CLIMATE_ORDER,
+            color_map=pc.CLIMATE_COLORS,
+            xlabel="Inventory Input Source",
+            ylabel=f"{component_label} emissions (Gt CO₂e/year)",
+            width=7.8,
+            height=4.6,
+            legend_above=True,
+        )
+        fig.tight_layout()
+        return fig
+
+
+def _inventory_period_labels(years: Sequence[int]) -> dict[int, str]:
+    pairs = build_interval_pairs(list(years))
+    return {end: f"{start}-{end}" for start, end in pairs}
+
+
+def _build_inventory_period_climate_df(
+    comp: ComparisonSpec,
+    records: Mapping[str, RunRecord],
+    component: str,
+    period_labels: Mapping[int, str],
+    period_order: Sequence[str],
+) -> pd.DataFrame:
+    attr_map = {
+        "drained": "by_period_drained_climate",
+        "burned": "by_period_burned_climate",
+        "total": "by_period_total_climate",
+    }
+    value_map = {
+        "drained": "drained_GtCO2e",
+        "burned": "burned_GtCO2e",
+        "total": "total_GtCO2e",
+    }
+
+    attr = attr_map[component.lower()]
+    value_col = value_map[component.lower()]
+
+    rows: list[pd.DataFrame] = []
+    for run_name in comp.run_names:
+        record = records[run_name]
+        df = getattr(record.breakouts, attr, pd.DataFrame())
+        if df is None or df.empty:
+            continue
+
+        sub = df.copy()
+        sub["Climate"] = sub["climate_domain"].apply(pc.titlecase_domain)
+        sub = sub[sub["Climate"].isin(pc.CLIMATE_ORDER)]
+        sub["Inventory period"] = sub["interval_end"].map(period_labels)
+        sub = sub[~sub["Inventory period"].isna()]
+        sub["Inventory period"] = pd.Categorical(sub["Inventory period"], period_order, ordered=True)
+        sub["run_key"] = run_name
+        sub["Run"] = record.spec.label
+        sub = sub.rename(columns={value_col: "Value"})
+        rows.append(sub[["run_key", "Run", "Inventory period", "Climate", "Value"]])
+
+    if not rows:
+        return pd.DataFrame(columns=["run_key", "Run", "Inventory period", "Climate", "Value"])
+
+    df_out = pd.concat(rows, ignore_index=True)
+    df_out["Run"] = pd.Categorical(
+        df_out["Run"],
+        [records[rn].spec.label for rn in comp.run_names],
+        ordered=True,
+    )
+    return df_out.sort_values(["Run", "Inventory period", "Climate"]).reset_index(drop=True)
+
+
+def _plot_inventory_period_climate(
+    df: pd.DataFrame, component_label: str, run_label: str
+) -> plt.Figure | None:
+    if df is None or df.empty:
+        return None
+
+    theme = {**pc.THEME_LIGHT_GRID, "axes.grid.axis": "y"}
+    with pc.use_theme(theme):
+        fig = pc.stacked_column_by_category(
+            df_long=df,
+            index_col="Inventory period",
+            category_col="Climate",
+            value_col="Value",
+            category_order=pc.CLIMATE_ORDER,
+            color_map=pc.CLIMATE_COLORS,
+            xlabel="Inventory period",
+            ylabel=f"{component_label} emissions (Gt CO₂e/year)",
+            width=7.5,
+            height=4.5,
+            legend_above=True,
+        )
+        if fig.axes:
+            fig.axes[0].set_title(run_label)
+        fig.tight_layout()
+        return fig
+
+
 def _build_emission_stack_df(comp: ComparisonSpec, records: Mapping[str, RunRecord]) -> pd.DataFrame:
     rows: list[dict[str, float | str]] = []
     for run_name in comp.run_names:
@@ -753,6 +996,24 @@ def _build_emission_stack_df(comp: ComparisonSpec, records: Mapping[str, RunReco
                 "Drained_high": unc.drained_high if unc else None,
                 "Burned_low": unc.burned_low if unc else None,
                 "Burned_high": unc.burned_high if unc else None,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _build_peat_area_stack_df(comp: ComparisonSpec, records: Mapping[str, RunRecord]) -> pd.DataFrame:
+    rows: list[dict[str, float | str]] = []
+    for run_name in comp.run_names:
+        record = records[run_name]
+        drained = record.metrics.drained_area_mha
+        undrained = record.metrics.undrained_area_mha
+        rows.append(
+            {
+                "run_key": run_name,
+                "Run": record.spec.label,
+                "Drained": drained,
+                "Undrained": undrained,
+                "Total": drained + undrained,
             }
         )
     return pd.DataFrame(rows)
@@ -843,9 +1104,13 @@ def _plot_stacked_total(
         return fig
 
 
-def _collect_breakouts(records: Mapping[str, RunRecord], attr: str) -> pd.DataFrame:
+def _collect_breakouts(
+    records: Mapping[str, RunRecord], attr: str, run_filter: Iterable[str] | None = None
+) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for run_name in sorted(records):
+        if run_filter is not None and run_name not in run_filter:
+            continue
         df = getattr(records[run_name].breakouts, attr)
         frames.append(df)
     if not frames:
@@ -1442,6 +1707,9 @@ def main(argv: Sequence[str] | None = None):
     if not years:
         raise SystemExit("At least one inventory year must be provided")
 
+    period_labels = _inventory_period_labels(years)
+    period_order = [period_labels[end] for end in sorted(period_labels)]
+
     run_specs = _parse_run_specs(args.run)
 
     user_chunk_stat_paths_raw = _parse_chunk_stat_paths(args.chunk_stats)
@@ -1517,6 +1785,159 @@ def main(argv: Sequence[str] | None = None):
                     _save_png(fig, fig_path, dpi=300)
                     plt.close(fig)
 
+            if comp.key == "inventory_source":
+                total_stack_df = _build_emission_stack_df(comp, records)
+                total_stack_path = _join(out_data_dir, f"{comp.key}_total_emissions_stack.csv")
+                _write_csv_df(writer_con, total_stack_df, total_stack_path)
+
+                area_stack_df = _build_peat_area_stack_df(comp, records)
+                area_stack_path = _join(out_data_dir, f"{comp.key}_peat_area_stack.csv")
+                _write_csv_df(writer_con, area_stack_df, area_stack_path)
+
+                for component in ("Drained", "Burned"):
+                    climate_df = _build_inventory_climate_component_df(comp, records, component)
+                    climate_stack_df = _build_inventory_climate_stack_df(climate_df)
+                    climate_stack_path = _join(
+                        out_data_dir,
+                        f"{comp.key}_{component.lower()}_emissions_by_climate_stack.csv",
+                    )
+                    _write_csv_df(writer_con, climate_stack_df, climate_stack_path)
+
+                if not args.data_only:
+                    total_stack_fig = _plot_horizontal_stack(
+                        total_stack_df,
+                        STACK_COMPONENT_ORDER,
+                        STACK_COMPONENT_COLORS,
+                        "Total emissions (Gt CO₂e/year)",
+                        comp.label,
+                    )
+                    total_stack_fig_path = _join(
+                        out_dir,
+                        "figures",
+                        "comparisons",
+                        f"{comp.key}_total_emissions_stack.png",
+                    )
+                    _save_png(total_stack_fig, total_stack_fig_path, dpi=300)
+                    plt.close(total_stack_fig)
+
+                    area_stack_fig = _plot_horizontal_stack(
+                        area_stack_df,
+                        ("Drained", "Undrained"),
+                        PEAT_AREA_COLORS,
+                        "Peat area (million ha)",
+                        comp.label,
+                    )
+                    area_stack_fig_path = _join(
+                        out_dir,
+                        "figures",
+                        "comparisons",
+                        f"{comp.key}_peat_area_stack.png",
+                    )
+                    _save_png(area_stack_fig, area_stack_fig_path, dpi=300)
+                    plt.close(area_stack_fig)
+
+                    for component in ("Drained", "Burned"):
+                        climate_df = _build_inventory_climate_component_df(comp, records, component)
+                        climate_stack_df = _build_inventory_climate_stack_df(climate_df)
+                        if climate_stack_df.empty:
+                            continue
+                        climate_components = [c for c in pc.CLIMATE_ORDER if c in climate_stack_df.columns]
+                        climate_stack_fig = _plot_horizontal_stack(
+                            climate_stack_df,
+                            climate_components,
+                            pc.CLIMATE_COLORS,
+                            f"{component} emissions (Gt CO₂e/year)",
+                            f"{comp.label} – {component} by climate",
+                            legend_columns=3,
+                        )
+                        climate_stack_fig_path = _join(
+                            out_dir,
+                            "figures",
+                            "comparisons",
+                            f"{comp.key}_{component.lower()}_emissions_by_climate_stack.png",
+                        )
+                        _save_png(climate_stack_fig, climate_stack_fig_path, dpi=300)
+                        plt.close(climate_stack_fig)
+
+                for component in ("Drained", "Burned"):
+                    climate_df = _build_inventory_climate_component_df(comp, records, component)
+                    long_path = _join(
+                        out_data_dir,
+                        f"{comp.key}_{component.lower()}_by_climate_long.csv",
+                    )
+                    _write_csv_df(writer_con, climate_df, long_path)
+                    wide_path = _join(
+                        out_data_dir,
+                        f"{comp.key}_{component.lower()}_by_climate_wide.csv",
+                    )
+                    _write_csv_df(
+                        writer_con,
+                        pc.pivot_wide(climate_df[["Run", "Climate", "Value"]], "Value", "Run"),
+                        wide_path,
+                    )
+
+                    if args.data_only:
+                        continue
+
+                    fig = _plot_inventory_climate_component(climate_df, component)
+                    if fig is not None:
+                        fig_path = _join(
+                            out_dir,
+                            "figures",
+                            "comparisons",
+                            f"{comp.key}_{component.lower()}_by_climate.png",
+                        )
+                        _save_png(fig, fig_path, dpi=300)
+                        plt.close(fig)
+
+                for component in ("Drained", "Burned", "Total"):
+                    period_climate_df = _build_inventory_period_climate_df(
+                        comp, records, component, period_labels, period_order
+                    )
+
+                    long_path = _join(
+                        out_data_dir,
+                        f"{comp.key}_{component.lower()}_by_period_climate_long.csv",
+                    )
+                    _write_csv_df(writer_con, period_climate_df, long_path)
+
+                    wide = (
+                        period_climate_df.pivot_table(
+                            index=["Run", "Inventory period"],
+                            columns="Climate",
+                            values="Value",
+                            aggfunc="sum",
+                            fill_value=0.0,
+                            observed=False,
+                        )
+                        .reindex(columns=pc.CLIMATE_ORDER, fill_value=0.0)
+                        .reset_index()
+                    )
+                    wide_path = _join(
+                        out_data_dir,
+                        f"{comp.key}_{component.lower()}_by_period_climate_wide.csv",
+                    )
+                    _write_csv_df(writer_con, wide, wide_path)
+
+                    if args.data_only:
+                        continue
+
+                    for run_name in comp.run_names:
+                        run_df = period_climate_df[period_climate_df["run_key"] == run_name]
+                        fig = _plot_inventory_period_climate(
+                            run_df, component, records[run_name].spec.label
+                        )
+                        if fig is None:
+                            continue
+                        fig_path = _join(
+                            out_dir,
+                            "figures",
+                            "comparisons",
+                            f"{comp.key}_{component.lower()}_by_period_climate__{run_name}.png",
+                        )
+                        _save_png(fig, fig_path, dpi=300)
+                        plt.close(fig)
+
             if args.data_only:
                 continue
 
@@ -1537,9 +1958,26 @@ def main(argv: Sequence[str] | None = None):
             ("by_burned_state_period", "by_burned_state"),
             ("by_country_drained_state_period", "by_country_drained_state"),
             ("by_country_burned_state_period", "by_country_burned_state"),
+            ("by_climate_component", "by_climate_component"),
+            ("by_period_drained_climate", "by_period_drained_climate"),
+            ("by_period_burned_climate", "by_period_burned_climate"),
+            ("by_period_total_climate", "by_period_total_climate"),
         )
+        climate_breakouts = {
+            "by_climate_component",
+            "by_period_drained_climate",
+            "by_period_burned_climate",
+            "by_period_total_climate",
+        }
+        inventory_comp = next((c for c in active_comparisons if c.key == "inventory_source"), None)
+        inventory_runs: Iterable[str] | None = inventory_comp.run_names if inventory_comp else None
+
         for file_stub, attr in breakout_specs:
-            breakout_df = _collect_breakouts(records, attr)
+            if attr in climate_breakouts and inventory_runs is None:
+                breakout_df = pd.DataFrame()
+            else:
+                run_filter = inventory_runs if attr in climate_breakouts else None
+                breakout_df = _collect_breakouts(records, attr, run_filter=run_filter)
             breakout_path = _join(out_data_dir, f"runs_{file_stub}.csv")
             _write_csv_df(writer_con, breakout_df, breakout_path)
 
