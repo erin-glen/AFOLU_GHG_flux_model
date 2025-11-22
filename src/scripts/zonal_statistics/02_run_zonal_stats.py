@@ -55,10 +55,25 @@ DATASETS: Dict[str, Dict[str, Any]] = {
     "drained_state_nodes": {"zarr": "drained_state_node_{interval}.zarr", "var": "drained_state_nodes"},
     "burned_state_nodes":  {"zarr": "burned_state_node_{interval}.zarr",  "var": "burned_state_nodes"},
     "drained_total":       {"zarr": "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr", "var": "drained_total"},
+    "drained_co2":         {"zarr": "drained_co2_Mg_CO2_ha_yr_{interval}.zarr", "var": "drained_co2"},
+    "drained_n2o":         {"zarr": "drained_n2o_Mg_CO2e_ha_yr_{interval}.zarr", "var": "drained_n2o"},
     "burned_total":        {"zarr": "burned_total_Mg_CO2e_pixel_yr_{interval}.zarr",  "var": "burned_total"},
 }
 
+FLUX_SPECS = {
+    "drained_total": {"code": 0, "label": "drained_total_Mg_CO2e", "group": "drained"},
+    "drained_co2": {"code": 3, "label": "drained_co2_Mg_CO2", "group": "drained"},
+    "drained_n2o": {"code": 4, "label": "drained_n2o_Mg_CO2e", "group": "drained"},
+    "burned_total": {"code": 1, "label": "burned_total_Mg_CO2e", "group": "burned"},
+}
+
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_name}/{run_date}/{interval}/"
+
+
+def ordered_dataset_keys(selected: Optional[List[str]]) -> List[str]:
+    if not selected:
+        return list(DATASETS.keys())
+    return [k for k in DATASETS if k in set(selected)]
 
 # ---- Contextual Zarrs (must match Step 1) ----
 CONTEXTUAL_ZARR_ROOT = (
@@ -197,10 +212,13 @@ def _df_from_result(res: xr.DataArray, flux_map: Dict[int, str], interval_end: i
     df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000.0  # m² -> ha
     return df
 
-def build_zarr_paths(interval: str, **fmt_kw) -> Dict[str, Dict[str, Any]]:
+def build_zarr_paths(interval: str, dataset_names: Optional[List[str]] = None, **fmt_kw) -> Dict[str, Dict[str, Any]]:
     zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **fmt_kw)
-    return {name: {"zarr": zarr_base + spec["zarr"].format(interval=interval), "var": spec["var"]}
-            for name, spec in DATASETS.items()}
+    return {
+        name: {"zarr": zarr_base + spec["zarr"].format(interval=interval), "var": spec["var"]}
+        for name, spec in DATASETS.items()
+        if name in ordered_dataset_keys(dataset_names)
+    }
 
 def leak_ratio_check(drained: xr.DataArray, burned: xr.DataArray, adm0: xr.DataArray,
                      mode: str, threshold: float, logger: logging.Logger) -> None:
@@ -266,6 +284,15 @@ def run(args: argparse.Namespace) -> None:
     logger.info("Diagnostics mode: %s | Force align: %s", args.diagnostics, args.force_align)
 
     OUTPUT_KW = dict(root=ROOT, model_version=args.model_version, run_date=args.run_date, run_name=args.run_name)
+    selected_names = ordered_dataset_keys(args.datasets)
+    drained_fluxes = [k for k in selected_names if FLUX_SPECS.get(k, {}).get("group") == "drained"]
+    burned_fluxes = [k for k in selected_names if FLUX_SPECS.get(k, {}).get("group") == "burned"]
+    required_names = set(selected_names)
+    if drained_fluxes:
+        required_names.add("drained_state_nodes")
+    if burned_fluxes:
+        required_names.add("burned_state_nodes")
+    dataset_names = ordered_dataset_keys(list(required_names))
 
     # Open contextual layers (built in Step 1)
     adm0_zarr = adm0_zarr_path()
@@ -298,8 +325,8 @@ def run(args: argparse.Namespace) -> None:
         interval = f"{interval_start_year}_{interval_end_year}"
         logger.info("Processing interval %s : %s", interval, timestr())
 
-        paths = build_zarr_paths(interval, **OUTPUT_KW)
-        for key in ("drained_total", "burned_total", "drained_state_nodes", "burned_state_nodes"):
+        paths = build_zarr_paths(interval, dataset_names=dataset_names, **OUTPUT_KW)
+        for key in dataset_names:
             zpath = paths[key]["zarr"]
             if not zarr_exists(zpath):
                 raise FileNotFoundError(
@@ -310,72 +337,99 @@ def run(args: argparse.Namespace) -> None:
                     f"--chunk_size {args.chunk_size}"
                 )
 
-        drained_total_raw = open_zarr_region(paths["drained_total"]["zarr"], bbox, args.chunk_size)
-        burned_total_raw  = open_zarr_region(paths["burned_total"]["zarr"],  bbox, args.chunk_size)
-        drained_nodes_raw = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
-        burned_nodes_raw  = open_zarr_region(paths["burned_state_nodes"]["zarr"],  bbox, args.chunk_size).astype("uint32")
+        zarr_data: Dict[str, xr.DataArray] = {}
+        for key in drained_fluxes + burned_fluxes:
+            zarr_data[key] = open_zarr_region(paths[key]["zarr"], bbox, args.chunk_size)
+
+        drained_nodes_aligned = burned_nodes_aligned = None
+        if "drained_state_nodes" in paths:
+            drained_nodes_raw = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
+            drained_nodes_aligned = align_auto(drained_nodes_raw, ref, tol, args.force_align)
+        if "burned_state_nodes" in paths:
+            burned_nodes_raw = open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
+            burned_nodes_aligned = align_auto(burned_nodes_raw, ref, tol, args.force_align)
 
         # Smart alignment (skip if coords already match)
-        adm0_aligned          = align_auto(adm0,             ref, tol, args.force_align)
-        drained_total_aligned = align_auto(drained_total_raw, ref, tol, args.force_align)
-        burned_total_aligned  = align_auto(burned_total_raw,  ref, tol, args.force_align)
-        drained_nodes_aligned = align_auto(drained_nodes_raw, ref, tol, args.force_align)
-        burned_nodes_aligned  = align_auto(burned_nodes_raw,  ref, tol, args.force_align)
+        adm0_aligned = align_auto(adm0, ref, tol, args.force_align)
+        aligned_flux = {k: align_auto(v, ref, tol, args.force_align) for k, v in zarr_data.items()}
 
         # Optional flux-over-ocean diagnostic (off by default)
-        leak_ratio_check(drained_total_aligned, burned_total_aligned, adm0_aligned,
-                         args.diagnostics, args.leak_warn_threshold, logger)
+        if {"drained_total", "burned_total"}.issubset(aligned_flux):
+            leak_ratio_check(aligned_flux["drained_total"], aligned_flux["burned_total"], adm0_aligned,
+                             args.diagnostics, args.leak_warn_threshold, logger)
+        else:
+            logger.info(
+                "Skipping flux-over-ocean diagnostic because drained_total and burned_total were not both selected."
+            )
 
         where_mask = (adm0_aligned > 0)
 
-        # Drained
-        with dask.annotate(label=f"reduce:drained:{interval}"):
-            cube_d = xr.concat([drained_total_aligned, ref], dim="flux_type").assign_coords(
-                flux_type=("flux_type", [0, 2])
-            )
-            res_d = xarray_reduce(
-                cube_d, adm0_aligned, drained_nodes_aligned, func="sum",
-                expected_groups=(gadm_adm0_ids, drained_codes_arr),
-                where=where_mask, **flox_sparse_reindex_kwargs(not args.no_sparse),
-            ).compute()
-        df_d = _df_from_result(res_d, {0: "drained_total_Mg_CO2e", 2: "area__ha"}, interval_end_year)
+        if drained_fluxes:
+            if drained_nodes_aligned is None:
+                raise RuntimeError("drained_state_nodes dataset is required when processing drained fluxes")
+            with dask.annotate(label=f"reduce:drained:{interval}"):
+                flux_codes = [FLUX_SPECS[k]["code"] for k in drained_fluxes]
+                cube_d = xr.concat([aligned_flux[k] for k in drained_fluxes] + [ref], dim="flux_type").assign_coords(
+                    flux_type=("flux_type", flux_codes + [2])
+                )
+                res_d = xarray_reduce(
+                    cube_d, adm0_aligned, drained_nodes_aligned, func="sum",
+                    expected_groups=(gadm_adm0_ids, drained_codes_arr),
+                    where=where_mask, **flox_sparse_reindex_kwargs(not args.no_sparse),
+                ).compute()
+            flux_map = {FLUX_SPECS[k]["code"]: FLUX_SPECS[k]["label"] for k in drained_fluxes}
+            flux_map[2] = "area__ha"
+            df_d = _df_from_result(res_d, flux_map, interval_end_year)
+        else:
+            df_d = None
 
-        # Burned
-        with dask.annotate(label=f"reduce:burned:{interval}"):
-            cube_b = xr.concat([burned_total_aligned, ref], dim="flux_type").assign_coords(
-                flux_type=("flux_type", [1, 2])
-            )
-            res_b = xarray_reduce(
-                cube_b, adm0_aligned, burned_nodes_aligned, func="sum",
-                expected_groups=(gadm_adm0_ids, burned_codes_arr),
-                where=where_mask, **flox_sparse_reindex_kwargs(not args.no_sparse),
-            ).compute()
-        df_b = _df_from_result(res_b, {1: "burned_total_Mg_CO2e", 2: "area__ha"}, interval_end_year)
+        if burned_fluxes:
+            if burned_nodes_aligned is None:
+                raise RuntimeError("burned_state_nodes dataset is required when processing burned fluxes")
+            with dask.annotate(label=f"reduce:burned:{interval}"):
+                flux_codes_b = [FLUX_SPECS[k]["code"] for k in burned_fluxes]
+                cube_b = xr.concat([aligned_flux[k] for k in burned_fluxes] + [ref], dim="flux_type").assign_coords(
+                    flux_type=("flux_type", flux_codes_b + [2])
+                )
+                res_b = xarray_reduce(
+                    cube_b, adm0_aligned, burned_nodes_aligned, func="sum",
+                    expected_groups=(gadm_adm0_ids, burned_codes_arr),
+                    where=where_mask, **flox_sparse_reindex_kwargs(not args.no_sparse),
+                ).compute()
+            flux_map_b = {FLUX_SPECS[k]["code"]: FLUX_SPECS[k]["label"] for k in burned_fluxes}
+            flux_map_b[2] = "area__ha"
+            df_b = _df_from_result(res_b, flux_map_b, interval_end_year)
+        else:
+            df_b = None
 
         # Write local Parquet (per interval)
         import shutil
-        local_d = (base_dir_drained / interval); local_b = (base_dir_burned / interval)
-        for pth in (local_d, local_b):
-            if pth.exists():
-                shutil.rmtree(pth, ignore_errors=True)
-            pth.mkdir(parents=True, exist_ok=True)
-
-        ds.write_dataset(pa.Table.from_pandas(df_d, preserve_index=False), base_dir=str(local_d),
-                         filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
-        ds.write_dataset(pa.Table.from_pandas(df_b, preserve_index=False), base_dir=str(local_b),
-                         filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
-        logger.info("Wrote %s rows (drained) and %s rows (burned) for %s", len(df_d), len(df_b), interval)
-
-        # Upload to S3
         dest_root = build_output_parquet(args.model_version, args.run_name, args.run_date, interval)
-        dest_d = posixpath.join(dest_root.rstrip("/"), "drained")
-        dest_b = posixpath.join(dest_root.rstrip("/"), "burned")
-        _upload_dir(fs_s3, local_d, dest_d); _upload_dir(fs_s3, local_b, dest_b)
-        logger.info("Uploaded interval %s → %s{drained,burned}", interval, dest_root)
+        if df_d is not None:
+            local_d = base_dir_drained / interval
+            if local_d.exists():
+                shutil.rmtree(local_d, ignore_errors=True)
+            local_d.mkdir(parents=True, exist_ok=True)
+            ds.write_dataset(pa.Table.from_pandas(df_d, preserve_index=False), base_dir=str(local_d),
+                             filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
+            dest_d = posixpath.join(dest_root.rstrip("/"), "drained")
+            _upload_dir(fs_s3, local_d, dest_d)
+            logger.info("Uploaded drained interval %s → %s", interval, dest_d)
+            if not args.keep_local:
+                shutil.rmtree(local_d, ignore_errors=True)
 
-        if not args.keep_local:
-            shutil.rmtree(local_d, ignore_errors=True)
-            shutil.rmtree(local_b, ignore_errors=True)
+        if df_b is not None:
+            local_b = base_dir_burned / interval
+            if local_b.exists():
+                shutil.rmtree(local_b, ignore_errors=True)
+            local_b.mkdir(parents=True, exist_ok=True)
+            ds.write_dataset(pa.Table.from_pandas(df_b, preserve_index=False), base_dir=str(local_b),
+                             filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
+            dest_b = posixpath.join(dest_root.rstrip("/"), "burned")
+            _upload_dir(fs_s3, local_b, dest_b)
+            logger.info("Uploaded burned interval %s → %s", interval, dest_b)
+            if not args.keep_local:
+                shutil.rmtree(local_b, ignore_errors=True)
 
     if not args.keep_local:
         import shutil
@@ -397,6 +451,8 @@ def main(argv=None):
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--no_sparse", action="store_true", default=not SPARSE_DEFAULT)
     parser.add_argument("--run_name", default="ogh_standard_model")
+    parser.add_argument("--datasets", nargs="+", choices=sorted(DATASETS.keys()),
+                        help="Datasets to process (default: all)")
     parser.add_argument("--align_tolerance_fraction", type=float, default=0.49,
                         help="Fraction of one pixel for nearest reindex tolerance (default 0.49).")
     parser.add_argument("--leak_warn_threshold", type=float, default=0.002,

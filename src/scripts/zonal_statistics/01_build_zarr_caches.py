@@ -2,7 +2,7 @@
 """Build aligned Zarr caches for organic-soils zonal statistics (canonical grid = pixel_area).
 
 python -m src.scripts.zonal_statistics.01_build_zarr_caches \
-  --interval_end_years 2005 2010 2015 2020 \
+  --interval_end_years 2024 \
   --cluster_name drainage_cluster \
   --run_date 20251118 \
   --model_version 0_9_7 \
@@ -45,6 +45,18 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         "var": "drained_total",
         "dtype": "float32",
     },
+    "drained_co2": {
+        "folder": "drained_co2_Mg_CO2_ha_yr",
+        "zarr": "drained_co2_Mg_CO2_ha_yr_{interval}.zarr",
+        "var": "drained_co2",
+        "dtype": "float32",
+    },
+    "drained_n2o": {
+        "folder": "drained_n2o_Mg_CO2e_ha_yr",
+        "zarr": "drained_n2o_Mg_CO2e_ha_yr_{interval}.zarr",
+        "var": "drained_n2o",
+        "dtype": "float32",
+    },
     "burned_total": {
         "folder": "burned_total_Mg_CO2e_pixel_yr",
         "zarr": "burned_total_Mg_CO2e_pixel_yr_{interval}.zarr",
@@ -70,6 +82,12 @@ FOLDER_TEMPLATE = (
     OUTPUT_BASE
     + "/{folder}/{run_name}/five_year_intervals/{interval}/{tile_pixels}_pixels/{run_date}/"
 )
+
+
+def ordered_dataset_keys(selected: Optional[List[str]]) -> List[str]:
+    if not selected:
+        return list(DATASETS.keys())
+    return [k for k in DATASETS if k in set(selected)]
 
 # ---- Contextual Zarrs (canonical reference grid = pixel_area) ----
 CONTEXTUAL_ZARR_ROOT = (
@@ -349,11 +367,12 @@ def ensure_adm0_contextual_zarr(
     return zarr_path
 
 # ------------------------------ pipeline --------------------------------
-def build_paths(interval: str, *, tile_pixels: int, **kw) -> Dict[str, Dict[str, Any]]:
+def build_paths(interval: str, *, tile_pixels: int, dataset_names: Optional[List[str]] = None, **kw) -> Dict[str, Dict[str, Any]]:
     zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
     kw2 = dict(kw); kw2["tile_pixels"] = tile_pixels
     out: Dict[str, Dict[str, Any]] = {}
-    for name, spec in DATASETS.items():
+    for name in ordered_dataset_keys(dataset_names):
+        spec = DATASETS[name]
         folder_uri = FOLDER_TEMPLATE.format(folder=spec["folder"], interval=interval, **kw2)
         out[name] = {"folder": folder_uri, "zarr": zarr_base + spec["zarr"].format(interval=interval),
                      "var": spec["var"], "dtype": spec["dtype"]}
@@ -372,6 +391,13 @@ def run(args: argparse.Namespace) -> None:
         logger.setLevel(logging.DEBUG)
 
     OUTPUT_KW = dict(root=ROOT, model_version=args.model_version, run_date=args.run_date, run_name=args.run_name)
+    base_selection = ordered_dataset_keys(args.datasets)
+    required_selection = set(base_selection)
+    if any(k in base_selection for k in ("drained_total", "drained_co2", "drained_n2o")):
+        required_selection.add("drained_state_nodes")
+    if "burned_total" in base_selection:
+        required_selection.add("burned_state_nodes")
+    dataset_names = ordered_dataset_keys(list(required_selection))
 
     # 0) Ensure canonical reference grid exists, then open it
     ensure_pixel_area_contextual_zarr(chunk_size=args.chunk_size, logger=logger)
@@ -405,9 +431,9 @@ def run(args: argparse.Namespace) -> None:
     for iv_start, iv_end in interval_pairs:
         interval = f"{iv_start}_{iv_end}"
         logger.info("flm: Interval %s", interval)
-        paths = build_paths(interval, tile_pixels=args.tile_pixels, **OUTPUT_KW)
+        paths = build_paths(interval, tile_pixels=args.tile_pixels, dataset_names=dataset_names, **OUTPUT_KW)
 
-        for key in ("drained_total", "burned_total", "drained_state_nodes", "burned_state_nodes"):
+        for key in dataset_names:
             spec = paths[key]
             folder = spec["folder"]; zpath = spec["zarr"]; var = spec["var"]; dtype = spec["dtype"]
 
@@ -471,6 +497,8 @@ def main(argv=None):
     parser.add_argument("--tile_pixels", type=int, default=40000,
                         help="Input tile size in pixels in the source folder path (4000 or 40000).")
     parser.add_argument("--run_name", default="ogh_standard_model")
+    parser.add_argument("--datasets", nargs="+", choices=sorted(DATASETS.keys()),
+                        help="Datasets to process (default: all)")
     parser.add_argument("--write_mode", choices=["w", "w-"], default="w-",
                         help="'w' overwrite, 'w-' skip if exists (validate only).")
     parser.add_argument("--align_tolerance_fraction", type=float, default=0.49,
