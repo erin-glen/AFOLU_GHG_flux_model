@@ -6,13 +6,14 @@ Production-lean defaults:
 - Smart alignment: skip reindex_like if coords already equal to pixel_area.
 
 python -m src.scripts.zonal_statistics.02_run_zonal_stats \
-  --interval_end_years 2005 2010 2015 2020 \
+  --interval_end_years 2024 \
   --cluster_name drainage_cluster \
   --run_date 20251118 \
   --model_version 0_9_7 \
   --run_name ogh_sensitivity_500m_10 \
   --chunk_size 10000 \
-  --diagnostics off
+  --diagnostics off \
+  --datasets drained_total burned_total
 
 """
 
@@ -55,8 +56,8 @@ DATASETS: Dict[str, Dict[str, Any]] = {
     "drained_state_nodes": {"zarr": "drained_state_node_{interval}.zarr", "var": "drained_state_nodes"},
     "burned_state_nodes":  {"zarr": "burned_state_node_{interval}.zarr",  "var": "burned_state_nodes"},
     "drained_total":       {"zarr": "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr", "var": "drained_total"},
-    "drained_co2":         {"zarr": "drained_co2_Mg_CO2_ha_yr_{interval}.zarr", "var": "drained_co2"},
-    "drained_n2o":         {"zarr": "drained_n2o_Mg_CO2e_ha_yr_{interval}.zarr", "var": "drained_n2o"},
+    "drained_co2":         {"zarr": "drained_co2_Mg_CO2_pixel_yr_{interval}.zarr", "var": "drained_co2"},
+    "drained_n2o":         {"zarr": "drained_n2o_Mg_CO2e_pixel_yr_{interval}.zarr", "var": "drained_n2o"},
     "burned_total":        {"zarr": "burned_total_Mg_CO2e_pixel_yr_{interval}.zarr",  "var": "burned_total"},
 }
 
