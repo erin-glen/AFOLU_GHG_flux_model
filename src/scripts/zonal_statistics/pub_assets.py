@@ -493,8 +493,8 @@ def main(argv=None):
                 left_vals=df_area["drained_area_mha"].tolist(),
                 right_vals=df_area["undrained_area_mha"].tolist(),
                 xlabel="Total Area (million ha)",
-                legends=("Drained peat area", "Undrained peat area"),
-                colors=("#FB6A29", "#3E3753"),
+                legends=("Drained organic soils area", "Undrained organic soils area"),
+                colors=("#3E3753","#9ca3af"),
             )
             _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_peat_area_bar.png"), dpi=300)
 
