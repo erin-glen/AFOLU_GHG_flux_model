@@ -46,13 +46,13 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         "dtype": "float32",
     },
     "drained_co2": {
-        "folder": "drained_co2_Mg_CO2_ha_yr",
+        "folder": "drained_co2_Mg_CO2_pixel_yr",
         "zarr": "drained_co2_Mg_CO2_pixel_yr_{interval}.zarr",
         "var": "drained_co2",
         "dtype": "float32",
     },
     "drained_n2o": {
-        "folder": "drained_n2o_Mg_CO2e_ha_yr",
+        "folder": "drained_n2o_Mg_CO2e_pixel_yr",
         "zarr": "drained_n2o_Mg_CO2e_pixel_yr_{interval}.zarr",
         "var": "drained_n2o",
         "dtype": "float32",
