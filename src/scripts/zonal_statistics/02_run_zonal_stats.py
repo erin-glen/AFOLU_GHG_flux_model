@@ -13,7 +13,7 @@ python -m src.scripts.zonal_statistics.02_run_zonal_stats \
   --run_name ogh_sensitivity_500m_10 \
   --chunk_size 10000 \
   --diagnostics off \
-  --datasets drained_total burned_total
+  --datasets drained_co2 drained_n2o
 
 """
 
@@ -288,6 +288,7 @@ def run(args: argparse.Namespace) -> None:
     selected_names = ordered_dataset_keys(args.datasets)
     drained_fluxes = [k for k in selected_names if FLUX_SPECS.get(k, {}).get("group") == "drained"]
     burned_fluxes = [k for k in selected_names if FLUX_SPECS.get(k, {}).get("group") == "burned"]
+    drained_only_gases = set(drained_fluxes) == {"drained_co2", "drained_n2o"}
     required_names = set(selected_names)
     if drained_fluxes:
         required_names.add("drained_state_nodes")
@@ -406,6 +407,7 @@ def run(args: argparse.Namespace) -> None:
         # Write local Parquet (per interval)
         import shutil
         dest_root = build_output_parquet(args.model_version, args.run_name, args.run_date, interval)
+        drained_subdir = "drained_co2_n2o" if drained_only_gases else "drained"
         if df_d is not None:
             local_d = base_dir_drained / interval
             if local_d.exists():
@@ -413,7 +415,7 @@ def run(args: argparse.Namespace) -> None:
             local_d.mkdir(parents=True, exist_ok=True)
             ds.write_dataset(pa.Table.from_pandas(df_d, preserve_index=False), base_dir=str(local_d),
                              filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
-            dest_d = posixpath.join(dest_root.rstrip("/"), "drained")
+            dest_d = posixpath.join(dest_root.rstrip("/"), drained_subdir)
             _upload_dir(fs_s3, local_d, dest_d)
             logger.info("Uploaded drained interval %s → %s", interval, dest_d)
             if not args.keep_local:
