@@ -49,21 +49,21 @@ Usage example (inventory + OGH sensitivity combined):
 
   python -m src.scripts.zonal_statistics.pub_compare_runs \
     --years 2024 \
-    --run "ogh_sensitivity_500m_10=0_9_7:20251118|OGH inventory (500 m)" \
-    --run "gfw_standard_model_500m=0_9_7:20251120|GFW 500 m" \
-    --run "gpd_standard_model_500m=0_9_7:20251120|GPD 500 m"
+    --run "ogh_sensitivity_500m_10=0_9_7:20251118|OGH" \
+    --run "gfw_standard_model_500m=0_9_7:20251120|GFW" \
+    --run "gpd_standard_model_500m=0_9_7:20251120|GPD"
 
   python -m src.scripts.zonal_statistics.pub_compare_runs \
     --years 2024 \
-    --run ogh_sensitivity_250m=0_9_7:20251120\
+    --run ogh_sensitivity_250m=0_9_7:20251120 \
     --run ogh_sensitivity_500m=0_9_7:20251121 \
     --run ogh_sensitivity_750m=0_9_7:20251120
 
   python -m src.scripts.zonal_statistics.pub_compare_runs \
     --years 2024 \
-    --run "ogh_sensitivity_high=0_9_7:20251120|OGH High" \
-    --run "ogh_sensitivity_low=0_9_7:20251121|OGH Low" \
-    --run "ogh_sensitivity_500m=0_9_7:20251121|OGH inventory (500 m)"
+    --run "ogh_sensitivity_high=0_9_7:20251120|High" \
+    --run "ogh_sensitivity_low=0_9_7:20251121|Low" \
+    --run "ogh_sensitivity_500m=0_9_7:20251121|Baseline"
 
 
 OGH sensitivity comparisons (distance and high/low emissions) are designed to
@@ -740,7 +740,6 @@ def _plot_metric(df: pd.DataFrame, metric: MetricSpec, comp: ComparisonSpec, col
         ax.set_yticklabels(labels)
         ax.invert_yaxis()
         ax.set_xlabel(f"{metric.label} ({metric.units})")
-        ax.set_title(comp.label)
         ax.set_axisbelow(True)
         pc.tidy_axes(ax, grid="x")
         pc.fmt_si(ax, axis="x")
@@ -785,7 +784,6 @@ def _plot_horizontal_stack(
         ax.set_yticklabels(labels)
         ax.invert_yaxis()
         ax.set_xlabel(xlabel)
-        ax.set_title(title)
         ax.set_axisbelow(True)
         pc.tidy_axes(ax, grid="x")
         pc.fmt_si(ax, axis="x")
@@ -991,8 +989,6 @@ def _plot_inventory_period_climate(
             height=4.5,
             legend_above=True,
         )
-        if fig.axes:
-            fig.axes[0].set_title(run_label)
         fig.tight_layout()
         return fig
 
@@ -1087,7 +1083,6 @@ def _plot_stacked_total(
         ax.set_xticks(x)
         ax.set_xticklabels(df["Run"], rotation=20, ha="right")
         ax.set_ylabel("Gt CO₂e/year")
-        ax.set_title(comp.label)
         ax.set_axisbelow(True)
         pc.tidy_axes(ax, grid="y")
         pc.fmt_si(ax, axis="y")
