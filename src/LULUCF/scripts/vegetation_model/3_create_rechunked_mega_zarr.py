@@ -1,7 +1,7 @@
 """
-Rechunks the global mega-zarr (zarr group with all variables/datasets and years) from 4000x4000 pixels into
-10000x10000 pixels by copying data from the populated raw zarr to the metadata-only rechunked zarr chunk by chunk
-for each dataset-year combination.
+Rechunks the global mega-zarr (zarr group with all variables/datasets and years) from 9x4000x4000 pixels into
+9x10000x10000 pixels by copying data from the populated raw zarr to the metadata-only rechunked zarr chunk by chunk
+for each dataset. All years for a dataset are rechunked at the same time since they are in a single chunk that covers all years (currently 9).
 
 I went through many iterations for how to rechunk the zarr and wound up with this one, which is kind of cumbersome and
 manual and doesn't use native Dask/xarray abilities.
@@ -23,18 +23,22 @@ Then, I tried just creating a chunk=10000x10000 Zarr up front and having the veg
 That didn't work for the same reason; I was writing multiple 4000x4000 chunks to a single 10000x10000 destination
 chunk concurrently. It had the same missing data issue as above (in comparison with the model output chunk stats
 spreadsheet).
-Finally, I settled on this approach, which grabs 10000x10000 pixel chunks from a raw zarr dataset-year
-and writes them into the rechunked one. The 10000x10000 chunks for a given dataset-year are transferred in parallel
-but each chunk is written by only one worker. It then iterates through the datasets and years in a nested for loop
-(which is at all Dask or xarray).
+Finally, I settled on this approach, which grabs 9x10000x10000 pixel chunks from a raw zarr dataset-year
+and writes them into the rechunked one. The 9x10000x10000 chunks for a dataset are transferred in parallel
+but each chunk is written by only one worker. It then iterates through the datasets in a for loop
+(which does not take advantage of xarray/Dask synergies)
 
-After transferring a single dataset-year to the rechunked zarr, it then gets 1x1 deg chunk stats for the provided
-chunk list from the rechunked zarr. The chunk stats are in the same format as the chunk stats from
+After transferring all years of a single dataset to the rechunked zarr, it then gets 1x1 deg chunk stats for the provided
+chunk list from the rechunked zarr iterating through years. The chunk stats are in the same format as the chunk stats from
 numpy arrays from the main model. It compares the min, mean, max and pixel count for each zarr chunk against the
 original model chunk stats and prints any rows that have a difference in any metric above a specified tolerance.
 After the chunk stats for each dataset-year combination are compared, a spreadsheet or parquet file is
 written with the cumulative comparison between model and rechunked zarr stats. This chunk stats comparison
 allows confirmation that data wasn't modified or lost during the transfer from geotifs to rechunked zarr.
+
+After all years in a dataset have had their chunk stats compared with the original chunk stats,
+the log reports how many chunks had differences in chunk stats larger than the supplied tolerance
+and how many chunks had missing stats in the rechunked zarr. Then, it moves on to the next dataset.
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
@@ -43,17 +47,17 @@ python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr --run
 python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr --run_local -fv 1 -fy 1 --test_print_stats_chunk 0 41 1 42 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ --input_date YYYYMMDD
 
 Small test run:
-python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_model
+python -m src.utilities.create_cluster -n 50 -t 1 -m 16 -cn vegetation_model  (Needs 16GB when doing chunk stats on 9x10000x10000 chunks)
 python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model -fv 2 -fy 2 --test_print_stats_chunk 0 41 1 42 -bb 0 41 1 42 -mcstn vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP.xlsx --input_date YYYYMMDD
 python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model -fv 2 -fy 2 --test_print_stats_chunk 0 41 1 42 -bb 0 41 1 42 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ --input_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
-python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_model
+python -m src.utilities.create_cluster -n 50 -t 1 -m 16 -cn vegetation_model  (Needs 16GB when doing chunk stats on 9x10000x10000 chunks)
 python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -mcstn vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 
 Full run:
-python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn vegetation_model
+python -m src.utilities.create_cluster -n 50 -t 1 -m 16 -cn vegetation_model  (Needs 16GB when doing chunk stats on 9x10000x10000 chunks)
 python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is the definitive rechunking run."
 
 Most recent ChatGPT convo about rechunking approach: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6900ce1b-e728-832a-9b87-4702f646da42
@@ -79,7 +83,7 @@ pd.set_option('display.float_format', '{:.6e}'.format)
 
 
 # Copies the 10000x10000 chunk
-def copy_block(var, year_idx, y0, y1, x0, x1, raw_path, dest_path):
+def copy_block(var, y0, y1, x0, x1, raw_path, dest_path):
 
     # print(f"Transferring {var} for {year_idx} for {y0}:{y1}, {x0}:{x1}: {uu.timestr()}")
     # start_time = time.time()
@@ -88,22 +92,19 @@ def copy_block(var, year_idx, y0, y1, x0, x1, raw_path, dest_path):
     raw_store = zarr.open_group(fs.get_mapper(raw_path), mode="r")
     rechunked_store = zarr.open_group(fs.get_mapper(dest_path), mode="r+")
 
-    year = cn.interval_end_years_annual[year_idx]
-
-    block = raw_store[var][year_idx, y0:y1, x0:x1]
-    rechunked_store[var][year_idx, y0:y1, x0:x1] = block
+    block = raw_store[var][:, y0:y1, x0:x1]
+    rechunked_store[var][:, y0:y1, x0:x1] = block
 
     # end_time = time.time()
     # print(f"  Transferred {var} for {year_idx} for y={y0}:{y1}, x={x0}:{x1} in {round(end_time - start_time)} seconds: {uu.timestr()}")
 
-    return f"Copied {var} year {year} region y={y0}:{y1}, x={x0}:{x1}"
+    return f"Copied {var} for all years for region y={y0}:{y1}, x={x0}:{x1}"
 
 
 # Parallelizes copy across 10000x10000 chunks for a given dataset-year combination
 def run_parallel_copy(
     client: Client,
     var: str,
-    year_idx: int,
     ny: int,
     nx: int,
     block_size: int,
@@ -118,7 +119,7 @@ def run_parallel_copy(
             x1 = min(x0 + block_size, nx)
 
             future = client.submit(copy_block,
-                                   var, year_idx, y0, y1, x0, x1, raw_path, dest_path, retries=2)
+                                   var, y0, y1, x0, x1, raw_path, dest_path, retries=2)
             futures.append(future)
 
     results = client.gather(futures)
@@ -128,7 +129,7 @@ def run_parallel_copy(
     # print(f"  All blocks copied for {var} for year {year_idx}: {uu.timestr()}")
 
 
-def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_name, chunk_shapefile_uri=False, bounding_box=None,
+def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False, model_chunk_stats_table_name=None, bounding_box=None,
          test_print_stats_chunk=None, first_variables_to_process=None, first_years_to_process=None,
          first_chunks=None, log_note=None):
 
@@ -158,7 +159,6 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
 
     main_logger.info(f"Raw mega-zarr path: {raw_mega_zarr_path}")
     main_logger.info(f"Rechunked mega-zarr path: {rechunked_mega_zarr_path}")
-    main_logger.info(f"Number of years to rechunk: {first_years_to_process}")
     main_logger.info(f"Test chunk (to print stats): {test_print_stats_chunk}")
     main_logger.info(f"Tolerance for comparison between model and zarr chunk stat metrics: {cn.zarr_difference_tolerance}")
 
@@ -218,15 +218,21 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
 
     ### Step 3: Prepare model chunk stats for comparison with zarr chunk stats
 
-    main_logger.info(f"Reading local model chunk stats tables: {uu.timestr()}")
-    model_chunk_stats_path = os.path.join(cn.local_chunk_stats_path, model_chunk_stats_table_name)
+    if model_chunk_stats_table_name:
 
-    # Text added to output chunk stats table name(s) (Excel or Parquet)
-    comparison_insert = "_rechunk_zarr_comparison"
+        main_logger.info(f"Reading local model chunk stats tables: {uu.timestr()}")
+        model_chunk_stats_path = os.path.join(cn.local_chunk_stats_path, model_chunk_stats_table_name)
 
-    tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
-        comparison_insert, main_logger, model_chunk_stats_path)
+        # Text added to output chunk stats table name(s) (Excel or Parquet)
+        comparison_insert = "_rechunk_zarr_comparison"
 
+        tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
+            comparison_insert, main_logger, model_chunk_stats_path)
+
+    else:
+        tables_to_compare_dict = None
+        zarr_comparison_stats_name = None
+        zarr_comparison_stats_path = None
 
     ### Step 4: Copy from chunk=4000x4000 zarr to chunk=10000x10000 zarr and obtain chunk stats
     ### for the rechunked zarr
@@ -239,34 +245,33 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
     # Number of chunks with differences between original and zarr exceeding tolerance
     chunks_count_exceeding_total = 0
 
+    # Number of chuinks that have model chunk stats but not corresponding zarr chunk stats
+    chunks_without_zarr_stats_total = 0
+
     # Iterates through variables/datasets. Each chunk=10000x10000 is transferred by just one task/worker
     # so that multiple workers aren't touching the same zarr chunk at the same time.
     for var_name in vars_to_process:
 
-        main_logger.info(f"Starting {var_name}: {uu.timestr()}")
+        main_logger.info(f"Starting transfer of {var_name} for all years: {uu.timestr()}")
         var_start_time = time.time()
+
+        # Transfers to rechunked zarr for a given dataset-year in parallel
+        run_parallel_copy(
+            client=client,
+            var=var_name,
+            ny=lat_size,
+            nx=lon_size,
+            block_size=cn.zarr_pixel_chunks,
+            raw_path=raw_mega_zarr_path,
+            dest_path=rechunked_mega_zarr_path,
+        )
+        var_end_time = time.time()
+        main_logger.info(f"    Transferred {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
         # Iterates through years
         for year_idx in range(years_to_process):
 
             year = cn.interval_end_years_annual[year_idx]
-
-            main_logger.info(f"  Starting transfer of {var_name} for year {year}: {uu.timestr()}")
-            year_start_time = time.time()
-
-            # Transfers to rechunked zarr for a given dataset-year in parallel
-            run_parallel_copy(
-                client=client,
-                var=var_name,
-                year_idx=year_idx,
-                ny=lat_size,
-                nx=lon_size,
-                block_size=cn.zarr_pixel_chunks,
-                raw_path=raw_mega_zarr_path,
-                dest_path=rechunked_mega_zarr_path,
-            )
-            year_end_time = time.time()
-            main_logger.info(f"    Transferred {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
 
             # Only prints test chunk stats if selected
             if test_print_stats_chunk:
@@ -288,6 +293,7 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
             main_logger.info(f"  Starting zarr stats for {var_name} for year {year}: {uu.timestr()}")
             year_start_time = time.time()
 
+            # TODO change run_parallel_stats to run on all years in a chunk, not just one year at a time. That way, it can iterate by dataset instead of by dataset-year.
             # Runs chunk stats for a dataset-year in the zarr in parallel
             chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
                 client=client,
@@ -299,21 +305,25 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
             year_end_time = time.time()
             main_logger.info(f"    Got zarr stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
 
-            # After all rechunking and zarr chunk stats is done for the dataset-year combination,
-            # the chunk stats from the zarr are compared to the chunk stats from the model.
-            # This is done with Pandas dataframes and is not parallelized because it's just table manipulation
-            # for each dataset-year combination.
-            # The model output vs. zarr comparison is done after each dataset-year combination
-            # to get more real-time feedback on how the datasets compare (rather than waiting until after
-            # all zarr chunk stats have been calculated to do the metric comparisons).
-            all_merged_tables, chunks_count_exceeding = zu.compare_dataset_year_chunk_stats(all_merged_tables,
-                                                                 chunk_stats_variable_year_rechunked_zarr,
-                                                                 main_logger, tables_to_compare_dict, var_name, year,
-                                                                 zarr_comparison_stats_path)
+            # If a model chunk stats table is supplied, it does the comparison
+            if model_chunk_stats_table_name:
 
-            # Total number of chunks that have differences in metrics between the model and zarr
-            # that exceed the tolerance
-            chunks_count_exceeding_total += chunks_count_exceeding
+                # After all rechunking and zarr chunk stats is done for the dataset-year combination,
+                # the chunk stats from the zarr are compared to the chunk stats from the model.
+                # This is done with Pandas dataframes and is not parallelized because it's just table manipulation
+                # for each dataset-year combination.
+                # The model output vs. zarr comparison is done after each dataset-year combination
+                # to get more real-time feedback on how the datasets compare (rather than waiting until after
+                # all zarr chunk stats have been calculated to do the metric comparisons).
+                all_merged_tables, chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
+                                                                     chunk_stats_variable_year_rechunked_zarr,
+                                                                     main_logger, tables_to_compare_dict, var_name, year,
+                                                                     zarr_comparison_stats_path)
+
+                # Total number of chunks that have differences in metrics between the model and zarr
+                # that exceed the tolerance
+                chunks_count_exceeding_total += chunks_count_exceeding
+                chunks_without_zarr_stats_total += chunks_without_zarr_stats
 
         var_end_time = time.time()
         main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
@@ -321,19 +331,23 @@ def main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_na
 
     ### Step 5: All iterations done. Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
 
-    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
-    # cluster, not all the workers.
-    if not run_local:
-        workers = client.scheduler_info()["workers"]
-        n_workers = len(workers)
+    # If a model chunk stats table is supplied, it does the comparison
+    if model_chunk_stats_table_name:
 
-        # Reduces number of workers in the cluster down to 1 if there is more than 10
-        if n_workers > 10:
-            main_logger.info("Resizing cluster to 1 worker")
-            resize_cluster.resize_coiled_cluster(cluster_name, 2)
+        # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+        # cluster, not all the workers.
+        if not run_local:
+            workers = client.scheduler_info()["workers"]
+            n_workers = len(workers)
 
-    zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger, model_chunk_stats_table_name, stage,
-                                       start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
+            # Reduces number of workers in the cluster down to 1 if there is more than 10
+            if n_workers > 10:
+                main_logger.info("Resizing cluster to 1 worker")
+                resize_cluster.resize_coiled_cluster(cluster_name, 2)
+
+        zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_without_zarr_stats_total,
+                                              main_logger, model_chunk_stats_table_name, stage,
+                                           start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
 
 
     ### Step 6: Combine and upload logs
@@ -389,6 +403,6 @@ if __name__ == "__main__":
     no_log = args.no_log
 
     # Create the cluster with command line arguments
-    main(cluster_name, input_date, run_local, no_log, model_chunk_stats_table_name, chunk_shapefile_uri, bounding_box=bounding_box,
+    main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri, model_chunk_stats_table_name=model_chunk_stats_table_name, bounding_box=bounding_box,
          test_print_stats_chunk=test_print_stats_chunk, first_variables_to_process=first_variables_to_process, first_years_to_process=first_years_to_process,
          first_chunks=first_chunks, log_note=log_note)

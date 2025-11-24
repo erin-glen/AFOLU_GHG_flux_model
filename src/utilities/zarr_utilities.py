@@ -279,12 +279,12 @@ def check_region_stats(store_url, dataset_key, year_idx, target_box, logger_work
 # Chunk stats are calculated using the same function as used on numpy array outputs from models.
 def zarr_1x1_deg_stats(bounds, var_name, year_idx, zarr_path):
 
-    # lu.print_and_log(f"Getting stats for {var_name} for year {year_idx} for {bounds}: {uu.timestr()}", False, logger_worker)
-    # start_time = time.time()
-
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
     year = cn.interval_end_years_annual[year_idx]
+
+    # print(f"Getting stats for {var_name} for year {year_idx} for {bounds_str}: {uu.timestr()}")
+    start_time = time.time()
 
     # Bounding box to get stats for, reformatted for zarr extraction
     target_box = {
@@ -297,6 +297,7 @@ def zarr_1x1_deg_stats(bounds, var_name, year_idx, zarr_path):
     # The dataset pattern being analyzed, with year and units added
     pattern_with_units = add_units_year_to_pattern(var_name, year)
 
+    # print(f"Getting indices for {bounds_str}")
     lat0, lon0 = latlon_to_global_zarr_indices(target_box["lat_max"], target_box["lon_min"], cn.resolution)
     lat1, lon1 = latlon_to_global_zarr_indices(target_box["lat_min"], target_box["lon_max"], cn.resolution)
 
@@ -306,15 +307,19 @@ def zarr_1x1_deg_stats(bounds, var_name, year_idx, zarr_path):
     # Rather than encoding rows as input or output layer, they are encoded by whether they are raw or rechunked zarr
     # since all of these are outputs.
     # Chunk stats are dictionaries.
+    # print(f"Getting mapper for {bounds_str}")
     zarr_mapper = fs.get_mapper(zarr_path)
+    # print(f"Opening zarr for {bounds_str}")
     zarr_group = zarr.open(zarr_mapper, mode="r")
+    # print(f"Getting array for {bounds_str}")
     zarr_chunk_array = zarr_group[var_name][year_idx, lat0:lat1, lon0:lon1]
+    # print(f"Calculating stats for {bounds_str}")
     zarr_stats_raw = uu.calculate_stats(zarr_chunk_array, pattern_with_units, bounds_str, tile_id, 'zarr_stats')
 
     # end_time = time.time()
-    # lu.print_and_log(f"  Calculated stats for {pattern_with_units} for {year} for {bounds} in {round(end_time - start_time)} seconds: {uu.timestr()}", False, logger_worker)
+    # print(f"  Calculated stats for {pattern_with_units} for {year} for {bounds} in {round(end_time - start_time)} seconds: {uu.timestr()}")
 
-    # print("zarr_stats_raw:", zarr_stats_raw)
+    # print(f"zarr_stats_raw for {bounds_str}: {zarr_stats_raw}")
 
     # Returns the chunk stats from the zarr as a dictionary
     return zarr_stats_raw
