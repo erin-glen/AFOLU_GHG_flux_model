@@ -255,6 +255,40 @@ def _write_csv_df(con: duckdb.DuckDBPyConnection, df: pd.DataFrame, path: str):
     except Exception:
         pass
 
+
+class FigureTableCollector:
+    """Accumulate figure tables and emit a single consolidated CSV."""
+
+    def __init__(self, out_dir: str):
+        self.entries: list[tuple[str, pd.DataFrame]] = []
+        self.out_path = _join(out_dir, "figures", "data", "all_figures_tables.csv")
+
+    def add(self, title: str, df: pd.DataFrame):
+        if df is None:
+            return
+        self.entries.append((title, df.copy()))
+
+    def write(self):
+        if not self.entries:
+            return
+        if _is_s3(self.out_path):  # consolidated CSV is only supported locally
+            return
+
+        _ensure_parent_dir_local(self.out_path)
+        with open(self.out_path, "w", encoding="utf-8", newline="") as f:
+            for idx, (title, df) in enumerate(self.entries):
+                f.write(f"{title}\n")
+                df.to_csv(f, index=False)
+                if idx < len(self.entries) - 1:
+                    f.write("\n\n")  # blank line between tables
+
+
+def _write_figure_table(con: duckdb.DuckDBPyConnection, df: pd.DataFrame, path: str,
+                        title: str, collector: FigureTableCollector | None):
+    _write_csv_df(con, df, path)
+    if collector:
+        collector.add(title, df)
+
 def _save_png(fig: plt.Figure, path: str, dpi: int = 300, width: float | None = None, height: float | None = None):
     if width and height:
         fig.set_size_inches(width, height)
@@ -299,6 +333,7 @@ def _build_component_climate_plot(
     inventory_col: str,
     period_labels: Mapping[int, str],
     data_only: bool,
+    collector: FigureTableCollector | None,
 ):
     df = con.execute(meta.sql_builder()).df()
     df["Climate"] = df["climate_domain"].apply(pc.titlecase_domain)
@@ -308,7 +343,13 @@ def _build_component_climate_plot(
     long_df = df[[inventory_col, "Climate", meta.value_column]]
 
     data_dir = _join(OUT_DIR, "figures", "data")
-    _write_csv_df(con, long_df, _join(data_dir, f"{meta.file_stub}_long.csv"))
+    _write_figure_table(
+        con,
+        long_df,
+        _join(data_dir, f"{meta.file_stub}_long.csv"),
+        f"{meta.component.title()} emissions by climate and inventory period",
+        collector,
+    )
     _write_csv_df(
         con,
         pc.pivot_wide(long_df, meta.value_column, inventory_col),
@@ -382,6 +423,7 @@ def main(argv=None):
     period_labels = {e: f"{s}-{e}" for (s, e) in pairs}
     inv_col = "Inventory Period"
     n_periods = len(years)
+    figure_table_collector = FigureTableCollector(OUT_DIR) if args.do_figures else None
 
     # -------------------- Tables --------------------
     if args.do_tables:
@@ -406,7 +448,14 @@ def main(argv=None):
 
         # 1) Drained & burned by climate (per period)
         for meta in CLIMATE_COMPONENT_PLOTS:
-            _build_component_climate_plot(con, meta, inv_col, period_labels, args.data_only)
+            _build_component_climate_plot(
+                con,
+                meta,
+                inv_col,
+                period_labels,
+                args.data_only,
+                figure_table_collector,
+            )
 
         # C) Total emissions (drained+burned) by climate × period
         df_tot = con.execute(pc.sql_total_by_climate()).df()
@@ -415,7 +464,13 @@ def main(argv=None):
         df_tot[inv_col] = df_tot["Year"].map(period_labels)
         tot_long = df_tot[[inv_col, "Climate", "total_GtCO2e"]]
 
-        _write_csv_df(con, tot_long, _join(OUT_DIR, "figures", "data", "global_total_by_climate_long.csv"))
+        _write_figure_table(
+            con,
+            tot_long,
+            _join(OUT_DIR, "figures", "data", "global_total_by_climate_long.csv"),
+            "Total annual emissions by climate and inventory period",
+            figure_table_collector,
+        )
         _write_csv_df(con, pc.pivot_wide(tot_long, "total_GtCO2e", inv_col),
                       _join(OUT_DIR, "figures", "data", "global_total_by_climate_wide.csv"))
         if not args.data_only:
@@ -429,8 +484,13 @@ def main(argv=None):
         # 2) Drained: Land Use × Climate (avg annual across selected periods)
         d_lu_raw = con.execute(pc.sql_drained_landuse_climate_avgs(n_periods)).df()
         d_lu = pc.aggregate_landuse(d_lu_raw, "drained_avg_GtCO2e_per_yr")
-        _write_csv_df(con, d_lu[["LandUse", "Climate", "drained_avg_GtCO2e_per_yr"]],
-                      _join(OUT_DIR, "figures", "data", "drained_landuse_climate_long.csv"))
+        _write_figure_table(
+            con,
+            d_lu[["LandUse", "Climate", "drained_avg_GtCO2e_per_yr"]],
+            _join(OUT_DIR, "figures", "data", "drained_landuse_climate_long.csv"),
+            "Average annual drained emissions by land use and climate",
+            figure_table_collector,
+        )
         wide = (
             d_lu.pivot_table(index="LandUse", columns="Climate", values="drained_avg_GtCO2e_per_yr",
                              aggfunc="sum", fill_value=0.0, observed=False)
@@ -445,8 +505,13 @@ def main(argv=None):
         # 3) Burned: Land Use × Climate (avg annual across selected periods)
         b_lu_raw = con.execute(pc.sql_burned_landuse_climate_avgs(n_periods)).df()
         b_lu = pc.aggregate_landuse(b_lu_raw, "burned_avg_GtCO2e_per_yr")
-        _write_csv_df(con, b_lu[["LandUse", "Climate", "burned_avg_GtCO2e_per_yr"]],
-                      _join(OUT_DIR, "figures", "data", "burned_landuse_climate_long.csv"))
+        _write_figure_table(
+            con,
+            b_lu[["LandUse", "Climate", "burned_avg_GtCO2e_per_yr"]],
+            _join(OUT_DIR, "figures", "data", "burned_landuse_climate_long.csv"),
+            "Average annual burned emissions by land use and climate",
+            figure_table_collector,
+        )
         wide = (
             b_lu.pivot_table(index="LandUse", columns="Climate", values="burned_avg_GtCO2e_per_yr",
                              aggfunc="sum", fill_value=0.0, observed=False)
@@ -464,8 +529,13 @@ def main(argv=None):
         df_cs = df_cs[df_cs["Climate"].isin(pc.CLIMATE_ORDER)]
         df_cs["Component"] = pd.Categorical(df_cs["component"], pc.PROCESS_ORDER, ordered=True)
 
-        _write_csv_df(con, df_cs[["Climate", "Component", "avg_GtCO2e_per_yr"]],
-                      _join(OUT_DIR, "figures", "data", "component_split_by_climate_avg.csv"))
+        _write_figure_table(
+            con,
+            df_cs[["Climate", "Component", "avg_GtCO2e_per_yr"]],
+            _join(OUT_DIR, "figures", "data", "component_split_by_climate_avg.csv"),
+            "Component split of emissions by climate",
+            figure_table_collector,
+        )
         if not args.data_only:
             fig = pc.stacked_column_by_category(
                 df_cs.rename(columns={"avg_GtCO2e_per_yr": "Value"}),
@@ -483,10 +553,14 @@ def main(argv=None):
         latest_year = max(years)
         df_area = con.execute(pc.sql_topn_peat_area_comp_latest(latest_year, args.topn, have_lookup)).df()
         df_area["label"] = pc.country_label(df_area)
-        _write_csv_df(con,
-                      df_area[["label", "drained_area_mha", "undrained_area_mha", "total_area_mha"]]
-                            .rename(columns={"label": "iso3_or_code"}),
-                      _join(OUT_DIR, "figures", "data", "top_10_country_peat_area.csv"))
+        _write_figure_table(
+            con,
+            df_area[["label", "drained_area_mha", "undrained_area_mha", "total_area_mha"]]
+                  .rename(columns={"label": "iso3_or_code"}),
+            _join(OUT_DIR, "figures", "data", "top_10_country_peat_area.csv"),
+            "Top countries by peat area (latest period)",
+            figure_table_collector,
+        )
         if not args.data_only:
             fig = pc.hbar_two_series(
                 labels=df_area["label"].tolist(),
@@ -501,10 +575,14 @@ def main(argv=None):
         # 5) Top-N by country: AVERAGE annual TOTAL EMISSIONS split (drained + burned)
         df_emsplit = con.execute(pc.sql_topn_total_emissions_split_avg(args.topn, have_lookup, n_periods)).df()
         df_emsplit["label"] = pc.country_label(df_emsplit)
-        _write_csv_df(con,
-                      df_emsplit[["label", "burned_avg_GtCO2e_per_yr", "drained_avg_GtCO2e_per_yr", "total_avg_GtCO2e_per_yr"]]
-                                  .rename(columns={"label": "iso3_or_code"}),
-                      _join(OUT_DIR, "figures", "data", "top_10_country_total_emissions.csv"))
+        _write_figure_table(
+            con,
+            df_emsplit[["label", "burned_avg_GtCO2e_per_yr", "drained_avg_GtCO2e_per_yr", "total_avg_GtCO2e_per_yr"]]
+                      .rename(columns={"label": "iso3_or_code"}),
+            _join(OUT_DIR, "figures", "data", "top_10_country_total_emissions.csv"),
+            "Top countries by average annual total emissions",
+            figure_table_collector,
+        )
         if not args.data_only:
             fig = pc.hbar_two_series(
                 labels=df_emsplit["label"].tolist(),
@@ -520,7 +598,13 @@ def main(argv=None):
         df_gt = con.execute(pc.sql_global_totals_by_period_long()).df()
         df_gt[inv_col] = df_gt["interval_end"].map(period_labels)
         gt_long = df_gt[[inv_col, "component", "GtCO2e"]].rename(columns={"component": "Component"})
-        _write_csv_df(con, gt_long, _join(OUT_DIR, "figures", "data", "global_total_emissions_long.csv"))
+        _write_figure_table(
+            con,
+            gt_long,
+            _join(OUT_DIR, "figures", "data", "global_total_emissions_long.csv"),
+            "Global annual emissions by component and period",
+            figure_table_collector,
+        )
         gt_wide = (
             gt_long.pivot_table(index=inv_col, columns="Component", values="GtCO2e",
                                 aggfunc="sum", fill_value=0.0, observed=False)
@@ -538,9 +622,13 @@ def main(argv=None):
         # 7) Top-N average-annual by component (separate charts)
         df_topd = con.execute(pc.sql_topn_avg_component_emissions("drained", args.topn, have_lookup, n_periods)).df()
         df_topd["label"] = pc.country_label(df_topd)
-        _write_csv_df(con,
-                      df_topd[["label", "drained_avg_GtCO2e_per_yr"]].rename(columns={"label": "iso3_or_code"}),
-                      _join(OUT_DIR, "figures", "data", "top_10_country_drained_avg_emissions.csv"))
+        _write_figure_table(
+            con,
+            df_topd[["label", "drained_avg_GtCO2e_per_yr"]].rename(columns={"label": "iso3_or_code"}),
+            _join(OUT_DIR, "figures", "data", "top_10_country_drained_avg_emissions.csv"),
+            "Top countries by average annual drained emissions",
+            figure_table_collector,
+        )
         if not args.data_only:
             fig = pc.barh_single(
                 labels=df_topd["label"].tolist(),
@@ -552,9 +640,13 @@ def main(argv=None):
 
         df_topb = con.execute(pc.sql_topn_avg_component_emissions("burned", args.topn, have_lookup, n_periods)).df()
         df_topb["label"] = pc.country_label(df_topb)
-        _write_csv_df(con,
-                      df_topb[["label", "burned_avg_GtCO2e_per_yr"]].rename(columns={"label": "iso3_or_code"}),
-                      _join(OUT_DIR, "figures", "data", "top_10_country_burned_avg_emissions.csv"))
+        _write_figure_table(
+            con,
+            df_topb[["label", "burned_avg_GtCO2e_per_yr"]].rename(columns={"label": "iso3_or_code"}),
+            _join(OUT_DIR, "figures", "data", "top_10_country_burned_avg_emissions.csv"),
+            "Top countries by average annual burned emissions",
+            figure_table_collector,
+        )
         if not args.data_only:
             fig = pc.barh_single(
                 labels=df_topb["label"].tolist(),
@@ -573,8 +665,13 @@ def main(argv=None):
         df_ic = df_ic.sort_values(["Climate", "Component"])
 
         out_cols = ["Climate", "Component", "intensity_tCO2e_per_ha_yr"]
-        _write_csv_df(con, df_ic[out_cols],
-                      _join(OUT_DIR, "figures", "data", "intensity_by_climate_component.csv"))
+        _write_figure_table(
+            con,
+            df_ic[out_cols],
+            _join(OUT_DIR, "figures", "data", "intensity_by_climate_component.csv"),
+            "Emissions intensity by climate and component",
+            figure_table_collector,
+        )
         intensity_wide = (
             df_ic[out_cols]
             .pivot_table(index="Climate", columns="Component", values="intensity_tCO2e_per_ha_yr",
@@ -602,6 +699,9 @@ def main(argv=None):
             _save_png(fig, _join(OUT_DIR, "figures", "intensity_by_climate_component_column.png"), dpi=300)
 
         # 9) Country scatter and land-use share figures removed per workflow update
+
+        if figure_table_collector:
+            figure_table_collector.write()
 
     print("Assets written to:", OUT_DIR)
 
