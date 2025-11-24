@@ -55,9 +55,9 @@ Usage example (inventory + OGH sensitivity combined):
 
   python -m src.scripts.zonal_statistics.pub_compare_runs \
     --years 2024 \
-    --run ogh_sensitivity_250m=0_9_7:20251120 \
-    --run ogh_sensitivity_500m=0_9_7:20251121 \
-    --run ogh_sensitivity_750m=0_9_7:20251120
+    --run "ogh_sensitivity_250m=0_9_7:20251120|250 m" \
+    --run "ogh_sensitivity_500m=0_9_7:20251121|500 m" \
+    --run "ogh_sensitivity_750m=0_9_7:20251120|750 m"
 
   python -m src.scripts.zonal_statistics.pub_compare_runs \
     --years 2024 \
@@ -319,7 +319,7 @@ METRIC_SPECS: Mapping[str, MetricSpec] = {
 COMPARISONS: Sequence[ComparisonSpec] = (
     ComparisonSpec(
         key="ogh_distance",
-        label="OGH Sensitivity (Distance Threshold)",
+        label="OGH Sensitivity (Distance Threshold (meters))",
         run_names=(
             "ogh_sensitivity_250m",
             "ogh_sensitivity_500m",
@@ -410,6 +410,24 @@ def _parse_chunk_stat_paths(entries: Sequence[str] | None) -> Mapping[str, str]:
             raise ValueError("Invalid --chunk-stats specification (expected run_name=path)")
         mapping[run_name] = path
     return mapping
+
+
+def _parse_category_labels(entries: Sequence[str] | None) -> Mapping[str, str]:
+    labels: dict[str, str] = {}
+    if not entries:
+        return labels
+
+    for entry in entries:
+        if "=" not in entry:
+            raise ValueError("Invalid label override (expected run_name=Label)")
+        run_name, label = entry.split("=", 1)
+        run_name = run_name.strip()
+        label = label.strip()
+        if not run_name or not label:
+            raise ValueError("Invalid label override (expected run_name=Label)")
+        labels[run_name] = label
+
+    return labels
 
 
 def _glob_s3_xlsx(prefix: str) -> list[str]:
@@ -1037,10 +1055,20 @@ def _build_peat_area_stack_df(comp: ComparisonSpec, records: Mapping[str, RunRec
     return pd.DataFrame(rows)
 
 
+def _apply_category_labels(df: pd.DataFrame, overrides: Mapping[str, str]) -> pd.DataFrame:
+    if not overrides:
+        return df
+
+    df = df.copy()
+    df["Run"] = df["run_key"].map(overrides).fillna(df["Run"])
+    return df
+
+
 def _plot_stacked_total(
     df: pd.DataFrame,
     comp: ComparisonSpec,
     component_colors: Mapping[str, str] = STACK_COMPONENT_COLORS,
+    xlabel: str | None = None,
 ) -> plt.Figure:
     """
     Single vertical stacked bar chart for total emissions split drained/burned.
@@ -1082,6 +1110,8 @@ def _plot_stacked_total(
 
         ax.set_xticks(x)
         ax.set_xticklabels(df["Run"], rotation=20, ha="right")
+        if xlabel:
+            ax.set_xlabel(xlabel)
         ax.set_ylabel("Gt CO₂e/year")
         ax.set_axisbelow(True)
         pc.tidy_axes(ax, grid="y")
@@ -1686,6 +1716,30 @@ def main(argv: Sequence[str] | None = None):
             "Provide once per run."
         ),
     )
+    parser.add_argument(
+        "--inventory-label",
+        action="append",
+        help=(
+            "Optional category label override for the inventory source comparison (run_name=Label). "
+            "Only affects that comparison's outputs."
+        ),
+    )
+    parser.add_argument(
+        "--emission-factor-label",
+        action="append",
+        help=(
+            "Optional category label override for the emission factor comparison (run_name=Label). "
+            "Only affects that comparison's outputs."
+        ),
+    )
+    parser.add_argument(
+        "--distance-label",
+        action="append",
+        help=(
+            "Optional category label override for the distance threshold comparison (run_name=Label). "
+            "Only affects that comparison's outputs."
+        ),
+    )
     parser.add_argument("--aws_region", default=None, help="Optional AWS region for S3 access")
     parser.add_argument("--data-only", action="store_true", help="Export CSV data only (skip figures)")
     parser.add_argument(
@@ -1728,6 +1782,9 @@ def main(argv: Sequence[str] | None = None):
     period_order = [period_labels[end] for end in sorted(period_labels)]
 
     run_specs = _parse_run_specs(args.run)
+    inventory_labels = _parse_category_labels(args.inventory_label)
+    emission_factor_labels = _parse_category_labels(args.emission_factor_label)
+    distance_labels = _parse_category_labels(args.distance_label)
 
     user_chunk_stat_paths_raw = _parse_chunk_stat_paths(args.chunk_stats)
     chunk_stat_config: dict[str, tuple[str | None, bool]] = {}
@@ -1781,6 +1838,14 @@ def main(argv: Sequence[str] | None = None):
     writer_con = duckdb.connect()
     try:
         for comp in active_comparisons:
+            label_overrides: Mapping[str, str] = {}
+            if comp.key == "inventory_source":
+                label_overrides = inventory_labels
+            elif comp.key == "ogh_sensitivity_range":
+                label_overrides = emission_factor_labels
+            elif comp.key == "ogh_distance":
+                label_overrides = distance_labels
+
             summary_df = _build_comparison_summary(comp, records)
             summary_path = _join(out_data_dir, f"{comp.key}_summary.csv")
             _write_csv_df(writer_con, summary_df, summary_path)
@@ -1804,10 +1869,12 @@ def main(argv: Sequence[str] | None = None):
 
             if comp.key == "inventory_source":
                 total_stack_df = _build_emission_stack_df(comp, records)
+                total_stack_df = _apply_category_labels(total_stack_df, label_overrides)
                 total_stack_path = _join(out_data_dir, f"{comp.key}_total_emissions_stack.csv")
                 _write_csv_df(writer_con, total_stack_df, total_stack_path)
 
                 area_stack_df = _build_peat_area_stack_df(comp, records)
+                area_stack_df = _apply_category_labels(area_stack_df, label_overrides)
                 area_stack_path = _join(out_data_dir, f"{comp.key}_peat_area_stack.csv")
                 _write_csv_df(writer_con, area_stack_df, area_stack_path)
 
@@ -1818,6 +1885,7 @@ def main(argv: Sequence[str] | None = None):
                         out_data_dir,
                         f"{comp.key}_{component.lower()}_emissions_by_climate_stack.csv",
                     )
+                    climate_stack_df = _apply_category_labels(climate_stack_df, label_overrides)
                     _write_csv_df(writer_con, climate_stack_df, climate_stack_path)
 
                 if not args.data_only:
@@ -1961,10 +2029,17 @@ def main(argv: Sequence[str] | None = None):
             # Single stacked total-emissions chart for sensitivity comparisons
             if comp.key in {"ogh_distance", "ogh_sensitivity_range"}:
                 stack_df = _build_emission_stack_df(comp, records)
+                stack_df = _apply_category_labels(stack_df, label_overrides)
                 stack_path = _join(out_data_dir, f"{comp.key}_drained_burned_stack.csv")
                 _write_csv_df(writer_con, stack_df, stack_path)
 
-                stack_fig = _plot_stacked_total(stack_df, comp)
+                xlabel = None
+                if comp.key == "ogh_distance":
+                    xlabel = "Distance threshold"
+                elif comp.key == "ogh_sensitivity_range":
+                    xlabel = "Emission factor"
+
+                stack_fig = _plot_stacked_total(stack_df, comp, xlabel=xlabel)
                 stack_fig_path = _join(out_dir, "figures", "comparisons", f"{comp.key}_total_stack.png")
                 _save_png(stack_fig, stack_fig_path, dpi=300)
                 plt.close(stack_fig)
