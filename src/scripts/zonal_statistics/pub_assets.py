@@ -564,23 +564,42 @@ def main(argv=None):
             )
             _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_burned_avg_emissions_bar.png"), dpi=300)
 
-        # F) Drained emissions intensity by climate (avg over periods / latest drained area)
-        df_ic = con.execute(pc.sql_drained_intensity_by_climate_avg(n_periods)).df()
+        # F) Emissions intensity by climate (avg over periods / latest areas), split by component
+        df_ic = con.execute(pc.sql_component_intensity_by_climate_avg(n_periods)).df()
         df_ic["Climate"] = df_ic["climate_domain"].apply(pc.titlecase_domain)
         df_ic = df_ic[df_ic["Climate"].isin(pc.CLIMATE_ORDER)]
-        df_ic = df_ic.sort_values("intensity_tCO2e_per_ha_yr", ascending=False)
+        df_ic["Climate"] = pd.Categorical(df_ic["Climate"], pc.CLIMATE_ORDER, ordered=True)
+        df_ic["Component"] = pd.Categorical(df_ic["component"], pc.PROCESS_ORDER, ordered=True)
+        df_ic = df_ic.sort_values(["Climate", "Component"])
 
-        _write_csv_df(con, df_ic[["Climate", "intensity_tCO2e_per_ha_yr"]],
-                      _join(OUT_DIR, "figures", "data", "drained_intensity_by_climate.csv"))
+        out_cols = ["Climate", "Component", "intensity_tCO2e_per_ha_yr"]
+        _write_csv_df(con, df_ic[out_cols],
+                      _join(OUT_DIR, "figures", "data", "intensity_by_climate_component.csv"))
+        intensity_wide = (
+            df_ic[out_cols]
+            .pivot_table(index="Climate", columns="Component", values="intensity_tCO2e_per_ha_yr",
+                         aggfunc="sum", fill_value=0.0, observed=False)
+            .reindex(columns=pc.PROCESS_ORDER, fill_value=0.0)
+            .reset_index()
+        )
+        _write_csv_df(con, intensity_wide,
+                      _join(OUT_DIR, "figures", "data", "intensity_by_climate_component_wide.csv"))
         if not args.data_only:
-            fig = pc.barh_single(
-                labels=df_ic["Climate"].tolist(),
-                values=df_ic["intensity_tCO2e_per_ha_yr"].tolist(),
-                xlabel="Drained Emissions Intensity (t CO₂e/ha/year)",
-                color="#5C6BC0",
-                sort_desc=False,
+            fig = pc.stacked_column_by_category(
+                df_ic,
+                index_col="Climate",
+                category_col="Component",
+                value_col="intensity_tCO2e_per_ha_yr",
+                category_order=pc.PROCESS_ORDER,
+                color_map=pc.PROCESS_COLORS,
+                xlabel="Climate Domain",
+                ylabel="Emissions Intensity (t CO₂e/ha/year)",
+                legend_above=True,
+                bar_width=0.55,
+                segment_edgecolor="white",
+                segment_linewidth=0.6,
             )
-            _save_png(fig, _join(OUT_DIR, "figures", "drained_intensity_by_climate_bar.png"), dpi=300)
+            _save_png(fig, _join(OUT_DIR, "figures", "intensity_by_climate_component_column.png"), dpi=300)
 
         # 9) Country scatter and land-use share figures removed per workflow update
 

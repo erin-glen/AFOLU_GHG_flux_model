@@ -13,6 +13,7 @@ Additions:
 New SQL helpers added in this revision:
 - sql_total_by_climate(): drained+burned totals by climate × period
 - sql_component_split_by_climate_avg(n_periods): avg drained vs burned per climate
+- sql_component_intensity_by_climate_avg(n_periods): emissions intensity per climate split by component
 - sql_drained_intensity_by_climate_avg(n_periods): drained emissions intensity per climate
 """
 
@@ -929,6 +930,90 @@ def sql_drained_intensity_by_climate_avg(n_periods: int) -> str:
       ( (e.sum_Mg / NULLIF({n_periods},0)) / NULLIF(a.latest_drained_ha, 0) ) AS intensity_tCO2e_per_ha_yr
     FROM em e
     JOIN latest_area a ON a.climate_domain = e.climate_domain;
+    """
+
+def sql_component_intensity_by_climate_avg(n_periods: int) -> str:
+    return f"""
+    WITH area_drained AS (
+      SELECT
+        COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
+        z.interval_end,
+        SUM(CASE
+              WHEN z.flux_type='area__ha' AND z.drained_state_meaning LIKE 'peat_drained%'
+              THEN z.value ELSE 0 END) AS drained_ha
+      FROM zs_drained z
+      LEFT JOIN drained_state_ctx AS ctx
+        ON (z.drained_state_meaning = ctx.meaning)
+        OR (RPAD(CAST(z.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+      GROUP BY 1,2
+    ),
+    area_burned AS (
+      SELECT
+        COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
+        z.interval_end,
+        SUM(CASE WHEN z.flux_type='area__ha' THEN z.value ELSE 0 END) AS burned_ha
+      FROM zs_burned z
+      LEFT JOIN burned_state_ctx AS ctx
+        ON (z.burned_state_meaning = ctx.meaning)
+        OR (RPAD(CAST(z.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+      GROUP BY 1,2
+    ),
+    latest_area AS (
+      SELECT
+        COALESCE(d.climate_domain, b.climate_domain) AS climate_domain,
+        COALESCE(d.drained_ha, 0) AS latest_drained_ha,
+        COALESCE(b.burned_ha, 0) AS latest_burned_ha
+      FROM (
+        SELECT ad.climate_domain, ad.drained_ha
+        FROM area_drained ad
+        JOIN (
+          SELECT climate_domain, MAX(interval_end) AS max_end
+          FROM area_drained GROUP BY 1
+        ) mxd ON ad.climate_domain = mxd.climate_domain AND ad.interval_end = mxd.max_end
+      ) d
+      FULL OUTER JOIN (
+        SELECT ab.climate_domain, ab.burned_ha
+        FROM area_burned ab
+        JOIN (
+          SELECT climate_domain, MAX(interval_end) AS max_end
+          FROM area_burned GROUP BY 1
+        ) mxb ON ab.climate_domain = mxb.climate_domain AND ab.interval_end = mxb.max_end
+      ) b
+        ON d.climate_domain = b.climate_domain
+    ),
+    em_drained AS (
+      SELECT
+        COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
+        SUM(CASE WHEN z.flux_type='drained_total_Mg_CO2e' THEN z.value ELSE 0 END) AS sum_Mg
+      FROM zs_drained z
+      LEFT JOIN drained_state_ctx AS ctx
+        ON (z.drained_state_meaning = ctx.meaning)
+        OR (RPAD(CAST(z.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+      GROUP BY 1
+    ),
+    em_burned AS (
+      SELECT
+        COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
+        SUM(CASE WHEN z.flux_type='burned_total_Mg_CO2e' THEN z.value ELSE 0 END) AS sum_Mg
+      FROM zs_burned z
+      LEFT JOIN burned_state_ctx AS ctx
+        ON (z.burned_state_meaning = ctx.meaning)
+        OR (RPAD(CAST(z.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+      GROUP BY 1
+    )
+    SELECT
+      la.climate_domain,
+      'Drained' AS component,
+      ( (ed.sum_Mg / NULLIF({n_periods},0)) / NULLIF(la.latest_drained_ha, 0) ) AS intensity_tCO2e_per_ha_yr
+    FROM latest_area la
+    LEFT JOIN em_drained ed ON la.climate_domain = ed.climate_domain
+    UNION ALL
+    SELECT
+      la.climate_domain,
+      'Burned' AS component,
+      ( (eb.sum_Mg / NULLIF({n_periods},0)) / NULLIF(la.latest_burned_ha, 0) ) AS intensity_tCO2e_per_ha_yr
+    FROM latest_area la
+    LEFT JOIN em_burned eb ON la.climate_domain = eb.climate_domain;
     """
 
 def sql_topn_total_emissions_split_avg(topn: int, with_lookup: bool, n_periods: int) -> str:
