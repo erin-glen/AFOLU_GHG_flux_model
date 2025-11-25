@@ -265,6 +265,11 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
         veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}"]
         veg_h_curr_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year}"]
 
+        # Vegetation height from GPW median vegetation height. Original values are rescaled by 10 to make them ints,
+        # so converting them to the actual float values here.
+        GPW_height_prev_block = (in_dict_int16[f"{cn.MVH_pattern}_{interval_end_year - interval_length}"]/10).astype('float32')
+        GPW_height_curr_block = (in_dict_int16[f"{cn.MVH_pattern}_{interval_end_year}"]/10).astype('float32')
+
         # print(f"{cn.land_cover_pattern}_{interval_end_year - interval_length}:", LC_prev_block)
         # print(f"{cn.land_cover_pattern}_{interval_end_year}:", LC_curr_block)
         # print(f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}:", veg_h_prev_block)
@@ -378,6 +383,9 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 LC_curr = LC_curr_block[row, col]
                 veg_h_prev = veg_h_prev_block[row, col]
                 veg_h_curr = veg_h_curr_block[row, col]
+
+                GPW_height_prev = GPW_height_prev_block[row, col]
+                GPW_height_curr = GPW_height_curr_block[row, col]
 
                 # Mangrove extent years (1 = mangrove, 0 = no mangrove)
                 mang_1996 = mangrove_extent_1996_block[row, col]
@@ -1929,7 +1937,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern].max())
     # print(layers[cn.forest_age_start_year_pattern].dtype)
     # print(layers[cn.climate_zone_pattern].dtype)
-    print(layers['GPW_height_2015'])
+    # print(layers['GPW_height_2015'])
     # sys.quit()
 
 
@@ -1953,7 +1961,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
 
     # print("uint8_typed_list:", typed_dict_uint8)
     # print("uint16_typed_list:", typed_dict_uint16)
-    print("int16_typed_list:", typed_dict_int16)
+    # print("int16_typed_list:", typed_dict_int16)
     # print("int32_typed_list:", typed_dict_int32)
     # print("float32_typed_list:", typed_dict_float32)
 
@@ -1961,7 +1969,6 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     del updated_download_dict
     del futures
     gc.collect()
-    sys.quit()
 
 
     ### Part 4: Calculates vegetation fluxes and densities
