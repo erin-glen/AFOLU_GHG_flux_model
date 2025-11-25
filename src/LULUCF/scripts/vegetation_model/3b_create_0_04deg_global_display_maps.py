@@ -12,19 +12,19 @@ it's running the entire planet regardless.
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps --run_local --no_upload -fy 1 -fv 1 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3b_create_0_04deg_global_display_maps --run_local --no_upload -fy 1 -fv 1 --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model -fy 2 -fv 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3b_create_0_04deg_global_display_maps -cn vegetation_model -fy 2 -fv 2 --input_date YYYYMMDD
 
 Coiled large run:
 python -m src.utilities.create_cluster -n 80 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 80 -t 1 -m 8 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.4b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.3b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d
 """

@@ -7,7 +7,7 @@ import numpy as np
 ########
 
 ### Model version
-model_version = "1.0.2_WWF_area"
+model_version = "1.0.3"
 model_version_underscore = model_version.replace(".", "_")
 
 ### s3 buckets
@@ -646,6 +646,12 @@ mangrove_1x1deg_smoothed_dir = f"{full_bucket_prefix}/global-mangrove-extent/ver
 
 mangrove_extent_processed_dir = f"{full_bucket_prefix}/global-mangrove-extent/version3/smoothed/raster/"
 mangrove_extent_processed_pattern = f"GMW{GMW_version}_smoothed_mangrove_extent"
+
+# Global Pasture Watch median vegetation height (https://stac.openlandmap.org/gpw_gsvh-30m/collection.json?.language=en,
+# from Hunter et al. 2025 (https://www.nature.com/articles/s41597-025-05739-6)
+MVH_uri = f"https://s3.opengeohub.org/gpw/arco/gpw_short.veg.height_egbt_m_30m_s_YYYY0101_YYYY1231_go_epsg.4326_v1.tif"
+MVH_pattern = f"GPW_height"
+
 
 # Organic Soils
 # Organic soil mask, from Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)

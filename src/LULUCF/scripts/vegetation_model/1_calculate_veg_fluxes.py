@@ -1893,6 +1893,13 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
 
+    # Adds the uri for the global COGS of Global Pasture Watch median vegetation height for each year to the download dictionary
+    for year in list(range(2015, 2025)):
+        MVH_uri_year = cn.MVH_uri.replace('YYYY', str(year))
+        updated_download_dict[f"{cn.MVH_pattern}_{year}"] = [MVH_uri_year, 'int16']
+
+    # print(updated_download_dict)
+
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
@@ -1922,6 +1929,8 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern].max())
     # print(layers[cn.forest_age_start_year_pattern].dtype)
     # print(layers[cn.climate_zone_pattern].dtype)
+    print(layers['GPW_height_2015'])
+    # sys.quit()
 
 
     ### Part 2: Calculates min, mean, and max for each input chunk.
@@ -1944,7 +1953,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
 
     # print("uint8_typed_list:", typed_dict_uint8)
     # print("uint16_typed_list:", typed_dict_uint16)
-    # print("int16_typed_list:", typed_dict_int16)
+    print("int16_typed_list:", typed_dict_int16)
     # print("int32_typed_list:", typed_dict_int32)
     # print("float32_typed_list:", typed_dict_float32)
 
@@ -1952,6 +1961,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     del updated_download_dict
     del futures
     gc.collect()
+    sys.quit()
 
 
     ### Part 4: Calculates vegetation fluxes and densities
