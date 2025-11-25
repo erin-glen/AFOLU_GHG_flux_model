@@ -591,6 +591,7 @@ def calculate_and_upload_drainage(
     run_name="ogh_standard_model",
     peat_threshold: Optional[float] = None,
     count_burned_years=False,
+    emission_factor_variant: str = "default",
 ):
     """Process a single chunk for a given interval.
 
@@ -616,9 +617,12 @@ def calculate_and_upload_drainage(
         Threshold applied to the peat probability layer when using the OGH
         dataset. Values strictly greater than the threshold are treated as
         peat. ``None`` disables thresholding and uses the raw probabilities.
-    count_burned_years : bool, optional
-        If ``True``, count the number of burned years within the interval and
-        multiply burned emissions accordingly.
+        count_burned_years : bool, optional
+            If ``True``, count the number of burned years within the interval and
+            multiply burned emissions accordingly.
+        emission_factor_variant : {"low", "default", "high"}, optional
+            Select which emission factor table set to use for drainage and
+            burned‑area emissions.
     """
 
     logger = lu.setup_logging_worker()
@@ -725,12 +729,30 @@ def calculate_and_upload_drainage(
         is_final,
         logger,
     )
+
+    try:
+        drainage_table = {
+            "low": defac.LOW_TABLE,
+            "default": defac.DEFAULT_TABLE,
+            "high": defac.HIGH_TABLE,
+        }[emission_factor_variant]
+        burned_table = {
+            "low": baf.LOW_TABLE,
+            "default": baf.DEFAULT_TABLE,
+            "high": baf.HIGH_TABLE,
+        }[emission_factor_variant]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unsupported emission factor variant '{emission_factor_variant}'."
+            " Expected one of: low, default, high."
+        ) from exc
+
     out_u32, out_f32 = calculate_drainage_and_emissions(
         td8,
         td16,
         td32f,
-        defac.DEFAULT_TABLE,
-        baf.DEFAULT_TABLE,
+        drainage_table,
+        burned_table,
         count_burned_years,
     )
     outputs = {**out_u32, **out_f32}
@@ -974,6 +996,7 @@ def run_drainage_model(
     run_name="ogh_standard_model",
     peat_threshold: Optional[float] = DEFAULT_OGH_THRESHOLD,
     count_burned_years=False,
+    emission_factor_variant: str = "default",
 ):
 
     stage = "drainage_model"
@@ -1118,6 +1141,7 @@ def run_drainage_model(
             run_name,
             peat_threshold,
             count_burned_years,
+            emission_factor_variant,
         )
 
     results = bag.map(_wrap).compute()
@@ -1179,6 +1203,7 @@ def main(argv=None):
             run_name="ogh_standard_model",
             peat_threshold=DEFAULT_OGH_THRESHOLD,
             count_burned_years=False,
+            emission_factor_variant="default",
         )
         return
 
@@ -1259,6 +1284,12 @@ def main(argv=None):
         action="store_true",
         help="Multiply burned emissions by the number of burned years in each interval",
     )
+    p.add_argument(
+        "--emission_factor_variant",
+        choices=["default", "low", "high"],
+        default="default",
+        help="Select drainage and burned-area emission factor set for sensitivity runs",
+    )
     args = p.parse_args(argv)
 
     tile_ids = []
@@ -1287,6 +1318,7 @@ def main(argv=None):
         run_name=args.run_name,
         peat_threshold=args.peat_threshold,
         count_burned_years=args.count_burned_years,
+        emission_factor_variant=args.emission_factor_variant,
     )
 
 
@@ -1355,7 +1387,6 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --start_year 2021 \
   --end_year 2024 \
   --interval_type five_year \
-  --all_five_year_periods \
   --count_burned_years \
   --run_name ogh_sensitivity_500m_10
   
