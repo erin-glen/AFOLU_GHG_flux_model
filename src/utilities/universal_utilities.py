@@ -1,4 +1,5 @@
 import os
+import fsspec
 import coiled
 import boto3
 import time
@@ -21,12 +22,17 @@ from botocore.config import Config
 from dask.distributed import print
 from dask.distributed import Client, LocalCluster
 from dask import delayed
+import dask.array as da
 from datetime import datetime
 from io import BytesIO
+import xarray as xr
 from numba import jit
 from osgeo import gdal
+from rasterio.transform import from_origin
 from rasterio.session import AWSSession
 import random
+import zarr
+import tempfile
 import rasterio.errors
 
 
@@ -37,7 +43,8 @@ session = boto3.Session()
 aws_session = AWSSession(session)
 
 # Project imports
-from src.utilities import constants_and_names as cn, log_utilities as lu
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
 
 ###################################################################################################
 # S3 Utilities
@@ -100,12 +107,16 @@ def upload_s3_file(s3_path, local_path):
     bucket, key = split_s3_path(s3_path)
     s3.upload_file(local_path, Bucket=bucket, Key=key)
 
-def check_s3_file_created(s3_path, main_logger):
+def check_s3_file_created(s3_path):
+
+    logger_worker = lu.setup_logging_worker()
+
     s3 = boto3.client('s3')
     bucket, key = split_s3_path(s3_path)
+
     try:
         s3.head_object(Bucket=bucket, Key=key)
-        main_logger.info(f"File successfully created at: {s3_path}")
+        lu.print_and_log.info(f"File successfully created at: {s3_path}", False, logger_worker)
         return True
     except s3.exceptions.ClientError as e:
         if e.response['Error']['Code'] == "404":
@@ -163,7 +174,7 @@ def save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id,
 
     file_info = f'{tile_id}__{bounds_str}'
 
-    lu.print_and_log(f"Saving outputs locally for {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"Saving outputs in cluster for {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
 
     # For every output file, saves from array to local raster, then to s3.
     # Can't save directly to s3, unfortunately, so need to save locally first.
@@ -293,7 +304,7 @@ def save_and_upload_raster_10x10(bounds, tile_length_pixels, tile_id,
 
     transform = rasterio.transform.from_bounds(*bounds, width=tile_length_pixels, height=tile_length_pixels)
 
-    lu.print_and_log(f"Saving outputs locally for {tile_id}: {timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"Saving output arrays to geotifs in cluster for {tile_id}: {timestr()}", is_final, logger_worker)
 
     # For every output file, saves from array to local raster, then to s3.
     # Can't save directly to s3, unfortunately, so need to save locally first.
@@ -703,10 +714,14 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
                         padded_data[row_offset:end_row, col_offset:end_col] = data[:end_row - row_offset, :end_col - col_offset]
 
                         data = padded_data
-                        status = f"padded {bounds_str} chunk from {original_shape} to {expected_shape}"
+                        status = f"padded {bounds_str} for {uri} from {original_shape} to {expected_shape}"
 
                     else:
-                        status = "success- chunk complete, no padding needed"
+                        status = f"success- {bounds_str} for {uri} complete, no padding needed"
+
+            # If previous attempts to download failed, log here that this attempt succeeded
+            if attempt > 1:
+                lu.print_and_log(f"Succeeded downloading {uri} on attempt {attempt}: {timestr()}",False, logger_worker)
 
             return data, status
 
@@ -717,16 +732,16 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
             # Retryable errors-- these mean that the input exists but it's not being successfully accessed,
             # perhaps because of too many simultaneous requests to s3.
             # List of keywords for attempting retries is just from encountering various issues over time and including them here
-            if any(keyword in err_msg for keyword in ["SlowDown", "Please reduce", "503", "Read failed", "internal error", "not recognized"]):
+            if any(keyword in err_msg for keyword in ["SlowDown", "Please reduce", "503", "Read failed", "previous exception", "internal error", "not recognized"]):
                 if attempt < MAX_RETRIES - 1:
                     sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
-                    lu.print_and_log(f"Retryable S3 error '{err_msg}' for {uri}. Retrying in {sleep_time:.2f}s...", False, logger_worker)
+                    lu.print_and_log(f"Retryable S3 error '{err_msg}' for {uri} on attempt {attempt}. Retrying in {sleep_time:.2f}s...: {timestr()}", False, logger_worker)
                     time.sleep(sleep_time)
                     continue
                 else:
                     # Too many retries → fail hard
                     raise RuntimeError(
-                        f"Retryable S3 error ('{err_msg}') persisted after {MAX_RETRIES} retries for {uri}"
+                        f"Retryable S3 error ('{err_msg}') persisted after {MAX_RETRIES} retries for {uri}: {timestr()}"
                     )
 
             # Non-retryable: missing key or other rasterio I/O issue
@@ -829,7 +844,7 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
     output_full_dirs = []
 
     # Replaces placeholders in paths with values specific to the run
-    dir_list = [path.replace(cn.model_type_placholder, model_type) for path in dir_list]
+    dir_list = [path.replace(cn.model_type_placeholder, model_type) for path in dir_list]
     dir_list = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in dir_list]
     dir_list = [path.replace("RUN_DATE", run_date) for path in dir_list]
 
@@ -880,11 +895,11 @@ def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_
             # For outputs that cover an interval (fluxes)
             else:
                 if interval_type == cn.intervals_five_years:
-                    output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
+                    output_dir = basic_output.replace('START_END', str(output_year))
                 elif interval_type == cn.intervals_annual:
-                    output_dir = basic_output.replace('START_END',f"{str(output_year - interval_duration[count])}_{str(output_year)}")
+                    output_dir = basic_output.replace('START_END', str(output_year))
                 else:  # Hybrid model (2000-2024)
-                    output_dir = basic_output.replace('START_END', f"{str(output_year - interval_duration[count])}_{str(output_year)}")
+                    output_dir = basic_output.replace('START_END', str(output_year))
 
             sample_output_dir = basic_output
             output_full_dirs.append(output_dir)
@@ -1501,9 +1516,9 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'chunk_name': f'{tile_id}__{bounds_str}__{out_pattern}_{year_range}.tif',
             'tile_name': f'{tile_id}__{out_pattern}_{year_range}.tif',
             'in_out': in_out,
-            'min_value': np.min(array_per_ha),
-            'mean_value': np.mean(array_per_ha),
-            'max_value': np.max(array_per_ha),
+            'min_value': float(np.min(array_per_ha)),
+            'mean_value': float(np.mean(array_per_ha)),
+            'max_value': float(np.max(array_per_ha)),
             'count_value': np.count_nonzero(array_per_ha),
             'sum_value': sum_value,
             'data_type': array_per_ha.dtype.name
@@ -1528,6 +1543,7 @@ def sanitize_numeric_columns(df, numeric_cols):
 # Calculates difference between pixel counts in all 1x1s in a 10x10 vs. the corresponding 10x10
 # to make sure that aggregation of 1x1s didn't lose any data (difference should be 0).
 # From https://chatgpt.com/share/e/67d5d68d-7168-800a-ada1-e42f8c3e9253
+# Returns the local path to the saved chunk stats, whether parquet or Excel.
 def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger):
 
     ### Part 1: Organizes chunk stats for 1x1 degree chunks (inputs and outputs)
@@ -1573,10 +1589,10 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     # There are so many chunks with so many inputs and outputs in a full model run that Excel can't handle all the rows
     # and they need to be split across multiple workbook tabs.
 
-    # Separates input rows (in_out == 'input') and output rows (in_out == 'output')
+    # Separates input rows (in_out == 'input') and output rows (in_out == 'output' or anything from a zarr)
     main_logger.info(f"Separating 1x1 outputs into different tables: {timestr()}")
     input_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'] == 'input_layer']
-    output_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'] == 'output_layer']
+    output_1x1_rows = merged_1x1_stats[merged_1x1_stats['in_out'].isin(['output_layer', 'zarr_stats'])]
 
     # Groups inputs that are a timeseries so they can go in their own tab so that no tab is too many rows
     timeseries_input_layers = f'{cn.burned_area_final_pattern}|{cn.forest_disturbance_layer_name}|{cn.vegetation_height_pattern}|{cn.land_cover_pattern}|{cn.mangrove_extent_processed_pattern}'
@@ -1617,6 +1633,7 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     # other_1x1_outputs is the output table that has the most rows, so it's the best way to judge what's output is too large for Excel.
     # Excel's row limit is more like 1.5 million, but that'd be a really unwieldy spreadsheet.
     if (len(other_1x1_outputs) > 900000) or (len(net_flux_1x1_outputs) > 900000) or (len(gross_flux_1x1_outputs) > 900000):
+    # if (len(other_1x1_outputs) > 2) or (len(net_flux_1x1_outputs) > 2) or (len(gross_flux_1x1_outputs) > 2):   # For testing
         main_logger.info(f"Row count {len(other_1x1_outputs)} greater than 900,000. Writing all outputs to Parquet.")
 
         # Saves each output DataFrame as Parquet
@@ -1648,29 +1665,34 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
         parquet_folder = Path(f"{output_dir}parquet_{timestamp}/")
         parquet_folder.mkdir(parents=True, exist_ok=True)
 
-        annual_1x1_inputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__annual_1x1_inputs.parquet", index=False)
-        other_1x1_inputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__other_1x1_inputs.parquet", index=False)
-        gross_flux_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__gross_outputs_1x1.parquet", index=False)
-        net_flux_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__net_outputs_1x1.parquet", index=False)
-        other_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__other_outputs_1x1.parquet", index=False)
-        min_max_1x1_stats.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__min_max_for_layers_1x1.parquet", index=False)
-        sum_1x1_to_10x10.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__1x1_counts_in_10x10.parquet", index=False)
+        annual_1x1_inputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.annual_1x1_inputs}.parquet", index=False)
+        other_1x1_inputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.other_1x1_inputs}.parquet", index=False)
+        gross_flux_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.gross_outputs_1x1}.parquet", index=False)
+        net_flux_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.net_outputs_1x1}.parquet", index=False)
+        other_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.other_outputs_1x1}.parquet", index=False)
+        min_max_1x1_stats.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.min_max_for_layers_1x1}.parquet", index=False)
+        sum_1x1_to_10x10.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.counts_1x1_in_10x10}.parquet", index=False)
 
         # Uploads to S3 if needed
+        parquet_files = {
+                cn.annual_1x1_inputs: f"{out_base}__v{cn.model_version_underscore}__{cn.annual_1x1_inputs}.parquet",
+                cn.other_1x1_inputs: f"{out_base}__v{cn.model_version_underscore}__{cn.other_1x1_inputs}.parquet",
+                cn.gross_outputs_1x1: f"{out_base}__v{cn.model_version_underscore}__{cn.gross_outputs_1x1}.parquet",
+                cn.net_outputs_1x1: f"{out_base}__v{cn.model_version_underscore}__{cn.net_outputs_1x1}.parquet",
+                cn.other_outputs_1x1: f"{out_base}__v{cn.model_version_underscore}__{cn.other_outputs_1x1}.parquet",
+                cn.min_max_for_layers_1x1: f"{out_base}__v{cn.model_version_underscore}__{cn.min_max_for_layers_1x1}.parquet",
+                cn.counts_1x1_in_10x10: f"{out_base}__v{cn.model_version_underscore}__{cn.counts_1x1_in_10x10}.parquet",
+            }
+
         if not no_upload:
-            for filename in [
-                f"{out_base}__v{cn.model_version_underscore}__annual_1x1_inputs.parquet",
-                f"{out_base}__v{cn.model_version_underscore}__other_1x1_inputs.parquet",
-                f"{out_base}__v{cn.model_version_underscore}__gross_outputs_1x1.parquet",
-                f"{out_base}__v{cn.model_version_underscore}__net_outputs_1x1.parquet",
-                f"{out_base}__v{cn.model_version_underscore}__other_outputs_1x1.parquet",
-                f"{out_base}__v{cn.model_version_underscore}__min_max_for_layers_1x1.parquet",
-                f"{out_base}__v{cn.model_version_underscore}__1x1_counts_in_10x10.parquet",
-            ]:
+            for key, filename in parquet_files.items():
                 full_path = f"{parquet_folder}/{filename}"
                 s3_key = f"{cn.s3_chunk_stats_path}parquet_{timestamp}/{filename}"
                 main_logger.info(f"Uploading {filename} to S3: {timestr()}")
                 s3_client.upload_file(full_path, cn.short_bucket_prefix, Key=s3_key)
+
+        # Returns the names of all the parquet files
+        return f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}"
 
     # Saves chunk stats to Excel
     else:
@@ -1687,20 +1709,20 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
 
                 # Writes input rows to one sheet
                 main_logger.info(f"Writing inputs to spreadsheet: {timestr()}")
-                annual_1x1_inputs.to_excel(writer, sheet_name='annual_1x1_inputs', index=False)
-                other_1x1_inputs.to_excel(writer, sheet_name='other_1x1_inputs', index=False)
+                annual_1x1_inputs.to_excel(writer, sheet_name=cn.annual_1x1_inputs, index=False)
+                other_1x1_inputs.to_excel(writer, sheet_name=cn.other_1x1_inputs, index=False)
 
                 # Writes output rows based on layer_name conditions to separate sheets
                 main_logger.info(f"Writing outputs to spreadsheet: {timestr()}")
-                gross_flux_1x1_outputs.to_excel(writer, sheet_name='gross_outputs_1x1', index=False)
-                net_flux_1x1_outputs.to_excel(writer, sheet_name='net_outputs_1x1', index=False)
-                other_1x1_outputs.to_excel(writer, sheet_name='other_outputs_1x1', index=False)
+                gross_flux_1x1_outputs.to_excel(writer, sheet_name=cn.gross_outputs_1x1, index=False)
+                net_flux_1x1_outputs.to_excel(writer, sheet_name=cn.net_outputs_1x1, index=False)
+                other_1x1_outputs.to_excel(writer, sheet_name=cn.other_outputs_1x1, index=False)
 
                 # Writes the min and max statistics to the second sheet
-                min_max_1x1_stats.to_excel(writer, sheet_name='min_max_for_layers_1x1', index=False)
+                min_max_1x1_stats.to_excel(writer, sheet_name=cn.min_max_for_layers_1x1, index=False)
 
                 # Writes the 1x1s summed to 10x10, if available
-                sum_1x1_to_10x10.to_excel(writer, sheet_name='1x1_counts_in_10x10', index=False)
+                sum_1x1_to_10x10.to_excel(writer, sheet_name=cn.counts_1x1_in_10x10, index=False)
 
             main_logger.info(merged_1x1_stats.head())  # Show first few rows of the stats DataFrame for inspection
 
@@ -1717,18 +1739,18 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
             except Exception as e:
                 main_logger.warning(f"Chunk stats upload to S3 failed: {e}. Continuing without halting.")
 
+        # Returns path to spreadsheet
+        return local_spreadsheet
 
 
-def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
+
+def aggregate_10x10_chunk_stats(counts_10x10_df, stage, no_upload, main_logger):
 
     ### Part 1: Organizes chunk stats for 1x1 degree chunks (inputs and outputs)
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
 
     main_logger.info(f"Starting to aggregate and export tile stats: {timestr()}")
-
-    # Converts accumulated 1x1 chunk statistics to a DataFrame
-    df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
 
     # Writes the data to a single Excel file with separate sheets.
     # Should continue with model post-processing even if chunk stats don't work for some reason
@@ -1740,9 +1762,9 @@ def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
     try:
         with pd.ExcelWriter(local_spreadsheet) as writer:
 
-            df_all_10x10_stats.to_excel(writer, sheet_name='pix_counts_compa_10x10_1x1', index=False)
+            counts_10x10_df.to_excel(writer, sheet_name='pix_counts_compa_10x10_1x1', index=False)
 
-        main_logger.info(df_all_10x10_stats.head())  # Show first few rows of the stats DataFrame for inspection
+        main_logger.info(counts_10x10_df.head())  # Show first few rows of the stats DataFrame for inspection
 
         main_logger.info(f"Done aggregating and exporting tile stats: {timestr()}")
 
@@ -1974,6 +1996,223 @@ def get_cluster_info(client, cluster):
     return worker_memory, n_workers, nthreads
 
 
+
+# Write single GeoTIFF to S3 using in-memory buffer
+def write_single_geotiff_to_s3(var, year, tile_id, data, transform, s3_path, logger_worker):
+
+    fs = fsspec.filesystem("s3", anon=False)
+
+    lu.print_and_log(f"  Writing {var} for year {year} for {tile_id} to {s3_path}: {timestr()}", False, logger_worker)
+    upload_start_time = time.time()
+
+    height, width = data.shape
+
+    profile = {
+        "driver": "GTiff",
+        "height": height,
+        "width": width,
+        "count": 1,
+        "dtype": data.dtype,
+        "crs": "EPSG:4326",
+        "transform": transform,
+        "compress": "LZW",
+        "nodata": 0,
+        "tiled": True,
+        "blockxsize": 400,
+        "blockysize": 400,
+    }
+
+    # Counts non-zero pixels for comparison with 1x1 dego geotifs
+    valid_pixel_count = int(np.count_nonzero(data != 0))
+    # print("pixel count:", valid_pixel_count)
+
+    # Writes to temporary file on disk
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=True) as tmpfile:
+        with rasterio.open(tmpfile.name, "w", **profile) as dst:
+            dst.write(data, 1)
+
+        # Uploads efficiently using multipart S3 upload
+        fs.put_file(tmpfile.name, s3_path)
+
+    upload_end_time = time.time()
+    lu.print_and_log(f"  Wrote {var} for year {year} for {tile_id} to {s3_path} in {round(upload_end_time-upload_start_time)} seconds: {timestr()}", False, logger_worker)
+
+    return valid_pixel_count
+
+
+# Extracts a 10x10° tile from a Zarr store and writes to GeoTIFF on S3
+def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_base, no_upload):
+
+    process = psutil.Process(os.getpid())
+
+    logger_worker = lu.setup_logging_worker()
+
+    # Convert tile_id to bounding box (W, S, E, N)
+    min_x, min_y, max_x, max_y = get_10x10_tile_bounds(tile_id)
+
+    year = cn.interval_end_years_annual[year_idx]
+
+    # Open Zarr group using fsspec mapper
+    fs = fsspec.filesystem("s3", anon=False)
+    model_zarr_store = zarr.open_group(fs.get_mapper(raw_path), mode="r")
+
+    # Determine pixel indices (applies to model outputs and pixel area)
+    lat_array_model = model_zarr_store["y"][:]
+    lon_array_model = model_zarr_store["x"][:]
+
+    # Get index ranges (applies to model outputs and pixel area)
+    y0_model = np.searchsorted(lat_array_model[::-1], max_y, side='right')
+    y1_model = np.searchsorted(lat_array_model[::-1], min_y, side='left')
+    x0_model = np.searchsorted(lon_array_model, min_x, side='left')
+    x1_model = np.searchsorted(lon_array_model, max_x, side='right')
+
+    # Flips y indices since lat is descending
+    y0_model, y1_model = len(lat_array_model) - y1_model, len(lat_array_model) - y0_model
+    if y0_model > y1_model:
+        y0_model, y1_model = y1_model, y0_model
+
+    lu.print_and_log(f"Extracting {var} for {year} for {tile_id}: {timestr()}", False, logger_worker)
+    extract_start_time = time.time()
+
+    # Loads model output data block
+    data_per_ha = model_zarr_store[var][year_idx, y0_model:y1_model, x0_model:x1_model]
+
+    # Calculates per-pixel output (for numeric outputs only)
+    # pixel_area_zarr_store = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
+    pixel_area_zarr_store = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
+
+    # Determine pixel indices (applies to model outputs and pixel area)
+    lat_array_pixel_area = pixel_area_zarr_store["y"][:]
+    lon_array_pixel_area = pixel_area_zarr_store["x"][:]
+
+    # Get index ranges (applies to model outputs and pixel area)
+    y0_pixel_area = np.searchsorted(lat_array_pixel_area[::-1], max_y, side='right')
+    y1_pixel_area = np.searchsorted(lat_array_pixel_area[::-1], min_y, side='left')
+    x0_pixel_area = np.searchsorted(lon_array_pixel_area, min_x, side='left')
+    x1_pixel_area = np.searchsorted(lon_array_pixel_area, max_x, side='right')
+
+    # Flips y indices since lat is descending
+    y0_pixel_area, y1_pixel_area = len(lat_array_pixel_area) - y1_pixel_area, len(lat_array_pixel_area) - y0_pixel_area
+    if y0_pixel_area > y1_pixel_area:
+        y0_pixel_area, y1_pixel_area = y1_pixel_area, y0_pixel_area
+
+    pixel_area = pixel_area_zarr_store['band_data'][y0_pixel_area:y1_pixel_area, x0_pixel_area:x1_pixel_area]
+    # pixel_area = pixel_area_zarr_store['pixel_area'][y0_pixel_area:y1_pixel_area, x0_pixel_area:x1_pixel_area]
+    # print("y0:", y0_pixel_area)
+    # print("y1:", y1_pixel_area)
+    # print("x0:", x0_pixel_area)
+    # print("x1:", x1_pixel_area)
+    # print(pixel_area)
+    # sys.quit()
+
+    # Converts per-ha to per-pixel
+    data_per_pixel = data_per_ha * pixel_area / cn.m2_to_ha
+
+    # GeoTransform (top-left corner)
+    transform = from_origin(min_x, max_y, cn.resolution, cn.resolution)
+
+    extract_end_time = time.time()
+    lu.print_and_log(f"  Extracted {var} for year {year} for {tile_id} in {round(extract_end_time - extract_start_time)} seconds: {timestr()}", False, logger_worker)
+    lu.print_and_log(f"  Memory usage after 10x10 extraction for {var} for year {year} for {tile_id}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+
+    # Establishes year/year range and units for dataset
+    if "density" in var:
+        year_or_range = f"{year}"
+        per_ha_units = "_ha"
+        per_pixel_units = "_pixel"
+    elif "emis" in var:
+        year_or_range = f"{year - 1}_{year}"
+        per_ha_units = "_ha_yr"
+        per_pixel_units = "_pixel_yr"
+    elif "removals" in var:
+        year_or_range = f"{year - 1}_{year}"
+        per_ha_units = "_ha_yr"
+        per_pixel_units = "_pixel_yr"
+    elif "net" in var:
+        year_or_range = f"{year - 1}_{year}"
+        per_ha_units = "_ha_yr"
+        per_pixel_units = "_pixel_yr"
+    elif cn.land_state_pattern in var:
+        year_or_range = f"{year - 1}_{year}"
+        per_ha_units = ""
+        per_pixel_units = ""
+    else:
+        year_or_range = f"{year}"
+        per_ha_units = ""
+        per_pixel_units = ""
+
+    # Output names and paths for per-ha and per-pixel outputs
+    output_path = output_base.replace("PATTERN", var)
+    output_path = output_path.replace("START_END", year_or_range)
+    output_path_per_ha = output_path.replace("PER_HA_OR_PIXEL", per_ha_units)
+    output_name_per_ha = f"{tile_id}__{var}{per_ha_units}_{year_or_range}.tif"
+    s3_filename_per_ha = f"{output_path_per_ha}{output_name_per_ha}"
+
+    output_path_per_pixel = output_path.replace("PER_HA_OR_PIXEL", per_pixel_units)
+    output_name_per_pixel = f"{tile_id}__{var}{per_pixel_units}_{year_or_range}.tif"
+    s3_filename_per_pixel = f"{output_path_per_pixel}{output_name_per_pixel}"
+
+    # Uploads to s3 if requested
+    if no_upload == False:
+
+        # Writes geotif to S3
+        valid_pixel_count_per_ha = write_single_geotiff_to_s3(var, year, tile_id, data_per_ha, transform, s3_filename_per_ha, logger_worker)
+
+        # Conditionally writes per-pixel output (only if dataset is float32, i.e. numeric output from model).
+        # Pixel count from per-pixel outputs is not used.
+        if model_zarr_store[var].dtype == np.float32:
+            valid_pixel_count_per_pixel = write_single_geotiff_to_s3(
+                var, year, tile_id, data_per_pixel, transform, s3_filename_per_pixel, logger_worker
+            )
+        else:
+            valid_pixel_count_per_pixel = None
+
+        # Most stats for the 10x10 deg outputs aren't calculated.
+        # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
+        # Dictionary is in a list because it's necessary for chunk stats processing later.
+        chunk_stats = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': output_name_per_ha,
+            'tile_name': output_name_per_ha,
+            'in_out': 'output_layer',
+            'pattern': var,
+            'years': year_or_range,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': valid_pixel_count_per_ha,
+            'sum_value': 'no data',
+            'data_type': 'no data'
+        }]
+
+    else:
+
+        # Most stats for the 10x10 aren't calculated.
+        # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
+        # Dictionary is in a list because it's necessary for chunk stats processing later.
+        chunk_stats = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': output_name_per_ha,
+            'tile_name': output_name_per_ha,
+            'in_out': 'output_layer',
+            'pattern': var,
+            'years': year_or_range,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': 'not calculated',
+            'sum_value': 'no data',
+            'data_type': 'no data'
+        }]
+
+    tile_end_time = time.time()
+    lu.print_and_log(f"  Tile {var} for year {year} for {tile_id} in {round(tile_end_time - extract_start_time)} seconds: {timestr()}", False, logger_worker)
+
+    return chunk_stats
+
+
 # Creates an empty txt file for each chunk in s3.
 # Uses concurrent.futures to parallelize the txt creation. Otherwise, it's very slow.
 # Based on https://chatgpt.com/share/e/67bf0fd9-7cb0-800a-8666-2becd97d45a7
@@ -2066,6 +2305,7 @@ def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
     if not deleted:
 
         lu.print_and_log(f"No task file found for chunk {chunk_id}. Nothing to delete.", is_final, logger_worker)
+
 
 
 ###################################################################################################

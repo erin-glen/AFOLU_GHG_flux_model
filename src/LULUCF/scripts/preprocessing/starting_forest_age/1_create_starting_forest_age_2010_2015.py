@@ -109,7 +109,7 @@ def try_open_zarr(url, cache_path, consolidated=True):
     return xr.open_zarr(store, consolidated=consolidated)
 
 
-def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
+def calculate_forest_age(bounds, is_large_run, no_upload, output_dir_list, stage):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -130,8 +130,8 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
     cache_dir = os.path.join(base_cache_dir, f"{tile_id}_{tile_uuid}")
 
     try:
-        uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
-        lu.print_and_log(f"Processing chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+        uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_large_run, logger_worker)
+        lu.print_and_log(f"Processing chunk {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
 
         try:
             ds = try_open_zarr(zarr_url, cache_dir, consolidated=True)
@@ -155,7 +155,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         # the (expanded) bounding box. The output raster is still the exact right size.
         buffer = cn.resolution * 2
 
-        uu.rename_s3_task_file(stage, bounds, "loading_", is_final, logger_worker)
+        uu.rename_s3_task_file(stage, bounds, "loading_", is_large_run, logger_worker)
 
         # Loads only selected chunk. Loads into memory so that subsequent steps are "eager", not "lazy"
         lu.print_and_log(f"Loading data into memory {bounds_str}: {uu.timestr()}", False, logger_worker)  # Prints even during full run
@@ -168,7 +168,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         # Deletes cache as soon as the data are loaded into memory
         shutil.rmtree(cache_dir, ignore_errors=True)
 
-        uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
+        uu.rename_s3_task_file(stage, bounds, "calculating_", is_large_run, logger_worker)
 
         lu.print_and_log(f"Cleaning {bounds_str}: {uu.timestr()}", False, logger_worker) # Prints even during full run
         # da_cleaned = da_chunk.where(da_chunk != -9999, 0)
@@ -180,7 +180,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         new_lon = np.arange(lon_min + cn.resolution / 2, lon_max, cn.resolution)
 
         # Essentially, resamples from original to final resolution
-        lu.print_and_log(f"Interpolating {bounds_str}: {uu.timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"Interpolating {bounds_str}: {uu.timestr()}", is_large_run, logger_worker)
         da_resampled = da_median.interp(latitude=new_lat, longitude=new_lon, method="nearest")
 
         # Rounds from float to int and makes NoData = 0
@@ -198,7 +198,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         file_2015 = f"/tmp/{tile_id}__{bounds_str}__{cn.forest_age_2015_pattern}.tif"
 
         # Writes 2010 age to raster
-        lu.print_and_log(f"Saving 2010 raster {file_2010}: {uu.timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"Saving 2010 raster {file_2010}: {uu.timestr()}", is_large_run, logger_worker)
         with rasterio.open(file_2010, 'w', driver='GTiff',
             height=arr_2010.shape[0], width=arr_2010.shape[1],
             count=1, dtype="int16", crs=crs, transform=transform,
@@ -207,7 +207,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
             dst.write(arr_2010, 1)
 
         # Writes 2015 age to raster
-        lu.print_and_log(f"Saving 2015 raster {file_2015}: {uu.timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"Saving 2015 raster {file_2015}: {uu.timestr()}", is_large_run, logger_worker)
         with rasterio.open(file_2015, 'w', driver='GTiff',
             height=arr_2015.shape[0], width=arr_2015.shape[1],
             count=1, dtype="int16", crs=crs, transform=transform,
@@ -218,7 +218,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         chunk_stats.append(uu.calculate_stats(arr_2010, cn.forest_age_2010_pattern, bounds_str, tile_id, 'output_layer'))
         chunk_stats.append(uu.calculate_stats(arr_2015, cn.forest_age_2015_pattern, bounds_str, tile_id, 'output_layer'))
 
-        uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
+        uu.rename_s3_task_file(stage, bounds, "uploading_", is_large_run, logger_worker)
 
         if not no_upload:
 
@@ -226,11 +226,11 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
             s3_key_2010 = f"{output_dir_list[0][cn.full_bucket_prefix_length:]}{os.path.basename(file_2010)}"
             s3_key_2015 = f"{output_dir_list[1][cn.full_bucket_prefix_length:]}{os.path.basename(file_2015)}"
 
-            lu.print_and_log(f"Uploading to S3: {s3_key_2010}, {s3_key_2015}", is_final, logger_worker)
+            lu.print_and_log(f"Uploading to S3: {s3_key_2010}, {s3_key_2015}", is_large_run, logger_worker)
             s3.upload_file(file_2010, cn.short_bucket_prefix, s3_key_2010)
             s3.upload_file(file_2015, cn.short_bucket_prefix, s3_key_2015)
 
-        lu.print_and_log(f"Finished chunk {bounds_str}: {uu.timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"Finished chunk {bounds_str}: {uu.timestr()}", is_large_run, logger_worker)
 
         return_message = f"Success creating 2010/2015 age maps for {bounds_str}: {uu.timestr()}"
 
@@ -239,7 +239,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         os.remove(file_2015)
 
         # Removes task tracking file from S3 once task is successful
-        uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
+        uu.delete_s3_task_file(stage, bounds, is_large_run, logger_worker)
 
     except Exception as e:
 
@@ -247,7 +247,7 @@ def calculate_forest_age(bounds, is_final, no_upload, output_dir_list, stage):
         return_message = f"Error creating 2010/2015 age maps for chunk {bounds}: {e}---{error_trace}: {uu.timestr()}"
 
         lu.print_and_log(return_message, False, logger_worker)
-        uu.rename_s3_task_file(stage, bounds, "error_", is_final, logger_worker)
+        uu.rename_s3_task_file(stage, bounds, "error_", is_large_run, logger_worker)
 
         shutil.rmtree(cache_dir, ignore_errors=True)
 
@@ -273,7 +273,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
+    main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
     # Starting time for stage
     start_time = uu.timestr()
@@ -301,9 +301,9 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
-    is_final = False
+    is_large_run = False
     if len(chunk_list) > 20:
-        is_final = True
+        is_large_run = True
         main_logger.info("Running as final model.")
 
     # Creates list of output directories specific to the run
@@ -336,7 +336,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         # previous batch
         shutil.rmtree(os.path.expanduser("~/zarr_cache"), ignore_errors=True)
 
-        futures = [client.submit(calculate_forest_age, chunk, is_final, no_upload, output_dir_list, stage)
+        futures = [client.submit(calculate_forest_age, chunk, is_large_run, no_upload, output_dir_list, stage)
                    for chunk in chunk_batch]
 
         try:
@@ -347,7 +347,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
 
         all_forest_age_results.extend(forest_age_results)
 
-        success_count_1x1, batch_stats = uu.count_successful_chunks(chunk_batch, is_final, main_logger, forest_age_results)
+        success_count_1x1, batch_stats = uu.count_successful_chunks(chunk_batch, is_large_run, main_logger, forest_age_results)
         all_1x1_stats.extend(batch_stats)
 
         del futures
@@ -368,7 +368,7 @@ def main(cluster_name, run_local=False, no_stats=False, no_log=False, no_upload=
         # and min and max values across all chunks for all inputs and outputs
         # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
         if not no_stats:
-            uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+            chunk_stats_path = uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 

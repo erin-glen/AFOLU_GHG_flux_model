@@ -68,7 +68,7 @@ def main(cluster_name, years_to_aggregate, run_local=False, no_stats=False, no_l
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
+    main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
@@ -118,20 +118,20 @@ def main(cluster_name, years_to_aggregate, run_local=False, no_stats=False, no_l
         main_logger.info(f"tile_ids to aggregate within: {chunk_list} ({len(chunk_list)}) tile_ids")
 
         # Determines if the output file names for final versions of outputs should be used
-        is_final = False
+        is_large_run = False
         if len(chunk_list) > 20:
-            is_final = True
+            is_large_run = True
             main_logger.info("Running as final model.")
 
         main_logger.info(f"Aggregating 1x1 deg outputs to 10x10 deg outputs for {year}: {uu.timestr()}")
 
         # Each task is a single 10x10 deg aggregated geotif
-        delayed_results_10x10_deg = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_final, no_upload)
+        delayed_results_10x10_deg = [dask.delayed(uu.merge_small_tiles_gdal)(s3_name_dict, is_large_run, no_upload)
                                             for s3_name_dict in list_of_s3_name_dicts_total]
 
         results_10x10_deg = dask.compute(*delayed_results_10x10_deg)
 
-        success_count_10x10, all_10x10_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, results_10x10_deg)
+        success_count_10x10, all_10x10_stats = uu.count_successful_chunks(chunk_list, is_large_run, main_logger, results_10x10_deg)
 
         uu.stage_duration(year_start_time, uu.timestr(), f"{stage} for {year}", main_logger)
 

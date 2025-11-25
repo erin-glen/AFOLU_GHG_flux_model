@@ -61,7 +61,7 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
+    main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")

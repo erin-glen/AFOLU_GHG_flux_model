@@ -14,16 +14,16 @@ python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -bb 10 49 
 
 Coiled small tests (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn vegetation_postprocessing -bb 10 49 11 50 -cs 1 --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn vegetation_postprocessing -bb 20 -1 21 0 -cs 1 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn vegetation_postprocessing -bb 10 49 11 50 -cs 1 --create_zarr --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn vegetation_postprocessing -bb 20 -1 21 0 -cs 1 --create_zarr --input_date YYYYMMDD
 
 Coiled large shapefile test (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "Summative outputs for 1884-feature shapefile for model v0.4.0."
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --create_zarr  --input_date YYYYMMDD -ln "Summative outputs for 1884-feature shapefile for model v1.0.3."
 
 Full run (1x1 deg chunk needs a 32GB worker):
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
+python -m src.LULUCF.scripts.vegetation_model.2_summative_veg_outputs -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --create_zarr  --input_date YYYYMMDD -ln "This is intended to be the definitive summative output run."
 
 Optimization notes: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210788116876878?focus=true
 
@@ -56,6 +56,7 @@ from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 from src.utilities import resize_cluster
+from src.utilities import zarr_utilities as zu
 
 # Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
 # The more files in an s3 folder, the longer it takes to access them without this environment variable.
@@ -65,9 +66,9 @@ os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
 
 def create_summative_vegetation_outputs(bounds, start_year, end_year, interval_type, interval_year_diff_list, interval_length_list,
-                                    interval_end_years, is_final, no_upload,
+                                    interval_end_years, is_large_run, no_upload, create_zarr,
                                     summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list,
-                                    stage):
+                                    stage, raw_mega_zarr_path, outputs_to_zarr):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -78,7 +79,7 @@ def create_summative_vegetation_outputs(bounds, start_year, end_year, interval_t
 
     chunk_start_time = time.time()
 
-    uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_final, logger_worker)
+    uu.rename_s3_task_file(stage, bounds, "preprocessing_", is_large_run, logger_worker)
 
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
@@ -125,7 +126,7 @@ def create_summative_vegetation_outputs(bounds, start_year, end_year, interval_t
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
     # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
-    futures = uu.prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_final, logger_worker, True)
+    futures = uu.prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_large_run, logger_worker, True)
 
     lu.print_and_log(f"Waiting for requests for data in chunk {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
 
@@ -146,7 +147,7 @@ def create_summative_vegetation_outputs(bounds, start_year, end_year, interval_t
     ### Part 2: Creates summative outputs
 
     lu.print_and_log(f"Summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
-    uu.rename_s3_task_file(stage, bounds, "calculating_", is_final, logger_worker)
+    uu.rename_s3_task_file(stage, bounds, "calculating_", is_large_run, logger_worker)
 
     # Everything in out_dict also needs to be in cn.LULUCF_summative_output_dirs
     # because that has the list of basic output directories which are customized for this run
@@ -208,130 +209,17 @@ def create_summative_vegetation_outputs(bounds, start_year, end_year, interval_t
 
     # print(out_dict)
 
-    # Sums key output variables across all intervals-- only for summative outputs.
-    # All of these must be in cn.LULUCF_summative_output_dirs.
-    # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/681244d9-83dc-800a-b397-0706e79391c0
-    total_gross_emis_CO2_only = None
-    total_gross_emis_non_CO2_only = None
-    total_gross_emis_all_gases = None
-    total_gross_removals = None
-    total_net_flux_AGC_all_gases = None
-    total_net_flux_BGC_all_gases = None
-    total_net_flux_deadwood_c_all_gases = None
-    total_net_flux_litter_c_all_gases = None
-    total_net_flux_all_pools_CO2_only = None
-    total_net_flux_all_pools_all_gases = None
-
-    # Iterates through intervals to sum the values from each interval
-    for i, interval_end_year in enumerate(interval_end_years):
-
-        interval_year_diff = interval_year_diff_list[i]
-        interval_length = interval_length_list[i]
-        interval_year_range = f"{interval_end_year - interval_year_diff}_{interval_end_year}"
-
-        # All of these must be in cn.LULUCF_summative_output_dirs
-        gross_emis_CO2_only_key = f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-        gross_emis_non_CO2_only_key = f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-        gross_emis_all_gases_key = f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-        gross_removals_key = f"{cn.gross_removals_all_C_pools_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-        net_flux_AGC_all_gases_key = f"{cn.net_flux_agc_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-        net_flux_BGC_all_gases_key = f"{cn.net_flux_bgc_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-        net_flux_deadwood_c_all_gases_key = f"{cn.net_flux_deadwood_c_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-        net_flux_litter_c_all_gases_key = f"{cn.net_flux_litter_c_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-        net_flux_all_pools_CO2_only_key = f"{cn.net_flux_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-        net_flux_all_pools_all_gases_key = f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_year_range}"
-
-        # Need to multiply by interval length because 5-year interval outputs actually contain 5 years of fluxes that need to be summed.
-        # Accumulates gross emissions (CO2 only) across intervals
-        if total_gross_emis_CO2_only is None:
-            total_gross_emis_CO2_only = out_dict[gross_emis_CO2_only_key] * interval_length
-        else:
-            total_gross_emis_CO2_only += out_dict[gross_emis_CO2_only_key] * interval_length
-
-        # Accumulates gross emissions (non-CO2 only) across intervals
-        if total_gross_emis_non_CO2_only is None:
-            total_gross_emis_non_CO2_only = out_dict[gross_emis_non_CO2_only_key] * interval_length
-        else:
-            total_gross_emis_non_CO2_only += out_dict[gross_emis_non_CO2_only_key] * interval_length
-
-        # Accumulates gross emissions (all gases) across intervals
-        if total_gross_emis_all_gases is None:
-            total_gross_emis_all_gases = out_dict[gross_emis_all_gases_key] * interval_length
-        else:
-            total_gross_emis_all_gases += out_dict[gross_emis_all_gases_key] * interval_length
-
-        # Accumulates gross removals across intervals
-        if total_gross_removals is None:
-            total_gross_removals = out_dict[gross_removals_key] * interval_length
-        else:
-            total_gross_removals += out_dict[gross_removals_key] * interval_length
-
-        # Accumulates net flux (AGC) across intervals
-        if total_net_flux_AGC_all_gases is None:
-            total_net_flux_AGC_all_gases = out_dict[net_flux_AGC_all_gases_key] * interval_length
-        else:
-            total_net_flux_AGC_all_gases += out_dict[net_flux_AGC_all_gases_key] * interval_length
-
-        # Accumulates net flux (BGC) across intervals
-        if total_net_flux_BGC_all_gases is None:
-            total_net_flux_BGC_all_gases = out_dict[net_flux_BGC_all_gases_key] * interval_length
-        else:
-            total_net_flux_BGC_all_gases += out_dict[net_flux_BGC_all_gases_key] * interval_length
-
-        # Accumulates net flux (deadwood C) across intervals
-        if total_net_flux_deadwood_c_all_gases is None:
-            total_net_flux_deadwood_c_all_gases = out_dict[net_flux_deadwood_c_all_gases_key] * interval_length
-        else:
-            total_net_flux_deadwood_c_all_gases += out_dict[net_flux_deadwood_c_all_gases_key] * interval_length
-
-        # Accumulates net flux (litter C) across intervals
-        if total_net_flux_litter_c_all_gases is None:
-            total_net_flux_litter_c_all_gases = out_dict[net_flux_litter_c_all_gases_key] * interval_length
-        else:
-            total_net_flux_litter_c_all_gases += out_dict[net_flux_litter_c_all_gases_key] * interval_length
-
-        # Accumulates net flux (all pools, CO2 only) across intervals
-        if total_net_flux_all_pools_CO2_only is None:
-            total_net_flux_all_pools_CO2_only = out_dict[net_flux_all_pools_CO2_only_key] * interval_length
-        else:
-            total_net_flux_all_pools_CO2_only += out_dict[net_flux_all_pools_CO2_only_key] * interval_length
-
-        # Accumulates net flux (all pools, all gases) across intervals
-        if total_net_flux_all_pools_all_gases is None:
-            total_net_flux_all_pools_all_gases = out_dict[net_flux_all_pools_all_gases_key] * interval_length
-        else:
-            total_net_flux_all_pools_all_gases += out_dict[net_flux_all_pools_all_gases_key] * interval_length
-
-        # print(gross_removals_key)
-        # print(out_dict[gross_removals_key].min())
-
-    # Store the full model summed outputs in out_dict with appropriate suffixes.
-    full_period_label = f"{start_year}_{end_year}"
-    out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}_ha_{full_period_label}"] = total_gross_emis_CO2_only
-    out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}_ha_{full_period_label}"] = total_gross_emis_non_CO2_only
-    out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}_ha_{full_period_label}"] = total_gross_emis_all_gases
-    out_dict[f"{cn.gross_removals_all_C_pools_pattern}_ha_{full_period_label}"] = total_gross_removals
-    out_dict[f"{cn.net_flux_agc_pattern}_ha_{full_period_label}"] = total_net_flux_AGC_all_gases
-    out_dict[f"{cn.net_flux_bgc_pattern}_ha_{full_period_label}"] = total_net_flux_BGC_all_gases
-    out_dict[f"{cn.net_flux_deadwood_c_pattern}_ha_{full_period_label}"] = total_net_flux_deadwood_c_all_gases
-    out_dict[f"{cn.net_flux_litter_c_pattern}_ha_{full_period_label}"] = total_net_flux_litter_c_all_gases
-    out_dict[f"{cn.net_flux_all_C_pools_CO2_only_pattern}_ha_{full_period_label}"] = total_net_flux_all_pools_CO2_only
-    out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}_ha_{full_period_label}"] = total_net_flux_all_pools_all_gases
-
-    # print(out_dict[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
-    # print(out_dict[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
-    # print(out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
-    # print(out_dict[f"{cn.gross_removals_all_C_pools_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
-    # print(out_dict[f"{cn.net_flux_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"])
-    # print(out_dict[f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{full_period_label}"].max())
-    #
-    # sys.quit()
-
     lu.print_and_log(f"Done summing derivative outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     lu.print_and_log(f"After creating summative outputs for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+    
+    
+    ### Part 3: Writes outputs to pre-existing global mega-zarr (only if requested)
+
+    zu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, raw_mega_zarr_path,
+                  out_dict, outputs_to_zarr, process, stage, tile_id)
 
 
-    ### Part 3: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
+    ### Part 4: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
     ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
     ### Also useful for a quick sum of outputs without doing zonal stats
 
@@ -358,12 +246,12 @@ def create_summative_vegetation_outputs(bounds, start_year, end_year, interval_t
 
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
-    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_final, logger_worker)
+    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
 
 
     ### Part 4: Saves numpy arrays as rasters and uploads to s3
 
-    uu.rename_s3_task_file(stage, bounds, "uploading_", is_final, logger_worker)
+    uu.rename_s3_task_file(stage, bounds, "uploading_", is_large_run, logger_worker)
 
     # Only saves arrays to geotifs and uploads them to s3 if enabled
     if not no_upload:
@@ -403,7 +291,7 @@ def create_summative_vegetation_outputs(bounds, start_year, end_year, interval_t
 
         # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
         upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
-                                                           out_dict, is_final, logger_worker, out_no_data_val)
+                                                           out_dict, is_large_run, logger_worker, out_no_data_val)
 
         lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", False, logger_worker)
 
@@ -412,7 +300,7 @@ def create_summative_vegetation_outputs(bounds, start_year, end_year, interval_t
             executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
         lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}",
-                         is_final, logger_worker)
+                         is_large_run, logger_worker)
 
     chunk_end_time = time.time()
     lu.print_and_log(f"{bounds_str} took {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
@@ -420,12 +308,12 @@ def create_summative_vegetation_outputs(bounds, start_year, end_year, interval_t
     return_message = f"Success for {bounds_str}: {uu.timestr()}"
 
     # Removes task tracking file from S3 once task is successful
-    uu.delete_s3_task_file(stage, bounds, is_final, logger_worker)
+    uu.delete_s3_task_file(stage, bounds, is_large_run, logger_worker)
 
     return return_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False, create_zarr=False,
          chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
 
@@ -455,13 +343,14 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
         chunk_shapefile_uri = cn.fishnet_1x1deg_uri
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
+    main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
     main_logger.info(f"Run date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
+    main_logger.info(f"Tolerance for comparison between model and zarr chunk stat metrics: {cn.zarr_difference_tolerance}")
 
     # Calculates the interval type, difference between start and end years of intervals,
     # and the model output years for the model run
@@ -482,10 +371,10 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
-    is_final = False
-    # is_final = True  # For simulating a large run
+    is_large_run = False
+    # is_large_run = True  # For simulating a large run
     if len(chunk_list) > 20:
-        is_final = True
+        is_large_run = True
         main_logger.info("Running as final model.")
 
 
@@ -499,7 +388,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
                                                                            chunk_size_pixels, model_type, interval_end_years_list,
                                                                            interval_year_diff_list, input_date, False, "per_ha")
     # print(summative_inputs_by_interval_dir_list)
-    if is_final:
+    if is_large_run:
         main_logger.info(f"summative_inputs_by_interval_dir_list:")
         for item in summative_inputs_by_interval_dir_list:
             main_logger.info(f"  {item}")
@@ -507,9 +396,9 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
     summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, interval_type, start_year,
                                                                             chunk_size_pixels, model_type, interval_end_years_list,
-                                                                            interval_year_diff_list, input_date, True, "per_ha")
+                                                                            interval_year_diff_list, input_date, False, "per_ha")
 
-    if is_final:
+    if is_large_run:
         main_logger.info(f"outputs_dir_list:")
         for item in summative_outputs_by_interval_dir_list:
             main_logger.info(f"  {item}")
@@ -518,23 +407,36 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     main_logger.info("Creating task txts in s3...")
     uu.create_s3_task_files(stage, chunk_list)
 
+    #TODO Add code to add datasets/variables to the mega-zarr
+
+    # Establishes the location in s3 of the mega-zarr
+    if create_zarr:
+        # Creates s3 paths for the raw mega-zarr
+        raw_mega_zarr_path = zu.create_mega_zarr_path(chunk_size_pixels, interval_type, model_type, input_date, main_logger)
+        outputs_to_zarr = cn.veg_summative_output_patterns   # [0:2] # For testing
+
+    else:
+        raw_mega_zarr_path = None
+        outputs_to_zarr = False
+
+
     ### Step 2: Create 1x1 degree outputs
 
     summative_output_tasks = [dask.delayed(create_summative_vegetation_outputs)
                        (chunk, start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years_list,
-                        is_final, no_upload,
-                        summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list, stage)
+                        is_large_run, no_upload, create_zarr,
+                        summative_inputs_by_interval_dir_list, summative_outputs_by_interval_dir_list, stage, raw_mega_zarr_path, outputs_to_zarr)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results
     summative_output_results = dask.compute(*summative_output_tasks)
 
-    success_count, all_stats = uu.count_successful_chunks(chunk_list, is_final, main_logger, summative_output_results)
+    success_count, all_stats = uu.count_successful_chunks(chunk_list, is_large_run, main_logger, summative_output_results)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
-    ### Step 3: Counts files in output folders, chunk stats for 1x1 degree outputs, aggregates logs
+    ### Step 3: Counts files in output folders, aggregates chunk stats for 1x1 degree outputs
 
     # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
     # cluster, not all the workers.
@@ -549,7 +451,7 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-    if not no_upload and is_final:
+    if not no_upload and is_large_run:
         for output_folder in summative_outputs_by_interval_dir_list:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output rasters in {output_folder}: {file_count}")
@@ -559,12 +461,103 @@ def main(cluster_name, input_date, year_range, run_local=False, no_stats=False, 
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
     if (not no_stats) and (success_count > 0):
-        uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+        model_chunk_stats_path = uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
 
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+
+
+
+    ### Step 4: Compares model output chunk stats to zarr chunk stats for each variable-year (only if chunk stats created)
+
+    if (not no_stats) and create_zarr:
+
+        main_logger.info(f"Starting zarr chunk stats comparison: {uu.timestr()}")
+
+        # Text added to output chunk stats table name(s) (Excel or Parquet)
+        comparison_insert = "_summative_zarr_comparison"
+
+        # The name of the chunk stats table from the model
+        model_chunk_stats_table_name = os.path.basename(model_chunk_stats_path)
+        # print(model_chunk_stats_table_name)
+
+        tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
+            comparison_insert, main_logger, model_chunk_stats_path)
+
+        # Resizes cluster up to 50 workers for zarr chunk stat comparison only if a large-scale run
+        if (not run_local) and (is_large_run == True):
+
+            main_logger.info("Resizing cluster to 50 workers")
+
+            resize_cluster.resize_coiled_cluster(cluster_name, 50)
+
+        # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
+        all_merged_tables = []
+
+        # Number of chunks with differences between original and zarr exceeding tolerance
+        chunks_count_exceeding_total = 0
+
+        # Iterates through variables/datasets. Each chunk=10000x10000 is transferred by just one task/worker
+        # so that multiple workers aren't touching the same zarr chunk at the same time.
+        for var_name in outputs_to_zarr:
+
+            main_logger.info(f"Starting {var_name}: {uu.timestr()}")
+            var_start_time = time.time()
+
+            # Iterates through years
+            for year_idx in range(len(cn.interval_end_years_annual)):
+                year = cn.interval_end_years_annual[year_idx]
+
+                # Gets stats for selected 1x1 deg chunks in raw and rechunked zarrs
+                main_logger.info(f"  Starting zarr stats for {var_name} for year {year}: {uu.timestr()}")
+                year_start_time = time.time()
+
+                # Runs chunk stats for a dataset-year in the zarr in parallel
+                chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
+                    client=client,
+                    chunk_list=chunk_list,
+                    var=var_name,
+                    year_idx=year_idx,
+                    zarr_path=raw_mega_zarr_path,
+                )
+                year_end_time = time.time()
+                main_logger.info(f"    Got zarr stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
+
+                # After all zarr chunk stats is done for the dataset-year combination,
+                # the chunk stats from the zarr are compared to the chunk stats from the model.
+                # This is done with Pandas dataframes and is not parallelized because it's just table manipulation
+                # for each dataset-year combination.
+                # The model output vs. zarr comparison is done after each dataset-year combination
+                # to get more real-time feedback on how the datasets compare (rather than waiting until after
+                # all zarr chunk stats have been calculated to do the metric comparisons).
+                all_merged_tables, chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
+                                                                chunk_stats_variable_year_rechunked_zarr,
+                                                                main_logger,
+                                                                tables_to_compare_dict,
+                                                                var_name, year,
+                                                                zarr_comparison_stats_path)
+
+                # Total number of chunks that have differences in metrics between the model and zarr
+                # that exceed the tolerance
+                chunks_count_exceeding_total += chunks_count_exceeding
+
+            var_end_time = time.time()
+            main_logger.info(f"  Processed {var_name}  in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
+
+
+    ### Step 5: All chunk stats comparison iterations done.
+    ### Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
+
+    zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, main_logger, model_chunk_stats_table_name,
+                                          stage, start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
+
+
+    ### Step 6: Aggregates logs
 
     # Sets it so that no worker logs are created if doing a local run
     if not run_local:
+
+        main_logger.info("Resizing cluster to 1 worker")
+        resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
         # Creates combined log from all workers if not deactivated
         worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
@@ -594,6 +587,7 @@ if __name__ == "__main__":
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
     parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
+    parser.add_argument('--create_zarr', action='store_true', help='Create and populate global mega-zarr with model outputs')
 
     args = parser.parse_args()
 
@@ -610,8 +604,9 @@ if __name__ == "__main__":
     no_stats = args.no_stats
     no_log = args.no_log
     no_upload = args.no_upload
+    create_zarr = args.create_zarr
 
     # Create the cluster with command line arguments
-    main(cluster_name, input_date, year_range, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
+    main(cluster_name, input_date, year_range, run_local, no_stats, no_log, no_upload, create_zarr, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size,
          first_chunks=first_chunks, log_note=log_note)
