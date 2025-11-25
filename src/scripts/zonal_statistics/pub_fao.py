@@ -1,44 +1,58 @@
 # -*- coding: utf-8 -*-
-"""Build FAO-style comparison figures from zonal statistics and FAOSTAT.
+"""
+Build FAO-style comparison figures from zonal statistics and FAOSTAT.
 
-This driver mirrors the pub_assets/pub_compare conventions but focuses on
-cropland and grassland cuts of drained emissions for the most recent inventory
-period *present in the FAO subset*.
+This driver compares multiple model runs (e.g., OGH, GFW, GPD) plus FAOSTAT
+for Cropland+Grassland drained peat emissions, using CO₂+N₂O zonal statistics.
 
-It compares:
-- Global drained peat area (Cropland + Grassland) against FAOSTAT "Area".
-- Global drained emissions by gas (CO₂, N₂O) against FAOSTAT "Emissions (CO2)"
-  and "Emissions (N2O)".
-- Global land-use split of drained peat area (Cropland vs Grassland) against
-  FAOSTAT area for "Cropland organic soils" and "Grassland organic soils".
+Key points
+----------
+* For each model run, we use the *drained_co2_n2o* zonal-statistics tiles for
+  the latest inventory interval (e.g., 2021–2024 for a 2024 end year).
+  These tiles are already in *average annual* units, so we just convert Mg
+  to Gt CO₂e/year.
 
-Inputs
-------
-1) Zonal statistics FAO tiles (Parquet):
-   <base>/<start>_<end>/drained/fao_stat/*.parquet
-   with flux_type values like:
-     - drained_co2_Mg_CO2...
-     - drained_n2o_Mg_CO2e...
-     - area__ha / area_ha
+* For FAOSTAT, we read the GV domain for the *same year window* as the latest
+  interval (e.g., 2021–2024) and compute **average annual** emissions:
+    - Emissions (CO2)   -> kt CO2       -> Gt CO₂e/year
+    - Emissions (N2O)   -> kt N2O mass  -> kt CO2e via GWP -> Gt CO₂e/year
+  plus area (Area) -> ha -> Mha (also averaged over the same window).
 
-2) FAOSTAT CSV (drained organic soils domain "GV"):
-   s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/fao_stat/
-       FAOSTAT_data_en_11-22-2025.csv
+* Land-use comparability:
+    - We classify model pixels from *emissions_state* using
+      `pc._reclass_emissions_state`.
+    - For this FAO comparison we explicitly fold **Oil Palm into Cropland**:
+          "Oil Palm" -> "Cropland"
+    - We then restrict to LandUse in {"Cropland", "Grassland"}.
+      (So Cropland includes oil-palm drained peat.)
 
 Outputs
 -------
 PNG figures and CSVs under:
   /mnt/c/tmp/pub_fao/version_<model_version>/<run_name>/<run_date>/
 
-CSV tables under figures/data/ include both Model and FAOSTAT rows, with a
+Where <run_name>/<run_date> come from the *first* --run entry (typically OGH).
+
+CSV tables under figures/data/ include all model runs and FAOSTAT, with a
 Source column.
+
+Example usage
+-------------
+  cd /mnt/c/gis/git/AFOLU_GHG_flux_model
+
+  python -m src.scripts.zonal_statistics.pub_fao \
+    --years 2024 \
+    --run "ogh_sensitivity_500m_10=0_9_7:20251118|OGH" \
+    --run "gfw_standard_model_500m=0_9_7:20251120|GFW" \
+    --run "gpd_standard_model_500m=0_9_7:20251120|GPD"
 """
 
 from __future__ import annotations
 
 import argparse
 import posixpath
-from typing import Iterable, List, Sequence, Tuple, Optional
+from dataclasses import dataclass
+from typing import Sequence, Tuple, Optional
 
 import duckdb
 import matplotlib.pyplot as plt
@@ -59,62 +73,192 @@ OUT_DIR = OUT_DIR_ROOT
 
 # Default FAOSTAT CSV (S3)
 DEFAULT_FAO_CSV = (
-    "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/fao_stat/"
-    "FAOSTAT_data_en_11-22-2025.csv"
+    "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/"
+    "fao_stat/FAOSTAT_data_en_11-22-2025.csv"
 )
 
-# ----------------------------- path helpers -----------------------------
+# Global Warming Potential used to convert FAOSTAT N2O (kt N2O) to CO2e.
+# Set this to the same GWP you use in the AFOLU model:
+#   AR4: 265, AR5: 298, AR6: 273
+FAO_N2O_GWP = 273.0
 
+# ----------------------------- color config -----------------------------
+# All figure colors live here so they're easy to tweak without touching
+# the plotting logic.
+
+# 1) Gas colors for CO₂ vs N₂O in the emissions stacked bar
+FAO_GAS_ORDER = ["CO₂", "N₂O"]
+FAO_GAS_COLORS = {
+    # Okabe–Ito CVD-safe pair:
+    # CO₂ = deep blue, N₂O = warm orange/red
+    "CO₂": "#0072B2",
+    "N₂O": "#D55E00",
+}
+
+# 2) Land-use colors (Cropland vs Grassland) for peat area split
+FAO_LANDUSE_ORDER = ["Cropland", "Grassland"]
+FAO_LANDUSE_COLORS = {
+    # Consistent with pub_common land-use styling:
+    "Cropland": "#E17C05",   # orange
+    "Grassland": "#A6761D",  # brown
+}
+
+# 3) Palette used for *sources* (OGH, GFW, GPD, FAOSTAT) in the area chart
+FAO_SOURCE_PALETTE = "okabe_ito"
+
+# Path helpers borrowed from pub_assets
 _join = pa._join
 _save_png = pa._save_png
 _write_csv_df = pa._write_csv_df
 
 
+@dataclass(frozen=True)
+class RunSpec:
+    run_name: str
+    model_version: str
+    run_date: str
+    label: str
+
+
+@dataclass
+class ModelMetrics:
+    source: str           # e.g., "OGH", "GFW", "GPD"
+    co2_gt: float         # Gt CO2e/year (CO2)
+    n2o_gt: float         # Gt CO2e/year (N2O)
+    total_area_mha: float # Cropland+Grassland drained peat area (Mha)
+    landuse_split: pd.DataFrame  # columns: LandUse, Area_Mha
+    components: pd.DataFrame     # per-emissions_state components (ag subset)
+    latest_year: int
+
+
+# ----------------------------- helpers -----------------------------
+
 def build_output_dir(model_version: str, run_name: str, run_date: str) -> str:
     return _join(OUT_DIR_ROOT, f"version_{model_version}", run_name, run_date)
 
 
-def _interval_folder_strings(years: Iterable[int]) -> List[str]:
-    pairs: List[Tuple[int, int]] = build_interval_pairs(list(years))
-    return [f"{s}_{e}" for (s, e) in pairs]
+def _interval_pair_for_latest(years: Sequence[int]) -> Tuple[int, int]:
+    """Return (start, end) pair for the interval whose end is max(years)."""
+    years_int = [int(y) for y in years]
+    pairs = build_interval_pairs(years_int)
+    latest = max(years_int)
+    for start, end in pairs:
+        if end == latest:
+            return start, end
+    # Fallback: just return the last pair
+    return pairs[-1]
 
 
-def _make_base_prefixes(
-    model_version: str,
-    run_name: str,
-    run_date: str,
-    interval_folders: Iterable[str],
-) -> List[str]:
-    return [
-        build_output_parquet(model_version, run_name, run_date, interval).rstrip("/")
-        for interval in interval_folders
-    ]
+def _default_label(run_name: str) -> str:
+    label = run_name.replace("_", " ").replace("-", " ").strip()
+    return label or run_name
 
 
-def _make_drained_globs(base_prefixes: Sequence[str]) -> list[str]:
-    # FAO exports are nested under a "fao_stat" subfolder instead of the
-    # top-level drained directory used by other publication scripts.
-    return [
-        posixpath.join(bp, "drained", "fao_stat", "*.parquet")
-        for bp in base_prefixes
-    ]
+def _parse_run_specs(entries: Sequence[str]) -> list[RunSpec]:
+    specs: list[RunSpec] = []
+    for entry in entries:
+        if "=" not in entry:
+            raise ValueError(
+                f"Invalid --run spec (expected run_name=model_version:run_date[|Label]): {entry}"
+            )
+        raw_name, rest = entry.split("=", 1)
+        run_name = raw_name.strip()
+        if not run_name:
+            raise ValueError(f"Invalid run name in --run: {entry}")
+
+        if "|" in rest:
+            config_part, label_part = rest.split("|", 1)
+            label = label_part.strip() or _default_label(run_name)
+        else:
+            config_part = rest
+            label = _default_label(run_name)
+
+        parts = [p.strip() for p in config_part.split(":") if p.strip()]
+        if len(parts) != 2:
+            raise ValueError(
+                "Invalid --run spec (expected model_version:run_date or "
+                "model_version:run_date|Label): "
+                f"{entry}"
+            )
+        model_version, run_date = parts
+        specs.append(
+            RunSpec(
+                run_name=run_name,
+                model_version=model_version,
+                run_date=run_date,
+                label=label,
+            )
+        )
+    return specs
 
 
-def _register_drained(
+# ----------------------------- model (zonal stats) -----------------------------
+
+def _make_drained_globs_for_run(spec: RunSpec, years: Sequence[int]) -> Tuple[list[str], Tuple[int, int]]:
+    """
+    Build drained_co2_n2o glob(s) for the latest inventory interval of this run.
+    """
+    start, end = _interval_pair_for_latest(years)
+    interval_folder = f"{start}_{end}"
+
+    base_prefix = build_output_parquet(
+        spec.model_version,
+        spec.run_name,
+        spec.run_date,
+        interval_folder,
+    ).rstrip("/")
+
+    glob_path = posixpath.join(base_prefix, "drained_co2_n2o", "*.parquet")
+    return [glob_path], (start, end)
+
+
+def _register_model_views_for_run(
     con: duckdb.DuckDBPyConnection,
-    drained_globs: Sequence[str],
+    spec: RunSpec,
+    years: Sequence[int],
     aws_region: Optional[str],
-) -> None:
-    """Create zs_drained view from FAO Parquet outputs."""
+) -> Tuple[int, int]:
+    """
+    Register zs_drained + drained_state_ctx for a given run's drained_co2_n2o tiles.
+
+    Returns the (start, end) interval pair used.
+    """
     pa._ensure_httpfs(con, aws_region)
-    drained_count = pa._count_globs(con, drained_globs)
-    print(f"[drained] Searching {len(drained_globs)} globs; matched {drained_count} files")
-    if drained_count == 0:
-        raise RuntimeError(f"[drained] No Parquet files found under: {drained_globs}")
+
+    drained_globs, interval_pair = _make_drained_globs_for_run(spec, years)
+    n_files = pa._count_globs(con, drained_globs)
+
+    # Fallback to legacy drained/fao_stat if no drained_co2_n2o tiles are found.
+    if n_files == 0:
+        start, end = interval_pair
+        interval_folder = f"{start}_{end}"
+        base_prefix = build_output_parquet(
+            spec.model_version,
+            spec.run_name,
+            spec.run_date,
+            interval_folder,
+        ).rstrip("/")
+        legacy_globs = [posixpath.join(base_prefix, "drained", "fao_stat", "*.parquet")]
+        n_legacy = pa._count_globs(con, legacy_globs)
+        if n_legacy == 0:
+            raise RuntimeError(
+                f"[FAO] No drained CO2+N2O Parquet files found for run '{spec.run_name}'. "
+                f"Tried globs: {drained_globs + legacy_globs}"
+            )
+        drained_globs = legacy_globs
+        n_files = n_legacy
+
+    print(
+        f"[FAO] {spec.label}: using drained_co2_n2o tiles "
+        f"({n_files} file(s) across {len(drained_globs)} interval(s))"
+    )
+    print(f"  Globs for {spec.label}")
+    for g in drained_globs:
+        print(f"    - {g}")
+
     pa._make_component_view(con, "zs_drained", drained_globs, kind="drained")
-
-
-# ----------------------------- Queries -----------------------------
+    pa._register_state_context_views(con)
+    return interval_pair
 
 
 def sql_components_latest() -> str:
@@ -123,9 +267,9 @@ def sql_components_latest() -> str:
     the *latest* interval_end present in the data.
 
     Critical bit: match gas flux types using prefix so that names like
-    `drained_co2_Mg_CO2` and `drained_n2o_Mg_CO2e` are picked up.
+    `drained_co2_Mg_CO2...` and `drained_n2o_Mg_CO2e...` are picked up.
     """
-    return """
+    return f"""
     WITH base AS (
       SELECT
         z.interval_end,
@@ -135,7 +279,7 @@ def sql_components_latest() -> str:
       FROM zs_drained z
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({pc._rpad_sql('z.drained_state_nodes')} = ctx.key)
     ),
     agg AS (
       SELECT
@@ -170,20 +314,105 @@ def sql_components_latest() -> str:
     """
 
 
+def _compute_model_metrics_for_run(
+    spec: RunSpec,
+    years: Sequence[int],
+    aws_region: Optional[str],
+) -> ModelMetrics:
+    """
+    Compute Cropland+Grassland drained peat metrics for a model run:
+    CO₂, N₂O, total area, and land-use split.
+
+    Land-use classification:
+      - Based on emissions_state via pc._reclass_emissions_state.
+      - "Oil Palm" is explicitly folded into "Cropland" for FAO comparison.
+      - Filtered to LandUse in {"Cropland", "Grassland"}.
+    """
+    con = duckdb.connect()
+    try:
+        _register_model_views_for_run(con, spec, years, aws_region)
+        df = con.execute(sql_components_latest()).df()
+    finally:
+        con.close()
+
+    if df.empty:
+        raise RuntimeError(
+            f"[FAO] No component rows returned for run '{spec.run_name}' "
+            "from sql_components_latest()."
+        )
+
+    latest_year = int(df["interval_end"].max())
+
+    # Land-use classification from emissions_state (NOT drained_state)
+    df = df.copy()
+    df["LandUse_raw"] = df["emissions_state"].apply(pc._reclass_emissions_state)
+
+    # Fold Oil Palm into Cropland for FAO comparison
+    df["LandUse"] = df["LandUse_raw"]
+    df["LandUse"] = df["LandUse"].replace({"Oil Palm": "Cropland"})
+    mask_oil_palm = df["LandUse_raw"].astype(str).str.lower().str.contains("oil palm")
+    df.loc[mask_oil_palm, "LandUse"] = "Cropland"
+
+    ag_uses = df[df["LandUse"].isin(["Cropland", "Grassland"])].copy()
+    if ag_uses.empty:
+        return ModelMetrics(
+            source=spec.label,
+            co2_gt=0.0,
+            n2o_gt=0.0,
+            total_area_mha=0.0,
+            landuse_split=pd.DataFrame(columns=["LandUse", "Area_Mha"]),
+            components=ag_uses,
+            latest_year=latest_year,
+        )
+
+    ag_uses[["drained_co2", "drained_n2o", "area_ha"]] = ag_uses[
+        ["drained_co2", "drained_n2o", "area_ha"]
+    ].fillna(0.0)
+
+    total_co2_gt = ag_uses["drained_co2"].sum() / 1e9
+    total_n2o_gt = ag_uses["drained_n2o"].sum() / 1e9
+    total_area_mha = ag_uses["area_ha"].sum() / 1e6
+
+    landuse_split = (
+        ag_uses.groupby("LandUse", as_index=False, observed=False)["area_ha"]
+        .sum()
+        .rename(columns={"area_ha": "Area_Mha"})
+    )
+    landuse_split["Area_Mha"] = landuse_split["Area_Mha"] / 1e6
+
+    return ModelMetrics(
+        source=spec.label,
+        co2_gt=total_co2_gt,
+        n2o_gt=total_n2o_gt,
+        total_area_mha=total_area_mha,
+        landuse_split=landuse_split,
+        components=ag_uses,
+        latest_year=latest_year,
+    )
+
+
 # ----------------------------- FAOSTAT helpers -----------------------------
 
-
-def _load_fao_for_year(
+def _load_fao_for_years(
     con: duckdb.DuckDBPyConnection,
-    year: int,
+    years: Sequence[int],
     path: str,
+    aws_region: Optional[str],
 ) -> pd.DataFrame:
     """
-    Load FAOSTAT drained-organic-soils records for the given year and the
-    cropland/grassland items we care about.
+    Load FAOSTAT drained-organic-soils records for the given years and the
+    cropland/grassland items we care about (GV domain).
     """
+    years = sorted(set(int(y) for y in years))
+    if not years:
+        return pd.DataFrame()
+
+    pa._ensure_httpfs(con, aws_region)
+    years_list = ", ".join(str(y) for y in years)
+    yrs_label = f"{years[0]}–{years[-1]}" if len(years) > 1 else f"{years[0]}"
+
     path_escaped = path.replace("'", "''")
-    print(f"[FAOSTAT] Reading FAO CSV from: {path}")
+    print(f"[FAOSTAT] Reading FAO CSV for years {yrs_label} from: {path}")
     sql = f"""
       SELECT
         "Area Code (M49)" AS area_code,
@@ -195,27 +424,55 @@ def _load_fao_for_year(
         "Value"
       FROM read_csv_auto('{path_escaped}', header=1)
       WHERE "Domain Code" = 'GV'
-        AND "Year" = {year}
+        AND "Year" IN ({years_list})
         AND "Item" IN ('Cropland organic soils', 'Grassland organic soils');
     """
     try:
         df = con.execute(sql).df()
-    except Exception as exc:  # pragma: no cover - IO environment dependent
+    except Exception as exc:  # pragma: no cover
         print(f"[FAOSTAT] Failed to read FAO CSV from {path!r}: {exc}")
         return pd.DataFrame()
     return df
 
 
-def _compute_fao_metrics(fao_df: pd.DataFrame) -> tuple[float, float, float, pd.DataFrame]:
+def _compute_fao_metrics(
+    fao_df: pd.DataFrame,
+    years: Optional[Sequence[int]] = None,
+) -> tuple[float, float, float, pd.DataFrame]:
     """
-    Compute FAOSTAT global metrics:
+    Compute FAOSTAT global metrics from the GV drained-organic-soils subset.
+
+    All returned emissions are in **Gt CO2e/year**, averaged over the
+    provided year window (e.g., 2021–2024):
+
+      * CO2: FAOSTAT reports Emissions (CO2) in kt CO2.
+        We convert kt -> Gt CO₂e by multiplying by 1e-6 and dividing
+        by the number of years.
+
+      * N2O: FAOSTAT reports Emissions (N2O) in kt N2O (mass).
+        We first convert kt N2O -> kt CO2e using FAO_N2O_GWP,
+        then kt -> Gt and average over years.
+
+      * Area: FAOSTAT "Area" is in ha; we convert to million ha (Mha)
+        and average over years.
+
+    Parameters
+    ----------
+    fao_df : DataFrame
+        FAOSTAT rows already filtered to Domain Code 'GV' and the relevant
+        Items ('Cropland organic soils', 'Grassland organic soils') and
+        years of interest.
+    years : sequence of int, optional
+        Used to restrict to a specific subset of years and to determine
+        how many years to average over. If None, the unique years present
+        in fao_df are used.
 
     Returns
     -------
     (co2_gt, n2o_gt, total_area_mha, landuse_split_df)
 
-    where `landuse_split_df` has columns LandUse, Area_Mha.
-    If fao_df is empty, returns zeros and empty split DF.
+    where `landuse_split_df` has columns:
+        LandUse, Area_Mha
     """
     if fao_df.empty:
         return 0.0, 0.0, 0.0, pd.DataFrame(columns=["LandUse", "Area_Mha"])
@@ -226,107 +483,117 @@ def _compute_fao_metrics(fao_df: pd.DataFrame) -> tuple[float, float, float, pd.
         "Grassland organic soils": "Grassland",
     }
 
-    fao_df = fao_df.copy()
-    fao_df["LandUse"] = fao_df["Item"].map(item_to_landuse)
+    df = fao_df.copy()
+    df["LandUse"] = df["Item"].map(item_to_landuse)
 
-    # Emissions (kt) -> Gt CO2e
-    co2_kt = fao_df.loc[fao_df["Element"] == "Emissions (CO2)", "Value"].sum()
-    n2o_kt = fao_df.loc[fao_df["Element"] == "Emissions (N2O)", "Value"].sum()
-    co2_gt = co2_kt * 1e-6
-    n2o_gt = n2o_kt * 1e-6
+    # Restrict to requested years if provided
+    if years is not None:
+        yrs = {int(y) for y in years}
+        df = df[df["Year"].isin(yrs)]
+        if df.empty:
+            return 0.0, 0.0, 0.0, pd.DataFrame(columns=["LandUse", "Area_Mha"])
 
-    # Area (ha) -> Mha
-    area_mask = fao_df["Element"] == "Area"
-    total_area_mha = fao_df.loc[area_mask, "Value"].sum() / 1e6
+    # Determine number of unique years for averaging
+    if "Year" in df.columns:
+        unique_years = sorted(df["Year"].dropna().unique().tolist())
+        n_years = len(unique_years)
+    else:
+        n_years = len(set(years)) if years is not None else 1
+    if n_years == 0:
+        n_years = 1
+
+    # Convenience masks
+    co2_mask = df["Element"] == "Emissions (CO2)"
+    n2o_mask = df["Element"] == "Emissions (N2O)"
+    area_mask = df["Element"] == "Area"
+
+    # ---- Emissions ----
+    # CO2: kt CO2 -> Gt CO2e/year
+    co2_kt_total = df.loc[co2_mask, "Value"].sum()
+
+    # N2O: kt N2O -> kt CO2e via GWP -> Gt CO2e/year
+    n2o_kt_total = df.loc[n2o_mask, "Value"].sum()
+
+    co2_gt = (co2_kt_total / n_years) * 1e-6
+    n2o_gt = (n2o_kt_total / n_years) * FAO_N2O_GWP * 1e-6
+
+    # ---- Area ----
+    # Area in ha -> average over years -> Mha
+    area_total_ha = df.loc[area_mask, "Value"].sum()
+    total_area_mha = (area_total_ha / n_years) / 1e6
 
     landuse_split = (
-        fao_df.loc[area_mask]
+        df.loc[area_mask]
         .groupby("LandUse", as_index=False, observed=False)["Value"]
         .sum()
         .rename(columns={"Value": "Area_Mha"})
     )
-    landuse_split["Area_Mha"] = landuse_split["Area_Mha"] / 1e6
+    landuse_split["Area_Mha"] = landuse_split["Area_Mha"] / n_years / 1e6
 
     return co2_gt, n2o_gt, total_area_mha, landuse_split
 
 
-# ----------------------------- Plotting -----------------------------
-
+# ----------------------------- plotting -----------------------------
 
 def _plot_emissions(emissions: pd.DataFrame) -> plt.Figure:
     """
-    Grouped bar chart by Gas (CO2, N2O) × Source (Model, FAOSTAT).
+    Stacked bar chart by Source with CO₂ + N₂O segments.
+
+    Styled to match other publication figures:
+      - Legend on top (centered).
+      - Themed with THEME_LIGHT_GRID + y-axis grid.
     """
     if emissions.empty:
         raise ValueError("emissions DataFrame is empty in _plot_emissions")
 
-    gas_order = ["CO₂", "N₂O"]
-    source_order = ["Model", "FAOSTAT"]
+    df = emissions.copy()
+    df = df[df["Gas"].isin(FAO_GAS_ORDER)]
+    if df.empty:
+        raise ValueError("No CO₂/N₂O rows available for plotting in _plot_emissions")
 
-    # Pivot to Gas × Source wide format
-    pivot = (
-        emissions.pivot_table(
-            index="Gas",
-            columns="Source",
-            values="Emissions_GtCO2e",
-            aggfunc="sum",
-            fill_value=0.0,
-            observed=False,
-        )
-        .reindex(index=gas_order, fill_value=0.0)
+    df["Gas"] = pd.Categorical(df["Gas"], categories=FAO_GAS_ORDER, ordered=True)
+
+    # Complete gas color map from top-level config
+    gas_colors = pc.resolve_colors(
+        FAO_GAS_ORDER,
+        color_map=FAO_GAS_COLORS,
+        palette="okabe_ito",
     )
 
-    # Ensure columns in desired order, but keep any extras
-    existing_sources = [s for s in source_order if s in pivot.columns]
-    extra_sources = [s for s in pivot.columns if s not in existing_sources]
-    col_order = existing_sources + extra_sources
-    pivot = pivot.reindex(columns=col_order, fill_value=0.0)
-
-    x = np.arange(len(gas_order))
-    n_src = len(col_order)
-    bar_width = min(0.35, 0.8 / max(n_src, 1))
-
-    color_map = pc.resolve_colors(col_order, palette="okabe_ito")
-
-    with pc.use_theme(pc.THEME_LIGHT_GRID):
-        fig, ax = plt.subplots(figsize=(6.0, 4.0))
-
-        for j, src in enumerate(col_order):
-            y = pivot[src].to_numpy()
-            offsets = x + (j - (n_src - 1) / 2.0) * bar_width
-            ax.bar(offsets, y, width=bar_width, label=src,
-                   color=color_map[src], edgecolor="white")
-
-        ax.set_xticks(x)
-        ax.set_xticklabels(gas_order)
-        ax.set_ylabel("Emissions (Gt CO₂e/year)")
-        ax.set_xlabel("Gas")
-        pc.tidy_axes(ax, grid="y")
-        pc.fmt_si(ax, axis="y")
-        ax.legend(frameon=False, title="Source")
-
+    theme = {**pc.THEME_LIGHT_GRID, "axes.grid.axis": "y"}
+    with pc.use_theme(theme):
+        fig = pc.stacked_column_by_category(
+            df_long=df,
+            index_col="Source",
+            category_col="Gas",
+            value_col="Emissions_GtCO2e",
+            category_order=FAO_GAS_ORDER,
+            color_map=gas_colors,
+            xlabel="Source",
+            ylabel="Emissions (Gt CO₂e/year)",
+            width=7.0,
+            height=4.6,
+            legend_above=True,
+        )
         return fig
 
 
 def _plot_area(area: pd.DataFrame) -> plt.Figure:
     """
-    Simple bar chart of total peat area by Source.
+    Simple bar chart of total Cropland+Grassland peat area by Source.
     """
     if area.empty:
         raise ValueError("area DataFrame is empty in _plot_area")
 
-    # We expect a single Category repeated; use x = Source.
-    ordered_sources = ["Model", "FAOSTAT"]
-    src_order = [s for s in ordered_sources if s in area["Source"].unique()]
-    src_order += [s for s in area["Source"].unique() if s not in src_order]
-
+    src_order = list(area["Source"].unique())
     df = area.copy()
     df["Source"] = pd.Categorical(df["Source"], categories=src_order, ordered=True)
     df = df.sort_values("Source")
 
-    with pc.use_theme(pc.THEME_LIGHT_GRID):
+    theme = {**pc.THEME_LIGHT_GRID, "axes.grid.axis": "y"}
+    with pc.use_theme(theme):
         fig, ax = plt.subplots(figsize=(4.8, 3.8))
-        colors = pc.resolve_colors(src_order, palette="okabe_ito")
+        colors = pc.resolve_colors(src_order, palette=FAO_SOURCE_PALETTE)
         xs = np.arange(len(df))
         vals = df["Area_Mha"].to_numpy()
 
@@ -343,7 +610,6 @@ def _plot_area(area: pd.DataFrame) -> plt.Figure:
         pc.tidy_axes(ax, grid="y")
         pc.fmt_si(ax, axis="y")
 
-        # Label values on top
         for b, v in zip(bars, vals):
             ax.text(
                 b.get_x() + b.get_width() / 2.0,
@@ -354,270 +620,291 @@ def _plot_area(area: pd.DataFrame) -> plt.Figure:
                 fontsize=9,
             )
 
+        fig.tight_layout()
         return fig
 
 
 def _plot_landuse_split(landuse: pd.DataFrame) -> plt.Figure:
     """
-    Grouped bar chart of peat area by LandUse × Source.
+    Stacked bar chart of peat area by Source with LandUse (Cropland/Grassland) segments.
+
+    Uses top-level FAO_LANDUSE_* config and legend on top, to match
+    other publication figures.
     """
     if landuse.empty:
         raise ValueError("landuse DataFrame is empty in _plot_landuse_split")
 
-    landuse_order = ["Cropland", "Grassland"]
-    source_order = ["Model", "FAOSTAT"]
+    df = landuse.copy()
+    df = df[df["LandUse"].isin(FAO_LANDUSE_ORDER)]
+    if df.empty:
+        raise ValueError("No Cropland/Grassland rows available for plotting in _plot_landuse_split")
 
-    lu = landuse.copy()
-    lu["LandUse"] = pd.Categorical(lu["LandUse"], categories=landuse_order, ordered=True)
-    lu = lu.sort_values(["LandUse", "Source"])
+    df["LandUse"] = pd.Categorical(df["LandUse"], categories=FAO_LANDUSE_ORDER, ordered=True)
 
-    pivot = (
-        lu.pivot_table(
-            index="LandUse",
-            columns="Source",
-            values="Area_Mha",
-            aggfunc="sum",
-            fill_value=0.0,
-            observed=False,
-        )
-        .reindex(index=landuse_order, fill_value=0.0)
+    lu_colors = pc.resolve_colors(
+        FAO_LANDUSE_ORDER,
+        color_map=FAO_LANDUSE_COLORS,
+        palette="okabe_ito",
     )
 
-    existing_sources = [s for s in source_order if s in pivot.columns]
-    extra_sources = [s for s in pivot.columns if s not in existing_sources]
-    col_order = existing_sources + extra_sources
-    pivot = pivot.reindex(columns=col_order, fill_value=0.0)
-
-    x = np.arange(len(landuse_order))
-    n_src = len(col_order)
-    bar_width = min(0.35, 0.8 / max(n_src, 1))
-
-    colors = pc.resolve_colors(col_order, palette="okabe_ito")
-
-    with pc.use_theme(pc.THEME_LIGHT_GRID):
-        fig, ax = plt.subplots(figsize=(5.4, 3.8))
-
-        for j, src in enumerate(col_order):
-            y = pivot[src].to_numpy()
-            offsets = x + (j - (n_src - 1) / 2.0) * bar_width
-            ax.bar(offsets, y, width=bar_width,
-                   label=src, color=colors[src], edgecolor="white")
-
-        ax.set_xticks(x)
-        ax.set_xticklabels(landuse_order)
-        ax.set_ylabel("Area (million ha)")
-        ax.set_xlabel("")
-        pc.tidy_axes(ax, grid="y")
-        pc.fmt_si(ax, axis="y")
-        ax.legend(frameon=False, title="Source")
-
-        # Label values on top of each bar
-        for j, src in enumerate(col_order):
-            y = pivot[src].to_numpy()
-            offsets = x + (j - (n_src - 1) / 2.0) * bar_width
-            for xx, v in zip(offsets, y):
-                ax.text(
-                    xx,
-                    v,
-                    f"{v:.1f}",
-                    ha="center",
-                    va="bottom",
-                    fontsize=9,
-                )
-
+    theme = {**pc.THEME_LIGHT_GRID, "axes.grid.axis": "y"}
+    with pc.use_theme(theme):
+        fig = pc.stacked_column_by_category(
+            df_long=df,
+            index_col="Source",
+            category_col="LandUse",
+            value_col="Area_Mha",
+            category_order=FAO_LANDUSE_ORDER,
+            color_map=lu_colors,
+            xlabel="Source",
+            ylabel="Area (million ha)",
+            width=7.0,
+            height=4.5,
+            legend_above=True,
+        )
         return fig
 
 
-# ----------------------------- Driver -----------------------------
-
+# ----------------------------- driver -----------------------------
 
 def main(argv=None):
-    p = argparse.ArgumentParser("Build FAO-style cropland/grassland comparison figures")
-    p.add_argument("--model_version", required=True)
-    p.add_argument("--run_name", required=True)
-    p.add_argument("--run_date", required=True)
+    p = argparse.ArgumentParser(
+        "Build FAO-style cropland/grassland comparison figures "
+        "(OGH / GFW / GPD vs FAOSTAT)"
+    )
     p.add_argument("--years", nargs="+", required=True)
+    p.add_argument(
+        "--run",
+        action="append",
+        required=True,
+        help=(
+            "Run specification: run_name=model_version:run_date or "
+            "run_name=model_version:run_date|Label (e.g. "
+            "\"ogh_sensitivity_500m_10=0_9_7:20251118|OGH\"). "
+            "Provide once per model source."
+        ),
+    )
     p.add_argument("--aws_region", default=None)
     p.add_argument(
         "--fao_csv",
         default=DEFAULT_FAO_CSV,
-        help="Path to FAOSTAT CSV (local or s3://...). "
-             "Default is the S3 GV drained-organic-soils CSV.",
+        help=(
+            "Path to FAOSTAT CSV (local or s3://...). "
+            "Default is the S3 GV drained-organic-soils CSV."
+        ),
     )
     p.add_argument("--data-only", action="store_true")
     args = p.parse_args(argv)
 
+    years = sorted({int(y) for y in args.years})
+    if not years:
+        raise SystemExit("At least one inventory year must be provided")
+
+    run_specs = _parse_run_specs(args.run)
+    if not run_specs:
+        raise SystemExit("At least one --run specification is required")
+
+    # Use the first run (typically OGH) to define the output directory
+    primary = run_specs[0]
     global OUT_DIR
-    OUT_DIR = build_output_dir(args.model_version, args.run_name, args.run_date)
+    OUT_DIR = build_output_dir(primary.model_version, primary.run_name, primary.run_date)
 
-    years = [int(y) for y in args.years]
-    interval_folders = _interval_folder_strings(years)
-    base_prefixes = _make_base_prefixes(
-        args.model_version,
-        args.run_name,
-        args.run_date,
-        interval_folders,
+    print("FAO comparison – model sources:")
+    for spec in run_specs:
+        print(
+            f"  - {spec.label}: run_name={spec.run_name}, "
+            f"version={spec.model_version}, run_date={spec.run_date}"
+        )
+    print("Output directory:", OUT_DIR)
+
+    # Determine FAO averaging window from the latest interval
+    start_year, end_year = _interval_pair_for_latest(years)
+    fao_years = list(range(start_year, end_year + 1))
+    if len(fao_years) > 1:
+        print(
+            f"Comparison period (model interval): {start_year}_{end_year} "
+            f"(FAO averaged over years {fao_years[0]}–{fao_years[-1]})"
+        )
+    else:
+        print(
+            f"Comparison period (model interval): {start_year}_{end_year} "
+            f"(FAO year {fao_years[0]})"
+        )
+
+    # --- model metrics for each run ---
+    model_metrics: list[ModelMetrics] = []
+    for spec in run_specs:
+        metrics = _compute_model_metrics_for_run(spec, years, args.aws_region)
+        model_metrics.append(metrics)
+
+    # Assemble combined tables for model sources
+    emissions_rows = []
+    area_rows = []
+    landuse_rows = []
+    components_frames = []
+
+    for m in model_metrics:
+        emissions_rows.extend(
+            [
+                {
+                    "Source": m.source,
+                    "Gas": "CO₂",
+                    "Emissions_GtCO2e": m.co2_gt,
+                    "interval_end": m.latest_year,
+                },
+                {
+                    "Source": m.source,
+                    "Gas": "N₂O",
+                    "Emissions_GtCO2e": m.n2o_gt,
+                    "interval_end": m.latest_year,
+                },
+            ]
+        )
+
+        area_rows.append(
+            {
+                "Source": m.source,
+                "Category": "Cropland + Grassland peat area",
+                "Area_Mha": m.total_area_mha,
+                "interval_end": m.latest_year,
+            }
+        )
+
+        if not m.landuse_split.empty:
+            lu = m.landuse_split.copy()
+            lu["Source"] = m.source
+            lu["interval_end"] = m.latest_year
+            landuse_rows.append(lu)
+
+        if not m.components.empty:
+            df_c = m.components.copy()
+            df_c["Source"] = m.source
+            components_frames.append(df_c)
+
+    emissions = pd.DataFrame(emissions_rows)
+    area = pd.DataFrame(area_rows)
+    landuse_split = (
+        pd.concat(landuse_rows, ignore_index=True) if landuse_rows else pd.DataFrame()
     )
-    drained_globs = _make_drained_globs(base_prefixes)
+    ag_components = (
+        pd.concat(components_frames, ignore_index=True)
+        if components_frames
+        else pd.DataFrame()
+    )
 
-    print("Resolved drained globs:")
-    for g in drained_globs:
-        print("  -", g)
-
-    con = duckdb.connect()
+    # --- FAOSTAT metrics over the same window (average 2021–2024 etc.) ---
+    con_fao = duckdb.connect()
     try:
-        _register_drained(con, drained_globs, aws_region=args.aws_region)
-        pa._register_state_context_views(con)
+        fao_raw = _load_fao_for_years(con_fao, fao_years, args.fao_csv, args.aws_region)
+    finally:
+        con_fao.close()
 
-        # Component data for the latest interval present in zs_drained
-        df = con.execute(sql_components_latest()).df()
+    latest_year = max(years)
 
-        if df.empty:
-            meta = con.execute(
-                "SELECT COUNT(*) AS n_rows, "
-                "MIN(interval_end) AS min_year, "
-                "MAX(interval_end) AS max_year "
-                "FROM zs_drained"
-            ).df().iloc[0]
-            flux_types = con.execute(
-                "SELECT DISTINCT flux_type "
-                "FROM zs_drained "
-                "ORDER BY flux_type LIMIT 20"
-            ).df()["flux_type"].tolist()
-            raise RuntimeError(
-                "FAO comparison: no rows returned from sql_components_latest().\n"
-                f"  zs_drained rows: {meta['n_rows']}\n"
-                f"  interval_end range: {meta['min_year']} – {meta['max_year']}\n"
-                f"  sample flux_type values: {flux_types}"
-            )
-
-        latest_year = int(df["interval_end"].max())
-
-        # Land-use reclassification & agricultural subset (Cropland / Grassland)
-        df["LandUse"] = df["emissions_state"].apply(pc._reclass_emissions_state)
-        ag_uses = df[df["LandUse"].isin(["Cropland", "Grassland"])].copy()
-
-        # --- Model aggregates ---
-
-        total_co2 = ag_uses["drained_co2"].sum()
-        total_n2o = ag_uses["drained_n2o"].sum()
-        model_emissions = pd.DataFrame(
-            {
-                "Source": ["Model", "Model"],
-                "Gas": ["CO₂", "N₂O"],
-                "Emissions_GtCO2e": [total_co2 / 1e9, total_n2o / 1e9],
-                "interval_end": [latest_year, latest_year],
-            }
+    if fao_raw.empty:
+        print(
+            f"[FAOSTAT] No FAO GV rows found for years {fao_years} "
+            f"in {args.fao_csv!r}. FAOSTAT will not appear in comparison."
+        )
+    else:
+        fao_co2_gt, fao_n2o_gt, fao_area_mha, fao_lu_split = _compute_fao_metrics(
+            fao_raw, fao_years
         )
 
-        total_area_mha = ag_uses["area_ha"].sum() / 1e6
-        model_area = pd.DataFrame(
-            {
-                "Source": ["Model"],
-                "Category": ["Cropland + Grassland peat area"],
-                "Area_Mha": [total_area_mha],
-                "interval_end": [latest_year],
-            }
+        emissions = pd.concat(
+            [
+                emissions,
+                pd.DataFrame(
+                    {
+                        "Source": ["FAOSTAT", "FAOSTAT"],
+                        "Gas": ["CO₂", "N₂O"],
+                        "Emissions_GtCO2e": [fao_co2_gt, fao_n2o_gt],
+                        "interval_end": [latest_year, latest_year],
+                    }
+                ),
+            ],
+            ignore_index=True,
         )
 
-        model_landuse_split = (
-            ag_uses.groupby("LandUse", as_index=False, observed=False)["area_ha"]
-            .sum()
-            .rename(columns={"area_ha": "Area_Mha"})
+        area = pd.concat(
+            [
+                area,
+                pd.DataFrame(
+                    {
+                        "Source": ["FAOSTAT"],
+                        "Category": ["Cropland + Grassland peat area"],
+                        "Area_Mha": [fao_area_mha],
+                        "interval_end": [latest_year],
+                    }
+                ),
+            ],
+            ignore_index=True,
         )
-        model_landuse_split["Area_Mha"] = model_landuse_split["Area_Mha"] / 1e6
-        model_landuse_split["Source"] = "Model"
-        model_landuse_split["interval_end"] = latest_year
 
-        # --- FAOSTAT aggregates ---
-
-        fao_raw = _load_fao_for_year(con, latest_year, args.fao_csv)
-        if fao_raw.empty:
-            print(
-                f"[FAOSTAT] No FAO rows found for year {latest_year} in {args.fao_csv!r}. "
-                "Only model data will be exported."
-            )
-            fao_emissions = pd.DataFrame(columns=model_emissions.columns)
-            fao_area = pd.DataFrame(columns=model_area.columns)
-            fao_landuse_split = pd.DataFrame(columns=model_landuse_split.columns)
-        else:
-            fao_co2_gt, fao_n2o_gt, fao_total_area_mha, fao_lu_split = _compute_fao_metrics(fao_raw)
-
-            fao_emissions = pd.DataFrame(
-                {
-                    "Source": ["FAOSTAT", "FAOSTAT"],
-                    "Gas": ["CO₂", "N₂O"],
-                    "Emissions_GtCO2e": [fao_co2_gt, fao_n2o_gt],
-                    "interval_end": [latest_year, latest_year],
-                }
-            )
-
-            fao_area = pd.DataFrame(
-                {
-                    "Source": ["FAOSTAT"],
-                    "Category": ["Cropland + Grassland peat area"],
-                    "Area_Mha": [fao_total_area_mha],
-                    "interval_end": [latest_year],
-                }
-            )
-
+        if not fao_lu_split.empty:
             fao_lu_split = fao_lu_split.copy()
             fao_lu_split["Source"] = "FAOSTAT"
             fao_lu_split["interval_end"] = latest_year
+            landuse_split = pd.concat(
+                [landuse_split, fao_lu_split], ignore_index=True
+            )
 
-            # Align columns with model_landuse_split
-            missing_cols = [c for c in model_landuse_split.columns if c not in fao_lu_split.columns]
-            for c in missing_cols:
-                fao_lu_split[c] = np.nan
-            fao_lu_split = fao_lu_split[model_landuse_split.columns]
+    print("Writing outputs to:", OUT_DIR)
 
-            fao_landuse_split = fao_lu_split
-
-        # Combined tables
-        emissions = pd.concat([model_emissions, fao_emissions], ignore_index=True)
-        area = pd.concat([model_area, fao_area], ignore_index=True)
-        landuse_split = pd.concat([model_landuse_split, fao_landuse_split], ignore_index=True)
-
-        print(f"Writing outputs to: {OUT_DIR}")
-
-        # Raw components (model only for now)
-        _write_csv_df(con, ag_uses, _join(OUT_DIR, "figures", "data", "ag_raw_components.csv"))
+    writer_con = duckdb.connect()
+    try:
+        _write_csv_df(
+            writer_con,
+            ag_components,
+            _join(OUT_DIR, "figures", "data", "ag_raw_components.csv"),
+        )
         print("  - figures/data/ag_raw_components.csv")
 
-        # Aggregated comparison tables
-        _write_csv_df(con, emissions, _join(OUT_DIR, "figures", "data", "emissions_by_gas.csv"))
+        _write_csv_df(
+            writer_con,
+            emissions,
+            _join(OUT_DIR, "figures", "data", "emissions_by_gas.csv"),
+        )
         print("  - figures/data/emissions_by_gas.csv")
 
-        _write_csv_df(con, area, _join(OUT_DIR, "figures", "data", "peat_area.csv"))
+        _write_csv_df(
+            writer_con,
+            area,
+            _join(OUT_DIR, "figures", "data", "peat_area.csv"),
+        )
         print("  - figures/data/peat_area.csv")
 
-        _write_csv_df(con, landuse_split, _join(OUT_DIR, "figures", "data", "landuse_area_split.csv"))
+        _write_csv_df(
+            writer_con,
+            landuse_split,
+            _join(OUT_DIR, "figures", "data", "landuse_area_split.csv"),
+        )
         print("  - figures/data/landuse_area_split.csv")
 
-        if args.data_only:
-            print("Data-only mode: figures skipped.")
-            return
-
-        # Figures
-        fig = _plot_emissions(emissions)
-        _save_png(fig, _join(OUT_DIR, "figures", "emissions_by_gas.png"), dpi=300)
-        print("  - figures/emissions_by_gas.png")
-
-        fig = _plot_area(area)
-        _save_png(fig, _join(OUT_DIR, "figures", "peat_area.png"), dpi=300)
-        print("  - figures/peat_area.png")
-
-        if not landuse_split.empty:
-            fig = _plot_landuse_split(landuse_split)
-            _save_png(fig, _join(OUT_DIR, "figures", "landuse_area_split.png"), dpi=300)
-            print("  - figures/landuse_area_split.png")
-        else:
-            print("  - [skipped] landuse_area_split.png (no Cropland/Grassland rows)")
-
-        print("Done.")
-
     finally:
-        con.close()
+        writer_con.close()
+
+    if args.data_only:
+        print("Data-only mode: figures skipped.")
+        return
+
+    # --- Figures ---
+    fig = _plot_emissions(emissions)
+    _save_png(fig, _join(OUT_DIR, "figures", "emissions_by_gas.png"), dpi=300)
+    print("  - figures/emissions_by_gas.png")
+
+    fig = _plot_area(area)
+    _save_png(fig, _join(OUT_DIR, "figures", "peat_area.png"), dpi=300)
+    print("  - figures/peat_area.png")
+
+    if not landuse_split.empty:
+        fig = _plot_landuse_split(landuse_split)
+        _save_png(fig, _join(OUT_DIR, "figures", "landuse_area_split.png"), dpi=300)
+        print("  - figures/landuse_area_split.png")
+    else:
+        print("  - [skipped] landuse_area_split.png (no Cropland/Grassland rows)")
+
+    print("Done.")
 
 
 if __name__ == "__main__":

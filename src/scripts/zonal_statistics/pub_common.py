@@ -27,6 +27,7 @@ from typing import Optional, Sequence, List, Dict, Mapping
 import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from src.scripts.zonal_statistics import zonal_constants as zc
 
 # Attempt to import pycountry lazily for ISO lookups. The dependency is optional and
 # the rest of the module works without it, so we swallow any import-time errors and
@@ -70,6 +71,8 @@ CLIMATE_COLORS = CLIMATE_PALETTES["brewer_set2"].copy()
 
 PROCESS_ORDER = ["Drained", "Burned"]
 PROCESS_COLORS = {"Drained": "#3E3753", "Burned": "#FB6A29"}
+
+STATE_PAD_DIGITS = zc.STATE_CODE_PAD_DIGITS
 
 def set_climate_palette(name: str) -> dict:
     """
@@ -280,10 +283,13 @@ def country_label(df: pd.DataFrame) -> pd.Series:
         return iso.where(iso.str.len().fillna(0) > 0, df["gadm_adm0"].astype(str))
     return df["gadm_adm0"].astype(str)
 
+
+def _rpad_sql(expr: str) -> str:
+    """Return an RPAD expression using the shared state-node width."""
+    return f"RPAD(CAST({expr} AS VARCHAR), {STATE_PAD_DIGITS}, '0')"
+
 def build_adm0_lookup_df(manual_overrides: Optional[Dict[int, Dict[str, Optional[str]]]] = None) -> pd.DataFrame:
     """Return a DataFrame with gadm_adm0 → (iso3, country) best-effort mappings."""
-    from src.scripts.zonal_statistics import zonal_constants as zc
-
     overrides: Dict[int, Dict[str, Optional[str]]] = manual_overrides or {}
     rows: list[dict[str, Optional[str] | int]] = []
     seen: set[int] = set()
@@ -346,9 +352,20 @@ def pivot_wide(df_long: pd.DataFrame, value_col: str, index_col: str) -> pd.Data
 # ----------------------------- Land-use reclass ---------------------------
 
 _LU_RECLASS_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # Coastal wetlands (mangroves & tidal marshes) → Wetland
+    # Handles:
+    #   coastal_mangrove
+    #   other_domain_coastal_mangrove
+    #   coastal_tidal_marsh
+    #   other_domain_coastal_tidal_marsh
+    # and any future variants that normalize to '*coastal_*mangrove' or '*coastal_*tidal_marsh'.
+    (re.compile(r"^.*coastal[_\- ]?(?:mangrove|tidal[_\- ]?marsh).*$"), "Wetland"),
+
     (re.compile(r"^(oil[_\- ]?palm|oilpalm)$"), "Oil Palm"),
-    (re.compile(r"^(short[_\- ]?rotation|long[_\- ]?rotation|plantation.*|planted.*|tree[_\- ]?crop.*)$"),
-     "Other plantation"),
+    (re.compile(
+        r"^(short[_\- ]?rotation|long[_\- ]?rotation|plantation.*|planted.*|"
+        r"tree[_\- ]?crop.*)$"
+    ), "Other plantation"),
     (re.compile(r"^cropland.*$"), "Cropland"),
     (re.compile(r"^forest.*$"), "Forest"),
     (re.compile(r"^(grassland|pasture|rangeland).*$"), "Grassland"),
@@ -357,6 +374,7 @@ _LU_RECLASS_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"^(extraction|peat[_\- ]?extraction|cutover).*$"), "Extraction"),
     (re.compile(r"^(otherland|other)$"), "Otherland"),
 ]
+
 
 def _normalize_emissions_state(s: Optional[str]) -> str:
     if s is None:
@@ -583,7 +601,7 @@ def table_by_country_period_sql(with_lookup: bool) -> str:
     """
 
 def table_by_drained_state_sql() -> str:
-    return """
+    return f"""
     WITH base AS (
       SELECT
         interval_end,
@@ -606,12 +624,12 @@ def table_by_drained_state_sql() -> str:
     FROM base
     LEFT JOIN drained_state_ctx AS ctx
       ON (base.drained_state_meaning = ctx.meaning)
-      OR (RPAD(CAST(base.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+      OR ({_rpad_sql('base.drained_state_nodes')} = ctx.key)
     ORDER BY base.interval_end, base.drained_MgCO2e DESC
     """
 
 def table_by_burned_state_sql() -> str:
-    return """
+    return f"""
     WITH base AS (
       SELECT
         interval_end,
@@ -634,7 +652,7 @@ def table_by_burned_state_sql() -> str:
     FROM base
     LEFT JOIN burned_state_ctx AS ctx
       ON (base.burned_state_meaning = ctx.meaning)
-      OR (RPAD(CAST(base.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+      OR ({_rpad_sql('base.burned_state_nodes')} = ctx.key)
     ORDER BY base.interval_end, base.burned_MgCO2e DESC
     """
 
@@ -668,7 +686,7 @@ def table_by_country_drained_state_sql(with_lookup: bool) -> str:
     {join_l}
     LEFT JOIN drained_state_ctx AS ctx
       ON (base.drained_state_meaning = ctx.meaning)
-      OR (RPAD(CAST(base.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+      OR ({_rpad_sql('base.drained_state_nodes')} = ctx.key)
     ORDER BY base.interval_end, base.drained_MgCO2e DESC
     """
 
@@ -702,7 +720,7 @@ def table_by_country_burned_state_sql(with_lookup: bool) -> str:
     {join_l}
     LEFT JOIN burned_state_ctx AS ctx
       ON (base.burned_state_meaning = ctx.meaning)
-      OR (RPAD(CAST(base.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+      OR ({_rpad_sql('base.burned_state_nodes')} = ctx.key)
     ORDER BY base.interval_end, base.burned_MgCO2e DESC
     """
 
@@ -745,7 +763,7 @@ def table_topn_country_sql(component: str, topn: int, with_lookup: bool) -> str:
 # ----------------------------- Figure SQL --------------------------------
 
 def sql_drained_by_climate() -> str:
-    return """
+    return f"""
     WITH joined AS (
       SELECT
         z.interval_end,
@@ -754,7 +772,7 @@ def sql_drained_by_climate() -> str:
       FROM zs_drained z
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.drained_state_nodes')} = ctx.key)
       GROUP BY 1,2
     )
     SELECT interval_end, climate_domain, drained_MgCO2e / 1e9 AS drained_GtCO2e
@@ -763,7 +781,7 @@ def sql_drained_by_climate() -> str:
     """
 
 def sql_burned_by_climate() -> str:
-    return """
+    return f"""
     WITH joined AS (
       SELECT
         z.interval_end,
@@ -772,7 +790,7 @@ def sql_burned_by_climate() -> str:
       FROM zs_burned z
       LEFT JOIN burned_state_ctx AS ctx
         ON (z.burned_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.burned_state_nodes')} = ctx.key)
       GROUP BY 1,2
     )
     SELECT interval_end, climate_domain, burned_MgCO2e / 1e9 AS burned_GtCO2e
@@ -781,49 +799,91 @@ def sql_burned_by_climate() -> str:
     """
 
 def sql_drained_landuse_climate_avgs(n_periods: int) -> str:
+    """
+    Drained Land Use × Climate using ONLY the latest inventory period
+    (i.e., the maximum interval_end present in zs_drained, which is 2024
+    for your current run).
+
+    Note: 'n_periods' is no longer used in the calculation; we keep the
+    output column name 'drained_avg_GtCO2e_per_yr' for compatibility with
+    the existing pub_assets plotting code.
+    """
     return f"""
-    WITH joined AS (
+    WITH latest AS (
+      SELECT MAX(interval_end) AS max_end
+      FROM zs_drained
+    ),
+    joined AS (
       SELECT
         COALESCE(ctx.climate_domain, 'Unspecified')  AS climate_domain,
         COALESCE(ctx.emissions_state, 'Unspecified') AS emissions_state,
-        SUM(CASE WHEN z.flux_type = 'drained_total_Mg_CO2e' THEN z.value ELSE 0 END) AS drained_MgCO2e
+        SUM(
+          CASE
+            WHEN z.flux_type = 'drained_total_Mg_CO2e' THEN z.value
+            ELSE 0
+          END
+        ) AS drained_MgCO2e
       FROM zs_drained z
+      JOIN latest lt
+        ON z.interval_end = lt.max_end
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.drained_state_nodes')} = ctx.key)
       GROUP BY 1,2
     )
     SELECT
       climate_domain,
       emissions_state,
-      (drained_MgCO2e / {n_periods}) / 1e9 AS drained_avg_GtCO2e_per_yr
+      drained_MgCO2e / 1e9 AS drained_avg_GtCO2e_per_yr
     FROM joined;
     """
 
+
 def sql_burned_landuse_climate_avgs(n_periods: int) -> str:
+    """
+    Burned Land Use × Climate using ONLY the latest inventory period
+    (i.e., the maximum interval_end present in zs_burned, which is 2024
+    for your current run).
+
+    Note: 'n_periods' is no longer used in the calculation; we keep the
+    output column name 'burned_avg_GtCO2e_per_yr' for compatibility with
+    the existing pub_assets plotting code.
+    """
     return f"""
-    WITH joined AS (
+    WITH latest AS (
+      SELECT MAX(interval_end) AS max_end
+      FROM zs_burned
+    ),
+    joined AS (
       SELECT
         COALESCE(ctx.climate_domain, 'Unspecified')  AS climate_domain,
         COALESCE(ctx.emissions_state, 'Unspecified') AS emissions_state,
-        SUM(CASE WHEN z.flux_type = 'burned_total_Mg_CO2e' THEN z.value ELSE 0 END) AS burned_MgCO2e
+        SUM(
+          CASE
+            WHEN z.flux_type = 'burned_total_Mg_CO2e' THEN z.value
+            ELSE 0
+          END
+        ) AS burned_MgCO2e
       FROM zs_burned z
+      JOIN latest lt
+        ON z.interval_end = lt.max_end
       LEFT JOIN burned_state_ctx AS ctx
         ON (z.burned_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.burned_state_nodes')} = ctx.key)
       GROUP BY 1,2
     )
     SELECT
       climate_domain,
       emissions_state,
-      (burned_MgCO2e / {n_periods}) / 1e9 AS burned_avg_GtCO2e_per_yr
+      burned_MgCO2e / 1e9 AS burned_avg_GtCO2e_per_yr
     FROM joined;
     """
+
 
 # --- NEW for C: total emissions (drained+burned) by climate × period -----
 
 def sql_total_by_climate() -> str:
-    return """
+    return f"""
     WITH d AS (
       SELECT
         z.interval_end,
@@ -832,7 +892,7 @@ def sql_total_by_climate() -> str:
       FROM zs_drained z
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.drained_state_nodes')} = ctx.key)
       GROUP BY 1,2
     ),
     b AS (
@@ -843,7 +903,7 @@ def sql_total_by_climate() -> str:
       FROM zs_burned z
       LEFT JOIN burned_state_ctx AS ctx
         ON (z.burned_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.burned_state_nodes')} = ctx.key)
       GROUP BY 1,2
     )
     SELECT
@@ -868,7 +928,7 @@ def sql_component_split_by_climate_avg(n_periods: int) -> str:
       FROM zs_drained z
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.drained_state_nodes')} = ctx.key)
       GROUP BY 1
     ),
     b AS (
@@ -878,7 +938,7 @@ def sql_component_split_by_climate_avg(n_periods: int) -> str:
       FROM zs_burned z
       LEFT JOIN burned_state_ctx AS ctx
         ON (z.burned_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.burned_state_nodes')} = ctx.key)
       GROUP BY 1
     )
     SELECT climate_domain, 'Drained' AS component, (COALESCE(d.Mg,0) / NULLIF({n_periods},0)) / 1e9 AS avg_GtCO2e_per_yr
@@ -903,7 +963,7 @@ def sql_drained_intensity_by_climate_avg(n_periods: int) -> str:
       FROM zs_drained z
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.drained_state_nodes')} = ctx.key)
       GROUP BY 1,2
     ),
     latest_area AS (
@@ -922,7 +982,7 @@ def sql_drained_intensity_by_climate_avg(n_periods: int) -> str:
       FROM zs_drained z
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.drained_state_nodes')} = ctx.key)
       GROUP BY 1
     )
     SELECT
@@ -944,7 +1004,7 @@ def sql_component_intensity_by_climate_avg(n_periods: int) -> str:
       FROM zs_drained z
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.drained_state_nodes')} = ctx.key)
       GROUP BY 1,2
     ),
     area_burned AS (
@@ -955,7 +1015,7 @@ def sql_component_intensity_by_climate_avg(n_periods: int) -> str:
       FROM zs_burned z
       LEFT JOIN burned_state_ctx AS ctx
         ON (z.burned_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.burned_state_nodes')} = ctx.key)
       GROUP BY 1,2
     ),
     latest_area AS (
@@ -988,7 +1048,7 @@ def sql_component_intensity_by_climate_avg(n_periods: int) -> str:
       FROM zs_drained z
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.drained_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.drained_state_nodes')} = ctx.key)
       GROUP BY 1
     ),
     em_burned AS (
@@ -998,7 +1058,7 @@ def sql_component_intensity_by_climate_avg(n_periods: int) -> str:
       FROM zs_burned z
       LEFT JOIN burned_state_ctx AS ctx
         ON (z.burned_state_meaning = ctx.meaning)
-        OR (RPAD(CAST(z.burned_state_nodes AS VARCHAR), 8, '0') = ctx.key)
+        OR ({_rpad_sql('z.burned_state_nodes')} = ctx.key)
       GROUP BY 1
     )
     SELECT
