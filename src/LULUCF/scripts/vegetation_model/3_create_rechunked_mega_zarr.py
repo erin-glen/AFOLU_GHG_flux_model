@@ -52,12 +52,12 @@ python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn v
 python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model -fv 2 -fy 2 --test_print_stats_chunk 0 41 1 42 -bb 0 41 1 42 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ --input_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
-python -m src.utilities.create_cluster -n 50 -t 1 -m 16 -cn vegetation_model  (Needs 16GB when doing chunk stats on 9x10000x10000 chunks)
+python -m src.utilities.create_cluster -n 100 -t 1 -m 16 -cn vegetation_model  (Needs 16GB when doing chunk stats on 9x10000x10000 chunks)
 python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -mcstn vegetation_fluxes_1x1_chunk_statistics_20251027_16_16_26__v1_0_2_1884_chunk_run__KEEP.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 
 Full run:
-python -m src.utilities.create_cluster -n 50 -t 1 -m 16 -cn vegetation_model  (Needs 16GB when doing chunk stats on 9x10000x10000 chunks)
+python -m src.utilities.create_cluster -n 100 -t 1 -m 16 -cn vegetation_model  (Needs 16GB when doing chunk stats on 9x10000x10000 chunks)
 python -m src.LULUCF.scripts.vegetation_model.3_create_rechunked_mega_zarr -cn vegetation_model --test_print_stats_chunk 0 41 1 42 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is the definitive rechunking run."
 
 Most recent ChatGPT convo about rechunking approach: https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6900ce1b-e728-832a-9b87-4702f646da42
@@ -185,10 +185,11 @@ def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False,
     else:
         # vars_to_process = cn.full_outputs_to_zarr
         vars_to_process = [  #TODO testing
-            cn.gross_emis_all_C_pools_CO2_only_pattern, cn.gross_emis_all_C_pools_non_CO2_only_pattern, cn.gross_emis_all_C_pools_all_gases_pattern,
-            cn.gross_removals_all_C_pools_pattern,
-            cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
-            cn.non_soil_c_modeled_dens_pattern]
+            # cn.gross_emis_all_C_pools_CO2_only_pattern, cn.gross_emis_all_C_pools_non_CO2_only_pattern, cn.gross_emis_all_C_pools_all_gases_pattern,
+            # cn.gross_removals_all_C_pools_pattern,
+            # cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
+            # cn.non_soil_c_modeled_dens_pattern,
+            cn.land_state_pattern]
     main_logger.info(f"Variables to rechunk and compare chunk stats for: {vars_to_process} out of {len(cn.full_outputs_to_zarr)}")
 
     # Limits the processed years to the supplied number (for testing)
@@ -206,9 +207,9 @@ def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False,
 
     start_time = uu.timestr()
 
-    # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
-    zu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, years_to_process,
-                                   ((len(cn.interval_end_years_annual)), cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
+    # # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
+    # zu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, years_to_process,
+    #                                ((len(cn.interval_end_years_annual)), cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
 
     fs = fsspec.filesystem("s3", anon=False)
     source_mapper = fs.get_mapper(rechunked_mega_zarr_path)

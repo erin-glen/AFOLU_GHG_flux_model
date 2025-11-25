@@ -277,11 +277,12 @@ def check_region_stats(store_url, dataset_key, year_idx, target_box, logger_work
 
 # Calculates regular chunk stats in 1x1 deg chunk of dataset-year slice of zarr.
 # Chunk stats are calculated using the same function as used on numpy array outputs from models.
-def zarr_1x1_deg_stats(bounds, var_name, year_idx, zarr_path):
+def zarr_1x1_deg_stats(bounds, var_name, zarr_path):
 
     bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
-    year = cn.interval_end_years_annual[year_idx]
+
+    zarr_stats_raw_all_years = []
 
     # print(f"Getting stats for {var_name} for year {year_idx} for {bounds_str}: {uu.timestr()}")
     start_time = time.time()
@@ -293,9 +294,6 @@ def zarr_1x1_deg_stats(bounds, var_name, year_idx, zarr_path):
         "lon_min": bounds[0],
         "lon_max": bounds[2]
     }
-
-    # The dataset pattern being analyzed, with year and units added
-    pattern_with_units = add_units_year_to_pattern(var_name, year)
 
     # print(f"Getting indices for {bounds_str}")
     lat0, lon0 = latlon_to_global_zarr_indices(target_box["lat_max"], target_box["lon_min"], cn.resolution)
@@ -312,9 +310,20 @@ def zarr_1x1_deg_stats(bounds, var_name, year_idx, zarr_path):
     # print(f"Opening zarr for {bounds_str}")
     zarr_group = zarr.open(zarr_mapper, mode="r")
     # print(f"Getting array for {bounds_str}")
-    zarr_chunk_array = zarr_group[var_name][year_idx, lat0:lat1, lon0:lon1]
-    # print(f"Calculating stats for {bounds_str}")
-    zarr_stats_raw = uu.calculate_stats(zarr_chunk_array, pattern_with_units, bounds_str, tile_id, 'zarr_stats')
+    zarr_chunk_array = zarr_group[var_name][:, lat0:lat1, lon0:lon1]
+    print("all years:", zarr_chunk_array)
+
+    for year_idx, year in cn.interval_end_years_annual:
+
+        zarr_chunk_array_year = zarr_chunk_array[i]
+        print(zarr_chunk_array_year)
+
+        # The dataset pattern being analyzed, with year and units added
+        pattern_with_units = add_units_year_to_pattern(var_name, year)
+
+        # print(f"Calculating stats for {bounds_str}")
+        zarr_stats_raw_year = uu.calculate_stats(zarr_chunk_array_year, pattern_with_units, bounds_str, tile_id, 'zarr_stats')
+        print(zarr_stats_raw_year)
 
     # end_time = time.time()
     # print(f"  Calculated stats for {pattern_with_units} for {year} for {bounds} in {round(end_time - start_time)} seconds: {uu.timestr()}")
@@ -322,7 +331,7 @@ def zarr_1x1_deg_stats(bounds, var_name, year_idx, zarr_path):
     # print(f"zarr_stats_raw for {bounds_str}: {zarr_stats_raw}")
 
     # Returns the chunk stats from the zarr as a dictionary
-    return zarr_stats_raw
+    return zarr_stats_raw_all_years
 
 
 # Parallelizes stats calculation in 1x1 deg chunks in raw and rechunked zarrs for a given dataset-year
@@ -333,7 +342,7 @@ def run_parallel_stats(client, chunk_list, var, year_idx, zarr_path):
     # Iterates through all chunks in the list for a given dataset-year
     for chunk in chunk_list:
         future = client.submit(zarr_1x1_deg_stats,
-                               chunk, var, year_idx, zarr_path, retries=2)
+                               chunk, var, zarr_path, retries=2)
         futures.append(future)
 
     # List of dictionaries, where each dictionary is stats for a single chunk
