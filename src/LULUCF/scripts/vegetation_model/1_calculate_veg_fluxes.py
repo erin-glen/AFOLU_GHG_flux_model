@@ -267,8 +267,8 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
 
         # Vegetation height from GPW median vegetation height. Original values are rescaled by 10 to make them ints,
         # so converting them to the actual float values here.
-        GPW_height_prev_block = (in_dict_int16[f"{cn.MVH_pattern}_{interval_end_year - interval_length}"]/10).astype('float32')
-        GPW_height_curr_block = (in_dict_int16[f"{cn.MVH_pattern}_{interval_end_year}"]/10).astype('float32')
+        GPW_height_prev_block = (in_dict_int16[f"{cn.GPW_MVH_pattern}_{interval_end_year - interval_length}"] / 10).astype('float32')
+        GPW_height_curr_block = (in_dict_int16[f"{cn.GPW_MVH_pattern}_{interval_end_year}"] / 10).astype('float32')
 
         # print(f"{cn.land_cover_pattern}_{interval_end_year - interval_length}:", LC_prev_block)
         # print(f"{cn.land_cover_pattern}_{interval_end_year}:", LC_curr_block)
@@ -630,6 +630,11 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 # Tree gain and loss based on canopy heights at start and end of interval (not based on LC composites)
                 tree_gain = (not tree_prev and tree_curr)
                 tree_loss = (tree_prev and not tree_curr)
+
+                # Gain and loss of vegetation according to Global Pasture Watch vegetation height product
+                #TODO finalize rule
+                GPW_veg_height_gain = (GPW_height_curr - GPW_height_prev > 0.5)
+                GPW_veg_height_loss = (GPW_height_curr - GPW_height_prev < -0.5)
 
                 # Booleans of vegetation height classes for start (prev) and end (curr) of current interval based on LC composites
                 short_veg_LC_prev, tall_veg_LC_prev = nu.classify_veg_height(LC_prev)
@@ -1658,7 +1663,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                      c_dens_out, non_co2_flux_out) = nu.calc_cropland_cropland(node, c_dens_in, times_burned_in_interval)
 
                 ### Non-tree/cropland converted to short vegetation
-                elif (not short_veg_LC_prev) and (short_veg_LC_curr):
+                elif (not short_veg_LC_prev) and (short_veg_LC_curr) and (GPW_veg_height_gain):
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     state_out = nu.accrete_node(node, 1)  # Short vegetation gain (61)
                     rf_array = short_veg_AGC_BGC_RF_adj
@@ -1666,7 +1671,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                     c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_short_veg_gain(rf_array)
                 ### Short vegetation converted to non-short vegetation, non-forest or non-cropland
-                elif (short_veg_LC_prev) and (not short_veg_LC_curr):
+                elif (short_veg_LC_prev) and (not short_veg_LC_curr) and (GPW_veg_height_loss):
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     node = nu.accrete_node(node, 2)  # Short vegetation loss (62)
                     if water_LC_curr:
@@ -1903,8 +1908,8 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
 
     # Adds the uri for the global COGS of Global Pasture Watch median vegetation height for each year to the download dictionary
     for year in list(range(2015, 2025)):
-        MVH_uri_year = cn.MVH_uri.replace('YYYY', str(year))
-        updated_download_dict[f"{cn.MVH_pattern}_{year}"] = [MVH_uri_year, 'int16']
+        MVH_uri_year = cn.GPW_MVH_uri.replace('YYYY', str(year))
+        updated_download_dict[f"{cn.GPW_MVH_pattern}_{year}"] = [MVH_uri_year, 'int16']
 
     # print(updated_download_dict)
 

@@ -152,19 +152,15 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
         # Time extraction from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/691f42e3-cd2c-800a-b9e1-715190ad3024
         # Extracts seconds from lines for core calculation processing
         numba_proc_times__sec = [int(m) for m in re.findall(r'Calculated using numba.*?(\d+) seconds', log_content)]
-        print(numba_proc_times__sec)
 
         # Extract seconds from lines for zarr insertion
         zarr_insert_proc_times__sec = [int(m) for m in re.findall(r'Wrote outputs to global zarrs.*?(\d+) seconds', log_content)]
-        print(zarr_insert_proc_times__sec)
 
         # Extract seconds from lines for geotif uploads
         uploads_proc_times__sec = [int(m) for m in re.findall(r'Uploads completed for.*?(\d+) seconds', log_content)]
-        print(uploads_proc_times__sec)
 
         # Extract seconds from lines for total chunk processing
         total_chunk_proc_times__sec = [int(m) for m in re.findall(r'Total chunk processing.*?(\d+) seconds', log_content)]
-        print(total_chunk_proc_times__sec)
 
         # Averages
         avg_numba_proc_times__sec = sum(numba_proc_times__sec) / len(numba_proc_times__sec) if numba_proc_times__sec else 0

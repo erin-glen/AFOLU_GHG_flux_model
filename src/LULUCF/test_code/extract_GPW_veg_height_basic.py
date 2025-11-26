@@ -21,29 +21,31 @@ lat_max = 50
 pixel_size = 0.00025
 tile_px = int(1.0 / pixel_size)  # 4000
 
-year = 2015
+for year in range(2015, 2024, 1):
 
-url = f"https://s3.opengeohub.org/gpw/arco/gpw_short.veg.height_egbt_m_30m_s_{year}0101_{year}1231_go_epsg.4326_v1.tif"
+    print(f"Extracting {year}")
 
-with rasterio.Env(AWS_NO_SIGN_REQUEST='YES'):
-    with rasterio.open(url) as src:
-        # Compute col/row in source raster for exact tile corner (upper-left pixel edge)
-        col_start = round((lon_min - src.bounds.left) / pixel_size)
-        row_start = round((src.bounds.top - lat_max) / pixel_size)
+    url = f"https://s3.opengeohub.org/gpw/arco/gpw_short.veg.height_egbt_m_30m_s_{year}0101_{year}1231_go_epsg.4326_v1.tif"
 
-        window = Window(col_start, row_start, tile_px, tile_px)
-        data = src.read(1, window=window)
+    with rasterio.Env(AWS_NO_SIGN_REQUEST='YES'):
+        with rasterio.open(url) as src:
+            # Compute col/row in source raster for exact tile corner (upper-left pixel edge)
+            col_start = round((lon_min - src.bounds.left) / pixel_size)
+            row_start = round((src.bounds.top - lat_max) / pixel_size)
 
-        # Force transform to exact corner alignment
-        transform = Affine.translation(lon_min, lat_max) * Affine.scale(pixel_size, -pixel_size)
+            window = Window(col_start, row_start, tile_px, tile_px)
+            data = src.read(1, window=window)
 
-        out_meta = src.meta.copy()
-        out_meta.update({
-            "driver": "GTiff",
-            "height": tile_px,
-            "width": tile_px,
-            "transform": transform
-        })
+            # Force transform to exact corner alignment
+            transform = Affine.translation(lon_min, lat_max) * Affine.scale(pixel_size, -pixel_size)
 
-        with rasterio.open(f"50N_010E_GPW_veg_height_{year}.tif", "w", **out_meta) as dest:
-            dest.write(data, 1)
+            out_meta = src.meta.copy()
+            out_meta.update({
+                "driver": "GTiff",
+                "height": tile_px,
+                "width": tile_px,
+                "transform": transform
+            })
+
+            with rasterio.open(f"50N_010E_GPW_veg_height_{year}.tif", "w", **out_meta) as dest:
+                dest.write(data, 1)
