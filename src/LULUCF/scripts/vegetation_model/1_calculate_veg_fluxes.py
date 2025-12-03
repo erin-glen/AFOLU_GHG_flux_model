@@ -2119,7 +2119,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
             executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
         upload_end_time = time.time()
-        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path} in {round(upload_end_time - upload_start_time)} seconds: {uu.timestr()}", is_large_run, logger_worker)
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.veg_outputs_path} in {round(upload_end_time - upload_start_time)} seconds: {uu.timestr()}", is_large_run, logger_worker)
 
     chunk_end_time = time.time()
     lu.print_and_log(f"Total chunk processing for {bounds_str} in {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
@@ -2176,7 +2176,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Calculates the interval type, difference between start and end years of intervals, and the model output years
     # for the model run
-    interval_type, interval_year_diff_list, interval_length_list, interval_end_years = uu.get_interval_info(end_year, main_logger, start_year)
+    interval_type, interval_year_diff_list, interval_length_list, interval_end_years = uu.get_interval_info(start_year, end_year, main_logger)
 
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -2189,7 +2189,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Determines if the output file names for final versions of outputs should be used
     is_large_run = False
-    # is_large_run = True  # For simulating a large run
+    is_large_run = True  # For simulating a large run
     if len(chunk_list) > 20:
         is_large_run = True
         main_logger.info(f"Running as large-scale run model: {is_large_run}")
@@ -2384,7 +2384,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     if create_zarr:
 
         # Creates s3 paths for the raw mega-zarr
-        raw_mega_zarr_path = zu.create_mega_zarr_path(chunk_size_pixels, interval_type, model_type, run_date, main_logger)
+        raw_mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, chunk_size_pixels, interval_type, model_type, run_date, main_logger)
 
         # These variables are added to the mega-zarr
         outputs_to_zarr = cn.full_outputs_to_zarr

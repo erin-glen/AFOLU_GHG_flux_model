@@ -214,7 +214,7 @@ def create_per_pixel_starting_carbon_pools(bounds, year, is_final, no_upload,
         with ThreadPoolExecutor(max_workers=5) as executor:
             executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
-        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}",
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.veg_outputs_path}: {uu.timestr()}",
                          is_final, logger_worker)
 
     chunk_end_time = time.time()

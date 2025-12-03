@@ -568,7 +568,7 @@ def xy_to_tile_id(top_left_x, top_left_y):
 # interval_year_diff is the difference between the start and end years of the interval, not the number of years in the interval.
 # The difference between interval_length and interval_year_diff arises for 5-year intervals (e.g., 2016-2020), where there are 5 years in the interval
 # but the difference between the start and end years is 4.
-def get_interval_info(end_year, main_logger, start_year):
+def get_interval_info(start_year, end_year, main_logger):
 
     if start_year == 2000 and end_year == 2020:
         interval_type = cn.intervals_five_years
@@ -577,14 +577,14 @@ def get_interval_info(end_year, main_logger, start_year):
         interval_year_diff = [cn.five_year_interval_duration - 1] * len(cn.interval_end_years_5_years)  # -1 because the interval really starts one year after the end of the previous interval
         # interval_year_diff = [4, 4, 4, 4]  # Expected for 2000-2020
         output_years = cn.interval_end_years_5_years
-    elif start_year == 2015 and end_year == max(cn.years_annual):
+    elif start_year == 2015 and end_year == cn.last_model_year_annual:
         interval_type = cn.intervals_annual
         interval_length = [1] * len(cn.interval_end_years_annual)
         # interval_length = [1, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2024
         interval_year_diff = [1] * len(cn.interval_end_years_annual)
         # interval_year_diff = [1, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2015-2024
         output_years = cn.interval_end_years_annual
-    elif start_year == 2000 and end_year == max(cn.years_annual):  # Hybrid model (2000-2024)
+    elif start_year == 2000 and end_year == cn.last_model_year_annual:  # Hybrid model (2000-2024)
         interval_type = cn.intervals_hybrid
         interval_length = [cn.five_year_interval_duration] * len(cn.interval_end_years_5_years[:-1]) + [1] * len(cn.interval_end_years_annual)
         # interval_length = [5, 5, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1]  # Expected for 2000-2024
@@ -1670,23 +1670,23 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
         parquet_folder = Path(f"{output_dir}parquet_{timestamp}/")
         parquet_folder.mkdir(parents=True, exist_ok=True)
 
-        annual_1x1_inputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.annual_1x1_inputs}.parquet", index=False)
-        other_1x1_inputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.other_1x1_inputs}.parquet", index=False)
-        gross_flux_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.gross_outputs_1x1}.parquet", index=False)
-        net_flux_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.net_outputs_1x1}.parquet", index=False)
-        other_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.other_outputs_1x1}.parquet", index=False)
-        min_max_1x1_stats.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.min_max_for_layers_1x1}.parquet", index=False)
-        sum_1x1_to_10x10.to_parquet(f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}__{cn.counts_1x1_in_10x10}.parquet", index=False)
+        annual_1x1_inputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.veg_model_version_underscore}__{cn.annual_1x1_inputs}.parquet", index=False)
+        other_1x1_inputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.veg_model_version_underscore}__{cn.other_1x1_inputs}.parquet", index=False)
+        gross_flux_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.veg_model_version_underscore}__{cn.gross_outputs_1x1}.parquet", index=False)
+        net_flux_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.veg_model_version_underscore}__{cn.net_outputs_1x1}.parquet", index=False)
+        other_1x1_outputs.to_parquet(f"{parquet_folder}/{out_base}__v{cn.veg_model_version_underscore}__{cn.other_outputs_1x1}.parquet", index=False)
+        min_max_1x1_stats.to_parquet(f"{parquet_folder}/{out_base}__v{cn.veg_model_version_underscore}__{cn.min_max_for_layers_1x1}.parquet", index=False)
+        sum_1x1_to_10x10.to_parquet(f"{parquet_folder}/{out_base}__v{cn.veg_model_version_underscore}__{cn.counts_1x1_in_10x10}.parquet", index=False)
 
         # Uploads to S3 if needed
         parquet_files = {
-                cn.annual_1x1_inputs: f"{out_base}__v{cn.model_version_underscore}__{cn.annual_1x1_inputs}.parquet",
-                cn.other_1x1_inputs: f"{out_base}__v{cn.model_version_underscore}__{cn.other_1x1_inputs}.parquet",
-                cn.gross_outputs_1x1: f"{out_base}__v{cn.model_version_underscore}__{cn.gross_outputs_1x1}.parquet",
-                cn.net_outputs_1x1: f"{out_base}__v{cn.model_version_underscore}__{cn.net_outputs_1x1}.parquet",
-                cn.other_outputs_1x1: f"{out_base}__v{cn.model_version_underscore}__{cn.other_outputs_1x1}.parquet",
-                cn.min_max_for_layers_1x1: f"{out_base}__v{cn.model_version_underscore}__{cn.min_max_for_layers_1x1}.parquet",
-                cn.counts_1x1_in_10x10: f"{out_base}__v{cn.model_version_underscore}__{cn.counts_1x1_in_10x10}.parquet",
+                cn.annual_1x1_inputs: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.annual_1x1_inputs}.parquet",
+                cn.other_1x1_inputs: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.other_1x1_inputs}.parquet",
+                cn.gross_outputs_1x1: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.gross_outputs_1x1}.parquet",
+                cn.net_outputs_1x1: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.net_outputs_1x1}.parquet",
+                cn.other_outputs_1x1: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.other_outputs_1x1}.parquet",
+                cn.min_max_for_layers_1x1: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.min_max_for_layers_1x1}.parquet",
+                cn.counts_1x1_in_10x10: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.counts_1x1_in_10x10}.parquet",
             }
 
         if not no_upload:
@@ -1697,7 +1697,7 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
                 s3_client.upload_file(full_path, cn.short_bucket_prefix, Key=s3_key)
 
         # Returns the names of all the parquet files
-        return f"{parquet_folder}/{out_base}__v{cn.model_version_underscore}"
+        return f"{parquet_folder}/{out_base}__v{cn.veg_model_version_underscore}"
 
     # Saves chunk stats to Excel
     else:
@@ -2083,7 +2083,6 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     data_per_ha = model_zarr_store[var][year_idx, y0_model:y1_model, x0_model:x1_model]
 
     # Calculates per-pixel output (for numeric outputs only)
-    # pixel_area_zarr_store = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
     pixel_area_zarr_store = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
 
     # Determine pixel indices (applies to model outputs and pixel area)

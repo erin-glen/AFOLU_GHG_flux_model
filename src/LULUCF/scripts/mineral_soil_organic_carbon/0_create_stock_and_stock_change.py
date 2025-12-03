@@ -268,7 +268,7 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, n
         with ThreadPoolExecutor(max_workers=5) as executor:
             executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
-        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path}: {uu.timestr()}", is_final, logger_worker)
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.veg_outputs_path}: {uu.timestr()}", is_final, logger_worker)
 
     chunk_end_time = time.time()
     lu.print_and_log(f"  {bounds_str} downloads and density calcs took {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}",False, logger_worker)
