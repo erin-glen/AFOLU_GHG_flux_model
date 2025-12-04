@@ -631,10 +631,12 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 tree_gain = (not tree_prev and tree_curr)
                 tree_loss = (tree_prev and not tree_curr)
 
-                # Gain and loss of vegetation according to Global Pasture Watch vegetation height product
-                #TODO finalize rule
-                GPW_veg_height_gain = (GPW_height_curr - GPW_height_prev > 0.5)
-                GPW_veg_height_loss = (GPW_height_curr - GPW_height_prev < -0.5)
+                # Gain and loss of vegetation according to Global Pasture Watch vegetation height product (Hunter et al. 2025)
+                GPW_veg_prev = (GPW_height_prev >= cn.GPW_short_veg_threshold)
+                GPW_veg_curr = (GPW_height_curr >= cn.GPW_short_veg_threshold)
+
+                GPW_veg_height_gain = (not GPW_veg_prev and GPW_veg_curr)
+                GPW_veg_height_loss = (GPW_veg_prev and not GPW_veg_curr)
 
                 # Booleans of vegetation height classes for start (prev) and end (curr) of current interval based on LC composites
                 short_veg_LC_prev, tall_veg_LC_prev = nu.classify_veg_height(LC_prev)
@@ -2501,6 +2503,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         # Text added to output chunk stats table name(s) (Excel or Parquet)
         comparison_insert = "_original_zarr_comparison"
 
+        model_chunk_stats_path = 'chunk_stats/vegetation_fluxes_1x1_chunk_statistics_20251203_17_20_15.xlsx' #TODO testing
         # The name of the chunk stats table from the model
         model_chunk_stats_table_name = os.path.basename(model_chunk_stats_path)
         # print(model_chunk_stats_table_name)
@@ -2533,59 +2536,44 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
             main_logger.info(f"Starting {var_name}: {uu.timestr()}")
             var_start_time = time.time()
 
-            # Iterates through years
-            for year_idx in range(len(cn.interval_end_years_annual)):
-                year = cn.interval_end_years_annual[year_idx]
+            # Runs chunk stats for a dataset (all years) in the zarr in parallel
+            chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
+                client=client,
+                chunk_list=chunk_list,
+                var=var_name,
+                zarr_path=raw_mega_zarr_path,
+            )
 
-                # Gets stats for selected 1x1 deg chunks in raw and rechunked zarrs
-                main_logger.info(f"  Starting zarr stats for {var_name} for year {year}: {uu.timestr()}")
-                year_start_time = time.time()
+            # After all zarr chunk stats is done for the dataset-year combination,
+            # the chunk stats from the zarr are compared to the chunk stats from the model.
+            # This is done with Pandas dataframes and is not parallelized because it's just table manipulation
+            # for each dataset-year combination.
+            # The model output vs. zarr comparison is done after each dataset-year combination
+            # to get more real-time feedback on how the datasets compare (rather than waiting until after
+            # all zarr chunk stats have been calculated to do the metric comparisons).
+            all_merged_tables, chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
+                                                                                    chunk_stats_variable_year_rechunked_zarr,
+                                                                                    main_logger,
+                                                                                    tables_to_compare_dict,
+                                                                                    var_name,
+                                                                                    zarr_comparison_stats_path)
 
-                # Runs chunk stats for a dataset-year in the zarr in parallel
-                chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
-                    client=client,
-                    chunk_list=chunk_list,
-                    var=var_name,
-                    year_idx=year_idx,
-                    zarr_path=raw_mega_zarr_path,
-                )
-                year_end_time = time.time()
-                main_logger.info(f"    Got zarr stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
-
-                # After all zarr chunk stats is done for the dataset-year combination,
-                # the chunk stats from the zarr are compared to the chunk stats from the model.
-                # This is done with Pandas dataframes and is not parallelized because it's just table manipulation
-                # for each dataset-year combination.
-                # The model output vs. zarr comparison is done after each dataset-year combination
-                # to get more real-time feedback on how the datasets compare (rather than waiting until after
-                # all zarr chunk stats have been calculated to do the metric comparisons).
-                all_merged_tables, chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
-                                                                                        chunk_stats_variable_year_rechunked_zarr,
-                                                                                        main_logger,
-                                                                                        tables_to_compare_dict,
-                                                                                        var_name, year,
-                                                                                        zarr_comparison_stats_path)
-
-                # Total number of chunks that have differences in metrics between the model and zarr
-                # that exceed the tolerance
-                chunks_count_exceeding_total += chunks_count_exceeding
-                chunks_without_zarr_stats_total += chunks_without_zarr_stats
+            # Total number of chunks that have differences in metrics between the model and zarr
+            # that exceed the tolerance
+            chunks_count_exceeding_total += chunks_count_exceeding
+            chunks_without_zarr_stats_total += chunks_without_zarr_stats
 
             var_end_time = time.time()
             main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
 
-    ### Step 6: All chunk stats comparison iterations done.
-    ### Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
-
-    if create_zarr:
-
+        # Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
         zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_without_zarr_stats_total,
                                               main_logger, model_chunk_stats_table_name,
                                               stage, start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
 
 
-    ### Step 7: Aggregates logs
+    ### Step 6: Aggregates logs
 
     # Worker logs are not aggregated if doing a local run (since there are no workers)
     if not run_local:

@@ -186,7 +186,7 @@ def global_map_for_variable_year(var, year_idx, zarr_path, pixel_area_overlap, o
         output_path = output_base.replace("PATTERN", var)
         output_path = output_path.replace("START_END", year_or_range)
         output_path = output_path.replace("PER_HA_OR_PIXEL", global_map_units)
-        output_name = f"{var}{global_map_units}_{year_or_range}__global.tif"
+        output_name = f"{var}{global_map_units}_{year_or_range}_{cn.veg_model_version_underscore}__global.tif"
         s3_filename = f"{output_path}{output_name}"
 
         transform = from_origin(-180, lat_model_slice.max(), cn.global_geotif_resolution, cn.global_geotif_resolution)

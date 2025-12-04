@@ -747,7 +747,7 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
             # Non-retryable: missing key or other rasterio I/O issue
             else:
                 data = np.full(expected_shape, 0, dtype=numpy_dtype)
-                status = f"Can't access dataset {uri} in {bounds_str}. Returning array of all 0s: {err_msg}"
+                status = f"Can't access dataset {uri} for {bounds_str}. Returning array of all 0s: {err_msg}"
                 return data, status
 
 

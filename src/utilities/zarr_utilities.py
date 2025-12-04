@@ -311,31 +311,31 @@ def zarr_1x1_deg_stats(bounds, var_name, zarr_path):
     zarr_group = zarr.open(zarr_mapper, mode="r")
     # print(f"Getting array for {bounds_str}")
     zarr_chunk_array = zarr_group[var_name][:, lat0:lat1, lon0:lon1]
-    print("all years:", zarr_chunk_array)
 
-    for year_idx, year in cn.interval_end_years_annual:
+    for year_idx, year in enumerate(cn.interval_end_years_annual):
 
-        zarr_chunk_array_year = zarr_chunk_array[i]
-        print(zarr_chunk_array_year)
+        zarr_chunk_array_year = zarr_chunk_array[year_idx]
 
         # The dataset pattern being analyzed, with year and units added
         pattern_with_units = add_units_year_to_pattern(var_name, year)
 
         # print(f"Calculating stats for {bounds_str}")
         zarr_stats_raw_year = uu.calculate_stats(zarr_chunk_array_year, pattern_with_units, bounds_str, tile_id, 'zarr_stats')
-        print(zarr_stats_raw_year)
+        # print(zarr_stats_raw_year)
+
+        zarr_stats_raw_all_years.append(zarr_stats_raw_year)
 
     # end_time = time.time()
     # print(f"  Calculated stats for {pattern_with_units} for {year} for {bounds} in {round(end_time - start_time)} seconds: {uu.timestr()}")
 
     # print(f"zarr_stats_raw for {bounds_str}: {zarr_stats_raw}")
 
-    # Returns the chunk stats from the zarr as a dictionary
+    # Returns the chunk stats from the zarr as a list of dictionaries, with each element being one chunk
     return zarr_stats_raw_all_years
 
 
 # Parallelizes stats calculation in 1x1 deg chunks in raw and rechunked zarrs for a given dataset-year
-def run_parallel_stats(client, chunk_list, var, year_idx, zarr_path):
+def run_parallel_stats(client, chunk_list, var, zarr_path):
 
     futures = []
 
@@ -353,37 +353,39 @@ def run_parallel_stats(client, chunk_list, var, year_idx, zarr_path):
 
 # Compares chunk stats from model and from zarr for a dataset-year combination
 # Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6903d1dd-555c-8321-8547-0aa4772c9878
-def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_year_zarr, main_logger,
-                                     tables_to_compare_dict, var_name, year, zarr_comparison_stats_path):
+def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zarr, main_logger,
+                                     tables_to_compare_dict, var_name, zarr_comparison_stats_path):
 
     # Selects relevant model output table
     # The formatting of the year depends on the variable.
     if "gross" in var_name:
         model_table = tables_to_compare_dict[cn.gross_outputs_1x1]
-        year = year
+        # year = year
     elif "net" in var_name:
         model_table = tables_to_compare_dict[cn.net_outputs_1x1]
-        year = year
+        # year = year
     else:
         model_table = tables_to_compare_dict[cn.other_outputs_1x1]
         # For reasons I can't really trace back, the year datatype for C densities is object, not int.
         # So, it needs to be recast to a str or int to match the chunk_stats table.
-        year = str(year)
+        # year = str(year)
 
-    # Converts zarr chunk stats from dictionary to dataframe
-    zarr_df = pd.DataFrame(chunk_stats_variable_year_zarr)
+    # Converts zarr chunk stats from list of dictionaries to dataframe. [0] undoes the list so that the dictionaries
+    # can each be their own row in the dataframe.
+    zarr_df = pd.DataFrame(chunk_stats_variable_zarr[0])
+    # print(zarr_df)
 
-    # Subsets model chunk stats to relevant pattern and year.
-    subset_model_table = model_table[(model_table['pattern'].str.contains(var_name, na=False)) & (model_table['years'] == year)]
+    # Subsets model chunk stats to relevant pattern
+    subset_model_table = model_table[(model_table['pattern'].str.contains(var_name, na=False))]
     # print("subset_model_table", subset_model_table)
 
     # Selects only the needed columns from rechunked_zarr_table
-    main_logger.info(f"    Subsetting zarr table to numeric columns for {var_name} for {year}: {uu.timestr()}")
+    main_logger.info(f"    Subsetting zarr table to numeric columns for {var_name}: {uu.timestr()}")
     zarr_subset_table = zarr_df[['chunk_name', 'min_value', 'mean_value', 'max_value', 'count_value']].copy()
     # print("zarr_subset_table", zarr_subset_table)
 
     # Renames columns in raw_subset to distinguish them after merge
-    main_logger.info(f"    Renaming zarr columns for {var_name} for {year}: {uu.timestr()}")
+    main_logger.info(f"    Renaming zarr columns for {var_name}: {uu.timestr()}")
     zarr_subset_table = zarr_subset_table.rename(columns={
         'min_value': 'min_value_zarr',
         'mean_value': 'mean_value_zarr',
@@ -393,16 +395,16 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     # print("zarr_subset_table", zarr_subset_table)
 
     # Converts all zarr value columns to numeric, coercing errors to NaN
-    main_logger.info(f"    Converting zarr columns to numeric for {var_name} for {year}: {uu.timestr()}")
+    main_logger.info(f"    Converting zarr columns to numeric for {var_name}: {uu.timestr()}")
     for col in ['min_value_zarr', 'mean_value_zarr', 'max_value_zarr', 'count_value_zarr']:
         zarr_subset_table[col] = pd.to_numeric(zarr_subset_table[col], errors='coerce')
 
     # Merges with subset_model_table on 'chunk_name', left join (keeps all model output rows)
-    main_logger.info(f"    Merging zarr data to original model data for {var_name} for {year}: {uu.timestr()}")
+    main_logger.info(f"    Merging zarr data to original model data for {var_name}: {uu.timestr()}")
     merged_table = subset_model_table.merge(zarr_subset_table, on='chunk_name', how='left')
 
     # Calculates differences for four metrics and stores in new columns
-    main_logger.info(f"    Calculating differences for {var_name} for {year} ({merged_table['count_value_zarr'].sum().item()} pixels in zarr): {uu.timestr()}")
+    main_logger.info(f"    Calculating differences for {var_name} ({merged_table['count_value_zarr'].sum().item()} pixels in zarr): {uu.timestr()}")
     merged_table['min_value_diff'] = merged_table['min_value'] - merged_table['min_value_zarr']
     merged_table['mean_value_diff'] = merged_table['mean_value'] - merged_table['mean_value_zarr']
     merged_table['max_value_diff'] = merged_table['max_value'] - merged_table['max_value_zarr']
@@ -426,7 +428,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
 
     # Prints rows that exceed the tolerance for difference between original and zarr chunk stats
     if len(differences_exceeding_tolerance) > 0:
-        main_logger.warning(f"    WARNING: There are {len(differences_exceeding_tolerance)} rows in {var_name} for year {year} that have differences exceeding the tolerance!")
+        main_logger.warning(f"    WARNING: There are {len(differences_exceeding_tolerance)} rows in {var_name} that have differences exceeding the tolerance!")
 
         # Selects chunk_id and all difference to print in the console for easy viewing
         cols_to_print = [
@@ -441,7 +443,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
         main_logger.warning(differences_exceeding_tolerance[cols_to_print])
 
     else:
-        main_logger.info(f"    No rows in {var_name} for year {year} have metrics with differences exceeding the tolerance.")
+        main_logger.info(f"    No rows in {var_name} have metrics with differences exceeding the tolerance.")
 
     # Adds df for this dataset-year combination to the list of all the dataset-year dfs
     all_merged_tables.append(merged_table)

@@ -10,7 +10,9 @@ import numpy as np
 veg_model_version = "1.0.3"
 veg_model_version_underscore = veg_model_version.replace(".", "_")
 
-organic_soil_model_version = "0_9_7"
+organic_soil_model_version = "0.9.7"
+organic_soil_model_version_underscore = organic_soil_model_version.replace(".", "_")
+
 
 ### s3 buckets
 s3 = boto3.resource('s3')
@@ -200,8 +202,11 @@ sig_height_loss_threshold_abs = 5
 # Threshold for height gain to be counted as regrowth in the same interval as a disturbance
 sig_height_gain_threshold_abs = -5
 
-# Height minimum for trees (meters)
+# Height minimum for GLAD trees (meters)
 tree_threshold = 5
+
+# Height minimum for short vegetation using Global Pasture Watch (meters) (Hunter et al. 2025)
+GPW_short_veg_threshold = 2
 
 # Converts grams to kilograms for burning of dry matter
 g_to_kg = 10 ** -3
@@ -901,10 +906,10 @@ veg_summative_output_dirs = [
 ### LULUCF summation
 
 burned_organic_soils_total_pattern = "burned_total_Mg_CO2e_ha_yr"
-burned_organic_soils_total_dir = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_{organic_soil_model_version}/{burned_organic_soils_total_pattern}/ogh_sensitivity_500m_10/five_year_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/"
+burned_organic_soils_total_dir = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_{organic_soil_model_version_underscore}/{burned_organic_soils_total_pattern}/ogh_sensitivity_500m_10/five_year_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/"
 
 drained_organic_soils_total_pattern = "drained_total_Mg_CO2e_ha_yr"
-drained_organic_soils_total_dir = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_{organic_soil_model_version}/{drained_organic_soils_total_pattern}/ogh_sensitivity_500m_10/five_year_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/"
+drained_organic_soils_total_dir = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_{organic_soil_model_version_underscore}/{drained_organic_soils_total_pattern}/ogh_sensitivity_500m_10/five_year_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/"
 
 
 # Soil total patterns
