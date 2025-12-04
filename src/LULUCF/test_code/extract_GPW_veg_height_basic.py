@@ -1,7 +1,7 @@
 """
 Basic script for downloading a portion of a global SOC COG, mostly for checking outputs.
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
-python src/LULUCF/scripts/mineral_soil_organic_carbon/extract_SOC_stock_basic.py
+python src/LULUCF/test_code/extract_GPW_veg_height_basic.py
 
 Does not use Dask or Coiled.
 Output is in kg C/m^3, multipled by 10 (to keep geotif in int instead of float)
@@ -15,13 +15,13 @@ import rasterio
 from rasterio.windows import Window
 from rasterio.transform import Affine
 
-# Desired tile extent
-lon_min = 10
-lat_max = 50
+# Desired tile extent (1x1 deg)
+lon_min = 124
+lat_max = -29
 pixel_size = 0.00025
 tile_px = int(1.0 / pixel_size)  # 4000
 
-for year in range(2015, 2024, 1):
+for year in range(2015, 2025, 1):
 
     print(f"Extracting {year}")
 
@@ -35,6 +35,7 @@ for year in range(2015, 2024, 1):
 
             window = Window(col_start, row_start, tile_px, tile_px)
             data = src.read(1, window=window)
+            data_rescale = data/10
 
             # Force transform to exact corner alignment
             transform = Affine.translation(lon_min, lat_max) * Affine.scale(pixel_size, -pixel_size)
@@ -44,8 +45,9 @@ for year in range(2015, 2024, 1):
                 "driver": "GTiff",
                 "height": tile_px,
                 "width": tile_px,
-                "transform": transform
+                "transform": transform,
+                "dtype": 'float32'
             })
 
-            with rasterio.open(f"50N_010E_GPW_veg_height_{year}.tif", "w", **out_meta) as dest:
-                dest.write(data, 1)
+            with rasterio.open(f"20S_120E__124_-30_125_-29__GPW_veg_height_m_{year}.tif", "w", **out_meta) as dest:
+                dest.write(data_rescale, 1)

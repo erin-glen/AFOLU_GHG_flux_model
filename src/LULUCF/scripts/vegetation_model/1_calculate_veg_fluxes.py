@@ -268,8 +268,8 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
         veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}"]
         veg_h_curr_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year}"]
 
-        # Vegetation height from GPW median vegetation height. Original values are rescaled by 10 to make them ints,
-        # so converting them to the actual float values here.
+        # Vegetation height from GPW median vegetation height. Original values are rescaled by 10 (reported in dm) to make them ints,
+        # so converting them to the m (float) values here.
         GPW_height_prev_block = (in_dict_int16[f"{cn.GPW_MVH_pattern}_{interval_end_year - interval_length}"] / 10).astype('float32')
         GPW_height_curr_block = (in_dict_int16[f"{cn.GPW_MVH_pattern}_{interval_end_year}"] / 10).astype('float32')
 
@@ -637,22 +637,29 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 tree_gain = (not tree_prev and tree_curr)
                 tree_loss = (tree_prev and not tree_curr)
 
-                # Gain and loss of vegetation according to Global Pasture Watch vegetation height product (Hunter et al. 2025)
-                GPW_veg_prev = (GPW_height_prev >= cn.GPW_short_veg_threshold)
-                GPW_veg_curr = (GPW_height_curr >= cn.GPW_short_veg_threshold)
+                # Gain and loss of vegetation according to Global Pasture Watch vegetation height product (Hunter et al. 2025).
+                # Already rescaled from dm to m in the block processing step above.
+                GPW_short_veg_prev = (GPW_height_prev >= cn.GPW_short_veg_threshold)
+                GPW_short_veg_curr = (GPW_height_curr >= cn.GPW_short_veg_threshold)
 
-                GPW_veg_height_gain = (not GPW_veg_prev and GPW_veg_curr)
-                GPW_veg_height_loss = (GPW_veg_prev and not GPW_veg_curr)
+                GPW_veg_height_gain = (not GPW_short_veg_prev and GPW_short_veg_curr)
+                GPW_veg_height_loss = (GPW_short_veg_prev and not GPW_short_veg_curr)
 
                 # Booleans of vegetation height classes for start (prev) and end (curr) of current interval based on LC composites
-                short_veg_LC_prev, tall_veg_LC_prev = nu.classify_veg_height(LC_prev)
-                short_veg_LC_curr, tall_veg_LC_curr = nu.classify_veg_height(LC_curr)
+                GLAD_short_veg_LC_prev, GLAD_tall_veg_LC_prev = nu.classify_veg_height(LC_prev)
+                GLAD_short_veg_LC_curr, GLAD_tall_veg_LC_curr = nu.classify_veg_height(LC_curr)
 
                 water_LC_curr = (LC_curr >= cn.water_min_code) and (LC_curr <= cn.water_max_code)
 
                 SDPT_planted_trees = (planted_forest_type_cell > 0)  # All SDPT planted trees
                 SDPT_oil_palm = (planted_forest_type_cell == cn.SDPT_oil_palm_code)  # Oil palm in SDPT planted trees
                 oil_palm_pre_2000 = (oil_palm_2000_extent_cell == 1) # Oil palm that existed in the year 2000, according to that specific map/input
+
+                #TODO short veg/bare ground fix
+                if GLAD_short_veg_LC_prev and GPW_short_veg_prev:
+                    bare_gr_short_veg = 2
+                else:
+                    bare_gr_short_veg = 1
 
                 # Establishes if the interval ends after Descals oil palm planting year. Rules are different for annual and 5-year intervals.
                 # Second condition for each used to exclude NoData (0s) from first year of oil palm.
@@ -959,11 +966,11 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                             state_out = nu.accrete_node(node, 4)    # Permanent loss of mangroves to settlement (124)
                             # print(f"Node code is {state_out}, permanent loss of mangroves to settlement (124)")
 
-                        elif short_veg_LC_curr:
+                        elif GLAD_short_veg_LC_curr:
                             state_out = nu.accrete_node(node, 5)    # Permanent loss of mangroves to short vegetation (125)
                             # print(f"Node code is {state_out}, permanent loss of mangroves to short vegetation (125)")
 
-                        elif tall_veg_LC_curr:
+                        elif GLAD_tall_veg_LC_curr:
                             state_out = nu.accrete_node(node, 6)    # Permanent loss of mangroves to tall vegetation (126)
                             # print(f"Node code is {state_out}, permanent loss of mangroves to tall vegetation (126)")
 
@@ -1055,7 +1062,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                 nu.calc_NT_T(interval_length, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio=0, litter_c_ratio=0))
                     else:  # Gain of non-planted trees (22)
                         node = nu.accrete_node(node, 2)
-                        if tall_veg_LC_curr:  # Gain of terrestrial natural forest (221)
+                        if GLAD_tall_veg_LC_curr:  # Gain of terrestrial natural forest (221)
                             state_out = nu.accrete_node(node, 1)
                             RF_AGC_final = natrl_forest_curve_0_5_AGC_RF   # Forces new forest to use the first interval of the age curve
                             RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang
@@ -1120,7 +1127,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                         c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio=0, litter_c_ratio=0)
-                            elif short_veg_LC_curr:  # Full loss of non-oil palm planted trees as short vegetation (3122)
+                            elif GLAD_short_veg_LC_curr:  # Full loss of non-oil palm planted trees as short vegetation (3122)
                                 node = nu.accrete_node(node, 2)
                                 if planted_forest_tree_crop_cell == 2:  # Full loss of non-oil palm tree crops as short vegetation (31221->312219/312212)
                                     node = nu.accrete_node(node, 1)
@@ -1214,7 +1221,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                         deadwood_c_ratio=0, litter_c_ratio=0)
                     else:  # Full loss of non-planted trees (32)
                         node = nu.accrete_node(node, 2)
-                        if tall_veg_LC_prev:  # Full loss of natural forest (321)
+                        if GLAD_tall_veg_LC_prev:  # Full loss of natural forest (321)
                             node = nu.accrete_node(node, 1)
                             if LC_curr == cn.cropland:  # Natural forest converted to cropland (3211->32119/32112)
                                 node = nu.accrete_node(node, 1)
@@ -1230,7 +1237,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                     c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
                                     deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
-                            elif short_veg_LC_curr:  # Natural forest converted to short vegetation (3212)
+                            elif GLAD_short_veg_LC_curr:  # Natural forest converted to short vegetation (3212)
                                 node = nu.accrete_node(node, 2)
                                 if drivers_cell in cn.drivers_non_soil_C: # Natural forest converted to short vegetation with disturbance that emits all non-soil C pools (32121->321219/321212)
                                     node = nu.accrete_node(node, 1)
@@ -1305,7 +1312,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                     c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in_ToF,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
                                     deadwood_c_ratio=0, litter_c_ratio=0)
-                            elif short_veg_LC_curr:  # Full loss of trees outside forests converted to short vegetation (3222->32229/32222)
+                            elif GLAD_short_veg_LC_curr:  # Full loss of trees outside forests converted to short vegetation (3222->32229/32222)
                                 node = nu.accrete_node(node, 2)
                                 agc_rf_in = cn.trees_outside_forests_agc_rf_max  # 5-year intervals only
                                 bgc_rf_in = agc_rf_in * r_s_ratio_non_mang       # 5-year intervals only
@@ -1453,7 +1460,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
                             else:  # Non-planted trees partially disturbed in the current interval (4212)
                                 node = nu.accrete_node(node, 2)
-                                if tall_veg_LC_curr:  # Forest partially disturbed in the current interval (42121)
+                                if GLAD_tall_veg_LC_curr:  # Forest partially disturbed in the current interval (42121)
                                     node = nu.accrete_node(node, 1)
                                     if sig_height_gain_prev_curr_abs:  # Forest partially disturbed in the current interval with signif. height increase after (421211->4212119/4212112)
                                         # NOTE: This should only occur with 5-year interval data, not annual data.
@@ -1562,7 +1569,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                         cn.Cf_forest_undisturbed, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
                             else:  # Non-planted trees not disturbed in last interval (4222)
                                 node = nu.accrete_node(node, 2)
-                                if tall_veg_LC_curr:  # Natural forest not disturbed in last interval (42221)
+                                if GLAD_tall_veg_LC_curr:  # Natural forest not disturbed in last interval (42221)
                                     node = nu.accrete_node(node, 1)
                                     if (most_recent_year_not_tall_veg > 0) or (part_or_full_dist_in_earlier_intervals > 0):  # Young secondary natural forest (422211->4222119/4222112)
                                         node = nu.accrete_node(node, 1)
@@ -1632,7 +1639,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland):
                     node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
                     node = nu.accrete_node(node, 2)  # Annual cropland loss (52)
-                    if short_veg_LC_curr:
+                    if GLAD_short_veg_LC_curr:
                         node = nu.accrete_node(node, 1)  # Annual cropland converted to short vegetation (521->5219/5212)
                         c_pools_EF_no_fire = cn.agc_emissions_only  # There should only be AGC in cropland anyway
                         RF_AGC_final = short_veg_AGC_BGC_RF_adj[0]  # Sets the output RF to use the AGC short veg gain RF
@@ -1671,7 +1678,8 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                      c_dens_out, non_co2_flux_out) = nu.calc_cropland_cropland(node, c_dens_in, times_burned_in_interval)
 
                 ### Non-tree/cropland converted to short vegetation
-                elif (not short_veg_LC_prev) and (short_veg_LC_curr) and (GPW_veg_height_gain):
+                # TODO short veg/bare ground fix
+                elif (not GLAD_short_veg_LC_prev) and (GLAD_short_veg_LC_curr) and (GPW_veg_height_gain):
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     state_out = nu.accrete_node(node, 1)  # Short vegetation gain (61)
                     rf_array = short_veg_AGC_BGC_RF_adj
@@ -1679,7 +1687,8 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                     c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_short_veg_gain(rf_array)
                 ### Short vegetation converted to non-short vegetation, non-forest or non-cropland
-                elif (short_veg_LC_prev) and (not short_veg_LC_curr) and (GPW_veg_height_loss):
+                # TODO short veg/bare ground fix
+                elif (GLAD_short_veg_LC_prev) and (not GLAD_short_veg_LC_curr) and (GPW_veg_height_loss):
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     node = nu.accrete_node(node, 2)  # Short vegetation loss (62)
                     if water_LC_curr:
@@ -1700,7 +1709,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                         (state_out, c_gross_emis_out, c_gross_removals_out,
                          c_dens_out, non_co2_flux_out) = nu.calc_short_veg_loss(node, c_dens_in, c_pools_EF_no_fire, times_burned_in_interval)
                 ### Short vegetation remaining short vegetation
-                elif short_veg_LC_prev and short_veg_LC_curr:
+                elif GLAD_short_veg_LC_prev and GLAD_short_veg_LC_curr:
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     node = nu.accrete_node(node, 3)  # Short vegetation remaining short vegetation (63->639/632)
                     c_dens_in = c_dens_in_short_veg
