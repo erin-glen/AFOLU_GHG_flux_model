@@ -227,6 +227,9 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
     # This is primarily used to determine what age the forest is (which matters for assigning removal factors).
     part_or_full_dist_in_curr_interval_block = np.zeros(agc_dens_block.shape).astype('uint8')
 
+    # Whether land was bare ground or short veg at end of interval based on GLAD composite and GPW short veg
+    bare_gr_short_veg_block = np.zeros(agc_dens_block.shape).astype('uint8')
+
     # print("interval_end_years:", interval_end_years)
 
     # All years covered by the model, including the start year of the model
@@ -442,6 +445,9 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 # or any previous interval
                 part_or_full_dist_in_curr_interval = part_or_full_dist_in_curr_interval_block[row, col]
                 part_or_full_dist_in_earlier_intervals = part_or_full_dist_in_earlier_intervals_block[row, col]
+
+                # Tracks whether pixel is bare ground or short veg at the end of the previous interval according to GLAD composite and GPW height
+                bare_gr_short_veg = bare_gr_short_veg_block[row, col]
 
                 # Input carbon densities for the pools using the end of the previous interval (Mg C/ha)
                 agc_dens_in = agc_dens_block[row, col]
@@ -1767,6 +1773,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 part_or_full_dist_in_earlier_intervals_block[row, col] = part_or_full_dist_in_earlier_intervals
                 part_or_full_dist_in_curr_interval_block[row, col] = part_or_full_dist_in_curr_interval
                 times_burned_in_interval_block[row, col] = times_burned_in_interval
+                bare_gr_short_veg_block[row, col] = bare_gr_short_veg
                 agc_ef_out_block[row, col] = agc_ef_out_cell
                 composite_primary_block[row, col] = composite_primary_cell
 
@@ -1805,7 +1812,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
         out_dict_float32[f"{cn.deadwood_c_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = deadwood_c_dens_block.copy()
         out_dict_float32[f"{cn.litter_c_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = litter_c_dens_block.copy()
 
-        # Summative outputs (Mg CO2/ha/yr)
+        # Summative outputs (Mg CO2(e)/ha/yr)
         # Gross emissions across all carbon pools
         out_dict_float32[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
                 out_dict_float32[f"{cn.agc_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
@@ -1873,6 +1880,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
         out_dict_uint8[f"{cn.part_or_full_dist_in_earlier_intervals}_{interval_end_year}"] = part_or_full_dist_in_earlier_intervals_block.copy()
         out_dict_uint8[f"{cn.part_or_full_dist_in_curr_interval}_{interval_end_year}"] = part_or_full_dist_in_curr_interval_block.copy()
         out_dict_uint8[f"{cn.times_burned_in_interval}_{interval_end_year}"] = times_burned_in_interval_block.copy()
+        out_dict_uint8[f"{cn.bare_gr_short_veg}_{interval_end_year}"] = bare_gr_short_veg_block.copy()
         out_dict_float32[f"{cn.agc_emission_factor}_{interval_end_year}"] = agc_ef_out_block.copy()
         out_dict_uint8[f"{cn.composite_primary_forest}_{interval_end_year}"] = composite_primary_block.copy()
 
@@ -2191,7 +2199,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Determines if the output file names for final versions of outputs should be used
     is_large_run = False
-    is_large_run = True  # For simulating a large run
+    # is_large_run = True  # For simulating a large run
     if len(chunk_list) > 20:
         is_large_run = True
         main_logger.info(f"Running as large-scale run model: {is_large_run}")
@@ -2503,7 +2511,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         # Text added to output chunk stats table name(s) (Excel or Parquet)
         comparison_insert = "_original_zarr_comparison"
 
-        model_chunk_stats_path = 'chunk_stats/vegetation_fluxes_1x1_chunk_statistics_20251203_17_20_15.xlsx' #TODO testing
         # The name of the chunk stats table from the model
         model_chunk_stats_table_name = os.path.basename(model_chunk_stats_path)
         # print(model_chunk_stats_table_name)

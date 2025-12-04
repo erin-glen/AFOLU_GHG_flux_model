@@ -811,6 +811,7 @@ first_time_sig_loss_from_max_height = "first_time_sig_loss_from_max_height"
 part_or_full_dist_in_earlier_intervals = "partial_or_full_dist_in_earlier_intervals"
 part_or_full_dist_in_curr_interval = "partial_or_full_dist_in_current_interval"
 times_burned_in_interval = "times_burned_in_current_interval"
+bare_gr_short_veg = "bare_ground_or_short_veg"
 agc_emission_factor = "AGC_emission_factor_CO2_only__fraction"
 composite_primary_forest = "composite_primary_forest"
 
@@ -860,6 +861,7 @@ veg_intermediate_output_dirs = [
     f"{veg_outputs_path}{part_or_full_dist_in_curr_interval}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{veg_outputs_path}{times_burned_in_interval}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{veg_outputs_path}{agc_emission_factor}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{bare_gr_short_veg}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{veg_outputs_path}{composite_primary_forest}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
