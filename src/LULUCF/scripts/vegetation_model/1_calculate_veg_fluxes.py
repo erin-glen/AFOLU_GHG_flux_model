@@ -227,9 +227,6 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
     # This is primarily used to determine what age the forest is (which matters for assigning removal factors).
     part_or_full_dist_in_curr_interval_block = np.zeros(agc_dens_block.shape).astype('uint8')
 
-    # Whether land was bare ground or short veg at end of interval based on GLAD composite and GPW short veg
-    bare_gr_short_veg_block = np.zeros(agc_dens_block.shape).astype('uint8')
-
     # print("interval_end_years:", interval_end_years)
 
     # All years covered by the model, including the start year of the model
@@ -446,9 +443,6 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 part_or_full_dist_in_curr_interval = part_or_full_dist_in_curr_interval_block[row, col]
                 part_or_full_dist_in_earlier_intervals = part_or_full_dist_in_earlier_intervals_block[row, col]
 
-                # Tracks whether pixel is bare ground or short veg at the end of the previous interval according to GLAD composite and GPW height
-                bare_gr_short_veg = bare_gr_short_veg_block[row, col]
-
                 # Input carbon densities for the pools using the end of the previous interval (Mg C/ha)
                 agc_dens_in = agc_dens_block[row, col]
                 bgc_dens_in = bgc_dens_block[row, col]
@@ -646,8 +640,8 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 GPW_veg_height_loss = (GPW_short_veg_prev and not GPW_short_veg_curr)
 
                 # Booleans of vegetation height classes for start (prev) and end (curr) of current interval based on LC composites
-                GLAD_short_veg_LC_prev, GLAD_tall_veg_LC_prev = nu.classify_veg_height(LC_prev)
-                GLAD_short_veg_LC_curr, GLAD_tall_veg_LC_curr = nu.classify_veg_height(LC_curr)
+                GLAD_bare_ground_LC_prev, GLAD_short_veg_LC_prev, GLAD_tall_veg_LC_prev = nu.classify_GLAD_composite(LC_prev)
+                GLAD_bare_ground_LC_curr, GLAD_short_veg_LC_curr, GLAD_tall_veg_LC_curr = nu.classify_GLAD_composite(LC_curr)
 
                 water_LC_curr = (LC_curr >= cn.water_min_code) and (LC_curr <= cn.water_max_code)
 
@@ -655,11 +649,6 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 SDPT_oil_palm = (planted_forest_type_cell == cn.SDPT_oil_palm_code)  # Oil palm in SDPT planted trees
                 oil_palm_pre_2000 = (oil_palm_2000_extent_cell == 1) # Oil palm that existed in the year 2000, according to that specific map/input
 
-                #TODO short veg/bare ground fix
-                if GLAD_short_veg_LC_prev and GPW_short_veg_prev:
-                    bare_gr_short_veg = 2
-                else:
-                    bare_gr_short_veg = 1
 
                 # Establishes if the interval ends after Descals oil palm planting year. Rules are different for annual and 5-year intervals.
                 # Second condition for each used to exclude NoData (0s) from first year of oil palm.
@@ -1678,8 +1667,8 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                      c_dens_out, non_co2_flux_out) = nu.calc_cropland_cropland(node, c_dens_in, times_burned_in_interval)
 
                 ### Non-tree/cropland converted to short vegetation
-                # TODO short veg/bare ground fix
-                elif (not GLAD_short_veg_LC_prev) and (GLAD_short_veg_LC_curr) and (GPW_veg_height_gain):
+                ### Requires 1/2) GLAD LC change and 3) GPW height shows sufficient veg at end of interval
+                elif (not GLAD_short_veg_LC_prev) and (GLAD_short_veg_LC_curr) and (GPW_short_veg_curr):
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     state_out = nu.accrete_node(node, 1)  # Short vegetation gain (61)
                     rf_array = short_veg_AGC_BGC_RF_adj
@@ -1687,8 +1676,8 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                     c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_short_veg_gain(rf_array)
                 ### Short vegetation converted to non-short vegetation, non-forest or non-cropland
-                # TODO short veg/bare ground fix
-                elif (GLAD_short_veg_LC_prev) and (not GLAD_short_veg_LC_curr) and (GPW_veg_height_loss):
+                ### Requires 1/2) GLAD LC change, 3) GPW height shows sufficient veg at start of interval, and 4) GPW shows vegetation too short at end of interval
+                elif (GLAD_short_veg_LC_prev) and (not GLAD_short_veg_LC_curr) and (GPW_short_veg_prev) and (not GPW_short_veg_curr):
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     node = nu.accrete_node(node, 2)  # Short vegetation loss (62)
                     if water_LC_curr:
@@ -1782,7 +1771,6 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 part_or_full_dist_in_earlier_intervals_block[row, col] = part_or_full_dist_in_earlier_intervals
                 part_or_full_dist_in_curr_interval_block[row, col] = part_or_full_dist_in_curr_interval
                 times_burned_in_interval_block[row, col] = times_burned_in_interval
-                bare_gr_short_veg_block[row, col] = bare_gr_short_veg
                 agc_ef_out_block[row, col] = agc_ef_out_cell
                 composite_primary_block[row, col] = composite_primary_cell
 
@@ -1889,7 +1877,6 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
         out_dict_uint8[f"{cn.part_or_full_dist_in_earlier_intervals}_{interval_end_year}"] = part_or_full_dist_in_earlier_intervals_block.copy()
         out_dict_uint8[f"{cn.part_or_full_dist_in_curr_interval}_{interval_end_year}"] = part_or_full_dist_in_curr_interval_block.copy()
         out_dict_uint8[f"{cn.times_burned_in_interval}_{interval_end_year}"] = times_burned_in_interval_block.copy()
-        out_dict_uint8[f"{cn.bare_gr_short_veg}_{interval_end_year}"] = bare_gr_short_veg_block.copy()
         out_dict_float32[f"{cn.agc_emission_factor}_{interval_end_year}"] = agc_ef_out_block.copy()
         out_dict_uint8[f"{cn.composite_primary_forest}_{interval_end_year}"] = composite_primary_block.copy()
 

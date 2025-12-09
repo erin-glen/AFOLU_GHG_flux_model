@@ -220,7 +220,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
             ### Part 3: Calculation of carbon density outputs masked by veg height/land cover
 
-            short_veg_LC, tall_veg_LC = nu.classify_veg_height(LC_composite_cell)
+            bare_ground_LC, short_veg_LC, tall_veg_LC = nu.classify_GLAD_composite(LC_composite_cell)
 
             # Carbon density for short vegetation (Mg C/ha) based on climate zone (IPCC default)
             # and adjusted for vegetation cover fraction

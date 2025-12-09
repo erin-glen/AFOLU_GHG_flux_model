@@ -380,12 +380,12 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
     # print("subset_model_table", subset_model_table)
 
     # Selects only the needed columns from rechunked_zarr_table
-    main_logger.info(f"    Subsetting zarr table to numeric columns for {var_name}: {uu.timestr()}")
+    # main_logger.info(f"    Subsetting zarr table to numeric columns for {var_name}: {uu.timestr()}")
     zarr_subset_table = zarr_df[['chunk_name', 'min_value', 'mean_value', 'max_value', 'count_value']].copy()
     # print("zarr_subset_table", zarr_subset_table)
 
     # Renames columns in raw_subset to distinguish them after merge
-    main_logger.info(f"    Renaming zarr columns for {var_name}: {uu.timestr()}")
+    # main_logger.info(f"    Renaming zarr columns for {var_name}: {uu.timestr()}")
     zarr_subset_table = zarr_subset_table.rename(columns={
         'min_value': 'min_value_zarr',
         'mean_value': 'mean_value_zarr',
@@ -395,12 +395,12 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
     # print("zarr_subset_table", zarr_subset_table)
 
     # Converts all zarr value columns to numeric, coercing errors to NaN
-    main_logger.info(f"    Converting zarr columns to numeric for {var_name}: {uu.timestr()}")
+    # main_logger.info(f"    Converting zarr columns to numeric for {var_name}: {uu.timestr()}")
     for col in ['min_value_zarr', 'mean_value_zarr', 'max_value_zarr', 'count_value_zarr']:
         zarr_subset_table[col] = pd.to_numeric(zarr_subset_table[col], errors='coerce')
 
     # Merges with subset_model_table on 'chunk_name', left join (keeps all model output rows)
-    main_logger.info(f"    Merging zarr data to original model data for {var_name}: {uu.timestr()}")
+    # main_logger.info(f"    Merging zarr data to original model data for {var_name}: {uu.timestr()}")
     merged_table = subset_model_table.merge(zarr_subset_table, on='chunk_name', how='left')
 
     # Calculates differences for four metrics and stores in new columns
