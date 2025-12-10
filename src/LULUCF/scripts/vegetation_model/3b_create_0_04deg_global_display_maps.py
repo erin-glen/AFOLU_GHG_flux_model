@@ -35,6 +35,7 @@ import xarray as xr
 import dask.array as da
 import fsspec
 import time
+from affine import Affine
 from dask.distributed import print
 from rasterio.transform import from_origin
 import zarr
@@ -57,240 +58,39 @@ def global_map_for_variable_year(var, year_idx, model_ds, pixel_area_overlap, ou
 
     main_logger.info(f"Processing {var} for year {year}: {uu.timestr()}")
 
-    # # Select one year of model data
-    # data_ha = model_ds[var].isel(year=year_idx)
-    # print("data_ha:", data_ha)
-    #
-    # # --- Round coordinates to ensure matching ---
-    # data_ha["y"] = np.round(data_ha["y"], 6)
-    # pixel_area_overlap["y"] = np.round(pixel_area_overlap["y"], 6)
-    #
-    # lat_min = max(data_ha["y"].min().item(), pixel_area_overlap["y"].min().item())
-    # lat_max = min(data_ha["y"].max().item(), pixel_area_overlap["y"].max().item())
-    #
-    # lat_min = np.round(lat_min, 6)
-    # lat_max = np.round(lat_max, 6)
-    #
-    # # --- Slice both datasets by the same lat range ---
-    # data_ha_slice = data_ha.sel(y=slice(lat_max, lat_min))
-    # pixel_area_slice = pixel_area_overlap.sel(y=slice(lat_max, lat_min))
-    #
-    # # --- Print shapes for debug ---
-    # print(f"data_ha_slice shape: {data_ha_slice.shape}")
-    # print(f"pixel_area_slice shape: {pixel_area_slice.shape}")
-    #
-    # # --- Multiply and coarsen ---
-    # data_pixel = data_ha_slice * pixel_area_slice * cn.m2_to_ha
-    #
-    # coarsened = data_pixel.coarsen(
-    #     y=cn.global_aggregation_factor,
-    #     x=cn.global_aggregation_factor,
-    #     boundary="trim"
-    # ).sum()
-    #
-    # main_logger.info(f"Computing per-pixel values for {var} for year {year}: {uu.timestr()}")
-    # coarsened_data = coarsened.compute()
-    #
-    # print(f"coarsened_data shape: {coarsened_data.shape}")
-    # print(f"coarsened_data: {coarsened_data}")
-    #
-    #
-    # # # TODO Try this with revised mega-zarr creation. Try running with both original (4000) chunks and rechunked versions.
-    # # #This didn't work with the existing mega-zarrs because of that float32/fill value issue, but maybe it will with a pending fix in the zarr creation function.
-    # # #Can adopt this if it works with the new mega-zarrs. Otherwise, revert to the below.
-    # #
-    # # # Select one year of model data
-    # # data_ha = model_ds[var].isel(year=year_idx)
-    # # print("data_ha:", data_ha)
-    # #
-    # # # Ensure lat/lon alignment
-    # # lat_min = max(data_ha["y"].min().item(), pixel_area_overlap["y"].min().item())
-    # # lat_max = min(data_ha["y"].max().item(), pixel_area_overlap["y"].max().item())
-    # # lat_min = np.round(lat_min, 6)
-    # # lat_max = np.round(lat_max, 6)
-    # #
-    # # # Slice both by coordinates
-    # # data_ha_slice = data_ha.sel(y=slice(lat_max, lat_min))  # descending
-    # # print("data_ha_slice:", data_ha_slice)
-    # # print("pixel_area_overlap shape:", pixel_area_overlap.shape)
-    # # print("pixel_area_overlap values:", pixel_area_overlap)
-    # # print("data_ha_slice.shape:", data_ha_slice.shape)
-    # # print("pixel_area_overlap type:", type(pixel_area_overlap))
-    # # print("pixel_area_overlap shape:", getattr(pixel_area_overlap, 'shape', 'No shape'))
-    # # print("pixel_area_overlap content:", pixel_area_overlap)
-    # # print("cn.m2_to_ha:", cn.m2_to_ha)
-    # # sys.quit()
-    # #
-    # # # Multiply and coarsen
-    # # data_pixel = data_ha_slice * pixel_area_overlap * cn.m2_to_ha
-    # #
-    # # print("data_pixel.shape:", data_pixel.shape)
-    # # print("coarsening factor:", cn.global_aggregation_factor)
-    # # print("data_ha_slice.shape:", data_ha_slice.shape)
-    # #
-    # # coarsened = data_pixel.coarsen(y=cn.global_aggregation_factor, x=cn.global_aggregation_factor, boundary="trim").sum()
-    # # main_logger.info(f"Computing per-pixel values for {var} for year {year}: {uu.timestr()}")
-    # # coarsened_data = coarsened.compute()
-    # # print("coarsened_data:", coarsened_data)
-    #
-    # lat_model = model_ds["y"][:]
-    # y0_model = np.searchsorted(lat_model[::-1], lat_max, side="right")
-    # y1_model = np.searchsorted(lat_model[::-1], lat_min, side="left")
-    # lat_model_slice = lat_model[y0_model:y1_model]
-
-
-    #TODO The below commented chunk worked using the existing megazarrs (1884 chunk ones) and their fillvalue.
-    # Can revert to this if the above doesn't work.
-
-    # model_zarr = zarr.open_group(fs.get_mapper(zarr_path), mode="r")
-    # pixel_area_zarr = zarr.open_group(fs.get_mapper(pixel_area_path), mode="r")
-    #
-    #TODO suggested by ChatGPT to reduce warm-up time for first iterations (https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d). Haven't tested.
-    #=== Warm-up Dask and load metadata (OPTION A) ===
-    # _ = model_ds.isel(year=0, y=slice(0, 10), x=slice(0, 10)).to_array().compute()
-    # _ = pixel_area_da.isel(y=slice(0, 10), x=slice(0, 10)).compute()
-
-
-    # Code below basically gets the pixel area and model mega-zarr to use the same latitude extent.
-    # It was somewhat convoluted with ChatGPT; the model extent kept not being sliced/clipped correctly.
-
-    # Coordinate arrays
-    # lat_model = model_ds["y"][:]
-    # lon_model = model_ds["x"][:]
-    # lat_pixel = pixel_area_overlap["y"][:]
-    # lon_pixel = pixel_area_overlap["x"][:]
-    #
-    # # Determines overlap in latitude between pixel area (80N-60S) and mega-zarr (90N-90S)
-    # lat_min = max(lat_model.min(), lat_pixel.min())
-    # lat_max = min(lat_model.max(), lat_pixel.max())
-    #
-    # # Model slice indices (lat_model is descending)
-    # y0_model = np.searchsorted(lat_model[::-1], lat_max, side="right")
-    # y1_model = np.searchsorted(lat_model[::-1], lat_min, side="left")
-    # y0_model = len(lat_model) - y1_model
-    # y1_model = len(lat_model) - y0_model
-    # if y0_model > y1_model:
-    #     y0_model, y1_model = y1_model, y0_model
-    #
-    # # Gets the latitude slice of the mega-zarr from the model
-    # lat_model_slice = lat_model[y0_model:y1_model]
-    # # print(f"Model slice indices for {var} for year {year}: {y0_model} to {y1_model} -> {y1_model - y0_model} rows")
-    #
-    # # Pixel area slice indices (matched by coordinate values).
-    # # Rounds coordinates to avoid floating-point mismatches (this was a problem before).
-    # lat_model_vals = np.round(lat_model_slice, 6)
-    # lat_pixel_vals = np.round(lat_pixel, 6)
-    #
-    # # Finds matching latitudes in pixel area Zarr
-    # lat_indices = np.nonzero(np.isin(lat_pixel_vals, lat_model_vals))[0]
-    #
-    # y0_pixel = lat_indices.min()
-    # y1_pixel = lat_indices.max() + 1  # inclusive slice
-    # # print(f"Pixel area slice indices: {y0_pixel} to {y1_pixel} -> {y1_pixel - y0_pixel} rows")
-    #
-    # # Slices arrays from Zarrs (overlapping latitude)
-    # data_ha = model_ds[var].isel(year=year_idx, y=slice(y0_model, y1_model))
-    # pixel_area = pixel_area_overlap.isel(y=slice(y0_pixel, y1_pixel))
-    #
-    # print(f"data_ha shape: {data_ha.shape}")
-    # print(f"pixel_area shape: {pixel_area.shape}")
-    #
-    # # Converts to per-pixel values
-    # data_pixel = data_ha * pixel_area * cn.m2_to_ha
-    # print(data_pixel.shape)
-    # print(data_pixel)
-    #
-    # # Create xarray DataArray for aggregation to 0.04x0.04 deg
-    # data_pixel_xr = xr.DataArray(
-    #     data_pixel,
-    #     dims=("y", "x"),
-    #     coords={"y": lat_model_slice, "x": lon_model},
-    # ).sortby("lat", ascending=False)
-    # # print(data_pixel_xr)
-    #
-    # # Aggregates to 0.04x0.04 deg (factor of 160)
-    # coarsened = data_pixel_xr.coarsen(y=cn.global_aggregation_factor, x=cn.global_aggregation_factor, boundary="trim").sum()
-    # main_logger.info(f"Computing per-pixel values for {var} for year {year}: {uu.timestr()}")
-    # coarsened_data = coarsened.compute()
-    # # print(coarsened_data)
-
-    # Uploads to S3 (if enabled)
-
-    # Load full coordinate arrays safely
-
-
-    # === Select year ===
+    # Selects year of outputs
     data_ha = model_ds[var].isel(year=year_idx)
 
-    # Drop 'year' coordinate to prevent unintended broadcasting
+    # Drops 'year' coordinate to prevent unintended broadcasting
     if "year" in data_ha.coords:
         data_ha = data_ha.drop_vars("year")
 
-    # === Round coordinates (critical!) ===
+    # Rounds coordinates for alignment between data and pixel area
     data_ha = data_ha.assign_coords(y=np.round(data_ha.y, 6))
     pixel_area_overlap = pixel_area_overlap.assign_coords(y=np.round(pixel_area_overlap.y, 6))
 
     # === Determine overlap ===
-    lat_min = max(data_ha.y.min().item(), pixel_area_overlap.y.min().item())
-    lat_max = min(data_ha.y.max().item(), pixel_area_overlap.y.max().item())
+    lat_min_coarse = max(data_ha.y.min().item(), pixel_area_overlap.y.min().item())
+    lat_max_coarse = min(data_ha.y.max().item(), pixel_area_overlap.y.max().item())
 
-    lat_min = np.round(lat_min, 6)
-    lat_max = np.round(lat_max, 6)
+    lat_min_coarse = np.round(lat_min_coarse, 6)
+    lat_max_coarse = np.round(lat_max_coarse, 6)
 
     # === Slice both datasets by coordinates DIRECTLY ===
-    data_ha_slice = data_ha.sel(y=slice(lat_max, lat_min))
-    pixel_area_slice = pixel_area_overlap.sel(y=slice(lat_max, lat_min))
-
-    # === Print shapes ===
-    print("data_ha_slice.shape:", data_ha_slice.shape)
-    print("pixel_area_slice.shape:", pixel_area_slice.shape)
-    print("data_ha_slice:", data_ha_slice)
-    print("pixel_area_slice:", pixel_area_slice)
-
-    print("model x min/max:", data_ha_slice.x.values.min(), data_ha_slice.x.values.max())
-    print("pixel area x min/max:", pixel_area_slice.x.values.min(), pixel_area_slice.x.values.max())
-
-    # print("model x unique (first 10):", np.unique(data_ha_slice.x.values[:100]))
-    # print("pixel area x unique (first 10):", np.unique(pixel_area_slice.x.values[:100]))
-    print("pixel_area_slice.dims:", pixel_area_slice.dims)
-
-    # === Ensure the shapes match ===
-    if data_ha_slice.shape != pixel_area_slice.shape:
-        raise RuntimeError(
-            f"Shape mismatch after slicing: model {data_ha_slice.shape}, pixel_area {pixel_area_slice.shape}"
-        )
+    data_ha_slice = data_ha.sel(y=slice(lat_max_coarse, lat_min_coarse))
+    pixel_area_slice = pixel_area_overlap.sel(y=slice(lat_max_coarse, lat_min_coarse))
 
     pixel_area_slice = pixel_area_slice.reset_coords("band", drop=True)
-
-    print("data_ha_slice.dims:", data_ha_slice.dims)
-    print("data_ha_slice.coords:", data_ha_slice.coords)
-    print("pixel_area_slice.dims (after drop):", pixel_area_slice.dims)
-    print("pixel_area_slice.coords (after drop):", pixel_area_slice.coords)
-
-    print("data_ha_slice.data:", type(data_ha_slice.data), data_ha_slice.data.shape, data_ha_slice.data.dtype)
-    print("pixel_area_slice.data:", type(pixel_area_slice.data), pixel_area_slice.data.shape, pixel_area_slice.data.dtype)
-
-    print("data_ha_slice.coords (x):", data_ha_slice.coords['x'].values[:5])
-    print("pixel_area_slice.coords (x):", pixel_area_slice.coords['x'].values[:5])
-
-    # Remove any lingering unwanted coordinates from pixel_area
-    if "band" in pixel_area_slice.coords:
-        pixel_area_slice = pixel_area_slice.drop_vars("band")
 
     # Force coordinate alignment to be identical before multiply
     pixel_area_slice = pixel_area_slice.assign_coords(x=data_ha_slice.x, y=data_ha_slice.y)
 
     # Before multiplication:
-    data_ha_slice = data_ha_slice.chunk({"x": 14400, "y": 14400})
-    pixel_area_slice = pixel_area_slice.chunk({"x": 14400, "y": 14400})
+    data_ha_slice = data_ha_slice.chunk({"x": 11200, "y": 11200})
+    pixel_area_slice = pixel_area_slice.chunk({"x": 11200, "y": 11200})
 
     # === Multiply per-ha × pixel area ===
     data_pixel = data_ha_slice * pixel_area_slice * cn.m2_to_ha
-
-    print("data_pixel.shape:", data_pixel.shape)
-
-    # Optional: ensure the result is also well chunked
-    data_pixel = data_pixel.chunk({"x": 14400, "y": 14400})
 
     # === Coarsen ===
     main_logger.info(f"Multiplying: {uu.timestr()}")
@@ -309,8 +109,6 @@ def global_map_for_variable_year(var, year_idx, model_ds, pixel_area_overlap, ou
 
     main_logger.info(f"Coarsening: {uu.timestr()}")
     coarsened_data = coarsened.compute()
-    print("coarsened_data.shape:", coarsened_data.shape)
-
 
     main_logger.info(f"Uploading global map for {var} for year {year}: {uu.timestr()}")
 
@@ -334,26 +132,14 @@ def global_map_for_variable_year(var, year_idx, model_ds, pixel_area_overlap, ou
         output_name = f"{var}{global_map_units}_{year}_{cn.veg_model_version_underscore}__global.tif"
         s3_filename = f"{output_path}{output_name}"
 
-        lat_model = model_ds["y"][:]
-        lon_model = model_ds["x"][:]
-        lat_pixel = pixel_area_overlap["y"][:]
-        lon_pixel = pixel_area_overlap["x"][:]
+        pixel_size = cn.global_geotif_resolution
 
-        # Determines overlap in latitude between pixel area (80N-60S) and mega-zarr (90N-90S)
-        lat_min = max(lat_model.min(), lat_pixel.min())
-        lat_max = min(lat_model.max(), lat_pixel.max())
+        if coarsened_data.y[0] < coarsened_data.y[-1]:
+            coarsened_data = coarsened_data.sel(y=coarsened_data.y[::-1])
 
-        # Model slice indices (lat_model is descending)
-        y0_model = np.searchsorted(lat_model[::-1], lat_max, side="right")
-        y1_model = np.searchsorted(lat_model[::-1], lat_min, side="left")
-        y0_model = len(lat_model) - y1_model
-        y1_model = len(lat_model) - y0_model
-        if y0_model > y1_model:
-            y0_model, y1_model = y1_model, y0_model
-
-        lat_model_slice = lat_model[y0_model:y1_model]
-
-        transform = from_origin(-180, lat_model_slice.max(), cn.global_geotif_resolution, cn.global_geotif_resolution)
+        x0 = float(coarsened_data.x[0]) - pixel_size / 2
+        y0 = float(coarsened_data.y[0]) + pixel_size / 2
+        transform = from_origin(x0, y0, pixel_size, pixel_size)
 
         data_vals = coarsened_data.values
 
