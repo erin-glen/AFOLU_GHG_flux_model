@@ -85,20 +85,18 @@ pd.set_option('display.float_format', '{:.6e}'.format)
 # Copies the 10000x10000 chunk
 def copy_block(var, y0, y1, x0, x1, raw_path, dest_path):
 
-    # print(f"Transferring {var} for {year_idx} for {y0}:{y1}, {x0}:{x1}: {uu.timestr()}")
-    # start_time = time.time()
-
     fs = fsspec.filesystem("s3", anon=False)
     raw_store = zarr.open_group(fs.get_mapper(raw_path), mode="r")
-    rechunked_store = zarr.open_group(fs.get_mapper(dest_path), mode="r+")
+    dest_store = zarr.open_group(fs.get_mapper(dest_path), mode="r+")
 
-    block = raw_store[var][:, y0:y1, x0:x1]
-    rechunked_store[var][:, y0:y1, x0:x1] = block
+    n_years = raw_store[var].shape[0]
 
-    # end_time = time.time()
-    # print(f"  Transferred {var} for {year_idx} for y={y0}:{y1}, x={x0}:{x1} in {round(end_time - start_time)} seconds: {uu.timestr()}")
+    for year_idx in range(n_years):
+        block = raw_store[var][year_idx, y0:y1, x0:x1]
+        dest_store[var][year_idx, y0:y1, x0:x1] = block
 
-    return f"Copied {var} for all years for region y={y0}:{y1}, x={x0}:{x1}"
+    return f"Copied {var} for all {n_years} years to region y={y0}:{y1}, x={x0}:{x1}"
+
 
 
 # Parallelizes copy across 10000x10000 chunks for a given dataset-year combination
@@ -203,13 +201,13 @@ def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False,
     lon_size = int(360 / cn.resolution)  # 1440000 columns
 
 
-    ### Step 2: Create metadata-only chunk=10000x10000 mega-zarr
+    ### Step 2: Create metadata-only chunk=1x10000x10000 mega-zarr
 
     start_time = uu.timestr()
 
     # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
-    zu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, years_to_process,
-                                   ((len(cn.interval_end_years_annual)), cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
+    zu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, len(cn.interval_end_years_annual),
+                                   (1, cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
 
     fs = fsspec.filesystem("s3", anon=False)
     source_mapper = fs.get_mapper(rechunked_mega_zarr_path)
@@ -236,7 +234,7 @@ def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False,
         zarr_comparison_stats_path = None
 
 
-    ### Step 4: Copy from chunk=9x4000x4000 zarr to chunk=9x10000x10000 zarr and obtain chunk stats
+    ### Step 4: Copy from chunk=9x4000x4000 zarr to chunk=1x10000x10000 zarr and obtain chunk stats
     ### for the rechunked zarr
 
     main_logger.info(f"Starting rechunk transfers and rechunk stats: {uu.timestr()}")
@@ -286,9 +284,9 @@ def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False,
                     "lon_max": test_print_stats_chunk[2]
                 }
 
-                main_logger.info(f"    Original (4000x4000) zarr:")
+                main_logger.info(f"    Original (9x4000x4000) zarr:")
                 zu.check_region_stats(raw_mega_zarr_path, var_name, year_idx, target_box, main_logger)
-                main_logger.info(f"    Rechunked (10000x10000) zarr:")
+                main_logger.info(f"    Rechunked (1x10000x10000) zarr:")
                 zu.check_region_stats(rechunked_mega_zarr_path, var_name, year_idx, target_box, main_logger)
 
             # Gets stats for selected 1x1 deg chunks in raw and rechunked zarrs
@@ -301,7 +299,6 @@ def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False,
                 client=client,
                 chunk_list=chunk_list,
                 var=var_name,
-                year_idx=year_idx,
                 zarr_path=rechunked_mega_zarr_path,
             )
             year_end_time = time.time()

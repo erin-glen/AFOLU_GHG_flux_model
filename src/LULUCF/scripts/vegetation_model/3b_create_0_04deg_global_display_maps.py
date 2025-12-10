@@ -15,15 +15,15 @@ Local test (Dask part does not work because of client.submit()):
 python -m src.LULUCF.scripts.vegetation_model.3b_create_0_04deg_global_display_maps --run_local --no_upload -fy 1 -fv 1 --input_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_model
+python -m src.utilities.create_cluster -n 1 -t 1 -m 64 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.3b_create_0_04deg_global_display_maps -cn vegetation_model -fy 2 -fv 2 --input_date YYYYMMDD
 
 Coiled large run:
-python -m src.utilities.create_cluster -n 80 -t 1 -m 8 -cn vegetation_model
+python -m src.utilities.create_cluster -n 80 -t 1 -m 64 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.3b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD
 
 Full run:
-python -m src.utilities.create_cluster -n 80 -t 1 -m 8 -cn vegetation_model
+python -m src.utilities.create_cluster -n 80 -t 1 -m 64 -cn vegetation_model
 python -m src.LULUCF.scripts.vegetation_model.3b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d
@@ -129,7 +129,7 @@ def global_map_for_variable_year(var, year_idx, model_ds, pixel_area_overlap, ou
         output_path = output_base.replace("PATTERN", var)
         output_path = output_path.replace("START_END", str(year))
         output_path = output_path.replace("PER_HA_OR_PIXEL", global_map_units)
-        output_name = f"{var}{global_map_units}_{year}_{cn.veg_model_version_underscore}__global.tif"
+        output_name = f"{var}{global_map_units}_{year}_v{cn.veg_model_version_underscore}__global.tif"
         s3_filename = f"{output_path}{output_name}"
 
         pixel_size = cn.global_geotif_resolution
@@ -188,7 +188,8 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
 
     # Outputs to turn into 10x10 tile
     # full_list_of_vars = cn.full_outputs_to_zarr    # If all variables are to be made into global maps (but very expensive)
-    full_list_of_vars = cn.veg_summative_output_patterns # Summative outputs only
+    # full_list_of_vars = cn.veg_summative_output_patterns # Summative outputs only
+    full_list_of_vars = [cn.net_flux_all_C_pools_all_gases_pattern]  #TODO for testing
 
     # Limits the processed variables to the supplied number (for testing)
     if first_variables_to_process:

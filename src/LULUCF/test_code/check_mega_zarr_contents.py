@@ -23,9 +23,8 @@ from src.utilities import zarr_utilities as zu
 
 # Settings-- modify these
 bounds = [124, -30, 125, -29]
-zarr_path = 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_3_AUS_only/mega_zarr/standard_model/annual_intervals/4000_pixels/20251209'
+zarr_path = 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_3_AUS_only/mega_zarr/standard_model/annual_intervals/10000_pixels/20251209'
 var_name = 'carbon_density__AGC__MgC'
-
 
 
 bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
@@ -60,15 +59,30 @@ zarr_group = zarr.open(zarr_mapper, mode="r")
 # print(f"Getting array for {bounds_str}")
 zarr_chunk_array = zarr_group[var_name][:, lat0:lat1, lon0:lon1]
 
-for year_idx, year in enumerate(cn.interval_end_years_annual):
-    zarr_chunk_array_year = zarr_chunk_array[year_idx]
+# ### For 9x4000x4000 zarr
+# for year_idx, year in enumerate(cn.interval_end_years_annual):
+#     zarr_chunk_array_year = zarr_chunk_array[year_idx]
+#
+#     # The dataset pattern being analyzed, with year and units added
+#     pattern_with_units = zu.add_units_year_to_pattern(var_name, year)
+#
+#     # print(f"Calculating stats for {bounds_str}")
+#     zarr_stats_raw_year = uu.calculate_stats(zarr_chunk_array_year, pattern_with_units, bounds_str, tile_id,'zarr_stats')
+#     # print(zarr_stats_raw_year)
+#
+#     zarr_stats_raw_all_years.append(zarr_stats_raw_year)
+#
+# # Returns the chunk stats from the zarr as a list of dictionaries, with each element being one chunk
+# print(zarr_stats_raw_all_years)
 
+
+### For 1x10000x10000 zarr
+for year in cn.interval_end_years_annual:
     # The dataset pattern being analyzed, with year and units added
     pattern_with_units = zu.add_units_year_to_pattern(var_name, year)
 
     # print(f"Calculating stats for {bounds_str}")
-    zarr_stats_raw_year = uu.calculate_stats(zarr_chunk_array_year, pattern_with_units, bounds_str, tile_id,
-                                             'zarr_stats')
+    zarr_stats_raw_year = uu.calculate_stats(zarr_chunk_array, pattern_with_units, bounds_str, tile_id,'zarr_stats')
     # print(zarr_stats_raw_year)
 
     zarr_stats_raw_all_years.append(zarr_stats_raw_year)
