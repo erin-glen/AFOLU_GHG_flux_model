@@ -827,13 +827,14 @@ zarr_pixel_chunks = 10000
 # There's often some rounding/float error between them, so a small difference (~10^-8) is expected.
 zarr_difference_tolerance = 0.05
 
-pixel_area_global_zarr = "s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20251106/global_pixel_area_20251106.zarr"
+pixel_area_global_zarr = "s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20251209_fillValue_removed/global_pixel_area_20251209.zarr"
 
 
 model_type_placeholder = "MODEL_TYPE"
 
 veg_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_{veg_model_version_underscore}/"
 veg_outputs_path_mega_zarr = f"{veg_outputs_path}mega_zarr/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"
+# veg_outputs_path_mega_zarr = f"{veg_outputs_path}mega_zarr/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/vegetation_zarr.zarr" #TODO try this
 
 # List of output directories from vegetation model with placeholders for parts of the directory
 veg_core_output_dirs = [

@@ -207,9 +207,9 @@ def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False,
 
     start_time = uu.timestr()
 
-    # # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
-    # zu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, years_to_process,
-    #                                ((len(cn.interval_end_years_annual)), cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
+    # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
+    zu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, years_to_process,
+                                   ((len(cn.interval_end_years_annual)), cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
 
     fs = fsspec.filesystem("s3", anon=False)
     source_mapper = fs.get_mapper(rechunked_mega_zarr_path)
@@ -235,7 +235,8 @@ def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False,
         zarr_comparison_stats_name = None
         zarr_comparison_stats_path = None
 
-    ### Step 4: Copy from chunk=4000x4000 zarr to chunk=10000x10000 zarr and obtain chunk stats
+
+    ### Step 4: Copy from chunk=9x4000x4000 zarr to chunk=9x10000x10000 zarr and obtain chunk stats
     ### for the rechunked zarr
 
     main_logger.info(f"Starting rechunk transfers and rechunk stats: {uu.timestr()}")
@@ -256,7 +257,7 @@ def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False,
         main_logger.info(f"Starting transfer of {var_name} for all years: {uu.timestr()}")
         var_start_time = time.time()
 
-        # Transfers to rechunked zarr for a given dataset-year in parallel
+        # Transfers to rechunked zarr for a given dataset in parallel (all years at same time)
         run_parallel_copy(
             client=client,
             var=var_name,

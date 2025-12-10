@@ -370,10 +370,13 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
         # So, it needs to be recast to a str or int to match the chunk_stats table.
         # year = str(year)
 
-    # Converts zarr chunk stats from list of dictionaries to dataframe. [0] undoes the list so that the dictionaries
-    # can each be their own row in the dataframe.
-    zarr_df = pd.DataFrame(chunk_stats_variable_zarr[0])
-    # print(zarr_df)
+    # Converts zarr chunk stats from list of dictionaries to dataframe.
+    # Need to flatten the list because each chunk for each dataset is a list of dictionaries, where each element is a year.
+    # So, flattening the list makes all years for all variables and chunks flat, rather than years being nested in each chunk-dataset.
+    chunk_stats_variable_zarr_flat = uu.flatten_list(chunk_stats_variable_zarr)
+    # print("chunk_stats_variable_zarr_flat:", chunk_stats_variable_zarr_flat)
+    zarr_df = pd.DataFrame(chunk_stats_variable_zarr_flat)
+    # print("zarr_df:", zarr_df)
 
     # Subsets model chunk stats to relevant pattern
     subset_model_table = model_table[(model_table['pattern'].str.contains(var_name, na=False))]
