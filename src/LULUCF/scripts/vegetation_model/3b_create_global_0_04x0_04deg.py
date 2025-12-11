@@ -12,19 +12,19 @@ it's running the entire planet regardless.
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
-python -m src.LULUCF.scripts.vegetation_model.3b_create_0_04deg_global_display_maps --run_local --no_upload -fy 1 -fv 1 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3b_create_global_0_04x0_04deg --run_local --no_upload -fy 1 -fv 1 --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 64 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3b_create_0_04deg_global_display_maps -cn vegetation_model -fy 2 -fv 2 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3b_create_global_0_04x0_04deg -cn vegetation_model -fy 2 -fv 2 --input_date YYYYMMDD
 
 Coiled large run:
 python -m src.utilities.create_cluster -n 80 -t 1 -m 64 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3b_create_global_0_04x0_04deg -cn vegetation_model --input_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 80 -t 1 -m 64 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3b_create_0_04deg_global_display_maps -cn vegetation_model --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.3b_create_global_0_04x0_04deg -cn vegetation_model --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d
 """
@@ -180,7 +180,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
 
     mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr,4000, "annual", model_type, input_date, main_logger)
     pixel_area_zarr_path = cn.pixel_area_global_zarr
-    output_base = f"{cn.veg_outputs_path}PATTERN/{model_type}/annual_intervals/START_END/PER_HA_OR_PIXEL/{input_date}/"
+    output_base = f"{cn.veg_outputs_path}PATTERN/{model_type}/annual_intervals/START_END/PER_HA_OR_PIXEL/global/{input_date}/"
 
     main_logger.info(f"Model output mega-zarr: {mega_zarr_path}")
     main_logger.info(f"Pixel area zarr: {pixel_area_zarr_path}")
@@ -188,8 +188,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
 
     # Outputs to turn into 10x10 tile
     # full_list_of_vars = cn.full_outputs_to_zarr    # If all variables are to be made into global maps (but very expensive)
-    # full_list_of_vars = cn.veg_summative_output_patterns # Summative outputs only
-    full_list_of_vars = [cn.net_flux_all_C_pools_all_gases_pattern]  #TODO for testing
+    full_list_of_vars = cn.veg_summative_output_patterns # Summative outputs only
 
     # Limits the processed variables to the supplied number (for testing)
     if first_variables_to_process:
