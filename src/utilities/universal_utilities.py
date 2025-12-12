@@ -2045,6 +2045,18 @@ def write_single_geotiff_to_s3(var, year, tile_id, data, transform, s3_path, log
     return valid_pixel_count
 
 
+# To cache the pixel area zarr once,
+# per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/693c4bed-09f0-832c-a6ef-66390c74aa60
+PIXEL_AREA_STORE = None
+
+def get_pixel_area_store():
+    global PIXEL_AREA_STORE
+    if PIXEL_AREA_STORE is None:
+        fs = fsspec.filesystem("s3", anon=False)
+        PIXEL_AREA_STORE = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
+    return PIXEL_AREA_STORE
+
+
 # Extracts a 10x10° tile from a Zarr store and writes to GeoTIFF on S3
 def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_base, no_upload):
 
@@ -2076,14 +2088,14 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     if y0_model > y1_model:
         y0_model, y1_model = y1_model, y0_model
 
-    lu.print_and_log(f"Extracting {var} for {year} for {tile_id}: {timestr()}", False, logger_worker)
+    lu.print_and_log(f"Extracting {var} for {year} for {tile_id}: {timestr()}", True, logger_worker)
     extract_start_time = time.time()
 
     # Loads model output data block
     data_per_ha = model_zarr_store[var][year_idx, y0_model:y1_model, x0_model:x1_model]
 
     # Calculates per-pixel output (for numeric outputs only)
-    pixel_area_zarr_store = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
+    pixel_area_zarr_store = get_pixel_area_store()
 
     # Determine pixel indices (applies to model outputs and pixel area)
     lat_array_pixel_area = pixel_area_zarr_store["y"][:]
@@ -2101,7 +2113,6 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
         y0_pixel_area, y1_pixel_area = y1_pixel_area, y0_pixel_area
 
     pixel_area = pixel_area_zarr_store['band_data'][y0_pixel_area:y1_pixel_area, x0_pixel_area:x1_pixel_area]
-    # pixel_area = pixel_area_zarr_store['pixel_area'][y0_pixel_area:y1_pixel_area, x0_pixel_area:x1_pixel_area]
     # print("y0:", y0_pixel_area)
     # print("y1:", y1_pixel_area)
     # print("x0:", x0_pixel_area)
@@ -2111,6 +2122,9 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
 
     # Converts per-ha to per-pixel
     data_per_pixel = data_per_ha * pixel_area * cn.m2_to_ha
+
+    # Cleanup. Without this, memory exceeds 24GB/worker and eventually tasks get repeated because of too much memory spillage or something
+    del pixel_area
 
     # GeoTransform (top-left corner)
     transform = from_origin(min_x, max_y, cn.resolution, cn.resolution)
@@ -2164,6 +2178,10 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
             )
         else:
             valid_pixel_count_per_pixel = None
+
+        # # More cleanup. This doesn't actually seem to reduce memory. Leaving it in commented just for reference.
+        # del data_per_ha
+        # del data_per_pixel
 
         # Most stats for the 10x10 deg outputs aren't calculated.
         # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
@@ -2238,7 +2256,7 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
         }]
 
     tile_end_time = time.time()
-    lu.print_and_log(f"  Tile {var} for year {year} for {tile_id} in {round(tile_end_time - extract_start_time)} seconds: {timestr()}", False, logger_worker)
+    lu.print_and_log(f"  Total chunk processing for tile {var} for year {year} in {round(tile_end_time - extract_start_time)} seconds: {timestr()}", False, logger_worker)
 
     return chunk_stats_per_ha, chunk_stats_per_pixel
 

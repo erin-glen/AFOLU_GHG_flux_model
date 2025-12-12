@@ -673,7 +673,7 @@ GPW_MVH_pattern = f"GPW_height"
 organic_soil_extent_dir = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/peat_mask/OGH/tiles/"
 organic_soil_extent_pattern = "ogh_mask"
 
-### Soil organic carbon (SOC) timeseries (URIs from https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv)
+### Soil organic carbon (SOC) timeseries from OpenGeoHub (OGH) (URIs from https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv)
 # From Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
 # Units of raw global COGs are kg C/m^3 for 0-30 cm, multiplied by 10 (rescale factor) to make COGs ints.
 # Values in dict need to be lists (even with just 1 element) because of how uu.prepare_to_download_chunk works.
