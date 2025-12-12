@@ -7,7 +7,7 @@ import numpy as np
 ########
 
 ### Model version
-veg_model_version = "1.0.3_AUS_only"
+veg_model_version = "1.0.3_WWF_sites"
 veg_model_version_underscore = veg_model_version.replace(".", "_")
 
 organic_soil_model_version = "0.9.7"
