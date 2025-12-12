@@ -1,5 +1,5 @@
 """
-Creates 10x10 deg per-hectare and per-pixel geotifs from global rechunked zarr for numeric model outputs.
+Creates 10x10 deg per-hectare and per-pixel geotifs from global zarr for numeric model outputs.
 Coded to run for summative outputs + land state nodes but can change code to run for more or less variables.
 Limited to just summative + land state nodes for now because it is quite expensive for just these variables.
 It creates a task list for all datasets, years, and 10x10 deg tiles for the variables, years, and area of interest,
@@ -99,7 +99,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
         tile_id = uu.xy_to_tile_id(chunk[0], chunk[3])  # tile_id in YYN/S_XXXE/W
         tile_ids.append(tile_id)
 
-    unique_tile_ids = list(set(tile_ids))
+    unique_tile_ids = sorted(list(set(tile_ids)))
 
     # Outputs to turn into 10x10 tile
     # full_list_of_vars = cn.full_outputs_to_zarr   # If all variables are to be made into 10x10s (but very expensive)
@@ -132,9 +132,13 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
         is_large_run = True
         main_logger.info(f"Running as large-scale run model: {is_large_run}")
 
-    # The zarr path that's being used (rechunked zarr)
-    rechunked_mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, cn.zarr_pixel_chunks, 'annual', model_type, input_date, main_logger)
-    main_logger.info(f"Aggregating from rechunked zarr (10000 pixel chunks): {rechunked_mega_zarr_path}")
+    # lat-long chunk size for source zarr
+    # source_zarr_chunk_size = cn.full_raster_dims  #10000x10000
+    source_zarr_chunk_size = cn.chunk_dims  #4000x4000
+
+    # The zarr path that's being used
+    source_mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, source_zarr_chunk_size, 'annual', model_type, input_date, main_logger)
+    main_logger.info(f"Aggregating from zarr ({source_zarr_chunk_size} pixel chunks): {source_mega_zarr_path}")
 
     output_base = f"{cn.veg_outputs_path}PATTERN/{model_type}/annual_intervals/START_END/PER_HA_OR_PIXEL/{cn.full_raster_dims}_pixels/{input_date}/"
     main_logger.info(f"Core output path for aggregation: {output_base}")
@@ -166,12 +170,24 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
 
             for tile_id in tile_ids_to_process:
 
+                # future = client.submit(uu.create_10x10_deg_geotif_from_zarr,
                 future = client.submit(uu.create_10x10_deg_geotif_from_zarr,
-                                       var_name, year_idx, tile_id, rechunked_mega_zarr_path, output_base, no_upload)
+                                       var_name, year_idx, tile_id, source_mega_zarr_path, output_base, no_upload)
                 futures.append(future)
 
-    # Results is a list of single-element lists, each with a dictionary of chunk stats for a single variable-year-tile.
+    # Results is a list of tuples, where each tuple is the per-ha and per-pixel chunk stats, each of which is a dictionary
+    # for a single variable-year-tile
+    # e.g., ([{'chunk_id': 'N/A', 'tile_id': '00N_050W', 'layer_name': '00N_050W__gross_emissions__all_C_pools__CO2_only__MgCO2_ha_yr_2016.tif',
+    # 'tile_name': '00N_050W__gross_emissions__all_C_pools__CO2_only__MgCO2_ha_yr_2016.tif', 'in_out': 'output_layer',
+    # 'pattern': 'gross_emissions__all_C_pools__CO2_only__MgCO2', 'years': 2016, 'min_value': 'no data', 'mean_value': 'no data', 'max_value': 'no data',
+    # 'count_value': 7912448, 'sum_value': 'no data', 'data_type': 'no data'}],
+    # [{'chunk_id': 'N/A', 'tile_id': '00N_050W', 'layer_name': '00N_050W__gross_emissions__all_C_pools__CO2_only__MgCO2_pixel_yr_2016.tif',
+    # 'tile_name': '00N_050W__gross_emissions__all_C_pools__CO2_only__MgCO2_pixel_yr_2016.tif', 'in_out': 'output_layer',
+    # 'pattern': 'gross_emissions__all_C_pools__CO2_only__MgCO2', 'years': 2016, 'min_value': 'no data', 'mean_value': 'no data',
+    # 'max_value': 'no data', 'count_value': 7912448, 'sum_value': 'no data', 'data_type': 'no data'}]),
+    # ([{'chunk_id': 'N/A', ... 'data_type': 'no data'}])]
     results = client.gather(futures)
+    # print(results)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
@@ -190,28 +206,52 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
 
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
-    # Flattens the tile-level lists of chunk stat dictionaries into a single list.
-    counts_10x10_stats_list = [item for sublist in results for item in sublist]
+    # Extracts the per-ha and per-pixel dictionaries from the returned tile stats so they are separate flat lists
+    # https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/693c28bf-ade0-8325-b28b-de531cad2408
+    counts_per_ha_10x10_stats_list = [ha_dict for (ha_group, pixel_group) in results for ha_dict in ha_group]
+    counts_per_pixel_10x10_stats_list = [pixel_dict for (ha_group, pixel_group) in results for pixel_dict in pixel_group]
+    # print(counts_per_ha_10x10_stats_list)
+    # print(counts_per_pixel_10x10_stats_list)
 
-    # Converts the pixel counts in the 10x10s into a dataframe
-    counts_10x10_df = pd.DataFrame(counts_10x10_stats_list)
+    # Converts the pixel counts from per-ha and per-pixel in the 10x10s into dataframes
+    counts_per_ha_10x10_df = pd.DataFrame(counts_per_ha_10x10_stats_list)
+    counts_per_pixel_10x10_df = pd.DataFrame(counts_per_pixel_10x10_stats_list)
 
-    # Merges the pixel counts for the 10x10 tiles against the pixel counts for the 1x1s
-    merged_10x10_counts_df = model_10x10_counts_df.merge(counts_10x10_df, on='tile_name', how='left')
+    # Merges the per-ha pixel counts for the 10x10 tiles against the pixel counts for the 1x1s
+    merged_10x10_counts_per_ha_df = model_10x10_counts_df.merge(counts_per_ha_10x10_df, on='tile_name', how='left')
+
+    # Renames the counts in the 1x1 df from ha to pixel so that their tile names match the per-pixel output
+    # and they can be joined. Otherwise, the per-pixel tile names won't match the pixel counts from the 1x1s (since they say ha).
+    model_10x10_counts_df['tile_name'] = (
+        model_10x10_counts_df['tile_name'].str.replace('ha', 'pixel', regex=False)
+    )
+
+    merged_10x10_counts_per_pixel_df = model_10x10_counts_df.merge(counts_per_pixel_10x10_df, on='tile_name', how='left')
 
     # Gets the difference between pixel counts in 10x10s and 1x1s for each tile
-    merged_10x10_counts_df['pixel_count_diff'] = merged_10x10_counts_df['total_count'] - merged_10x10_counts_df['count_value']
-    max_pixel_count_diff = merged_10x10_counts_df['pixel_count_diff'].abs().max()
-    if max_pixel_count_diff > 0:
-        main_logger.warning(f"WARNING: at least one tile has a difference in pixel counts between 1x1s and 10x10s! Max difference is {max_pixel_count_diff}: {uu.timestr()}")
+    merged_10x10_counts_per_ha_df['pixel_count_diff'] = merged_10x10_counts_per_ha_df['total_count'] - merged_10x10_counts_per_ha_df['count_value']
+    max_pixel_count_diff_per_ha = merged_10x10_counts_per_ha_df['pixel_count_diff'].abs().max()
+
+    merged_10x10_counts_per_pixel_df['pixel_count_diff'] = merged_10x10_counts_per_pixel_df['total_count'] - merged_10x10_counts_per_pixel_df['count_value']
+    max_pixel_count_diff_per_pixel = merged_10x10_counts_per_pixel_df['pixel_count_diff'].abs().max()
+
+    if max_pixel_count_diff_per_ha > 0:
+        main_logger.warning(f"WARNING: at least one per-hectare tile has a difference in pixel counts between 1x1s and 10x10s! Max difference is {max_pixel_count_diff_per_ha}: {uu.timestr()}")
     else:
-        main_logger.info(f"No tiles have a difference in pixel counts between 1x1s and 10x10s.")
+        main_logger.info(f"No per-hectare tiles have a difference in pixel counts between 1x1s and 10x10s.")
+
+    if max_pixel_count_diff_per_pixel > 0:
+        main_logger.warning(f"WARNING: at least one per-pixel tile has a difference in pixel counts between 1x1s and 10x10s! Max difference is {max_pixel_count_diff_per_pixel}: {uu.timestr()}")
+    else:
+        main_logger.info(f"No per-pixel tiles have a difference in pixel counts between 1x1s and 10x10s.")
 
     # Number of rows from model output without matching 10x10 aggregation pixel counts
-    main_logger.info(f"    Rows without pixel count comparison: {merged_10x10_counts_df['pixel_count_diff'].isna().sum()}")
+    main_logger.info(f"Rows without pixel count comparison for per-ha output: {merged_10x10_counts_per_ha_df['pixel_count_diff'].isna().sum()}")
+    main_logger.info(f"Rows without pixel count comparison for per-pixel output: {merged_10x10_counts_per_pixel_df['pixel_count_diff'].isna().sum()}")
 
     # Prepares 10x10 deg chunk stats spreadsheet: pixel count for outputs
-    uu.aggregate_10x10_chunk_stats(merged_10x10_counts_df, stage, no_upload, main_logger)
+    uu.aggregate_10x10_chunk_stats(merged_10x10_counts_per_ha_df, f"{stage}_per_ha", no_upload, main_logger)
+    uu.aggregate_10x10_chunk_stats(merged_10x10_counts_per_pixel_df, f"{stage}_per_pixel", no_upload, main_logger)
 
 
     ### Step 4: Aggregates logs
@@ -235,7 +275,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="Create a global rechunked mega-zarr.")
+    parser = argparse.ArgumentParser(description="Create 10x10 deg per-ha and per-pixel output geotifs")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-rd', '--input_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')

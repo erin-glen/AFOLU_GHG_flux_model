@@ -2110,7 +2110,7 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     # sys.quit()
 
     # Converts per-ha to per-pixel
-    data_per_pixel = data_per_ha * pixel_area / cn.m2_to_ha
+    data_per_pixel = data_per_ha * pixel_area * cn.m2_to_ha
 
     # GeoTransform (top-left corner)
     transform = from_origin(min_x, max_y, cn.resolution, cn.resolution)
@@ -2121,39 +2121,33 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
 
     # Establishes year/year range and units for dataset
     if "density" in var:
-        year_or_range = f"{year}"
         per_ha_units = "_ha"
         per_pixel_units = "_pixel"
     elif "emis" in var:
-        year_or_range = f"{year - 1}_{year}"
         per_ha_units = "_ha_yr"
         per_pixel_units = "_pixel_yr"
     elif "removals" in var:
-        year_or_range = f"{year - 1}_{year}"
         per_ha_units = "_ha_yr"
         per_pixel_units = "_pixel_yr"
     elif "net" in var:
-        year_or_range = f"{year - 1}_{year}"
         per_ha_units = "_ha_yr"
         per_pixel_units = "_pixel_yr"
     elif cn.land_state_pattern in var:
-        year_or_range = f"{year - 1}_{year}"
         per_ha_units = ""
         per_pixel_units = ""
     else:
-        year_or_range = f"{year}"
         per_ha_units = ""
         per_pixel_units = ""
 
     # Output names and paths for per-ha and per-pixel outputs
     output_path = output_base.replace("PATTERN", var)
-    output_path = output_path.replace("START_END", year_or_range)
+    output_path = output_path.replace("START_END", str(year))
     output_path_per_ha = output_path.replace("PER_HA_OR_PIXEL", per_ha_units)
-    output_name_per_ha = f"{tile_id}__{var}{per_ha_units}_{year_or_range}.tif"
+    output_name_per_ha = f"{tile_id}__{var}{per_ha_units}_{str(year)}.tif"
     s3_filename_per_ha = f"{output_path_per_ha}{output_name_per_ha}"
 
     output_path_per_pixel = output_path.replace("PER_HA_OR_PIXEL", per_pixel_units)
-    output_name_per_pixel = f"{tile_id}__{var}{per_pixel_units}_{year_or_range}.tif"
+    output_name_per_pixel = f"{tile_id}__{var}{per_pixel_units}_{str(year)}.tif"
     s3_filename_per_pixel = f"{output_path_per_pixel}{output_name_per_pixel}"
 
     # Uploads to s3 if requested
@@ -2174,18 +2168,34 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
         # Most stats for the 10x10 deg outputs aren't calculated.
         # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
         # Dictionary is in a list because it's necessary for chunk stats processing later.
-        chunk_stats = [{
+        chunk_stats_per_ha = [{
             'chunk_id': 'N/A',
             'tile_id': tile_id,
             'layer_name': output_name_per_ha,
             'tile_name': output_name_per_ha,
             'in_out': 'output_layer',
             'pattern': var,
-            'years': year_or_range,
+            'years': year,
             'min_value': 'no data',
             'mean_value': 'no data',
             'max_value': 'no data',
             'count_value': valid_pixel_count_per_ha,
+            'sum_value': 'no data',
+            'data_type': 'no data'
+        }]
+
+        chunk_stats_per_pixel = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': output_name_per_pixel,
+            'tile_name': output_name_per_pixel,
+            'in_out': 'output_layer',
+            'pattern': var,
+            'years': year,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': valid_pixel_count_per_pixel,
             'sum_value': 'no data',
             'data_type': 'no data'
         }]
@@ -2195,14 +2205,30 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
         # Most stats for the 10x10 aren't calculated.
         # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
         # Dictionary is in a list because it's necessary for chunk stats processing later.
-        chunk_stats = [{
+        chunk_stats_per_ha = [{
             'chunk_id': 'N/A',
             'tile_id': tile_id,
             'layer_name': output_name_per_ha,
             'tile_name': output_name_per_ha,
             'in_out': 'output_layer',
             'pattern': var,
-            'years': year_or_range,
+            'years': year,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': 'not calculated',
+            'sum_value': 'no data',
+            'data_type': 'no data'
+        }]
+
+        chunk_stats_per_pixel = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': output_name_per_pixel,
+            'tile_name': output_name_per_pixel,
+            'in_out': 'output_layer',
+            'pattern': var,
+            'years': year,
             'min_value': 'no data',
             'mean_value': 'no data',
             'max_value': 'no data',
@@ -2214,7 +2240,7 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     tile_end_time = time.time()
     lu.print_and_log(f"  Tile {var} for year {year} for {tile_id} in {round(tile_end_time - extract_start_time)} seconds: {timestr()}", False, logger_worker)
 
-    return chunk_stats
+    return chunk_stats_per_ha, chunk_stats_per_pixel
 
 
 # Creates an empty txt file for each chunk in s3.
