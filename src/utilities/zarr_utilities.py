@@ -423,8 +423,14 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
     mask = merged_table['maximum_diff_value'] > cn.zarr_difference_tolerance
 
     # Number of rows from model output without matching zarr pixel counts
-    chunks_without_zarr_stats = merged_table['count_value_diff'].isna().sum().item()
-    main_logger.info(f"    Rows without pixel count comparison: {chunks_without_zarr_stats}")
+
+    # Excludes rows where model 'count_value' is non-numeric (like 'no data') (no model outputs in those chunks).
+    # Coerces to numeric and check for valid values.
+    valid_count_mask = pd.to_numeric(merged_table['count_value'], errors='coerce').notna()
+
+    # From those valid rows, counts how many have no zarr stats
+    chunks_without_zarr_stats = merged_table[valid_count_mask]['count_value_diff'].isna().sum().item()
+    main_logger.info(f"    Rows with data without pixel count comparison: {chunks_without_zarr_stats}")
 
     # Applies the mask to filter those rows
     differences_exceeding_tolerance = merged_table[mask]
