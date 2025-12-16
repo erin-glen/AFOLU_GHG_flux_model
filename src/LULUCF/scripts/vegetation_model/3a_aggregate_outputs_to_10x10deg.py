@@ -58,6 +58,253 @@ from src.utilities import universal_utilities as uu
 from src.utilities import zarr_utilities as zu
 from src.utilities import resize_cluster
 
+import psutil
+import zarr
+import time
+import fsspec
+import numpy as np
+from rasterio.transform import from_origin
+
+# Extracts a 10x10° tile from a Zarr store and writes to GeoTIFF on S3
+def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_base, no_upload):
+
+    process = psutil.Process(os.getpid())
+
+    logger_worker = lu.setup_logging_worker()
+
+    # Convert tile_id to bounding box (W, S, E, N)
+    min_x, min_y, max_x, max_y = uu.get_10x10_tile_bounds(tile_id)
+
+    year = cn.interval_end_years_annual[year_idx]
+
+    # Open Zarr group using fsspec mapper
+    fs = fsspec.filesystem("s3", anon=False)
+    model_zarr_store = zarr.open_group(fs.get_mapper(raw_path), mode="r")
+
+    # Determine pixel indices (applies to model outputs and pixel area)
+    lat_array_model = model_zarr_store["y"][:]
+    lon_array_model = model_zarr_store["x"][:]
+
+    # Get index ranges (applies to model outputs and pixel area)
+    y0_model = np.searchsorted(lat_array_model[::-1], max_y, side='right')
+    y1_model = np.searchsorted(lat_array_model[::-1], min_y, side='left')
+    x0_model = np.searchsorted(lon_array_model, min_x, side='left')
+    x1_model = np.searchsorted(lon_array_model, max_x, side='right')
+
+    # Flips y indices since lat is descending
+    y0_model, y1_model = len(lat_array_model) - y1_model, len(lat_array_model) - y0_model
+    if y0_model > y1_model:
+        y0_model, y1_model = y1_model, y0_model
+
+    lu.print_and_log(f"Extracting {var} for {year} for {tile_id}: {uu.timestr()}", True, logger_worker)
+    extract_start_time = time.time()
+
+    # Loads model output data block
+    data_per_ha = model_zarr_store[var][year_idx, y0_model:y1_model, x0_model:x1_model]
+
+    # Calculates per-pixel output (for numeric outputs only)
+    pixel_area_zarr_store = uu.get_pixel_area_store()
+
+    # Determine pixel indices (applies to model outputs and pixel area)
+    lat_array_pixel_area = pixel_area_zarr_store["y"][:]
+    lon_array_pixel_area = pixel_area_zarr_store["x"][:]
+
+    # Get index ranges (applies to model outputs and pixel area)
+    y0_pixel_area = np.searchsorted(lat_array_pixel_area[::-1], max_y, side='right')
+    y1_pixel_area = np.searchsorted(lat_array_pixel_area[::-1], min_y, side='left')
+    x0_pixel_area = np.searchsorted(lon_array_pixel_area, min_x, side='left')
+    x1_pixel_area = np.searchsorted(lon_array_pixel_area, max_x, side='right')
+
+    # Flips y indices since lat is descending
+    y0_pixel_area, y1_pixel_area = len(lat_array_pixel_area) - y1_pixel_area, len(lat_array_pixel_area) - y0_pixel_area
+    if y0_pixel_area > y1_pixel_area:
+        y0_pixel_area, y1_pixel_area = y1_pixel_area, y0_pixel_area
+
+    pixel_area = pixel_area_zarr_store['band_data'][y0_pixel_area:y1_pixel_area, x0_pixel_area:x1_pixel_area]
+    # print("y0:", y0_pixel_area)
+    # print("y1:", y1_pixel_area)
+    # print("x0:", x0_pixel_area)
+    # print("x1:", x1_pixel_area)
+    # print(pixel_area)
+    # sys.quit()
+
+    # Converts per-ha to per-pixel
+    data_per_pixel = data_per_ha * pixel_area * cn.m2_to_ha
+
+    # Cleanup. Without this, memory exceeds 24GB/worker and eventually tasks get repeated because of too much memory spillage or something
+    del pixel_area
+
+    # Creates 0.04x0.04 deg geotif in Mg CO2(e)/0.04x0.04deg pixel/yr
+    # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6941b3f0-30c8-8332-ab19-9b154c0a2b43
+
+    # Trims fine grid so it splits evenly into coarse blocks
+    ny, nx = data_per_pixel.shape
+    ny_trim = ny - (ny % cn.global_aggregation_factor)
+    nx_trim = nx - (nx % cn.global_aggregation_factor)
+    data_fine_trim = data_per_pixel[:ny_trim, :nx_trim]
+
+    # Reshapes and sums over each block
+    coarse_agg = data_fine_trim.reshape(
+        ny_trim // cn.global_aggregation_factor, cn.global_aggregation_factor,
+        nx_trim // cn.global_aggregation_factor, cn.global_aggregation_factor
+    ).sum(axis=(1, 3))
+
+    extract_end_time = time.time()
+    lu.print_and_log(f"  Extracted {var} for year {year} for {tile_id} in {round(extract_end_time - extract_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"  Memory usage after 10x10 extraction for {var} for year {year} for {tile_id}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+
+    # Establishes year/year range and units for dataset
+    if "density" in var:
+        per_ha_units = cn.C_density_pixel_meaning
+        per_pixel_units = cn.C_per_pixel_pixel_meaning
+        coarse_units = cn.C_density_aggreg_pixel_meaning
+    elif "emis" in var:
+        per_ha_units = cn.flux_density_pixel_meaning
+        per_pixel_units = cn.flux_per_pixel_pixel_meaning
+        coarse_units = cn.flux_aggreg_pixel_meaning
+    elif "removals" in var:
+        per_ha_units = cn.flux_density_pixel_meaning
+        per_pixel_units = cn.flux_per_pixel_pixel_meaning
+        coarse_units = cn.flux_aggreg_pixel_meaning
+    elif "net" in var:
+        per_ha_units = cn.flux_density_pixel_meaning
+        per_pixel_units = cn.flux_per_pixel_pixel_meaning
+        coarse_units = cn.flux_aggreg_pixel_meaning
+    elif cn.land_state_pattern in var:
+        per_ha_units = ""
+        per_pixel_units = ""
+        coarse_units = ""
+    else:
+        per_ha_units = ""
+        per_pixel_units = ""
+        coarse_units = ""
+
+    # Output names and paths for per-ha and per-pixel outputs
+    output_path = output_base.replace("PATTERN", var)
+    output_path = output_path.replace("START_END", str(year))
+    output_path_per_ha = output_path.replace("CHUNK_SIZE_pixels", f"{cn.full_raster_dims}_pixels")
+    output_path_per_ha = output_path_per_ha.replace("PER_HA_OR_PIXEL", per_ha_units)
+    output_name_per_ha = f"{tile_id}__{var}{per_ha_units}_{str(year)}.tif"
+    s3_filename_per_ha = f"{output_path_per_ha}{output_name_per_ha}"
+
+    # Name and s3 folder for per-pixel output
+    output_path_per_pixel = output_path.replace("CHUNK_SIZE_pixels", f"{cn.full_raster_dims}_pixels")
+    output_path_per_pixel = output_path_per_pixel.replace("PER_HA_OR_PIXEL", per_pixel_units)
+    output_name_per_pixel = f"{tile_id}__{var}{per_pixel_units}_{str(year)}.tif"
+    s3_filename_per_pixel = f"{output_path_per_pixel}{output_name_per_pixel}"
+
+    # Name and s3 folder for 0.04x0.04 deg output
+    output_path_coarse = output_path.replace("CHUNK_SIZE_pixels", f"{cn.global_aggregation_factor}_pixels")
+    output_path_coarse = output_path_coarse.replace("PER_HA_OR_PIXEL", coarse_units)
+    output_name_coarse = f"{tile_id}__{var}{coarse_units}_{str(year)}.tif"
+    s3_filename_coarse = f"{output_path_coarse}{output_name_coarse}"
+
+    # Uploads to s3 if requested
+    if no_upload == False:
+
+        # GeoTransform for 0.00025 deg resolution grid (top-left corner)
+        transform = from_origin(min_x, max_y, cn.resolution, cn.resolution)
+
+        # GeoTransform for coarse (0.04 deg) resolution grid
+        coarse_transform = from_origin(min_x, max_y, cn.global_geotif_resolution, cn.global_geotif_resolution)
+
+        # Writes per-ha geotif to S3
+        valid_pixel_count_per_ha = uu.write_single_geotiff_to_s3(var, year, tile_id, data_per_ha, transform, s3_filename_per_ha, logger_worker)
+
+        # Conditionally writes per-pixel output and 0.04x0.04 res output (only if dataset is float32, i.e. numeric output from model).
+        if model_zarr_store[var].dtype == np.float32:
+            valid_pixel_count_per_pixel = uu.write_single_geotiff_to_s3(
+                var, year, tile_id, data_per_pixel, transform, s3_filename_per_pixel, logger_worker
+            )
+            # valid_pixel_count_coarse not used. Not doing anything with stats from the aggregated output
+            valid_pixel_count_coarse = uu.write_single_geotiff_to_s3(
+                var, year, tile_id, coarse_agg, coarse_transform, s3_filename_coarse, logger_worker
+            )
+        else:
+            valid_pixel_count_per_pixel = None
+            valid_pixel_count_coarse = None
+
+        # # More cleanup. This doesn't actually seem to reduce memory. Leaving it in commented just for reference.
+        # del data_per_ha
+        # del data_per_pixel
+
+        # Most stats for the 10x10 deg outputs aren't calculated.
+        # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
+        # Dictionary is in a list because it's necessary for chunk stats processing later.
+        chunk_stats_per_ha = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': output_name_per_ha,
+            'tile_name': output_name_per_ha,
+            'in_out': 'output_layer',
+            'pattern': var,
+            'years': year,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': valid_pixel_count_per_ha,
+            'sum_value': 'no data',
+            'data_type': 'no data'
+        }]
+
+        chunk_stats_per_pixel = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': output_name_per_pixel,
+            'tile_name': output_name_per_pixel,
+            'in_out': 'output_layer',
+            'pattern': var,
+            'years': year,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': valid_pixel_count_per_pixel,
+            'sum_value': 'no data',
+            'data_type': 'no data'
+        }]
+
+    else:
+
+        # Most stats for the 10x10 aren't calculated.
+        # Only the pixel count is because it is compared to the pixel counts in all the relevant 1x1s.
+        # Dictionary is in a list because it's necessary for chunk stats processing later.
+        chunk_stats_per_ha = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': output_name_per_ha,
+            'tile_name': output_name_per_ha,
+            'in_out': 'output_layer',
+            'pattern': var,
+            'years': year,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': 'not calculated',
+            'sum_value': 'no data',
+            'data_type': 'no data'
+        }]
+
+        chunk_stats_per_pixel = [{
+            'chunk_id': 'N/A',
+            'tile_id': tile_id,
+            'layer_name': output_name_per_pixel,
+            'tile_name': output_name_per_pixel,
+            'in_out': 'output_layer',
+            'pattern': var,
+            'years': year,
+            'min_value': 'no data',
+            'mean_value': 'no data',
+            'max_value': 'no data',
+            'count_value': 'not calculated',
+            'sum_value': 'no data',
+            'data_type': 'no data'
+        }]
+
+    tile_end_time = time.time()
+    lu.print_and_log(f"  Total chunk processing for tile {var} for year {year} in {round(tile_end_time - extract_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+
+    return chunk_stats_per_ha, chunk_stats_per_pixel
+
 
 def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_stats_table_name, chunk_shapefile_uri=False, bounding_box=None,
          first_variables_to_process=None, first_years_to_process=None,
@@ -125,6 +372,8 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
         tile_ids_to_process = unique_tile_ids
     main_logger.info(f"tile_ids to aggregate to 10x10 deg and compare chunk stats for: {tile_ids_to_process} ({len(tile_ids_to_process)} out of {len(unique_tile_ids)})")
 
+    tile_ids_to_process = ['20S_120E']  #TODO testing
+
     # Determines if the output file names for final versions of outputs should be used
     is_large_run = False
     # is_large_run = True  # For simulating a large run
@@ -140,7 +389,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
     source_mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, source_zarr_chunk_size, 'annual', model_type, input_date, main_logger)
     main_logger.info(f"Aggregating from zarr ({source_zarr_chunk_size} pixel chunks): {source_mega_zarr_path}")
 
-    output_base = f"{cn.veg_outputs_path}PATTERN/{model_type}/annual_intervals/START_END/PER_HA_OR_PIXEL/{cn.full_raster_dims}_pixels/{input_date}/"
+    output_base = f"{cn.veg_outputs_path}PATTERN/{model_type}/annual_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{input_date}/"
     main_logger.info(f"Core output path for aggregation: {output_base}")
 
 
@@ -171,7 +420,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
             for tile_id in tile_ids_to_process:
 
                 # future = client.submit(uu.create_10x10_deg_geotif_from_zarr,
-                future = client.submit(uu.create_10x10_deg_geotif_from_zarr,
+                future = client.submit(create_10x10_deg_geotif_from_zarr,
                                        var_name, year_idx, tile_id, source_mega_zarr_path, output_base, no_upload)
                 futures.append(future)
 
