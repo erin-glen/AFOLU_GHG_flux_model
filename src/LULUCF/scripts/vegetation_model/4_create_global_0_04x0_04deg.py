@@ -73,7 +73,7 @@ def gdal_translate_progress(pct, message, data):
     return 1  # return 0 would cancel
 
 
-def mosaic_tiles_to_global(var_name, year_idx, tile_ids_to_process, base_path, no_upload):
+def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path, no_upload, is_large_run):
 
     process = psutil.Process(os.getpid())
 
@@ -111,44 +111,45 @@ def mosaic_tiles_to_global(var_name, year_idx, tile_ids_to_process, base_path, n
     # Output s3 folder for dataset and year
     output_path = base_path.replace("CHUNK_SIZE_pixels", "global")
 
-    fs = fsspec.filesystem("s3", anon=False)
-
-    # 1. Collect all S3 tile files
-    tile_files = fs.glob(f"{input_path}*.tif")
-    if not tile_files:
-        return f"No tiles found in {input_path}"
-    lu.print_and_log(f"{len(tile_files)} tiles found in {input_path}: {uu.timestr()}", False, logger_worker)
-
-    tile_files = [f"/vsis3/{fp}" for fp in tile_files]  # Faster than vsis3_streaming, by experiment
-    # print(tile_files)
-
     output_name = f"{var_name}{units}_{year}_global.tif"
     # print(output_name)
 
+    # Collects s3 tiles for the dataset-year
+    fs = fsspec.filesystem("s3", anon=False)
+    if first_tiles_to_process == None:  # All tiles in folder
+        tile_files = fs.glob(f"{input_path}*.tif")
+    else:  # Specified first few tiles in folder (for testing)
+        tile_files = fs.glob(f"{input_path}*.tif")[0:first_tiles_to_process]
+    if len(tile_files) == 0:
+        return f"No tiles found in {input_path}"
+    lu.print_and_log(f"{len(tile_files)} tiles to be processed in {input_path}: {uu.timestr()}", False, logger_worker)
 
-    # 2. Create a temporary working directory for this worker
+    tile_files = [f"/vsis3/{fp}" for fp in tile_files]  # Faster for accessing than using vsis3_streaming, by experiment
+    # print(tile_files)
+
+    # Creates a temporary working directory for worker
     tmpdir = tempfile.mkdtemp(prefix="mosaic_")
     safe_name = re.sub(r'[^0-9a-zA-Z]+', '_', input_path.strip('/'))
-
     list_path = os.path.join(tmpdir, f"tile_list_{safe_name}.txt")
     vrt_path = os.path.join(tmpdir, f"mosaic_{safe_name}.vrt")
 
     with open(list_path, "w") as f:
         f.write("\n".join(tile_files))
 
-    # 3. Build VRT
-    lu.print_and_log(f"Building VRT for {input_path} into {vrt_path}: {uu.timestr()}", False, logger_worker)
+    # Builds VRT
+    lu.print_and_log(f"Building VRT for {input_path} into {vrt_path}: {uu.timestr()}", is_large_run, logger_worker)
     # Build VRT directly from list of files
     vrt = gdal.BuildVRT(vrt_path,
-                        tile_files,
-                        callback=gdal_vrt_progress,
-                        callback_data=os.path.basename(output_name))
+                        tile_files
+                        # callback=gdal_vrt_progress,  # Can use progress tracking if vrt creation is taking a long time
+                        # callback_data=os.path.basename(output_name)
+                        )
     if vrt is None:
         raise RuntimeError(f"gdal.BuildVRT failed for {input_path}")
 
     vrt = None  # flush to disk
 
-    # 3b. Validate VRT
+    # Validates VRT
     try:
         info = gdal.Info(vrt_path, format="json")
         size = info.get("size", [])
@@ -158,10 +159,8 @@ def mosaic_tiles_to_global(var_name, year_idx, tile_ids_to_process, base_path, n
         lu.print_and_log(f"VRT validation failed: {e}", False, logger_worker)
         raise RuntimeError(f"VRT validation failed for {vrt_path}")
 
-    # 4. Translate VRT → GeoTIFF
-
+    # Translates VRT → GeoTIFF
     local_out = os.path.join(tmpdir, output_name)
-
     gtiff_options = gdal.TranslateOptions(
         format="GTiff",
         creationOptions=[
@@ -170,30 +169,29 @@ def mosaic_tiles_to_global(var_name, year_idx, tile_ids_to_process, base_path, n
             "BLOCKXSIZE=512",
             "BLOCKYSIZE=512"
         ],
-        callback=gdal_translate_progress,
-        callback_data=os.path.basename(output_name)
+        # callback=gdal_translate_progress,  # Can use progress tracking if gdal_translate is taking a long time
+        # callback_data=os.path.basename(output_name)
     )
-    lu.print_and_log(f"Writing vrt to geotif for {output_path}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Writing vrt to geotif for {output_path}: {uu.timestr()}", is_large_run, logger_worker)
 
     writing_start_time = time.time()
     gdal.Translate(local_out, vrt_path, options=gtiff_options)
     writing_end_time = time.time()
     lu.print_and_log(f"Wrote vrt to geotif for {output_path}, took {round(writing_end_time - writing_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
-
-    lu.print_and_log(f"Uploading geotif for {output_path}: {uu.timestr()}", False, logger_worker)
-    fs.put(local_out, output_path)
-    lu.print_and_log(f"Uploaded mosaic to {output_path}: {uu.timestr()}", False, logger_worker)
+    if not no_upload:
+        lu.print_and_log(f"Uploading global geotif for {output_path}: {uu.timestr()}", is_large_run, logger_worker)
+        fs.put(local_out, output_path)
+        lu.print_and_log(f"Uploaded global geotif to {output_path}: {uu.timestr()}", False, logger_worker)
 
     end_time = time.time()
-    lu.print_and_log(f"{output_path} took {round(end_time - start_time)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Total chunk processing for {output_path} took {round(end_time - start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
-    return f"Global mosaic written to {output_path}"
+    return f"Global geotif written to {output_path}"
 
 
-def main(cluster_name, input_date, run_local, no_log, no_upload, chunk_shapefile_uri=False, bounding_box=None,
-         first_variables_to_process=None, first_years_to_process=None,
-         first_tiles_to_process=None, log_note=None):
+def main(cluster_name, input_date, run_local, no_log, no_upload,
+         first_variables_to_process=None, first_years_to_process=None, first_tiles_to_process=None, log_note=None):
 
 
     ### Step 1: Preparation
@@ -205,10 +203,6 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, chunk_shapefile
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
 
-    # Shapefile of chunk footprints to use if none is supplied on the command line
-    if not chunk_shapefile_uri:
-        chunk_shapefile_uri = cn.fishnet_1x1deg_uri
-
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
@@ -217,23 +211,6 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, chunk_shapefile
     main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
-
-    # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
-    # chunk_ids for making chunk list if shapefile is supplied in command line.
-    # chunk_ids and iso code used for chunk stats.
-    fishnet_iso_df = uu.fishnet_with_GADM_iso(chunk_shapefile_uri)
-
-    # Creates the list of chunks to process, depending on the approach: shapefile attribute table or a bounding box
-    chunk_size_deg = 1   # Chunk size for geotifs is set at 1x1 deg
-    chunk_list, chunk_size_pixels = uu.create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size_deg, None, fishnet_iso_df, main_logger)
-
-    # Gets a list of unique tile_ids from the chunk list
-    tile_ids = []
-    for chunk in chunk_list:
-        tile_id = uu.xy_to_tile_id(chunk[0], chunk[3])  # tile_id in YYN/S_XXXE/W
-        tile_ids.append(tile_id)
-
-    unique_tile_ids = sorted(list(set(tile_ids)))
 
     # Outputs to turn into 10x10 tile
     # full_list_of_vars = cn.full_outputs_to_zarr   # If all variables are to be made into 10x10s (but very expensive)
@@ -253,18 +230,10 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, chunk_shapefile
         years_to_process = len(cn.interval_end_years_annual)
     main_logger.info(f"Years to aggregate to 10x10 deg and compare chunk stats for: {years_to_process} out of {len(cn.interval_end_years_annual)}")
 
-    if first_tiles_to_process:
-        tile_ids_to_process = unique_tile_ids[0:first_tiles_to_process]
-    else:
-        tile_ids_to_process = unique_tile_ids
-    main_logger.info(f"tile_ids to aggregate to 10x10 deg and compare chunk stats for: {tile_ids_to_process} ({len(tile_ids_to_process)} out of {len(unique_tile_ids)})")
-
-    tile_ids_to_process = ['20S_120E']  #TODO testing
-
     # Determines if the output file names for final versions of outputs should be used
     is_large_run = False
     # is_large_run = True  # For simulating a large run
-    if len(tile_ids) > 20:
+    if len(vars_to_process * years_to_process) > 20:
         is_large_run = True
         main_logger.info(f"Running as large-scale run model: {is_large_run}")
 
@@ -284,7 +253,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, chunk_shapefile
 
             # future = client.submit(uu.create_10x10_deg_geotif_from_zarr,
             future = client.submit(mosaic_tiles_to_global,
-                                   var_name, year_idx, tile_ids_to_process, base_path, no_upload)
+                                   var_name, year_idx, first_tiles_to_process, base_path, no_upload, is_large_run)
             futures.append(future)
 
     results = client.gather(futures)
@@ -293,49 +262,33 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, chunk_shapefile
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
 
+    ### Step 3: Aggregates logs
 
-    # ### Step 3: Counts files in output folders, chunk stats for outputs, aggregates logs
-    #
-    # # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
-    # # cluster, not all the workers.
-    # if not run_local:
-    #     workers = client.scheduler_info()["workers"]
-    #     n_workers = len(workers)
-    #
-    #     # Reduces number of workers in the cluster down to 1 if there is more than 8
-    #     if n_workers > 8:
-    #         main_logger.info("Resizing cluster to 1 worker")
-    #
-    #         resize_cluster.resize_coiled_cluster(cluster_name, 1)
-    #
-    # # Iterates through output folders and counts the number of output rasters (only if uploads enabled)
-    # if not no_upload and is_final:
-    #     for output_folder in outputs_by_interval_dir_list:
-    #         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-    #         main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-    #         # print(geotiff_files)
-    #
-    # # # Prepares 1x1 deg chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
-    # # # and min and max values across all chunks for all inputs and outputs
-    # # # only if not suppressed by the --no_stats flag and at least one chunk was successfully (wasn't skipped).
-    # # if (not no_stats) and (success_count > 0):
-    # #     uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
-    # #
-    # # uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
-    #
-    # # Sets it so that no worker logs are created if doing a local run
-    # if not run_local:
-    #
-    #     # Creates combined log from all workers if not deactivated
-    #     worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
-    #     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats, and worker log compilation", main_logger)
-    #
-    #     # Adds the workers' logs to the main log and uploads to s3
-    #     lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
-    #
-    # # Closes the Dask client if not running locally
-    # if not run_local:
-    #     client.close()
+    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    # cluster, not all the workers.
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
+
+        # Reduces number of workers in the cluster down to 1 if there is more than 8
+        if n_workers > 8:
+            main_logger.info("Resizing cluster to 1 worker")
+
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
+
+    # Sets it so that no worker logs are created if doing a local run
+    if not run_local:
+
+        # Creates combined log from all workers if not deactivated
+        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
+
+        # Adds the workers' logs to the main log and uploads to s3
+        lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
+
+    # Closes the Dask client if not running locally
+    if not run_local:
+        client.close()
 
 
 if __name__ == "__main__":
@@ -371,6 +324,6 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, input_date, run_local, no_log, no_upload, chunk_shapefile_uri, bounding_box=bounding_box,
+    main(cluster_name, input_date, run_local, no_log, no_upload,
          first_variables_to_process=first_variables_to_process, first_years_to_process=first_years_to_process,
          first_tiles_to_process=first_tiles_to_process, log_note=log_note)

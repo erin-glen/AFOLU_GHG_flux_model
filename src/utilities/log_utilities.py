@@ -85,9 +85,9 @@ def setup_logging_worker():
 
 
 # Determines whether statement should be printed to the console as well as logged
-def print_and_log(text, is_large_scale_run, logger):
+def print_and_log(text, is_large_run, logger):
     logger.info(f"flm: {text}")
-    if not is_large_scale_run:
+    if not is_large_run:
         print(text, flush=True)
 
 
