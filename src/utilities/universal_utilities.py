@@ -2040,7 +2040,7 @@ def write_single_geotiff_to_s3(var, year, tile_id, data, transform, s3_path, log
         fs.put_file(tmpfile.name, s3_path)
 
     upload_end_time = time.time()
-    lu.print_and_log(f"  Wrote {var} for year {year} for {tile_id} to {s3_path} in {round(upload_end_time-upload_start_time)} seconds: {timestr()}", False, logger_worker)
+    lu.print_and_log(f"  Uploads completed for {var} for year {year} for {tile_id} to {s3_path} in {round(upload_end_time-upload_start_time)} seconds: {timestr()}", False, logger_worker)
 
     return valid_pixel_count
 

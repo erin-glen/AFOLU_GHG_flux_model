@@ -16,32 +16,32 @@ creation.
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
-python -m src.LULUCF.scripts.vegetation_model.3a_aggregate_outputs_to_10x10deg -bb 10 49 11 50 --run_local --no_upload -fy 1 -fv 1 -ft 1 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_outputs_to_10x10deg -bb 10 49 11 50 --run_local --no_upload -fy 1 -fv 1 -ft 1 --input_date YYYYMMDD
 
 Coiled small tests (needs 32 GB because of per-ha and per-pixel outputs):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3a_aggregate_outputs_to_10x10deg -cn vegetation_model -bb 10 49 11 50 fy 2 -fv 2 -ft 2 -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx  --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.3a_aggregate_outputs_to_10x10deg -cn vegetation_model -bb 10 49 11 50 fy 2 -fv 2 -ft 2 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_outputs_to_10x10deg -cn vegetation_model -bb 10 49 11 50 fy 2 -fv 2 -ft 2 -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx  --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_outputs_to_10x10deg -cn vegetation_model -bb 10 49 11 50 fy 2 -fv 2 -ft 2 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3a_aggregate_outputs_to_10x10deg -cn vegetation_model -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.3a_aggregate_outputs_to_10x10deg -cn vegetation_model -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_outputs_to_10x10deg -cn vegetation_model -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_outputs_to_10x10deg -cn vegetation_model -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ --input_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.3a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.3a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
-python -m src.LULUCF.scripts.vegetation_model.3a_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.3_aggregate_outputs_to_10x10deg -cn vegetation_model -mcstn parquet_20250921_17_33_57__XYX/LULUCF_fluxes_20250921_17_33_45_XYZ -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/690a21cd-2ea0-8333-9c7f-7091f8016fb3
 """
@@ -179,13 +179,17 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
         per_pixel_units = ""
         coarse_units = ""
 
-    # Output names and paths for per-ha and per-pixel outputs
+    # Name and s3 folder for per-hectare output
     output_path = output_base.replace("PATTERN", var)
     output_path = output_path.replace("START_END", str(year))
     output_path_per_ha = output_path.replace("CHUNK_SIZE_pixels", f"{cn.full_raster_dims}_pixels")
     output_path_per_ha = output_path_per_ha.replace("PER_HA_OR_PIXEL", per_ha_units)
     output_name_per_ha = f"{tile_id}__{var}{per_ha_units}_{str(year)}.tif"
     s3_filename_per_ha = f"{output_path_per_ha}{output_name_per_ha}"
+
+    # Hacky way to fix land_state and other unitless outputs that otherwise have in the pay YYYY//40000_pixels.
+    # This removes the extra / .
+    s3_filename_per_ha = s3_filename_per_ha.replace("//40000", "/40000")
 
     # Name and s3 folder for per-pixel output
     output_path_per_pixel = output_path.replace("CHUNK_SIZE_pixels", f"{cn.full_raster_dims}_pixels")
@@ -329,7 +333,9 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
+    main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
     main_logger.info(f"Input date: {input_date}")
+    main_logger.info(f"no_upload: {no_upload}")
 
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -372,8 +378,6 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
         tile_ids_to_process = unique_tile_ids
     main_logger.info(f"tile_ids to aggregate to 10x10 deg and compare chunk stats for: {tile_ids_to_process} ({len(tile_ids_to_process)} out of {len(unique_tile_ids)})")
 
-    tile_ids_to_process = ['20S_120E']  #TODO testing
-
     # Determines if the output file names for final versions of outputs should be used
     is_large_run = False
     # is_large_run = True  # For simulating a large run
@@ -405,6 +409,13 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
         comparison_insert, main_logger, model_chunk_stats_path)
 
     model_10x10_counts_df = tables_to_compare_dict[cn.counts_1x1_in_10x10]
+
+    # Limits the pixel counts in the model output df to just the model outputs that are being aggregated in this step.
+    # That way, pixel count differences between the core model and the aggregation aren't being reported at the end for
+    # model outputs that aren't being run here.
+    # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69437ae5-a94c-8326-b6d4-ad0dab6bb903
+    pattern = "|".join(vars_to_process)
+    model_10x10_counts_df = model_10x10_counts_df[model_10x10_counts_df["layer_name"].str.contains(pattern, regex=True, na=False)]
 
 
     ### Step 3: Create 10x10 deg outputs

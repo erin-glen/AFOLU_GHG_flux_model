@@ -2568,8 +2568,6 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
             var_end_time = time.time()
             main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
-            sys.quit()
-
 
         # Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
         zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_without_zarr_stats_total,
