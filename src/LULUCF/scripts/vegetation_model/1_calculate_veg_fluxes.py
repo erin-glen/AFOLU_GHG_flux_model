@@ -2398,7 +2398,8 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
         # Creates the global mega-zarr with metadata only
         zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
-                                    ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
+                                    # ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
+                                    (1, chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
@@ -2520,9 +2521,15 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
             zarr_chunk_stats_workers = min(50, n_workers)
 
-            main_logger.info(f"Resizing cluster {zarr_chunk_stats_workers} workers")
+            main_logger.info(f"Resizing cluster to {zarr_chunk_stats_workers} workers incrementally: {uu.timestr()}")
 
-            resize_cluster.resize_coiled_cluster(cluster_name, zarr_chunk_stats_workers)
+            # Increases worker count more gradually than jumping up to the full number all at once
+            # because that can cause failures.
+            # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
+            for target in [int(zarr_chunk_stats_workers*0.1), int(zarr_chunk_stats_workers*0.25),
+                           int(zarr_chunk_stats_workers*0.5), int(zarr_chunk_stats_workers)]:
+                resize_cluster.resize_coiled_cluster(cluster_name, target)
+                time.sleep(30)
 
         # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
         all_merged_tables = []

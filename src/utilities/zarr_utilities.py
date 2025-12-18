@@ -194,7 +194,7 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
         mapper = fs.get_mapper(mega_zarr_path)
         z = zarr.open(mapper, mode="r+")
 
-        lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}: {uu.timestr()}", False, logger_worker)
+        lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}: {uu.timestr()}", is_large_run, logger_worker)
 
         # Iterates through each output that we want to include in the zarr and each interval to add it
         for output_to_zarr_pattern in outputs_to_zarr:

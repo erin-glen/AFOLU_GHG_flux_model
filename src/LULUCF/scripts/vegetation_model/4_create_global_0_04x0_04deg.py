@@ -7,6 +7,10 @@ They are not to be used for calculations or statistics.
 
 Can only run on 10x10 degree tiles already in 0.04x0.04 deg resolution.
 
+For testing, it can be run on a specified number of datasets, years, and/or tile_ids.
+It can't be run based on the extent of a shapefile or bounding box; the only way to geographically limit this
+is by telling it to run on only the X first tiles.
+
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
@@ -28,13 +32,10 @@ python -m src.LULUCF.scripts.vegetation_model.4_create_global_0_04x0_04deg -cn v
 """
 
 import argparse
-import sys
 import time
 import psutil
-import rasterio
 from osgeo import gdal
 import fsspec
-from dask import delayed, compute
 import os
 import re
 import tempfile
@@ -74,8 +75,6 @@ def gdal_translate_progress(pct, message, data):
 
 
 def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path, no_upload, is_large_run):
-
-    process = psutil.Process(os.getpid())
 
     logger_worker = lu.setup_logging_worker()
 
@@ -213,8 +212,8 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
     main_logger.info(f"no_upload: {no_upload}")
 
     # Outputs to turn into 10x10 tile
-    # full_list_of_vars = cn.full_outputs_to_zarr   # If all variables are to be made into 10x10s (but very expensive)
-    full_list_of_vars = cn.veg_summative_output_patterns + [cn.land_state_pattern] # Summative outputs + land state nodes
+    # full_list_of_vars = cn.full_outputs_to_zarr   # If all variables were made into 10x10s
+    full_list_of_vars = cn.veg_summative_output_patterns
 
     # Limits the processed variables to the supplied number (for testing)
     if first_variables_to_process:
@@ -292,14 +291,12 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Creat global 0.04x0.04 deg output maps.")
+    parser = argparse.ArgumentParser(description="Create global 0.04x0.04 deg output maps.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-rd', '--input_date', help='Date of run, in YYYYMMDD')
-    parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-fv', '--first_variables_to_process', type=int, help='Number of variables to process from raw mega-zarr (for testing)')
     parser.add_argument('-ft', '--first_tiles_to_process', type=int, help='Number of tiles to process (for testing)')
     parser.add_argument('-fy', '--first_years_to_process', type=int, help='Number of years to process from raw mega-zarr (for testing)')
-    parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
