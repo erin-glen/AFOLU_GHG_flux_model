@@ -6,11 +6,7 @@ python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stoc
 
 Coiled small test (1x1 deg):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn LULUCF_mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn LULUCF_mineral_soil -bb 110 -1 111 0 -cs 10
-
-Coiled 10x10 deg test (not using):
-python -m src.utilities.create_cluster -n 1 -t 1 -m 128 -cn LULUCF_mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn LULUCF_mineral_soil -bb 110 -10 120 0 -cs 10
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn LULUCF_mineral_soil -bb 110 -1 111 0 -cs 10 --create_zarr
 
 Coiled large shapefile test:
 python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn LULUCF_mineral_soil
@@ -282,7 +278,7 @@ def create_soil_C_density_and_change_tiles(bounds, is_final, stage, no_upload, n
     return return_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, run_date, run_local=False, no_stats=False, no_log=False, no_upload=False,
+def main(cluster_name, run_date, run_local=False, no_stats=False, no_log=False, no_upload=False, create_zarr=False,
          chunk_shapefile_uri=False, bounding_box=None, chunk_size=None, first_chunks=None, log_note=None):
 
     ### Step 1: Preparation
@@ -293,7 +289,7 @@ def main(cluster_name, run_date, run_local=False, no_stats=False, no_log=False, 
 
     # Runs chunks in batches of specified size.
     # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
-    batch_size = 3000
+    batch_size = 3200
     # batch_size = 3  # For testing batch processing
 
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -479,6 +475,7 @@ if __name__ == "__main__":
     parser.add_argument('--no_stats', action='store_true', help='Do not create the chunk stats spreadsheet')
     parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
+    parser.add_argument('--create_zarr', action='store_true', help='Create and populate global mega-zarr with model outputs')
 
     args = parser.parse_args()
 
@@ -494,7 +491,8 @@ if __name__ == "__main__":
     no_stats = args.no_stats
     no_log = args.no_log
     no_upload = args.no_upload
+    create_zarr = args.create_zarr
 
     # Create the cluster with command line arguments
-    main(cluster_name, run_date, run_local, no_stats, no_log, no_upload, chunk_shapefile_uri,
+    main(cluster_name, run_date, run_local, no_stats, no_log, no_upload, create_zarr, chunk_shapefile_uri,
          bounding_box=bounding_box, chunk_size=chunk_size, first_chunks=first_chunks, log_note=log_note)

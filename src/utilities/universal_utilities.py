@@ -34,6 +34,8 @@ import random
 import zarr
 import tempfile
 import rasterio.errors
+from urllib.parse import urlparse
+import threading
 
 
 # Turns off a FutureWarning about gdal.UseExceptions() vs. gdal.DontUseExceptions()
@@ -660,6 +662,42 @@ def stage_duration(start_time_str, end_time_str, stage, logger, format="full"):
 
     logger.info(f"Elapsed time for {stage}: {end_time - start_time}" + "\n")
 
+# To help with staggering HTTPS connection to OpenGeoHub data so it doesn't get overwhelmed,
+# per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
+def _is_opengeohub(uri: str) -> bool:
+    try:
+        return urlparse(uri).netloc.endswith("s3.opengeohub.org")
+    except Exception:
+        return False
+
+# Per-worker throttle
+_OPENGEOHUB_LOCK = threading.Lock()
+_OPENGEOHUB_ACTIVE = 0
+
+# To help with staggering HTTPS connection to OpenGeoHub data so it doesn't get overwhelmed,
+# per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
+def _opengohub_stagger(logger_worker, uri):
+    global _OPENGEOHUB_ACTIVE
+
+    with _OPENGEOHUB_LOCK:
+        _OPENGEOHUB_ACTIVE += 1
+        active = _OPENGEOHUB_ACTIVE
+
+    # Delay scales with contention
+    base_delay = 0.5   # seconds
+    max_delay = 5.0
+
+    delay = min(max_delay, base_delay * active)
+    delay += random.uniform(0.0, 0.5)
+
+    lu.print_and_log(
+        f"OpenGeoHub stagger: active={active}, sleeping={delay:.2f}s for {uri}",
+        False,
+        logger_worker,
+    )
+
+    time.sleep(delay)
+
 
 # Lazily opens tile within provided bounds (i.e. one chunk) and returns as a numpy array.
 # If it can't open the uri for the chunk (tile does not exist), it creates a numpy array of all 0s
@@ -687,7 +725,15 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
     # If too many requests to s3 are being made, the script terminates for safety.
     # https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68c3235e-a590-832d-bfdc-c1531416c311
     for attempt in range(MAX_RETRIES):
+
+        active_incremented = False
+
         try:
+            # IMPORTANT: stagger immediately before opening HTTP connection
+            if _is_opengeohub(uri):
+                _opengohub_stagger(logger_worker, uri)
+                active_incremented = True
+
             # Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
             # The more files in an s3 folder, the longer it takes to access them without this environment variable.
             # It takes about 9 minutes to access the inputs for a 1x1 deg summative output without this and <1 minute with it.
@@ -732,9 +778,24 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
             # Retryable errors-- these mean that the input exists but it's not being successfully accessed,
             # perhaps because of too many simultaneous requests to s3.
             # List of keywords for attempting retries is just from encountering various issues over time and including them here
-            if any(keyword in err_msg for keyword in ["SlowDown", "Please reduce", "503", "Read failed", "previous exception", "internal error", "not recognized"]):
+            retryable_keywords = [
+                # existing S3-ish/transient
+                "SlowDown", "Please reduce", "503", "Read failed", "previous exception", "internal error",
+                "not recognized",
+                # HTTP/CURL-ish transient
+                # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
+                "CURL", "Recv failure", "Connection reset by peer", "Connection timed out", "Timeout",
+                "Operation timed out",
+                "Could not resolve host", "Failed to connect", "Empty reply from server", "TLS", "SSL"
+            ]
+
+            if any(keyword in err_msg for keyword in retryable_keywords):
                 if attempt < MAX_RETRIES - 1:
-                    sleep_time = (2 ** attempt) + random.uniform(0.1, 0.5)
+                    # Additional jitter for accessing OpenGeoHub because I was hitting it too quickly,
+                    # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
+                    base = 1.0
+                    cap = 30.0
+                    sleep_time = min(cap, base * (2 ** attempt)) + random.uniform(0.0, 1.0)
                     lu.print_and_log(f"Retryable S3 error '{err_msg}' for {uri} on attempt {attempt}. Retrying in {sleep_time:.2f}s...: {timestr()}", False, logger_worker)
                     time.sleep(sleep_time)
                     continue
@@ -749,6 +810,14 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
                 data = np.full(expected_shape, 0, dtype=numpy_dtype)
                 status = f"Can't access dataset {uri} for {bounds_str}. Returning array of all 0s: {err_msg}"
                 return data, status
+
+        finally:
+            # ---- ALWAYS decrement if we incremented ----
+            if active_incremented:
+                with _OPENGEOHUB_LOCK:
+                    global _OPENGEOHUB_ACTIVE
+                    _OPENGEOHUB_ACTIVE -= 1
+                    assert _OPENGEOHUB_ACTIVE >= 0, "OpenGeoHub active counter went negative"
 
 
 # Prepares list of chunks to download.
@@ -771,6 +840,7 @@ def prepare_to_download_chunk(bounds, download_dict, chunk_length_pixels, is_fin
     # Submits requests to S3 for input chunks but doesn't actually download them yet.
     # This queueing of the requests before downloading then speeds up the downloading.
     # Approach is to download all the input chunks up front for every year to make downloading more efficient, even though it means storing more upfront.
+    # BTW, the threads per worker for this is vCPU+4 according to ChatGPT, so that's 6 threads/worker on a vCPU worker.
     with concurrent.futures.ThreadPoolExecutor() as executor:
         lu.print_and_log(f"Requesting data in chunk {bounds_str} in {tile_id}: {timestr()}", is_final, logger_worker)
 
