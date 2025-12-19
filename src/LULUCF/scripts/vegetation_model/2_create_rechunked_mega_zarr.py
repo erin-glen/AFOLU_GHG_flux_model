@@ -153,7 +153,9 @@ def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False,
 
     # Creates s3 paths for the raw and rechunked mega-zarrs
     raw_mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, cn.chunk_dims, 'annual', model_type, input_date, main_logger)
-    rechunked_mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, cn.zarr_pixel_chunks, 'annual', model_type, input_date, main_logger)
+    rechunked_mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr,
+                                                        f"{len(cn.interval_end_years_annual)}x{cn.chunk_dims}x{cn.chunk_dims}",
+                                                        'annual', model_type, input_date, main_logger)
 
     main_logger.info(f"Raw mega-zarr path: {raw_mega_zarr_path}")
     main_logger.info(f"Rechunked mega-zarr path: {rechunked_mega_zarr_path}")
@@ -177,17 +179,14 @@ def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False,
         is_large_run = True
         main_logger.info(f"Running as large-scale run model: {is_large_run}")
 
+    full_list_of_vars = cn.veg_summative_output_patterns + [cn.land_state_pattern] # Summative outputs + land state nodes
+
     # Limits the processed variables to the supplied number (for testing)
     if first_variables_to_process:
-        vars_to_process = cn.full_outputs_to_zarr[0:first_variables_to_process]
+        vars_to_process = full_list_of_vars[0:first_variables_to_process]
     else:
-        # vars_to_process = cn.full_outputs_to_zarr
-        vars_to_process = [  #TODO testing
-            # cn.gross_emis_all_C_pools_CO2_only_pattern, cn.gross_emis_all_C_pools_non_CO2_only_pattern, cn.gross_emis_all_C_pools_all_gases_pattern,
-            # cn.gross_removals_all_C_pools_pattern,
-            # cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
-            # cn.non_soil_c_modeled_dens_pattern,
-            cn.land_state_pattern]
+        # vars_to_process = cn.veg_summative_output_patterns
+        vars_to_process = full_list_of_vars
     main_logger.info(f"Variables to rechunk and compare chunk stats for: {vars_to_process} out of {len(cn.full_outputs_to_zarr)}")
 
     # Limits the processed years to the supplied number (for testing)
@@ -206,8 +205,10 @@ def main(cluster_name, input_date, run_local, no_log, chunk_shapefile_uri=False,
     start_time = uu.timestr()
 
     # Creates a metadata-only rechunked zarr that will be populated with rechunked data copied in
+    # zu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, len(cn.interval_end_years_annual),
+    #                                (1, cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
     zu.initialize_global_mega_zarr(rechunked_mega_zarr_path, vars_to_process, len(cn.interval_end_years_annual),
-                                   (1, cn.zarr_pixel_chunks, cn.zarr_pixel_chunks), main_logger)
+                                   (len(cn.interval_end_years_annual), cn.chunk_dims, cn.chunk_dims), main_logger)
 
     fs = fsspec.filesystem("s3", anon=False)
     source_mapper = fs.get_mapper(rechunked_mega_zarr_path)
@@ -372,14 +373,14 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Create a global rechunked mega-zarr.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-rd', '--input_date', help='Date of run, in YYYYMMDD')
+    parser.add_argument('-rd', '--input_date', required=True, help='Date of run, in YYYYMMDD')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-fv', '--first_variables_to_process', type=int, help='Number of variables to process from raw mega-zarr (for testing)')
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-fy', '--first_years_to_process', type=int, help='Number of years to process from raw mega-zarr (for testing)')
     parser.add_argument('-tpsc', '--test_print_stats_chunk', nargs=4, type=float, help='Bounding box to print rechunked zarr stats from: W, S, E, N (degrees)')
-    parser.add_argument('-mcstn', '--model_chunk_stats_table_name', help='s3 path for model chunk stats table that will be compared with zarr chunk stats')
+    parser.add_argument('-mcstn', '--model_chunk_stats_table_name', required=True, help='s3 path for model chunk stats table that will be compared with zarr chunk stats')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')

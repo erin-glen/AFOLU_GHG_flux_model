@@ -293,7 +293,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create global 0.04x0.04 deg output maps.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-rd', '--input_date', help='Date of run, in YYYYMMDD')
+    parser.add_argument('-rd', '--input_date', required=True, help='Date of run, in YYYYMMDD')
     parser.add_argument('-fv', '--first_variables_to_process', type=int, help='Number of variables to process from raw mega-zarr (for testing)')
     parser.add_argument('-ft', '--first_tiles_to_process', type=int, help='Number of tiles to process (for testing)')
     parser.add_argument('-fy', '--first_years_to_process', type=int, help='Number of years to process from raw mega-zarr (for testing)')
