@@ -52,6 +52,7 @@ import xarray as xr
 from concurrent.futures import ThreadPoolExecutor
 from dask.distributed import print
 from numba import jit
+from datetime import date
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -2138,8 +2139,8 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     return return_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False, create_zarr=False,
-         chunk_shapefile_uri=False, bounding_box=None, chunk_size_deg=None, first_chunks=None, log_note=None):
+def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False, create_zarr=False,
+         chunk_shapefile_uri=False, bounding_box=None, chunk_size_deg=None, first_chunks=None, run_date=None, log_note=None):
 
     ### Step 1: Preparation
 
@@ -2171,6 +2172,11 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
+
+    # Sets date as today if it's not supplied
+    if not run_date:
+        today = date.today()
+        run_date = today.strftime("%Y%m%d")
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
@@ -2396,10 +2402,10 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         outputs_to_zarr = cn.full_outputs_to_zarr
         # outputs_to_zarr = cn.full_outputs_to_zarr[0:2] # For testing
 
-        # Creates the global mega-zarr with metadata only
-        zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
-                                    # ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
-                                    (1, chunk_size_pixels, chunk_size_pixels), main_logger)
+        # # Creates the global mega-zarr with metadata only
+        # zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+        #                             # ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
+        #                             (1, chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
@@ -2642,5 +2648,5 @@ if __name__ == "__main__":
     create_zarr = args.create_zarr
 
     # Create the cluster with command line arguments
-    main(cluster_name, run_date, year_range, run_local, no_stats, no_log, no_upload, create_zarr, chunk_shapefile_uri,
-         bounding_box=bounding_box, chunk_size_deg=chunk_size_deg, first_chunks=first_chunks, log_note=log_note)
+    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, create_zarr, chunk_shapefile_uri,
+         bounding_box=bounding_box, chunk_size_deg=chunk_size_deg, first_chunks=first_chunks, run_date=run_date, log_note=log_note)
