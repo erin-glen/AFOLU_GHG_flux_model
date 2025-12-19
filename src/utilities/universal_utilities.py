@@ -35,7 +35,6 @@ import zarr
 import tempfile
 import rasterio.errors
 from urllib.parse import urlparse
-import threading
 
 
 # Turns off a FutureWarning about gdal.UseExceptions() vs. gdal.DontUseExceptions()
@@ -662,42 +661,6 @@ def stage_duration(start_time_str, end_time_str, stage, logger, format="full"):
 
     logger.info(f"Elapsed time for {stage}: {end_time - start_time}" + "\n")
 
-# To help with staggering HTTPS connection to OpenGeoHub data so it doesn't get overwhelmed,
-# per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
-def _is_opengeohub(uri: str) -> bool:
-    try:
-        return urlparse(uri).netloc.endswith("s3.opengeohub.org")
-    except Exception:
-        return False
-
-# Per-worker throttle
-_OPENGEOHUB_LOCK = threading.Lock()
-_OPENGEOHUB_ACTIVE = 0
-
-# To help with staggering HTTPS connection to OpenGeoHub data so it doesn't get overwhelmed,
-# per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
-def _opengohub_stagger(logger_worker, uri):
-    global _OPENGEOHUB_ACTIVE
-
-    with _OPENGEOHUB_LOCK:
-        _OPENGEOHUB_ACTIVE += 1
-        active = _OPENGEOHUB_ACTIVE
-
-    # Delay scales with contention
-    base_delay = 0.5   # seconds
-    max_delay = 5.0
-
-    delay = min(max_delay, base_delay * active)
-    delay += random.uniform(0.0, 0.5)
-
-    lu.print_and_log(
-        f"OpenGeoHub stagger: active={active}, sleeping={delay:.2f}s for {uri}",
-        False,
-        logger_worker,
-    )
-
-    time.sleep(delay)
-
 
 # Lazily opens tile within provided bounds (i.e. one chunk) and returns as a numpy array.
 # If it can't open the uri for the chunk (tile does not exist), it creates a numpy array of all 0s
@@ -717,6 +680,9 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
     # Number of retries for submitting requests to s3
     MAX_RETRIES = 11
 
+    # Determines if the uri being accessed is from OpenGeoHub (because it needs special request staggering)
+    is_OGH_data = urlparse(uri).netloc.endswith("s3.opengeohub.org")
+
     # If the uri exists, the relevant window is opened and returned and returned as an array.
     # Note that this chunk could still just have NoData values, which would be downloaded.
     # If the uri exists but the raster just doesn't extend there (e.g., far north), the array has to be padded to
@@ -725,14 +691,20 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
     # If too many requests to s3 are being made, the script terminates for safety.
     # https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68c3235e-a590-832d-bfdc-c1531416c311
     for attempt in range(MAX_RETRIES):
-
-        active_incremented = False
-
         try:
-            # IMPORTANT: stagger immediately before opening HTTP connection
-            if _is_opengeohub(uri):
-                _opengohub_stagger(logger_worker, uri)
-                active_incremented = True
+
+            # Accessing OGH data in a burst also causes fatal errors.
+            # This specifically staggers and slows down requests for OGH data,
+            # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
+            if is_OGH_data and attempt == 0:
+                time.sleep(random.uniform(0.0, 0.2))
+
+            if is_OGH_data and attempt > 0:
+                base = 1.0
+                cap = 30.0
+                sleep_time = min(cap, base * (2 ** attempt)) + random.uniform(0.0, 1.0)
+                lu.print_and_log(f"Accessing OGH data from {uri} on retry {attempt}. Sleeping for {sleep_time:.2f}s...: {timestr()}",False, logger_worker)
+                time.sleep(sleep_time)
 
             # Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
             # The more files in an s3 folder, the longer it takes to access them without this environment variable.
@@ -810,14 +782,6 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
                 data = np.full(expected_shape, 0, dtype=numpy_dtype)
                 status = f"Can't access dataset {uri} for {bounds_str}. Returning array of all 0s: {err_msg}"
                 return data, status
-
-        finally:
-            # ---- ALWAYS decrement if we incremented ----
-            if active_incremented:
-                with _OPENGEOHUB_LOCK:
-                    global _OPENGEOHUB_ACTIVE
-                    _OPENGEOHUB_ACTIVE -= 1
-                    assert _OPENGEOHUB_ACTIVE >= 0, "OpenGeoHub active counter went negative"
 
 
 # Prepares list of chunks to download.
