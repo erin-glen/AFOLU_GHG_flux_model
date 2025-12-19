@@ -2404,8 +2404,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
         # Creates the global mega-zarr with metadata only
         zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
-                                    # ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
-                                    (1, chunk_size_pixels, chunk_size_pixels), main_logger)
+                                    ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
