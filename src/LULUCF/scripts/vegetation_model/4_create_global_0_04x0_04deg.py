@@ -308,11 +308,9 @@ if __name__ == "__main__":
 
     cluster_name = args.cluster_name
     input_date = args.input_date
-    bounding_box = args.bounding_box
     first_tiles_to_process = args.first_tiles_to_process
     first_variables_to_process = args.first_variables_to_process
     first_years_to_process = args.first_years_to_process
-    chunk_shapefile_uri = args.chunk_shapefile_uri
     log_note = args.log_note
 
     run_local = args.run_local

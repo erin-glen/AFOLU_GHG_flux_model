@@ -198,7 +198,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
             outfile.write(f"  Average and stdev: {avg_zarr_pop_proc_times__sec:.0f} seconds (stdev: {stdev_zarr_pop_proc_times__sec:.0f})\n")
             outfile.write(f"  Min and max: {min_zarr_pop_proc_times__sec:.0f} - {max_zarr_pop_proc_times__sec:.0f}\n")
 
-            outfile.write(f"Processing stats for geotif upload code ({len(avg_uploads_proc_times__sec)} tasks):\n")
+            outfile.write(f"Processing stats for geotif upload code ({len(uploads_proc_times__sec)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_uploads_proc_times__sec:.0f} seconds (stdev: {stdev_uploads_proc_times__sec:.0f})\n")
             outfile.write(f"  Min and max: {min_uploads_proc_times__sec:.0f} - {max_uploads_proc_times__sec:.0f}\n")
 
