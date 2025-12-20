@@ -520,41 +520,65 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
 
-    ### Step 4: Aggregates logs
+    ### Step 4: Counts 10x10 deg tiles
 
-    output_dir_list_per_ha = uu.create_output_dir_name_list(vars_to_process, 'annual', cn.first_model_year_annual,
-                                                     chunk_size_pixels, model_type, interval_end_years,
+    # Counts per-hectare outputs
+    output_dir_list_per_ha = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, 'annual', cn.first_model_year_annual,
+                                                     cn.full_raster_dims, model_type, interval_end_years,
                                                      interval_year_diff_list, input_date, False, "per_ha")
     output_dir_list_per_ha.sort()  # Alphabetically order the outputs (modifies output_dir_list_per_ha)
     if is_large_run:
         main_logger.info(f"output_dir_list_per_ha for {stage}:")
         for item in output_dir_list_per_ha:
             main_logger.info(f"  {item}")
-    print(output_dir_list_per_ha)
+    # print(output_dir_list_per_ha)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
-    if not no_upload and is_large_run:
+    # if not no_upload and is_large_run:
+    if not no_upload: #TODO testing
         for output_folder in output_dir_list_per_ha:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output per-ha rasters in {output_folder}: {file_count}")
             # print(geotiff_files)
 
-    output_dir_list_per_pixel = uu.create_output_dir_name_list(vars_to_process, 'annual', cn.first_model_year_annual,
-                                                     chunk_size_pixels, model_type, interval_end_years,
+    # Counts per-pixel outputs
+    output_dir_list_per_pixel = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, 'annual', cn.first_model_year_annual,
+                                                     cn.full_raster_dims, model_type, interval_end_years,
                                                      interval_year_diff_list, input_date, False, "per_pixel")
-    output_dir_list_per_pixel.sort()  # Alphabetically order the outputs (modifies output_dir_list_per_pixel)
+    output_dir_list_per_pixel.sort()
     if is_large_run:
         main_logger.info(f"output_dir_list_per_pixel for {stage}:")
         for item in output_dir_list_per_pixel:
             main_logger.info(f"  {item}")
-    print(output_dir_list_per_pixel)
+    # print(output_dir_list_per_pixel)
 
-    # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
-    if not no_upload and is_large_run:
+    # if not no_upload and is_large_run:
+    if not no_upload: #TODO testing
         for output_folder in output_dir_list_per_pixel:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output per-pixel rasters in {output_folder}: {file_count}")
             # print(geotiff_files)
+
+    # Counts 0.04x0.04 deg outputs
+    output_dir_list_aggreg = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, 'annual', cn.first_model_year_annual,
+                                                     '160', model_type, interval_end_years,
+                                                     interval_year_diff_list, input_date, False, "_0_04deg_yr")
+    output_dir_list_aggreg.sort()
+    if is_large_run:
+        main_logger.info(f"output_dir_list_aggreg for {stage}:")
+        for item in output_dir_list_aggreg:
+            main_logger.info(f"  {item}")
+    # print(output_dir_list_aggreg)
+
+    # if not no_upload and is_large_run:
+    if not no_upload: #TODO testing
+        for output_folder in output_dir_list_aggreg:
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output aggregated rasters in {output_folder}: {file_count}")
+            # print(geotiff_files)
+
+
+    # Step 5: Aggregates worker and local logs
 
     # Sets it so that no worker logs are created if doing a local run
     if not run_local:

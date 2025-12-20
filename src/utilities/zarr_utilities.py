@@ -25,7 +25,7 @@ def create_mega_zarr_path(zarr_basic_path, chunk_size_pixels, interval_type, mod
     mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
     mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
 
-    main_logger.info(f"Zarr path created: {mega_zarr_path}")
+    main_logger.info(f"Zarr path to use: {mega_zarr_path}")
 
     return mega_zarr_path
 
@@ -43,12 +43,20 @@ def latlon_to_global_zarr_indices(lat, lon, resolution):
 
 # Creates a Zarr group with individual datasets on S3 with coordinate arrays (x/y/year),
 # spatial_ref metadata, and dataset definitions WITHOUT allocating global arrays.
-# That is, it doesn't computer anything upfront or locally. It just creates the zarr group
+# That is, it doesn't compute anything upfront or locally. It just creates the zarr group
 # with datasets inside.
 # In addition to x and y dimensions, there is also a time dimension (intervals), which uses an index (not the actual year).
 # This zarr-related code from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
 # and maybe some later chats, too.
 def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, main_logger, fill_value= np.nan):
+
+    fs = fsspec.filesystem("s3", anon=False)
+
+    # Checks if zarr already exists at that location. Does not make one if it already exits.
+    # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6945fc55-7d3c-832d-9724-c718ec0abbe3
+    if fs.exists(store_url):
+        main_logger.info(f"Mega-zarr already exists at {store_url}. Skipping initialization: {uu.timestr()}")
+        return
 
     # Computes dimensions
     lat_size = int(180 / cn.resolution)
@@ -141,7 +149,6 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
 
     # Writes only metadata to s3 (lazy), not values
     main_logger.info(f"Writing metadata for mega-zarr: {uu.timestr()}")
-    fs = fsspec.filesystem("s3", anon=False)
     mapper = fs.get_mapper(store_url)
     ds.to_zarr(
         store=mapper,
