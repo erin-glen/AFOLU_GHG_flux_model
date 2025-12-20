@@ -534,8 +534,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
     # print(output_dir_list_per_ha)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
-    # if not no_upload and is_large_run:
-    if not no_upload: #TODO testing
+    if not no_upload and is_large_run:
         for output_folder in output_dir_list_per_ha:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output per-ha rasters in {output_folder}: {file_count}")
@@ -552,8 +551,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
             main_logger.info(f"  {item}")
     # print(output_dir_list_per_pixel)
 
-    # if not no_upload and is_large_run:
-    if not no_upload: #TODO testing
+    if not no_upload and is_large_run:
         for output_folder in output_dir_list_per_pixel:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output per-pixel rasters in {output_folder}: {file_count}")
@@ -570,8 +568,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
             main_logger.info(f"  {item}")
     # print(output_dir_list_aggreg)
 
-    # if not no_upload and is_large_run:
-    if not no_upload: #TODO testing
+    if not no_upload and is_large_run:
         for output_folder in output_dir_list_aggreg:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output aggregated rasters in {output_folder}: {file_count}")

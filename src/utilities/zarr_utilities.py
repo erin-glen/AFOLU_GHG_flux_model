@@ -604,6 +604,9 @@ def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_with
         main_logger.info(f"Uploading chunk stats comparison parquet tables to s3: {uu.timestr()}")
 
         for parquet_name, parquet_path in zip(zarr_comparison_stats_name, zarr_comparison_stats_path):
+            # No zarr stats comparison for 1x1_counts_in_10x10 table, so don't upload that
+            if '1x1_counts_in_10x10' in parquet_name:
+                continue
             parquet_folder = parquet_path.split('/')[1]   # parquet_YYYYMMDD_HH_MM_SS
             s3_key = f"{cn.s3_chunk_stats_path}{parquet_folder}/{parquet_name}"
             # print(cn.s3_chunk_stats_path)
