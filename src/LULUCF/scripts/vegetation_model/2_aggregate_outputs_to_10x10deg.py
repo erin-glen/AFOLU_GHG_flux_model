@@ -337,6 +337,10 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
 
+    # Calculates the interval type, difference between start and end years of intervals, and the model output years
+    # for the model run
+    interval_type, interval_year_diff_list, interval_length_list, interval_end_years = uu.get_interval_info(cn.first_model_year_annual, cn.last_model_year_annual, main_logger)
+
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
     # chunk_ids and iso code used for chunk stats.
@@ -481,7 +485,8 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
 
     # Renames the counts in the 1x1 df from ha to pixel so that their tile names match the per-pixel output
     # and they can be joined. Otherwise, the per-pixel tile names won't match the pixel counts from the 1x1s (since they say ha).
-    model_10x10_counts_df['tile_name'] = (
+    # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6945fa31-cd14-8333-bf8a-f71cc6918ae6
+    model_10x10_counts_df.loc[:, 'tile_name'] = (
         model_10x10_counts_df['tile_name'].str.replace('ha', 'pixel', regex=False)
     )
 
@@ -512,10 +517,44 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
     uu.aggregate_10x10_chunk_stats(merged_10x10_counts_per_ha_df, f"{stage}_per_ha", no_upload, main_logger)
     uu.aggregate_10x10_chunk_stats(merged_10x10_counts_per_pixel_df, f"{stage}_per_pixel", no_upload, main_logger)
 
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+
 
     ### Step 4: Aggregates logs
 
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+    output_dir_list_per_ha = uu.create_output_dir_name_list(vars_to_process, 'annual', cn.first_model_year_annual,
+                                                     chunk_size_pixels, model_type, interval_end_years,
+                                                     interval_year_diff_list, input_date, False, "per_ha")
+    output_dir_list_per_ha.sort()  # Alphabetically order the outputs (modifies output_dir_list_per_ha)
+    if is_large_run:
+        main_logger.info(f"output_dir_list_per_ha for {stage}:")
+        for item in output_dir_list_per_ha:
+            main_logger.info(f"  {item}")
+    print(output_dir_list_per_ha)
+
+    # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
+    if not no_upload and is_large_run:
+        for output_folder in output_dir_list_per_ha:
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output per-ha rasters in {output_folder}: {file_count}")
+            # print(geotiff_files)
+
+    output_dir_list_per_pixel = uu.create_output_dir_name_list(vars_to_process, 'annual', cn.first_model_year_annual,
+                                                     chunk_size_pixels, model_type, interval_end_years,
+                                                     interval_year_diff_list, input_date, False, "per_pixel")
+    output_dir_list_per_pixel.sort()  # Alphabetically order the outputs (modifies output_dir_list_per_pixel)
+    if is_large_run:
+        main_logger.info(f"output_dir_list_per_pixel for {stage}:")
+        for item in output_dir_list_per_pixel:
+            main_logger.info(f"  {item}")
+    print(output_dir_list_per_pixel)
+
+    # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
+    if not no_upload and is_large_run:
+        for output_folder in output_dir_list_per_pixel:
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output per-pixel rasters in {output_folder}: {file_count}")
+            # print(geotiff_files)
 
     # Sets it so that no worker logs are created if doing a local run
     if not run_local:

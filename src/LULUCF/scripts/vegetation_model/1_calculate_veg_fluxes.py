@@ -2400,7 +2400,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
         # These variables are added to the mega-zarr
         outputs_to_zarr = cn.full_outputs_to_zarr
-        # outputs_to_zarr = cn.full_outputs_to_zarr[0:2] # For testing
 
         # Creates the global mega-zarr with metadata only
         zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),

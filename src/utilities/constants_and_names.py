@@ -7,8 +7,7 @@ import numpy as np
 ########
 
 ### Model version
-veg_model_version = "1.0.3_AUS_only_chunk_1x4000x4000"
-# veg_model_version = "1.0.3_WWF_sites"
+veg_model_version = "1.0.3_test"
 veg_model_version_underscore = veg_model_version.replace(".", "_")
 
 organic_soil_model_version = "0.9.7"
@@ -835,8 +834,8 @@ pixel_area_global_zarr = "s3://gfw2-data/climate/AFOLU_flux_model/contextual_lay
 model_type_placeholder = "MODEL_TYPE"
 
 veg_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_{veg_model_version_underscore}/"
-veg_outputs_path_mega_zarr = f"{veg_outputs_path}mega_zarr/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"
-# veg_outputs_path_mega_zarr = f"{veg_outputs_path}mega_zarr/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/vegetation_zarr.zarr" #TODO try this
+# veg_outputs_path_mega_zarr = f"{veg_outputs_path}mega_zarr/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"
+veg_outputs_path_mega_zarr = f"{veg_outputs_path}mega_zarr/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/vegetation_zarr.zarr"
 
 # List of output directories from vegetation model with placeholders for parts of the directory
 veg_core_output_dirs = [
