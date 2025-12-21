@@ -223,14 +223,18 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
     ny = lat_end - lat_start
     nx = lon_end - lon_start
 
+    buffers = {}
+
     # Writes each variable as a full time block
     for output_to_zarr_pattern, zarr_array in zarr_arrays.items():
 
-        # Allocates full (time, y, x) block
-        block = np.empty(
-            (n_years, ny, nx),
-            dtype=zarr_array.dtype
-        )
+        dtype = zarr_array.dtype
+
+        # Allocate buffer ONCE per dtype
+        if dtype not in buffers:
+            buffers[dtype] = np.empty((n_years, ny, nx), dtype=dtype)
+
+        block = buffers[dtype]
 
         has_any_data = False
 
