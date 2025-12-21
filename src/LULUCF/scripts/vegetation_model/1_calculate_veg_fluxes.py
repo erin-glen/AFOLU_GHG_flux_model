@@ -2476,16 +2476,15 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     ### Step 4: Counts files in output folders, aggregates chunk stats for 1x1 degree outputs
 
-    # # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
-    # # cluster, not all the workers.
-    # if not run_local:
-    #     workers = client.scheduler_info()["workers"]
-    #     n_workers = len(workers)
-    #
-    #     # Reduces number of workers in the cluster down to 1 if there is more than 10
-    #     if n_workers > 10:
-    #         main_logger.info("Resizing cluster to 1 worker")
-    #         resize_cluster.resize_coiled_cluster(cluster_name, 2)
+    # Resizes cluster down for all subsequent steps (chunk stats, zarr stats comparison, and log aggregation)
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
+
+        # Reduces number of workers in the cluster if there are more than 10
+        if n_workers > 10:
+            main_logger.info("Resizing cluster to 1 worker")
+            resize_cluster.resize_coiled_cluster(cluster_name, n_workers/3)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
     if not no_upload and is_large_run:
