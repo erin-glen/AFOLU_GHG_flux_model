@@ -187,74 +187,141 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
 
 
 # Populates pre-existing global mega-zarr with select output numpy arrays (out_dict_all_dtypes)
+# Accelerated by writing all years at once
+# per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694612e9-0d2c-832f-8b6d-e7cb247ff781
 def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
                   out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id):
 
-    if create_zarr:
+    if not create_zarr:
+        lu.print_and_log(f"Not writing outputs for {bounds_str} in {tile_id} to global zarrs: {uu.timestr()}", False, logger_worker)
+        return
 
-        lu.print_and_log(f"Writing select outputs to global zarr for {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
-        uu.rename_s3_task_file(stage, bounds, "zarr_population_", is_large_run, logger_worker)
-        zarr_start = time.time()
+    lu.print_and_log(f"Writing select outputs to global zarr for {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
 
-        # Opens pre-created global mega-zarr
-        fs = fsspec.filesystem("s3", anon=False)
-        mapper = fs.get_mapper(mega_zarr_path)
-        z = zarr.open(mapper, mode="r+")
+    uu.rename_s3_task_file(stage, bounds, "zarr_population_", is_large_run, logger_worker)
+    zarr_start = time.time()
 
-        lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}: {uu.timestr()}", is_large_run, logger_worker)
+    # Opens pre-created global mega-zarr
+    fs = fsspec.filesystem("s3", anon=False)
+    mapper = fs.get_mapper(mega_zarr_path)
+    z = zarr.open(mapper, mode="r+")
 
-        # Iterates through each output that we want to include in the zarr and each interval to add it
-        for output_to_zarr_pattern in outputs_to_zarr:
-            for i, year in enumerate(interval_end_years):
+    lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}: {uu.timestr()}", is_large_run, logger_worker)
 
-                # lu.print_and_log(f"Writing {output_to_zarr_pattern} for {year} for {bounds_str} to zarr: {uu.timestr()}",
-                #     is_large_run, logger_worker)
+    # Computes spatial indices ONCE (unchanged logic)
+    lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
+    lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
 
-                # Converts bounding box corners to row and column indices
-                lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
-                lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
+    n_years = len(interval_end_years)
+    ny = lat_end - lat_start
+    nx = lon_end - lon_start
 
-                pattern_with_units = add_units_year_to_pattern(output_to_zarr_pattern, year)
+    # Writes each variable as a full time block
+    for output_to_zarr_pattern in outputs_to_zarr:
 
-                # Selects the relevant output numpy array for insertion into zarr.
-                # Only inserts into zarr if that data is in the output dictionary.
-                # That way, it won't try to insert summative outputs in the global zarr when the summative outputs aren't in the output dictionary.
-                if pattern_with_units in out_dict_all_dtypes:
-                    data = out_dict_all_dtypes[pattern_with_units]
+        zarr_array = z[output_to_zarr_pattern]
 
-                    # Writes numpy array to global zarr
-                    z[output_to_zarr_pattern][
-                        i,                  # year index (not the actual year)
-                        lat_start:lat_end,  # rows (Y)
-                        lon_start:lon_end,  # columns (X)
-                    ] = data
+        # Allocates full (time, y, x) block
+        block = np.empty(
+            (n_years, ny, nx),
+            dtype=zarr_array.dtype
+        )
 
-                else:
-                    lu.print_and_log(f"Skipping missing key {pattern_with_units} for inclusion in zarr: {uu.timestr()}", is_large_run, logger_worker)
+        has_any_data = False
+
+        for i, year in enumerate(interval_end_years):
+            pattern_with_units = add_units_year_to_pattern(output_to_zarr_pattern, year)
+
+            if pattern_with_units in out_dict_all_dtypes:
+                block[i, :, :] = out_dict_all_dtypes[pattern_with_units]
+                has_any_data = True
+            else:
+                # Fills with Zarr fill_value if missing
+                fill = zarr_array.fill_value
+                if fill is None:
+                    fill = np.nan
+                block[i, :, :] = fill
+
+        # Only writes if at least one year exists for this variable
+        if has_any_data:
+            zarr_array[
+                0:n_years,
+                lat_start:lat_end,
+                lon_start:lon_end
+            ] = block
+        else:
+            lu.print_and_log(f"Skipping {output_to_zarr_pattern}: no data found for any year", False, logger_worker)
+
+    zarr_end = time.time()
+    lu.print_and_log(f"Wrote outputs to global zarrs for {bounds_str} in {tile_id} in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}",False, logger_worker)
 
 
-        # # Checks min, mean and max values for chunk in the zarr for comparison with chunk stats spreadsheet
-        # # that directly uses original numpy arrays.
-        # # For QC only.
-        # for output_to_zarr_pattern in outputs_to_zarr:
-        #     for year_idx, year in enumerate(interval_end_years):
-        #
-        #         target_box = {
-        #             "lat_min": bounds[1],
-        #             "lat_max": bounds[3],
-        #             "lon_min": bounds[0],
-        #             "lon_max": bounds[2]
-        #         }
-        #
-        #         if "density__AGC" in output_to_zarr_pattern:  # Just calculates and prints for AGC density for QC purposes
-        #             check_region_stats(mega_zarr_path, output_to_zarr_pattern, year_idx, target_box, logger_worker)
-        #
-        zarr_end = time.time()
-        # lu.print_and_log(f"Memory usage after writing to zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
-        lu.print_and_log(f"Wrote outputs to global zarrs for {bounds_str} in {tile_id} in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}",False, logger_worker)
 
-    else:
-        lu.print_and_log(f"Not writing outputs for {bounds_str} in {tile_id} to global zarrs: {uu.timestr()}",False, logger_worker)
+    # if create_zarr:
+    #
+    #     lu.print_and_log(f"Writing select outputs to global zarr for {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
+    #     uu.rename_s3_task_file(stage, bounds, "zarr_population_", is_large_run, logger_worker)
+    #     zarr_start = time.time()
+    #
+    #     # Opens pre-created global mega-zarr
+    #     fs = fsspec.filesystem("s3", anon=False)
+    #     mapper = fs.get_mapper(mega_zarr_path)
+    #     z = zarr.open(mapper, mode="r+")
+    #
+    #     lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}: {uu.timestr()}", is_large_run, logger_worker)
+    #
+    #     # Iterates through each output that we want to include in the zarr and each interval to add it
+    #     for output_to_zarr_pattern in outputs_to_zarr:
+    #         for i, year in enumerate(interval_end_years):
+    #
+    #             # lu.print_and_log(f"Writing {output_to_zarr_pattern} for {year} for {bounds_str} to zarr: {uu.timestr()}",
+    #             #     is_large_run, logger_worker)
+    #
+    #             # Converts bounding box corners to row and column indices
+    #             lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
+    #             lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
+    #
+    #             pattern_with_units = add_units_year_to_pattern(output_to_zarr_pattern, year)
+    #
+    #             # Selects the relevant output numpy array for insertion into zarr.
+    #             # Only inserts into zarr if that data is in the output dictionary.
+    #             # That way, it won't try to insert summative outputs in the global zarr when the summative outputs aren't in the output dictionary.
+    #             if pattern_with_units in out_dict_all_dtypes:
+    #                 data = out_dict_all_dtypes[pattern_with_units]
+    #
+    #                 # Writes numpy array to global zarr
+    #                 z[output_to_zarr_pattern][
+    #                     i,                  # year index (not the actual year)
+    #                     lat_start:lat_end,  # rows (Y)
+    #                     lon_start:lon_end,  # columns (X)
+    #                 ] = data
+    #
+    #             else:
+    #                 lu.print_and_log(f"Skipping missing key {pattern_with_units} for inclusion in zarr: {uu.timestr()}", is_large_run, logger_worker)
+    #
+    #
+    #     # # Checks min, mean and max values for chunk in the zarr for comparison with chunk stats spreadsheet
+    #     # # that directly uses original numpy arrays.
+    #     # # For QC only.
+    #     # for output_to_zarr_pattern in outputs_to_zarr:
+    #     #     for year_idx, year in enumerate(interval_end_years):
+    #     #
+    #     #         target_box = {
+    #     #             "lat_min": bounds[1],
+    #     #             "lat_max": bounds[3],
+    #     #             "lon_min": bounds[0],
+    #     #             "lon_max": bounds[2]
+    #     #         }
+    #     #
+    #     #         if "density__AGC" in output_to_zarr_pattern:  # Just calculates and prints for AGC density for QC purposes
+    #     #             check_region_stats(mega_zarr_path, output_to_zarr_pattern, year_idx, target_box, logger_worker)
+    #     #
+    #     zarr_end = time.time()
+    #     # lu.print_and_log(f"Memory usage after writing to zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
+    #     lu.print_and_log(f"Wrote outputs to global zarrs for {bounds_str} in {tile_id} in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}",False, logger_worker)
+    #
+    # else:
+    #     lu.print_and_log(f"Not writing outputs for {bounds_str} in {tile_id} to global zarrs: {uu.timestr()}",False, logger_worker)
 
 
 # Checks the stats for a bounding box in a zarr for a given dataset and year
