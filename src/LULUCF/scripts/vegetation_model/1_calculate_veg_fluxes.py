@@ -52,6 +52,7 @@ import xarray as xr
 from concurrent.futures import ThreadPoolExecutor
 from dask.distributed import print
 from numba import jit
+from datetime import date
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -265,6 +266,11 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
         veg_h_prev_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}"]
         veg_h_curr_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_{interval_end_year}"]
 
+        # Vegetation height from GPW median vegetation height. Original values are rescaled by 10 (reported in dm) to make them ints,
+        # so converting them to the m (float) values here.
+        GPW_height_prev_block = (in_dict_int16[f"{cn.GPW_MVH_pattern}_{interval_end_year - interval_length}"] / 10).astype('float32')
+        GPW_height_curr_block = (in_dict_int16[f"{cn.GPW_MVH_pattern}_{interval_end_year}"] / 10).astype('float32')
+
         # print(f"{cn.land_cover_pattern}_{interval_end_year - interval_length}:", LC_prev_block)
         # print(f"{cn.land_cover_pattern}_{interval_end_year}:", LC_curr_block)
         # print(f"{cn.vegetation_height_pattern}_{interval_end_year - interval_length}:", veg_h_prev_block)
@@ -378,6 +384,9 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 LC_curr = LC_curr_block[row, col]
                 veg_h_prev = veg_h_prev_block[row, col]
                 veg_h_curr = veg_h_curr_block[row, col]
+
+                GPW_height_prev = GPW_height_prev_block[row, col]
+                GPW_height_curr = GPW_height_curr_block[row, col]
 
                 # Mangrove extent years (1 = mangrove, 0 = no mangrove)
                 mang_1996 = mangrove_extent_1996_block[row, col]
@@ -623,15 +632,24 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 tree_gain = (not tree_prev and tree_curr)
                 tree_loss = (tree_prev and not tree_curr)
 
+                # Gain and loss of vegetation according to Global Pasture Watch vegetation height product (Hunter et al. 2025).
+                # Already rescaled from dm to m in the block processing step above.
+                GPW_short_veg_prev = (GPW_height_prev >= cn.GPW_short_veg_threshold)
+                GPW_short_veg_curr = (GPW_height_curr >= cn.GPW_short_veg_threshold)
+
+                GPW_veg_height_gain = (not GPW_short_veg_prev and GPW_short_veg_curr)
+                GPW_veg_height_loss = (GPW_short_veg_prev and not GPW_short_veg_curr)
+
                 # Booleans of vegetation height classes for start (prev) and end (curr) of current interval based on LC composites
-                short_veg_LC_prev, tall_veg_LC_prev = nu.classify_veg_height(LC_prev)
-                short_veg_LC_curr, tall_veg_LC_curr = nu.classify_veg_height(LC_curr)
+                GLAD_bare_ground_LC_prev, GLAD_short_veg_LC_prev, GLAD_tall_veg_LC_prev = nu.classify_GLAD_composite(LC_prev)
+                GLAD_bare_ground_LC_curr, GLAD_short_veg_LC_curr, GLAD_tall_veg_LC_curr = nu.classify_GLAD_composite(LC_curr)
 
                 water_LC_curr = (LC_curr >= cn.water_min_code) and (LC_curr <= cn.water_max_code)
 
                 SDPT_planted_trees = (planted_forest_type_cell > 0)  # All SDPT planted trees
                 SDPT_oil_palm = (planted_forest_type_cell == cn.SDPT_oil_palm_code)  # Oil palm in SDPT planted trees
                 oil_palm_pre_2000 = (oil_palm_2000_extent_cell == 1) # Oil palm that existed in the year 2000, according to that specific map/input
+
 
                 # Establishes if the interval ends after Descals oil palm planting year. Rules are different for annual and 5-year intervals.
                 # Second condition for each used to exclude NoData (0s) from first year of oil palm.
@@ -938,11 +956,11 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                             state_out = nu.accrete_node(node, 4)    # Permanent loss of mangroves to settlement (124)
                             # print(f"Node code is {state_out}, permanent loss of mangroves to settlement (124)")
 
-                        elif short_veg_LC_curr:
+                        elif GLAD_short_veg_LC_curr:
                             state_out = nu.accrete_node(node, 5)    # Permanent loss of mangroves to short vegetation (125)
                             # print(f"Node code is {state_out}, permanent loss of mangroves to short vegetation (125)")
 
-                        elif tall_veg_LC_curr:
+                        elif GLAD_tall_veg_LC_curr:
                             state_out = nu.accrete_node(node, 6)    # Permanent loss of mangroves to tall vegetation (126)
                             # print(f"Node code is {state_out}, permanent loss of mangroves to tall vegetation (126)")
 
@@ -1034,7 +1052,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                 nu.calc_NT_T(interval_length, RF_AGC_final, RF_BGC_final, c_dens_in_NT_T, deadwood_c_ratio=0, litter_c_ratio=0))
                     else:  # Gain of non-planted trees (22)
                         node = nu.accrete_node(node, 2)
-                        if tall_veg_LC_curr:  # Gain of terrestrial natural forest (221)
+                        if GLAD_tall_veg_LC_curr:  # Gain of terrestrial natural forest (221)
                             state_out = nu.accrete_node(node, 1)
                             RF_AGC_final = natrl_forest_curve_0_5_AGC_RF   # Forces new forest to use the first interval of the age curve
                             RF_BGC_final = RF_AGC_final * r_s_ratio_non_mang
@@ -1099,7 +1117,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                         c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
                                         rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
                                         deadwood_c_ratio=0, litter_c_ratio=0)
-                            elif short_veg_LC_curr:  # Full loss of non-oil palm planted trees as short vegetation (3122)
+                            elif GLAD_short_veg_LC_curr:  # Full loss of non-oil palm planted trees as short vegetation (3122)
                                 node = nu.accrete_node(node, 2)
                                 if planted_forest_tree_crop_cell == 2:  # Full loss of non-oil palm tree crops as short vegetation (31221->312219/312212)
                                     node = nu.accrete_node(node, 1)
@@ -1193,7 +1211,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                         deadwood_c_ratio=0, litter_c_ratio=0)
                     else:  # Full loss of non-planted trees (32)
                         node = nu.accrete_node(node, 2)
-                        if tall_veg_LC_prev:  # Full loss of natural forest (321)
+                        if GLAD_tall_veg_LC_prev:  # Full loss of natural forest (321)
                             node = nu.accrete_node(node, 1)
                             if LC_curr == cn.cropland:  # Natural forest converted to cropland (3211->32119/32112)
                                 node = nu.accrete_node(node, 1)
@@ -1209,7 +1227,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                     c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
                                     deadwood_c_ratio_non_mang, litter_c_ratio_non_mang)
-                            elif short_veg_LC_curr:  # Natural forest converted to short vegetation (3212)
+                            elif GLAD_short_veg_LC_curr:  # Natural forest converted to short vegetation (3212)
                                 node = nu.accrete_node(node, 2)
                                 if drivers_cell in cn.drivers_non_soil_C: # Natural forest converted to short vegetation with disturbance that emits all non-soil C pools (32121->321219/321212)
                                     node = nu.accrete_node(node, 1)
@@ -1284,7 +1302,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                     c_pools_EF_no_fire, first_year_annual_dist_during_interval, interval_end_year, c_dens_in_ToF,
                                     rf_post_dist, most_recent_year_not_tall_veg, Cf_forest, Gef_ch4_forest, Gef_n2o_forest,
                                     deadwood_c_ratio=0, litter_c_ratio=0)
-                            elif short_veg_LC_curr:  # Full loss of trees outside forests converted to short vegetation (3222->32229/32222)
+                            elif GLAD_short_veg_LC_curr:  # Full loss of trees outside forests converted to short vegetation (3222->32229/32222)
                                 node = nu.accrete_node(node, 2)
                                 agc_rf_in = cn.trees_outside_forests_agc_rf_max  # 5-year intervals only
                                 bgc_rf_in = agc_rf_in * r_s_ratio_non_mang       # 5-year intervals only
@@ -1432,7 +1450,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                             Cf_forest, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
                             else:  # Non-planted trees partially disturbed in the current interval (4212)
                                 node = nu.accrete_node(node, 2)
-                                if tall_veg_LC_curr:  # Forest partially disturbed in the current interval (42121)
+                                if GLAD_tall_veg_LC_curr:  # Forest partially disturbed in the current interval (42121)
                                     node = nu.accrete_node(node, 1)
                                     if sig_height_gain_prev_curr_abs:  # Forest partially disturbed in the current interval with signif. height increase after (421211->4212119/4212112)
                                         # NOTE: This should only occur with 5-year interval data, not annual data.
@@ -1541,7 +1559,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                                         cn.Cf_forest_undisturbed, Gef_co2_forest, Gef_ch4_forest, Gef_n2o_forest, deadwood_c_ratio=0, litter_c_ratio=0)
                             else:  # Non-planted trees not disturbed in last interval (4222)
                                 node = nu.accrete_node(node, 2)
-                                if tall_veg_LC_curr:  # Natural forest not disturbed in last interval (42221)
+                                if GLAD_tall_veg_LC_curr:  # Natural forest not disturbed in last interval (42221)
                                     node = nu.accrete_node(node, 1)
                                     if (most_recent_year_not_tall_veg > 0) or (part_or_full_dist_in_earlier_intervals > 0):  # Young secondary natural forest (422211->4222119/4222112)
                                         node = nu.accrete_node(node, 1)
@@ -1611,7 +1629,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 elif (LC_prev == cn.cropland) and (LC_curr != cn.cropland):
                     node = nu.accrete_node(node, cn.cropland_node)  # General cropland node code (5)
                     node = nu.accrete_node(node, 2)  # Annual cropland loss (52)
-                    if short_veg_LC_curr:
+                    if GLAD_short_veg_LC_curr:
                         node = nu.accrete_node(node, 1)  # Annual cropland converted to short vegetation (521->5219/5212)
                         c_pools_EF_no_fire = cn.agc_emissions_only  # There should only be AGC in cropland anyway
                         RF_AGC_final = short_veg_AGC_BGC_RF_adj[0]  # Sets the output RF to use the AGC short veg gain RF
@@ -1650,7 +1668,8 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                      c_dens_out, non_co2_flux_out) = nu.calc_cropland_cropland(node, c_dens_in, times_burned_in_interval)
 
                 ### Non-tree/cropland converted to short vegetation
-                elif (not short_veg_LC_prev) and (short_veg_LC_curr):
+                ### Requires 1/2) GLAD LC change and 3) GPW height shows sufficient veg at end of interval
+                elif (not GLAD_short_veg_LC_prev) and (GLAD_short_veg_LC_curr) and (GPW_short_veg_curr):
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     state_out = nu.accrete_node(node, 1)  # Short vegetation gain (61)
                     rf_array = short_veg_AGC_BGC_RF_adj
@@ -1658,7 +1677,8 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                     forest_age_end_of_interval = 0  # Sets forest age to 0 because there's no forest
                     c_gross_emis_out, c_gross_removals_out, c_dens_out = nu.calc_short_veg_gain(rf_array)
                 ### Short vegetation converted to non-short vegetation, non-forest or non-cropland
-                elif (short_veg_LC_prev) and (not short_veg_LC_curr):
+                ### Requires 1/2) GLAD LC change, 3) GPW height shows sufficient veg at start of interval, and 4) GPW shows vegetation too short at end of interval
+                elif (GLAD_short_veg_LC_prev) and (not GLAD_short_veg_LC_curr) and (GPW_short_veg_prev) and (not GPW_short_veg_curr):
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     node = nu.accrete_node(node, 2)  # Short vegetation loss (62)
                     if water_LC_curr:
@@ -1679,7 +1699,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                         (state_out, c_gross_emis_out, c_gross_removals_out,
                          c_dens_out, non_co2_flux_out) = nu.calc_short_veg_loss(node, c_dens_in, c_pools_EF_no_fire, times_burned_in_interval)
                 ### Short vegetation remaining short vegetation
-                elif short_veg_LC_prev and short_veg_LC_curr:
+                elif GLAD_short_veg_LC_prev and GLAD_short_veg_LC_curr:
                     node = nu.accrete_node(node, cn.grassland_node)  # General short veg node code (6)
                     node = nu.accrete_node(node, 3)  # Short vegetation remaining short vegetation (63->639/632)
                     c_dens_in = c_dens_in_short_veg
@@ -1790,7 +1810,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
         out_dict_float32[f"{cn.deadwood_c_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = deadwood_c_dens_block.copy()
         out_dict_float32[f"{cn.litter_c_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = litter_c_dens_block.copy()
 
-        # Summative outputs (Mg CO2/ha/yr)
+        # Summative outputs (Mg CO2(e)/ha/yr)
         # Gross emissions across all carbon pools
         out_dict_float32[f"{cn.gross_emis_all_C_pools_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
                 out_dict_float32[f"{cn.agc_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
@@ -1893,6 +1913,13 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # Replaces the placeholder tile_id in the download data dictionary from main with the tile_id for this chunk
     updated_download_dict = uu.replace_tile_id_in_dict(download_dict_with_data_types, tile_id)
 
+    # Adds the uri for the global COGS of Global Pasture Watch median vegetation height for each year to the download dictionary
+    for year in list(range(2015, 2025)):
+        MVH_uri_year = cn.GPW_MVH_uri.replace('YYYY', str(year))
+        updated_download_dict[f"{cn.GPW_MVH_pattern}_{year}"] = [MVH_uri_year, 'int16']
+
+    # print(updated_download_dict)
+
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
@@ -1922,6 +1949,8 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern].max())
     # print(layers[cn.forest_age_start_year_pattern].dtype)
     # print(layers[cn.climate_zone_pattern].dtype)
+    # print(layers['GPW_height_2015'])
+    # sys.quit()
 
 
     ### Part 2: Calculates min, mean, and max for each input chunk.
@@ -2097,7 +2126,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
             executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
         upload_end_time = time.time()
-        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.outputs_path} in {round(upload_end_time - upload_start_time)} seconds: {uu.timestr()}", is_large_run, logger_worker)
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.veg_outputs_path} in {round(upload_end_time - upload_start_time)} seconds: {uu.timestr()}", is_large_run, logger_worker)
 
     chunk_end_time = time.time()
     lu.print_and_log(f"Total chunk processing for {bounds_str} in {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
@@ -2110,8 +2139,8 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     return return_message, chunk_stats  # Return both the success message and the statistics
 
 
-def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False, create_zarr=False,
-         chunk_shapefile_uri=False, bounding_box=None, chunk_size_deg=None, first_chunks=None, log_note=None):
+def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False, create_zarr=False,
+         chunk_shapefile_uri=False, bounding_box=None, chunk_size_deg=None, first_chunks=None, run_date=None, log_note=None):
 
     ### Step 1: Preparation
 
@@ -2144,6 +2173,11 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
+    # Sets date as today if it's not supplied
+    if not run_date:
+        today = date.today()
+        run_date = today.strftime("%Y%m%d")
+
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
@@ -2154,7 +2188,7 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     # Calculates the interval type, difference between start and end years of intervals, and the model output years
     # for the model run
-    interval_type, interval_year_diff_list, interval_length_list, interval_end_years = uu.get_interval_info(end_year, main_logger, start_year)
+    interval_type, interval_year_diff_list, interval_length_list, interval_end_years = uu.get_interval_info(start_year, end_year, main_logger)
 
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.
@@ -2362,11 +2396,10 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
     if create_zarr:
 
         # Creates s3 paths for the raw mega-zarr
-        raw_mega_zarr_path = zu.create_mega_zarr_path(chunk_size_pixels, interval_type, model_type, run_date, main_logger)
+        raw_mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, chunk_size_pixels, interval_type, model_type, run_date, main_logger)
 
         # These variables are added to the mega-zarr
         outputs_to_zarr = cn.full_outputs_to_zarr
-        # outputs_to_zarr = cn.full_outputs_to_zarr[0:2] # For testing
 
         # Creates the global mega-zarr with metadata only
         zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
@@ -2443,16 +2476,15 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
 
     ### Step 4: Counts files in output folders, aggregates chunk stats for 1x1 degree outputs
 
-    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
-    # cluster, not all the workers.
+    # Resizes cluster down for all subsequent steps (chunk stats, zarr stats comparison, and log aggregation)
     if not run_local:
         workers = client.scheduler_info()["workers"]
         n_workers = len(workers)
 
-        # Reduces number of workers in the cluster down to 1 if there is more than 10
+        # Reduces number of workers in the cluster if there are more than 10
         if n_workers > 10:
             main_logger.info("Resizing cluster to 1 worker")
-            resize_cluster.resize_coiled_cluster(cluster_name, 2)
+            resize_cluster.resize_coiled_cluster(cluster_name, n_workers/3)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
     if not no_upload and is_large_run:
@@ -2486,15 +2518,21 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
         tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
             comparison_insert, main_logger, model_chunk_stats_path)
 
-        # Resizes cluster if more than 1 chunk is being processed.
-        # Uses the minimum of the initial number of workers requested and 50
-        if (not run_local) and (len(chunk_list) > 1):
-
-            zarr_chunk_stats_workers = min(50, n_workers)
-
-            main_logger.info(f"Resizing cluster {zarr_chunk_stats_workers} workers")
-
-            resize_cluster.resize_coiled_cluster(cluster_name, zarr_chunk_stats_workers)
+        # # Resizes cluster if more than 1 chunk is being processed.
+        # # Uses the minimum of the initial number of workers requested and 50
+        # if (not run_local) and (len(chunk_list) > 1):
+        #
+        #     zarr_chunk_stats_workers = min(50, n_workers)
+        #
+        #     main_logger.info(f"Resizing cluster to {zarr_chunk_stats_workers} workers incrementally: {uu.timestr()}")
+        #
+        #     # Increases worker count more gradually than jumping up to the full number all at once
+        #     # because that can cause failures.
+        #     # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
+        #     for target in [int(zarr_chunk_stats_workers*0.1), int(zarr_chunk_stats_workers*0.25),
+        #                    int(zarr_chunk_stats_workers*0.5), int(zarr_chunk_stats_workers)]:
+        #         resize_cluster.resize_coiled_cluster(cluster_name, target)
+        #         time.sleep(30)
 
         # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
         all_merged_tables = []
@@ -2511,59 +2549,43 @@ def main(cluster_name, run_date, year_range, run_local=False, no_stats=False, no
             main_logger.info(f"Starting {var_name}: {uu.timestr()}")
             var_start_time = time.time()
 
-            # Iterates through years
-            for year_idx in range(len(cn.interval_end_years_annual)):
-                year = cn.interval_end_years_annual[year_idx]
+            # Runs chunk stats for a dataset (all years) in the zarr in parallel
+            chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
+                client=client,
+                chunk_list=chunk_list,
+                var=var_name,
+                zarr_path=raw_mega_zarr_path,
+            )
 
-                # Gets stats for selected 1x1 deg chunks in raw and rechunked zarrs
-                main_logger.info(f"  Starting zarr stats for {var_name} for year {year}: {uu.timestr()}")
-                year_start_time = time.time()
+            # After all zarr chunk stats is done for the dataset-year combination,
+            # the chunk stats from the zarr are compared to the chunk stats from the model.
+            # This is done with Pandas dataframes and is not parallelized because it's just table manipulation
+            # for each dataset-year combination.
+            # The model output vs. zarr comparison is done after each dataset-year combination
+            # to get more real-time feedback on how the datasets compare (rather than waiting until after
+            # all zarr chunk stats have been calculated to do the metric comparisons).
+            all_merged_tables, chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
+                                                                                    chunk_stats_variable_year_rechunked_zarr,
+                                                                                    main_logger,
+                                                                                    tables_to_compare_dict,
+                                                                                    var_name,
+                                                                                    zarr_comparison_stats_path)
 
-                # Runs chunk stats for a dataset-year in the zarr in parallel
-                chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
-                    client=client,
-                    chunk_list=chunk_list,
-                    var=var_name,
-                    year_idx=year_idx,
-                    zarr_path=raw_mega_zarr_path,
-                )
-                year_end_time = time.time()
-                main_logger.info(f"    Got zarr stats for {var_name} for year {year} in {round(year_end_time - year_start_time)} seconds: {uu.timestr()}")
-
-                # After all zarr chunk stats is done for the dataset-year combination,
-                # the chunk stats from the zarr are compared to the chunk stats from the model.
-                # This is done with Pandas dataframes and is not parallelized because it's just table manipulation
-                # for each dataset-year combination.
-                # The model output vs. zarr comparison is done after each dataset-year combination
-                # to get more real-time feedback on how the datasets compare (rather than waiting until after
-                # all zarr chunk stats have been calculated to do the metric comparisons).
-                all_merged_tables, chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
-                                                                                        chunk_stats_variable_year_rechunked_zarr,
-                                                                                        main_logger,
-                                                                                        tables_to_compare_dict,
-                                                                                        var_name, year,
-                                                                                        zarr_comparison_stats_path)
-
-                # Total number of chunks that have differences in metrics between the model and zarr
-                # that exceed the tolerance
-                chunks_count_exceeding_total += chunks_count_exceeding
-                chunks_without_zarr_stats_total += chunks_without_zarr_stats
+            # Total number of chunks that have differences in metrics between the model and zarr
+            # that exceed the tolerance
+            chunks_count_exceeding_total += chunks_count_exceeding
+            chunks_without_zarr_stats_total += chunks_without_zarr_stats
 
             var_end_time = time.time()
             main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
 
-
-    ### Step 6: All chunk stats comparison iterations done.
-    ### Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
-
-    if create_zarr:
-
+        # Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
         zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_without_zarr_stats_total,
                                               main_logger, model_chunk_stats_table_name,
                                               stage, start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
 
 
-    ### Step 7: Aggregates logs
+    ### Step 6: Aggregates logs
 
     # Worker logs are not aggregated if doing a local run (since there are no workers)
     if not run_local:
@@ -2623,5 +2645,5 @@ if __name__ == "__main__":
     create_zarr = args.create_zarr
 
     # Create the cluster with command line arguments
-    main(cluster_name, run_date, year_range, run_local, no_stats, no_log, no_upload, create_zarr, chunk_shapefile_uri,
-         bounding_box=bounding_box, chunk_size_deg=chunk_size_deg, first_chunks=first_chunks, log_note=log_note)
+    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, create_zarr, chunk_shapefile_uri,
+         bounding_box=bounding_box, chunk_size_deg=chunk_size_deg, first_chunks=first_chunks, run_date=run_date, log_note=log_note)

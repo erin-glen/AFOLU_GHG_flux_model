@@ -55,7 +55,7 @@ def populate_main_log_header(client, cluster, log_note, run_local, model_type, s
 
     main_logger.info(f"Model type: {model_type}")
     main_logger.info(f"Stage: {stage}")
-    main_logger.info(f"Model version: {cn.model_version}")
+    main_logger.info(f"Model version: {cn.veg_model_version}")
     main_logger.info(f"Number of workers: {n_workers}")
     main_logger.info(f"Memory per worker: {worker_memory}")
     main_logger.info(f"Threads per worker: {nthreads}")
@@ -85,9 +85,9 @@ def setup_logging_worker():
 
 
 # Determines whether statement should be printed to the console as well as logged
-def print_and_log(text, is_large_scale_run, logger):
+def print_and_log(text, is_large_run, logger):
     logger.info(f"flm: {text}")
-    if not is_large_scale_run:
+    if not is_large_run:
         print(text, flush=True)
 
 
@@ -152,19 +152,15 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
         # Time extraction from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/691f42e3-cd2c-800a-b9e1-715190ad3024
         # Extracts seconds from lines for core calculation processing
         numba_proc_times__sec = [int(m) for m in re.findall(r'Calculated using numba.*?(\d+) seconds', log_content)]
-        print(numba_proc_times__sec)
 
         # Extract seconds from lines for zarr insertion
         zarr_insert_proc_times__sec = [int(m) for m in re.findall(r'Wrote outputs to global zarrs.*?(\d+) seconds', log_content)]
-        print(zarr_insert_proc_times__sec)
 
         # Extract seconds from lines for geotif uploads
         uploads_proc_times__sec = [int(m) for m in re.findall(r'Uploads completed for.*?(\d+) seconds', log_content)]
-        print(uploads_proc_times__sec)
 
         # Extract seconds from lines for total chunk processing
         total_chunk_proc_times__sec = [int(m) for m in re.findall(r'Total chunk processing.*?(\d+) seconds', log_content)]
-        print(total_chunk_proc_times__sec)
 
         # Averages
         avg_numba_proc_times__sec = sum(numba_proc_times__sec) / len(numba_proc_times__sec) if numba_proc_times__sec else 0
@@ -202,7 +198,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
             outfile.write(f"  Average and stdev: {avg_zarr_pop_proc_times__sec:.0f} seconds (stdev: {stdev_zarr_pop_proc_times__sec:.0f})\n")
             outfile.write(f"  Min and max: {min_zarr_pop_proc_times__sec:.0f} - {max_zarr_pop_proc_times__sec:.0f}\n")
 
-            outfile.write(f"Processing stats for geotif upload code ({len(zarr_insert_proc_times__sec)} tasks):\n")
+            outfile.write(f"Processing stats for geotif upload code ({len(uploads_proc_times__sec)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_uploads_proc_times__sec:.0f} seconds (stdev: {stdev_uploads_proc_times__sec:.0f})\n")
             outfile.write(f"  Min and max: {min_uploads_proc_times__sec:.0f} - {max_uploads_proc_times__sec:.0f}\n")
 

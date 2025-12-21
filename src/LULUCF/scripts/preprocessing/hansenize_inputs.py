@@ -341,7 +341,7 @@ def main(cluster_name, process, bounding_box, chunk_size, run_local, no_upload):
         tile_index_dict = []
 
         # The key for the dictionary: the s3 path with a tile set that will be indexed
-        path = items['processed_dir'].replace(cn.outputs_path, "")
+        path = items['processed_dir'].replace(cn.veg_outputs_path, "")
         print(path) #TODO
 
         # The value for the dictionary: the pattern to use for naming the output shapefile

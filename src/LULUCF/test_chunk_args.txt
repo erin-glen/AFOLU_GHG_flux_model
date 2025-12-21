@@ -20,6 +20,7 @@
 # Range of edge cases for testing
 -bb 10 49.75 10.25 50 -cs 0.25           # 0.25x0.25 deg (50N_010E), 1 chunk (should be a normal tile)
 -bb 10 49 11 50 -cs 1                    # 1x1 deg (50N_010E), 1 chunk (should be a normal tile)
+-bb 105 10 106 11 -cs 1                  # 1x1 deg (20N_100E), 1 chunk (has burned and drained organic soil)
 -bb 10 49.5 10.5 50 -cs 0.5              # 0.5x0.5 deg (50N_010E), 1 chunk (should be a normal tile)
 -bb 20 -70 20.25 -69.75 -cs 0.25         # 0.25x0.25 deg (30N_070W), 1 chunk (tile does not exist)
 -bb 20 69.75 20.25 70 -cs 0.25           # 0.25x0.25 deg (30N_060E), 1 chunk (tile exists for GLCLU but not all other inputs, e.g., fire)

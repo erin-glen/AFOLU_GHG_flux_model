@@ -17,15 +17,15 @@ from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 
 # Creates the s3 paths for the raw and rechunked mega-zarrs
-def create_mega_zarr_path(chunk_size_pixels, interval_type, model_type, run_date, main_logger):
+def create_mega_zarr_path(zarr_basic_path, chunk_size_pixels, interval_type, model_type, run_date, main_logger):
 
     # Sets the output zarr location based on the model run
-    mega_zarr_path = cn.outputs_path_mega_zarr.replace(cn.model_type_placeholder, model_type)
+    mega_zarr_path = zarr_basic_path.replace(cn.model_type_placeholder, model_type)
     mega_zarr_path = mega_zarr_path.replace("MODEL_INTERVAL_TYPE", interval_type)
     mega_zarr_path = mega_zarr_path.replace("RUN_DATE", run_date)
     mega_zarr_path = mega_zarr_path.replace("CHUNK_SIZE", str(chunk_size_pixels))
 
-    main_logger.info(f"Zarr path created: {mega_zarr_path}")
+    main_logger.info(f"Zarr path to use: {mega_zarr_path}")
 
     return mega_zarr_path
 
@@ -43,12 +43,20 @@ def latlon_to_global_zarr_indices(lat, lon, resolution):
 
 # Creates a Zarr group with individual datasets on S3 with coordinate arrays (x/y/year),
 # spatial_ref metadata, and dataset definitions WITHOUT allocating global arrays.
-# That is, it doesn't computer anything upfront or locally. It just creates the zarr group
+# That is, it doesn't compute anything upfront or locally. It just creates the zarr group
 # with datasets inside.
 # In addition to x and y dimensions, there is also a time dimension (intervals), which uses an index (not the actual year).
 # This zarr-related code from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
 # and maybe some later chats, too.
 def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, main_logger, fill_value= np.nan):
+
+    fs = fsspec.filesystem("s3", anon=False)
+
+    # Checks if zarr already exists at that location. Does not make one if it already exits.
+    # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6945fc55-7d3c-832d-9724-c718ec0abbe3
+    if fs.exists(store_url):
+        main_logger.info(f"Mega-zarr already exists at {store_url}. Skipping initialization: {uu.timestr()}")
+        return
 
     # Computes dimensions
     lat_size = int(180 / cn.resolution)
@@ -141,7 +149,6 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
 
     # Writes only metadata to s3 (lazy), not values
     main_logger.info(f"Writing metadata for mega-zarr: {uu.timestr()}")
-    fs = fsspec.filesystem("s3", anon=False)
     mapper = fs.get_mapper(store_url)
     ds.to_zarr(
         store=mapper,
@@ -180,74 +187,82 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
 
 
 # Populates pre-existing global mega-zarr with select output numpy arrays (out_dict_all_dtypes)
+# Accelerated by writing all years at once
+# per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694612e9-0d2c-832f-8b6d-e7cb247ff781
 def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
                   out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id):
 
-    if create_zarr:
+    if not create_zarr:
+        lu.print_and_log(f"Not writing outputs for {bounds_str} in {tile_id} to global zarrs: {uu.timestr()}", False, logger_worker)
+        return
 
-        lu.print_and_log(f"Writing select outputs to global zarr for {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
-        uu.rename_s3_task_file(stage, bounds, "zarr_population_", is_large_run, logger_worker)
-        zarr_start = time.time()
+    lu.print_and_log(f"Writing select outputs to global zarr for {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
 
-        # Opens pre-created global mega-zarr
-        fs = fsspec.filesystem("s3", anon=False)
-        mapper = fs.get_mapper(mega_zarr_path)
-        z = zarr.open(mapper, mode="r+")
+    uu.rename_s3_task_file(stage, bounds, "zarr_population_", is_large_run, logger_worker)
+    zarr_start = time.time()
 
-        lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}: {uu.timestr()}", False, logger_worker)
+    # Opens pre-created global mega-zarr
+    fs = fsspec.filesystem("s3", anon=False)
+    mapper = fs.get_mapper(mega_zarr_path)
+    z = zarr.open(mapper, mode="r+")
 
-        # Iterates through each output that we want to include in the zarr and each interval to add it
-        for output_to_zarr_pattern in outputs_to_zarr:
-            for i, year in enumerate(interval_end_years):
+    lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}: {uu.timestr()}", is_large_run, logger_worker)
 
-                # lu.print_and_log(f"Writing {output_to_zarr_pattern} for {year} for {bounds_str} to zarr: {uu.timestr()}",
-                #     is_large_run, logger_worker)
+    # Pre-opens Zarr arrays once rather than repeatedly for each dataset during the for loop
+    zarr_arrays = {
+        var: z[var]
+        for var in outputs_to_zarr
+        if var in z
+    }
 
-                # Converts bounding box corners to row and column indices
-                lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
-                lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
+    # Computes spatial indices ONCE
+    lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
+    lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
 
-                pattern_with_units = add_units_year_to_pattern(output_to_zarr_pattern, year)
+    n_years = len(interval_end_years)
+    ny = lat_end - lat_start
+    nx = lon_end - lon_start
 
-                # Selects the relevant output numpy array for insertion into zarr.
-                # Only inserts into zarr if that data is in the output dictionary.
-                # That way, it won't try to insert summative outputs in the global zarr when the summative outputs aren't in the output dictionary.
-                if pattern_with_units in out_dict_all_dtypes:
-                    data = out_dict_all_dtypes[pattern_with_units]
+    buffers = {}
 
-                    # Writes numpy array to global zarr
-                    z[output_to_zarr_pattern][
-                        i,                  # year index (not the actual year)
-                        lat_start:lat_end,  # rows (Y)
-                        lon_start:lon_end,  # columns (X)
-                    ] = data
+    # Writes each variable as a full time block
+    for output_to_zarr_pattern, zarr_array in zarr_arrays.items():
 
-                else:
-                    lu.print_and_log(f"Skipping missing key {pattern_with_units} for inclusion in zarr: {uu.timestr()}", is_large_run, logger_worker)
+        dtype = zarr_array.dtype
 
+        # Allocate buffer ONCE per dtype
+        if dtype not in buffers:
+            buffers[dtype] = np.empty((n_years, ny, nx), dtype=dtype)
 
-        # # Checks min, mean and max values for chunk in the zarr for comparison with chunk stats spreadsheet
-        # # that directly uses original numpy arrays.
-        # # For QC only.
-        # for output_to_zarr_pattern in outputs_to_zarr:
-        #     for year_idx, year in enumerate(interval_end_years):
-        #
-        #         target_box = {
-        #             "lat_min": bounds[1],
-        #             "lat_max": bounds[3],
-        #             "lon_min": bounds[0],
-        #             "lon_max": bounds[2]
-        #         }
-        #
-        #         if "density__AGC" in output_to_zarr_pattern:  # Just calculates and prints for AGC density for QC purposes
-        #             check_region_stats(mega_zarr_path, output_to_zarr_pattern, year_idx, target_box, logger_worker)
-        #
-        zarr_end = time.time()
-        # lu.print_and_log(f"Memory usage after writing to zarr completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
-        lu.print_and_log(f"Wrote outputs to global zarrs for {bounds_str} in {tile_id} in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}",False, logger_worker)
+        block = buffers[dtype]
 
-    else:
-        lu.print_and_log(f"Not writing outputs for {bounds_str} in {tile_id} to global zarrs: {uu.timestr()}",False, logger_worker)
+        has_any_data = False
+
+        for i, year in enumerate(interval_end_years):
+            pattern_with_units = add_units_year_to_pattern(output_to_zarr_pattern, year)
+
+            if pattern_with_units in out_dict_all_dtypes:
+                block[i, :, :] = out_dict_all_dtypes[pattern_with_units]
+                has_any_data = True
+            else:
+                # Fills with Zarr fill_value if missing
+                fill = zarr_array.fill_value
+                if fill is None:
+                    fill = np.nan
+                block[i, :, :] = fill
+
+        # Only writes if at least one year exists for this variable
+        if has_any_data:
+            zarr_array[
+                0:n_years,
+                lat_start:lat_end,
+                lon_start:lon_end
+            ] = block
+        else:
+            lu.print_and_log(f"Skipping {output_to_zarr_pattern}: no data found for any year", False, logger_worker)
+
+    zarr_end = time.time()
+    lu.print_and_log(f"Wrote outputs to global zarrs for {bounds_str} in {tile_id} in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}",False, logger_worker)
 
 
 # Checks the stats for a bounding box in a zarr for a given dataset and year
@@ -311,31 +326,31 @@ def zarr_1x1_deg_stats(bounds, var_name, zarr_path):
     zarr_group = zarr.open(zarr_mapper, mode="r")
     # print(f"Getting array for {bounds_str}")
     zarr_chunk_array = zarr_group[var_name][:, lat0:lat1, lon0:lon1]
-    print("all years:", zarr_chunk_array)
 
-    for year_idx, year in cn.interval_end_years_annual:
+    for year_idx, year in enumerate(cn.interval_end_years_annual):
 
-        zarr_chunk_array_year = zarr_chunk_array[i]
-        print(zarr_chunk_array_year)
+        zarr_chunk_array_year = zarr_chunk_array[year_idx]
 
         # The dataset pattern being analyzed, with year and units added
         pattern_with_units = add_units_year_to_pattern(var_name, year)
 
         # print(f"Calculating stats for {bounds_str}")
         zarr_stats_raw_year = uu.calculate_stats(zarr_chunk_array_year, pattern_with_units, bounds_str, tile_id, 'zarr_stats')
-        print(zarr_stats_raw_year)
+        # print(zarr_stats_raw_year)
+
+        zarr_stats_raw_all_years.append(zarr_stats_raw_year)
 
     # end_time = time.time()
     # print(f"  Calculated stats for {pattern_with_units} for {year} for {bounds} in {round(end_time - start_time)} seconds: {uu.timestr()}")
 
     # print(f"zarr_stats_raw for {bounds_str}: {zarr_stats_raw}")
 
-    # Returns the chunk stats from the zarr as a dictionary
+    # Returns the chunk stats from the zarr as a list of dictionaries, with each element being one chunk
     return zarr_stats_raw_all_years
 
 
 # Parallelizes stats calculation in 1x1 deg chunks in raw and rechunked zarrs for a given dataset-year
-def run_parallel_stats(client, chunk_list, var, year_idx, zarr_path):
+def run_parallel_stats(client, chunk_list, var, zarr_path):
 
     futures = []
 
@@ -353,37 +368,42 @@ def run_parallel_stats(client, chunk_list, var, year_idx, zarr_path):
 
 # Compares chunk stats from model and from zarr for a dataset-year combination
 # Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6903d1dd-555c-8321-8547-0aa4772c9878
-def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_year_zarr, main_logger,
-                                     tables_to_compare_dict, var_name, year, zarr_comparison_stats_path):
+def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zarr, main_logger,
+                                     tables_to_compare_dict, var_name, zarr_comparison_stats_path):
 
     # Selects relevant model output table
     # The formatting of the year depends on the variable.
     if "gross" in var_name:
         model_table = tables_to_compare_dict[cn.gross_outputs_1x1]
-        year = year
+        # year = year
     elif "net" in var_name:
         model_table = tables_to_compare_dict[cn.net_outputs_1x1]
-        year = year
+        # year = year
     else:
         model_table = tables_to_compare_dict[cn.other_outputs_1x1]
         # For reasons I can't really trace back, the year datatype for C densities is object, not int.
         # So, it needs to be recast to a str or int to match the chunk_stats table.
-        year = str(year)
+        # year = str(year)
 
-    # Converts zarr chunk stats from dictionary to dataframe
-    zarr_df = pd.DataFrame(chunk_stats_variable_year_zarr)
+    # Converts zarr chunk stats from list of dictionaries to dataframe.
+    # Need to flatten the list because each chunk for each dataset is a list of dictionaries, where each element is a year.
+    # So, flattening the list makes all years for all variables and chunks flat, rather than years being nested in each chunk-dataset.
+    chunk_stats_variable_zarr_flat = uu.flatten_list(chunk_stats_variable_zarr)
+    # print("chunk_stats_variable_zarr_flat:", chunk_stats_variable_zarr_flat)
+    zarr_df = pd.DataFrame(chunk_stats_variable_zarr_flat)
+    # print("zarr_df:", zarr_df)
 
-    # Subsets model chunk stats to relevant pattern and year.
-    subset_model_table = model_table[(model_table['pattern'].str.contains(var_name, na=False)) & (model_table['years'] == year)]
+    # Subsets model chunk stats to relevant pattern
+    subset_model_table = model_table[(model_table['pattern'].str.contains(var_name, na=False))]
     # print("subset_model_table", subset_model_table)
 
     # Selects only the needed columns from rechunked_zarr_table
-    main_logger.info(f"    Subsetting zarr table to numeric columns for {var_name} for {year}: {uu.timestr()}")
+    # main_logger.info(f"    Subsetting zarr table to numeric columns for {var_name}: {uu.timestr()}")
     zarr_subset_table = zarr_df[['chunk_name', 'min_value', 'mean_value', 'max_value', 'count_value']].copy()
     # print("zarr_subset_table", zarr_subset_table)
 
     # Renames columns in raw_subset to distinguish them after merge
-    main_logger.info(f"    Renaming zarr columns for {var_name} for {year}: {uu.timestr()}")
+    # main_logger.info(f"    Renaming zarr columns for {var_name}: {uu.timestr()}")
     zarr_subset_table = zarr_subset_table.rename(columns={
         'min_value': 'min_value_zarr',
         'mean_value': 'mean_value_zarr',
@@ -393,16 +413,16 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     # print("zarr_subset_table", zarr_subset_table)
 
     # Converts all zarr value columns to numeric, coercing errors to NaN
-    main_logger.info(f"    Converting zarr columns to numeric for {var_name} for {year}: {uu.timestr()}")
+    # main_logger.info(f"    Converting zarr columns to numeric for {var_name}: {uu.timestr()}")
     for col in ['min_value_zarr', 'mean_value_zarr', 'max_value_zarr', 'count_value_zarr']:
         zarr_subset_table[col] = pd.to_numeric(zarr_subset_table[col], errors='coerce')
 
     # Merges with subset_model_table on 'chunk_name', left join (keeps all model output rows)
-    main_logger.info(f"    Merging zarr data to original model data for {var_name} for {year}: {uu.timestr()}")
+    # main_logger.info(f"    Merging zarr data to original model data for {var_name}: {uu.timestr()}")
     merged_table = subset_model_table.merge(zarr_subset_table, on='chunk_name', how='left')
 
     # Calculates differences for four metrics and stores in new columns
-    main_logger.info(f"    Calculating differences for {var_name} for {year} ({merged_table['count_value_zarr'].sum().item()} pixels in zarr): {uu.timestr()}")
+    main_logger.info(f"    Calculating differences for {var_name} ({merged_table['count_value_zarr'].sum().item()} pixels in zarr): {uu.timestr()}")
     merged_table['min_value_diff'] = merged_table['min_value'] - merged_table['min_value_zarr']
     merged_table['mean_value_diff'] = merged_table['mean_value'] - merged_table['mean_value_zarr']
     merged_table['max_value_diff'] = merged_table['max_value'] - merged_table['max_value_zarr']
@@ -418,15 +438,21 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
     mask = merged_table['maximum_diff_value'] > cn.zarr_difference_tolerance
 
     # Number of rows from model output without matching zarr pixel counts
-    chunks_without_zarr_stats = merged_table['count_value_diff'].isna().sum().item()
-    main_logger.info(f"    Rows without pixel count comparison: {chunks_without_zarr_stats}")
+
+    # Excludes rows where model 'count_value' is non-numeric (like 'no data') (no model outputs in those chunks).
+    # Coerces to numeric and check for valid values.
+    valid_count_mask = pd.to_numeric(merged_table['count_value'], errors='coerce').notna()
+
+    # From those valid rows, counts how many have no zarr stats
+    chunks_without_zarr_stats = merged_table[valid_count_mask]['count_value_diff'].isna().sum().item()
+    main_logger.info(f"    Rows with data without pixel count comparison: {chunks_without_zarr_stats}")
 
     # Applies the mask to filter those rows
     differences_exceeding_tolerance = merged_table[mask]
 
     # Prints rows that exceed the tolerance for difference between original and zarr chunk stats
     if len(differences_exceeding_tolerance) > 0:
-        main_logger.warning(f"    WARNING: There are {len(differences_exceeding_tolerance)} rows in {var_name} for year {year} that have differences exceeding the tolerance!")
+        main_logger.warning(f"    WARNING: There are {len(differences_exceeding_tolerance)} rows in {var_name} that have differences exceeding the tolerance!")
 
         # Selects chunk_id and all difference to print in the console for easy viewing
         cols_to_print = [
@@ -441,7 +467,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_yea
         main_logger.warning(differences_exceeding_tolerance[cols_to_print])
 
     else:
-        main_logger.info(f"    No rows in {var_name} for year {year} have metrics with differences exceeding the tolerance.")
+        main_logger.info(f"    No rows in {var_name} have metrics with differences exceeding the tolerance.")
 
     # Adds df for this dataset-year combination to the list of all the dataset-year dfs
     all_merged_tables.append(merged_table)
@@ -586,6 +612,9 @@ def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_with
         main_logger.info(f"Uploading chunk stats comparison parquet tables to s3: {uu.timestr()}")
 
         for parquet_name, parquet_path in zip(zarr_comparison_stats_name, zarr_comparison_stats_path):
+            # No zarr stats comparison for 1x1_counts_in_10x10 table, so don't upload that
+            if '1x1_counts_in_10x10' in parquet_name:
+                continue
             parquet_folder = parquet_path.split('/')[1]   # parquet_YYYYMMDD_HH_MM_SS
             s3_key = f"{cn.s3_chunk_stats_path}{parquet_folder}/{parquet_name}"
             # print(cn.s3_chunk_stats_path)
