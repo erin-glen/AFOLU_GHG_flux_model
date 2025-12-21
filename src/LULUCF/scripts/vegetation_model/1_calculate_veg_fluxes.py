@@ -2476,16 +2476,16 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     ### Step 4: Counts files in output folders, aggregates chunk stats for 1x1 degree outputs
 
-    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
-    # cluster, not all the workers.
-    if not run_local:
-        workers = client.scheduler_info()["workers"]
-        n_workers = len(workers)
-
-        # Reduces number of workers in the cluster down to 1 if there is more than 10
-        if n_workers > 10:
-            main_logger.info("Resizing cluster to 1 worker")
-            resize_cluster.resize_coiled_cluster(cluster_name, 2)
+    # # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    # # cluster, not all the workers.
+    # if not run_local:
+    #     workers = client.scheduler_info()["workers"]
+    #     n_workers = len(workers)
+    #
+    #     # Reduces number of workers in the cluster down to 1 if there is more than 10
+    #     if n_workers > 10:
+    #         main_logger.info("Resizing cluster to 1 worker")
+    #         resize_cluster.resize_coiled_cluster(cluster_name, 2)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
     if not no_upload and is_large_run:
@@ -2519,21 +2519,21 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
             comparison_insert, main_logger, model_chunk_stats_path)
 
-        # Resizes cluster if more than 1 chunk is being processed.
-        # Uses the minimum of the initial number of workers requested and 50
-        if (not run_local) and (len(chunk_list) > 1):
-
-            zarr_chunk_stats_workers = min(50, n_workers)
-
-            main_logger.info(f"Resizing cluster to {zarr_chunk_stats_workers} workers incrementally: {uu.timestr()}")
-
-            # Increases worker count more gradually than jumping up to the full number all at once
-            # because that can cause failures.
-            # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
-            for target in [int(zarr_chunk_stats_workers*0.1), int(zarr_chunk_stats_workers*0.25),
-                           int(zarr_chunk_stats_workers*0.5), int(zarr_chunk_stats_workers)]:
-                resize_cluster.resize_coiled_cluster(cluster_name, target)
-                time.sleep(30)
+        # # Resizes cluster if more than 1 chunk is being processed.
+        # # Uses the minimum of the initial number of workers requested and 50
+        # if (not run_local) and (len(chunk_list) > 1):
+        #
+        #     zarr_chunk_stats_workers = min(50, n_workers)
+        #
+        #     main_logger.info(f"Resizing cluster to {zarr_chunk_stats_workers} workers incrementally: {uu.timestr()}")
+        #
+        #     # Increases worker count more gradually than jumping up to the full number all at once
+        #     # because that can cause failures.
+        #     # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
+        #     for target in [int(zarr_chunk_stats_workers*0.1), int(zarr_chunk_stats_workers*0.25),
+        #                    int(zarr_chunk_stats_workers*0.5), int(zarr_chunk_stats_workers)]:
+        #         resize_cluster.resize_coiled_cluster(cluster_name, target)
+        #         time.sleep(30)
 
         # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
         all_merged_tables = []
