@@ -2,11 +2,15 @@ import numpy as np
 
 """Node code utilities for organic soils zonal statistics."""
 
-_PAD_DIGITS = 8
+PAD_DIGITS = 8
+# Backward compatibility: historical callers refer to STATE_CODE_PAD_DIGITS
+# when zfill-ing emitted node codes. Keep the public alias to avoid breaking
+# downstream scripts (e.g., pub_common/pub_assets).
+STATE_CODE_PAD_DIGITS = PAD_DIGITS
 
 def _pad_right(code: str) -> str:
     """Right‑pad ``code`` with zeros to the standard length."""
-    return code.ljust(_PAD_DIGITS, "0")
+    return code.ljust(PAD_DIGITS, "0")
 
 _drain_root = {
     "11": "peat_drained_primary_infra",          # dadap / canals
@@ -61,12 +65,16 @@ _emissions_by_suffix = {
         "1291": "temperate_coastal_mangrove",
         "1391": "tropical_coastal_mangrove",
         "191": "other_domain_coastal_mangrove",
+        # Drainage model emits ``…91`` for non‑domain coastal cases (no climate digit).
+        "91": "coastal_mangrove",
     },
     "92": {
         "1192": "boreal_coastal_tidal_marsh",
         "1292": "temperate_coastal_tidal_marsh",
         "1392": "tropical_coastal_tidal_marsh",
         "192": "other_domain_coastal_tidal_marsh",
+        # Drainage model emits ``…92`` for non‑domain coastal cases (no climate digit).
+        "92": "coastal_tidal_marsh",
     },
 }
 
