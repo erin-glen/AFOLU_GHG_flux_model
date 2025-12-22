@@ -41,6 +41,42 @@ outputs_path = posixpath.join(
     f"version_{model_version_underscore}"    # "version_0_3_0"
 )   # → s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_3_0
 
+drainage_outputs_path_mega_zarr = posixpath.join(outputs_path, "mega_zarr")
+
+drainage_outputs_to_zarr = [
+    "drained_soil",
+    "drained_state",
+    "burned_state",
+    "burned_years_count",
+    "drained_co2_Mg_CO2_ha_yr",
+    "drained_n2o_Mg_CO2e_ha_yr",
+    "drained_ch4_land_Mg_CO2e_ha_yr",
+    "drained_ch4_ditch_Mg_CO2e_ha_yr",
+    "drained_co2_offsite_Mg_CO2_ha_yr",
+    "drained_total_Mg_CO2e_ha_yr",
+    "burned_co2_Mg_CO2_ha_yr",
+    "burned_co_Mg_CO2e_ha_yr",
+    "burned_ch4_Mg_CO2e_ha_yr",
+    "burned_total_Mg_CO2e_ha_yr",
+]
+
+drainage_output_dtypes = {
+    "drained_soil": "uint32",
+    "drained_state": "uint32",
+    "burned_state": "uint32",
+    "burned_years_count": "uint32",
+    "drained_co2_Mg_CO2_ha_yr": "float32",
+    "drained_n2o_Mg_CO2e_ha_yr": "float32",
+    "drained_ch4_land_Mg_CO2e_ha_yr": "float32",
+    "drained_ch4_ditch_Mg_CO2e_ha_yr": "float32",
+    "drained_co2_offsite_Mg_CO2_ha_yr": "float32",
+    "drained_total_Mg_CO2e_ha_yr": "float32",
+    "burned_co2_Mg_CO2_ha_yr": "float32",
+    "burned_co_Mg_CO2e_ha_yr": "float32",
+    "burned_ch4_Mg_CO2e_ha_yr": "float32",
+    "burned_total_Mg_CO2e_ha_yr": "float32",
+}
+
 s3_log_path = posixpath.join(project_dir, 'model_logs')
 
 # Shapefile of global 1x1 degree chunks with GADM ISO codes
