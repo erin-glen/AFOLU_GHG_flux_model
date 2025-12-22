@@ -671,7 +671,7 @@ def stage_duration(start_time_str, end_time_str, stage, logger, format="full"):
 # the Numba functions won't be able to handle that (since they're so particular about datatypes).
 # So, that is addressed here through setting the array of 0s to the datatype of the dataset.
 # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
-def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_type='float32'):
+def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_type):
 
     bounds_str = boundstr(bounds)
     numpy_dtype = map_to_numpy_dtype(data_type)
@@ -732,7 +732,7 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
                         padded_data[row_offset:end_row, col_offset:end_col] = data[:end_row - row_offset, :end_col - col_offset]
 
                         data = padded_data
-                        status = f"padded {bounds_str} for {uri} from {original_shape} to {expected_shape}"
+                        status = f"padded {bounds_str} for {uri} from {original_shape} to {expected_shape} with data_type {data_type}/{numpy_dtype}"
 
                     else:
                         status = f"success- {bounds_str} for {uri} complete, no padding needed"
