@@ -71,7 +71,7 @@ os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
 # Function to calculate vegetation fluxes and carbon densities
 # Operates pixel by pixel, so uses numba (Python compiled to C++).
-# @jit(nopython=True)
+@jit(nopython=True)
 def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int32, in_dict_float32,
                       primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                       model_start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_large_run):
@@ -1918,7 +1918,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
         MVH_uri_year = cn.GPW_MVH_uri.replace('YYYY', str(year))
         updated_download_dict[f"{cn.GPW_MVH_pattern}_{year}"] = [MVH_uri_year, 'Int16']
 
-    print("updated_download_dict:", updated_download_dict)
+    # print("updated_download_dict:", updated_download_dict)
 
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
     # Thus, this returns a complete set of inputs (missing chunks filled).
@@ -1950,8 +1950,8 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern].max())
     # print(layers[cn.forest_age_start_year_pattern].dtype)
     # print(layers[cn.climate_zone_pattern].dtype)
-    print(layers['GPW_height_2015'].dtype)
-    print("layers['GPW_height_2015']:", layers['GPW_height_2015'])
+    # print(layers['GPW_height_2015'].dtype)
+    # print("layers['GPW_height_2015']:", layers['GPW_height_2015'])
     # sys.quit()
 
 
@@ -1975,7 +1975,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
 
     # print("uint8_typed_list:", typed_dict_uint8)
     # print("uint16_typed_list:", typed_dict_uint16)
-    print("int16_typed_list:", typed_dict_int16)
+    # print("int16_typed_list:", typed_dict_int16)
     # print("int32_typed_list:", typed_dict_int32)
     # print("float32_typed_list:", typed_dict_float32)
 
