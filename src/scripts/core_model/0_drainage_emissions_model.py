@@ -13,12 +13,15 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import os
+import posixpath
 import sys
 from datetime import datetime
 from typing import Optional
 
 import dask.bag
+import fsspec
 import numpy as np
+import zarr
 from numba import jit, types
 from numba.typed import Dict
 
@@ -39,6 +42,82 @@ n2o_n_to_n2o = np.float32(cn.n2o_n_to_n2o)
 gwp_ch4 = np.float32(cn.gwp_ch4)
 gwp_n2o = np.float32(cn.gwp_n2o)
 combustion_factor = np.float32(cn.combustion_factor)
+
+DRAINAGE_MEGA_ZARR_ROOT = posixpath.join(cn.outputs_path, "mega_zarr")
+DRAINAGE_OUTPUTS_TO_ZARR = {
+    "drained_soil": "uint32",
+    "drained_state": "uint32",
+    "burned_state": "uint32",
+    "burned_years_count": "uint32",
+    "drained_co2_Mg_CO2_ha_yr": "float32",
+    "drained_n2o_Mg_CO2e_ha_yr": "float32",
+    "drained_ch4_land_Mg_CO2e_ha_yr": "float32",
+    "drained_ch4_ditch_Mg_CO2e_ha_yr": "float32",
+    "drained_co2_offsite_Mg_CO2_ha_yr": "float32",
+    "drained_total_Mg_CO2e_ha_yr": "float32",
+    "burned_co2_Mg_CO2_ha": "float32",
+    "burned_co_Mg_CO2e_ha": "float32",
+    "burned_ch4_Mg_CO2e_ha": "float32",
+    "burned_total_Mg_CO2e_ha": "float32",
+}
+
+
+def create_mega_zarr_path(
+    base_path: str,
+    chunk_size_pixels: int,
+    interval_type: str,
+    run_name: str,
+    run_date: str,
+) -> str:
+    return posixpath.join(
+        base_path,
+        run_name,
+        run_date,
+        interval_type,
+        f"drainage_mega_{chunk_size_pixels}px.zarr",
+    )
+
+
+def initialize_global_mega_zarr(
+    zarr_path: str,
+    outputs_to_zarr: dict,
+    model_years: list[int],
+    chunk_size_pixels: int,
+    logger,
+) -> None:
+    pixels_per_degree = cn.full_raster_dims / 10
+    global_y = int(180 * pixels_per_degree)
+    global_x = int(360 * pixels_per_degree)
+    shape = (len(model_years), global_y, global_x)
+    chunks = (1, chunk_size_pixels, chunk_size_pixels)
+
+    fs, root = fsspec.core.url_to_fs(zarr_path)
+    mapper = fs.get_mapper(root)
+    group = zarr.open_group(mapper, mode="w")
+    group.create_dataset(
+        "year",
+        data=np.asarray(model_years, dtype="int16"),
+        shape=(len(model_years),),
+        chunks=(len(model_years),),
+        dtype="int16",
+    ).attrs["_ARRAY_DIMENSIONS"] = ["year"]
+
+    for name, dtype in outputs_to_zarr.items():
+        array = group.create_dataset(
+            name,
+            shape=shape,
+            chunks=chunks,
+            dtype=dtype,
+            fill_value=0,
+        )
+        array.attrs["_ARRAY_DIMENSIONS"] = ["year", "y", "x"]
+
+    logger.info(
+        "Initialized drainage mega-zarr at %s with shape %s and chunks %s",
+        zarr_path,
+        shape,
+        chunks,
+    )
 
 # Determine the width of finalized (padded) state codes robustly, then derive a
 # divisor that extracts the two-digit "root" (peat/non-peat and peat class)
@@ -997,6 +1076,7 @@ def run_drainage_model(
     peat_threshold: Optional[float] = DEFAULT_OGH_THRESHOLD,
     count_burned_years=False,
     emission_factor_variant: str = "default",
+    create_zarr: bool = False,
 ):
 
     stage = "drainage_model"
@@ -1093,6 +1173,13 @@ def run_drainage_model(
         bounding_box = bounding_box or [110, -10, 120, 0]
         chunks = uu.get_chunk_bounds(bounding_box, chunk_size)
     is_final = len(chunks) > 20
+    is_large_run = is_final
+    if is_large_run:
+        main_logger.info("Running as large-scale model run.")
+
+    if is_large_run:
+        create_zarr = True
+    main_logger.info("Create and populate global mega-zarr: %s", create_zarr)
 
     # Normalize interval settings and compute interval list
     intervals, start_year, end_year, interval_type = compute_intervals(
@@ -1101,6 +1188,31 @@ def run_drainage_model(
         interval_type,
         all_five_year_periods,
     )
+
+    chunk_size_pixels = int(chunk_size * (cn.full_raster_dims / 10))
+    model_years = list(
+        range(
+            cn.five_year_inventory_periods[0][0],
+            cn.five_year_inventory_periods[-1][1] + 1,
+        )
+    )
+
+    if create_zarr:
+        run_date = cn.today_date
+        raw_mega_zarr_path = create_mega_zarr_path(
+            DRAINAGE_MEGA_ZARR_ROOT,
+            chunk_size_pixels,
+            interval_type,
+            run_name,
+            run_date,
+        )
+        initialize_global_mega_zarr(
+            raw_mega_zarr_path,
+            DRAINAGE_OUTPUTS_TO_ZARR,
+            model_years,
+            chunk_size_pixels,
+            main_logger,
+        )
 
     # build task list & run with dask.bag
     bag_items = [(bds, iv[0], iv[1]) for iv in intervals for bds in chunks]
@@ -1172,7 +1284,7 @@ def run_drainage_model(
 # ----------------------------------------------------------------------
 # main entry point
 # ----------------------------------------------------------------------
-def main(argv=None):
+def main(argv=None, create_zarr: bool = False):
     """
     CLI entry point with an IDE‑friendly quick‑test.
 
@@ -1204,6 +1316,7 @@ def main(argv=None):
             peat_threshold=DEFAULT_OGH_THRESHOLD,
             count_burned_years=False,
             emission_factor_variant="default",
+            create_zarr=create_zarr,
         )
         return
 
@@ -1290,6 +1403,11 @@ def main(argv=None):
         default="default",
         help="Select drainage and burned-area emission factor set for sensitivity runs",
     )
+    p.add_argument(
+        "--create_zarr",
+        action="store_true",
+        help="Create and populate global mega-zarr with model outputs",
+    )
     args = p.parse_args(argv)
 
     tile_ids = []
@@ -1319,6 +1437,7 @@ def main(argv=None):
         peat_threshold=args.peat_threshold,
         count_burned_years=args.count_burned_years,
         emission_factor_variant=args.emission_factor_variant,
+        create_zarr=args.create_zarr,
     )
 
 
