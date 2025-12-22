@@ -17,16 +17,16 @@ Local test:
 python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -fy 1 -fv 1 -ft 1 --run_local --no_upload --input_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_model -fy 1 -fv 1 -ft 1 --no_upload --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_postprocessing -fy 1 -fv 1 -ft 1 --no_upload --input_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_model -fy 2 -fv 2 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
+python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_postprocessing -fy 2 -fv 2 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
 
 Full run:
-python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is intended to be the definitive global 0.04x0.04 deg output run for model v1.0.0 (2016-2024)."
+python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_postprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is intended to be the definitive global 0.04x0.04 deg output run for model v1.0.0 (2016-2024)."
 
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
 """
