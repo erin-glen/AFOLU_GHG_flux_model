@@ -19,7 +19,7 @@ from typing import Optional
 
 import dask.bag
 import numpy as np
-import pandas as pd
+import psutil
 from numba import jit, types
 from numba.typed import Dict
 
@@ -30,8 +30,8 @@ from src.scripts.utilities import log_utilities as lu
 from src.scripts.utilities import numba_utilities as nu
 from src.scripts.utilities import drainage_emission_factors as defac
 from src.scripts.utilities import burned_area_emission_factors as baf
-from src.scripts.utilities import drainage_zarr_utilities as dzu
 from src.scripts.zonal_statistics import zonal_constants as zc
+from src.utilities import zarr_utilities as zu
 
 # ----------------------------------------------------------------------
 # constants pulled into locals for Numba speed
@@ -60,10 +60,6 @@ VALID_BURNED_STATE_CODES = np.array(
 # Default peat probability threshold for the OGH dataset. This matches the
 # preprocessing threshold previously applied during tiling.
 DEFAULT_OGH_THRESHOLD = 10.0
-
-DRAINAGE_CLASSIFICATION_LAYERS = {"drained_soil", "drained_state", "burned_state"}
-DRAINAGE_NUMERIC_LAYERS = {"burned_years_count"}
-ZARR_STAT_TOLERANCE = 1e-6
 
 forest_code = cn.ipcc_codes["forest"]
 cropland_code = cn.ipcc_codes["cropland"]
@@ -598,10 +594,9 @@ def calculate_and_upload_drainage(
     peat_threshold: Optional[float] = None,
     count_burned_years=False,
     emission_factor_variant: str = "default",
-    create_zarr: bool = False,
     mega_zarr_path: Optional[str] = None,
     outputs_to_zarr: Optional[list[str]] = None,
-    zarr_year_index: Optional[dict[int, int]] = None,
+    interval_end_years: Optional[list[int]] = None,
 ):
     """Process a single chunk for a given interval.
 
@@ -633,14 +628,12 @@ def calculate_and_upload_drainage(
         emission_factor_variant : {"low", "default", "high"}, optional
             Select which emission factor table set to use for drainage and
             burned‑area emissions.
-        create_zarr : bool, optional
-            If ``True``, populate the drainage mega-zarr for this chunk.
-        mega_zarr_path : str or None, optional
-            Destination mega-zarr path.
-        outputs_to_zarr : list[str] or None, optional
-            Canonical output list for zarr population.
-        zarr_year_index : dict[int, int] or None, optional
-            Mapping from interval end year to zarr year index.
+        mega_zarr_path : str, optional
+            Path to the global mega-zarr store for chunk output writes.
+        outputs_to_zarr : list[str], optional
+            Output datasets to populate into the mega-zarr.
+        interval_end_years : list[int], optional
+            Ordered interval end years used to index the year dimension in zarr.
     """
 
     logger = lu.setup_logging_worker()
@@ -847,25 +840,6 @@ def calculate_and_upload_drainage(
         if old in outputs:
             outputs[new] = outputs.pop(old) / interval_length
 
-    if (
-        create_zarr
-        and mega_zarr_path
-        and outputs_to_zarr
-        and zarr_year_index
-        and iv_end in zarr_year_index
-    ):
-        dzu.populate_mega_zarr(
-            mega_zarr_path,
-            outputs,
-            outputs_to_zarr,
-            bounds,
-            zarr_year_index[iv_end],
-        )
-
-    # stats for outputs, with explicit layer categorization
-    drainage_classification_layers = DRAINAGE_CLASSIFICATION_LAYERS
-    numeric_layers = DRAINAGE_NUMERIC_LAYERS
-
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tid}.tif"
     pixel_area_chunk = uu.get_tile_dataset_rio(
         pixel_area_uri,
@@ -876,8 +850,48 @@ def calculate_and_upload_drainage(
         logger,
     )[0]
 
+    if mega_zarr_path and outputs_to_zarr:
+        zarr_outputs = {}
+        for output_name in outputs_to_zarr:
+            if output_name in outputs:
+                zarr_outputs[output_name] = outputs[output_name]
+                continue
+            if output_name.endswith("_pixel_yr"):
+                per_ha_name = output_name.replace("_pixel_yr", "_ha_yr")
+                if per_ha_name in outputs:
+                    zarr_outputs[output_name] = (
+                        outputs[per_ha_name] * pixel_area_chunk * cn.m2_to_ha
+                    )
+            elif output_name.endswith("_pixel"):
+                per_ha_name = output_name.replace("_pixel", "_ha")
+                if per_ha_name in outputs:
+                    zarr_outputs[output_name] = (
+                        outputs[per_ha_name] * pixel_area_chunk * cn.m2_to_ha
+                    )
+
+        if zarr_outputs:
+            zu.populate_zarr(
+                bounds,
+                bstr,
+                True,
+                interval_end_years or [iv_end],
+                is_final,
+                logger,
+                mega_zarr_path,
+                zarr_outputs,
+                outputs_to_zarr,
+                psutil.Process(os.getpid()),
+                "drainage_model",
+                tid,
+            )
+
+    # stats for outputs, with explicit layer categorization
+    drainage_classification_layers = ["drained_soil", "drained_state"]
+    burned_classification_layers = ["burned_state"]
+    numeric_layers = ["burned_years_count"]
+
     for k, arr in outputs.items():
-        if k in drainage_classification_layers:
+        if k in drainage_classification_layers or k in burned_classification_layers:
             chunk_stats.append(
                 uu.calculate_stats(
                     arr,
@@ -1009,141 +1023,6 @@ def parse_optional_float(value: Optional[str]) -> Optional[float]:
     return float(value)
 
 
-def collect_zarr_chunk_stats(
-    bag_items,
-    zarr_path: str,
-    outputs_to_zarr: list[str],
-    zarr_year_index: dict[int, int],
-    is_final: bool,
-    logger,
-):
-    zarr_stats = []
-    for bounds, iv_start, iv_end in bag_items:
-        year_idx = zarr_year_index.get(iv_end)
-        if year_idx is None:
-            continue
-        bstr = uu.boundstr(bounds)
-        tid = uu.xy_to_tile_id(bounds[0], bounds[3])
-        chunk_px = uu.calc_chunk_length_pixels(bounds)
-        pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tid}.tif"
-        pixel_area_chunk = uu.get_tile_dataset_rio(
-            pixel_area_uri,
-            "Float32",
-            bounds,
-            chunk_px,
-            is_final,
-            logger,
-        )[0]
-
-        for name in outputs_to_zarr:
-            arr = dzu.open_zarr_window(zarr_path, name, bounds, year_idx)
-            if name in DRAINAGE_CLASSIFICATION_LAYERS:
-                zarr_stats.append(
-                    uu.calculate_stats(
-                        arr,
-                        name,
-                        bstr,
-                        tid,
-                        "zarr_output_layer",
-                        iv_start=iv_start,
-                        iv_end=iv_end,
-                    )
-                )
-            elif name in DRAINAGE_NUMERIC_LAYERS:
-                zarr_stats.append(
-                    uu.calculate_stats(
-                        arr,
-                        name,
-                        bstr,
-                        tid,
-                        "zarr_output_layer_numeric",
-                        iv_start=iv_start,
-                        iv_end=iv_end,
-                    )
-                )
-            else:
-                per_pixel = arr * pixel_area_chunk * cn.m2_to_ha
-                zarr_stats.append(
-                    uu.calculate_stats(
-                        arr,
-                        name,
-                        bstr,
-                        tid,
-                        "zarr_output_layer",
-                        per_pixel,
-                        iv_start,
-                        iv_end,
-                    )
-                )
-    return zarr_stats
-
-
-def compare_zarr_chunk_stats(
-    model_stats: list[dict],
-    zarr_stats: list[dict],
-    tolerance: float,
-    logger,
-):
-    if not model_stats or not zarr_stats:
-        logger.warning("No chunk stats available for zarr comparison.")
-        return None, 0, 0
-
-    model_df = pd.DataFrame(model_stats)
-    zarr_df = pd.DataFrame(zarr_stats)
-
-    model_df = model_df[
-        model_df["in_out"].isin(["output_layer", "output_layer_numeric"])
-    ]
-    zarr_df = zarr_df[
-        zarr_df["in_out"].isin(["zarr_output_layer", "zarr_output_layer_numeric"])
-    ]
-
-    merged = model_df.merge(
-        zarr_df,
-        on=["chunk_id", "tile_id", "layer_name", "years"],
-        how="outer",
-        suffixes=("_model", "_zarr"),
-        indicator=True,
-    )
-
-    diff_cols = ["min_value", "mean_value", "max_value", "count_value", "sum_value"]
-    for col in diff_cols:
-        merged[f"{col}_model"] = pd.to_numeric(
-            merged[f"{col}_model"], errors="coerce"
-        )
-        merged[f"{col}_zarr"] = pd.to_numeric(
-            merged[f"{col}_zarr"], errors="coerce"
-        )
-        merged[f"{col}_diff"] = (
-            merged[f"{col}_model"] - merged[f"{col}_zarr"]
-        ).abs()
-
-    merged["exceeds_tolerance"] = False
-    for col in diff_cols:
-        merged["exceeds_tolerance"] |= merged[f"{col}_diff"] > tolerance
-
-    chunks_exceeding = int(merged["exceeds_tolerance"].sum())
-    chunks_missing = int((merged["_merge"] != "both").sum())
-
-    out_dir = cn.local_chunk_stats_path
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(
-        out_dir, f"drainage_zarr_comparison_{uu.timestr()}.xlsx"
-    )
-    with pd.ExcelWriter(out_path) as xls:
-        merged.to_excel(xls, sheet_name="comparison", index=False)
-        merged[merged["exceeds_tolerance"]].to_excel(
-            xls, sheet_name="exceeds_tolerance", index=False
-        )
-    logger.info("Zarr comparison report written to %s", out_path)
-    logger.info(
-        "Zarr comparison: %d rows exceed tolerance, %d missing pairs",
-        chunks_exceeding,
-        chunks_missing,
-    )
-    return merged, chunks_exceeding, chunks_missing
-
-
 def run_drainage_model(
     cluster_name=None,
     bounding_box=None,
@@ -1164,8 +1043,8 @@ def run_drainage_model(
     peat_threshold: Optional[float] = DEFAULT_OGH_THRESHOLD,
     count_burned_years=False,
     emission_factor_variant: str = "default",
-    create_zarr: bool = False,
-    compare_zarr: bool = False,
+    mega_zarr_path: Optional[str] = None,
+    outputs_to_zarr: Optional[list[str]] = None,
 ):
 
     stage = "drainage_model"
@@ -1270,32 +1149,7 @@ def run_drainage_model(
         interval_type,
         all_five_year_periods,
     )
-
-    outputs_to_zarr = None
-    mega_zarr_path = None
-    zarr_year_index = None
-    if create_zarr:
-        outputs_to_zarr = cn.drainage_outputs_to_zarr
-        zarr_years = dzu.full_model_year_index(interval_type)
-        zarr_year_index = {year: idx for idx, year in enumerate(zarr_years)}
-        chunk_size_pixels = uu.calc_chunk_length_pixels(chunks[0])
-        run_date = cn.today_date
-        mega_zarr_path = dzu.create_mega_zarr_path(
-            cn.drainage_outputs_path_mega_zarr,
-            chunk_size_pixels,
-            interval_type,
-            run_name,
-            run_date,
-            main_logger,
-        )
-        dzu.initialize_global_mega_zarr(
-            mega_zarr_path,
-            outputs_to_zarr,
-            zarr_years,
-            chunk_size_pixels,
-            interval_type,
-            main_logger,
-        )
+    interval_end_years = [iv[1] for iv in intervals]
 
     # build task list & run with dask.bag
     bag_items = [(bds, iv[0], iv[1]) for iv in intervals for bds in chunks]
@@ -1337,10 +1191,9 @@ def run_drainage_model(
             peat_threshold,
             count_burned_years,
             emission_factor_variant,
-            create_zarr,
-            mega_zarr_path,
-            outputs_to_zarr,
-            zarr_year_index,
+            mega_zarr_path=mega_zarr_path,
+            outputs_to_zarr=outputs_to_zarr,
+            interval_end_years=interval_end_years,
         )
 
     results = bag.map(_wrap).compute()
@@ -1361,29 +1214,6 @@ def run_drainage_model(
             run_name=run_name,
         )
 
-    if (
-        compare_zarr
-        and create_zarr
-        and (not no_stats)
-        and mega_zarr_path
-        and outputs_to_zarr
-        and zarr_year_index
-    ):
-        main_logger.info("Starting zarr chunk stats comparison: %s", uu.timestr())
-        zarr_stats = collect_zarr_chunk_stats(
-            bag_items,
-            mega_zarr_path,
-            outputs_to_zarr,
-            zarr_year_index,
-            is_final,
-            main_logger,
-        )
-        compare_zarr_chunk_stats(
-            all_stats,
-            zarr_stats,
-            ZARR_STAT_TOLERANCE,
-            main_logger,
-        )
 
     uu.stage_duration(start_ts, uu.timestr(), stage)
     if not run_local:
@@ -1512,16 +1342,6 @@ def main(argv=None):
         default="default",
         help="Select drainage and burned-area emission factor set for sensitivity runs",
     )
-    p.add_argument(
-        "--create_zarr",
-        action="store_true",
-        help="Create and populate the drainage mega-zarr",
-    )
-    p.add_argument(
-        "--compare_zarr",
-        action="store_true",
-        help="Compare zarr chunk stats against GeoTIFF chunk stats",
-    )
     args = p.parse_args(argv)
 
     tile_ids = []
@@ -1551,8 +1371,6 @@ def main(argv=None):
         peat_threshold=args.peat_threshold,
         count_burned_years=args.count_burned_years,
         emission_factor_variant=args.emission_factor_variant,
-        create_zarr=args.create_zarr,
-        compare_zarr=args.compare_zarr,
     )
 
 
