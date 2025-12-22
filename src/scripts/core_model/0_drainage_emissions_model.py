@@ -12,14 +12,12 @@ Organic‑soils drainage and fire emissions model
 from __future__ import annotations
 import argparse
 import concurrent.futures
-import os
 import sys
 from datetime import datetime
 from typing import Optional
 
 import dask.bag
 import numpy as np
-import psutil
 from numba import jit, types
 from numba.typed import Dict
 
@@ -31,7 +29,7 @@ from src.scripts.utilities import numba_utilities as nu
 from src.scripts.utilities import drainage_emission_factors as defac
 from src.scripts.utilities import burned_area_emission_factors as baf
 from src.scripts.zonal_statistics import zonal_constants as zc
-from src.utilities import zarr_utilities as zu
+from src.scripts.utilities import drainage_zarr_utilities as zu
 
 # ----------------------------------------------------------------------
 # constants pulled into locals for Numba speed
@@ -870,20 +868,23 @@ def calculate_and_upload_drainage(
                     )
 
         if zarr_outputs:
-            zu.populate_zarr(
-                bounds,
-                bstr,
-                True,
-                interval_end_years or [iv_end],
-                is_final,
-                logger,
-                mega_zarr_path,
-                zarr_outputs,
-                outputs_to_zarr,
-                psutil.Process(os.getpid()),
-                "drainage_model",
-                tid,
-            )
+            interval_years = interval_end_years or [iv_end]
+            try:
+                year_index = interval_years.index(iv_end)
+            except ValueError:
+                lu.print_and_log(
+                    f"Interval end year {iv_end} missing from zarr year index list.",
+                    is_final,
+                    logger,
+                )
+            else:
+                zu.populate_mega_zarr(
+                    mega_zarr_path,
+                    zarr_outputs,
+                    outputs_to_zarr,
+                    bounds,
+                    year_index,
+                )
 
     # stats for outputs, with explicit layer categorization
     drainage_classification_layers = ["drained_soil", "drained_state"]
@@ -1045,6 +1046,8 @@ def run_drainage_model(
     emission_factor_variant: str = "default",
     mega_zarr_path: Optional[str] = None,
     outputs_to_zarr: Optional[list[str]] = None,
+    create_zarr: bool = False,
+    run_date: Optional[str] = None,
 ):
 
     stage = "drainage_model"
@@ -1142,6 +1145,15 @@ def run_drainage_model(
         chunks = uu.get_chunk_bounds(bounding_box, chunk_size)
     is_final = len(chunks) > 20
 
+    # Default run date for zarr naming
+    if not run_date:
+        run_date = datetime.utcnow().strftime("%Y%m%d")
+
+    # Whenever the run is large-scale (final), force zarr creation
+    if is_final:
+        create_zarr = True
+    main_logger.info("Create and populate global mega-zarr: %s", create_zarr)
+
     # Normalize interval settings and compute interval list
     intervals, start_year, end_year, interval_type = compute_intervals(
         start_year,
@@ -1150,6 +1162,28 @@ def run_drainage_model(
         all_five_year_periods,
     )
     interval_end_years = [iv[1] for iv in intervals]
+
+    if create_zarr:
+        if not chunks:
+            raise ValueError("No chunks available to determine zarr chunk size.")
+        chunk_size_pixels = uu.calc_chunk_length_pixels(chunks[0])
+        mega_zarr_path = zu.create_mega_zarr_path(
+            cn.drainage_outputs_path_mega_zarr,
+            chunk_size_pixels,
+            interval_type,
+            run_name,
+            run_date,
+            main_logger,
+        )
+        outputs_to_zarr = list(cn.drainage_outputs_to_zarr)
+        zu.initialize_global_mega_zarr(
+            mega_zarr_path,
+            outputs_to_zarr,
+            interval_end_years,
+            chunk_size_pixels,
+            interval_type,
+            main_logger,
+        )
 
     # build task list & run with dask.bag
     bag_items = [(bds, iv[0], iv[1]) for iv in intervals for bds in chunks]
@@ -1342,6 +1376,15 @@ def main(argv=None):
         default="default",
         help="Select drainage and burned-area emission factor set for sensitivity runs",
     )
+    p.add_argument(
+        "--create_zarr",
+        action="store_true",
+        help="Create and populate global mega-zarr with model outputs",
+    )
+    p.add_argument(
+        "--run_date",
+        help="Run date used in mega-zarr path naming (YYYYMMDD)",
+    )
     args = p.parse_args(argv)
 
     tile_ids = []
@@ -1371,6 +1414,8 @@ def main(argv=None):
         peat_threshold=args.peat_threshold,
         count_burned_years=args.count_burned_years,
         emission_factor_variant=args.emission_factor_variant,
+        create_zarr=args.create_zarr,
+        run_date=args.run_date,
     )
 
 
