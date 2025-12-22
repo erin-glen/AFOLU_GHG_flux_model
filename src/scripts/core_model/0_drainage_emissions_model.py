@@ -17,7 +17,9 @@ from datetime import datetime
 from typing import Optional
 
 import dask.bag
+import fsspec
 import numpy as np
+import xarray as xr
 from numba import jit, types
 from numba.typed import Dict
 
@@ -1183,6 +1185,19 @@ def run_drainage_model(
             chunk_size_pixels,
             interval_type,
             main_logger,
+        )
+        fs = fsspec.filesystem("s3", anon=False)
+        mapper = fs.get_mapper(mega_zarr_path)
+        ds = xr.open_zarr(mapper, consolidated=False)
+        main_logger.info("mega-zarr coords: %s", ds.coords)
+        main_logger.info(
+            "y range: %s, %s", ds.y.values.min(), ds.y.values.max()
+        )
+        main_logger.info(
+            "x range: %s, %s", ds.x.values.min(), ds.x.values.max()
+        )
+        main_logger.info(
+            "mega-zarr chunk size (years, y, x): %s", ds.chunksizes
         )
 
     # build task list & run with dask.bag
