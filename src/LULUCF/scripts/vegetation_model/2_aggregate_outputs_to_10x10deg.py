@@ -524,7 +524,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
 
     # Counts per-hectare outputs
     output_dir_list_per_ha = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, 'annual', cn.first_model_year_annual,
-                                                     cn.full_raster_dims, model_type, interval_end_years,
+                                                     cn.full_raster_dims, model_type, cn.veg_model_version_underscore, model_path_description, interval_end_years,
                                                      interval_year_diff_list, input_date, False, "per_ha")
     output_dir_list_per_ha.sort()  # Alphabetically order the outputs (modifies output_dir_list_per_ha)
     if is_large_run:
@@ -542,7 +542,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
 
     # Counts per-pixel outputs
     output_dir_list_per_pixel = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, 'annual', cn.first_model_year_annual,
-                                                     cn.full_raster_dims, model_type, interval_end_years,
+                                                     cn.full_raster_dims, model_type, cn.veg_model_version_underscore, model_path_description, interval_end_years,
                                                      interval_year_diff_list, input_date, False, "per_pixel")
     output_dir_list_per_pixel.sort()
     if is_large_run:
@@ -559,7 +559,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload, model_chunk_sta
 
     # Counts 0.04x0.04 deg outputs
     output_dir_list_aggreg = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, 'annual', cn.first_model_year_annual,
-                                                     '160', model_type, interval_end_years,
+                                                     '160', model_type, cn.veg_model_version_underscore, model_path_description, interval_end_years,
                                                      interval_year_diff_list, input_date, False, "_0_04deg_yr")
     output_dir_list_aggreg.sort()
     if is_large_run:

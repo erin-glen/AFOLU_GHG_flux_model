@@ -1999,17 +1999,17 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
 
     lu.print_and_log(f"Calculating vegetation fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_large_run, logger_worker)
-    numba_start = time.time()
+    calc_start = time.time()
 
     out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = vegetation_fluxes(
         typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32,
         primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
         start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_large_run)
 
-    numba_end = time.time()
-    lu.print_and_log(f"Done calculating vegetation fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    calc_end = time.time()
+    lu.print_and_log(f"Done calculating vegetation fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
     lu.print_and_log(f"Memory usage after numba calculations completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
-    lu.print_and_log(f"Calculated using numba in {bounds_str} in {tile_id} in {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Calculated {bounds_str} in {tile_id} in {round(calc_end-calc_start)} seconds: {uu.timestr()}", False, logger_worker)
 
     # print("out_dict_uint8:", out_dict_uint8)
     # print("out_dict_uint32:", out_dict_uint32)
@@ -2046,7 +2046,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     ### Part 5: Writes outputs to pre-existing global mega-zarr (only if activated)
 
     zu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
-                  out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
+                  out_dict_all_dtypes, outputs_to_zarr, stage, tile_id)
 
 
     ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
@@ -2224,6 +2224,8 @@ def main(cluster_name, year_range, model_type,
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
+    main_logger.info(f"Model version: {cn.veg_model_version}")
+    main_logger.info(f"Model path descriptor: {model_path_description}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
     main_logger.info(f"Run date: {run_date}")
     main_logger.info(f"Batch size: {batch_size} chunks")
@@ -2402,7 +2404,7 @@ def main(cluster_name, year_range, model_type,
     # Creates a list of output directories (core and intermediates) for all outputs and intervals based on specifics of the model run
     output_dir_list_core_intermediate = cn.veg_core_output_dirs + cn.veg_intermediate_output_dirs + cn.veg_summative_output_dirs
     output_dir_list = uu.create_output_dir_name_list(output_dir_list_core_intermediate, interval_type, start_year,
-                                                     chunk_size_pixels, model_type, model_path_description, interval_end_years,
+                                                     chunk_size_pixels, model_type, cn.veg_model_version_underscore, model_path_description, interval_end_years,
                                                      interval_year_diff_list, run_date, False, "per_ha")
     output_dir_list.sort()  # Alphabetically order the outputs (modifies output_dir_list)
     if is_large_run:
@@ -2441,7 +2443,8 @@ def main(cluster_name, year_range, model_type,
 
         # Creates s3 paths for the raw mega-zarr
         mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, chunk_size_pixels, interval_type,
-                                                      model_type, model_path_description, run_date, main_logger)
+                                                  model_type, cn.veg_model_version_underscore, model_path_description,
+                                                  run_date, main_logger)
 
         # These variables are added to the mega-zarr
         outputs_to_zarr = cn.full_outputs_to_zarr
@@ -2620,6 +2623,7 @@ def main(cluster_name, year_range, model_type,
                 chunk_list=chunk_list,
                 var=var_name,
                 zarr_path=mega_zarr_path,
+                interval_end_years=interval_end_years
             )
 
             # After all zarr chunk stats is done for the dataset-year combination,

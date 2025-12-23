@@ -5,6 +5,7 @@ import os
 import statistics
 import sys
 import time
+import numpy as np
 
 from dask.distributed import print
 
@@ -55,7 +56,6 @@ def populate_main_log_header(client, cluster, log_note, run_local, model_type, s
 
     main_logger.info(f"Model type: {model_type}")
     main_logger.info(f"Stage: {stage}")
-    main_logger.info(f"Model version: {cn.veg_model_version}")
     main_logger.info(f"Number of workers: {n_workers}")
     main_logger.info(f"Memory per worker: {worker_memory}")
     main_logger.info(f"Threads per worker: {nthreads}")
@@ -151,7 +151,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
 
         # Time extraction from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/691f42e3-cd2c-800a-b9e1-715190ad3024
         # Extracts seconds from lines for core calculation processing
-        numba_proc_times__sec = [int(m) for m in re.findall(r'Calculated using numba.*?(\d+) seconds', log_content)]
+        numba_proc_times__sec = [int(m) for m in re.findall(r'Calculated.*?(\d+) seconds', log_content)]
 
         # Extract seconds from lines for zarr insertion
         zarr_insert_proc_times__sec = [int(m) for m in re.findall(r'Wrote outputs to global zarrs.*?(\d+) seconds', log_content)]
@@ -163,8 +163,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
         total_chunk_proc_times__sec = [int(m) for m in re.findall(r'Total chunk processing.*?(\d+) seconds', log_content)]
 
         # Extract peak memory usage
-        peak_memory__GB = [m for m in re.findall(r'Peak memory for [^:]+: ([0-9]+(?:\.[0-9]+)?) GB', log_content)]
-        print(peak_memory__GB)
+        peak_memory__GB = [np.float32(m) for m in re.findall(r'Peak memory for [^:]+: ([0-9]+(?:\.[0-9]+)?) GB', log_content)]
 
         # Averages
         avg_numba_proc_times__sec = sum(numba_proc_times__sec) / len(numba_proc_times__sec) if numba_proc_times__sec else 0
@@ -228,7 +227,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
     # Removes the main log if the stage doesn't run in batches.
     # The main log must be kept for stages that run in batches because each batch uses the same main log.
     # The main log can be manually deleted after the run is done.
-    if stage not in ["create_forest_age_2010_2015__1x1_deg", "LULUCF_fluxes", "soil_carbon_densities_and_changes"]:
+    if stage not in ["create_forest_age_2010_2015__1x1_deg", "vegetation_fluxes", "soil_carbon_densities_and_changes"]:
         os.remove(main_log)
 
     if not no_log:

@@ -697,7 +697,9 @@ if __name__ == '__main__':
 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
     inputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, "annual", cn.first_model_year_annual,
-                                                                  "global", "standard_model", cn.interval_end_years_annual,
+                                                                  "global",
+                                                                 "standard_model", cn.veg_model_version_underscore, model_path_description,
+                                                                 cn.interval_end_years_annual,
                                                                  [1, 1, 1, 1, 1, 1, 1, 1, 1], input_date,
                                                                  True, cn.flux_aggreg_pixel_meaning)
 

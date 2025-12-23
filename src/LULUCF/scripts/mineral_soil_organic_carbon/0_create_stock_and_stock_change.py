@@ -2,31 +2,22 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -bb 110 -1 111 0 -cs 1 -mpd test_box
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -bb 110 -1 111 0 -cs 1 -mt standard -mpd test_box
 
 Coiled small test (1x1 deg):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -bb 110 -1 111 0 -cs 1 --create_zarr
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -bb 110 -1 111 0 -cs 1 -mt standard -mpd test_box --create_zarr
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 50 -t 1 -m 4 -cn mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -ln "SOC timeseries for 1884-feature shapefile."
+python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn mineral_soil
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -mt standard -mpd 1884_features-cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -ln "SOC timeseries for 1884-feature shapefile."
 
 Full run:
-python -m src.utilities.create_cluster -n 100 -t 1 -m 4 -cn mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -mpd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive SOC timeseries creation."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn mineral_soil
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -mt standard -mpd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive SOC timeseries creation."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6877a34b-02cc-800a-88cc-a123cdc9ed1b
 Selection of 100 workers for full run based on tests in https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1211069739892865?focus=true
-
-Cluster: https://cloud.coiled.io/clusters/1102243/account/wri-forest-research/information?organization=wri
-Peak memory: ~1600 MB/worker
-Average processing time per chunk (from log, with only 9000 tasks in it): average of 83 seconds (range: 21-176 seconds, stdev = 24)
-Time until chunk stats: 5:13:59
-Time with chunk stats: 5:18:34
-Coiled tasks: 18832 (expected number)
-Coiled credits: 522 (101/hr)
-AWS cost: $11.8 ($2.28/hr)
 """
 
 import argparse
@@ -51,6 +42,7 @@ from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 from src.utilities import zarr_utilities as zu
 from src.utilities import resize_cluster
+
 
 def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nodata_val, outputs_by_interval_dir_list,
                                      mega_zarr_path=None, outputs_to_zarr=None):
@@ -114,9 +106,10 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
     # Combined into single dict at end for uploading but separate now because calculating deltas is easier with them separate.
     out_dict_full_extent = {}
     out_dict_min_soil_extent = {}
+    calc_start = time.time()
 
-    for year_range in list(layers.keys()):
-        interval_array_full_extent = layers[year_range]
+    for end_year in list(layers.keys()):
+        interval_array_full_extent = layers[end_year]
 
         # Replace COG int16 NoData with 0
         interval_array_full_extent = np.where(interval_array_full_extent == nodata_val, 0, interval_array_full_extent)
@@ -125,15 +118,15 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
         converted_array_full_extent = (interval_array_full_extent * SOC_CONVERSION_FACTOR).astype(np.float32)
 
         # print(f"\n--- Chunk {bounds_str} ---")
-        # print(f"SOC density array shape for {bounds_str} for {year_range}: {converted_array_full_extent.shape}")
-        # print(f"Organic soil mask shape for {bounds_str} for {year_range}: {organic_soil_mask.shape}")
+        # print(f"SOC density array shape for {bounds_str} for {end_year}: {converted_array_full_extent.shape}")
+        # print(f"Organic soil mask shape for {bounds_str} for {end_year}: {organic_soil_mask.shape}")
 
         # Masks extent to just mineral soil (excludes pixels with high chance of being organic soil, per OpenGeoHub analysis)
         converted_array_min_soil_extent = np.where(organic_soil_mask <= 10, converted_array_full_extent, 0)
 
         # Save back to output dicts with the converted unit arrays
-        out_dict_full_extent[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}__{year_range}"] = converted_array_full_extent
-        out_dict_min_soil_extent[f"{cn.SOC_density_min_soil_extent_pattern}{cn.C_density_pixel_meaning}__{year_range}"] = converted_array_min_soil_extent
+        out_dict_full_extent[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}_{end_year}"] = converted_array_full_extent
+        out_dict_min_soil_extent[f"{cn.SOC_density_min_soil_extent_pattern}{cn.C_density_pixel_meaning}_{end_year}"] = converted_array_min_soil_extent
 
         lu.print_and_log(f"After calculating densities for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
 
@@ -157,16 +150,18 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
 
         lu.print_and_log(f"Calculating SOC change for {end_year} to {start_year} for {bounds_str}: {uu.timestr()}", False, logger_worker)
 
-        delta_full_extent = (out_dict_full_extent_ordered[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}__{end_year}"] -
-                             out_dict_full_extent_ordered[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}__{start_year}"]) / year_diff  # Interval arrays must be unsigned so difference can be negative
-        delta_min_soil = (out_dict_min_soil_extent_ordered[f"{cn.SOC_density_min_soil_extent_pattern}{cn.C_density_pixel_meaning}__{end_year}"] -
-                          out_dict_min_soil_extent_ordered[f"{cn.SOC_density_min_soil_extent_pattern}{cn.C_density_pixel_meaning}__{start_year}"]) / year_diff  # Interval arrays must be unsigned so difference can be negative
+        delta_full_extent = (out_dict_full_extent_ordered[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}_{end_year}"] -
+                             out_dict_full_extent_ordered[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}_{start_year}"]) / year_diff  # Interval arrays must be unsigned so difference can be negative
+        delta_min_soil = (out_dict_min_soil_extent_ordered[f"{cn.SOC_density_min_soil_extent_pattern}{cn.C_density_pixel_meaning}_{end_year}"] -
+                          out_dict_min_soil_extent_ordered[f"{cn.SOC_density_min_soil_extent_pattern}{cn.C_density_pixel_meaning}_{start_year}"]) / year_diff  # Interval arrays must be unsigned so difference can be negative
 
         # Saves back to output dicts with the converted unit arrays
-        out_dict_full_extent_ordered[f"{cn.SOC_change_full_extent_pattern}{cn.flux_density_pixel_meaning}__{end_year}"] = delta_full_extent
-        out_dict_min_soil_extent_ordered[f"{cn.SOC_change_min_soil_extent_pattern}{cn.flux_density_pixel_meaning}__{end_year}"] = delta_min_soil
+        out_dict_full_extent_ordered[f"{cn.SOC_change_full_extent_pattern}{cn.flux_density_pixel_meaning}_{end_year}"] = delta_full_extent
+        out_dict_min_soil_extent_ordered[f"{cn.SOC_change_min_soil_extent_pattern}{cn.flux_density_pixel_meaning}_{end_year}"] = delta_min_soil
 
-        lu.print_and_log(f"After calculating deltas for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
+    calc_end = time.time()
+    lu.print_and_log(f"After calculating deltas for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
+    lu.print_and_log(f"Calculated {bounds_str} in {tile_id} in {round(calc_end-calc_start)} seconds: {uu.timestr()}", False, logger_worker)
 
     # print("out_dict_full_extent_ordered:", out_dict_full_extent_ordered)
     # print("out_dict_min_soil_extent_ordered:", out_dict_min_soil_extent_ordered)
@@ -176,11 +171,10 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
 
     # Combine the full extent and mineral soil extent dictionaries into a single dictionary
     out_dict_combined = out_dict_full_extent_ordered | out_dict_min_soil_extent_ordered
-    print(out_dict_combined)
+    # print(out_dict_combined)
 
     zu.populate_zarr(bounds, bounds_str, create_zarr, cn.SOC_density_intervals, is_large_run, logger_worker, mega_zarr_path,
-                  out_dict_combined, outputs_to_zarr, process, stage, tile_id)
-    # sys.quit()
+                  out_dict_combined, outputs_to_zarr, stage, tile_id)
 
 
     ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
@@ -219,6 +213,7 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
     if not no_upload:
 
         out_no_data_val = 0  # NoData value for output raster (optional)
+        upload_start_time = time.time()
 
         # Adds metadata used for uploading outputs to s3 to the dictionary
         for key, value in out_dict_combined.items():
@@ -263,10 +258,11 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
         with ThreadPoolExecutor(max_workers=5) as executor:
             executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
-        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {outputs_by_interval_dir_list[0]}: {uu.timestr()}", is_large_run, logger_worker)
+        upload_end_time = time.time()
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {outputs_by_interval_dir_list[0]} in {round(upload_end_time - upload_start_time)} seconds: {uu.timestr()}", is_large_run, logger_worker)
 
     chunk_end_time = time.time()
-    lu.print_and_log(f"  {bounds_str} downloads and density calcs took {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}",False, logger_worker)
+    lu.print_and_log(f"  Total chunk processing for {bounds_str} in {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}",False, logger_worker)
 
     return_message = f"Success for {bounds_str}: {uu.timestr()}"
 
@@ -314,6 +310,8 @@ def main(cluster_name, model_type,
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
+    main_logger.info(f"Model version: {cn.SOC_soil_model_version}")
+    main_logger.info(f"Model path descriptor: {model_path_description}")
     main_logger.info(f"Run date: {run_date}")
     main_logger.info(f"Batch size: {batch_size} chunks")
     main_logger.info(f"no_upload: {no_upload}")
@@ -346,7 +344,7 @@ def main(cluster_name, model_type,
                         cn.SOC_density_min_soil_extent_dir, cn.SOC_change_min_soil_extent_dir]
     outputs_dir_list = [path.replace("CHUNK_SIZE_pixels", f"{chunk_size_pixels}_pixels") for path in outputs_dir_list]
     outputs_dir_list = [path.replace("RUN_DATE", run_date) for path in outputs_dir_list]
-    outputs_dir_list = [path.replace(cn.model_version_type_description_placeholder, f"version_{cn.OGH_soil_model_version_underscore}__{model_type}__{model_path_description}") for path in outputs_dir_list]
+    outputs_dir_list = [path.replace(cn.model_version_type_description_placeholder, f"version_{cn.SOC_soil_model_version_underscore}__{model_type}__{model_path_description}") for path in outputs_dir_list]
     # print(outputs_dir_list)
 
     # List of output paths by interval in s3
@@ -391,7 +389,8 @@ def main(cluster_name, model_type,
 
         # Creates s3 paths for the raw mega-zarr
         mega_zarr_path = zu.create_mega_zarr_path(cn.SOC_path_mega_zarr, chunk_size_pixels, 'N/A',
-                                                      model_type, model_path_description, run_date, main_logger)
+                                                  model_type, cn.SOC_soil_model_version_underscore, model_path_description,
+                                                  run_date, main_logger)
 
         # These variables are added to the mega-zarr
         outputs_to_zarr = cn.SOC_outputs_to_zarr
@@ -555,6 +554,7 @@ def main(cluster_name, model_type,
                 chunk_list=chunk_list,
                 var=var_name,
                 zarr_path=mega_zarr_path,
+                interval_end_years=cn.SOC_density_intervals
             )
 
             # After all zarr chunk stats is done for the dataset-year combination,

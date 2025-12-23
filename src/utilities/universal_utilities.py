@@ -872,14 +872,14 @@ def check_for_tile(download_dict, is_final, logger):
 
 # Turns a list of basic output directory names into a list of fully specified directories based on output chunk size, run date, model type, and output years
 def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_pixels,
-                                model_type, model_path_description, output_years, interval_duration,
+                                model_type, model_version, model_path_description, output_years, interval_duration,
                                 run_date, include_full_period_totals, pixel_meaning=None):
 
     # List of directories for outputs
     output_full_dirs = []
 
     # Replaces placeholders in paths with values specific to the run
-    dir_list = [path.replace(cn.model_version_type_description_placeholder, f"version_{cn.veg_model_version_underscore}__{model_type}__{model_path_description}") for path in dir_list]
+    dir_list = [path.replace(cn.model_version_type_description_placeholder, f"version_{model_version}__{model_type}__{model_path_description}") for path in dir_list]
     dir_list = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in dir_list]
     dir_list = [path.replace("RUN_DATE", run_date) for path in dir_list]
 

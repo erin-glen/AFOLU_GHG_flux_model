@@ -10,8 +10,8 @@ import numpy as np
 veg_model_version = "1.0.4"
 veg_model_version_underscore = veg_model_version.replace(".", "_")
 
-OGH_soil_model_version = "1.0.0"
-OGH_soil_model_version_underscore = OGH_soil_model_version.replace(".", "_")
+SOC_soil_model_version = "1.0.0"
+SOC_soil_model_version_underscore = SOC_soil_model_version.replace(".", "_")
 
 organic_soil_model_version = "0.9.7"
 organic_soil_model_version_underscore = organic_soil_model_version.replace(".", "_")
