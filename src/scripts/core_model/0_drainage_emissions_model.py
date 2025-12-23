@@ -633,7 +633,8 @@ def calculate_and_upload_drainage(
         outputs_to_zarr : list[str], optional
             Output datasets to populate into the mega-zarr.
         interval_end_years : list[int], optional
-            Ordered interval end years used to index the year dimension in zarr.
+            Ordered year index used to locate the interval end year in zarr.
+            This can be the full-model year index when populating a global store.
     """
 
     logger = lu.setup_logging_worker()
@@ -1164,11 +1165,18 @@ def run_drainage_model(
         all_five_year_periods,
     )
     interval_end_years = [iv[1] for iv in intervals]
+    zarr_year_index = interval_end_years
 
     if create_zarr:
         if not chunks:
             raise ValueError("No chunks available to determine zarr chunk size.")
         chunk_size_pixels = uu.calc_chunk_length_pixels(chunks[0])
+        zarr_year_index = zu.full_model_year_index(interval_type)
+        main_logger.info(
+            "Zarr year index (%s): %s",
+            interval_type,
+            zarr_year_index,
+        )
         mega_zarr_path = zu.create_mega_zarr_path(
             cn.drainage_outputs_path_mega_zarr,
             chunk_size_pixels,
@@ -1181,7 +1189,7 @@ def run_drainage_model(
         zu.initialize_global_mega_zarr(
             mega_zarr_path,
             outputs_to_zarr,
-            interval_end_years,
+            zarr_year_index,
             chunk_size_pixels,
             interval_type,
             main_logger,
@@ -1242,7 +1250,7 @@ def run_drainage_model(
             emission_factor_variant,
             mega_zarr_path=mega_zarr_path,
             outputs_to_zarr=outputs_to_zarr,
-            interval_end_years=interval_end_years,
+            interval_end_years=zarr_year_index,
         )
 
     results = bag.map(_wrap).compute()
