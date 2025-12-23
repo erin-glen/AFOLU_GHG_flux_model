@@ -82,11 +82,33 @@ def initialize_global_mega_zarr(
 
     outputs = list(outputs_to_zarr)
     x, y, _ = global_coords()
-    group.create_dataset("x", data=x, overwrite=True)
+    group.create_dataset(
+        "x",
+        data=x,
+        shape=x.shape,
+        dtype=x.dtype,
+        chunks=x.shape,
+        overwrite=True,
+    )
     group["x"].attrs["_ARRAY_DIMENSIONS"] = ["x"]
-    group.create_dataset("y", data=y, overwrite=True)
+    group.create_dataset(
+        "y",
+        data=y,
+        shape=y.shape,
+        dtype=y.dtype,
+        chunks=y.shape,
+        overwrite=True,
+    )
     group["y"].attrs["_ARRAY_DIMENSIONS"] = ["y"]
-    group.create_dataset("year", data=np.asarray(years, dtype=np.int32), overwrite=True)
+    year_data = np.asarray(years, dtype=np.int32)
+    group.create_dataset(
+        "year",
+        data=year_data,
+        shape=year_data.shape,
+        dtype=year_data.dtype,
+        chunks=year_data.shape,
+        overwrite=True,
+    )
     group["year"].attrs["_ARRAY_DIMENSIONS"] = ["year"]
 
     height, width = global_grid_shape()
