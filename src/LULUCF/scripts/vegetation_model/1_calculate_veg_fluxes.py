@@ -2157,7 +2157,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # Linux reports in kilobytes
     peak_gb = peak_kb / 1024 ** 2
 
-    lu.print_and_log(f"Peak memory for {bounds_str} in {tile_id}: {peak_gb:.2f} GB", is_large_run, logger_worker)
+    lu.print_and_log(f"Peak memory for {bounds_str} in {tile_id}: {peak_gb:.2f} GB", False, logger_worker)
 
     return return_message, chunk_stats
 
@@ -2531,12 +2531,36 @@ def main(cluster_name, year_range, model_type,
         # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
         # That way there are some basic chunk stats (not sorted or anything) to fall back on.
         if len(chunk_batches) > 1:
-            main_logger.info(f"Writing batch stats to spreadsheet: {uu.timestr()}")
+
+            main_logger.info(f"Writing batch stats to disk: {uu.timestr()}")
             df_batch_stats = pd.DataFrame(batch_stats)
-            out_spreadsheet = f'TEMP_BATCH_{stage}__batch_{i}_{uu.timestr()}.xlsx'
-            local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
-            with pd.ExcelWriter(local_spreadsheet) as writer:
-                df_batch_stats.to_excel(writer, sheet_name=f'stats__batch_{i}', index=False)
+
+            timestamp = uu.timestr()
+
+            # Writes batch output to parquet file if output is large
+            if len(df_batch_stats) > 900_000:
+                # Write Parquet for large tables
+                out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.parquet"
+                local_path = f"{cn.local_chunk_stats_path}{out_file}"
+
+                df_batch_stats.to_parquet(
+                    local_path,
+                    engine="pyarrow",
+                    index=False
+                )
+
+            # Otherwise, writes output to spreadsheet
+            else:
+                # Write Excel for smaller tables
+                out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.xlsx"
+                local_path = f"{cn.local_chunk_stats_path}{out_file}"
+
+                with pd.ExcelWriter(local_path) as writer:
+                    df_batch_stats.to_excel(
+                        writer,
+                        sheet_name=f"stats__batch_{i}",
+                        index=False
+                    )
 
         del futures
         del batch_results
