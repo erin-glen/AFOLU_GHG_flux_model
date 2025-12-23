@@ -141,52 +141,51 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
     out_dict_full_extent_ordered = dict(sorted(out_dict_full_extent.items()))
     out_dict_min_soil_extent_ordered = dict(sorted(out_dict_min_soil_extent.items()))
 
-    print("out_dict_full_extent_ordered:", out_dict_full_extent_ordered)
-    print("out_dict_min_soil_extent_ordered:", out_dict_min_soil_extent_ordered)
-
-    sys.quit()
+    # print("out_dict_full_extent_ordered:", out_dict_full_extent_ordered)
+    # print("out_dict_min_soil_extent_ordered:", out_dict_min_soil_extent_ordered)
 
 
     ### Part 3: Calculate density changes between adjacent intervals (Mg C/ha/yr for 0-30 cm)
 
     # Computes and save deltas. Iterates through both full extent and mineral soil extent
-    year_ranges = list(out_dict_full_extent_ordered.keys())    # Need to read from the chronologically ordered dictionary, not the unordered out_dict_full_extent
     # print(year_ranges)
     lu.print_and_log(f"Calculating consecutive SOC changes for {bounds_str}: {uu.timestr()}", False, logger_worker)
-    for i in range(len(year_ranges) - 1):
-        start_interval = year_ranges[i][-9:]
-        end_interval = year_ranges[i + 1][-9:]
-        year_diff = int(end_interval[:4])-int(start_interval[:4])
+    for i, start_year in enumerate(cn.SOC_density_intervals[:-1]):  # Stops iterating at year before last because year_diff is based on the next year
+        end_year = cn.SOC_density_intervals[i+1]
+        year_diff = end_year-start_year
+        # print(f"start_year: {start_year}; end_year: {end_year}; year_diff: {year_diff}")
 
-        lu.print_and_log(f"Calculating SOC change for {start_interval} to {end_interval} for {bounds_str}: {uu.timestr()}", False, logger_worker)
+        lu.print_and_log(f"Calculating SOC change for {end_year} to {start_year} for {bounds_str}: {uu.timestr()}", False, logger_worker)
 
-        delta_full_extent = (out_dict_full_extent_ordered[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}__{end_interval}"] -
-                             out_dict_full_extent_ordered[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}__{start_interval}"]) / year_diff  # Interval arrays must be unsigned so difference can be negative
-        delta_min_soil = (out_dict_min_soil_extent_ordered[f"{cn.SOC_density_min_soil_extent_pattern}{cn.C_density_pixel_meaning}__{end_interval}"] -
-                          out_dict_min_soil_extent_ordered[f"{cn.SOC_density_min_soil_extent_pattern}{cn.C_density_pixel_meaning}__{start_interval}"]) / year_diff  # Interval arrays must be unsigned so difference can be negative
+        delta_full_extent = (out_dict_full_extent_ordered[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}__{end_year}"] -
+                             out_dict_full_extent_ordered[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}__{start_year}"]) / year_diff  # Interval arrays must be unsigned so difference can be negative
+        delta_min_soil = (out_dict_min_soil_extent_ordered[f"{cn.SOC_density_min_soil_extent_pattern}{cn.C_density_pixel_meaning}__{end_year}"] -
+                          out_dict_min_soil_extent_ordered[f"{cn.SOC_density_min_soil_extent_pattern}{cn.C_density_pixel_meaning}__{start_year}"]) / year_diff  # Interval arrays must be unsigned so difference can be negative
 
         # Saves back to output dicts with the converted unit arrays
-        out_dict_full_extent_ordered[f"{cn.SOC_change_full_extent_pattern}{cn.flux_density_pixel_meaning}__{start_interval}_{end_interval}"] = delta_full_extent
-        out_dict_min_soil_extent_ordered[f"{cn.SOC_change_min_soil_extent_pattern}{cn.flux_density_pixel_meaning}__{start_interval}_{end_interval}"] = delta_min_soil
+        out_dict_full_extent_ordered[f"{cn.SOC_change_full_extent_pattern}{cn.flux_density_pixel_meaning}__{end_year}"] = delta_full_extent
+        out_dict_min_soil_extent_ordered[f"{cn.SOC_change_min_soil_extent_pattern}{cn.flux_density_pixel_meaning}__{end_year}"] = delta_min_soil
 
         lu.print_and_log(f"After calculating deltas for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB",False, logger_worker)
 
-    # print(out_dict_full_extent_ordered)
-    # print(out_dict_min_soil_extent_ordered)
+    # print("out_dict_full_extent_ordered:", out_dict_full_extent_ordered)
+    # print("out_dict_min_soil_extent_ordered:", out_dict_min_soil_extent_ordered)
 
 
     ### Part 5: Writes outputs to pre-existing global mega-zarr (only if activated)
 
+    # Combine the full extent and mineral soil extent dictionaries into a single dictionary
+    out_dict_combined = out_dict_full_extent_ordered | out_dict_min_soil_extent_ordered
+    print(out_dict_combined)
+
     zu.populate_zarr(bounds, bounds_str, create_zarr, cn.SOC_density_intervals, is_large_run, logger_worker, mega_zarr_path,
-                  out_dict_full_extent_ordered, outputs_to_zarr, process, stage, tile_id)
+                  out_dict_combined, outputs_to_zarr, process, stage, tile_id)
+    # sys.quit()
 
 
     ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
     ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
     ### Also useful for a quick sum of outputs without doing zonal stats
-
-    # Combines the two output dictionaries into a single dictionary
-    out_dict = out_dict_full_extent_ordered | out_dict_min_soil_extent_ordered
 
     lu.print_and_log(f"Populating chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
 
@@ -204,7 +203,7 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
     # Worked on it in https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/681244d9-83dc-800a-b397-0706e79391c0
     # but never implemented the fix because the very slight rounding results in <0.01% difference.
 
-    for key, array_per_ha in out_dict.items():
+    for key, array_per_ha in out_dict_combined.items():
 
         # Converts per hectare values to per pixel values for the output numpy array
         output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
@@ -222,7 +221,7 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
         out_no_data_val = 0  # NoData value for output raster (optional)
 
         # Adds metadata used for uploading outputs to s3 to the dictionary
-        for key, value in out_dict.items():
+        for key, value in out_dict_combined.items():
             data_type = value.dtype.name
             # print("key:", key)
 
@@ -252,11 +251,11 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
             # print("")
 
             # Dictionary with metadata for each array
-            out_dict[key] = [value, data_type, out_pattern, interval_year_range, s3_path_without_bucket]
+            out_dict_combined[key] = [value, data_type, out_pattern, interval_year_range, s3_path_without_bucket]
 
         # Converts output numpy arrays to local rasters and puts them in a list of files to upload in parallel
         upload_tasks = uu.save_and_upload_small_raster_set(bounds, chunk_length_pixels, tile_id, bounds_str,
-                                                           out_dict, is_large_run, logger_worker, out_no_data_val)
+                                                           out_dict_combined, is_large_run, logger_worker, out_no_data_val)
 
         lu.print_and_log(f"Upload tasks created for {bounds_str} in {tile_id}. Uploading now: {uu.timestr()}", False,logger_worker)
 
@@ -264,7 +263,7 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
         with ThreadPoolExecutor(max_workers=5) as executor:
             executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
-        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.veg_outputs_path}: {uu.timestr()}", is_large_run, logger_worker)
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {outputs_by_interval_dir_list[0]}: {uu.timestr()}", is_large_run, logger_worker)
 
     chunk_end_time = time.time()
     lu.print_and_log(f"  {bounds_str} downloads and density calcs took {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}",False, logger_worker)
@@ -358,11 +357,13 @@ def main(cluster_name, model_type,
         if "density" in output_dir:
             for SOC_density_interval in cn.SOC_density_intervals:
                 output_dir_interval = output_dir.replace("START_END", str(SOC_density_interval))
+                output_dir_interval = output_dir_interval.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning)
                 outputs_by_interval_dir_list = outputs_by_interval_dir_list + [output_dir_interval]
 
         if "change" in output_dir:
             for SOC_change_interval in cn.SOC_change_intervals:
                 output_dir_interval = output_dir.replace("START_END", str(SOC_change_interval))
+                output_dir_interval = output_dir_interval.replace("PER_HA_OR_PIXEL", cn.flux_density_pixel_meaning)
                 outputs_by_interval_dir_list = outputs_by_interval_dir_list + [output_dir_interval]
 
     # print(outputs_by_interval_dir_list)

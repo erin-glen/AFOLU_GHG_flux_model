@@ -163,7 +163,8 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
         total_chunk_proc_times__sec = [int(m) for m in re.findall(r'Total chunk processing.*?(\d+) seconds', log_content)]
 
         # Extract peak memory usage
-        peak_memory__GB = [int(m) for m in re.findall(r'Peak memory for [^:]+: ([0-9]+(?:\.[0-9]+)?) GB', log_content)]
+        peak_memory__GB = [m for m in re.findall(r'Peak memory for [^:]+: ([0-9]+(?:\.[0-9]+)?) GB', log_content)]
+        print(peak_memory__GB)
 
         # Averages
         avg_numba_proc_times__sec = sum(numba_proc_times__sec) / len(numba_proc_times__sec) if numba_proc_times__sec else 0
