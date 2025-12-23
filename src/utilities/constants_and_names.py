@@ -10,6 +10,9 @@ import numpy as np
 veg_model_version = "1.0.4"
 veg_model_version_underscore = veg_model_version.replace(".", "_")
 
+OGH_soil_model_version = "1.0.0"
+OGH_soil_model_version_underscore = OGH_soil_model_version.replace(".", "_")
+
 organic_soil_model_version = "0.9.7"
 organic_soil_model_version_underscore = organic_soil_model_version.replace(".", "_")
 
@@ -668,40 +671,10 @@ GPW_MVH_pattern = f"GPW_height"
 
 # Organic Soils
 # Organic soil mask, from Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
-# and thresholded by Erin Glen for peat emissions model. Includes only pixels with organic soil probability >23%,
-# a cutoff determined by OpenGeoHub and implemented by Erin.
-organic_soil_extent_dir = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/peat_mask/OGH/tiles/"
-organic_soil_extent_pattern = "ogh_mask"
+# Per Erin's Slack message 2025-12-23, she is using >10 for organic soil extent, so mineral soil is <=10.
+organic_soil_extent_dir = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/peat_mask/OGH/tiles_unthresholded/20251110/"
+organic_soil_extent_pattern = "ogh_unthresholded_mask"
 
-### Soil organic carbon (SOC) timeseries from OpenGeoHub (OGH) (URIs from https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv)
-# From Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
-# Confirmed to be up-to-date by Tom Hengl on 2025-12-19 via email.
-# Units of raw global COGs are kg C/m^3 for 0-30 cm, multiplied by 10 (rescale factor) to make COGs ints.
-# Values in dict need to be lists (even with just 1 element) because of how uu.prepare_to_download_chunk works.
-SOC_COGS = {
-    "2000_2005": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif"],
-    "2005_2010": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif"],
-    "2010_2015": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20100101_20151231_g_epsg.4326_v20250204.tif"],
-    "2015_2020": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"]
-}
-
-SOC_timeseries_run_date = '20250819'
-SOC_timeseries_base_output_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/soil_organic_carbon_timeseries/"
-
-SOC_density_intervals = ['2000_2005', '2005_2010', '2010_2015', '2015_2020']
-SOC_change_intervals = ['2000_2005_2005_2010', '2005_2010_2010_2015', '2010_2015_2015_2020', '2000_2005_2015_2020']   # Last one is the full-period delta
-
-# Extent of raw COGs
-SOC_density_full_extent_pattern = "SOC_density__full_extent__0-30cm_MgC"
-SOC_density_full_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
-SOC_change_full_extent_pattern = "SOC_change__full_extent__0-30cm_MgC"
-SOC_change_full_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
-
-# Extent of mineral soil (excludes thresholded organic soil extent created by Erin Glen)
-SOC_density_min_soil_extent_pattern = "SOC_density__mineral_soil_extent__0-30cm_MgC"
-SOC_density_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_min_soil_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
-SOC_change_min_soil_extent_pattern = "SOC_change__mineral_soil_extent__0-30cm_MgC"
-SOC_change_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_min_soil_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 
 # Cropland emissions
 cropland_emis_run_date =  '20241204'
@@ -830,11 +803,9 @@ zarr_difference_tolerance = 0.05
 
 pixel_area_global_zarr = "s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20251209_fillValue_removed/global_pixel_area_20251209.zarr"
 
-
 model_version_type_description_placeholder = 'version_MODEL_VERSION__TYPE__DESCRIPTION'
 
 veg_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/{model_version_type_description_placeholder}/"
-# veg_outputs_path_mega_zarr = f"{veg_outputs_path}mega_zarr/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"
 veg_outputs_path_mega_zarr = f"{veg_outputs_path}mega_zarr/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/vegetation_zarr.zarr"
 
 # List of output directories from vegetation model with placeholders for parts of the directory
@@ -965,6 +936,49 @@ soil_output_dirs = [
     f"{soil_outputs_path}{net_flux_all_C_pools_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{soil_outputs_path}{net_flux_all_C_pools_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
+
+### Soil organic carbon (SOC) timeseries from OpenGeoHub (OGH) (URIs from https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv)
+# From Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
+# Confirmed to be up-to-date by Tom Hengl on 2025-12-19 via email.
+# Units of raw global COGs are kg C/m^3 for 0-30 cm, multiplied by 10 (rescale factor) to make COGs ints.
+# Values in dict need to be lists (even with just 1 element) because of how uu.prepare_to_download_chunk works.
+SOC_COGS = {
+    "2005": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif"],
+    "2010": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif"],
+    "2015": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20100101_20151231_g_epsg.4326_v20250204.tif"],
+    "2020": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"],
+    "2022": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20200101_20221231_g_epsg.4326_v20250204.tif"]
+}
+
+SOC_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_soil_organic_carbon/{model_version_type_description_placeholder}/"
+
+# Value refers to the end year of the OGH reporting block
+SOC_density_intervals = [2005, 2010, 2015, 2020, 2022]
+# Value refers to the end year of the second OGH reporting block, e.g., 2010 is the comparison of 2000-2005 block vs. 2005-2010 block
+SOC_change_intervals = [2010, 2015, 2020, 2022]
+
+SOC_path_mega_zarr = f"{SOC_outputs_path}mega_zarr/CHUNK_SIZE_pixels/RUN_DATE/SOC_zarr.zarr"
+
+# Extent of raw COGs
+SOC_density_full_extent_pattern = "SOC_density__full_extent__0-30cm_MgC"
+SOC_density_full_extent_dir = f"{SOC_outputs_path}{SOC_density_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+SOC_change_full_extent_pattern = "SOC_change__full_extent__0-30cm_MgC"
+SOC_change_full_extent_dir = f"{SOC_outputs_path}{SOC_change_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+
+# Extent of mineral soil (excludes thresholded organic soil extent created by Erin Glen)
+SOC_density_min_soil_extent_pattern = "SOC_density__mineral_soil_extent__0-30cm_MgC"
+SOC_density_min_soil_extent_dir = f"{SOC_outputs_path}{SOC_density_min_soil_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+SOC_change_min_soil_extent_pattern = "SOC_change__mineral_soil_extent__0-30cm_MgC"
+SOC_change_min_soil_extent_dir = f"{SOC_outputs_path}{SOC_change_min_soil_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+
+SOC_outputs_to_zarr = [
+    SOC_density_full_extent_pattern, SOC_change_full_extent_pattern,
+    SOC_density_min_soil_extent_pattern, SOC_change_min_soil_extent_pattern
+]
+
+
+
+### LULUCF outputs
 
 LULUCF_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_LULUCF/{model_version_type_description_placeholder}/"
 LULUCF_outputs_path_mega_zarr = f"{LULUCF_outputs_path}mega_zarr/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"

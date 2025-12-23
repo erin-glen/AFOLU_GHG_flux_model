@@ -65,7 +65,7 @@ from src.utilities import universal_utilities as uu
 from src.utilities import zarr_utilities as zu
 from src.utilities import resize_cluster
 
-# To get enhanced logging from workers so that I can tell why they are lost
+# To get enhanced logging from workers so that I can tell why they are lost. I don't know if this works.
 # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
 dask.config.set({
     "distributed.logging.distributed": "debug",   # show detailed worker logs
@@ -2153,10 +2153,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # To track peak memory usage
     # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
     peak_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-
-    # Linux reports in kilobytes
     peak_gb = peak_kb / 1024 ** 2
-
     lu.print_and_log(f"Peak memory for {bounds_str} in {tile_id}: {peak_gb:.2f} GB", False, logger_worker)
 
     return return_message, chunk_stats
@@ -2164,7 +2161,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
 
 # Designed to report task/worker crashes, including memory usage at the time.
 # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
-def safe_vegetation_task(*args, **kwargs):
+def safe_task_wrapper(*args, **kwargs):
     try:
         result = calculate_and_upload_vegetation_fluxes(*args, **kwargs)
         return result
@@ -2209,15 +2206,6 @@ def main(cluster_name, year_range, model_type,
     else:
         start_year = year_range[0]
         end_year = year_range[1]
-
-    # # Raises the bar for spilling to disk but kills worker when memory usage is too high
-    # # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
-    # dask.config.set({
-    #     "distributed.worker.memory.target": 0.8,  # Start managing memory (e.g., spilling)
-    #     "distributed.worker.memory.spill": 0.85,  # Spill aggressively
-    #     "distributed.worker.memory.pause": 0.90,  # Temporarily pause new tasks
-    #     "distributed.worker.memory.terminate": 0.95  # Kill/restart worker if needed
-    # })
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -2452,19 +2440,19 @@ def main(cluster_name, year_range, model_type,
     if create_zarr:
 
         # Creates s3 paths for the raw mega-zarr
-        raw_mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, chunk_size_pixels, interval_type,
+        mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, chunk_size_pixels, interval_type,
                                                       model_type, model_path_description, run_date, main_logger)
 
         # These variables are added to the mega-zarr
         outputs_to_zarr = cn.full_outputs_to_zarr
 
         # Creates the global mega-zarr with metadata only
-        zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+        zu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
                                     ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
-        mapper = fs.get_mapper(raw_mega_zarr_path)
+        mapper = fs.get_mapper(mega_zarr_path)
         ds = xr.open_zarr(mapper, consolidated=False)
         main_logger.info(f"mega-zarr coords: {ds.coords}")
         main_logger.info(f"y range: {ds.y.values.min()}, {ds.y.values.max()}")
@@ -2472,7 +2460,7 @@ def main(cluster_name, year_range, model_type,
         main_logger.info(f"mega-zarr chunk size (years, y, x): {ds.chunksizes}")
 
     else:
-        raw_mega_zarr_path = None
+        mega_zarr_path = None
         outputs_to_zarr = False
 
 
@@ -2488,7 +2476,7 @@ def main(cluster_name, year_range, model_type,
     # Accumulates all output messages and statistics across batches
     # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
     all_results = []
-    all_1x1_stats = []
+    all_stats = []
     success_count = 0  # Count of successful chunks
 
     # Iterates through the batches
@@ -2504,11 +2492,11 @@ def main(cluster_name, year_range, model_type,
         futures = []
         for chunk in chunk_batch:
             future = client.submit(
-                        safe_vegetation_task,
+                        safe_task_wrapper,
                         chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                         download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
                         interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
-                        output_dir_list, stage, model_type, raw_mega_zarr_path, outputs_to_zarr,
+                        output_dir_list, stage, model_type, mega_zarr_path, outputs_to_zarr,
                         retries=1)
             futures.append(future)
 
@@ -2526,7 +2514,7 @@ def main(cluster_name, year_range, model_type,
         all_results.extend(batch_results)
 
         success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_large_run, main_logger, batch_results)
-        all_1x1_stats.extend(batch_stats)
+        all_stats.extend(batch_stats)
 
         # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
         # That way there are some basic chunk stats (not sorted or anything) to fall back on.
@@ -2539,7 +2527,6 @@ def main(cluster_name, year_range, model_type,
 
             # Writes batch output to parquet file if output is large
             if len(df_batch_stats) > 900_000:
-                # Write Parquet for large tables
                 out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.parquet"
                 local_path = f"{cn.local_chunk_stats_path}{out_file}"
 
@@ -2551,7 +2538,6 @@ def main(cluster_name, year_range, model_type,
 
             # Otherwise, writes output to spreadsheet
             else:
-                # Write Excel for smaller tables
                 out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.xlsx"
                 local_path = f"{cn.local_chunk_stats_path}{out_file}"
 
@@ -2578,7 +2564,7 @@ def main(cluster_name, year_range, model_type,
 
         # Reduces number of workers in the cluster if there are more than 10
         if n_workers > 10:
-            main_logger.info("Resizing cluster to 1 worker")
+            main_logger.info("Downsizing cluster.")
             resize_cluster.resize_coiled_cluster(cluster_name, n_workers/3)
 
     # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
@@ -2592,7 +2578,7 @@ def main(cluster_name, year_range, model_type,
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
     if (not no_stats) and (success_count > 0):
-        model_chunk_stats_path = uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+        model_chunk_stats_path = uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
@@ -2612,22 +2598,6 @@ def main(cluster_name, year_range, model_type,
 
         tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
             comparison_insert, main_logger, model_chunk_stats_path)
-
-        # # Resizes cluster if more than 1 chunk is being processed.
-        # # Uses the minimum of the initial number of workers requested and 50
-        # if (not run_local) and (len(chunk_list) > 1):
-        #
-        #     zarr_chunk_stats_workers = min(50, n_workers)
-        #
-        #     main_logger.info(f"Resizing cluster to {zarr_chunk_stats_workers} workers incrementally: {uu.timestr()}")
-        #
-        #     # Increases worker count more gradually than jumping up to the full number all at once
-        #     # because that can cause failures.
-        #     # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
-        #     for target in [int(zarr_chunk_stats_workers*0.1), int(zarr_chunk_stats_workers*0.25),
-        #                    int(zarr_chunk_stats_workers*0.5), int(zarr_chunk_stats_workers)]:
-        #         resize_cluster.resize_coiled_cluster(cluster_name, target)
-        #         time.sleep(30)
 
         # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
         all_merged_tables = []
@@ -2649,7 +2619,7 @@ def main(cluster_name, year_range, model_type,
                 client=client,
                 chunk_list=chunk_list,
                 var=var_name,
-                zarr_path=raw_mega_zarr_path,
+                zarr_path=mega_zarr_path,
             )
 
             # After all zarr chunk stats is done for the dataset-year combination,
@@ -2697,7 +2667,7 @@ def main(cluster_name, year_range, model_type,
         # Adds the workers' logs to the main log and uploads to s3
         lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
 
-        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats and worker log compilation", main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats, zarr comparison, and worker log compilation", main_logger)
 
     # Closes the Dask client if not running locally
     if not run_local:

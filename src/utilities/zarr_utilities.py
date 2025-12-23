@@ -96,6 +96,8 @@ def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, ma
         # and just assigning the output datatype here for each dataset that goes in the zarr
         if "density" in key:
             dtype = 'float32'
+        elif "change" in key:
+            dtype = 'float32'
         elif "emis" in key:
             dtype = 'float32'
         elif "removals" in key:
