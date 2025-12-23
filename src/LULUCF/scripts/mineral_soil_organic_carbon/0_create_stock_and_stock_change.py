@@ -9,7 +9,7 @@ python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn mineral_soil
 python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -bb 110 -1 111 0 -cs 1 -mt standard -mpd test_box --create_zarr
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn mineral_soil
+python -m src.utilities.create_cluster -n 100 -t 1 -m 4 -cn mineral_soil
 python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -mt standard -mpd 1884_features-cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -ln "SOC timeseries for 1884-feature shapefile."
 
 Full run:
@@ -43,7 +43,7 @@ from src.utilities import zarr_utilities as zu
 from src.utilities import resize_cluster
 
 
-def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nodata_val, outputs_by_interval_dir_list,
+def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, create_zarr, nodata_val, outputs_by_interval_dir_list,
                                      mega_zarr_path=None, outputs_to_zarr=None):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
@@ -375,10 +375,6 @@ def main(cluster_name, model_type,
         with rasterio.open(first_url) as src:
             nodata_val = src.nodata
 
-    # Makes a txt for each task in the list. These are deleted as tasks are completed.
-    main_logger.info("Creating task txts in s3...")
-    uu.create_s3_task_files(stage, chunk_list)
-
 
     ### Step 2: Create empty (metadata-only), global mega-zarr in s3.
     ### Zarr approach from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
@@ -415,7 +411,6 @@ def main(cluster_name, model_type,
     ### Step 3: Create outputs
 
     # Creates list of tasks to run (1 task = 1 chunk)
-    main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
     main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
     chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
@@ -438,7 +433,7 @@ def main(cluster_name, model_type,
         for chunk in chunk_batch:
 
             future = client.submit(create_soil_C_density_and_change, chunk,
-                                   is_large_run, stage, no_upload, nodata_val, outputs_by_interval_dir_list,
+                                   is_large_run, stage, no_upload, create_zarr, nodata_val, outputs_by_interval_dir_list,
                                    mega_zarr_path, outputs_to_zarr)
             futures.append(future)
 
