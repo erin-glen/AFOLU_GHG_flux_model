@@ -14,10 +14,9 @@ python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stoc
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -mt standard -mpd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive SOC timeseries creation."
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -mt standard -mpd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive SOC timeseries creation for 2000-2022."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6877a34b-02cc-800a-88cc-a123cdc9ed1b
-Selection of 100 workers for full run based on tests in https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1211069739892865?focus=true
 """
 
 import argparse
@@ -148,7 +147,7 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
         year_diff = end_year-start_year
         # print(f"start_year: {start_year}; end_year: {end_year}; year_diff: {year_diff}")
 
-        lu.print_and_log(f"Calculating SOC change for {end_year} to {start_year} for {bounds_str}: {uu.timestr()}", False, logger_worker)
+        lu.print_and_log(f"Calculating SOC change for {end_year} to {start_year} for {bounds_str}: {uu.timestr()}", is_large_run, logger_worker)
 
         delta_full_extent = (out_dict_full_extent_ordered[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}_{end_year}"] -
                              out_dict_full_extent_ordered[f"{cn.SOC_density_full_extent_pattern}{cn.C_density_pixel_meaning}_{start_year}"]) / year_diff  # Interval arrays must be unsigned so difference can be negative
@@ -204,7 +203,7 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, nod
 
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
 
-    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
 
 
     ### Part 7: Saves numpy arrays as rasters and uploads to s3
