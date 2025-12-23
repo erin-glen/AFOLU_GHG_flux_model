@@ -39,6 +39,7 @@ https://app.asana.com/1/25496124013636/task/1206230383901961/comment/12106415042
 
 import argparse
 import concurrent.futures
+import dask
 import gc
 import os
 import psutil
@@ -48,6 +49,8 @@ import pandas as pd
 import numpy as np
 import fsspec
 import xarray as xr
+import resource
+import traceback
 
 from concurrent.futures import ThreadPoolExecutor
 from dask.distributed import print
@@ -61,6 +64,13 @@ from src.utilities import numba_utilities as nu
 from src.utilities import universal_utilities as uu
 from src.utilities import zarr_utilities as zu
 from src.utilities import resize_cluster
+
+# To get enhanced logging from workers so that I can tell why they are lost
+# Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
+dask.config.set({
+    "distributed.logging.distributed": "debug",   # show detailed worker logs
+    "distributed.logging.bokeh": "critical",      # silence dashboard noise
+})
 
 # Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
 # The more files in an s3 folder, the longer it takes to access them without this environment variable.
@@ -90,10 +100,10 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
 
     # Carbon density arrays determined by the starting year of the model (Mg C/ha),
     # but the starting C densities have the same key in the dictionary regardless of the starting year
-    agc_dens_block = in_dict_float32[cn.agc_LC_masked_dens_pattern].astype('float32')
-    bgc_dens_block = in_dict_float32[cn.bgc_LC_masked_dens_pattern].astype('float32')
-    deadwood_c_dens_block = in_dict_float32[cn.deadwood_c_LC_masked_dens_pattern].astype('float32')
-    litter_c_dens_block = in_dict_float32[cn.litter_c_LC_masked_dens_pattern].astype('float32')
+    agc_dens_block = in_dict_float32[cn.agc_LC_masked_dens_pattern]
+    bgc_dens_block = in_dict_float32[cn.bgc_LC_masked_dens_pattern]
+    deadwood_c_dens_block = in_dict_float32[cn.deadwood_c_LC_masked_dens_pattern]
+    litter_c_dens_block = in_dict_float32[cn.litter_c_LC_masked_dens_pattern]
 
     # print(agc_dens_block.max())
     # print(bgc_dens_block.max())
@@ -101,23 +111,23 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
     # print(litter_c_dens_block.max())
 
     # Root:shoot (unitless)
-    r_s_ratio_non_mang_block = in_dict_float32[cn.r_s_ratio_non_mang_pattern].astype('float32')
+    r_s_ratio_non_mang_block = in_dict_float32[cn.r_s_ratio_non_mang_pattern]
 
     # Natural forest regrowth curves (Mg C/ha/yr)
-    natrl_forest_curve_0_5_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__0_5_years"].astype('float32')
-    natrl_forest_curve_6_10_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__6_10_years"].astype('float32')
-    natrl_forest_curve_11_15_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__11_15_years"].astype('float32')
-    natrl_forest_curve_16_20_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__16_20_years"].astype('float32')
-    natrl_forest_curve_21_40_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__21_40_years"].astype('float32')
-    natrl_forest_curve_41_60_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__41_60_years"].astype('float32')
-    natrl_forest_curve_61_80_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__61_80_years"].astype('float32')
+    natrl_forest_curve_0_5_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__0_5_years"]
+    natrl_forest_curve_6_10_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__6_10_years"]
+    natrl_forest_curve_11_15_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__11_15_years"]
+    natrl_forest_curve_16_20_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__16_20_years"]
+    natrl_forest_curve_21_40_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__21_40_years"]
+    natrl_forest_curve_41_60_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__41_60_years"]
+    natrl_forest_curve_61_80_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__61_80_years"]
     natrl_forest_curve_81_100_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__81_100_years"].astype('float32')
 
     # Removal factor (Mg C/ha/yr)
     # Because this is used to store the RF from the previous interval,
     # it persists from one interval to the next. Therefore, it must be defined before the first iteration.
     # That way, removal factors can be over-written by those used in the most recent interval.
-    agc_rf_pre_dist_out_block = np.zeros(agc_dens_block.shape).astype('float32')
+    agc_rf_pre_dist_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
 
     # Mangrove extent
     mangrove_extent_1996_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_1996"]
@@ -198,13 +208,13 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
     # 0=Always tall vegetation so far. Other values represent the last year of non-tall vegetation.
     # This is assessed at the pixel level because numba wouldn't allow the needed logical operations on numpy arrays (chunks).
     # Tall vegetation is basd on the composite land cover maps, not the canopy height maps.
-    most_recent_year_not_tall_veg_block = np.zeros(agc_dens_block.shape).astype('uint16')
+    most_recent_year_not_tall_veg_block = np.zeros(agc_dens_block.shape, dtype='uint16')
 
     # Forest age for each output year of the model
     forest_age_end_of_interval_block = forest_age_start_year_block
 
     # Maximum height of vegetation since the last interval in which there was not forest
-    max_height_since_last_time_not_tall_veg_block = np.zeros(agc_dens_block.shape).astype('uint8')
+    max_height_since_last_time_not_tall_veg_block = np.zeros(agc_dens_block.shape, dtype='uint8')
 
     # Tracks whether the height has already decreased more than the signif. height loss threshold compared to
     # maximum vegetation height since the last time the pixel was non-tall vegetation land cover.
@@ -214,19 +224,19 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
     # 0=no significant height loss relative to the maximum vegetation height since last non-tall vegetation.
     # 1=height loss relative to the maximum vegetation height occurred in this interval.
     # 2=height loss relative to the maximum vegetation height occurred in a previous interval.
-    first_time_sig_loss_from_max_height_block = np.zeros(agc_dens_block.shape).astype('uint8')
+    first_time_sig_loss_from_max_height_block = np.zeros(agc_dens_block.shape, dtype='uint8')
 
     # Tracks whether there was a partial (non-fire) or full disturbance in a previous interval (not including just fire,
     # which does not count as a partial disturbance in this model if height does not decrease significantly with it).
     # Updated for every interval based on the current interval disturbance status.
     # This is primarily used to determine what age the forest is (which matters for assigning removal factors).
-    part_or_full_dist_in_earlier_intervals_block = np.zeros(agc_dens_block.shape).astype('uint8')
+    part_or_full_dist_in_earlier_intervals_block = np.zeros(agc_dens_block.shape, dtype='uint8')
 
     # Tracks whether a partial disturbance occurs in the current interval due to any cause (not including just fire,
     # which does not count as a partial disturbance in this model if height does not decrease significantly with it).
     # Overwritten for every interval.
     # This is primarily used to determine what age the forest is (which matters for assigning removal factors).
-    part_or_full_dist_in_curr_interval_block = np.zeros(agc_dens_block.shape).astype('uint8')
+    part_or_full_dist_in_curr_interval_block = np.zeros(agc_dens_block.shape, dtype='uint8')
 
     # print("interval_end_years:", interval_end_years)
 
@@ -348,31 +358,31 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
             # print("annual_forest_dist_blocks_all_intervals_so_far max for all intervals so far:", np.max(annual_forest_dist_blocks_all_intervals_so_far))
 
         # Tracks how many times each pixel was burned during the interval
-        times_burned_in_interval_block = np.zeros(agc_dens_block.shape).astype('uint8')
+        times_burned_in_interval_block = np.zeros(agc_dens_block.shape, dtype='uint8')
 
         # Numpy arrays for outputs that don't depend on previous interval's values
-        state_out_block = np.zeros(agc_dens_block.shape).astype('uint32')  # Land cover state at end of interval
+        state_out_block = np.zeros(agc_dens_block.shape, dtype='uint32')  # Land cover state at end of interval
 
         # Number of years of canopy growth.
         # First digit is pre-disturbance years of growth.
         # Second digit (if it exists) is post-disturbance years of growth
-        gain_year_count_out_block = np.zeros(agc_dens_block.shape).astype('uint8')
+        gain_year_count_out_block = np.zeros(agc_dens_block.shape, dtype='uint8')
 
-        agc_gross_emis_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        bgc_gross_emis_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        deadwood_c_gross_emis_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        litter_c_gross_emis_out_block = np.zeros(agc_dens_block.shape).astype('float32')
+        agc_gross_emis_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        bgc_gross_emis_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        deadwood_c_gross_emis_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        litter_c_gross_emis_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
 
-        ch4_gross_emis_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        n2o_gross_emis_out_block = np.zeros(agc_dens_block.shape).astype('float32')
+        ch4_gross_emis_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        n2o_gross_emis_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
 
-        agc_gross_removals_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        bgc_gross_removals_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        deadwood_c_gross_removals_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        litter_c_gross_removals_out_block = np.zeros(agc_dens_block.shape).astype('float32')
+        agc_gross_removals_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        bgc_gross_removals_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        deadwood_c_gross_removals_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        litter_c_gross_removals_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
 
         # Aboveground carbon emission factors
-        agc_ef_out_block = np.zeros(agc_dens_block.shape).astype('float32')
+        agc_ef_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
 
 
         # Iterates through all pixels in the chunk
@@ -1939,7 +1949,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
         layer = futures[future]  # Gets the corresponding key
         data, status = future.result()  # Unpacks the tuple result
         if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
-            lu.print_and_log(f"{status}: {uu.timestr()}", False, logger_worker)
+            lu.print_and_log(f"{status}: {uu.timestr()}", is_large_run, logger_worker)
         layers[layer] = data
 
     # Test prints
@@ -2006,6 +2016,11 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # print("out_dict_float32:", out_dict_float32)
     # print(f"Average of {list(out_dict_uint32.keys())[0]} is: {list(out_dict_uint32.values())[0].mean()}")
 
+    # Deletes all unnecessary input dictionaries before moving on
+    # Suggested by ChatGPT: https://chatgpt.com/share/e/672bbf2e-ebbc-800a-aae3-3d92f5a1d663
+    in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
+    [in_dict.clear() for in_dict in in_dicts]
+
     # Fresh non-Numba-constrained dictionary that stores all numpy arrays.
     # The dictionaries by datatype that are returned from the numba function have limitations on them,
     # e.g., they can't be combined with other datatypes. This prevents the addition of attributes needed for uploading to s3.
@@ -2024,11 +2039,6 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
 
         # Clear memory of unneeded arrays
         del out_dict
-
-    # Deletes all unnecessary input dictionaries before moving on
-    # Suggested by ChatGPT: https://chatgpt.com/share/e/672bbf2e-ebbc-800a-aae3-3d92f5a1d663
-    in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
-    [in_dict.clear() for in_dict in in_dicts]
 
     # print(out_dict_all_dtypes)
 
@@ -2059,6 +2069,8 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
         output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
 
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
+
+    del pixel_area_chunk
 
     lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
 
@@ -2138,7 +2150,39 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # Removes task tracking file from S3 once task is successful
     uu.delete_s3_task_file(stage, bounds, is_large_run, logger_worker)
 
-    return return_message, chunk_stats  # Return both the success message and the statistics
+    # To track peak memory usage
+    # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
+    peak_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+
+    # Linux reports in kilobytes
+    peak_gb = peak_kb / 1024 ** 2
+
+    lu.print_and_log(f"Peak memory for {bounds_str} in {tile_id}: {peak_gb:.2f} GB", is_large_run, logger_worker)
+
+    return return_message, chunk_stats
+
+
+# Designed to report task/worker crashes, including memory usage at the time.
+# Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
+def safe_vegetation_task(*args, **kwargs):
+    try:
+        result = calculate_and_upload_vegetation_fluxes(*args, **kwargs)
+        return result
+
+    except Exception as e:
+
+        proc = psutil.Process(os.getpid())
+        mem = proc.memory_info()
+
+        return {
+            "status": "failed",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "memory_at_failure": {
+                "rss_gb": mem.rss / 1024**3,  # VMS is the important one
+                # "vms_gb": mem.vms / 1024**3,
+            },
+        }
 
 
 def main(cluster_name, year_range, model_type,
@@ -2165,6 +2209,15 @@ def main(cluster_name, year_range, model_type,
     else:
         start_year = year_range[0]
         end_year = year_range[1]
+
+    # # Raises the bar for spilling to disk but kills worker when memory usage is too high
+    # # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
+    # dask.config.set({
+    #     "distributed.worker.memory.target": 0.8,  # Start managing memory (e.g., spilling)
+    #     "distributed.worker.memory.spill": 0.85,  # Spill aggressively
+    #     "distributed.worker.memory.pause": 0.90,  # Temporarily pause new tasks
+    #     "distributed.worker.memory.terminate": 0.95  # Kill/restart worker if needed
+    # })
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -2337,7 +2390,7 @@ def main(cluster_name, year_range, model_type,
     }
     # print(download_dict)
 
-    print("Download dictionary::")
+    print("Download dictionary:")
     for key, item in download_dict.items():
         print(f"{key}: {item}")
 
@@ -2445,16 +2498,30 @@ def main(cluster_name, year_range, model_type,
         uu.create_s3_task_files(stage, chunk_batch)
 
         # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_vegetation_fluxes ... )]
+        # safe_vegetation_task is supposed to report task/worker crashes.
+        # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
+        # That chat has a table that explains what different combinations of traceback & memory presence/absence mean for the failure.
         futures = []
         for chunk in chunk_batch:
-            future = client.submit(calculate_and_upload_vegetation_fluxes,
-                                   chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
-                                   download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                                   interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
-                                   output_dir_list, stage, model_type, raw_mega_zarr_path, outputs_to_zarr)
+            future = client.submit(
+                        safe_vegetation_task,
+                        chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
+                        download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
+                        interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
+                        output_dir_list, stage, model_type, raw_mega_zarr_path, outputs_to_zarr,
+                        retries=1)
             futures.append(future)
 
         batch_results = client.gather(futures)
+
+        for result in batch_results:
+            if isinstance(result, dict) and result.get("status") == "failed":
+                main_logger.error(
+                    "Task failed\n"
+                    f"Error: {result['error']}\n"
+                    f"Memory at failure (GB): {result['memory_at_failure']}\n"
+                    f"Traceback:\n{result['traceback']}"
+                )
 
         all_results.extend(batch_results)
 

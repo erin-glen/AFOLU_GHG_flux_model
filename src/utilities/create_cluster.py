@@ -14,9 +14,13 @@ List available worker types for Coiled clusters with: coiled.list_instance_types
 Using more than 1 thread/worker slows down processing a lot when there are more tasks than workers for the core LULUCF model,
 which is the situation for large analyses, obviously.
 """
+
 import coiled
 import argparse
 import sys
+from dask.distributed import Client
+from dask import config
+
 
 
 def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=None):
@@ -84,17 +88,26 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
         region="us-east-1",
         name=cluster_name,
         workspace='wri-forest-research',
-        # mount_bucket="s3://gfw2-data",
         tags = {"project": "AFOLU_flux_model"},
         scheduler_vm_types = scheduler_vm_type,
         worker_vm_types = worker_vm_type,
-        worker_options = worker_options
+        worker_options = worker_options,
+        # send_dask_config = True
     )
 
     print(f"Cluster created with name: {cluster.name}")
     print(f"Number of workers: {n_workers}; worker memory: {worker_memory_str}; scheduler memory: {scheduler_memory_str}; threads per worker: {threads_per_worker}")
     return cluster
 
+# # Gets worker memory configuration that is specified in ~/.config/dask/distributed.yaml
+# # Check from https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
+# def check_worker_memory_config():
+#     return {
+#         "target": config.get("distributed.worker.memory.target"),
+#         "spill": config.get("distributed.worker.memory.spill"),
+#         "pause": config.get("distributed.worker.memory.pause"),
+#         "terminate": config.get("distributed.worker.memory.terminate"),
+#     }
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create a Coiled cluster with specified parameters.")
@@ -111,4 +124,9 @@ if __name__ == "__main__":
     threads_per_worker = args.threads_per_worker
 
     # Create the cluster with command line arguments
-    create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker)
+    cluster = create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker)
+
+    # client = Client(cluster)
+    # print(client.run(check_worker_memory_config))
+
+

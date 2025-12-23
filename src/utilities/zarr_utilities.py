@@ -9,6 +9,7 @@ from dask.distributed import print
 import dask.array as da
 import xarray as xr
 import zarr
+import gc
 # from zarr.storage import FSStore
 
 # Project imports
@@ -224,18 +225,12 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
     ny = lat_end - lat_start
     nx = lon_end - lon_start
 
-    buffers = {}
-
     # Writes each variable as a full time block
     for output_to_zarr_pattern, zarr_array in zarr_arrays.items():
 
         dtype = zarr_array.dtype
 
-        # Allocate buffer ONCE per dtype
-        if dtype not in buffers:
-            buffers[dtype] = np.empty((n_years, ny, nx), dtype=dtype)
-
-        block = buffers[dtype]
+        block = np.empty((n_years, ny, nx), dtype=dtype)
 
         has_any_data = False
 
@@ -261,6 +256,9 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
             ] = block
         else:
             lu.print_and_log(f"Skipping {output_to_zarr_pattern}: no data found for any year", False, logger_worker)
+
+        del block
+        gc.collect()
 
     zarr_end = time.time()
     lu.print_and_log(f"Wrote outputs to global zarrs for {bounds_str} in {tile_id} in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}",False, logger_worker)
