@@ -6,23 +6,23 @@ outputs that are useful for QC and potentially as contextual layers (e.g., compo
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd test_box -bb 116.25 -2.25 116.5 -2 -cs 0.25 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd test_box -bb 116.25 -2.25 116.5 -2 -cs 0.25
 
 Coiled small tests (1x1 deg chunk needs 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd test_box -bb -64 -22 -63 -21 -cs 1 --create_zarr --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd test_box -bb -64 -22 -63 -21 -cs 1 --create_zarr
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd Cerrado -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --create_zarr --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd Cerrado -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --create_zarr
 
 Coiled large shapefile test (1884 features):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd 1884_features -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --create_zarr --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd 1884_features -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --create_zarr
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_model
@@ -1915,6 +1915,19 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
 
+    # Report the number of retries for the task. Untested.
+    # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694bfc7f-fab0-8332-b903-d5efa84b61c3
+    retry_env_var = os.environ.get("DASK_TASK_RETRIES", "0")
+    retry_count = int(retry_env_var)
+
+    if retry_count > 0:
+        msg = f"Running vegetation flux task for {bounds_str} in {tile_id} (retry #{retry_count}: {uu.timestr()})"
+        lu.print_and_log(msg, False, logger_worker)
+
+    # # Can potentially add to prevent indefinite retries. Untested.
+    # if retry_count >= 2:
+    #     raise RuntimeError(f"Tile {bounds_str} in {tile_id} failed twice — exiting to prevent infinite retries.")
+
 
     ### Part 1: Downloads all inputs for chunk.
     ### No checks about whether the chunk has data because the way the chunk_list is constructed,
@@ -2500,7 +2513,7 @@ def main(cluster_name, year_range, model_type,
                         download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
                         interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
                         output_dir_list, stage, model_type, mega_zarr_path, outputs_to_zarr,
-                        retries=1)
+                        retries=1, key=f"vegflux-{chunk}")  # Designed to prevent infinite retries and rerunning completed tasks (happens in global runs)
             futures.append(future)
 
         batch_results = client.gather(futures)
@@ -2532,6 +2545,12 @@ def main(cluster_name, year_range, model_type,
             if len(df_batch_stats) > 900_000:
                 out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.parquet"
                 local_path = f"{cn.local_chunk_stats_path}{out_file}"
+
+                # Coerce output to string so there aren't mismatched types
+                # https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694c44d0-19e8-8330-8098-a7ec93366e44
+                for col in ['min_value', 'max_value', 'mean_value', 'sum_value']:
+                    if col in df_batch_stats.columns:
+                        df_batch_stats[col] = df_batch_stats[col].astype(str)
 
                 df_batch_stats.to_parquet(
                     local_path,

@@ -4,7 +4,7 @@ python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
 python -m src.utilities.create_cluster -n 5 -t 1 -m 32 -cn LULUCF_model
 python -m src.utilities.create_cluster -n 20 -t 1 -m 64 -cn LULUCF_model
 
-Table of instance types: https://aws.amazon.com/ec2/instance-types/
+Table of instance types (and pricing): https://instances.vantage.sh/?id=9c1a108b13a45889fc00951e867ca5295e82dd2c
 Table of spot pricing: https://aws.amazon.com/ec2/spot/pricing/
 These are the cheapest worker types and they have fewer vCPUs than usual for the memory.
 This makes them less costly on AWS and use fewer Coiled credits.
@@ -36,13 +36,17 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
 
     elif worker_memory == 64:
         idle_timeout = 15
-        scheduler_vm_type = "x2gd.xlarge"    # 4 vCPU/worker
-        worker_vm_type = "x2gd.xlarge"
+        # scheduler_vm_type = "x2gd.xlarge"    # 4 vCPU/worker
+        # worker_vm_type = "x2gd.xlarge"
+        scheduler_vm_type = "x8aedz.large"    # 4 vCPU/worker
+        worker_vm_type = "x8aedz.large"
 
     elif worker_memory == 32:
         idle_timeout = 20
-        scheduler_vm_type = "x8g.large"   # 2 vCPU/worker, could also use x2gd.large (2 vCPU, 32 GB)
-        worker_vm_type = "x8g.large"
+        scheduler_vm_type = "x8g.large"   # 2 vCPU/worker. x2gd.large also has this ratio, and theoretically lower interruption rates but has worse hardware.
+        worker_vm_type = "x8g.large"      # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694bfc7f-fab0-8332-b903-d5efa84b61c3
+        # scheduler_vm_type = "x2gd.large"   # 2 vCPU/worker. x8g.large also has this ratio. x2gd.large theoretically has a lower interruption rate.
+        # worker_vm_type = "x2gd.large"      # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694bfc7f-fab0-8332-b903-d5efa84b61c3
 
     elif worker_memory == 16:
         idle_timeout = 25
@@ -80,10 +84,16 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
     if threads_per_worker is not None:
         worker_options["nthreads"] = threads_per_worker
 
+    # Uses on-demand workers for large jobs. Otherwise, prefers spot workers.
+    if n_workers > 110:
+        purchase_option = "on-demand"
+    else:
+        purchase_option = "spot_with_fallback"
+
     cluster = coiled.Cluster(
         n_workers=n_workers,
         use_best_zone=True,
-        compute_purchase_option="spot_with_fallback",
+        compute_purchase_option=purchase_option,
         idle_timeout=idle_timeout,
         region="us-east-1",
         name=cluster_name,
@@ -96,7 +106,8 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
     )
 
     print(f"Cluster created with name: {cluster.name}")
-    print(f"Number of workers: {n_workers}; worker memory: {worker_memory_str}; scheduler memory: {scheduler_memory_str}; threads per worker: {threads_per_worker}")
+    print(f"Number of workers: {n_workers}; worker memory: {worker_memory_str}; scheduler memory: {scheduler_memory_str}; "
+          f"'threads per worker: {threads_per_worker}; worker purchase option: {purchase_option}")
     return cluster
 
 # # Gets worker memory configuration that is specified in ~/.config/dask/distributed.yaml

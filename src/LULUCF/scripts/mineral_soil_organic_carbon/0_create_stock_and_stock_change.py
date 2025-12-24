@@ -33,6 +33,7 @@ import xarray as xr
 import resource
 import time
 from dask.distributed import print
+from dask import config
 from concurrent.futures import ThreadPoolExecutor
 
 # Project imports
@@ -67,6 +68,15 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, cre
     # Converts the raw COG's kg C/m^3 (top 30 cm) that is rescaled by 10 -> Mg C/ha without the rescaling.
     # OGH rescaled the global COGs by 10 to make them ints instead of floats to save storage.
     SOC_CONVERSION_FACTOR = 3.0 / 10.0  # = 0.3
+
+    # Report the number of retries for the task. Untested.
+    # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694bfc7f-fab0-8332-b903-d5efa84b61c3
+    retry_env_var = os.environ.get("DASK_TASK_RETRIES", "0")
+    retry_count = int(retry_env_var)
+
+    if retry_count > 0:
+        msg = f"Running task for {bounds_str} in {tile_id} (retry #{retry_count}: {uu.timestr()})"
+        lu.print_and_log(msg, False, logger_worker)
 
 
     ### Part 1: Downloads all inputs for chunk
@@ -294,6 +304,12 @@ def main(cluster_name, model_type,
     # batch_size = 2  # For testing batch processing
 
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
+
+    # Theoretically, prevents indefinite retries. Untested.
+    # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694bfc7f-fab0-8332-b903-d5efa84b61c3
+    config.set({
+        "distributed.scheduler.allowed-failures": 2
+    })
 
     # Shapefile of chunk footprints to use if none is supplied on the command line
     if not chunk_shapefile_uri:
