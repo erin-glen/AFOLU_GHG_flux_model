@@ -300,7 +300,7 @@ def main(cluster_name, model_type,
 
     # Runs chunks in batches of specified size.
     # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
-    batch_size = 3200
+    batch_size = 3800
     # batch_size = 2  # For testing batch processing
 
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -473,6 +473,12 @@ def main(cluster_name, model_type,
             if len(df_batch_stats) > 900_000:
                 out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.parquet"
                 local_path = f"{cn.local_chunk_stats_path}{out_file}"
+
+                # Coerce output to string so there aren't mismatched types
+                # https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694c44d0-19e8-8330-8098-a7ec93366e44
+                for col in ['min_value', 'max_value', 'mean_value', 'sum_value', 'count_value']:
+                    if col in df_batch_stats.columns:
+                        df_batch_stats[col] = df_batch_stats[col].astype(str)
 
                 df_batch_stats.to_parquet(
                     local_path,

@@ -1961,8 +1961,8 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     for future in concurrent.futures.as_completed(futures):
         layer = futures[future]  # Gets the corresponding key
         data, status = future.result()  # Unpacks the tuple result
-        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
-            lu.print_and_log(f"{status}: {uu.timestr()}", is_large_run, logger_worker)
+        # if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
+        #     lu.print_and_log(f"{status}: {uu.timestr()}", is_large_run, logger_worker)
         layers[layer] = data
 
     # Test prints
@@ -2208,7 +2208,7 @@ def main(cluster_name, year_range, model_type,
     # Runs chunks in batches of specified size.
     # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
     batch_size = 3800  # 5 batches to cover all chunks
-    # batch_size = 1  # For testing batch processing
+    # batch_size = 2  # For testing batch processing
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
@@ -2548,7 +2548,7 @@ def main(cluster_name, year_range, model_type,
 
                 # Coerce output to string so there aren't mismatched types
                 # https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694c44d0-19e8-8330-8098-a7ec93366e44
-                for col in ['min_value', 'max_value', 'mean_value', 'sum_value']:
+                for col in ['min_value', 'max_value', 'mean_value', 'sum_value', 'count_value']:
                     if col in df_batch_stats.columns:
                         df_batch_stats[col] = df_batch_stats[col].astype(str)
 
