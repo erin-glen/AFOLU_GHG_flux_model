@@ -41,7 +41,7 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
 
     elif worker_memory == 32:
         idle_timeout = 20
-        scheduler_vm_type = "x8g.large"   # 2 vCPU/worker
+        scheduler_vm_type = "x8g.large"   # 2 vCPU/worker, could also use x2gd.large (2 vCPU, 32 GB)
         worker_vm_type = "x8g.large"
 
     elif worker_memory == 16:
