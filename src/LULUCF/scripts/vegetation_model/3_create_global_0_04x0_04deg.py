@@ -26,7 +26,7 @@ python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn v
 
 Full run:
 python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is intended to be the definitive global 0.04x0.04 deg output run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_postprocessing --input_date 20251224 -mt standard -mpd global -ln "This is intended to be the definitive global 0.04x0.04 deg output run for model v1.0.0 (2016-2024)."
 
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
 """
@@ -74,7 +74,7 @@ def gdal_translate_progress(pct, message, data):
     return 1  # return 0 would cancel
 
 
-def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path, model_type, model_path_description, no_upload, is_large_run):
+def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path, model_version, model_type, model_path_description, no_upload, is_large_run):
 
     logger_worker = lu.setup_logging_worker()
 
@@ -98,7 +98,7 @@ def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path
 
     # Input s3 folder for dataset and year
     base_path = base_path.replace("PATTERN", var_name)
-    base_path = base_path.replace(cn.model_version_type_description_placeholder, f"version_{cn.veg_model_version_underscore}__{model_type}__{model_path_description}")
+    base_path = base_path.replace(cn.model_version_type_description_placeholder, f"version_{model_version}__{model_type}__{model_path_description}")
     base_path = base_path.replace("START_END", str(year))
     base_path = base_path.replace("PER_HA_OR_PIXEL", units)
 
@@ -111,7 +111,7 @@ def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path
     # Output s3 folder for dataset and year
     output_path = base_path.replace("CHUNK_SIZE_pixels", "global")
 
-    output_name = f"{var_name}{units}_{year}_global.tif"
+    output_name = f"{var_name}{units}_v{model_version}_{year}_global.tif"
     # print(output_name)
 
     # Collects s3 tiles for the dataset-year
@@ -254,7 +254,8 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload,
 
             # future = client.submit(uu.create_10x10_deg_geotif_from_zarr,
             future = client.submit(mosaic_tiles_to_global,
-                                   var_name, year_idx, first_tiles_to_process, base_path, model_type, model_path_description,
+                                   var_name, year_idx, first_tiles_to_process, base_path,
+                                   cn.veg_model_version_underscore, model_type, model_path_description,
                                    no_upload, is_large_run)
             futures.append(future)
 

@@ -1,5 +1,5 @@
 """
-python -m src.LULUCF.scripts.vegetation_model.4_create_0_04deg_global_display_maps --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.4_create_0_04deg_global_display_maps -mt standard -mpd global --input_date YYYYMMDD
 
 Run locally (not in Coiled)
 
@@ -357,7 +357,7 @@ def map_net_flux(s3_folders,
         parts = s3_folder.strip('/').split('/')
 
         # Gets the segment for the input pattern
-        pattern_idx = parts.index(f"version_{cn.veg_model_version_underscore}")
+        pattern_idx = parts.index(f"version_{cn.veg_model_version_underscore}__{model_type}__{model_path_description}")
         pattern_segment = parts[pattern_idx + 1]
 
         # Gets the segment for the input interval
@@ -365,7 +365,7 @@ def map_net_flux(s3_folders,
         interval_segment = parts[interval_idx + 1]
 
         # Names before and after reprojection
-        year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{interval_segment}_{cn.veg_model_version_underscore}__global"
+        year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_v{cn.veg_model_version_underscore}_{interval_segment}_global"
         year_path_unproj = f"{s3_folder}{year_file}.tif"
         year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
 
@@ -692,7 +692,7 @@ def main(input_date, model_type, model_path_description=None):
 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
     inputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, "annual", cn.first_model_year_annual,"global",
-                                                                 "standard_model", cn.veg_model_version_underscore, model_path_description,
+                                                                 model_type, cn.veg_model_version_underscore, model_path_description,
                                                                  cn.interval_end_years_annual,
                                                                  [1, 1, 1, 1, 1, 1, 1, 1, 1], input_date,
                                                                  True, cn.flux_aggreg_pixel_meaning)
