@@ -18,11 +18,14 @@ from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import pyproj
 
 from matplotlib.colors import Normalize, TwoSlopeNorm, LinearSegmentedColormap
 from rasterio.warp import calculate_default_transform, reproject, Resampling
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import Polygon, MultiPolygon, box, mapping
 from scipy.stats import percentileofscore
+from rasterio.windows import from_bounds
+from pyproj import Transformer
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -60,6 +63,27 @@ def download_s3_file(s3_uri, local_path):
     # Use boto3 to download
     s3 = boto3.client("s3")
     s3.download_file(bucket, key, str(local_path))
+
+def transform_bbox_to_robinson(bbox_deg, src_crs="EPSG:4326", dst_crs=None):
+    """
+    Transforms a bounding box from lat/lon (EPSG:4326) to Robinson projection.
+    bbox_deg: (minx, miny, maxx, maxy) in degrees
+    dst_crs: destination CRS (defaults to cn.Robinson_crs)
+    Returns: (minx, miny, maxx, maxy) in meters (Robinson)
+    """
+    if dst_crs is None:
+        dst_crs = cn.Robinson_crs  # e.g., 'ESRI:54030'
+
+    minx, miny, maxx, maxy = bbox_deg
+    transformer = Transformer.from_crs(src_crs, dst_crs, always_xy=True)
+
+    # Transform corners
+    xmin_t, ymin_t = transformer.transform(minx, miny)
+    xmax_t, ymax_t = transformer.transform(maxx, maxy)
+
+    # Return projected bounding box
+    return (min(xmin_t, xmax_t), min(ymin_t, ymax_t),
+            max(xmin_t, xmax_t), max(ymin_t, ymax_t))
 
 def reproject_raster(tif_unproj_s3, tif_reproj_local):
     """
@@ -340,15 +364,21 @@ def create_gif(gif_base_name, out_folder, out_maps_for_gif):
 # Makes jpegs and gifs of net fluxes
 def map_net_flux(s3_folders,
                  local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 colors, percentiles, shapefile):
+                 colors, percentiles, country_shapefile, bounding_box=None):
 
     series_start_time = time.time()
 
     out_maps_for_gif = []
 
+    # If bounding_box was given in degrees, transforms to match the raster CRS (Robinson)
+    if bounding_box is not None:
+        bounding_box_proj = transform_bbox_to_robinson(bounding_box)
+    else:
+        bounding_box_proj = None
+
     # Iterates through modeled years
-    for i, year in enumerate(cn.years_annual[1:]):
-    # for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
+    # for i, year in enumerate(cn.years_annual[1:]):
+    for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
 
         # The s3 folder to process for this year
         s3_folder = s3_folders[i]
@@ -377,10 +407,29 @@ def map_net_flux(s3_folders,
         # Reprojects raster, if needed
         reproject_raster(year_path_unproj, year_path_reproj)
 
-        # Reads raster data
+        # # Reads raster data
+        # with rasterio.open(year_path_reproj) as src:
+        #     data = src.read(1)  # Read the first band
+        #     raster_extent = src.bounds
+
         with rasterio.open(year_path_reproj) as src:
-            data = src.read(1)  # Read the first band
-            raster_extent = src.bounds
+
+            if bounding_box_proj is not None:
+                minx, miny, maxx, maxy = bounding_box_proj
+
+                window = from_bounds(minx, miny, maxx, maxy, src.transform)
+
+                data = src.read(1, window=window)
+                window_transform = src.window_transform(window)
+
+                # Update extent from the window
+                left, bottom, right, top = rasterio.windows.bounds(window, src.transform)
+                raster_extent = (left, right, bottom, top)
+
+            else:
+                data = src.read(1)
+                b = src.bounds
+                raster_extent = (b.left, b.right, b.bottom, b.top)
 
         # Calculates the percentile for 0 (no flux)
         percentile_0 = percentile_for_0(data)
@@ -421,17 +470,25 @@ def map_net_flux(s3_folders,
         # Sets the ocean color
         set_ocean_color(ax)
 
+        if bounding_box_proj is not None:
+            bbox_geom = box(*bounding_box_proj)
+            country_shapefile = country_shapefile.clip(bbox_geom)
+
         # Plots the country polygons first
-        plot_country_polygons(ax, shapefile)
+        plot_country_polygons(ax, country_shapefile)
 
         # Raster extent
-        extent = [raster_extent.left, raster_extent.right, raster_extent.bottom, raster_extent.top]
+        # extent = [raster_extent.left, raster_extent.right, raster_extent.bottom, raster_extent.top]
+        extent = list(raster_extent)
 
         # Plots the raster next
         img = plot_raster(ax, cmap, extent, masked_data, norm)
 
         # Plots the country boundaries on top
-        plot_country_boundaries(ax, shapefile)
+        plot_country_boundaries(ax, country_shapefile)
+
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
 
         # Creates the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
         # Rounds data_min down and data_max up for legend.
@@ -472,8 +529,8 @@ def map_net_flux(s3_folders,
 
 # Makes jpeg of gross fluxes
 def map_gross(s3_folders,
-                 local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 colors, percentiles, shapefile):
+              local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+              colors, percentiles, country_shapefile, bounding_box):
 
     series_start_time = time.time()
 
@@ -568,7 +625,7 @@ def map_gross(s3_folders,
         set_ocean_color(ax)
 
         # Plots the country polygons first
-        plot_country_polygons(ax, shapefile)
+        plot_country_polygons(ax, country_shapefile)
 
         # Raster extent
         extent = [raster_extent.left, raster_extent.right, raster_extent.bottom, raster_extent.top]
@@ -577,7 +634,7 @@ def map_gross(s3_folders,
         img = plot_raster(ax, cmap, extent, masked_data, norm)
 
         # Plots the country boundaries on top
-        plot_country_boundaries(ax, shapefile)
+        plot_country_boundaries(ax, country_shapefile)
 
         # Creates the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
         # Rounds data_min down and data_max up for legend.
@@ -664,7 +721,7 @@ def create_three_panel_map():
     plt.close()
 
 
-def main(input_date, model_type, model_path_description=None):
+def main(bounding_box, input_date, model_type, model_path_description=None):
 
 
     # Defines desired percentiles for colors
@@ -729,8 +786,7 @@ def main(input_date, model_type, model_path_description=None):
     # print(net_CO2_only_input_folders_s3)
     # print(net_all_gases_input_folders_s3)
 
-
-
+    # Folders for local outputs
     local_reproj_folder = Path(cn.local_jpeg_folder)
     local_reproj_folder.mkdir(parents=True, exist_ok=True)
     local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder}output_jpegs_and_gifs/jpegs_non_pres")
@@ -741,7 +797,7 @@ def main(input_date, model_type, model_path_description=None):
     local_gif_folder.mkdir(parents=True, exist_ok=True)
 
     # Reprojects simplified country boundary shapefile, if needed
-    shapefile = check_and_reproject_shapefile(
+    country_shapefile = check_and_reproject_shapefile(
         shapefile_path=cn.original_shapefile_path,
         target_crs=cn.Robinson_crs,
         reprojected_shapefile_path=cn.reprojected_shapefile_path
@@ -751,27 +807,27 @@ def main(input_date, model_type, model_path_description=None):
 
     map_net_flux(net_all_gases_input_folders_s3, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_color_palette, net_percentiles, shapefile)
+                 net_color_palette, net_percentiles, country_shapefile, bounding_box)
 
     # map_net_flux(net_CO2_only_input_folders_s3, local_reproj_folder,
     #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              net_color_palette, net_percentiles, shapefile)
+    #              net_color_palette, net_percentiles, country_shapefile, bounding_box)
     #
     # map_gross(gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles, shapefile)
+    #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box)
     #
     # map_gross(gross_emis_non_CO2_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles, shapefile)
+    #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box)
     #
     # map_gross(gross_emis_all_gases_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles, shapefile)
+    #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box)
     #
     # map_gross(gross_removals_input_folders_s3, local_reproj_folder,
     #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              removals_colors, removals_percentiles, shapefile)
+    #              removals_colors, removals_percentiles, country_shapefile, bounding_box)
 
     # # Generates three-panel map
     # create_three_panel_map()
@@ -781,13 +837,15 @@ if __name__ == '__main__':
 
 
     parser = argparse.ArgumentParser(description="Create jpegs of 0.04x0.04 deg output maps.")
+    parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-id', '--input_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard).')
     parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area).')
 
     args = parser.parse_args()
+    bounding_box = args.bounding_box
     input_date = args.input_date
     model_type = args.model_type
     model_path_description = args.model_path_description
 
-    main(input_date, model_type, model_path_description=model_path_description)
+    main(bounding_box, input_date, model_type, model_path_description=model_path_description)
