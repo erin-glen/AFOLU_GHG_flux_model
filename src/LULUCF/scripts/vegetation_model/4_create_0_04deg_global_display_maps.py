@@ -64,6 +64,45 @@ def download_s3_file(s3_uri, local_path):
     s3 = boto3.client("s3")
     s3.download_file(bucket, key, str(local_path))
 
+def calculate_bbox_centered(center_lat, center_lon, lat_height, aspect_ratio=2.0):
+    """
+    Given a center point (lat/lon), vertical height in degrees latitude,
+    and desired width:height aspect ratio, returns a bounding box in degrees
+    that maintains the visual proportions in the map projection.
+
+    Returns: (lon_min, lat_min, lon_max, lat_max)
+    """
+    # Compute vertical range
+    lat_min = center_lat - lat_height / 2
+    lat_max = center_lat + lat_height / 2
+
+    # Setup projection to Robinson (or your map projection)
+    src_crs = "EPSG:4326"
+    dst_crs = cn.Robinson_crs  # e.g. 'ESRI:54030'
+    transformer = Transformer.from_crs(src_crs, dst_crs, always_xy=True)
+
+    # Project the vertical extent at the center longitude
+    _, y_min = transformer.transform(center_lon, lat_min)
+    _, y_max = transformer.transform(center_lon, lat_max)
+    height_m = abs(y_max - y_min)
+
+    # Desired width in projected meters
+    width_m = height_m * aspect_ratio
+
+    # Estimate how many degrees of longitude gives that width
+    # Use small step to compute meters per degree lon at center_lat
+    test_dx = 1.0
+    x0, _ = transformer.transform(center_lon, center_lat)
+    x1, _ = transformer.transform(center_lon + test_dx, center_lat)
+    meters_per_degree_lon = abs(x1 - x0)
+
+    # Required lon range in degrees
+    lon_width = width_m / meters_per_degree_lon
+    lon_min = center_lon - lon_width / 2
+    lon_max = center_lon + lon_width / 2
+
+    return (lon_min, lat_min, lon_max, lat_max)
+
 def transform_bbox_to_robinson(bbox_deg, src_crs="EPSG:4326", dst_crs=None):
     """
     Transforms a bounding box from lat/lon (EPSG:4326) to Robinson projection.
@@ -487,8 +526,10 @@ def map_net_flux(s3_folders,
         # Plots the country boundaries on top
         plot_country_boundaries(ax, country_shapefile)
 
-        ax.set_xlim(extent[0], extent[1])
-        ax.set_ylim(extent[2], extent[3])
+        # Explicitly sets the bounding box for the plot image
+        if bounding_box_proj is not None:
+            ax.set_xlim(extent[0], extent[1])
+            ax.set_ylim(extent[2], extent[3])
 
         # Creates the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
         # Rounds data_min down and data_max up for legend.
@@ -721,8 +762,7 @@ def create_three_panel_map():
     plt.close()
 
 
-def main(bounding_box, input_date, model_type, model_path_description=None):
-
+def main(input_date, model_type, model_path_description=None, center_latitude=None, center_longitude=None, lat_height=None):
 
     # Defines desired percentiles for colors
     net_percentiles = [5, 25, 50, 75, 89, 91, 92, 93, 94, 99]  # Specifies where colors transition in the data
@@ -803,6 +843,15 @@ def main(bounding_box, input_date, model_type, model_path_description=None):
         reprojected_shapefile_path=cn.reprojected_shapefile_path
     )
 
+    # Bounding box in degrees, maintaining the aspect ratio, and centered on a specific lat-long
+    bounding_box = calculate_bbox_centered(
+        center_lat=center_latitude,
+        center_lon=center_longitude,
+        lat_height=lat_height,  # Show ±1/2 of value from center
+        aspect_ratio=2.0  # From panel_dims = (12, 6)
+    )
+    print(bounding_box)
+
     # Generates jpegs for net flux, gross emissions, and gross removals
 
     map_net_flux(net_all_gases_input_folders_s3, local_reproj_folder,
@@ -837,15 +886,21 @@ if __name__ == '__main__':
 
 
     parser = argparse.ArgumentParser(description="Create jpegs of 0.04x0.04 deg output maps.")
-    parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
+    parser.add_argument('-clat', '--center_latitude', type=float, help='Latitude to center output maps (optional)')
+    parser.add_argument('-clon', '--center_longitude', type=float, help='Longitude to center output maps (optional)')
+    parser.add_argument('-lh', '--lat_height', type=float, help='Latitude to show around lat center (value is total north/south) (optional)')
     parser.add_argument('-id', '--input_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard).')
     parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area).')
 
     args = parser.parse_args()
-    bounding_box = args.bounding_box
+    center_latitude = args.center_latitude
+    center_longitude = args.center_longitude
+    lat_height = args.lat_height
     input_date = args.input_date
     model_type = args.model_type
     model_path_description = args.model_path_description
 
-    main(bounding_box, input_date, model_type, model_path_description=model_path_description)
+    main(input_date, model_type, model_path_description=model_path_description,
+         center_latitude=center_latitude, center_longitude=center_longitude, lat_height=lat_height)
+
