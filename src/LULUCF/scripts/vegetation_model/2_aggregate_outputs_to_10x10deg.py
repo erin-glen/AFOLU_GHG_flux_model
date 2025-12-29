@@ -16,32 +16,32 @@ creation.
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
-python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -bb 10 49 11 50 --run_local --no_upload -fy 1 -fv 1 -ft 1 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -bb 10 49 11 50 --run_local --no_upload -mt standard -mpd global -fy 1 -fv 1 -ft 1 --input_date YYYYMMDD
 
 Coiled small tests (needs 32 GB because of per-ha and per-pixel outputs):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -bb 10 49 11 50 fy 2 -fv 2 -ft 2 -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx  --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -bb 10 49 11 50 fy 2 -fv 2 -ft 2 -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -bb 10 49 11 50 fy 2 -fv 2 -ft 2 -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx  --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -bb 10 49 11 50 fy 2 -fv 2 -ft 2 -mt standard -mpd global -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -bb -64 -22 -63 -21 fy 3 -fv 3 -ft 3 -mt standard -mpd global -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 --input_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
-python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.2_aggregate_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/690a21cd-2ea0-8333-9c7f-7091f8016fb3
 """
@@ -340,6 +340,8 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
+    main_logger.info(f"Model version: {cn.veg_model_version}")
+    main_logger.info(f"Model path descriptor: {model_path_description}")
     main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
@@ -536,7 +538,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     uu.aggregate_10x10_chunk_stats(merged_10x10_counts_per_ha_df, f"{stage}_per_ha", no_upload, main_logger)
     uu.aggregate_10x10_chunk_stats(merged_10x10_counts_per_pixel_df, f"{stage}_per_pixel", no_upload, main_logger)
 
-    uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with chunk stat comparison", main_logger)
 
 
     ### Step 5: Counts 10x10 deg tiles
@@ -593,6 +595,8 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
             main_logger.info(f"Output aggregated rasters in {output_folder}: {file_count}")
             # print(geotiff_files)
 
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with output counts", main_logger)
+
 
     ### Step 6: Merges worker and local logs
     if not run_local:
@@ -609,7 +613,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Create 10x10 deg per-ha and per-pixel output geotifs")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-rd', '--input_date', required=True, help='Date of run, in YYYYMMDD')
+    parser.add_argument('-id', '--input_date', required=True, help='Date of run, in YYYYMMDD')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-fv', '--first_variables_to_process', type=int, help='Number of variables to process from raw mega-zarr (for testing)')
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')

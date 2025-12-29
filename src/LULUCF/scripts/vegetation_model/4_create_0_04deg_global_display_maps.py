@@ -340,7 +340,7 @@ def create_gif(gif_base_name, out_folder, out_maps_for_gif):
 # Makes jpegs and gifs of net fluxes
 def map_net_flux(s3_folders,
                  local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 colors, percentiles):
+                 colors, percentiles, shapefile):
 
     series_start_time = time.time()
 
@@ -473,7 +473,7 @@ def map_net_flux(s3_folders,
 # Makes jpeg of gross fluxes
 def map_gross(s3_folders,
                  local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 colors, percentiles):
+                 colors, percentiles, shapefile):
 
     series_start_time = time.time()
 
@@ -664,14 +664,8 @@ def create_three_panel_map():
     plt.close()
 
 
-if __name__ == '__main__':
+def main(input_date, model_type, model_path_description=None):
 
-    parser = argparse.ArgumentParser(description="Create jpegs of 0.04x0.04 deg output maps.")
-    parser.add_argument('-id', '--input_date', help='Date of run, in YYYYMMDD')
-
-    args = parser.parse_args()
-
-    input_date = args.input_date
 
     # Defines desired percentiles for colors
     net_percentiles = [5, 25, 50, 75, 89, 91, 92, 93, 94, 99]  # Specifies where colors transition in the data
@@ -686,23 +680,24 @@ if __name__ == '__main__':
     removals_colors = net_color_palette[0:5]
     emissions_colors = net_color_palette[5:]
 
+    # Datasets that need to be expanded to all output years
     basic_dirs_to_expand = [
         # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/{cn.model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/{cn.model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/{cn.model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         # f"{cn.veg_outputs_path}{cn.gross_removals_all_C_pools_pattern}/{cn.model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         # f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/{cn.model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/{cn.model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+        f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
     ]
 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
-    inputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, "annual", cn.first_model_year_annual,
-                                                                  "global",
+    inputs_by_interval_dir_list = uu.create_output_dir_name_list(basic_dirs_to_expand, "annual", cn.first_model_year_annual,"global",
                                                                  "standard_model", cn.veg_model_version_underscore, model_path_description,
                                                                  cn.interval_end_years_annual,
                                                                  [1, 1, 1, 1, 1, 1, 1, 1, 1], input_date,
                                                                  True, cn.flux_aggreg_pixel_meaning)
 
+    # s3 folders to process
     gross_emis_CO2_only_input_folders_s3 = []
     gross_emis_non_CO2_input_folders_s3 = []
     gross_emis_all_gases_input_folders_s3 = []
@@ -734,18 +729,18 @@ if __name__ == '__main__':
     # print(net_CO2_only_input_folders_s3)
     # print(net_all_gases_input_folders_s3)
 
-    local_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v{cn.veg_model_version_underscore}/"
 
-    local_reproj_folder = Path(local_folder)
+
+    local_reproj_folder = Path(cn.local_jpeg_folder)
     local_reproj_folder.mkdir(parents=True, exist_ok=True)
-    local_jpeg_non_pres_folder = Path(f"{local_folder}output_jpegs_and_gifs/jpegs_non_pres")
+    local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder}output_jpegs_and_gifs/jpegs_non_pres")
     local_jpeg_non_pres_folder.mkdir(parents=True, exist_ok=True)
-    local_jpeg_pres_folder = Path(f"{local_folder}output_jpegs_and_gifs/jpegs_pres")
+    local_jpeg_pres_folder = Path(f"{cn.local_jpeg_folder}output_jpegs_and_gifs/jpegs_pres")
     local_jpeg_pres_folder.mkdir(parents=True, exist_ok=True)
-    local_gif_folder = Path(f"{local_folder}output_jpegs_and_gifs/gifs")
+    local_gif_folder = Path(f"{cn.local_jpeg_folder}output_jpegs_and_gifs/gifs")
     local_gif_folder.mkdir(parents=True, exist_ok=True)
 
-    # Reprojects shapefile, if needed
+    # Reprojects simplified country boundary shapefile, if needed
     shapefile = check_and_reproject_shapefile(
         shapefile_path=cn.original_shapefile_path,
         target_crs=cn.Robinson_crs,
@@ -756,27 +751,43 @@ if __name__ == '__main__':
 
     map_net_flux(net_all_gases_input_folders_s3, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_color_palette, net_percentiles)
+                 net_color_palette, net_percentiles, shapefile)
 
     # map_net_flux(net_CO2_only_input_folders_s3, local_reproj_folder,
     #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              net_color_palette, net_percentiles)
+    #              net_color_palette, net_percentiles, shapefile)
     #
     # map_gross(gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles)
+    #                  emissions_colors, emissions_percentiles, shapefile)
     #
     # map_gross(gross_emis_non_CO2_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles)
+    #                  emissions_colors, emissions_percentiles, shapefile)
     #
     # map_gross(gross_emis_all_gases_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles)
+    #                  emissions_colors, emissions_percentiles, shapefile)
     #
     # map_gross(gross_removals_input_folders_s3, local_reproj_folder,
     #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              removals_colors, removals_percentiles)
+    #              removals_colors, removals_percentiles, shapefile)
 
     # # Generates three-panel map
     # create_three_panel_map()
+
+
+if __name__ == '__main__':
+
+
+    parser = argparse.ArgumentParser(description="Create jpegs of 0.04x0.04 deg output maps.")
+    parser.add_argument('-id', '--input_date', help='Date of run, in YYYYMMDD')
+    parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard).')
+    parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area).')
+
+    args = parser.parse_args()
+    input_date = args.input_date
+    model_type = args.model_type
+    model_path_description = args.model_path_description
+
+    main(input_date, model_type, model_path_description=model_path_description)
