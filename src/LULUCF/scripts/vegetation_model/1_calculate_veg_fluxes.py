@@ -2153,7 +2153,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
             executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
         upload_end_time = time.time()
-        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.veg_outputs_path} in {round(upload_end_time - upload_start_time)} seconds: {uu.timestr()}", is_large_run, logger_worker)
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.veg_outputs_path} in {round(upload_end_time - upload_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
     chunk_end_time = time.time()
     lu.print_and_log(f"Total chunk processing for {bounds_str} in {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
@@ -2462,9 +2462,9 @@ def main(cluster_name, year_range, model_type,
         # These variables are added to the mega-zarr
         outputs_to_zarr = cn.full_outputs_to_zarr
 
-        # Creates the global mega-zarr with metadata only
-        zu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
-                                    ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
+        # # Creates the global mega-zarr with metadata only
+        # zu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+        #                             ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
@@ -2480,127 +2480,133 @@ def main(cluster_name, year_range, model_type,
         outputs_to_zarr = False
 
 
-    ### Step 3: Create 1x1 degree outputs
+    # ### Step 3: Create 1x1 degree outputs
+    #
+    # # Creates list of tasks to run (1 task = 1 chunk)
+    # main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
+    # main_logger.info("Workers' logs to be appended after main function log"+ "\n")
+    #
+    # chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
+    # main_logger.info(f"There are {len(chunk_batches)} batches to process: {uu.timestr()}")
+    #
+    # # Accumulates all output messages and statistics across batches
+    # # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
+    # all_results = []
+    # all_stats = []
+    # success_count = 0  # Count of successful chunks
+    #
+    # # Iterates through the batches
+    # for i, chunk_batch in enumerate(chunk_batches):
+    #     main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks): {uu.timestr()}")
+    #     main_logger.info("Creating batch task txts in s3...")
+    #     uu.create_s3_task_files(stage, chunk_batch)
+    #
+    #     # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_vegetation_fluxes ... )]
+    #     # safe_vegetation_task is supposed to report task/worker crashes.
+    #     # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
+    #     # That chat has a table that explains what different combinations of traceback & memory presence/absence mean for the failure.
+    #     futures = []
+    #     for chunk in chunk_batch:
+    #         future = client.submit(
+    #                     safe_task_wrapper,
+    #                     chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
+    #                     download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
+    #                     interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
+    #                     output_dir_list, stage, model_type, mega_zarr_path, outputs_to_zarr,
+    #                     retries=1, key=f"vegflux-{chunk}")  # Designed to prevent infinite retries and rerunning completed tasks (happens in global runs)
+    #         futures.append(future)
+    #
+    #     batch_results = client.gather(futures)
+    #
+    #     for result in batch_results:
+    #         if isinstance(result, dict) and result.get("status") == "failed":
+    #             main_logger.error(
+    #                 "Task failed\n"
+    #                 f"Error: {result['error']}\n"
+    #                 f"Memory at failure (GB): {result['memory_at_failure']}\n"
+    #                 f"Traceback:\n{result['traceback']}"
+    #             )
+    #
+    #     all_results.extend(batch_results)
+    #
+    #     success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_large_run, main_logger, batch_results)
+    #     all_stats.extend(batch_stats)
+    #
+    #     # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
+    #     # That way there are some basic chunk stats (not sorted or anything) to fall back on.
+    #     if len(chunk_batches) > 1:
+    #
+    #         main_logger.info(f"Writing batch stats to disk: {uu.timestr()}")
+    #         df_batch_stats = pd.DataFrame(batch_stats)
+    #
+    #         timestamp = uu.timestr()
+    #
+    #         # Writes batch output to parquet file if output is large
+    #         if len(df_batch_stats) > 900_000:
+    #             out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.parquet"
+    #             local_path = f"{cn.local_chunk_stats_path}{out_file}"
+    #
+    #             # Coerce output to string so there aren't mismatched types
+    #             # https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694c44d0-19e8-8330-8098-a7ec93366e44
+    #             for col in ['min_value', 'max_value', 'mean_value', 'sum_value', 'count_value']:
+    #                 if col in df_batch_stats.columns:
+    #                     df_batch_stats[col] = df_batch_stats[col].astype(str)
+    #
+    #             df_batch_stats.to_parquet(
+    #                 local_path,
+    #                 engine="pyarrow",
+    #                 index=False
+    #             )
+    #
+    #         # Otherwise, writes output to spreadsheet
+    #         else:
+    #             out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.xlsx"
+    #             local_path = f"{cn.local_chunk_stats_path}{out_file}"
+    #
+    #             with pd.ExcelWriter(local_path) as writer:
+    #                 df_batch_stats.to_excel(
+    #                     writer,
+    #                     sheet_name=f"stats__batch_{i}",
+    #                     index=False
+    #                 )
+    #
+    #     del futures
+    #     del batch_results
+    #     client.run(gc.collect)
+    #
+    #     uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
-    # Creates list of tasks to run (1 task = 1 chunk)
-    main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
-    main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
-    chunk_batches = [chunk_list[i:i + batch_size] for i in range(0, len(chunk_list), batch_size)]
-    main_logger.info(f"There are {len(chunk_batches)} batches to process: {uu.timestr()}")
-
-    # Accumulates all output messages and statistics across batches
-    # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
-    all_results = []
-    all_stats = []
-    success_count = 0  # Count of successful chunks
-
-    # Iterates through the batches
-    for i, chunk_batch in enumerate(chunk_batches):
-        main_logger.info(f"Processing batch {i + 1}/{len(chunk_batches)} ({len(chunk_batch)} chunks): {uu.timestr()}")
-        main_logger.info("Creating batch task txts in s3...")
-        uu.create_s3_task_files(stage, chunk_batch)
-
-        # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_vegetation_fluxes ... )]
-        # safe_vegetation_task is supposed to report task/worker crashes.
-        # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
-        # That chat has a table that explains what different combinations of traceback & memory presence/absence mean for the failure.
-        futures = []
-        for chunk in chunk_batch:
-            future = client.submit(
-                        safe_task_wrapper,
-                        chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
-                        download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                        interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
-                        output_dir_list, stage, model_type, mega_zarr_path, outputs_to_zarr,
-                        retries=1, key=f"vegflux-{chunk}")  # Designed to prevent infinite retries and rerunning completed tasks (happens in global runs)
-            futures.append(future)
-
-        batch_results = client.gather(futures)
-
-        for result in batch_results:
-            if isinstance(result, dict) and result.get("status") == "failed":
-                main_logger.error(
-                    "Task failed\n"
-                    f"Error: {result['error']}\n"
-                    f"Memory at failure (GB): {result['memory_at_failure']}\n"
-                    f"Traceback:\n{result['traceback']}"
-                )
-
-        all_results.extend(batch_results)
-
-        success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_large_run, main_logger, batch_results)
-        all_stats.extend(batch_stats)
-
-        # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
-        # That way there are some basic chunk stats (not sorted or anything) to fall back on.
-        if len(chunk_batches) > 1:
-
-            main_logger.info(f"Writing batch stats to disk: {uu.timestr()}")
-            df_batch_stats = pd.DataFrame(batch_stats)
-
-            timestamp = uu.timestr()
-
-            # Writes batch output to parquet file if output is large
-            if len(df_batch_stats) > 900_000:
-                out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.parquet"
-                local_path = f"{cn.local_chunk_stats_path}{out_file}"
-
-                # Coerce output to string so there aren't mismatched types
-                # https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694c44d0-19e8-8330-8098-a7ec93366e44
-                for col in ['min_value', 'max_value', 'mean_value', 'sum_value', 'count_value']:
-                    if col in df_batch_stats.columns:
-                        df_batch_stats[col] = df_batch_stats[col].astype(str)
-
-                df_batch_stats.to_parquet(
-                    local_path,
-                    engine="pyarrow",
-                    index=False
-                )
-
-            # Otherwise, writes output to spreadsheet
-            else:
-                out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.xlsx"
-                local_path = f"{cn.local_chunk_stats_path}{out_file}"
-
-                with pd.ExcelWriter(local_path) as writer:
-                    df_batch_stats.to_excel(
-                        writer,
-                        sheet_name=f"stats__batch_{i}",
-                        index=False
-                    )
-
-        del futures
-        del batch_results
-        client.run(gc.collect)
-
-        uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
-
-
-    ### Step 4: Counts files in output folders, aggregates chunk stats for 1x1 degree outputs
-
-    # Resizes cluster down for all subsequent steps (chunk stats, zarr stats comparison, and log aggregation)
-    if not run_local:
-        workers = client.scheduler_info()["workers"]
-        n_workers = len(workers)
-
-        # Reduces number of workers in the cluster if there are more than 10
-        if n_workers > 10:
-            main_logger.info("Downsizing cluster.")
-            resize_cluster.resize_coiled_cluster(cluster_name, n_workers/3)
-
-    # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
-    if not no_upload and is_large_run:
-        for output_folder in output_dir_list:
-            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-            # print(geotiff_files)
-
-    # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
-    # and min and max values across all chunks for all inputs and outputs
-    # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
-    if (not no_stats) and (success_count > 0):
-        model_chunk_stats_path = uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+    # ### Step 4: Counts files in output folders, aggregates chunk stats for 1x1 degree outputs
+    #
+    # # Resizes cluster down for all subsequent steps (chunk stats, zarr stats comparison, and log aggregation)
+    # if not run_local:
+    #     workers = client.scheduler_info()["workers"]
+    #     n_workers = len(workers)
+    #
+    #     # Reduces number of workers in the cluster if there are more than 10
+    #     if n_workers > 10:
+    #         main_logger.info("Downsizing cluster.")
+    #         resize_cluster.resize_coiled_cluster(cluster_name, n_workers/3)
+    #
+    # # TODO move output counting after everything else (chunk stats, zarr comparison, model log aggregation) because cluster times out during this. Can end cluster, and print outputs directly to end of combined log.
+    # # Iterates through select output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
+    # keywords = ["gross", "net", "state"]
+    # output_dir_list_to_count = [
+    #     item for item in output_dir_list
+    #     if any(keyword in item for keyword in keywords)
+    # ]
+    # if not no_upload and is_large_run:
+    #     for output_folder in output_dir_list_to_count:
+    #         geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+    #         main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+    #         # print(geotiff_files)
+    #
+    # # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
+    # # and min and max values across all chunks for all inputs and outputs
+    # # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
+    # if (not no_stats) and (success_count > 0):
+    #     model_chunk_stats_path = uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
@@ -2615,6 +2621,7 @@ def main(cluster_name, year_range, model_type,
         comparison_insert = "_original_zarr_comparison"
 
         # The name of the chunk stats table from the model
+        model_chunk_stats_path = 'chunk_stats/parquet_20251225_10_05_52_v1_0_4__standard__global__KEEP'  #TODO testing
         model_chunk_stats_table_name = os.path.basename(model_chunk_stats_path)
         # print(model_chunk_stats_table_name)
 
@@ -2630,8 +2637,14 @@ def main(cluster_name, year_range, model_type,
         # Number of chuinks that have model chunk stats but not corresponding zarr chunk stats
         chunks_without_zarr_stats_total = 0
 
-        # Iterates through variables/datasets.
-        for var_name in outputs_to_zarr:
+        # Iterates through select variables/datasets
+        outputs_to_compare = [
+            cn.gross_emis_all_C_pools_CO2_only_pattern, cn.gross_emis_all_C_pools_non_CO2_only_pattern, cn.gross_emis_all_C_pools_all_gases_pattern,
+            cn.gross_removals_all_C_pools_pattern,
+            cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
+            cn.non_soil_c_modeled_dens_pattern, cn.land_state_pattern
+        ]
+        for var_name in outputs_to_compare:
 
             main_logger.info(f"Starting {var_name}: {uu.timestr()}")
             var_start_time = time.time()

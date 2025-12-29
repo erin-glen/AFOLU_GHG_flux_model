@@ -533,11 +533,12 @@ def get_table_names_for_zarr_stats_comparison(comparison_insert, main_logger, mo
         # print(zarr_comparison_stats_name)
 
     elif "parquet" in model_chunk_stats_path:
-        main_logger.info(f"Reading parquet tables from local files: {model_chunk_stats_path}")
-        chunk_stats_model_gross = pd.read_parquet(f"{model_chunk_stats_path}__{cn.gross_outputs_1x1}.parquet")
-        chunk_stats_model_other = pd.read_parquet(f"{model_chunk_stats_path}__{cn.other_outputs_1x1}.parquet")
-        chunk_stats_model_net = pd.read_parquet(f"{model_chunk_stats_path}__{cn.net_outputs_1x1}.parquet")
-        chunk_stats_model_1x1_in_10x10 = pd.read_parquet(f"{model_chunk_stats_path}__{cn.counts_1x1_in_10x10}.parquet")
+        main_logger.info(f"Reading parquet tables from local parquet files: {model_chunk_stats_path}")
+        parquet_base = f"{model_chunk_stats_path}/vegetation_fluxes__v{cn.veg_model_version_underscore}__"
+        chunk_stats_model_gross = pd.read_parquet(f"{parquet_base}{cn.gross_outputs_1x1}.parquet")
+        chunk_stats_model_other = pd.read_parquet(f"{parquet_base}{cn.other_outputs_1x1}.parquet")
+        chunk_stats_model_net = pd.read_parquet(f"{parquet_base}{cn.net_outputs_1x1}.parquet")
+        chunk_stats_model_1x1_in_10x10 = pd.read_parquet(f"{parquet_base}{cn.counts_1x1_in_10x10}.parquet")
 
         # Names of output parquet tables with chunk stats comparisons
         zarr_comparison_stats_gross_name = f"{model_chunk_stats_path}__{cn.gross_outputs_1x1}_{comparison_insert}_{uu.timestr()}.parquet"

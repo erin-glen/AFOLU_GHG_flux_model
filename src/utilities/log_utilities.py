@@ -197,7 +197,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
         with open(combined_local_log, "a") as outfile:
             outfile.write("\n")
             outfile.write("=== Chunk-level processing times (approximate because worker log may be missing end) ===\n")
-            outfile.write(f"Processing stats for numba code ({len(numba_proc_times__sec)} tasks):\n")
+            outfile.write(f"Processing stats for calculation code ({len(numba_proc_times__sec)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_numba_proc_times__sec:.0f} seconds (stdev: {stdev_numba_proc_times__sec:.0f})\n")
             outfile.write(f"  Min and max: {min_numba_proc_times__sec:.0f} - {max_numba_proc_times__sec:.0f}\n")
 
@@ -214,8 +214,8 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
             outfile.write(f"  Min and max: {min_total_chunk_proc_times__sec:.0f} - {max_total_chunk_proc_times__sec:.0f}\n")
 
             outfile.write(f"Peak memory usage for tasks ({len(peak_memory__GB)} tasks):\n")
-            outfile.write(f"  Average and stdev: {avg_peak_memory__GB:.0f} GB (stdev: {stdev_peak_memory__GB:.0f})\n")
-            outfile.write(f"  Min and max: {min_peak_memory__GB:.0f} - {max_peak_memory__GB:.0f}\n")
+            outfile.write(f"  Average and stdev: {avg_peak_memory__GB:.2f} GB (stdev: {stdev_peak_memory__GB:.2f})\n")
+            outfile.write(f"  Min and max: {min_peak_memory__GB:.2f} - {max_peak_memory__GB:.2f}\n")
 
             outfile.write("--- End of log---\n")
 
