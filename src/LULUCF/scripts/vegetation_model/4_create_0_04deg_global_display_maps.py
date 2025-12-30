@@ -3,6 +3,10 @@ python -m src.LULUCF.scripts.vegetation_model.4_create_0_04deg_global_display_ma
 
 Run locally (not in Coiled)
 
+A zoomed in map can be created by supplying central lat-long arguments, as well as a north-south extent for the map to include.
+The aspect ratio used in the global map of 2:1 (width:height) is maintained, and the east-west extent is determined
+from that information. That keeps all zoomed in maps in the same shape as the global map for simplicity.
+
 With https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67634e63-bbcc-800a-8267-004e88ced2e4
 Continued at https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d6d26f-b054-8323-98bb-731a86582e74
 """
