@@ -419,9 +419,64 @@ def map_net_flux(s3_folders,
     else:
         bounding_box_proj = None
 
+    print("Pre-scanning rasters to determine global color scale...")
+
+    all_valid_values = []
+
+    # First pass through years to get the range of values across years to standardize legend across years
+    for i, year in enumerate(cn.years_annual[1:]):
+    # for i, year in enumerate(cn.years_annual[2:3]):
+        s3_folder = s3_folders[i]
+        parts = s3_folder.strip('/').split('/')
+
+        pattern_idx = parts.index(f"version_{cn.veg_model_version_underscore}__{model_type}__{model_path_description}")
+        pattern_segment = parts[pattern_idx + 1]
+
+        interval_idx = parts.index("annual_intervals")
+        interval_segment = parts[interval_idx + 1]
+
+        year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_v{cn.veg_model_version_underscore}_{interval_segment}_global"
+        year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
+
+        with rasterio.open(year_path_reproj) as src:
+            if bounding_box_proj is not None:
+                window = from_bounds(*bounding_box_proj, src.transform)
+                data = src.read(1, window=window)
+            else:
+                data = src.read(1)
+
+        valid = data[data != 0]
+        if valid.size > 0:
+            all_valid_values.append(valid)
+
+    # Calculates min, center and max across all years
+    all_valid_values = np.concatenate(all_valid_values)
+
+    global_breaks = np.percentile(all_valid_values, [0.5, 99.5])
+
+    global_vmin = global_breaks[0]
+    global_vcenter = 0
+    global_vmax = global_breaks[-1]
+
+    print("Global scale:")
+    print("  vmin:", global_vmin)
+    print("  vcenter:", global_vcenter)
+    print("  vmax:", global_vmax)
+
+    # Creates the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
+    # Rounds data_min down and data_max up for legend.
+    rounded_min = math.ceil(global_vmin / 10 ** 3 * 100) / 100  # Rounds up
+    rounded_max = math.floor(global_vmax / 10 ** 3 * 100) / 100  # Rounds down
+    print(rounded_min)
+    print(rounded_max)
+    tick_labels = [f"< {rounded_min:.0f}  (sink)",  # Spaces are to horizontally align the text explanations
+                   "0           (neutral)",
+                   f"> {rounded_max:.0f}  (source)"]
+    print(tick_labels)
+
     # Iterates through modeled years
-    # for i, year in enumerate(cn.years_annual[1:]):
-    for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
+    for i, year in enumerate(cn.years_annual[1:]):
+    # for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
 
         # The s3 folder to process for this year
         s3_folder = s3_folders[i]
@@ -463,7 +518,6 @@ def map_net_flux(s3_folders,
                 window = from_bounds(minx, miny, maxx, maxy, src.transform)
 
                 data = src.read(1, window=window)
-                window_transform = src.window_transform(window)
 
                 # Update extent from the window
                 left, bottom, right, top = rasterio.windows.bounds(window, src.transform)
@@ -503,9 +557,16 @@ def map_net_flux(s3_folders,
         data_max = masked_data.max()  # Maximum of the valid data
         print(f"  Min and max for {year} (Mg): {data_min}, {data_max}")
 
-        print(f"  Normalizing for {year}")
+        print(f"  Normalizing map for {year}")
         # Normalizes the data for the colormap
         norm = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+
+        norm = TwoSlopeNorm(
+            vmin=global_vmin,
+            # vcenter=global_vcenter,
+            vcenter=0,
+            vmax=global_vmax
+        )
 
         print(f"  Plotting map for {year}")
         ax, fig = create_plot()
@@ -521,7 +582,6 @@ def map_net_flux(s3_folders,
         plot_country_polygons(ax, country_shapefile)
 
         # Raster extent
-        # extent = [raster_extent.left, raster_extent.right, raster_extent.bottom, raster_extent.top]
         extent = list(raster_extent)
 
         # Plots the raster next
@@ -535,28 +595,20 @@ def map_net_flux(s3_folders,
             ax.set_xlim(extent[0], extent[1])
             ax.set_ylim(extent[2], extent[3])
 
-        # Creates the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
-        # Rounds data_min down and data_max up for legend.
-        rounded_min = math.ceil(data_min/10**3 * 100) / 100  # Rounds up
-        rounded_max = math.floor(data_max/10**3 * 100) / 100  # Rounds down
-        tick_labels = [f"< {rounded_min:.0f}  (sink)",   # Spaces are to horizontally align the text explanations
-                        "0           (neutral)",
-                       f"> {rounded_max:.0f}  (source)"]
-
         # Modifies the legend title based on the input.
         if "all_gases" in pattern_segment:
             title_text = f"Net greenhouse gas flux\nAll vegetation pools, all gases\nkt CO$_2$e yr$^{{-1}}$"
         else:
             title_text = f"Net greenhouse gas flux\nAll vegetation pools, CO2 only\nkt CO$_2$e yr$^{{-1}}$"
 
-        create_divergent_legend(fig, img, vmin, vcenter, vmax, title_text, tick_labels, year)
+        create_divergent_legend(fig, img, global_vmin , global_vcenter, global_vmax , title_text, tick_labels, year)
 
         # Removes axis ticks and labels
         remove_ticks(ax)
 
         pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
         core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.veg_model_version_underscore}__{uu.timestr()[0:8]}"
-        if bounding_box_description:
+        if bounding_box_description:  # Adds bounding box description to file name, if supplied
             core_jpeg_name = f"{core_jpeg_name}_{bounding_box_description}"
         jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
         jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
@@ -850,13 +902,13 @@ def main(input_date, model_type, model_path_description=None,
         reprojected_shapefile_path=cn.reprojected_shapefile_path
     )
 
-    # Bounding box in degrees (optional)
+    # Creates bounding box in degrees from given map center and desired latitude range (optional)
     if center_latitude is not None and center_longitude is not None and lat_height is not None:
         bounding_box = calculate_bbox_centered(
             center_lat=center_latitude,
             center_lon=center_longitude,
             lat_height=lat_height,
-            aspect_ratio=2.0  # panel_dims = (12, 6)
+            aspect_ratio=2.0  # panel_dims = (12, 6), same as global map for simplicity
         )
         print(f"Using custom bounding box: {bounding_box}")
     else:
