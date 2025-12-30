@@ -403,7 +403,7 @@ def create_gif(gif_base_name, out_folder, out_maps_for_gif):
 # Makes jpegs and gifs of net fluxes
 def map_net_flux(s3_folders,
                  local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 colors, percentiles, country_shapefile, bounding_box=None):
+                 colors, percentiles, country_shapefile, bounding_box=None, bounding_box_description=None):
 
     series_start_time = time.time()
 
@@ -552,6 +552,8 @@ def map_net_flux(s3_folders,
 
         pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
         core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.veg_model_version_underscore}__{uu.timestr()[0:8]}"
+        if bounding_box_description:
+            core_jpeg_name = f"{core_jpeg_name}_{bounding_box_description}"
         jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
         jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
@@ -762,7 +764,8 @@ def create_three_panel_map():
     plt.close()
 
 
-def main(input_date, model_type, model_path_description=None, center_latitude=None, center_longitude=None, lat_height=None):
+def main(input_date, model_type, model_path_description=None,
+         center_latitude=None, center_longitude=None, lat_height=None, bounding_box_description=None):
 
     # Defines desired percentiles for colors
     net_percentiles = [5, 25, 50, 75, 89, 91, 92, 93, 94, 99]  # Specifies where colors transition in the data
@@ -843,40 +846,44 @@ def main(input_date, model_type, model_path_description=None, center_latitude=No
         reprojected_shapefile_path=cn.reprojected_shapefile_path
     )
 
-    # Bounding box in degrees, maintaining the aspect ratio, and centered on a specific lat-long
-    bounding_box = calculate_bbox_centered(
-        center_lat=center_latitude,
-        center_lon=center_longitude,
-        lat_height=lat_height,  # Show ±1/2 of value from center
-        aspect_ratio=2.0  # From panel_dims = (12, 6)
-    )
-    print(bounding_box)
+    # Bounding box in degrees (optional)
+    if center_latitude is not None and center_longitude is not None and lat_height is not None:
+        bounding_box = calculate_bbox_centered(
+            center_lat=center_latitude,
+            center_lon=center_longitude,
+            lat_height=lat_height,
+            aspect_ratio=2.0  # panel_dims = (12, 6)
+        )
+        print(f"Using custom bounding box: {bounding_box}")
+    else:
+        bounding_box = None
+        print("No bounding box specified; using global extent.")
 
     # Generates jpegs for net flux, gross emissions, and gross removals
 
     map_net_flux(net_all_gases_input_folders_s3, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_color_palette, net_percentiles, country_shapefile, bounding_box)
+                 net_color_palette, net_percentiles, country_shapefile, bounding_box, bounding_box_description)
 
     # map_net_flux(net_CO2_only_input_folders_s3, local_reproj_folder,
     #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              net_color_palette, net_percentiles, country_shapefile, bounding_box)
+    #              net_color_palette, net_percentiles, country_shapefile, bounding_box, bounding_box_description)
     #
     # map_gross(gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box)
+    #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
     #
     # map_gross(gross_emis_non_CO2_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box)
+    #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
     #
     # map_gross(gross_emis_all_gases_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box)
+    #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
     #
     # map_gross(gross_removals_input_folders_s3, local_reproj_folder,
     #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              removals_colors, removals_percentiles, country_shapefile, bounding_box)
+    #              removals_colors, removals_percentiles, country_shapefile, bounding_box, bounding_box_description)
 
     # # Generates three-panel map
     # create_three_panel_map()
@@ -889,6 +896,7 @@ if __name__ == '__main__':
     parser.add_argument('-clat', '--center_latitude', type=float, help='Latitude to center output maps (optional)')
     parser.add_argument('-clon', '--center_longitude', type=float, help='Longitude to center output maps (optional)')
     parser.add_argument('-lh', '--lat_height', type=float, help='Latitude to show around lat center (value is total north/south) (optional)')
+    parser.add_argument('-bbd', '--bounding_box_description', help='Description of bounding box (if used) to include in output names.')
     parser.add_argument('-id', '--input_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard).')
     parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area).')
@@ -897,10 +905,11 @@ if __name__ == '__main__':
     center_latitude = args.center_latitude
     center_longitude = args.center_longitude
     lat_height = args.lat_height
+    bounding_box_description = args.bounding_box_description
     input_date = args.input_date
     model_type = args.model_type
     model_path_description = args.model_path_description
 
     main(input_date, model_type, model_path_description=model_path_description,
-         center_latitude=center_latitude, center_longitude=center_longitude, lat_height=lat_height)
+         center_latitude=center_latitude, center_longitude=center_longitude, lat_height=lat_height, bounding_box_description=bounding_box_description)
 
