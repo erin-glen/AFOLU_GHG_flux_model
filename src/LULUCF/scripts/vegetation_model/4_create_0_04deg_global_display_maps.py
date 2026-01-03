@@ -244,10 +244,20 @@ def create_divergent_legend_asymmetric(fig, vmin, vcenter, vmax, title_text, tic
 
     # Create the colormap manually with asymmetry
     colors = [
-        (0.0, "#8c510a"),         # sink color
-        (center_pos, "#f6e8c3"),  # near-zero
-        (1.0, "#01665e")          # source color
+        (0.0, "#003C30"),         # sink color
+        (0.05, "#01665E"),         # sink color
+        (0.25, "#35978F"),         # sink color
+        (0.50, "#80CDC1"),         # sink color
+        (0.75, "#C7EAE5"),         # sink color
+        (0.89, "#F6E8C3"),  # near-neutral
+        (0.91, "#DFC27D"),         # source color
+        (0.92, "#BF812D"),         # source color
+        (0.93, "#8C510A"),         # source color
+        (0.94, "#543005"),         # source color
+        (1.0, "#543005")          # source color
     ]
+
+    net_percentiles = [5, 25, 50, 75, 89, 91, 92, 93, 94, 99]
     cmap = LinearSegmentedColormap.from_list("asymmetric_div", colors)
 
     # Create fake gradient image for legend (not shown, just for colorbar)
