@@ -419,13 +419,13 @@ def map_net_flux(s3_folders,
     else:
         bounding_box_proj = None
 
-    print("Pre-scanning rasters to determine global color scale...")
+    print("Pre-scanning rasters to determine full time series color scale...")
 
     all_valid_values = []
 
     # First pass through years to get the range of values across years to standardize legend across years
-    for i, year in enumerate(cn.years_annual[1:]):
-    # for i, year in enumerate(cn.years_annual[2:3]):
+    # for i, year in enumerate(cn.years_annual[1:]):
+    for i, year in enumerate(cn.years_annual[2:3]):
         s3_folder = s3_folders[i]
         parts = s3_folder.strip('/').split('/')
 
@@ -452,7 +452,8 @@ def map_net_flux(s3_folders,
     # Calculates min, center and max across all years
     all_valid_values = np.concatenate(all_valid_values)
 
-    global_breaks = np.percentile(all_valid_values, [0.5, 99.5])
+    global_breaks = np.percentile(all_valid_values, [1, 99])  # The min and max percentiles at which colors saturate
+    # global_breaks = np.percentile(all_valid_values, [0.5, 99.5])
 
     global_vmin = global_breaks[0]
     global_vcenter = 0
@@ -475,8 +476,8 @@ def map_net_flux(s3_folders,
     print(tick_labels)
 
     # Iterates through modeled years
-    for i, year in enumerate(cn.years_annual[1:]):
-    # for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
+    # for i, year in enumerate(cn.years_annual[1:]):
+    for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
 
         # The s3 folder to process for this year
         s3_folder = s3_folders[i]
@@ -543,23 +544,23 @@ def map_net_flux(s3_folders,
         percentiles_normalized = np.linspace(0, 1, len(percentiles))
         cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
 
-        # Calculates breaks in the data based on the percentiles
-        breaks = np.percentile(data[data != 0], percentiles)  # Ignores NoData values
-        print(f"  Breaks for {year}: {breaks}")
+        # # Calculates breaks in the data based on the percentiles
+        # breaks = np.percentile(data[data != 0], percentiles)  # Ignores NoData values
+        # print(f"  Breaks for {year}: {breaks}")
 
-        # Min, center and max values for the colormap (not the min and max values for the raster)
-        vmin, vcenter, vmax = breaks[0], breaks[len(breaks) // 2], breaks[-1]  # Uses the median as the center
-        print(f"  vcenter: {vcenter}")
+        # # Min, center and max values for the colormap (not the min and max values for the raster)
+        # vmin, vcenter, vmax = breaks[0], breaks[len(breaks) // 2], breaks[-1]  # Uses the median as the center
+        # print(f"  vcenter: {vcenter}")
 
         print(f"  Masking raster for {year} to non-0 values")
         masked_data = np.ma.masked_where(data == 0, data)
-        data_min = masked_data.min()  # Minimum of the valid data
-        data_max = masked_data.max()  # Maximum of the valid data
-        print(f"  Min and max for {year} (Mg): {data_min}, {data_max}")
-
-        print(f"  Normalizing map for {year}")
-        # Normalizes the data for the colormap
-        norm = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+        # data_min = masked_data.min()  # Minimum of the valid data
+        # data_max = masked_data.max()  # Maximum of the valid data
+        # print(f"  Min and max for {year} (Mg): {data_min}, {data_max}")
+        #
+        # print(f"  Normalizing map for {year}")
+        # # Normalizes the data for the colormap
+        # norm = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
 
         norm = TwoSlopeNorm(
             vmin=global_vmin,
