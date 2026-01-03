@@ -222,38 +222,65 @@ def remove_ticks(ax):
     ax.set_xticklabels([])  # Remove x-axis labels
     ax.set_yticklabels([])  # Remove y-axis labels
 
-def create_divergent_legend(fig, img, vmin, vcenter, vmax, title_text, tick_labels, year):
+def create_divergent_legend_asymmetric(fig, vmin, vcenter, vmax, title_text, tick_labels, year):
     """
-    Creates a vertical colorbar legend with a left-aligned title above it.
-    :param fig: The figure
-    :param img: The image
-    :param vmin: minimum value to use in scaling legend colors
-    :param vcenter: middle value to use in scaling legend colors
-    :param vmax: maximum value to use in scaling legend colors
-    :param title_text: Title for legend
-    :param tick_labels: Tick labels for legend
-    :return: N/A
+    Creates a vertical asymmetric colorbar legend where 0 is not visually centered.
+
+    Parameters:
+        fig: Matplotlib figure
+        vmin: Minimum data value (e.g., -14)
+        vcenter: Center value (e.g., 0)
+        vmax: Maximum data value (e.g., 22)
+        title_text: Text for the legend title
+        tick_labels: Labels for the three ticks (min, 0, max)
+        year: Year string, for logging/debug
     """
+    print(f"  Creating asymmetric legend for {year}")
 
-    print(f"  Creating legend for {year}")
+    # Compute center position in normalized [0–1] space
+    center_pos = abs(vmin) / (vmax - vmin)
 
-    # Add a vertical colorbar (legend) in the bottom-left of the map
-    cbar_ax = fig.add_axes(cn.colorbar_dimensions)  # [left, bottom, width, height]
-    cb = plt.colorbar(img, cax=cbar_ax, orientation="vertical")
+    print("  Tick positions (legend normalized space):", [0.0, center_pos, 1.0])
 
-    # Set custom ticks and labels for the colorbar
-    cb.set_ticks([vmin, vcenter, vmax])  # Set the ticks at the minimum, zero, and maximum
-    cb.set_ticklabels(tick_labels, fontsize=cn.legend_fontsize)  # Format the labels
+    # Create the colormap manually with asymmetry
+    colors = [
+        (0.0, "#8c510a"),         # sink color
+        (center_pos, "#f6e8c3"),  # near-zero
+        (1.0, "#01665e")          # source color
+    ]
+    cmap = LinearSegmentedColormap.from_list("asymmetric_div", colors)
 
-    # Add a left-aligned, multi-row title above the colorbar
-    cbar_ax.text(
-        0, 1.1,  # Adjust the x (horizontal) and y (vertical) coordinates for the title position
+    # Create fake gradient image for legend (not shown, just for colorbar)
+    gradient = np.linspace(0, 1, 256).reshape(-1, 1)
+
+    # Create colorbar axis
+    cbar_ax = fig.add_axes(cn.colorbar_dimensions)  # e.g., [left, bottom, width, height]
+
+    im = cbar_ax.imshow(gradient, cmap=cmap, aspect='auto', origin='lower')
+    cbar_ax.axis('off')
+
+    # Add ticks using a separate axis
+    cb_ax = fig.add_axes([
+        cn.colorbar_dimensions[0] + cn.colorbar_dimensions[2] + 0.01,  # shift to right
+        cn.colorbar_dimensions[1],
+        0.03,  # width
+        cn.colorbar_dimensions[3]
+    ])
+
+    cb = plt.colorbar(im, cax=cb_ax, orientation="vertical")
+    cb.set_ticks([0.0, center_pos, 1.0])
+    cb.set_ticklabels(tick_labels, fontsize=cn.legend_fontsize)
+
+    # Add title above the bar (optional)
+    cb_ax.text(
+        0, 1.05,  # x, y in axes coords
         title_text,
         fontsize=cn.legend_fontsize,
-        ha="left",  # Horizontally align the text to the left
-        va="bottom",  # Vertically align the text
-        transform=cbar_ax.transAxes  # Use axes coordinates for positioning
+        ha="left",
+        va="bottom",
+        transform=cb_ax.transAxes
     )
+
 
 def create_unidirection_legend(fig, img, vmin, vmax, title_text, tick_labels, year):
     """
@@ -568,6 +595,10 @@ def map_net_flux(s3_folders,
             vcenter=0,
             vmax=global_vmax
         )
+        print("Norm check:")
+        print("  norm(-14):", norm(-14))
+        print("  norm(0):", norm(0))
+        print("  norm(22):", norm(22))
 
         print(f"  Plotting map for {year}")
         ax, fig = create_plot()
@@ -602,7 +633,10 @@ def map_net_flux(s3_folders,
         else:
             title_text = f"Net greenhouse gas flux\nAll vegetation pools, CO2 only\nkt CO$_2$e yr$^{{-1}}$"
 
-        create_divergent_legend(fig, img, global_vmin , global_vcenter, global_vmax , title_text, tick_labels, year)
+        VIS_VMIN = -14
+        VIS_VMAX = 22
+        VIS_VCENTER = 0
+        create_divergent_legend_asymmetric(fig, VIS_VMIN, VIS_VCENTER, VIS_VMAX, title_text, tick_labels, year)
 
         # Removes axis ticks and labels
         remove_ticks(ax)
@@ -782,7 +816,6 @@ def map_gross(s3_folders,
 
     series_end_time = time.time()
     print(f"{pattern_segment} took {round(series_end_time - series_start_time)} seconds: {uu.timestr()}")
-
 
 
 def create_three_panel_map():
