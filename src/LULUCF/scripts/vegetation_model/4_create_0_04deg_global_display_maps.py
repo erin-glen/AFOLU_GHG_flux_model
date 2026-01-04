@@ -1,5 +1,9 @@
 """
+Global:
 python -m src.LULUCF.scripts.vegetation_model.4_create_0_04deg_global_display_maps -mt standard -mpd global --input_date YYYYMMDD
+
+For Central Africa:
+python -m src.LULUCF.scripts.vegetation_model.4_create_0_04deg_global_display_maps -mt standard -mpd global --input_date YYYYMMDD --center_latitude 0 --center_longitude 20 --lat_height 20 -bbd central_Africa
 
 Run locally (not in Coiled)
 
@@ -222,7 +226,7 @@ def remove_ticks(ax):
     ax.set_xticklabels([])  # Remove x-axis labels
     ax.set_yticklabels([])  # Remove y-axis labels
 
-def create_divergent_legend_asymmetric(fig, vmin, vcenter, vmax, title_text, tick_labels, year, colors_rgb):
+def create_divergent_legend_asymmetric(fig, vmin, vmax, title_text, tick_labels, year, colors_rgb):
     """
     Creates a vertical asymmetric colorbar legend where 0 is not visually centered.
 
@@ -241,10 +245,11 @@ def create_divergent_legend_asymmetric(fig, vmin, vcenter, vmax, title_text, tic
     # per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d6d26f-b054-8323-98bb-731a86582e74
     net_color_palette_hex = ['#{:02x}{:02x}{:02x}'.format(r, g, b) for r, g, b in colors_rgb]
 
+    # Calculates color (RGB and hex) for neutral value-- for legend only. Not used in mop because it makes the map look worse.
     neutral_rgb = tuple(round((colors_rgb[4][i] + colors_rgb[5][i]) / 2) for i in range(3))
     neutral_hex = "#{:02X}{:02X}{:02X}".format(*neutral_rgb)
 
-    # Compute center position in normalized [0–1] space
+    # Computes center position in normalized [0–1] space for display on legend
     neutral_pos = abs(vmin) / (vmax - vmin)
 
     print(f"  Neutral tick position for legend: {neutral_pos}")
@@ -257,39 +262,31 @@ def create_divergent_legend_asymmetric(fig, vmin, vcenter, vmax, title_text, tic
         (0.05, net_color_palette_hex[1]),         # sink color
         (0.20, net_color_palette_hex[2]),         # sink color
         (0.25, net_color_palette_hex[3]),         # sink color
-        (0.36, net_color_palette_hex[4]),         # sink color
+        (neutral_pos-0.03, net_color_palette_hex[4]),         # sink color
         (neutral_pos, neutral_hex),         # near neutral, midpoint of adjacent colors per ChatGPT
-        (0.40, net_color_palette_hex[5]),         # source color
+        (neutral_pos+0.03, net_color_palette_hex[5]),         # source color
         (0.50, net_color_palette_hex[6]),         # source color
         (0.60, net_color_palette_hex[7]),         # source color
         (0.90, net_color_palette_hex[8]),         # source color
         (1.0, net_color_palette_hex[9]),          # source color
     ]
 
+    # Makes color map for legend
     cmap = LinearSegmentedColormap.from_list("asymmetric_div", colors)
 
-    # Create fake gradient image for legend (not shown, just for colorbar)
-    gradient = np.linspace(0, 1, 256).reshape(-1, 1)
-
-    # Create colorbar axis
-    cbar_ax = fig.add_axes(cn.colorbar_dimensions)  # e.g., [left, bottom, width, height]
-
-    im = cbar_ax.imshow(gradient, cmap=cmap, aspect='auto', origin='lower')
-    cbar_ax.axis('off')
-
-    # Add ticks using a separate axis
+    # Adds ticks using a separate axis
     cb_ax = fig.add_axes([
-        cn.colorbar_dimensions[0] + cn.colorbar_dimensions[2] + 0.01,  # shift to right
+        cn.colorbar_dimensions[0] + cn.colorbar_dimensions[2],
         cn.colorbar_dimensions[1],
-        0.03,  # width
+        0.02,  # width
         cn.colorbar_dimensions[3]
     ])
 
-    cb = plt.colorbar(im, cax=cb_ax, orientation="vertical")
+    cb = plt.colorbar(plt.cm.ScalarMappable(cmap=cmap), cax=cb_ax, orientation="vertical")
     cb.set_ticks([0.0, neutral_pos, 1.0])
     cb.set_ticklabels(tick_labels, fontsize=cn.legend_fontsize)
 
-    # Add title above the bar (optional)
+    # Adds title above the bar
     cb_ax.text(
         0, 1.05,  # x, y in axes coords
         title_text,
@@ -298,7 +295,6 @@ def create_divergent_legend_asymmetric(fig, vmin, vcenter, vmax, title_text, tic
         va="bottom",
         transform=cb_ax.transAxes
     )
-
 
 def create_unidirection_legend(fig, img, vmin, vmax, title_text, tick_labels, year):
     """
@@ -420,7 +416,7 @@ def save_pres_non_pres_jpegs(ax, out_jpeg, out_jpeg_for_pres, year):
     save_jpeg(out_jpeg, year)
 
     # Note in bottom right of panel
-    ax.text(0.98, 0.04, cn.pres_text, transform=ax.transAxes, fontsize=7,
+    ax.text(0.99, 0.05, cn.pres_text, transform=ax.transAxes, fontsize=7,
             ha="right", va="top", color="black")
 
     # Saves jpeg with journal name and update notes in bottom right
@@ -469,8 +465,8 @@ def map_net_flux(s3_folders,
     all_valid_values = []
 
     # First pass through years to get the range of values across years to standardize legend across years
-    # for i, year in enumerate(cn.years_annual[1:]):
-    for i, year in enumerate(cn.years_annual[2:3]):
+    for i, year in enumerate(cn.years_annual[1:]):
+    # for i, year in enumerate(cn.years_annual[2:3]):
         s3_folder = s3_folders[i]
         parts = s3_folder.strip('/').split('/')
 
@@ -513,16 +509,14 @@ def map_net_flux(s3_folders,
     # Rounds data_min down and data_max up for legend.
     rounded_min = math.ceil(global_vmin / 10 ** 3 * 100) / 100  # Rounds up
     rounded_max = math.floor(global_vmax / 10 ** 3 * 100) / 100  # Rounds down
-    print(rounded_min)
-    print(rounded_max)
     tick_labels = [f"< {rounded_min:.0f}  (sink)",  # Spaces are to horizontally align the text explanations
-                   "0           (neutral)",
+                   "0        (neutral)",
                    f"> {rounded_max:.0f}  (source)"]
-    print(tick_labels)
+    # print(tick_labels)
 
     # Iterates through modeled years
-    # for i, year in enumerate(cn.years_annual[1:]):
-    for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
+    for i, year in enumerate(cn.years_annual[1:]):
+    # for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
 
         # The s3 folder to process for this year
         s3_folder = s3_folders[i]
@@ -550,11 +544,6 @@ def map_net_flux(s3_folders,
 
         # Reprojects raster, if needed
         reproject_raster(year_path_unproj, year_path_reproj)
-
-        # # Reads raster data
-        # with rasterio.open(year_path_reproj) as src:
-        #     data = src.read(1)  # Read the first band
-        #     raster_extent = src.bounds
 
         with rasterio.open(year_path_reproj) as src:
 
@@ -589,28 +578,13 @@ def map_net_flux(s3_folders,
         percentiles_normalized = np.linspace(0, 1, len(percentiles))
         cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
 
-        # # Calculates breaks in the data based on the percentiles
-        # breaks = np.percentile(data[data != 0], percentiles)  # Ignores NoData values
-        # print(f"  Breaks for {year}: {breaks}")
-
-        # # Min, center and max values for the colormap (not the min and max values for the raster)
-        # vmin, vcenter, vmax = breaks[0], breaks[len(breaks) // 2], breaks[-1]  # Uses the median as the center
-        # print(f"  vcenter: {vcenter}")
 
         print(f"  Masking raster for {year} to non-0 values")
         masked_data = np.ma.masked_where(data == 0, data)
-        # data_min = masked_data.min()  # Minimum of the valid data
-        # data_max = masked_data.max()  # Maximum of the valid data
-        # print(f"  Min and max for {year} (Mg): {data_min}, {data_max}")
-        #
-        # print(f"  Normalizing map for {year}")
-        # # Normalizes the data for the colormap
-        # norm = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
 
         norm = TwoSlopeNorm(
             vmin=global_vmin,
-            # vcenter=global_vcenter,
-            vcenter=0,
+            vcenter=global_vcenter,
             vmax=global_vmax
         )
 
@@ -647,10 +621,7 @@ def map_net_flux(s3_folders,
         else:
             title_text = f"Net greenhouse gas flux\nAll vegetation pools, CO2 only\nkt CO$_2$e yr$^{{-1}}$"
 
-        VIS_VMIN = -14
-        VIS_VMAX = 22
-        VIS_VCENTER = 0
-        create_divergent_legend_asymmetric(fig, VIS_VMIN, VIS_VCENTER, VIS_VMAX, title_text, tick_labels, year, colors_rgb)
+        create_divergent_legend_asymmetric(fig, rounded_min, rounded_max, title_text, tick_labels, year, colors_rgb)
 
         # Removes axis ticks and labels
         remove_ticks(ax)

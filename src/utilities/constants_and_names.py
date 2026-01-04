@@ -1025,9 +1025,10 @@ boundary_width = 0.2 # Width of country boundaries
 panel_dims = (12, 6) # Map panel dimensions (width, height)
 dpi_jpeg = 300 # dpi for output jpegs
 legend_fontsize = 9 # Font size for legend titles and labels
-colorbar_dimensions = [0.14, 0.17, 0.02, 0.13] # [left, bottom, width, height]
+colorbar_dimensions = [0.12, 0.17, 0.02, 0.13] # [left, bottom, width, height]
 
-pres_text = f"Land use vegetation fluxes (model v{veg_model_version}, 2016-2024)"
+pres_text = (f"Land use vegetation fluxes (model v{veg_model_version}, 2016-2024) \n"
+             f"Legend value range represents 1 and 99 percentiles of fluxes across all years.")
 
 # Output global aggregated jpeg names
 three_panel_jpeg_base = f"three_panels__4km_aggregation__v{veg_model_version}"
