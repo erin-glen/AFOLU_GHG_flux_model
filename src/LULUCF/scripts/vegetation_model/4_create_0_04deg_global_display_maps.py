@@ -222,7 +222,7 @@ def remove_ticks(ax):
     ax.set_xticklabels([])  # Remove x-axis labels
     ax.set_yticklabels([])  # Remove y-axis labels
 
-def create_divergent_legend_asymmetric(fig, vmin, vcenter, vmax, title_text, tick_labels, year):
+def create_divergent_legend_asymmetric(fig, vmin, vcenter, vmax, title_text, tick_labels, year, colors_rgb):
     """
     Creates a vertical asymmetric colorbar legend where 0 is not visually centered.
 
@@ -237,27 +237,35 @@ def create_divergent_legend_asymmetric(fig, vmin, vcenter, vmax, title_text, tic
     """
     print(f"  Creating asymmetric legend for {year}")
 
+    # Converts net flux RGB palette to hex
+    # per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d6d26f-b054-8323-98bb-731a86582e74
+    net_color_palette_hex = ['#{:02x}{:02x}{:02x}'.format(r, g, b) for r, g, b in colors_rgb]
+
+    neutral_rgb = tuple(round((colors_rgb[4][i] + colors_rgb[5][i]) / 2) for i in range(3))
+    neutral_hex = "#{:02X}{:02X}{:02X}".format(*neutral_rgb)
+
     # Compute center position in normalized [0–1] space
-    center_pos = abs(vmin) / (vmax - vmin)
+    neutral_pos = abs(vmin) / (vmax - vmin)
 
-    print("  Tick positions (legend normalized space):", [0.0, center_pos, 1.0])
+    print(f"  Neutral tick position for legend: {neutral_pos}")
 
-    # Create the colormap manually with asymmetry
+    # Creates the colormap manually with asymmetry.
+    # Manually setting legend percentiles for now, and they don't bear any relationship to the actual data.
+    # TODO make these percentiles actually reflect the percentiles of the values in the data. Haven't tried it at all.
     colors = [
-        (0.0, "#003C30"),         # sink color
-        (0.05, "#01665E"),         # sink color
-        (0.25, "#35978F"),         # sink color
-        (0.50, "#80CDC1"),         # sink color
-        (0.75, "#C7EAE5"),         # sink color
-        (0.89, "#F6E8C3"),  # near-neutral
-        (0.91, "#DFC27D"),         # source color
-        (0.92, "#BF812D"),         # source color
-        (0.93, "#8C510A"),         # source color
-        (0.94, "#543005"),         # source color
-        (1.0, "#543005")          # source color
+        (0.0, net_color_palette_hex[0]),         # sink color
+        (0.05, net_color_palette_hex[1]),         # sink color
+        (0.20, net_color_palette_hex[2]),         # sink color
+        (0.25, net_color_palette_hex[3]),         # sink color
+        (0.36, net_color_palette_hex[4]),         # sink color
+        (neutral_pos, neutral_hex),         # near neutral, midpoint of adjacent colors per ChatGPT
+        (0.40, net_color_palette_hex[5]),         # source color
+        (0.50, net_color_palette_hex[6]),         # source color
+        (0.60, net_color_palette_hex[7]),         # source color
+        (0.90, net_color_palette_hex[8]),         # source color
+        (1.0, net_color_palette_hex[9]),          # source color
     ]
 
-    net_percentiles = [5, 25, 50, 75, 89, 91, 92, 93, 94, 99]
     cmap = LinearSegmentedColormap.from_list("asymmetric_div", colors)
 
     # Create fake gradient image for legend (not shown, just for colorbar)
@@ -278,7 +286,7 @@ def create_divergent_legend_asymmetric(fig, vmin, vcenter, vmax, title_text, tic
     ])
 
     cb = plt.colorbar(im, cax=cb_ax, orientation="vertical")
-    cb.set_ticks([0.0, center_pos, 1.0])
+    cb.set_ticks([0.0, neutral_pos, 1.0])
     cb.set_ticklabels(tick_labels, fontsize=cn.legend_fontsize)
 
     # Add title above the bar (optional)
@@ -444,7 +452,7 @@ def create_gif(gif_base_name, out_folder, out_maps_for_gif):
 # Makes jpegs and gifs of net fluxes
 def map_net_flux(s3_folders,
                  local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 colors, percentiles, country_shapefile, bounding_box=None, bounding_box_description=None):
+                 colors_rgb, percentiles, country_shapefile, bounding_box=None, bounding_box_description=None):
 
     series_start_time = time.time()
 
@@ -575,7 +583,7 @@ def map_net_flux(s3_folders,
         print(f"  Calculating percentiles and breaks for {year}")
 
         # Converts RGB color palette to matplotlib color palette
-        colors_matplotlib = rgb_to_mpl_palette(colors)
+        colors_matplotlib = rgb_to_mpl_palette(colors_rgb)
 
         # Makes percentiles for the breakpoints and prepares colormap
         percentiles_normalized = np.linspace(0, 1, len(percentiles))
@@ -605,10 +613,6 @@ def map_net_flux(s3_folders,
             vcenter=0,
             vmax=global_vmax
         )
-        print("Norm check:")
-        print("  norm(-14):", norm(-14))
-        print("  norm(0):", norm(0))
-        print("  norm(22):", norm(22))
 
         print(f"  Plotting map for {year}")
         ax, fig = create_plot()
@@ -646,7 +650,7 @@ def map_net_flux(s3_folders,
         VIS_VMIN = -14
         VIS_VMAX = 22
         VIS_VCENTER = 0
-        create_divergent_legend_asymmetric(fig, VIS_VMIN, VIS_VCENTER, VIS_VMAX, title_text, tick_labels, year)
+        create_divergent_legend_asymmetric(fig, VIS_VMIN, VIS_VCENTER, VIS_VMAX, title_text, tick_labels, year, colors_rgb)
 
         # Removes axis ticks and labels
         remove_ticks(ax)
@@ -867,8 +871,12 @@ def create_three_panel_map():
 def main(input_date, model_type, model_path_description=None,
          center_latitude=None, center_longitude=None, lat_height=None, bounding_box_description=None):
 
-    # Defines desired percentiles for colors
-    net_percentiles = [5, 25, 50, 75, 89, 91, 92, 93, 94, 99]  # Specifies where colors transition in the data
+    # Defines desired percentiles for colors. Specifies where colors transition in the data.
+    # Setting neutral ends of sink and source is empirically based on the 0 value being around the 82nd percentile.
+    # From some experimentation, it's better not to encode a neutral percentile (or associated color) here or below.
+    # It dampens the colors around the neutral value (low emissions and removals) even more.
+    net_percentiles = [5, 30, 60, 70, 81,   # Sink
+                       83, 88, 97, 94, 99]  # Source
     removals_percentiles = [5, 25, 50, 75, 99]
     emissions_percentiles = [5, 25, 50, 75, 99]
 
