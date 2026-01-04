@@ -259,15 +259,15 @@ def create_divergent_legend_asymmetric(fig, vmin, vmax, title_text, tick_labels,
     # TODO make these percentiles actually reflect the percentiles of the values in the data. Haven't tried it at all.
     colors = [
         (0.0, net_color_palette_hex[0]),         # sink color
-        (0.05, net_color_palette_hex[1]),         # sink color
-        (0.20, net_color_palette_hex[2]),         # sink color
-        (0.25, net_color_palette_hex[3]),         # sink color
-        (neutral_pos-0.03, net_color_palette_hex[4]),         # sink color
+        (neutral_pos*0.2, net_color_palette_hex[1]),         # sink color
+        (neutral_pos*0.5, net_color_palette_hex[2]),         # sink color
+        (neutral_pos*0.7, net_color_palette_hex[3]),         # sink color
+        (neutral_pos*0.9, net_color_palette_hex[4]),         # sink color
         (neutral_pos, neutral_hex),         # near neutral, midpoint of adjacent colors per ChatGPT
-        (neutral_pos+0.03, net_color_palette_hex[5]),         # source color
-        (0.50, net_color_palette_hex[6]),         # source color
-        (0.60, net_color_palette_hex[7]),         # source color
-        (0.90, net_color_palette_hex[8]),         # source color
+        (min(neutral_pos*1.2, 0.45), net_color_palette_hex[5]),         # source color
+        (min(neutral_pos*1.4, 0.50), net_color_palette_hex[6]),         # source color
+        (min(neutral_pos*1.6, 0.60), net_color_palette_hex[7]),         # source color
+        (min(neutral_pos*1.8, 0.90), net_color_palette_hex[8]),         # source color
         (1.0, net_color_palette_hex[9]),          # source color
     ]
 
@@ -416,7 +416,7 @@ def save_pres_non_pres_jpegs(ax, out_jpeg, out_jpeg_for_pres, year):
     save_jpeg(out_jpeg, year)
 
     # Note in bottom right of panel
-    ax.text(0.99, 0.05, cn.pres_text, transform=ax.transAxes, fontsize=7,
+    ax.text(0.99, 0.07, cn.pres_text, transform=ax.transAxes, fontsize=7,   #Vertical, horizontal
             ha="right", va="top", color="black")
 
     # Saves jpeg with journal name and update notes in bottom right
@@ -465,8 +465,10 @@ def map_net_flux(s3_folders,
     all_valid_values = []
 
     # First pass through years to get the range of values across years to standardize legend across years
-    for i, year in enumerate(cn.years_annual[1:]):
-    # for i, year in enumerate(cn.years_annual[2:3]):
+    # for i, year in enumerate(cn.years_annual[1:]):
+    for i, year in enumerate(cn.years_annual[2:3]):
+
+        # print(f"Scanning {year}")
         s3_folder = s3_folders[i]
         parts = s3_folder.strip('/').split('/')
 
@@ -515,8 +517,8 @@ def map_net_flux(s3_folders,
     # print(tick_labels)
 
     # Iterates through modeled years
-    for i, year in enumerate(cn.years_annual[1:]):
-    # for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
+    # for i, year in enumerate(cn.years_annual[1:]):
+    for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
 
         # The s3 folder to process for this year
         s3_folder = s3_folders[i]
@@ -911,11 +913,11 @@ def main(input_date, model_type, model_path_description=None,
     # Folders for local outputs
     local_reproj_folder = Path(cn.local_jpeg_folder)
     local_reproj_folder.mkdir(parents=True, exist_ok=True)
-    local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder}output_jpegs_and_gifs/jpegs_non_pres")
+    local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder}output_jpegs_and_gifs_{bounding_box_description}/jpegs_non_pres")
     local_jpeg_non_pres_folder.mkdir(parents=True, exist_ok=True)
-    local_jpeg_pres_folder = Path(f"{cn.local_jpeg_folder}output_jpegs_and_gifs/jpegs_pres")
+    local_jpeg_pres_folder = Path(f"{cn.local_jpeg_folder}output_jpegs_and_gifs_{bounding_box_description}/jpegs_pres")
     local_jpeg_pres_folder.mkdir(parents=True, exist_ok=True)
-    local_gif_folder = Path(f"{cn.local_jpeg_folder}output_jpegs_and_gifs/gifs")
+    local_gif_folder = Path(f"{cn.local_jpeg_folder}output_jpegs_and_gifs_{bounding_box_description}/gifs")
     local_gif_folder.mkdir(parents=True, exist_ok=True)
 
     # Reprojects simplified country boundary shapefile, if needed
@@ -975,7 +977,7 @@ if __name__ == '__main__':
     parser.add_argument('-clat', '--center_latitude', type=float, help='Latitude to center output maps (optional)')
     parser.add_argument('-clon', '--center_longitude', type=float, help='Longitude to center output maps (optional)')
     parser.add_argument('-lh', '--lat_height', type=float, help='Latitude to show around lat center (value is total north/south) (optional)')
-    parser.add_argument('-bbd', '--bounding_box_description', help='Description of bounding box (if used) to include in output names.')
+    parser.add_argument('-bbd', '--bounding_box_description', default='global', help='Description of bounding box (if used) to include in output names.')
     parser.add_argument('-id', '--input_date', help='Date of run, in YYYYMMDD')
     parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard).')
     parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area).')
