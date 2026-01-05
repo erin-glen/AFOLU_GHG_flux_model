@@ -469,7 +469,7 @@ def map_net_flux(s3_folders,
     else:
         bounding_box_proj = None
 
-    print("Pre-scanning rasters to determine full time series color scale...")
+    print("Pre-scanning rasters to determine full time series upper and lower limits...")
 
     all_valid_values = []
 
@@ -504,25 +504,27 @@ def map_net_flux(s3_folders,
     # Calculates min, center and max across all years
     all_valid_values = np.concatenate(all_valid_values)
 
-    global_breaks = np.percentile(all_valid_values, [1, 99])  # The min and max percentiles at which colors saturate
-    # global_breaks = np.percentile(all_valid_values, [0.5, 99.5])
+    percentile_for_saturation = 1
 
-    global_vmin = global_breaks[0]
-    global_vcenter = 0
-    global_vmax = global_breaks[-1]
+    breaks_all_yrs = np.percentile(all_valid_values, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
+    # breaks_all_yrs = np.percentile(all_valid_values, [0.5, 99.5])
 
-    print("Global scale:")
-    print("  vmin:", global_vmin)
-    print("  vcenter:", global_vcenter)
-    print("  vmax:", global_vmax)
+    lower_lim_all_yrs = breaks_all_yrs[0]
+    global_neutral = 0
+    upper_lim_all_yrs = breaks_all_yrs[-1]
+
+    print("Across all years:")
+    print(f"  lower limit ({percentile_for_saturation} percentile):", lower_lim_all_yrs)
+    print(f"  neutral:", global_neutral)
+    print(f"  upper limit ({(100-percentile_for_saturation)} percentile):", upper_lim_all_yrs)
 
     # Creates the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
     # Rounds data_min down and data_max up for legend.
-    rounded_min = math.ceil(global_vmin / 10 ** 3 * 100) / 100  # Rounds up
-    rounded_max = math.floor(global_vmax / 10 ** 3 * 100) / 100  # Rounds down
-    tick_labels = [f"< {rounded_min:.0f}  (sink)",  # Spaces are to horizontally align the text explanations
+    rounded_lower_lim_all_yrs = math.ceil(lower_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds up
+    rounded_upper_lim_all_yrs = math.floor(upper_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds down
+    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f}  (sink)",  # Spaces are to horizontally align the text explanations
                    "0        (neutral)",
-                   f"> {rounded_max:.0f}  (source)"]
+                   f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
     # print(tick_labels)
 
     # Iterates through modeled years
@@ -574,37 +576,32 @@ def map_net_flux(s3_folders,
                 b = src.bounds
                 raster_extent = (b.left, b.right, b.bottom, b.top)
 
-        # Calculates the percentile for 0 (no flux)
+        # Calculates the percentile for 0 for the year (neutral, no flux)
         percentile_0 = percentile_for_0(data)
         print(f"  0 is at the {percentile_0}th percentile of the raster for {year}.")
         percentiles = [percentile_0/6, percentile_0/4, percentile_0/2, percentile_0/1.3, percentile_0/1.05,
                        percentile_0*1.05, percentile_0*1.1, percentile_0*1.2, percentile_0*1.3, percentile_0*1.5]
-        print("percentiles:", percentiles)
+        # print("percentiles:", percentiles)
 
-        # net_percentiles = [5, 30, 60, 70, 81,   # Sink
-        #                    83, 88, 97, 94, 99]  # Source
-
-
-        # Matches percentile breaks with colors.
-        # Normalizes percentiles to a 0-1 scale.
         print(f"  Calculating percentiles and breaks for {year}")
 
         # Converts RGB color palette to matplotlib color palette
         colors_matplotlib = rgb_to_mpl_palette(colors_rgb)
 
-        # Makes percentiles for the breakpoints and prepares colormap
+        # Matches percentile breaks with colors for the map.
+        # Normalizes percentiles to a 0-1 scale.
         percentiles_normalized = np.linspace(0, 1, len(percentiles))
-        print("percentiles_normalized:", percentiles_normalized)
+        # print("percentiles_normalized:", percentiles_normalized)
         cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
-
 
         print(f"  Masking raster for {year} to non-0 values")
         masked_data = np.ma.masked_where(data == 0, data)
 
+        # For map (not legend)
         norm = TwoSlopeNorm(
-            vmin=global_vmin,
-            vcenter=global_vcenter,
-            vmax=global_vmax
+            vmin=lower_lim_all_yrs,
+            vcenter=global_neutral,
+            vmax=upper_lim_all_yrs
         )
 
         print(f"  Plotting map for {year}")
@@ -613,6 +610,7 @@ def map_net_flux(s3_folders,
         # Sets the ocean color
         set_ocean_color(ax)
 
+        # Limits shapefile to focal extent (if requested)
         if bounding_box_proj is not None:
             bbox_geom = box(*bounding_box_proj)
             country_shapefile = country_shapefile.clip(bbox_geom)
@@ -641,7 +639,7 @@ def map_net_flux(s3_folders,
             title_text = f"Net greenhouse gas flux\nAll vegetation pools, CO2 only\nkt CO$_2$e yr$^{{-1}}$"
 
         # Creates legend
-        create_divergent_legend_asymmetric(fig, rounded_min, rounded_max, title_text, tick_labels,
+        create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs, title_text, tick_labels,
                                            year, colors_rgb, percentiles, percentile_0)
 
         # Removes axis ticks and labels
