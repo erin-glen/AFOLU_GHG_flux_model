@@ -226,7 +226,8 @@ def remove_ticks(ax):
     ax.set_xticklabels([])  # Remove x-axis labels
     ax.set_yticklabels([])  # Remove y-axis labels
 
-def create_divergent_legend_asymmetric(fig, vmin, vmax, title_text, tick_labels, year, colors_rgb):
+def create_divergent_legend_asymmetric(fig, vmin, vmax, title_text, tick_labels,
+                                       year, colors_rgb, percentiles, percentile_0):
     """
     Creates a vertical asymmetric colorbar legend where 0 is not visually centered.
 
@@ -249,27 +250,35 @@ def create_divergent_legend_asymmetric(fig, vmin, vmax, title_text, tick_labels,
     neutral_rgb = tuple(round((colors_rgb[4][i] + colors_rgb[5][i]) / 2) for i in range(3))
     neutral_hex = "#{:02X}{:02X}{:02X}".format(*neutral_rgb)
 
-    # Computes center position in normalized [0–1] space for display on legend
+    # Computes neutral (no flux) position in normalized [0–1] space for display on legend
     neutral_pos = abs(vmin) / (vmax - vmin)
-
     print(f"  Neutral tick position for legend: {neutral_pos}")
 
     # Creates the colormap manually with asymmetry.
-    # Manually setting legend percentiles for now, and they don't bear any relationship to the actual data.
-    # TODO make these percentiles actually reflect the percentiles of the values in the data. Haven't tried it at all.
+    # Determining what percentile of the legend each color should be at was pretty convoluted.
+    # Long ChatGPT conversation (https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d6d26f-b054-8323-98bb-731a86582e74)
+    # which ended up getting me an asymmetric legend and the basis for this percentile-color list
+    # but not the actual percentiles.
+    # I messed around for a while to figure out how to calculate the percentile for each color.
+    # I am still not sure this is entirely right (in the sense that the percentiles here may not exactly match the
+    # percentiles used for colors on the map) but this should be somewhat close or at least generally representative.
+    # I tried it with a global map and a Central Africa map and the legend looked okay at both scales.
+    # Basically, I tried to determine at what point on the legend each color should go relative to the neutral value,
+    # hence, everything is in reference to neutral_pos (when flux=0).
     colors = [
         (0.0, net_color_palette_hex[0]),         # sink color
-        (neutral_pos*0.2, net_color_palette_hex[1]),         # sink color
-        (neutral_pos*0.5, net_color_palette_hex[2]),         # sink color
-        (neutral_pos*0.7, net_color_palette_hex[3]),         # sink color
-        (neutral_pos*0.9, net_color_palette_hex[4]),         # sink color
+        ((1-((percentile_0-percentiles[1])/percentile_0))*neutral_pos, net_color_palette_hex[1]),         # sink color
+        ((1-((percentile_0-percentiles[2])/percentile_0))*neutral_pos, net_color_palette_hex[2]),         # sink color
+        ((1-((percentile_0-percentiles[3])/percentile_0))*neutral_pos, net_color_palette_hex[3]),         # sink color
+        ((1-((percentile_0-percentiles[4])/percentile_0))*neutral_pos, net_color_palette_hex[4]),         # sink color
         (neutral_pos, neutral_hex),         # near neutral, midpoint of adjacent colors per ChatGPT
-        (min(neutral_pos*1.2, 0.45), net_color_palette_hex[5]),         # source color
-        (min(neutral_pos*1.4, 0.50), net_color_palette_hex[6]),         # source color
-        (min(neutral_pos*1.6, 0.60), net_color_palette_hex[7]),         # source color
-        (min(neutral_pos*1.8, 0.90), net_color_palette_hex[8]),         # source color
+        (neutral_pos+(1-neutral_pos)*((percentiles[5]-percentile_0)/percentile_0), net_color_palette_hex[5]),         # source color
+        (neutral_pos+(1-neutral_pos)*((percentiles[6]-percentile_0)/percentile_0), net_color_palette_hex[5]),         # source color
+        (neutral_pos+(1-neutral_pos)*((percentiles[7]-percentile_0)/percentile_0), net_color_palette_hex[5]),         # source color
+        (neutral_pos+(1-neutral_pos)*((percentiles[8]-percentile_0)/percentile_0), net_color_palette_hex[5]),         # source color
         (1.0, net_color_palette_hex[9]),          # source color
     ]
+    print(f"legend breakpoints and associated colors: {colors}")
 
     # Makes color map for legend
     cmap = LinearSegmentedColormap.from_list("asymmetric_div", colors)
@@ -448,7 +457,7 @@ def create_gif(gif_base_name, out_folder, out_maps_for_gif):
 # Makes jpegs and gifs of net fluxes
 def map_net_flux(s3_folders,
                  local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 colors_rgb, percentiles, country_shapefile, bounding_box=None, bounding_box_description=None):
+                 colors_rgb, country_shapefile, bounding_box=None, bounding_box_description=None):
 
     series_start_time = time.time()
 
@@ -568,6 +577,13 @@ def map_net_flux(s3_folders,
         # Calculates the percentile for 0 (no flux)
         percentile_0 = percentile_for_0(data)
         print(f"  0 is at the {percentile_0}th percentile of the raster for {year}.")
+        percentiles = [percentile_0/6, percentile_0/4, percentile_0/2, percentile_0/1.3, percentile_0/1.05,
+                       percentile_0*1.05, percentile_0*1.1, percentile_0*1.2, percentile_0*1.3, percentile_0*1.5]
+        print("percentiles:", percentiles)
+
+        # net_percentiles = [5, 30, 60, 70, 81,   # Sink
+        #                    83, 88, 97, 94, 99]  # Source
+
 
         # Matches percentile breaks with colors.
         # Normalizes percentiles to a 0-1 scale.
@@ -578,6 +594,7 @@ def map_net_flux(s3_folders,
 
         # Makes percentiles for the breakpoints and prepares colormap
         percentiles_normalized = np.linspace(0, 1, len(percentiles))
+        print("percentiles_normalized:", percentiles_normalized)
         cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
 
 
@@ -623,7 +640,9 @@ def map_net_flux(s3_folders,
         else:
             title_text = f"Net greenhouse gas flux\nAll vegetation pools, CO2 only\nkt CO$_2$e yr$^{{-1}}$"
 
-        create_divergent_legend_asymmetric(fig, rounded_min, rounded_max, title_text, tick_labels, year, colors_rgb)
+        # Creates legend
+        create_divergent_legend_asymmetric(fig, rounded_min, rounded_max, title_text, tick_labels,
+                                           year, colors_rgb, percentiles, percentile_0)
 
         # Removes axis ticks and labels
         remove_ticks(ax)
@@ -848,8 +867,8 @@ def main(input_date, model_type, model_path_description=None,
     # Setting neutral ends of sink and source is empirically based on the 0 value being around the 82nd percentile.
     # From some experimentation, it's better not to encode a neutral percentile (or associated color) here or below.
     # It dampens the colors around the neutral value (low emissions and removals) even more.
-    net_percentiles = [5, 30, 60, 70, 81,   # Sink
-                       83, 88, 97, 94, 99]  # Source
+    # net_percentiles = [5, 30, 60, 70, 81,   # Sink
+    #                    83, 88, 97, 94, 99]  # Source
     removals_percentiles = [5, 25, 50, 75, 99]
     emissions_percentiles = [5, 25, 50, 75, 99]
 
@@ -944,11 +963,11 @@ def main(input_date, model_type, model_path_description=None,
 
     map_net_flux(net_all_gases_input_folders_s3, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_color_palette, net_percentiles, country_shapefile, bounding_box, bounding_box_description)
+                 net_color_palette, country_shapefile, bounding_box, bounding_box_description)
 
     # map_net_flux(net_CO2_only_input_folders_s3, local_reproj_folder,
     #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              net_color_palette, net_percentiles, country_shapefile, bounding_box, bounding_box_description)
+    #              net_color_palette, country_shapefile, bounding_box, bounding_box_description)
     #
     # map_gross(gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
