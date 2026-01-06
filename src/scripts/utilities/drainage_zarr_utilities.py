@@ -3,8 +3,10 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Iterable, Sequence
 
+import dask.array as da
 import fsspec
 import numpy as np
+import xarray as xr
 import zarr
 
 from src.scripts.utilities import constants_and_names as cn
@@ -78,59 +80,51 @@ def initialize_global_mega_zarr(
 ) -> None:
     logger.info("Initializing drainage mega-zarr: %s", zarr_path)
     store = fsspec.get_mapper(zarr_path)
-    group = zarr.open_group(store=store, mode="w")
 
     outputs = list(outputs_to_zarr)
     x, y, _ = global_coords()
-    group.create_dataset(
-        "x",
-        data=x,
-        shape=x.shape,
-        dtype=x.dtype,
-        chunks=x.shape,
-        overwrite=True,
-    )
-    group["x"].attrs["_ARRAY_DIMENSIONS"] = ["x"]
-    group.create_dataset(
-        "y",
-        data=y,
-        shape=y.shape,
-        dtype=y.dtype,
-        chunks=y.shape,
-        overwrite=True,
-    )
-    group["y"].attrs["_ARRAY_DIMENSIONS"] = ["y"]
     year_data = np.asarray(years, dtype=np.int32)
-    group.create_dataset(
-        "year",
-        data=year_data,
-        shape=year_data.shape,
-        dtype=year_data.dtype,
-        chunks=year_data.shape,
-        overwrite=True,
-    )
-    group["year"].attrs["_ARRAY_DIMENSIONS"] = ["year"]
-
     height, width = global_grid_shape()
+
+    data_vars: dict[str, xr.DataArray] = {}
     for name in outputs:
         dtype = cn.drainage_output_dtypes.get(name, "float32")
-        arr = group.create_dataset(
-            name,
-            shape=(len(years), height, width),
-            chunks=(1, chunk_size_pixels, chunk_size_pixels),
+        dask_data = da.full(
+            (len(years), height, width),
+            0,
             dtype=dtype,
-            fill_value=0,
-            overwrite=True,
+            chunks=(1, chunk_size_pixels, chunk_size_pixels),
         )
-        arr.attrs["_ARRAY_DIMENSIONS"] = ["year", "y", "x"]
+        data_vars[name] = xr.DataArray(
+            dask_data,
+            dims=("year", "y", "x"),
+            coords={"year": year_data, "y": y, "x": x},
+            name=name,
+        )
 
-    group.attrs.update(
-        {
+    ds = xr.Dataset(
+        data_vars=data_vars,
+        coords={"x": x, "y": y, "year": year_data},
+        attrs={
             "model": "organic_soils_drainage",
             "interval_type": interval_type,
             "chunk_size_pixels": chunk_size_pixels,
-        }
+        },
     )
+
+    ds.to_zarr(
+        store=store,
+        mode="w",
+        compute=False,
+        zarr_format=3,
+    )
+
+    group = zarr.open_group(store=store, mode="r+")
+    for key in group.array_keys():
+        arr = group[key]
+        if "_FillValue" in arr.attrs:
+            del arr.attrs["_FillValue"]
+
     logger.info("Initialized mega-zarr with %d datasets", len(outputs))
 
 

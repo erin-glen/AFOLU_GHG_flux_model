@@ -57,10 +57,34 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         "var": "drained_n2o",
         "dtype": "float32",
     },
+    "drained_total_co2": {
+        "folder": "drained_total_co2_Mg_CO2_pixel_yr",
+        "zarr": "drained_total_co2_Mg_CO2_pixel_yr_{interval}.zarr",
+        "var": "drained_total_co2",
+        "dtype": "float32",
+    },
+    "drained_total_ch4": {
+        "folder": "drained_total_ch4_Mg_CO2e_pixel_yr",
+        "zarr": "drained_total_ch4_Mg_CO2e_pixel_yr_{interval}.zarr",
+        "var": "drained_total_ch4",
+        "dtype": "float32",
+    },
     "burned_total": {
         "folder": "burned_total_Mg_CO2e_pixel_yr",
         "zarr": "burned_total_Mg_CO2e_pixel_yr_{interval}.zarr",
         "var": "burned_total",
+        "dtype": "float32",
+    },
+    "burned_total_co2": {
+        "folder": "burned_total_co2_Mg_CO2_pixel_yr",
+        "zarr": "burned_total_co2_Mg_CO2_pixel_yr_{interval}.zarr",
+        "var": "burned_total_co2",
+        "dtype": "float32",
+    },
+    "burned_total_ch4": {
+        "folder": "burned_total_ch4_Mg_CO2e_pixel_yr",
+        "zarr": "burned_total_ch4_Mg_CO2e_pixel_yr_{interval}.zarr",
+        "var": "burned_total_ch4",
         "dtype": "float32",
     },
     "drained_state_nodes": {

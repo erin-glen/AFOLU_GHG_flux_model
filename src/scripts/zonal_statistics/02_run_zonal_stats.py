@@ -58,14 +58,22 @@ DATASETS: Dict[str, Dict[str, Any]] = {
     "drained_total":       {"zarr": "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr", "var": "drained_total"},
     "drained_co2":         {"zarr": "drained_co2_Mg_CO2_pixel_yr_{interval}.zarr", "var": "drained_co2"},
     "drained_n2o":         {"zarr": "drained_n2o_Mg_CO2e_pixel_yr_{interval}.zarr", "var": "drained_n2o"},
+    "drained_total_co2":   {"zarr": "drained_total_co2_Mg_CO2_pixel_yr_{interval}.zarr", "var": "drained_total_co2"},
+    "drained_total_ch4":   {"zarr": "drained_total_ch4_Mg_CO2e_pixel_yr_{interval}.zarr", "var": "drained_total_ch4"},
     "burned_total":        {"zarr": "burned_total_Mg_CO2e_pixel_yr_{interval}.zarr",  "var": "burned_total"},
+    "burned_total_co2":    {"zarr": "burned_total_co2_Mg_CO2_pixel_yr_{interval}.zarr",  "var": "burned_total_co2"},
+    "burned_total_ch4":    {"zarr": "burned_total_ch4_Mg_CO2e_pixel_yr_{interval}.zarr",  "var": "burned_total_ch4"},
 }
 
 FLUX_SPECS = {
     "drained_total": {"code": 0, "label": "drained_total_Mg_CO2e", "group": "drained"},
     "drained_co2": {"code": 3, "label": "drained_co2_Mg_CO2", "group": "drained"},
     "drained_n2o": {"code": 4, "label": "drained_n2o_Mg_CO2e", "group": "drained"},
+    "drained_total_co2": {"code": 5, "label": "drained_total_co2_Mg_CO2", "group": "drained"},
+    "drained_total_ch4": {"code": 6, "label": "drained_total_ch4_Mg_CO2e", "group": "drained"},
     "burned_total": {"code": 1, "label": "burned_total_Mg_CO2e", "group": "burned"},
+    "burned_total_co2": {"code": 7, "label": "burned_total_co2_Mg_CO2", "group": "burned"},
+    "burned_total_ch4": {"code": 8, "label": "burned_total_ch4_Mg_CO2e", "group": "burned"},
 }
 
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_name}/{run_date}/{interval}/"

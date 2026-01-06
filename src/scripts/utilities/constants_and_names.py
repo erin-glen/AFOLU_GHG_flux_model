@@ -53,10 +53,14 @@ drainage_outputs_to_zarr = [
     "drained_ch4_land_Mg_CO2e_ha_yr",
     "drained_ch4_ditch_Mg_CO2e_ha_yr",
     "drained_co2_offsite_Mg_CO2_ha_yr",
+    "drained_total_co2_Mg_CO2_ha_yr",
+    "drained_total_ch4_Mg_CO2e_ha_yr",
     "drained_total_Mg_CO2e_ha_yr",
     "burned_co2_Mg_CO2_ha_yr",
     "burned_co_Mg_CO2e_ha_yr",
     "burned_ch4_Mg_CO2e_ha_yr",
+    "burned_total_co2_Mg_CO2_ha_yr",
+    "burned_total_ch4_Mg_CO2e_ha_yr",
     "burned_total_Mg_CO2e_ha_yr",
 ]
 
@@ -70,10 +74,14 @@ drainage_output_dtypes = {
     "drained_ch4_land_Mg_CO2e_ha_yr": "float32",
     "drained_ch4_ditch_Mg_CO2e_ha_yr": "float32",
     "drained_co2_offsite_Mg_CO2_ha_yr": "float32",
+    "drained_total_co2_Mg_CO2_ha_yr": "float32",
+    "drained_total_ch4_Mg_CO2e_ha_yr": "float32",
     "drained_total_Mg_CO2e_ha_yr": "float32",
     "burned_co2_Mg_CO2_ha_yr": "float32",
     "burned_co_Mg_CO2e_ha_yr": "float32",
     "burned_ch4_Mg_CO2e_ha_yr": "float32",
+    "burned_total_co2_Mg_CO2_ha_yr": "float32",
+    "burned_total_ch4_Mg_CO2e_ha_yr": "float32",
     "burned_total_Mg_CO2e_ha_yr": "float32",
 }
 
