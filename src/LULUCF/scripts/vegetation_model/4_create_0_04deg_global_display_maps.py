@@ -473,9 +473,41 @@ def map_net_flux(s3_folders,
 
     all_valid_values = []
 
-    # First pass through years to get the range of values across years to standardize legend across years
-    # for i, year in enumerate(cn.years_annual[1:]):
-    for i, year in enumerate(cn.years_annual[2:3]):
+    # First pass: Reprojects input rasters
+    for i, year in enumerate(cn.years_annual[1:]):
+    # for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
+
+        # The s3 folder to process for this year
+        s3_folder = s3_folders[i]
+
+        # All the components of the input s3 path
+        parts = s3_folder.strip('/').split('/')
+
+        # Gets the segment for the input pattern
+        pattern_idx = parts.index(f"version_{cn.veg_model_version_underscore}__{model_type}__{model_path_description}")
+        pattern_segment = parts[pattern_idx + 1]
+
+        # Gets the segment for the input interval
+        interval_idx = parts.index(f"annual_intervals")
+        interval_segment = parts[interval_idx + 1]
+
+        # Names before and after reprojection
+        year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_v{cn.veg_model_version_underscore}_{interval_segment}_global"
+        year_path_unproj = f"{s3_folder}{year_file}.tif"
+        year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
+
+        print(f"\n\n---Mapping {pattern_segment} for {year} from {year_file}")
+
+        print(f"Unprojected raster: {year_path_unproj}")
+        print(f"Reprojected raster: {year_path_reproj}")
+
+        # Reprojects raster, if needed
+        reproject_raster(year_path_unproj, year_path_reproj)
+
+
+    # Second pass: Gets the range of values across years to standardize legend across years
+    for i, year in enumerate(cn.years_annual[1:]):
+    # for i, year in enumerate(cn.years_annual[2:3]):
 
         # print(f"Scanning {year}")
         s3_folder = s3_folders[i]
@@ -527,9 +559,9 @@ def map_net_flux(s3_folders,
                    f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
     # print(tick_labels)
 
-    # Iterates through modeled years
-    # for i, year in enumerate(cn.years_annual[1:]):
-    for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
+    # Final pass: Iterates through modeled years to create the jpegs
+    for i, year in enumerate(cn.years_annual[1:]):
+    # for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
 
         # The s3 folder to process for this year
         s3_folder = s3_folders[i]
@@ -547,16 +579,9 @@ def map_net_flux(s3_folders,
 
         # Names before and after reprojection
         year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_v{cn.veg_model_version_underscore}_{interval_segment}_global"
-        year_path_unproj = f"{s3_folder}{year_file}.tif"
         year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
 
         print(f"\n\n---Mapping {pattern_segment} for {year} from {year_file}")
-
-        print(f"Unprojected raster: {year_path_unproj}")
-        print(f"Reprojected raster: {year_path_reproj}")
-
-        # Reprojects raster, if needed
-        reproject_raster(year_path_unproj, year_path_reproj)
 
         with rasterio.open(year_path_reproj) as src:
 
@@ -880,12 +905,12 @@ def main(input_date, model_type, model_path_description=None,
 
     # Datasets that need to be expanded to all output years
     basic_dirs_to_expand = [
-        # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/{cn.model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/{cn.model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/{cn.model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        # f"{cn.veg_outputs_path}{cn.gross_removals_all_C_pools_pattern}/{cn.model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        # f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/{cn.model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+        # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.veg_outputs_path}{cn.gross_removals_all_C_pools_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        # f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
     ]
 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
@@ -959,14 +984,14 @@ def main(input_date, model_type, model_path_description=None,
 
     # Generates jpegs for net flux, gross emissions, and gross removals
 
-    map_net_flux(net_all_gases_input_folders_s3, local_reproj_folder,
+    # map_net_flux(net_all_gases_input_folders_s3, local_reproj_folder,
+    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #              net_color_palette, country_shapefile, bounding_box, bounding_box_description)
+
+    map_net_flux(net_CO2_only_input_folders_s3, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
                  net_color_palette, country_shapefile, bounding_box, bounding_box_description)
 
-    # map_net_flux(net_CO2_only_input_folders_s3, local_reproj_folder,
-    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              net_color_palette, country_shapefile, bounding_box, bounding_box_description)
-    #
     # map_gross(gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
     #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
