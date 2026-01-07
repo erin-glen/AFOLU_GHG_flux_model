@@ -273,9 +273,9 @@ def create_divergent_legend_asymmetric(fig, vmin, vmax, title_text, tick_labels,
         ((1-((percentile_0-percentiles[4])/percentile_0))*neutral_pos, net_color_palette_hex[4]),         # sink color
         (neutral_pos, neutral_hex),         # near neutral, midpoint of adjacent colors per ChatGPT
         (neutral_pos+(1-neutral_pos)*((percentiles[5]-percentile_0)/percentile_0), net_color_palette_hex[5]),         # source color
-        (neutral_pos+(1-neutral_pos)*((percentiles[6]-percentile_0)/percentile_0), net_color_palette_hex[5]),         # source color
-        (neutral_pos+(1-neutral_pos)*((percentiles[7]-percentile_0)/percentile_0), net_color_palette_hex[5]),         # source color
-        (neutral_pos+(1-neutral_pos)*((percentiles[8]-percentile_0)/percentile_0), net_color_palette_hex[5]),         # source color
+        (neutral_pos+(1-neutral_pos)*((percentiles[6]-percentile_0)/percentile_0), net_color_palette_hex[6]),         # source color
+        (neutral_pos+(1-neutral_pos)*((percentiles[7]-percentile_0)/percentile_0), net_color_palette_hex[7]),         # source color
+        (neutral_pos+(1-neutral_pos)*((percentiles[8]-percentile_0)/percentile_0), net_color_palette_hex[8]),         # source color
         (1.0, net_color_palette_hex[9]),          # source color
     ]
     print(f"legend breakpoints and associated colors: {colors}")
@@ -469,8 +469,6 @@ def map_net_flux(s3_folders,
     else:
         bounding_box_proj = None
 
-    print("Pre-scanning rasters to determine full time series upper and lower limits...")
-
     all_valid_values = []
 
     # First pass: Reprojects input rasters
@@ -504,6 +502,7 @@ def map_net_flux(s3_folders,
         # Reprojects raster, if needed
         reproject_raster(year_path_unproj, year_path_reproj)
 
+    print("Pre-scanning rasters to determine full time series upper and lower limits...")
 
     # Second pass: Gets the range of values across years to standardize legend across years
     for i, year in enumerate(cn.years_annual[1:]):
@@ -909,8 +908,8 @@ def main(input_date, model_type, model_path_description=None,
         # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         # f"{cn.veg_outputs_path}{cn.gross_removals_all_C_pools_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        # f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+        # f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
     ]
 
     # Creates a list of output directories for all outputs and intervals based on specifics of the model run
@@ -984,13 +983,13 @@ def main(input_date, model_type, model_path_description=None,
 
     # Generates jpegs for net flux, gross emissions, and gross removals
 
-    # map_net_flux(net_all_gases_input_folders_s3, local_reproj_folder,
-    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              net_color_palette, country_shapefile, bounding_box, bounding_box_description)
-
-    map_net_flux(net_CO2_only_input_folders_s3, local_reproj_folder,
+    map_net_flux(net_all_gases_input_folders_s3, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
                  net_color_palette, country_shapefile, bounding_box, bounding_box_description)
+
+    # map_net_flux(net_CO2_only_input_folders_s3, local_reproj_folder,
+    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #              net_color_palette, country_shapefile, bounding_box, bounding_box_description)
 
     # map_gross(gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
