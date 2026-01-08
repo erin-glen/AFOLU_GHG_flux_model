@@ -435,79 +435,61 @@ def save_pres_non_pres_jpegs(ax, out_jpeg, out_jpeg_for_pres, year):
     return out_jpeg_for_pres
 
 # Creates gifs of timeseries (fast and slow)
-def create_gif(gif_base_name, out_folder, out_maps_for_gif):
-    # Open all images
-    frames = [Image.open(img) for img in out_maps_for_gif]
-    # Save as GIF
-    frames[0].save(
-        f"{out_folder}/{gif_base_name}__fast.gif",
-        save_all=True,
-        append_images=frames[1:],  # add the rest
-        duration=1000,  # ms per frame
-        loop=0  # 0 = infinite loop
-    )
-    frames[0].save(
-        f"{out_folder}/{gif_base_name}__slow.gif",
-        save_all=True,
-        append_images=frames[1:],  # add the rest
-        duration=2500,  # ms per frame
-        loop=0  # 0 = infinite loop
-    )
-
-
-from PIL import Image
-import os
-
-
-def create_consistent_gif(jpeg_folder, output_gif_path, frame_duration=500):
+def create_consistent_gif(out_maps_for_gif, output_gif_path):
     """
     Create a GIF from JPEGs using a consistent color palette across frames.
 
     Parameters:
         jpeg_folder (str): Path to folder containing .jpeg frames.
         output_gif_path (str): Where to save the output .gif.
-        frame_duration (int): Frame display time in milliseconds.
     """
-    # Step 1: Load JPEG frames
-    jpeg_files = sorted([
-        os.path.join(jpeg_folder, f)
-        for f in os.listdir(jpeg_folder)
-        if f.lower().endswith(".jpeg")
-    ])
-    print(jpeg_files)
-    frames = [Image.open(f).convert("RGB") for f in jpeg_files]
+    # Step 1: Loads JPEG frames
+    frames = [Image.open(f).convert("RGB") for f in out_maps_for_gif]
 
-    # Step 2: Build a global color palette
+    # Step 2: Builds a global color palette.
+    # I was finding that even if the color palettes looked the same in each jpeg,
+    # they were different by year in the gif for some reason.
+    # Using a single color palette fixes that.
     print("Generating global color palette from all frames...")
     combined_height = frames[0].height * len(frames)
     combined = Image.new("RGB", (frames[0].width, combined_height))
     for i, frame in enumerate(frames):
         combined.paste(frame, (0, i * frames[0].height))
 
-    # Get adaptive palette from composite image
+    # Gets adaptive palette from composite image
     palette_image = combined.convert("P", palette=Image.ADAPTIVE, colors=256)
     global_palette = palette_image.getpalette()
 
-    # Step 3: Apply palette to each frame (quantize disables dithering)
-    # Needs this dithering to prevent the gif legend from being blocky
+    # Step 3: Applies palette to each frame.
+    # Needs this specific dithering to prevent the gif legend from being blocky,
+    # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/695e7ea8-60dc-832b-ba01-c4852bedbc57.
+    # It was looking blocky otherwise.
     palettized_frames = [
         f.quantize(palette=palette_image, dither=Image.FLOYDSTEINBERG)
         for f in frames
     ]
 
-    # Step 4: Save GIF
+    # Step 4: Saves GIF
     print(f"Saving animated GIF to: {output_gif_path}")
     palettized_frames[0].save(
-        output_gif_path,
+        f"{output_gif_path}_fast.gif",
         save_all=True,
         append_images=palettized_frames[1:],
-        duration=frame_duration,
+        duration=1000,
         loop=0,
         optimize=False,
         disposal=2  # Clears previous frame
     )
 
-
+    palettized_frames[0].save(
+        f"{output_gif_path}_slow.gif",
+        save_all=True,
+        append_images=palettized_frames[1:],
+        duration=2500,
+        loop=0,
+        optimize=False,
+        disposal=2  # Clears previous frame
+    )
 
 # Makes jpegs and gifs of net fluxes
 def map_net_flux(s3_folders,
@@ -741,9 +723,8 @@ def map_net_flux(s3_folders,
 
     # Example usage
     create_consistent_gif(
-        jpeg_folder='/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v1_0_4__standard__global/output_jpegs_and_gifs_central_Africa/jpegs_pres/',
-        output_gif_path=f"{local_gif_folder}/{gif_base_name}.gif",
-        frame_duration=1000  # ms per frame
+        out_maps_for_gif,
+        output_gif_path=f"{local_gif_folder}/{gif_base_name}"
     )
 
     series_end_time = time.time()
