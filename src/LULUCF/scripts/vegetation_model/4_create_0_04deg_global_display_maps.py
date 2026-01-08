@@ -489,8 +489,9 @@ def create_consistent_gif(jpeg_folder, output_gif_path, frame_duration=500):
     global_palette = palette_image.getpalette()
 
     # Step 3: Apply palette to each frame (quantize disables dithering)
+    # Needs this dithering to prevent the gif legend from being blocky
     palettized_frames = [
-        f.quantize(palette=palette_image, dither=Image.NONE)
+        f.quantize(palette=palette_image, dither=Image.FLOYDSTEINBERG)
         for f in frames
     ]
 
@@ -1063,7 +1064,7 @@ def main(input_date, model_type, model_path_description=None,
         # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         # f"{cn.veg_outputs_path}{cn.gross_removals_all_C_pools_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        # f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
     ]
 
@@ -1142,9 +1143,9 @@ def main(input_date, model_type, model_path_description=None,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
                  net_color_palette, country_shapefile, bounding_box, bounding_box_description)
 
-    # map_net_flux(net_CO2_only_input_folders_s3, local_reproj_folder,
-    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              net_color_palette, country_shapefile, bounding_box, bounding_box_description)
+    map_net_flux(net_CO2_only_input_folders_s3, local_reproj_folder,
+                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                 net_color_palette, country_shapefile, bounding_box, bounding_box_description)
 
     # map_gross(gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
     #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
