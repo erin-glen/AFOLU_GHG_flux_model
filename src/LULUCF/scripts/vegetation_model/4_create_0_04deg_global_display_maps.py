@@ -240,11 +240,11 @@ def create_divergent_legend_asymmetric(fig, vmin, vmax, title_text, tick_labels,
         tick_labels: Labels for the three ticks (min, 0, max)
         year: Year string, for logging/debug
     """
-    print(f"  Creating asymmetric legend for {year}")
+    print(f"  Creating legend for {year}")
 
     # Converts net flux RGB palette to hex
     # per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d6d26f-b054-8323-98bb-731a86582e74
-    net_color_palette_hex = ['#{:02x}{:02x}{:02x}'.format(r, g, b) for r, g, b in colors_rgb]
+    net_colors_rgb_hex = ['#{:02x}{:02x}{:02x}'.format(r, g, b) for r, g, b in colors_rgb]
 
     # Calculates color (RGB and hex) for neutral value-- for legend only. Not used in mop because it makes the map look worse.
     neutral_rgb = tuple(round((colors_rgb[4][i] + colors_rgb[5][i]) / 2) for i in range(3))
@@ -266,17 +266,17 @@ def create_divergent_legend_asymmetric(fig, vmin, vmax, title_text, tick_labels,
     # Basically, I tried to determine at what point on the legend each color should go relative to the neutral value,
     # hence, everything is in reference to neutral_pos (when flux=0).
     colors = [
-        (0.0, net_color_palette_hex[0]),         # sink color
-        ((1-((percentile_0-percentiles[1])/percentile_0))*neutral_pos, net_color_palette_hex[1]),         # sink color
-        ((1-((percentile_0-percentiles[2])/percentile_0))*neutral_pos, net_color_palette_hex[2]),         # sink color
-        ((1-((percentile_0-percentiles[3])/percentile_0))*neutral_pos, net_color_palette_hex[3]),         # sink color
-        ((1-((percentile_0-percentiles[4])/percentile_0))*neutral_pos, net_color_palette_hex[4]),         # sink color
+        (0.0, net_colors_rgb_hex[0]),         # sink color
+        ((1-((percentile_0-percentiles[1])/percentile_0))*neutral_pos, net_colors_rgb_hex[1]),         # sink color
+        ((1-((percentile_0-percentiles[2])/percentile_0))*neutral_pos, net_colors_rgb_hex[2]),         # sink color
+        ((1-((percentile_0-percentiles[3])/percentile_0))*neutral_pos, net_colors_rgb_hex[3]),         # sink color
+        ((1-((percentile_0-percentiles[4])/percentile_0))*neutral_pos, net_colors_rgb_hex[4]),         # sink color
         (neutral_pos, neutral_hex),         # near neutral, midpoint of adjacent colors per ChatGPT
-        (neutral_pos+(1-neutral_pos)*((percentiles[5]-percentile_0)/percentile_0), net_color_palette_hex[5]),         # source color
-        (neutral_pos+(1-neutral_pos)*((percentiles[6]-percentile_0)/percentile_0), net_color_palette_hex[6]),         # source color
-        (neutral_pos+(1-neutral_pos)*((percentiles[7]-percentile_0)/percentile_0), net_color_palette_hex[7]),         # source color
-        (neutral_pos+(1-neutral_pos)*((percentiles[8]-percentile_0)/percentile_0), net_color_palette_hex[8]),         # source color
-        (1.0, net_color_palette_hex[9]),          # source color
+        (neutral_pos+(1-neutral_pos)*((percentiles[5]-percentile_0)/percentile_0), net_colors_rgb_hex[5]),         # source color
+        (neutral_pos+(1-neutral_pos)*((percentiles[6]-percentile_0)/percentile_0), net_colors_rgb_hex[6]),         # source color
+        (neutral_pos+(1-neutral_pos)*((percentiles[7]-percentile_0)/percentile_0), net_colors_rgb_hex[7]),         # source color
+        (neutral_pos+(1-neutral_pos)*((percentiles[8]-percentile_0)/percentile_0), net_colors_rgb_hex[8]),         # source color
+        (1.0, net_colors_rgb_hex[9]),          # source color
     ]
     print(f"legend breakpoints and associated colors: {colors}")
 
@@ -284,28 +284,29 @@ def create_divergent_legend_asymmetric(fig, vmin, vmax, title_text, tick_labels,
     cmap = LinearSegmentedColormap.from_list("asymmetric_div", colors)
 
     # Adds ticks using a separate axis
-    cb_ax = fig.add_axes([
+    cbar_ax = fig.add_axes([          # [left, bottom, width, height]
         cn.colorbar_dimensions[0] + cn.colorbar_dimensions[2],
         cn.colorbar_dimensions[1],
-        0.02,  # width
+        cn.colorbar_dimensions[2],
         cn.colorbar_dimensions[3]
     ])
 
-    cb = plt.colorbar(plt.cm.ScalarMappable(cmap=cmap), cax=cb_ax, orientation="vertical")
+    cb = plt.colorbar(plt.cm.ScalarMappable(cmap=cmap), cax=cbar_ax, orientation="vertical")
     cb.set_ticks([0.0, neutral_pos, 1.0])
     cb.set_ticklabels(tick_labels, fontsize=cn.legend_fontsize)
 
     # Adds title above the bar
-    cb_ax.text(
+    cbar_ax.text(
         0, 1.05,  # x, y in axes coords
         title_text,
         fontsize=cn.legend_fontsize,
         ha="left",
         va="bottom",
-        transform=cb_ax.transAxes
+        transform=cbar_ax.transAxes
     )
 
-def create_unidirection_legend(fig, img, vmin, vmax, title_text, tick_labels, year):
+def create_unidirection_legend(fig, img, lower_lim_all_yrs, upper_lim_all_yrs, title_text, tick_labels,
+                               year, colors_rgb, percentiles):
     """
     Creates a vertical colorbar legend with a left-aligned title above it.
     :param fig: The figure
@@ -316,15 +317,23 @@ def create_unidirection_legend(fig, img, vmin, vmax, title_text, tick_labels, ye
     :param tick_labels: Tick labels for legend
     :return: N/A
     """
-
     print(f"  Creating legend for {year}")
 
+    # Converts net flux RGB palette to hex
+    # per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d6d26f-b054-8323-98bb-731a86582e74
+    net_colors_rgb_hex = ['#{:02x}{:02x}{:02x}'.format(r, g, b) for r, g, b in colors_rgb]
+
     # Add a vertical colorbar (legend) in the bottom-left of the map
-    cbar_ax = fig.add_axes(cn.colorbar_dimensions)  # [left, bottom, width, height]
+    cbar_ax = fig.add_axes([          # [left, bottom, width, height]
+        cn.colorbar_dimensions[0] + cn.colorbar_dimensions[2],
+        cn.colorbar_dimensions[1],
+        cn.colorbar_dimensions[2],
+        cn.colorbar_dimensions[3]
+    ])
     cb = plt.colorbar(img, cax=cbar_ax, orientation="vertical")
 
     # Set custom ticks and labels for the colorbar
-    cb.set_ticks([vmin, vmax])  # Set the ticks at the minimum, zero, and maximum
+    cb.set_ticks([lower_lim_all_yrs, upper_lim_all_yrs])  # Set the ticks at the minimum, zero, and maximum
     cb.set_ticklabels(tick_labels, fontsize=cn.legend_fontsize)  # Format the labels
 
     # Add a left-aligned, multi-row title above the colorbar
@@ -435,7 +444,7 @@ def save_pres_non_pres_jpegs(ax, out_jpeg, out_jpeg_for_pres, year):
     return out_jpeg_for_pres
 
 # Creates gifs of timeseries (fast and slow)
-def create_consistent_gif(out_maps_for_gif, output_gif_path):
+def create_gif(out_maps_for_gif, output_gif_path):
     """
     Create a GIF from JPEGs using a consistent color palette across frames.
 
@@ -572,9 +581,7 @@ def map_net_flux(s3_folders,
     all_valid_values = np.concatenate(all_valid_values)
 
     percentile_for_saturation = 1
-
     breaks_all_yrs = np.percentile(all_valid_values, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
-    # breaks_all_yrs = np.percentile(all_valid_values, [0.5, 99.5])
 
     lower_lim_all_yrs = breaks_all_yrs[0]
     global_neutral = 0
@@ -612,12 +619,13 @@ def map_net_flux(s3_folders,
         interval_idx = parts.index(f"annual_intervals")
         interval_segment = parts[interval_idx + 1]
 
-        # Names before and after reprojection
+        # Names after reprojection
         year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_v{cn.veg_model_version_underscore}_{interval_segment}_global"
         year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
 
         print(f"\n\n---Mapping {pattern_segment} for {year} from {year_file}")
 
+        # Reads raster data for year
         with rasterio.open(year_path_reproj) as src:
 
             if bounding_box_proj is not None:
@@ -636,7 +644,7 @@ def map_net_flux(s3_folders,
                 b = src.bounds
                 raster_extent = (b.left, b.right, b.bottom, b.top)
 
-        # Calculates the percentile for 0 for the year (neutral, no flux)
+        # Calculates the percentile for 0 for the year (neutral, no flux) for mapping
         percentile_0 = percentile_for_0(data)
         print(f"  0 is at the {percentile_0}th percentile of the raster for {year}.")
         percentiles = [percentile_0/6, percentile_0/4, percentile_0/2, percentile_0/1.3, percentile_0/1.05,
@@ -699,7 +707,8 @@ def map_net_flux(s3_folders,
             title_text = f"Net greenhouse gas flux\nAll vegetation pools, CO2 only\nkt CO$_2$e yr$^{{-1}}$"
 
         # Creates legend
-        create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs, title_text, tick_labels,
+        create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs, 
+                                           title_text, tick_labels,
                                            year, colors_rgb, percentiles, percentile_0)
 
         # Removes axis ticks and labels
@@ -719,10 +728,7 @@ def map_net_flux(s3_folders,
 
     # Creates gifs of timeseries
     gif_base_name = f"veg_{pattern_segment_revised}__{cn.years_annual[1]}_{cn.years_annual[-1]}__v{cn.veg_model_version_underscore}"
-    # create_gif(gif_base_name, local_gif_folder, out_maps_for_gif)
-
-    # Example usage
-    create_consistent_gif(
+    create_gif(
         out_maps_for_gif,
         output_gif_path=f"{local_gif_folder}/{gif_base_name}"
     )
@@ -734,7 +740,7 @@ def map_net_flux(s3_folders,
 # Makes jpeg of gross fluxes
 def map_gross(s3_folders,
               local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-              colors, percentiles, country_shapefile, bounding_box=None, bounding_box_description=None):
+              colors_rgb, percentiles, country_shapefile, bounding_box=None, bounding_box_description=None):
 
     series_start_time = time.time()
 
@@ -779,11 +785,12 @@ def map_gross(s3_folders,
         # Reprojects raster, if needed
         reproject_raster(year_path_unproj, year_path_reproj)
 
+    pattern_segment = ''
 
     # Second pass: Gets the range of values across years to standardize legend across years
     print("Pre-scanning rasters to determine full time series upper and lower limits...")
     for i, year in enumerate(cn.years_annual[1:]):
-        # for i, year in enumerate(cn.years_annual[2:3]):
+    # for i, year in enumerate(cn.years_annual[2:3]):
 
         # print(f"Scanning {year}")
         s3_folder = s3_folders[i]
@@ -809,13 +816,11 @@ def map_gross(s3_folders,
         if valid.size > 0:
             all_valid_values.append(valid)
 
-    # Calculates min, center and max across all years
+    # Calculates min and max across all years
     all_valid_values = np.concatenate(all_valid_values)
 
     percentile_for_saturation = 1
-
     breaks_all_yrs = np.percentile(all_valid_values, [1, (100 - percentile_for_saturation)])  # The min and max percentiles at which colors saturate
-    # breaks_all_yrs = np.percentile(all_valid_values, [0.5, 99.5])
 
     lower_lim_all_yrs = breaks_all_yrs[0]
     upper_lim_all_yrs = breaks_all_yrs[-1]
@@ -828,160 +833,162 @@ def map_gross(s3_folders,
     # Rounds data_min down and data_max up for legend.
     rounded_lower_lim_all_yrs = math.ceil(lower_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds up
     rounded_upper_lim_all_yrs = math.floor(upper_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds down
-    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f}  (sink)",
-                   # Spaces are to horizontally align the text explanations
-                   "0        (neutral)",
-                   f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
-    # print(tick_labels)
+
+    # Legend labels depend on what exact input is displayed
+    if "removals" in pattern_segment:
+        tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f}", 0]
+        title_text = f"Gross removals\nAll vegetation pools\nkt CO$_2$ yr$^{{-1}}$"
+    elif "all_gases" in pattern_segment:
+        tick_labels = [0, f"> {rounded_upper_lim_all_yrs:.0f}"]
+        title_text = f"Gross emissions\nAll vegetation pools, all gases\nkt CO$_2$e yr$^{{-1}}$"
+    elif "non_CO2_only" in pattern_segment:
+        tick_labels = [0, f"> {rounded_upper_lim_all_yrs:.0f}"]
+        title_text = f"Gross emissions\nAll vegetation pools, non-CO$_2$ only\nkt CO$_2$e yr$^{{-1}}$"
+    elif "CO2_only" in pattern_segment:
+        tick_labels = [0, f"> {rounded_upper_lim_all_yrs:.0f}"]
+        title_text = f"Gross emissions\nAll vegetation pools, CO$_2$ only\nkt CO$_2$ yr$^{{-1}}$"
+    else:
+        tick_labels = ["N/A", "N/A"]
+        title_text = ""
+        print("Can't generate tick labels")
+    print(tick_labels)
+
+    # Final pass: Iterates through modeled years to create the jpegs
+    for i, year in enumerate(cn.years_annual[1:]):
+    # for i, year in enumerate(cn.years_annual[2:4]): # For testing a specific year
+
+        # The s3 folder to process for this year
+        s3_folder = s3_folders[i]
+
+        # All the components of the input s3 path
+        parts = s3_folder.strip('/').split('/')
+
+        # Gets the segment for the input interval
+        interval_idx = parts.index(f"annual_intervals")
+        interval_segment = parts[interval_idx + 1]
+
+        # # Names before and after reprojection
+        # year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{interval_segment}_{cn.veg_model_version_underscore}__global"
+        # year_path_unproj = f"{s3_folder}{year_file}.tif"
+        #
+        # # For reasons I couldn't figure out, gross removals and CO2-only emissions just wouldn't work for some files
+        # # using the reprojected file names I wanted. So, these two need special reprojected file names.
+        # # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
+        # if ("removals" in pattern_segment) or ("all_C_pools__CO2_only" in pattern_segment):
+        #     year_path_reproj = f"{local_reproj_folder}/{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{year}_reproj.tif"
+        # else:
+        #     year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
+
+        # Names after reprojection
+        year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_v{cn.veg_model_version_underscore}_{interval_segment}_global"
+        year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
+
+        print(f"\n\n---Mapping {pattern_segment} for {year} from {year_file}")
+
+        # Reads raster data for year
+        with rasterio.open(year_path_reproj) as src:
+
+            if bounding_box_proj is not None:
+                minx, miny, maxx, maxy = bounding_box_proj
+
+                window = from_bounds(minx, miny, maxx, maxy, src.transform)
+
+                data = src.read(1, window=window)
+
+                # Update extent from the window
+                left, bottom, right, top = rasterio.windows.bounds(window, src.transform)
+                raster_extent = (left, right, bottom, top)
+
+            else:
+                data = src.read(1)
+                b = src.bounds
+                raster_extent = (b.left, b.right, b.bottom, b.top)
+
+        # Matches percentile breaks with colors.
+        # Normalizes percentiles to a 0-1 scale.
+        print(f"  Calculating percentiles and breaks for {year}")
+
+        # Converts RGB color palette to matplotlib color palette
+        colors_matplotlib = rgb_to_mpl_palette(colors_rgb)
+
+        # Matches percentile breaks with colors for the map.
+        # Normalizes percentiles to a 0-1 scale.
+        percentiles_normalized = np.linspace(0, 1, len(percentiles))
+        # print("percentiles_normalized:", percentiles_normalized)
+        cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
+
+        print(f"  Masking raster to non-0 values for {year}")
+        if "removals" in year_path_reproj:
+            masked_data = np.ma.masked_where(data >= 0, data)
+
+            # This colors all 0-value pixels, leaving non-0s white.
+            # It clearly shows that more of Australia is non-0, but I just can't get it to be symbolized in any masking.
+            # masked_data = np.ma.masked_where(data < 0, data)
+        elif "emis" in year_path_reproj:
+            masked_data = np.ma.masked_where(data <= 0, data)
+        else:
+            masked_data = np.ma.masked_where(data == 0, data)
+            print("Not using either emissions or removals")
+
+        print(f"  Normalizing for {year}")
+        # Normalizes the data for the colormap
+        norm = Normalize(vmin=lower_lim_all_yrs, vmax=upper_lim_all_yrs)
+
+        print(f"  Plotting map for {year}")
+        ax, fig = create_plot()
+
+        # Sets the ocean color
+        set_ocean_color(ax)
+
+        # Limits shapefile to focal extent (if requested)
+        if bounding_box_proj is not None:
+            bbox_geom = box(*bounding_box_proj)
+            country_shapefile = country_shapefile.clip(bbox_geom)
+
+        # Plots the country polygons first
+        plot_country_polygons(ax, country_shapefile)
+
+        # Raster extent
+        extent = list(raster_extent)
+
+        # Plots the raster next
+        img = plot_raster(ax, cmap, extent, masked_data, norm)
+
+        # Plots the country boundaries on top
+        plot_country_boundaries(ax, country_shapefile)
+
+        # Explicitly sets the bounding box for the plot image
+        if bounding_box_proj is not None:
+            ax.set_xlim(extent[0], extent[1])
+            ax.set_ylim(extent[2], extent[3])
 
 
-    # # Iterates through modeled years
-    # for i, year in enumerate(cn.years_annual[1:]):
-    # # for i, year in enumerate(cn.years_annual[1:2]): # For testing a specific year
-    #
-    #     # The s3 folder to process for this year
-    #     s3_folder = s3_folders[i]
-    #
-    #     # All the components of the input s3 path
-    #     parts = s3_folder.strip('/').split('/')
-    #
-    #     # Gets the segment for the input pattern
-    #     pattern_idx = parts.index(f"version_{cn.veg_model_version_underscore}")
-    #     pattern_segment = parts[pattern_idx + 1]
-    #
-    #     # Gets the segment for the input interval
-    #     interval_idx = parts.index(f"annual_intervals")
-    #     interval_segment = parts[interval_idx + 1]
-    #
-    #     # Names before and after reprojection
-    #     year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{interval_segment}_{cn.veg_model_version_underscore}__global"
-    #     year_path_unproj = f"{s3_folder}{year_file}.tif"
-    #
-    #     # For reasons I couldn't figure out, gross removals and CO2-only emissions just wouldn't work for some files
-    #     # using the reprojected file names I wanted. So, these two need special reprojected file names.
-    #     # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
-    #     if ("removals" in pattern_segment) or ("all_C_pools__CO2_only" in pattern_segment):
-    #         year_path_reproj = f"{local_reproj_folder}/{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{year}_reproj.tif"
-    #     else:
-    #         year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
-    #
-    #
-    #     print(f"\n\n---Mapping {pattern_segment} for {year} from {year_file}")
-    #
-    #     print(f"Unprojected raster: {year_path_unproj}")
-    #     print(f"Reprojected raster: {year_path_reproj}")
-    #
-    #     # Reprojects raster, if needed
-    #     reproject_raster(year_path_unproj, year_path_reproj)
-    #
-    #     # Reads raster data
-    #     with rasterio.open(year_path_reproj) as src:
-    #         data = src.read(1)  # Read the first band
-    #         raster_extent = src.bounds
-    #
-    #     # Matches percentile breaks with colors.
-    #     # Normalizes percentiles to a 0-1 scale.
-    #     print(f"  Calculating percentiles and breaks for {year}")
-    #
-    #     # Converts RGB color palette to matplotlib color palette
-    #     colors_matplotlib = rgb_to_mpl_palette(colors)
-    #
-    #     # Makes percentiles for the breakpoints and prepares colormap
-    #     percentiles_normalized = np.linspace(0, 1, len(percentiles))
-    #     cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
-    #
-    #     # Calculates breaks in the data based on the percentiles
-    #     breaks = np.percentile(data[data != 0], percentiles)  # Ignores NoData values
-    #     print("  Breaks:", breaks)
-    #
-    #     # Min and max values for the colormap (not the min and max values for the raster)
-    #     vmin, vmax = breaks[0], breaks[-1]
-    #     print(f"  vmin: {vmin}, vmax: {vmax}")
-    #
-    #     print(f"  Masking raster to non-0 values for {year}")
-    #     if "removals" in year_path_reproj:
-    #         masked_data = np.ma.masked_where(data >= 0, data)
-    #
-    #         # This colors all 0-value pixels, leaving non-0s white.
-    #         # It clearly shows that more of Australia is non-0, but I just can't get it to be symbolized in any masking.
-    #         # masked_data = np.ma.masked_where(data < 0, data)
-    #     elif "emis" in year_path_reproj:
-    #         masked_data = np.ma.masked_where(data <= 0, data)
-    #     else:
-    #         masked_data = np.ma.masked_where(data == 0, data)
-    #         print("Not using either emissions or removals")
-    #     data_min = masked_data.min()  # Minimum of the valid data
-    #     data_max = masked_data.max()  # Maximum of the valid data
-    #
-    #     print(f"  Normalizing for {year}")
-    #     # Normalizes the data for the colormap
-    #     norm = Normalize(vmin=vmin, vmax=vmax)
-    #
-    #     print(f"  Plotting map for {year}")
-    #     ax, fig = create_plot()
-    #
-    #     # Sets the ocean color
-    #     set_ocean_color(ax)
-    #
-    #     # Plots the country polygons first
-    #     plot_country_polygons(ax, country_shapefile)
-    #
-    #     # Raster extent
-    #     extent = [raster_extent.left, raster_extent.right, raster_extent.bottom, raster_extent.top]
-    #
-    #     # Plots the raster next
-    #     img = plot_raster(ax, cmap, extent, masked_data, norm)
-    #
-    #     # Plots the country boundaries on top
-    #     plot_country_boundaries(ax, country_shapefile)
-    #
-    #     # Creates the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
-    #     # Rounds data_min down and data_max up for legend.
-    #     rounded_min = math.floor(data_min/10**3 * 100) / 100  # Round down
-    #     rounded_max = math.ceil(data_max/10**3 * 100) / 100  # Round up
-    #     # print(data_min, rounded_min)
-    #     # print(data_max, rounded_max)
-    #
-    #     # Legend labels depend on what exact input is displayed
-    #     if "removals" in pattern_segment:
-    #         tick_labels = [f"< {rounded_min:.0f}", 0]
-    #         title_text = f"Gross removals\nAll vegetation pools\nkt CO$_2$ yr$^{{-1}}$"
-    #     elif "all_gases" in pattern_segment:
-    #         tick_labels = [0, f"> {rounded_max:.0f}"]
-    #         title_text = f"Gross emissions\nAll vegetation pools, all gases\nkt CO$_2$e yr$^{{-1}}$"
-    #     elif "non_CO2_only" in pattern_segment:
-    #         tick_labels = [0, f"> {rounded_max:.0f}"]
-    #         title_text = f"Gross emissions\nAll vegetation pools, non-CO$_2$ only\nkt CO$_2$e yr$^{{-1}}$"
-    #     elif "CO2_only" in pattern_segment:
-    #         tick_labels = [0, f"> {rounded_max:.0f}"]
-    #         title_text = f"Gross emissions\nAll vegetation pools, CO$_2$ only\nkt CO$_2$ yr$^{{-1}}$"
-    #     else:
-    #         tick_labels = ["N/A", "N/A"]
-    #         title_text = ""
-    #         print("Can't generate tick labels")
-    #
-    #     create_unidirection_legend(fig, img, vmin, vmax, title_text, tick_labels, year)
-    #
-    #     # Removes axis ticks and labels
-    #     remove_ticks(ax)
-    #
-    #     pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
-    #     core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.veg_model_version_underscore}__{uu.timestr()[0:8]}"
-    #     jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
-    #     jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
-    #
-    #     # Saves two versions of the map: without and with a source note in the bottom right
-    #     out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, year)
-    #
-    #     out_maps_for_gif.append(out_jpeg_for_pres)
-    #
-    # # Creates gifs of timeseries
-    # gif_base_name = f"veg_{pattern_segment_revised}__{cn.years_annual[1]}_{cn.years_annual[-1]}__v{cn.veg_model_version_underscore}"
-    # create_gif(gif_base_name, local_gif_folder, out_maps_for_gif)
-    #
-    # series_end_time = time.time()
-    # print(f"{pattern_segment} took {round(series_end_time - series_start_time)} seconds: {uu.timestr()}")
+        create_unidirection_legend(fig, img, lower_lim_all_yrs, upper_lim_all_yrs,
+                                   title_text, tick_labels, 
+                                   year, colors_rgb, percentiles)
 
+        # Removes axis ticks and labels
+        remove_ticks(ax)
+
+        pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
+        core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.veg_model_version_underscore}__{uu.timestr()[0:8]}"
+        jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
+        jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
+
+        # Saves two versions of the map: without and with a source note in the bottom right
+        out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, year)
+
+        out_maps_for_gif.append(out_jpeg_for_pres)
+
+    # Creates gifs of timeseries
+    gif_base_name = f"veg_{pattern_segment_revised}__{cn.years_annual[1]}_{cn.years_annual[-1]}__v{cn.veg_model_version_underscore}"
+    create_gif(
+        out_maps_for_gif,
+        output_gif_path=f"{local_gif_folder}/{gif_base_name}"
+    )
+
+    series_end_time = time.time()
+    print(f"{pattern_segment} took {round(series_end_time - series_start_time)} seconds: {uu.timestr()}")
 
 def create_three_panel_map():
     """
@@ -1033,18 +1040,18 @@ def main(input_date, model_type, model_path_description=None,
 
     # Colors in RGB. Gross emissions and removals are subset of net flux palette.
     # From https://colorbrewer2.org/#type=diverging&scheme=BrBG&n=10
-    net_color_palette = [(0, 60, 48), (1, 102, 94), (53, 151, 143), (128, 205, 193), (199, 234, 229),  # Used for removals
+    net_colors_rgb = [(0, 60, 48), (1, 102, 94), (53, 151, 143), (128, 205, 193), (199, 234, 229),  # Used for removals
                          (246, 232, 195), (223, 194, 125), (191, 129, 45), (140, 81, 10), (84, 48, 5)  # Used for emissions
                          ]
-    removals_colors = net_color_palette[0:5]
-    emissions_colors = net_color_palette[5:]
+    removals_colors_rgb = net_colors_rgb[0:5]
+    emissions_colors_rgb = net_colors_rgb[5:]
 
     # Datasets that need to be expanded to all output years
     basic_dirs_to_expand = [
-        # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        # f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-        # f"{cn.veg_outputs_path}{cn.gross_removals_all_C_pools_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_non_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+        f"{cn.veg_outputs_path}{cn.gross_removals_all_C_pools_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
         f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
     ]
@@ -1122,27 +1129,27 @@ def main(input_date, model_type, model_path_description=None,
 
     map_net_flux(net_all_gases_input_folders_s3, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_color_palette, country_shapefile, bounding_box, bounding_box_description)
+                 net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
 
     map_net_flux(net_CO2_only_input_folders_s3, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_color_palette, country_shapefile, bounding_box, bounding_box_description)
+                 net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
 
-    # map_gross(gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
-    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
-    #
-    # map_gross(gross_emis_non_CO2_input_folders_s3, local_reproj_folder,
-    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
-    #
-    # map_gross(gross_emis_all_gases_input_folders_s3, local_reproj_folder,
-    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #                  emissions_colors, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
-    #
-    # map_gross(gross_removals_input_folders_s3, local_reproj_folder,
-    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-    #              removals_colors, removals_percentiles, country_shapefile, bounding_box, bounding_box_description)
+    map_gross(gross_emis_CO2_only_input_folders_s3, local_reproj_folder,
+                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                     emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
+
+    map_gross(gross_emis_non_CO2_input_folders_s3, local_reproj_folder,
+                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                     emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
+
+    map_gross(gross_emis_all_gases_input_folders_s3, local_reproj_folder,
+                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                     emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
+
+    map_gross(gross_removals_input_folders_s3, local_reproj_folder,
+                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                 removals_colors_rgb, removals_percentiles, country_shapefile, bounding_box, bounding_box_description)
 
     # # Generates three-panel map
     # create_three_panel_map()
