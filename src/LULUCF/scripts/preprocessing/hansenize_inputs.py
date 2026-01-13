@@ -257,7 +257,7 @@ def main(cluster_name, process, bounding_box, chunk_size, run_local, no_upload):
 
         # Create a vrt from all raw input rasters
         main_logger.info(f"Submitting VRT build for {key}: {uu.timestr('time')}\n")
-        vrt_future = client.submit(uu.build_vrt_gdal_coiled, input_raster_list_s3, output_vrt_s3, items['vrt'], main_logger)
+        vrt_future = client.submit(uu.build_vrt_gdal_coiled, input_raster_list_s3, output_vrt_s3, items['vrt'])
         vrt_futures.append((key, vrt_future))
 
     # Wait for all VRTs to finish before moving on to step 3
