@@ -4,12 +4,17 @@ Script to create global, stacked COGS:
 2) builds a global COG for per dataset per year, and
 3) combine annual COGs into single, stacked global COG per dataset
 
-#TODO: Update creation option based on GDAL type. Check blocksize. Right now using COs for float. Look up optimal COs by datatype.
+run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
+python -m src.utilities.create_cluster -cn WWF_flux_global_cogs_V2 -n 9 -m 16
+python -m src.LULUCF.scripts.postprocessing.GEE.1_create_cogs -cn WWF_flux_global_cogs_V2 -p emissions
+
+TODO: Update creation option based on GDAL type. Check block_size. Right now using COs for float. Look up optimal COs by datatype.
 """
 import os
 import argparse
 import time
 import subprocess
+from osgeo import gdal
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -17,9 +22,71 @@ from src.utilities import universal_utilities as uu
 from src.utilities import log_utilities as lu
 
 #TODO: move to UU
-def create_cog_from_vrt(output_vrt_s3_path, tmp_cog_path, dt, output_cog_s3_path):
+def check_s3_upload_and_clean_local(s3_path, local_path, logger_worker):
+    if uu.exists_in_s3(s3_path):
+        lu.print_and_log(f"File uploaded to S3: {s3_path}", False, logger_worker)
+        try:
+            os.remove(local_path)
+        except Exception as e:
+            lu.print_and_log(f"Warning: could not delete {local_path}: {e}", False, logger_worker)
+#TODO: update usage in other places
+
+def gdal_translate_cog(vrt, cog, dt, compress="ZSTD", zstd_level=12, blocksize=1024, nodata_value=None):
+
+    predictor = 3 if "float" in dt.lower() else 2
+    creation_opts = [
+        f"COMPRESS={compress}",
+        f"BLOCKSIZE={blocksize}",
+        f"PREDICTOR={predictor}",
+        "BIGTIFF=IF_SAFER",
+        "NUM_THREADS=ALL_CPUS",
+    ]
+    if compress.upper() == "ZSTD":
+        creation_opts.append(f"ZSTD_LEVEL={zstd_level}")
+
+    if nodata_value is not None:
+        opts = gdal.TranslateOptions(
+            format="COG",
+            outputType=gdal.GetDataTypeByName(dt),
+            creationOptions=creation_opts,
+            noData=nodata_value
+        )
+    else:
+        opts = gdal.TranslateOptions(
+            format="COG",
+            outputType=gdal.GetDataTypeByName(dt),
+            creationOptions=creation_opts,
+        )
+    ds = gdal.Translate(cog, vrt, options=opts)
+
+    if ds is None:
+        error = gdal.GetLastErrorMsg()
+        raise RuntimeError(f"COG creation failed for {cog}: {error}")
+
+    ds = None  # flush/close
+
+def build_overviews(cog, resampling="AVERAGE", levels=None):
+    ds = gdal.Open(cog, gdal.GA_Update)
+    if ds is None:
+        raise RuntimeError(f"Failed to open {cog} for overview build")
+
+    if levels is None:
+        levels = [2, 4, 8, 16, 32, 64]         # Typical powers of two; you can trim this list to reduce size/time
+
+    error = ds.BuildOverviews(resampling, levels)
+    ds = None
+    if error != 0:
+        raise RuntimeError(f"Overviews build failed for {cog}")
+
+def create_cog_from_vrt(output_vrt_s3_path, dt, tmp_cog_path, output_cog_s3_path, nodata_value=None):
     os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
     os.environ.setdefault("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff,.vrt,.ovr,.aux.xml")
+
+    # Recommended from ChatGPT for vsis3 performance
+    os.environ.setdefault("VSI_CACHE", "TRUE")
+    os.environ.setdefault("VSI_CACHE_SIZE", str(1 * 1024 * 1024 * 1024))  # 1GB
+    os.environ.setdefault("GDAL_HTTP_MAX_RETRY", "10")
+    os.environ.setdefault("GDAL_HTTP_RETRY_DELAY", "1")
 
     logger_worker = lu.setup_logging_worker()
 
@@ -27,32 +94,24 @@ def create_cog_from_vrt(output_vrt_s3_path, tmp_cog_path, dt, output_cog_s3_path
     if uu.exists_in_s3(output_cog_s3_path):
         return lu.print_and_log(f"COG file already exists in S3: {output_cog_s3_path}. Skipping creation.", False, logger_worker)
 
-    #TODO can change to gdal python package instead of subprocess
-    cmd = [
-        "gdal_translate",
-        output_vrt_s3_path.replace("s3://", "/vsis3/"),
-        tmp_cog_path,
-        "-of", "COG",
-        "-ot", f"{dt}",
-        "-co", "COMPRESS=DEFLATE",
-        "-co", "BLOCKSIZE=1024",
-        "-co", "PREDICTOR=3",
-        "-co", "BIGTIFF=IF_SAFER",
-        "-co", f"OVERVIEW_RESAMPLING=AVERAGE",
-    ]
-    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    lu.print_and_log(f"Built local COG: {tmp_cog_path}", False, logger_worker)
+    # Build COG via GDAL Python
+    src_vrt = output_vrt_s3_path.replace("s3://", "/vsis3/")
+    try:
+        gdal_translate_cog(src_vrt, tmp_cog_path, dt,"ZSTD",  12, 1024, nodata_value)
+    except Exception as e:
+        lu.print_and_log(f"COG build failed for {src_vrt}: {e}", False, logger_worker)
+        raise
+    lu.print_and_log(f"COG created locally at: {tmp_cog_path}", False, logger_worker)
+
+    # Per ChatGPT: OVERVIEW_RESAMPLING=AVERAGE during translate step can trigger expensive overview building in some GDAL setups or cause weird behavior
+    # Build overviews for COG after COG creation
+    build_overviews(tmp_cog_path, resampling="AVERAGE", levels=[2, 4, 8, 16, 32])
 
     # Upload COG to S3
     uu.upload_s3_file(output_cog_s3_path, tmp_cog_path)
 
-    # If successfully uploaded to s3, delete local COG #TODO: Make microservice to delete local file if uploaded to s3 to avoid duplicate code
-    if uu.exists_in_s3(output_cog_s3_path):
-        lu.print_and_log(f"Uploaded COG to S3: {output_cog_s3_path}", False, logger_worker)
-        try:
-            os.remove(tmp_cog_path)
-        except Exception as e:
-            lu.print_and_log(f"Warning: could not delete {tmp_cog_path}: {e}", False, logger_worker)
+    # If successfully uploaded to s3, delete local COG
+    check_s3_upload_and_clean_local(output_cog_s3_path, tmp_cog_path, logger_worker)
 
 def stack_annual_cogs(dataset_name, dt, year_to_cog_s3, tmp_stacked_vrt, tmp_stacked_cog, output_stacked_vrt_s3_path, output_stacked_cog_s3_path):
     os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
@@ -83,7 +142,7 @@ def stack_annual_cogs(dataset_name, dt, year_to_cog_s3, tmp_stacked_vrt, tmp_sta
         "-co", "BLOCKSIZE=1024",
         "-co", "PREDICTOR=3",
         "-co", "BIGTIFF=IF_SAFER",
-        "-co", f"OVERVIEW_RESAMPLING=AVERAGE",
+        "-co", "OVERVIEW_RESAMPLING=AVERAGE",
     ]
     subprocess.run(cmd_cog, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
     lu.print_and_log(f"Built stacked local COG: {tmp_stacked_cog}", False, logger_worker)
@@ -113,8 +172,8 @@ def main(cluster_name, process):
     client
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path = lu.populate_main_log_header(client, cluster, f"Global COG creation",
-                                                                   run_local, 'standard', f'Global COG creation')
+    main_logger, main_log_local_path, n_workers= lu.populate_main_log_header(client, cluster, "Global COG creation",
+                                                                   run_local, 'standard', 'Global COG creation')
 
     #TODO: Change to cn paths when switching back to global AFOLU ouput
     wwf_emissions_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_3_WWF_sites/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/YYYY/_pixel_yr/40000_pixels/20251211/"
@@ -170,25 +229,20 @@ def main(cluster_name, process):
         # Add output VRT s3 path to the dictionary
         output_vrt_s3 = f"{items['raw_dir']}{os.path.basename(items['vrt'])}"
         download_upload_dictionary[key]['output_vrt_s3'] = output_vrt_s3
-        main_logger.info(f" S3 data folder: {items['raw_dir']}")     # TODO: comment out or delete
-        main_logger.info(f" File pattern: {items['raw_pattern']}")   # TODO: comment out or delete
-        main_logger.info(f" Local vrt path: {items['vrt']}")         # TODO: comment out or delete
-        main_logger.info(f" S3 vrt path: {output_vrt_s3}")           # TODO: comment out or delete
 
         # Find all files in s3 that match the raw pattern (w/ '*.tif') and add to the dictionary
         input_raster_list_s3 = uu.list_s3_files_with_pattern(items['raw_dir'], items['raw_pattern'])
         if input_raster_list_s3:
             download_upload_dictionary[key]['raw_raster_list'] = input_raster_list_s3
-            main_logger.info(f" Input raster list: {items['raw_raster_list']}")  # TODO: comment out or delete
-            main_logger.info(f" {key} - there are {len(input_raster_list_s3)} rasters in the raw data folder to include in the vrt")
+            main_logger.info(f" {key} - There are {len(input_raster_list_s3)} rasters in the raw data folder to include in the vrt")
         else:
-            main_logger.warning(f"{key} - there were no rasters found in {items['raw_dir']}. Skipping VRT/COG creation.")
+            main_logger.warning(f"{key} - There were no rasters found. Skipping VRT/COG creation.")
             keys_to_remove.append(key)
             continue
 
         # Create a VRT from all input rasters
         main_logger.info(f" Submitting VRT build for {key}: {uu.timestr('time')}")
-        vrt_future = client.submit(uu.build_vrt_gdal_coiled, input_raster_list_s3, output_vrt_s3, items['vrt'])
+        vrt_future = client.submit(uu.build_vrt_gdal_coiled, input_raster_list_s3, output_vrt_s3, items['vrt'], 0)
         vrt_futures.append((key, vrt_future))
 
     # Wait for all VRTs to finish before moving on to Step 3
@@ -209,8 +263,6 @@ def main(cluster_name, process):
     main_logger.info(f"STEP 3 - Getting GDAL datatypes")
 
     for key, items in download_upload_dictionary.items():
-        main_logger.info(f" Getting GDAL datatype for {key}")
-
         # Dictionary that matches format expected by function that gets name of first tile in an s3 folder
         simple_dict = {}
         simple_dict[key] = items["raw_dir"]
@@ -222,10 +274,11 @@ def main(cluster_name, process):
         download_dict_with_data_types = uu.add_file_type_to_dict(first_tile)
         dtype = download_dict_with_data_types[key][1]
         gdal_dtype = uu.string_to_gdal_dtype_mapping.get(dtype)
+        gdal_dtype_str = uu.gdal_to_string_dtype_mapping.get(gdal_dtype)
 
         # Adds the dtype of the dataset to the processing dictionary
-        download_upload_dictionary[key]["dt"] = gdal_dtype
-        main_logger.info(f" Data type for {key} is {uu.gdal_to_string_dtype_mapping.get(gdal_dtype)}")
+        download_upload_dictionary[key]["dt"] = gdal_dtype_str
+        main_logger.info(f" Data type for {key} is {gdal_dtype_str}")
 
     end_time = time.time()
     main_logger.info(f"STEP 3 Complete - All GDAL datatypes added to dictionary in {round(end_time-start_time)} seconds\n")
@@ -244,7 +297,7 @@ def main(cluster_name, process):
         download_upload_dictionary[key]['output_cog_s3'] = output_cog_s3
 
         main_logger.info(f" Submitting global COG build for {key}")
-        cog_future = client.submit(create_cog_from_vrt, items["output_vrt_s3"], items["cog"], items["dt"], items["output_cog_s3"])
+        cog_future = client.submit(create_cog_from_vrt, items["output_vrt_s3"], items["dt"], items["cog"], items["output_cog_s3"], 0)
         cog_futures.append((key, cog_future))
 
     # Wait for all COGs to finish before moving on to Step 5

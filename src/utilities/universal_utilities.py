@@ -2433,21 +2433,27 @@ def vrt_exists_in_s3(output_vrt_s3):
 # Function to build a VRT using GDAL using tmp dir as intermediate step to download input files and build VRT
 # raw_raster_paths_list_s3 = list of s3 paths (with "s3://" prefix) to all raw raster used as input for the build VRT step
 # output_vrt_s3 = s3 path (with "s3://" prefix) where vrt is saved to
-def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
+def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt, nodata_value=None):
 
     logger_worker = lu.setup_logging_worker()
 
     # Check if the VRT file already exists in S3
     if vrt_exists_in_s3(output_vrt_s3):
-        return lu.print_and_log(f"VRT file already exists in S3: {output_vrt_s3}. Skipping creation.", False, logger_worker)
-    vsis3_paths = []
-    for s3_path in raw_raster_paths_list_s3:
-        vsis3_path = s3_path.replace("s3://", "/vsis3/")
-        vsis3_paths.append(vsis3_path)
+        return lu.print_and_log(f"VRT file already exists in S3:\n{output_vrt_s3}.\nSkipping VRT creation.", False, logger_worker)
+
+    vsis3_paths = [p.replace("s3://", "/vsis3/") for p in raw_raster_paths_list_s3]
+
+    # No data handling if flagged
+    if nodata_value is not None:
+        vrt_opts = gdal.BuildVRTOptions(
+            srcNodata=nodata_value,
+            VRTNodata=nodata_value,
+        )
+    else:
+        vrt_opts = gdal.BuildVRTOptions()
 
     # Use GDAL to build the VRT
-    # gdal.BuildVRT(local_vrt, "/vsis3/gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/AGB/raw/N00E010_ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv5.0.tif")
-    gdal.BuildVRT(local_vrt, vsis3_paths)
+    gdal.BuildVRT(local_vrt, vsis3_paths, options=vrt_opts)
     lu.print_and_log(f"Built {local_vrt}: {timestr('time')}", True, logger_worker)
 
     # Various checks that vrt was created and has data in it
