@@ -406,7 +406,11 @@ def plot_raster(ax, cmap, extent, masked_data, norm):
     :return: image
     """
 
-    img = ax.imshow(masked_data, cmap=cmap, norm=norm, extent=extent, origin='upper', zorder=2)
+    # Turn off interpolation to prevent showing boundaries around pixel patches
+    # (matters mostly for areas with sparse emissions in gross emissions map, like boreal forest)
+    # https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6964d5d4-12b4-8325-aec3-c7bbed008ac9
+    img = ax.imshow(masked_data, cmap=cmap, norm=norm, extent=extent,
+                    origin='upper', interpolation='none', zorder=2)
     return img
 
 def plot_country_boundaries(ax, shapefile):
