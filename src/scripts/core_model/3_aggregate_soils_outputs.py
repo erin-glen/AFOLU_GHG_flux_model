@@ -1,34 +1,15 @@
 import argparse
 import dask
-import re
+import fsspec
+import numpy as np
+import zarr
 
 from src.scripts.utilities import constants_and_names as cn
-
+from src.scripts.utilities import drainage_zarr_utilities as dzu
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
 
-DATA_TYPES = [
-    # "burned_ch4_Mg_CO2e_ha",
-    # "burned_co2_Mg_CO2_ha",
-    # "burned_co_Mg_CO2e_ha",
-    # "burned_state",
-    # "burned_years_count",
-    # "burned_total_Mg_CO2e_ha",
-    # "burned_total_Mg_CO2e_pixel_yr",
-    # "burned_total_co2_Mg_CO2_pixel_yr",
-    # "burned_total_ch4_Mg_CO2e_pixel_yr",
-    # "drained_ch4_ditch_Mg_CO2e_ha_yr",
-    # "drained_ch4_land_Mg_CO2e_ha_yr",
-    "drained_co2_Mg_CO2_pixel_yr",
-    # "drained_co2_offsite_Mg_CO2_ha_yr",
-    # "drained_total_co2_Mg_CO2_pixel_yr",
-    # "drained_total_ch4_Mg_CO2e_pixel_yr",
-    "drained_n2o_Mg_CO2e_pixel_yr",
-    # "drained_total_Mg_CO2e_ha_yr",
-    # "drained_total_Mg_CO2e_pixel_yr",
-    # "drained_soil",
-    # "drained_state",
-]
+DATA_TYPES = list(cn.drainage_outputs_to_zarr)
 
 
 INVENTORY_PERIODS = [
@@ -44,34 +25,153 @@ BASE_URL = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/versi
 DEFAULT_OUTPUT_DATE = "20251007"
 
 
-def get_input_datasets(
+def get_output_folders(
+    interval_type: str,
     pixel_resolution: str = "4000_pixels",
     run_name: str = "ogh_standard_model",
     output_date: str = DEFAULT_OUTPUT_DATE,
 ) -> list:
     """Return list of S3 folders for organic soil outputs."""
+    interval_folder = f"{interval_type}_intervals"
     paths = []
     for period in INVENTORY_PERIODS:
         for dtype in DATA_TYPES:
             path = (
                 f"{BASE_URL}/{dtype}/{run_name}/"
-                f"five_year_intervals/{period}/{pixel_resolution}/{output_date}"
+                f"{interval_folder}/{period}/{pixel_resolution}/{output_date}"
             )
             paths.append(path)
     return paths
 
 
-def robust_merge_small_tiles(s3_name_dict, is_final, no_upload, no_log, logger):
-    """Wrapper for :func:`merge_small_tiles_gdal` with error handling."""
-    folder, output_names = next(iter(s3_name_dict.items()))
-    out_file = output_names[0]
+def build_period_lookup() -> dict[int, str]:
+    return {end: f"{start}_{end}" for start, end in cn.five_year_inventory_periods}
+
+
+def build_year_indices(interval_type: str) -> tuple[list[int], dict[int, int]]:
+    year_index = dzu.full_model_year_index(interval_type)
+    year_lookup = {year: idx for idx, year in enumerate(year_index)}
+    return year_index, year_lookup
+
+
+def load_zarr_window(zarr_path: str, dataset: str, bounds, year_idx: int) -> np.ndarray:
+    return dzu.open_zarr_window(zarr_path, dataset, bounds, year_idx)
+
+
+def create_10x10_outputs_from_zarr(
+    dataset: str,
+    year_idx: int,
+    year_value: int,
+    period: str,
+    tile_id: str,
+    zarr_path: str,
+    interval_type: str,
+    pixel_resolution: str,
+    run_name: str,
+    output_date: str,
+    is_final: bool,
+    no_upload: bool,
+    logger,
+):
+    bounds = uu.get_10x10_tile_bounds(tile_id)
+    chunk_px = uu.calc_chunk_length_pixels(bounds)
+    bstr = uu.boundstr(bounds)
+
+    data_per_ha = load_zarr_window(zarr_path, dataset, bounds, year_idx)
+
+    dtype_str = cn.drainage_output_dtypes.get(dataset, "float32")
+    is_numeric = dtype_str == "float32"
+
+    data_per_pixel = None
+    if is_numeric:
+        pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
+        pixel_area = uu.get_tile_dataset_rio(
+            pixel_area_uri, "Float32", bounds, chunk_px, is_final, logger
+        )[0]
+        data_per_pixel = data_per_ha * pixel_area * cn.m2_to_ha
+
+    output_interval_folder = f"{interval_type}_intervals"
+    output_dir_per_ha = (
+        f"{BASE_URL}/{dataset}/{run_name}/{output_interval_folder}/"
+        f"{period}/{pixel_resolution}/{output_date}/"
+    )
+    output_name_per_ha = f"{tile_id}__{dataset}__{period}.tif"
+
+    output_name_per_pixel = None
+    output_dir_per_pixel = None
+    if is_numeric:
+        dataset_pixel = dataset.replace("_ha_", "_pixel_")
+        output_dir_per_pixel = (
+            f"{BASE_URL}/{dataset_pixel}/{run_name}/{output_interval_folder}/"
+            f"{period}/{pixel_resolution}/{output_date}/"
+        )
+        output_name_per_pixel = f"{tile_id}__{dataset_pixel}__{period}.tif"
+
+    if not no_upload:
+        uu.save_and_upload_single_raster(
+            bounds,
+            chunk_px,
+            tile_id,
+            data_per_ha,
+            data_per_ha.dtype.name,
+            output_name_per_ha,
+            output_dir_per_ha,
+            is_final,
+            logger,
+        )
+        if is_numeric and data_per_pixel is not None:
+            uu.save_and_upload_single_raster(
+                bounds,
+                chunk_px,
+                tile_id,
+                data_per_pixel,
+                data_per_pixel.dtype.name,
+                output_name_per_pixel,
+                output_dir_per_pixel,
+                is_final,
+                logger,
+            )
+
+    chunk_stats = []
+    chunk_stats.append(
+        uu.calculate_stats(
+            data_per_ha,
+            output_name_per_ha,
+            bstr,
+            tile_id,
+            "output_layer",
+            array_per_pixel=data_per_pixel if is_numeric else None,
+            iv_start=None,
+            iv_end=year_value,
+        )
+    )
+    if is_numeric and output_name_per_pixel:
+        chunk_stats.append(
+            uu.calculate_stats(
+                data_per_pixel,
+                output_name_per_pixel,
+                bstr,
+                tile_id,
+                "output_layer",
+                array_per_pixel=data_per_pixel,
+                iv_start=None,
+                iv_end=year_value,
+            )
+        )
+
+    return f"Success for {tile_id} {dataset} {period}", chunk_stats
+
+
+def robust_create_10x10_outputs(*args, logger, **kwargs):
+    dataset = args[0] if args else kwargs.get("dataset", "unknown")
+    tile_id = args[4] if len(args) > 4 else kwargs.get("tile_id", "unknown")
     try:
-        msg, stats = uu.merge_small_tiles_gdal(s3_name_dict, is_final, no_upload, no_log)
-        logger.info(f"Successfully merged: {out_file}")
+        msg, stats = create_10x10_outputs_from_zarr(*args, **kwargs, logger=logger)
+        logger.info(f"Successfully aggregated: {tile_id} {dataset}")
         return msg, stats
     except Exception as e:
-        logger.error(f"Error merging {out_file}: {e}")
-        return f"Failed: {out_file} - {e}", None
+        logger.error(f"Error aggregating {tile_id} {dataset}: {e}")
+        return f"Error: {tile_id} {dataset} - {e}", None
 
 
 def main(
@@ -82,53 +182,103 @@ def main(
     pixel_resolution: str = "4000_pixels",
     run_name: str = "ogh_standard_model",
     output_date: str = DEFAULT_OUTPUT_DATE,
+    interval_type: str = cn.intervals_five_year,
 ):
     logger = lu.setup_logging_main()
-
-    is_final = False
 
     cluster, client, run_local = uu.connect_to_cluster(
         cluster_name=cluster_name, run_local=run_local
     )
 
-    stage = f"LULUCF_flux_postprocessing__outputs_aggregated_to_10x10deg_{pixel_resolution}"
+    stage = (
+        f"LULUCF_flux_postprocessing__outputs_aggregated_to_10x10deg_{pixel_resolution}"
+    )
 
     start_time = uu.timestr()
-    lu.print_and_log(f"Stage {stage} started at: {start_time}", is_final, logger)
+    lu.print_and_log(f"Stage {stage} started at: {start_time}", False, logger)
 
-    input_datasets = get_input_datasets(pixel_resolution, run_name, output_date)
+    chunk_size_pixels = int(pixel_resolution.replace("_pixels", ""))
+    year_index, year_lookup = build_year_indices(interval_type)
+    period_lookup = build_period_lookup()
 
-    list_of_s3_name_dicts_total = uu.create_list_for_aggregation(input_datasets, logger)
+    zarr_path = dzu.create_mega_zarr_path(
+        cn.drainage_outputs_path_mega_zarr,
+        chunk_size_pixels,
+        interval_type,
+        run_name,
+        output_date,
+        logger,
+    )
+    fs = fsspec.filesystem("s3", anon=False)
+    zarr.open_group(fs.get_mapper(zarr_path), mode="r")
+
+    tile_ids = cn.tile_id_list
+    is_final = len(tile_ids) > 20
+
+    tasks = []
+    for dataset in DATA_TYPES:
+        for period in INVENTORY_PERIODS:
+            end_year = int(period.split("_")[-1])
+            year_idx = year_lookup.get(end_year)
+            if year_idx is None:
+                logger.warning(f"Skipping period {period}; not in zarr year index")
+                continue
+            for tile_id in tile_ids:
+                tasks.append(
+                    dask.delayed(robust_create_10x10_outputs)(
+                        dataset,
+                        year_idx,
+                        year_index[year_idx],
+                        period_lookup.get(end_year, period),
+                        tile_id,
+                        zarr_path,
+                        interval_type,
+                        pixel_resolution,
+                        run_name,
+                        output_date,
+                        is_final,
+                        no_upload,
+                        logger=logger,
+                    )
+                )
 
     delayed_results = [
-        dask.delayed(robust_merge_small_tiles)(
-            s3_name_dict, is_final, no_upload, no_log, logger
-        )
-        for s3_name_dict in list_of_s3_name_dicts_total
+        task for task in tasks
     ]
 
     results = dask.compute(*delayed_results)
     lu.print_and_log(results, is_final, logger)
 
-    # extract tile ids for reporting
-    tile_ids = set()
-    for entry in list_of_s3_name_dicts_total:
-        out_name = list(entry.values())[0][0]
-        match = re.search(cn.tile_id_pattern, out_name)
-        if match:
-            tile_ids.add(match.group())
+    success_count, all_stats = uu.count_successful_chunks(
+        tile_ids, is_final, logger, results
+    )
 
-    chunk_list = sorted(tile_ids)
+    output_folders = get_output_folders(
+        interval_type, pixel_resolution, run_name, output_date
+    )
+    output_folders_pixel = [
+        folder.replace("_ha_", "_pixel_") for folder in output_folders
+    ]
 
-    success_count, all_stats = uu.count_successful_chunks(chunk_list, is_final, logger, results)
-
-    output_folders = [path.replace(pixel_resolution, "40000_pixels") for path in input_datasets]
-
-    for folder in output_folders:
-        geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(folder)
-        lu.print_and_log(
-            f"Aggregated 10x10 deg outputs in {folder}: {file_count}", is_final, logger
-        )
+    if not no_upload:
+        for folder in output_folders:
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(
+                folder
+            )
+            lu.print_and_log(
+                f"Aggregated 10x10 deg outputs in {folder}: {file_count}",
+                is_final,
+                logger,
+            )
+        for folder in output_folders_pixel:
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(
+                folder
+            )
+            lu.print_and_log(
+                f"Aggregated 10x10 deg per-pixel outputs in {folder}: {file_count}",
+                is_final,
+                logger,
+            )
 
     if success_count > 0:
         uu.aggregate_10x10_chunk_stats(all_stats, stage, no_upload, logger)
@@ -161,6 +311,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--run_name", default="ogh_standard_model", help="Model run name")
     parser.add_argument(
+        "--interval_type",
+        choices=[cn.intervals_five_year, cn.intervals_annual],
+        default=cn.intervals_five_year,
+        help="Interval type for zarr outputs",
+    )
+    parser.add_argument(
         "--output_date",
         default=DEFAULT_OUTPUT_DATE,
         help="Date tag for selecting input datasets (YYYYMMDD)",
@@ -176,6 +332,7 @@ if __name__ == "__main__":
         args.pixel_resolution,
         args.run_name,
         args.output_date,
+        args.interval_type,
     )
 
 """
