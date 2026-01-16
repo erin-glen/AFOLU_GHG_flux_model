@@ -1466,7 +1466,8 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --start_year 2021 \
   --end_year 2024 \
   --interval_type five_year \
-  --run_name custom_run
+  --run_name zarr_test \
+  --create_zarr 
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
