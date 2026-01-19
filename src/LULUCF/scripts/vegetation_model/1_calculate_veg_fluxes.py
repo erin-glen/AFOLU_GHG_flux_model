@@ -6,27 +6,27 @@ outputs that are useful for QC and potentially as contextual layers (e.g., compo
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -bb 10 49.75 10.25 50 -cs 0.25 --run_local --no_upload
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -bb 116.25 -2.25 116.5 -2 -cs 0.25 --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd test_box -bb 116.25 -2.25 116.5 -2 -cs 0.25
 
 Coiled small tests (1x1 deg chunk needs 32GB worker):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -bb -64 -22 -63 -21 -cs 1 --create_zarr --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd test_box -bb -64 -22 -63 -21 -cs 1 --create_zarr
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --create_zarr --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd Cerrado -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --create_zarr
 
 Coiled large shapefile test (1884 features):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --create_zarr --run_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd 1884_features -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --create_zarr
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --create_zarr --run_date 20250921 --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.1_calculate_veg_fluxes -cn vegetation_model -mt standard -mpd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --log_note "This is a global run for model v1.0.4 (2016-2024). Hopefully, it is the run used for the published model."
 
 To download all outputs locally:
 python src/utilities/download_outputs_local.py v1_test_name 23_-4_24_-3
@@ -39,6 +39,7 @@ https://app.asana.com/1/25496124013636/task/1206230383901961/comment/12106415042
 
 import argparse
 import concurrent.futures
+import dask
 import gc
 import os
 import psutil
@@ -48,6 +49,8 @@ import pandas as pd
 import numpy as np
 import fsspec
 import xarray as xr
+import resource
+import traceback
 
 from concurrent.futures import ThreadPoolExecutor
 from dask.distributed import print
@@ -61,6 +64,13 @@ from src.utilities import numba_utilities as nu
 from src.utilities import universal_utilities as uu
 from src.utilities import zarr_utilities as zu
 from src.utilities import resize_cluster
+
+# To get enhanced logging from workers so that I can tell why they are lost. I don't know if this works.
+# Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
+dask.config.set({
+    "distributed.logging.distributed": "debug",   # show detailed worker logs
+    "distributed.logging.bokeh": "critical",      # silence dashboard noise
+})
 
 # Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
 # The more files in an s3 folder, the longer it takes to access them without this environment variable.
@@ -90,10 +100,10 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
 
     # Carbon density arrays determined by the starting year of the model (Mg C/ha),
     # but the starting C densities have the same key in the dictionary regardless of the starting year
-    agc_dens_block = in_dict_float32[cn.agc_LC_masked_dens_pattern].astype('float32')
-    bgc_dens_block = in_dict_float32[cn.bgc_LC_masked_dens_pattern].astype('float32')
-    deadwood_c_dens_block = in_dict_float32[cn.deadwood_c_LC_masked_dens_pattern].astype('float32')
-    litter_c_dens_block = in_dict_float32[cn.litter_c_LC_masked_dens_pattern].astype('float32')
+    agc_dens_block = in_dict_float32[cn.agc_LC_masked_dens_pattern]
+    bgc_dens_block = in_dict_float32[cn.bgc_LC_masked_dens_pattern]
+    deadwood_c_dens_block = in_dict_float32[cn.deadwood_c_LC_masked_dens_pattern]
+    litter_c_dens_block = in_dict_float32[cn.litter_c_LC_masked_dens_pattern]
 
     # print(agc_dens_block.max())
     # print(bgc_dens_block.max())
@@ -101,23 +111,23 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
     # print(litter_c_dens_block.max())
 
     # Root:shoot (unitless)
-    r_s_ratio_non_mang_block = in_dict_float32[cn.r_s_ratio_non_mang_pattern].astype('float32')
+    r_s_ratio_non_mang_block = in_dict_float32[cn.r_s_ratio_non_mang_pattern]
 
     # Natural forest regrowth curves (Mg C/ha/yr)
-    natrl_forest_curve_0_5_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__0_5_years"].astype('float32')
-    natrl_forest_curve_6_10_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__6_10_years"].astype('float32')
-    natrl_forest_curve_11_15_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__11_15_years"].astype('float32')
-    natrl_forest_curve_16_20_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__16_20_years"].astype('float32')
-    natrl_forest_curve_21_40_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__21_40_years"].astype('float32')
-    natrl_forest_curve_41_60_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__41_60_years"].astype('float32')
-    natrl_forest_curve_61_80_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__61_80_years"].astype('float32')
+    natrl_forest_curve_0_5_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__0_5_years"]
+    natrl_forest_curve_6_10_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__6_10_years"]
+    natrl_forest_curve_11_15_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__11_15_years"]
+    natrl_forest_curve_16_20_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__16_20_years"]
+    natrl_forest_curve_21_40_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__21_40_years"]
+    natrl_forest_curve_41_60_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__41_60_years"]
+    natrl_forest_curve_61_80_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__61_80_years"]
     natrl_forest_curve_81_100_AGC_RF_block = in_dict_float32[f"{cn.natural_forest_growth_curve_pattern}__81_100_years"].astype('float32')
 
     # Removal factor (Mg C/ha/yr)
     # Because this is used to store the RF from the previous interval,
     # it persists from one interval to the next. Therefore, it must be defined before the first iteration.
     # That way, removal factors can be over-written by those used in the most recent interval.
-    agc_rf_pre_dist_out_block = np.zeros(agc_dens_block.shape).astype('float32')
+    agc_rf_pre_dist_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
 
     # Mangrove extent
     mangrove_extent_1996_block = in_dict_uint8[f"{cn.mangrove_extent_processed_pattern}_1996"]
@@ -198,13 +208,13 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
     # 0=Always tall vegetation so far. Other values represent the last year of non-tall vegetation.
     # This is assessed at the pixel level because numba wouldn't allow the needed logical operations on numpy arrays (chunks).
     # Tall vegetation is basd on the composite land cover maps, not the canopy height maps.
-    most_recent_year_not_tall_veg_block = np.zeros(agc_dens_block.shape).astype('uint16')
+    most_recent_year_not_tall_veg_block = np.zeros(agc_dens_block.shape, dtype='uint16')
 
     # Forest age for each output year of the model
     forest_age_end_of_interval_block = forest_age_start_year_block
 
     # Maximum height of vegetation since the last interval in which there was not forest
-    max_height_since_last_time_not_tall_veg_block = np.zeros(agc_dens_block.shape).astype('uint8')
+    max_height_since_last_time_not_tall_veg_block = np.zeros(agc_dens_block.shape, dtype='uint8')
 
     # Tracks whether the height has already decreased more than the signif. height loss threshold compared to
     # maximum vegetation height since the last time the pixel was non-tall vegetation land cover.
@@ -214,19 +224,19 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
     # 0=no significant height loss relative to the maximum vegetation height since last non-tall vegetation.
     # 1=height loss relative to the maximum vegetation height occurred in this interval.
     # 2=height loss relative to the maximum vegetation height occurred in a previous interval.
-    first_time_sig_loss_from_max_height_block = np.zeros(agc_dens_block.shape).astype('uint8')
+    first_time_sig_loss_from_max_height_block = np.zeros(agc_dens_block.shape, dtype='uint8')
 
     # Tracks whether there was a partial (non-fire) or full disturbance in a previous interval (not including just fire,
     # which does not count as a partial disturbance in this model if height does not decrease significantly with it).
     # Updated for every interval based on the current interval disturbance status.
     # This is primarily used to determine what age the forest is (which matters for assigning removal factors).
-    part_or_full_dist_in_earlier_intervals_block = np.zeros(agc_dens_block.shape).astype('uint8')
+    part_or_full_dist_in_earlier_intervals_block = np.zeros(agc_dens_block.shape, dtype='uint8')
 
     # Tracks whether a partial disturbance occurs in the current interval due to any cause (not including just fire,
     # which does not count as a partial disturbance in this model if height does not decrease significantly with it).
     # Overwritten for every interval.
     # This is primarily used to determine what age the forest is (which matters for assigning removal factors).
-    part_or_full_dist_in_curr_interval_block = np.zeros(agc_dens_block.shape).astype('uint8')
+    part_or_full_dist_in_curr_interval_block = np.zeros(agc_dens_block.shape, dtype='uint8')
 
     # print("interval_end_years:", interval_end_years)
 
@@ -348,31 +358,31 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
             # print("annual_forest_dist_blocks_all_intervals_so_far max for all intervals so far:", np.max(annual_forest_dist_blocks_all_intervals_so_far))
 
         # Tracks how many times each pixel was burned during the interval
-        times_burned_in_interval_block = np.zeros(agc_dens_block.shape).astype('uint8')
+        times_burned_in_interval_block = np.zeros(agc_dens_block.shape, dtype='uint8')
 
         # Numpy arrays for outputs that don't depend on previous interval's values
-        state_out_block = np.zeros(agc_dens_block.shape).astype('uint32')  # Land cover state at end of interval
+        state_out_block = np.zeros(agc_dens_block.shape, dtype='uint32')  # Land cover state at end of interval
 
         # Number of years of canopy growth.
         # First digit is pre-disturbance years of growth.
         # Second digit (if it exists) is post-disturbance years of growth
-        gain_year_count_out_block = np.zeros(agc_dens_block.shape).astype('uint8')
+        gain_year_count_out_block = np.zeros(agc_dens_block.shape, dtype='uint8')
 
-        agc_gross_emis_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        bgc_gross_emis_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        deadwood_c_gross_emis_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        litter_c_gross_emis_out_block = np.zeros(agc_dens_block.shape).astype('float32')
+        agc_gross_emis_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        bgc_gross_emis_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        deadwood_c_gross_emis_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        litter_c_gross_emis_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
 
-        ch4_gross_emis_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        n2o_gross_emis_out_block = np.zeros(agc_dens_block.shape).astype('float32')
+        ch4_gross_emis_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        n2o_gross_emis_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
 
-        agc_gross_removals_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        bgc_gross_removals_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        deadwood_c_gross_removals_out_block = np.zeros(agc_dens_block.shape).astype('float32')
-        litter_c_gross_removals_out_block = np.zeros(agc_dens_block.shape).astype('float32')
+        agc_gross_removals_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        bgc_gross_removals_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        deadwood_c_gross_removals_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
+        litter_c_gross_removals_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
 
         # Aboveground carbon emission factors
-        agc_ef_out_block = np.zeros(agc_dens_block.shape).astype('float32')
+        agc_ef_out_block = np.zeros(agc_dens_block.shape, dtype='float32')
 
 
         # Iterates through all pixels in the chunk
@@ -1905,6 +1915,19 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
     chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)  # Chunk length in pixels (as opposed to decimal degrees)
 
+    # Report the number of retries for the task. Untested.
+    # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694bfc7f-fab0-8332-b903-d5efa84b61c3
+    retry_env_var = os.environ.get("DASK_TASK_RETRIES", "0")
+    retry_count = int(retry_env_var)
+
+    if retry_count > 0:
+        msg = f"Running vegetation flux task for {bounds_str} in {tile_id} (retry #{retry_count}: {uu.timestr()})"
+        lu.print_and_log(msg, False, logger_worker)
+
+    # # Can potentially add to prevent indefinite retries. Untested.
+    # if retry_count >= 2:
+    #     raise RuntimeError(f"Tile {bounds_str} in {tile_id} failed twice — exiting to prevent infinite retries.")
+
 
     ### Part 1: Downloads all inputs for chunk.
     ### No checks about whether the chunk has data because the way the chunk_list is constructed,
@@ -1916,14 +1939,15 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # Adds the uri for the global COGS of Global Pasture Watch median vegetation height for each year to the download dictionary
     for year in list(range(2015, 2025)):
         MVH_uri_year = cn.GPW_MVH_uri.replace('YYYY', str(year))
-        updated_download_dict[f"{cn.GPW_MVH_pattern}_{year}"] = [MVH_uri_year, 'int16']
+        updated_download_dict[f"{cn.GPW_MVH_pattern}_{year}"] = [MVH_uri_year, 'Int16']
 
-    # print(updated_download_dict)
+    # print("updated_download_dict:", updated_download_dict)
 
     # If a particular tile doesn't exist for an input, an array of 0s of the correct size and datatype is returned instead.
     # Thus, this returns a complete set of inputs (missing chunks filled).
     # Note: If running in a local Dask cluster, prints to console may be duplicated. Doesn't happen with a Coiled cluster of the same size (1 worker).
     # Seems to be a problem with local Dask getting overwhelmed by so many futures being created and downloaded from s3.
+    # futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_large_run, logger_worker, False)
     futures = uu.prepare_to_download_chunk(bounds, updated_download_dict, chunk_length_pixels, is_large_run, logger_worker, False)
     # print(futures)
 
@@ -1937,8 +1961,8 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     for future in concurrent.futures.as_completed(futures):
         layer = futures[future]  # Gets the corresponding key
         data, status = future.result()  # Unpacks the tuple result
-        if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
-            lu.print_and_log(f"{status}: {uu.timestr()}", False, logger_worker)
+        # if 'success' not in status: # Prints and logs any inputs that couldn't be accessed (downloaded as all 0s) or had to be padded
+        #     lu.print_and_log(f"{status}: {uu.timestr()}", is_large_run, logger_worker)
         layers[layer] = data
 
     # Test prints
@@ -1949,7 +1973,8 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # print(layers[cn.planted_forest_AGC_BGC_removal_factor_pattern].max())
     # print(layers[cn.forest_age_start_year_pattern].dtype)
     # print(layers[cn.climate_zone_pattern].dtype)
-    # print(layers['GPW_height_2015'])
+    # print(layers['GPW_height_2015'].dtype)
+    # print("layers['GPW_height_2015']:", layers['GPW_height_2015'])
     # sys.quit()
 
 
@@ -1987,22 +2012,27 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
 
     lu.print_and_log(f"Calculating vegetation fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     uu.rename_s3_task_file(stage, bounds, "calculating_", is_large_run, logger_worker)
-    numba_start = time.time()
+    calc_start = time.time()
 
     out_dict_uint8, out_dict_uint16, out_dict_uint32, out_dict_float32 = vegetation_fluxes(
         typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32,
         primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
         start_year, end_year, interval_type, interval_year_diff_list, interval_length_list, interval_end_years, is_large_run)
 
-    numba_end = time.time()
-    lu.print_and_log(f"Done calculating vegetation fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
+    calc_end = time.time()
+    lu.print_and_log(f"Done calculating vegetation fluxes and carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
     lu.print_and_log(f"Memory usage after numba calculations completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
-    lu.print_and_log(f"Calculated using numba in {bounds_str} in {tile_id} in {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Calculated {bounds_str} in {tile_id} in {round(calc_end-calc_start)} seconds: {uu.timestr()}", False, logger_worker)
 
     # print("out_dict_uint8:", out_dict_uint8)
     # print("out_dict_uint32:", out_dict_uint32)
     # print("out_dict_float32:", out_dict_float32)
     # print(f"Average of {list(out_dict_uint32.keys())[0]} is: {list(out_dict_uint32.values())[0].mean()}")
+
+    # Deletes all unnecessary input dictionaries before moving on
+    # Suggested by ChatGPT: https://chatgpt.com/share/e/672bbf2e-ebbc-800a-aae3-3d92f5a1d663
+    in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
+    [in_dict.clear() for in_dict in in_dicts]
 
     # Fresh non-Numba-constrained dictionary that stores all numpy arrays.
     # The dictionaries by datatype that are returned from the numba function have limitations on them,
@@ -2023,18 +2053,13 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
         # Clear memory of unneeded arrays
         del out_dict
 
-    # Deletes all unnecessary input dictionaries before moving on
-    # Suggested by ChatGPT: https://chatgpt.com/share/e/672bbf2e-ebbc-800a-aae3-3d92f5a1d663
-    in_dicts = [layers, typed_dict_uint8, typed_dict_int16, typed_dict_int32, typed_dict_float32]
-    [in_dict.clear() for in_dict in in_dicts]
-
     # print(out_dict_all_dtypes)
 
 
     ### Part 5: Writes outputs to pre-existing global mega-zarr (only if activated)
 
     zu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
-                  out_dict_all_dtypes, outputs_to_zarr, process, stage, tile_id)
+                  out_dict_all_dtypes, outputs_to_zarr, stage, tile_id)
 
 
     ### Part 6: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
@@ -2047,7 +2072,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
-    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, bounds, chunk_length_pixels, 'Float32')
+    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, bounds, chunk_length_pixels, logger_worker, 'Float32')
     pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
     # Calculates stats for the output layers from create_starting_C_densities as a dictionary with chunk attributes
@@ -2057,6 +2082,8 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
         output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
 
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
+
+    del pixel_area_chunk
 
     lu.print_and_log(f"Populated chunk stats for outputs in {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
 
@@ -2126,7 +2153,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
             executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
         upload_end_time = time.time()
-        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.veg_outputs_path} in {round(upload_end_time - upload_start_time)} seconds: {uu.timestr()}", is_large_run, logger_worker)
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.veg_outputs_path} in {round(upload_end_time - upload_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
     chunk_end_time = time.time()
     lu.print_and_log(f"Total chunk processing for {bounds_str} in {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
@@ -2136,22 +2163,52 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # Removes task tracking file from S3 once task is successful
     uu.delete_s3_task_file(stage, bounds, is_large_run, logger_worker)
 
-    return return_message, chunk_stats  # Return both the success message and the statistics
+    # To track peak memory usage
+    # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
+    peak_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    peak_gb = peak_kb / 1024 ** 2
+    lu.print_and_log(f"Peak memory for {bounds_str} in {tile_id}: {peak_gb:.2f} GB", False, logger_worker)
+
+    return return_message, chunk_stats
 
 
-def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False, no_upload=False, create_zarr=False,
-         chunk_shapefile_uri=False, bounding_box=None, chunk_size_deg=None, first_chunks=None, run_date=None, log_note=None):
+# Designed to report task/worker crashes, including memory usage at the time.
+# Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
+def safe_task_wrapper(*args, **kwargs):
+    try:
+        result = calculate_and_upload_vegetation_fluxes(*args, **kwargs)
+        return result
+
+    except Exception as e:
+
+        proc = psutil.Process(os.getpid())
+        mem = proc.memory_info()
+
+        return {
+            "status": "failed",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "memory_at_failure": {
+                "rss_gb": mem.rss / 1024**3,  # VMS is the important one
+                # "vms_gb": mem.vms / 1024**3,
+            },
+        }
+
+
+def main(cluster_name, year_range, model_type,
+         run_local=False, no_stats=False, no_log=False, no_upload=False, create_zarr=False,
+         chunk_shapefile_uri=False, bounding_box=None, chunk_size_deg=None, first_chunks=None,
+         run_date=None, model_path_description=None, log_note=None):
 
     ### Step 1: Preparation
 
     # Model stage being run
     stage = 'vegetation_fluxes'
-    model_type = 'standard_model'
 
     # Runs chunks in batches of specified size.
     # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
-    batch_size = 3200  # 6 batches to cover all chunks
-    # batch_size = 5  # For testing batch processing
+    batch_size = 3800  # 5 batches to cover all chunks
+    # batch_size = 2  # For testing batch processing
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
@@ -2180,6 +2237,8 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
+    main_logger.info(f"Model version: {cn.veg_model_version}")
+    main_logger.info(f"Model path descriptor: {model_path_description}")
     main_logger.info(f"Start year: {start_year}; end year: {end_year}")
     main_logger.info(f"Run date: {run_date}")
     main_logger.info(f"Batch size: {batch_size} chunks")
@@ -2334,7 +2393,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     }
     # print(download_dict)
 
-    print("Download dictionary::")
+    print("Download dictionary:")
     for key, item in download_dict.items():
         print(f"{key}: {item}")
 
@@ -2358,7 +2417,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Creates a list of output directories (core and intermediates) for all outputs and intervals based on specifics of the model run
     output_dir_list_core_intermediate = cn.veg_core_output_dirs + cn.veg_intermediate_output_dirs + cn.veg_summative_output_dirs
     output_dir_list = uu.create_output_dir_name_list(output_dir_list_core_intermediate, interval_type, start_year,
-                                                     chunk_size_pixels, model_type, interval_end_years,
+                                                     chunk_size_pixels, model_type, cn.veg_model_version_underscore, model_path_description, interval_end_years,
                                                      interval_year_diff_list, run_date, False, "per_ha")
     output_dir_list.sort()  # Alphabetically order the outputs (modifies output_dir_list)
     if is_large_run:
@@ -2396,18 +2455,20 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     if create_zarr:
 
         # Creates s3 paths for the raw mega-zarr
-        raw_mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, chunk_size_pixels, interval_type, model_type, run_date, main_logger)
+        mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, chunk_size_pixels, interval_type,
+                                                  model_type, cn.veg_model_version_underscore, model_path_description,
+                                                  run_date, main_logger)
 
         # These variables are added to the mega-zarr
         outputs_to_zarr = cn.full_outputs_to_zarr
 
         # Creates the global mega-zarr with metadata only
-        zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+        zu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
                                     ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
-        mapper = fs.get_mapper(raw_mega_zarr_path)
+        mapper = fs.get_mapper(mega_zarr_path)
         ds = xr.open_zarr(mapper, consolidated=False)
         main_logger.info(f"mega-zarr coords: {ds.coords}")
         main_logger.info(f"y range: {ds.y.values.min()}, {ds.y.values.max()}")
@@ -2415,7 +2476,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         main_logger.info(f"mega-zarr chunk size (years, y, x): {ds.chunksizes}")
 
     else:
-        raw_mega_zarr_path = None
+        mega_zarr_path = None
         outputs_to_zarr = False
 
 
@@ -2431,7 +2492,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # Accumulates all output messages and statistics across batches
     # From https://chatgpt.com/share/e/5599b6b0-1aaa-4d54-98d3-c720a436dd9a
     all_results = []
-    all_1x1_stats = []
+    all_stats = []
     success_count = 0  # Count of successful chunks
 
     # Iterates through the batches
@@ -2441,31 +2502,73 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         uu.create_s3_task_files(stage, chunk_batch)
 
         # This approach handles large task lists (graphs) better than [dask.delayed(calculate_and_upload_vegetation_fluxes ... )]
+        # safe_vegetation_task is supposed to report task/worker crashes.
+        # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
+        # That chat has a table that explains what different combinations of traceback & memory presence/absence mean for the failure.
         futures = []
         for chunk in chunk_batch:
-            future = client.submit(calculate_and_upload_vegetation_fluxes,
-                                   chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
-                                   download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
-                                   interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
-                                   output_dir_list, stage, model_type, raw_mega_zarr_path, outputs_to_zarr)
+            future = client.submit(
+                        safe_task_wrapper,
+                        chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
+                        download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
+                        interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
+                        output_dir_list, stage, model_type, mega_zarr_path, outputs_to_zarr,
+                        retries=1, key=f"vegflux-{chunk}")  # Designed to prevent infinite retries and rerunning completed tasks (happens in global runs)
             futures.append(future)
 
         batch_results = client.gather(futures)
 
+        for result in batch_results:
+            if isinstance(result, dict) and result.get("status") == "failed":
+                main_logger.error(
+                    "Task failed\n"
+                    f"Error: {result['error']}\n"
+                    f"Memory at failure (GB): {result['memory_at_failure']}\n"
+                    f"Traceback:\n{result['traceback']}"
+                )
+
         all_results.extend(batch_results)
 
         success_count, batch_stats = uu.count_successful_chunks(chunk_batch, is_large_run, main_logger, batch_results)
-        all_1x1_stats.extend(batch_stats)
+        all_stats.extend(batch_stats)
 
         # Saves stats from batch in Excel locally in case the run fails, but only if there are multiple batches.
         # That way there are some basic chunk stats (not sorted or anything) to fall back on.
         if len(chunk_batches) > 1:
-            main_logger.info(f"Writing batch stats to spreadsheet: {uu.timestr()}")
+
+            main_logger.info(f"Writing batch stats to disk: {uu.timestr()}")
             df_batch_stats = pd.DataFrame(batch_stats)
-            out_spreadsheet = f'TEMP_BATCH_{stage}__batch_{i}_{uu.timestr()}.xlsx'
-            local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
-            with pd.ExcelWriter(local_spreadsheet) as writer:
-                df_batch_stats.to_excel(writer, sheet_name=f'stats__batch_{i}', index=False)
+
+            timestamp = uu.timestr()
+
+            # Writes batch output to parquet file if output is large
+            if len(df_batch_stats) > 900_000:
+                out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.parquet"
+                local_path = f"{cn.local_chunk_stats_path}{out_file}"
+
+                # Coerce output to string so there aren't mismatched types
+                # https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694c44d0-19e8-8330-8098-a7ec93366e44
+                for col in ['min_value', 'max_value', 'mean_value', 'sum_value', 'count_value']:
+                    if col in df_batch_stats.columns:
+                        df_batch_stats[col] = df_batch_stats[col].astype(str)
+
+                df_batch_stats.to_parquet(
+                    local_path,
+                    engine="pyarrow",
+                    index=False
+                )
+
+            # Otherwise, writes output to spreadsheet
+            else:
+                out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.xlsx"
+                local_path = f"{cn.local_chunk_stats_path}{out_file}"
+
+                with pd.ExcelWriter(local_path) as writer:
+                    df_batch_stats.to_excel(
+                        writer,
+                        sheet_name=f"stats__batch_{i}",
+                        index=False
+                    )
 
         del futures
         del batch_results
@@ -2483,12 +2586,19 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
 
         # Reduces number of workers in the cluster if there are more than 10
         if n_workers > 10:
-            main_logger.info("Resizing cluster to 1 worker")
+            main_logger.info("Downsizing cluster.")
             resize_cluster.resize_coiled_cluster(cluster_name, n_workers/3)
 
-    # Iterates through output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
+    # TODO move output counting after everything else (chunk stats, zarr comparison, model log aggregation) because cluster times out during this. Can end cluster, and print outputs directly to end of combined log.
+    # TODO Base it on 2_aggregate_outputs_to_10x10deg, where I already made this change
+    # Iterates through select output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
+    keywords = ["gross", "net", "state"]
+    output_dir_list_to_count = [
+        item for item in output_dir_list
+        if any(keyword in item for keyword in keywords)
+    ]
     if not no_upload and is_large_run:
-        for output_folder in output_dir_list:
+        for output_folder in output_dir_list_to_count:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output rasters in {output_folder}: {file_count}")
             # print(geotiff_files)
@@ -2497,7 +2607,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
     if (not no_stats) and (success_count > 0):
-        model_chunk_stats_path = uu.compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
+        model_chunk_stats_path = uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
@@ -2518,22 +2628,6 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
             comparison_insert, main_logger, model_chunk_stats_path)
 
-        # # Resizes cluster if more than 1 chunk is being processed.
-        # # Uses the minimum of the initial number of workers requested and 50
-        # if (not run_local) and (len(chunk_list) > 1):
-        #
-        #     zarr_chunk_stats_workers = min(50, n_workers)
-        #
-        #     main_logger.info(f"Resizing cluster to {zarr_chunk_stats_workers} workers incrementally: {uu.timestr()}")
-        #
-        #     # Increases worker count more gradually than jumping up to the full number all at once
-        #     # because that can cause failures.
-        #     # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69446f3d-0fbc-832a-9629-ae5469adeae3
-        #     for target in [int(zarr_chunk_stats_workers*0.1), int(zarr_chunk_stats_workers*0.25),
-        #                    int(zarr_chunk_stats_workers*0.5), int(zarr_chunk_stats_workers)]:
-        #         resize_cluster.resize_coiled_cluster(cluster_name, target)
-        #         time.sleep(30)
-
         # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
         all_merged_tables = []
 
@@ -2543,8 +2637,14 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         # Number of chuinks that have model chunk stats but not corresponding zarr chunk stats
         chunks_without_zarr_stats_total = 0
 
-        # Iterates through variables/datasets.
-        for var_name in outputs_to_zarr:
+        # Iterates through select variables/datasets for chunk stats comparison. Can modify as needed.
+        outputs_to_compare = [
+            cn.gross_emis_all_C_pools_CO2_only_pattern, cn.gross_emis_all_C_pools_non_CO2_only_pattern, cn.gross_emis_all_C_pools_all_gases_pattern,
+            cn.gross_removals_all_C_pools_pattern,
+            cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
+            cn.non_soil_c_modeled_dens_pattern, cn.land_state_pattern
+        ]
+        for var_name in outputs_to_compare:
 
             main_logger.info(f"Starting {var_name}: {uu.timestr()}")
             var_start_time = time.time()
@@ -2554,7 +2654,8 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
                 client=client,
                 chunk_list=chunk_list,
                 var=var_name,
-                zarr_path=raw_mega_zarr_path,
+                zarr_path=mega_zarr_path,
+                interval_end_years=interval_end_years
             )
 
             # After all zarr chunk stats is done for the dataset-year combination,
@@ -2602,7 +2703,7 @@ def main(cluster_name, year_range, run_local=False, no_stats=False, no_log=False
         # Adds the workers' logs to the main log and uploads to s3
         lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
 
-        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats and worker log compilation", main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats, zarr comparison, and worker log compilation", main_logger)
 
     # Closes the Dask client if not running locally
     if not run_local:
@@ -2619,6 +2720,8 @@ if __name__ == "__main__":
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('-yr', '--year_range', nargs=2, type=int, default=[cn.first_model_year_annual, cn.last_model_year_annual],
                         help='Starting and ending years for model. Start options: 2000, 2015. End options: 2020, 2024.')
+    parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard).')
+    parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area).')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
@@ -2636,6 +2739,8 @@ if __name__ == "__main__":
     chunk_shapefile_uri = args.chunk_shapefile_uri
     first_chunks = args.first_chunks
     year_range = args.year_range
+    model_type = args.model_type
+    model_path_description = args.model_path_description
     log_note = args.log_note
 
     run_local = args.run_local
@@ -2645,5 +2750,6 @@ if __name__ == "__main__":
     create_zarr = args.create_zarr
 
     # Create the cluster with command line arguments
-    main(cluster_name, year_range, run_local, no_stats, no_log, no_upload, create_zarr, chunk_shapefile_uri,
-         bounding_box=bounding_box, chunk_size_deg=chunk_size_deg, first_chunks=first_chunks, run_date=run_date, log_note=log_note)
+    main(cluster_name, year_range, model_type, run_local, no_stats, no_log, no_upload, create_zarr, chunk_shapefile_uri,
+         bounding_box=bounding_box, chunk_size_deg=chunk_size_deg, first_chunks=first_chunks,
+         run_date=run_date, model_path_description=model_path_description, log_note=log_note)

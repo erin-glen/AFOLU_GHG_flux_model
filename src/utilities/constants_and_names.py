@@ -7,8 +7,11 @@ import numpy as np
 ########
 
 ### Model version
-veg_model_version = "1.0.3_test"
+veg_model_version = "1.0.4"
 veg_model_version_underscore = veg_model_version.replace(".", "_")
+
+SOC_soil_model_version = "1.0.0"
+SOC_soil_model_version_underscore = SOC_soil_model_version.replace(".", "_")
 
 organic_soil_model_version = "0.9.7"
 organic_soil_model_version_underscore = organic_soil_model_version.replace(".", "_")
@@ -668,40 +671,10 @@ GPW_MVH_pattern = f"GPW_height"
 
 # Organic Soils
 # Organic soil mask, from Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
-# and thresholded by Erin Glen for peat emissions model. Includes only pixels with organic soil probability >23%,
-# a cutoff determined by OpenGeoHub and implemented by Erin.
-organic_soil_extent_dir = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/peat_mask/OGH/tiles/"
-organic_soil_extent_pattern = "ogh_mask"
+# Per Erin's Slack message 2025-12-23, she is using >10 for organic soil extent, so mineral soil is <=10.
+organic_soil_extent_dir = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/peat_mask/OGH/tiles_unthresholded/20251110/"
+organic_soil_extent_pattern = "ogh_unthresholded_mask"
 
-### Soil organic carbon (SOC) timeseries from OpenGeoHub (OGH) (URIs from https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv)
-# From Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
-# Confirmed to be up-to-date by Tom Hengl on 2025-12-19 via email.
-# Units of raw global COGs are kg C/m^3 for 0-30 cm, multiplied by 10 (rescale factor) to make COGs ints.
-# Values in dict need to be lists (even with just 1 element) because of how uu.prepare_to_download_chunk works.
-SOC_COGS = {
-    "2000_2005": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif"],
-    "2005_2010": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif"],
-    "2010_2015": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20100101_20151231_g_epsg.4326_v20250204.tif"],
-    "2015_2020": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"]
-}
-
-SOC_timeseries_run_date = '20250819'
-SOC_timeseries_base_output_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/soil_organic_carbon_timeseries/"
-
-SOC_density_intervals = ['2000_2005', '2005_2010', '2010_2015', '2015_2020']
-SOC_change_intervals = ['2000_2005_2005_2010', '2005_2010_2010_2015', '2010_2015_2015_2020', '2000_2005_2015_2020']   # Last one is the full-period delta
-
-# Extent of raw COGs
-SOC_density_full_extent_pattern = "SOC_density__full_extent__0-30cm_MgC"
-SOC_density_full_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
-SOC_change_full_extent_pattern = "SOC_change__full_extent__0-30cm_MgC"
-SOC_change_full_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
-
-# Extent of mineral soil (excludes thresholded organic soil extent created by Erin Glen)
-SOC_density_min_soil_extent_pattern = "SOC_density__mineral_soil_extent__0-30cm_MgC"
-SOC_density_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_density_min_soil_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
-SOC_change_min_soil_extent_pattern = "SOC_change__mineral_soil_extent__0-30cm_MgC"
-SOC_change_min_soil_extent_dir = f"{SOC_timeseries_base_output_dir}{SOC_change_min_soil_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 
 # Cropland emissions
 cropland_emis_run_date =  '20241204'
@@ -830,45 +803,43 @@ zarr_difference_tolerance = 0.05
 
 pixel_area_global_zarr = "s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20251209_fillValue_removed/global_pixel_area_20251209.zarr"
 
+model_version_type_description_placeholder = 'version_MODEL_VERSION__TYPE__DESCRIPTION'
 
-model_type_placeholder = "MODEL_TYPE"
-
-veg_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_{veg_model_version_underscore}/"
-# veg_outputs_path_mega_zarr = f"{veg_outputs_path}mega_zarr/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"
-veg_outputs_path_mega_zarr = f"{veg_outputs_path}mega_zarr/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/vegetation_zarr.zarr"
+veg_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/{model_version_type_description_placeholder}/"
+veg_outputs_path_mega_zarr = f"{veg_outputs_path}mega_zarr/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/vegetation_zarr.zarr"
 
 # List of output directories from vegetation model with placeholders for parts of the directory
 veg_core_output_dirs = [
-    f"{veg_outputs_path}{agc_modeled_dens_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{bgc_modeled_dens_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{deadwood_c_modeled_dens_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{litter_c_modeled_dens_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{agc_gross_emis_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{bgc_gross_emis_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{deadwood_c_gross_emis_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{litter_c_gross_emis_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{agc_gross_removals_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{bgc_gross_removals_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{deadwood_c_gross_removals_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{litter_c_gross_removals_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{ch4_flux_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{n2o_flux_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{land_state_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{agc_rf_pre_dist_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+    f"{veg_outputs_path}{agc_modeled_dens_pattern}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{bgc_modeled_dens_pattern}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{deadwood_c_modeled_dens_pattern}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{litter_c_modeled_dens_pattern}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{agc_gross_emis_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{bgc_gross_emis_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{deadwood_c_gross_emis_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{litter_c_gross_emis_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{agc_gross_removals_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{bgc_gross_removals_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{deadwood_c_gross_removals_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{litter_c_gross_removals_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{ch4_flux_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{n2o_flux_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{land_state_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{agc_rf_pre_dist_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
 # Intermediate outputs from vegetation model
 veg_intermediate_output_dirs = [
-    f"{veg_outputs_path}{forest_age_output_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{gain_year_count_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{most_recent_year_not_tall_veg}/{model_type_placeholder}/RUNSTART_END/CHUNK_SIZE_pixels/RUN_DATE/", # Years represent from model start to current interval end
-    f"{veg_outputs_path}{max_height_since_last_time_not_tall_veg}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{first_time_sig_loss_from_max_height}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{part_or_full_dist_in_earlier_intervals}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{part_or_full_dist_in_curr_interval}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{times_burned_in_interval}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{agc_emission_factor}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{composite_primary_forest}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/"
+    f"{veg_outputs_path}{forest_age_output_pattern}/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{gain_year_count_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{most_recent_year_not_tall_veg}/RUNSTART_END/CHUNK_SIZE_pixels/RUN_DATE/", # Years represent from model start to current interval end
+    f"{veg_outputs_path}{max_height_since_last_time_not_tall_veg}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{first_time_sig_loss_from_max_height}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{part_or_full_dist_in_earlier_intervals}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{part_or_full_dist_in_curr_interval}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{times_burned_in_interval}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{agc_emission_factor}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{composite_primary_forest}/MODEL_INTERVAL_TYPE_intervals/YEAR/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
 # Summative outputs from core vegetation model
@@ -897,17 +868,17 @@ full_outputs_to_zarr.extend(veg_summative_output_patterns)
 
 # Summative outputs from core vegetation model
 veg_summative_output_dirs = [
-    f"{veg_outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{gross_emis_all_C_pools_non_CO2_only_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{gross_removals_all_C_pools_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{net_flux_agc_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{net_flux_bgc_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{net_flux_deadwood_c_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{net_flux_litter_c_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{net_flux_all_C_pools_all_gases_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{non_soil_c_modeled_dens_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"  # Only per interval
+    f"{veg_outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{gross_emis_all_C_pools_non_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{gross_removals_all_C_pools_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{net_flux_agc_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{net_flux_bgc_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{net_flux_deadwood_c_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{net_flux_litter_c_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{net_flux_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{non_soil_c_modeled_dens_pattern}/MODEL_INTERVAL_TYPE_intervals/YEAR/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"  # Only per interval
 ]
 
 
@@ -940,16 +911,16 @@ net_flux_all_C_pools_all_gases_LULUCF_pattern = "LULUCF_net_flux__all_C_pools__a
 
 # Summative outputs used for LULUCF totals
 veg_summative_for_LULUCF_output_dirs = [
-    f"{veg_outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{gross_emis_all_C_pools_non_CO2_only_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{gross_removals_all_C_pools_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{net_flux_all_C_pools_all_gases_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+    f"{veg_outputs_path}{gross_emis_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{gross_emis_all_C_pools_non_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{gross_emis_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{gross_removals_all_C_pools_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{net_flux_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{net_flux_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
 soil_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_soil/version_{veg_model_version_underscore}/"
-soil_outputs_path_mega_zarr = f"{soil_outputs_path}mega_zarr/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"
+soil_outputs_path_mega_zarr = f"{soil_outputs_path}mega_zarr/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"
 
 soil_output_patterns = [
     gross_emis_all_C_pools_CO2_only_soil_pattern,
@@ -959,15 +930,58 @@ soil_output_patterns = [
     net_flux_all_C_pools_CO2_only_soil_pattern
 ]
 soil_output_dirs = [
-    f"{soil_outputs_path}{gross_emis_all_C_pools_CO2_only_soil_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{soil_outputs_path}{gross_emis_all_C_pools_non_CO2_only_soil_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{soil_outputs_path}{gross_emis_all_C_pools_all_gases_soil_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{soil_outputs_path}{net_flux_all_C_pools_CO2_only_soil_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{soil_outputs_path}{net_flux_all_C_pools_CO2_only_soil_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+    f"{soil_outputs_path}{gross_emis_all_C_pools_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{soil_outputs_path}{gross_emis_all_C_pools_non_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{soil_outputs_path}{gross_emis_all_C_pools_all_gases_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{soil_outputs_path}{net_flux_all_C_pools_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{soil_outputs_path}{net_flux_all_C_pools_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
-LULUCF_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_LULUCF/version_{veg_model_version_underscore}/"
-LULUCF_outputs_path_mega_zarr = f"{LULUCF_outputs_path}mega_zarr/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"
+### Soil organic carbon (SOC) timeseries from OpenGeoHub (OGH) (URIs from https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv)
+# From Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
+# Confirmed to be up-to-date by Tom Hengl on 2025-12-19 via email.
+# Units of raw global COGs are kg C/m^3 for 0-30 cm, multiplied by 10 (rescale factor) to make COGs ints.
+# Values in dict need to be lists (even with just 1 element) because of how uu.prepare_to_download_chunk works.
+SOC_COGS = {
+    "2005": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20000101_20051231_g_epsg.4326_v20250204.tif"],
+    "2010": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20050101_20101231_g_epsg.4326_v20250204.tif"],
+    "2015": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20100101_20151231_g_epsg.4326_v20250204.tif"],
+    "2020": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20150101_20201231_g_epsg.4326_v20250204.tif"],
+    "2022": ["https://s3.opengeohub.org/global-soil/global_soil_props_v20250204_mosaics/oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm_20200101_20221231_g_epsg.4326_v20250204.tif"]
+}
+
+SOC_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_soil_organic_carbon/{model_version_type_description_placeholder}/"
+
+# Value refers to the end year of the OGH reporting block
+SOC_density_intervals = [2005, 2010, 2015, 2020, 2022]
+# Value refers to the end year of the second OGH reporting block, e.g., 2010 is the comparison of 2000-2005 block vs. 2005-2010 block
+SOC_change_intervals = [2010, 2015, 2020, 2022]
+
+SOC_path_mega_zarr = f"{SOC_outputs_path}mega_zarr/CHUNK_SIZE_pixels/RUN_DATE/SOC_zarr.zarr"
+
+# Extent of raw COGs
+SOC_density_full_extent_pattern = "SOC_density__full_extent__0-30cm_MgC"
+SOC_density_full_extent_dir = f"{SOC_outputs_path}{SOC_density_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+SOC_change_full_extent_pattern = "SOC_change__full_extent__0-30cm_MgC"
+SOC_change_full_extent_dir = f"{SOC_outputs_path}{SOC_change_full_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+
+# Extent of mineral soil (excludes thresholded organic soil extent created by Erin Glen)
+SOC_density_min_soil_extent_pattern = "SOC_density__mineral_soil_extent__0-30cm_MgC"
+SOC_density_min_soil_extent_dir = f"{SOC_outputs_path}{SOC_density_min_soil_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+SOC_change_min_soil_extent_pattern = "SOC_change__mineral_soil_extent__0-30cm_MgC"
+SOC_change_min_soil_extent_dir = f"{SOC_outputs_path}{SOC_change_min_soil_extent_pattern}/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+
+SOC_outputs_to_zarr = [
+    SOC_density_full_extent_pattern, SOC_change_full_extent_pattern,
+    SOC_density_min_soil_extent_pattern, SOC_change_min_soil_extent_pattern
+]
+
+
+
+### LULUCF outputs
+
+LULUCF_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_LULUCF/{model_version_type_description_placeholder}/"
+LULUCF_outputs_path_mega_zarr = f"{LULUCF_outputs_path}mega_zarr/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"
 
 LULUCF_output_patterns = [
     gross_emis_all_C_pools_CO2_only_LULUCF_pattern,
@@ -978,12 +992,12 @@ LULUCF_output_patterns = [
     net_flux_all_C_pools_all_gases_LULUCF_pattern
 ]
 LULUCF_output_dirs = [
-    f"{LULUCF_outputs_path}{gross_emis_all_C_pools_CO2_only_LULUCF_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{LULUCF_outputs_path}{gross_emis_all_C_pools_non_CO2_only_LULUCF_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{LULUCF_outputs_path}{gross_emis_all_C_pools_all_gases_LULUCF_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{LULUCF_outputs_path}{gross_removals_all_C_pools_LULUCF_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{LULUCF_outputs_path}{net_flux_all_C_pools_CO2_only_LULUCF_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{LULUCF_outputs_path}{net_flux_all_C_pools_all_gases_LULUCF_pattern}/{model_type_placeholder}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+    f"{LULUCF_outputs_path}{gross_emis_all_C_pools_CO2_only_LULUCF_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{LULUCF_outputs_path}{gross_emis_all_C_pools_non_CO2_only_LULUCF_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{LULUCF_outputs_path}{gross_emis_all_C_pools_all_gases_LULUCF_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{LULUCF_outputs_path}{gross_removals_all_C_pools_LULUCF_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{LULUCF_outputs_path}{net_flux_all_C_pools_CO2_only_LULUCF_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{LULUCF_outputs_path}{net_flux_all_C_pools_all_gases_LULUCF_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
 #######
@@ -993,6 +1007,8 @@ LULUCF_output_dirs = [
 # Country shapefile, with small islands removed for visual simplicity
 original_shapefile_path = "/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/world-administrative-boundaries_simple__20250102.shp"
 reprojected_shapefile_path = "/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/world-administrative-boundaries_simple__20250102_reproj.shp"
+
+local_jpeg_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v{veg_model_version_underscore}__standard__global/"
 
 # CRS for jpegs (Robinson equal area)
 Robinson_crs = "ESRI:54030"
@@ -1009,9 +1025,10 @@ boundary_width = 0.2 # Width of country boundaries
 panel_dims = (12, 6) # Map panel dimensions (width, height)
 dpi_jpeg = 300 # dpi for output jpegs
 legend_fontsize = 9 # Font size for legend titles and labels
-colorbar_dimensions = [0.14, 0.17, 0.02, 0.13] # [left, bottom, width, height]
+colorbar_dimensions = [0.12, 0.17, 0.02, 0.13] # [left, bottom, width, height]
 
-pres_text = f"Land use vegetation fluxes (model v{veg_model_version}, 2016-2024)"
+pres_text = (f"Land use vegetation fluxes (model v{veg_model_version}, 2016-2024) \n"
+             f"Legend value range represents 1 and 99 percentiles of fluxes across all years.")
 
 # Output global aggregated jpeg names
 three_panel_jpeg_base = f"three_panels__4km_aggregation__v{veg_model_version}"

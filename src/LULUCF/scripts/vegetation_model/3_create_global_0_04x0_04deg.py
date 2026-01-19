@@ -14,19 +14,19 @@ is by telling it to run on only the X first tiles.
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
-python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -fy 1 -fv 1 -ft 1 --run_local --no_upload --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -mt standard -mpd global -fy 1 -fv 1 -ft 1 --run_local --no_upload --input_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_model -fy 1 -fv 1 -ft 1 --no_upload --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -fy 1 -fv 1 -ft 1 --no_upload --input_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_model -fy 2 -fv 2 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
+python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -fy 2 -fv 2 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
 
 Full run:
-python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_model
-python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_model -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -ln "This is intended to be the definitive global 0.04x0.04 deg output run for model v1.0.0 (2016-2024)."
+python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing
+python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_postprocessing --input_date 20251224 -mt standard -mpd global -ln "This is intended to be the definitive global 0.04x0.04 deg output run for model v1.0.0 (2016-2024)."
 
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
 """
@@ -74,7 +74,7 @@ def gdal_translate_progress(pct, message, data):
     return 1  # return 0 would cancel
 
 
-def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path, no_upload, is_large_run):
+def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path, model_version, model_type, model_path_description, no_upload, is_large_run):
 
     logger_worker = lu.setup_logging_worker()
 
@@ -98,10 +98,11 @@ def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path
 
     # Input s3 folder for dataset and year
     base_path = base_path.replace("PATTERN", var_name)
+    base_path = base_path.replace(cn.model_version_type_description_placeholder, f"version_{model_version}__{model_type}__{model_path_description}")
     base_path = base_path.replace("START_END", str(year))
     base_path = base_path.replace("PER_HA_OR_PIXEL", units)
 
-    # Hacky way to fix land_state and other unitless outputs that otherwise have in the pay YYYY//40000_pixels.
+    # Hacky way to fix land_state and other unitless outputs that otherwise have in the path YYYY//40000_pixels.
     # This removes the extra / .
     base_path = base_path.replace("//CHUNK_SIZE_pixels", "/CHUNK_SIZE_pixels")
 
@@ -110,7 +111,7 @@ def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path
     # Output s3 folder for dataset and year
     output_path = base_path.replace("CHUNK_SIZE_pixels", "global")
 
-    output_name = f"{var_name}{units}_{year}_global.tif"
+    output_name = f"{var_name}{units}_v{model_version}_{year}_global.tif"
     # print(output_name)
 
     # Collects s3 tiles for the dataset-year
@@ -189,15 +190,14 @@ def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path
     return f"Global geotif written to {output_path}"
 
 
-def main(cluster_name, input_date, run_local, no_log, no_upload,
-         first_variables_to_process=None, first_years_to_process=None, first_tiles_to_process=None, log_note=None):
+def main(cluster_name, input_date, model_type, run_local, no_log, no_upload,
+         first_variables_to_process=None, first_years_to_process=None, first_tiles_to_process=None, model_path_description=None, log_note=None):
 
 
     ### Step 1: Preparation
 
     # Model stage being run
     stage = 'vegetation_0_04deg_output_global'
-    model_type = 'standard_model'
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -207,6 +207,8 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
+    main_logger.info(f"Model version: {cn.veg_model_version}")
+    main_logger.info(f"Model path descriptor: {model_path_description}")
     main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
@@ -236,7 +238,7 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
         is_large_run = True
         main_logger.info(f"Running as large-scale run model: {is_large_run}")
 
-    base_path = f"{cn.veg_outputs_path}PATTERN/{model_type}/annual_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{input_date}/"
+    base_path = f"{cn.veg_outputs_path}PATTERN/annual_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{input_date}/"
     main_logger.info(f"Core output path for aggregation: {base_path}")
 
 
@@ -252,7 +254,9 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
 
             # future = client.submit(uu.create_10x10_deg_geotif_from_zarr,
             future = client.submit(mosaic_tiles_to_global,
-                                   var_name, year_idx, first_tiles_to_process, base_path, no_upload, is_large_run)
+                                   var_name, year_idx, first_tiles_to_process, base_path,
+                                   cn.veg_model_version_underscore, model_type, model_path_description,
+                                   no_upload, is_large_run)
             futures.append(future)
 
     results = client.gather(futures)
@@ -293,10 +297,12 @@ def main(cluster_name, input_date, run_local, no_log, no_upload,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create global 0.04x0.04 deg output maps.")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-rd', '--input_date', required=True, help='Date of run, in YYYYMMDD')
+    parser.add_argument('-id', '--input_date', required=True, help='Date of run, in YYYYMMDD')
     parser.add_argument('-fv', '--first_variables_to_process', type=int, help='Number of variables to process from raw mega-zarr (for testing)')
     parser.add_argument('-ft', '--first_tiles_to_process', type=int, help='Number of tiles to process (for testing)')
     parser.add_argument('-fy', '--first_years_to_process', type=int, help='Number of years to process from raw mega-zarr (for testing)')
+    parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard).')
+    parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area).')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
@@ -311,6 +317,8 @@ if __name__ == "__main__":
     first_tiles_to_process = args.first_tiles_to_process
     first_variables_to_process = args.first_variables_to_process
     first_years_to_process = args.first_years_to_process
+    model_type = args.model_type
+    model_path_description = args.model_path_description
     log_note = args.log_note
 
     run_local = args.run_local
@@ -319,6 +327,6 @@ if __name__ == "__main__":
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, input_date, run_local, no_log, no_upload,
+    main(cluster_name, input_date, model_type, run_local, no_log, no_upload,
          first_variables_to_process=first_variables_to_process, first_years_to_process=first_years_to_process,
-         first_tiles_to_process=first_tiles_to_process, log_note=log_note)
+         first_tiles_to_process=first_tiles_to_process, model_path_description=model_path_description, log_note=log_note)

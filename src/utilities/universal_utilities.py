@@ -671,7 +671,7 @@ def stage_duration(start_time_str, end_time_str, stage, logger, format="full"):
 # the Numba functions won't be able to handle that (since they're so particular about datatypes).
 # So, that is addressed here through setting the array of 0s to the datatype of the dataset.
 # Revised with https://chatgpt.com/share/e/67bde66c-d9a0-800a-a524-a9ef88c641a2 to return status messages
-def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_type='float32'):
+def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_type):
 
     bounds_str = boundstr(bounds)
     numpy_dtype = map_to_numpy_dtype(data_type)
@@ -732,7 +732,7 @@ def get_tile_dataset_rio(uri, bounds, chunk_length_pixels, logger_worker, data_t
                         padded_data[row_offset:end_row, col_offset:end_col] = data[:end_row - row_offset, :end_col - col_offset]
 
                         data = padded_data
-                        status = f"padded {bounds_str} for {uri} from {original_shape} to {expected_shape}"
+                        status = f"padded {bounds_str} for {uri} from {original_shape} to {expected_shape} with data_type {data_type}/{numpy_dtype}"
 
                     else:
                         status = f"success- {bounds_str} for {uri} complete, no padding needed"
@@ -872,13 +872,14 @@ def check_for_tile(download_dict, is_final, logger):
 
 # Turns a list of basic output directory names into a list of fully specified directories based on output chunk size, run date, model type, and output years
 def create_output_dir_name_list(dir_list, interval_type, start_year, chunk_size_pixels,
-                                model_type, output_years, interval_duration, run_date, include_full_period_totals, pixel_meaning=None):
+                                model_type, model_version, model_path_description, output_years, interval_duration,
+                                run_date, include_full_period_totals, pixel_meaning=None):
 
     # List of directories for outputs
     output_full_dirs = []
 
     # Replaces placeholders in paths with values specific to the run
-    dir_list = [path.replace(cn.model_type_placeholder, model_type) for path in dir_list]
+    dir_list = [path.replace(cn.model_version_type_description_placeholder, f"version_{model_version}__{model_type}__{model_path_description}") for path in dir_list]
     dir_list = [path.replace("MODEL_INTERVAL_TYPE", interval_type) for path in dir_list]
     dir_list = [path.replace("RUN_DATE", run_date) for path in dir_list]
 
@@ -1714,13 +1715,13 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
 
         # Uploads to S3 if needed
         parquet_files = {
-                cn.annual_1x1_inputs: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.annual_1x1_inputs}.parquet",
-                cn.other_1x1_inputs: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.other_1x1_inputs}.parquet",
-                cn.gross_outputs_1x1: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.gross_outputs_1x1}.parquet",
-                cn.net_outputs_1x1: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.net_outputs_1x1}.parquet",
-                cn.other_outputs_1x1: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.other_outputs_1x1}.parquet",
-                cn.min_max_for_layers_1x1: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.min_max_for_layers_1x1}.parquet",
-                cn.counts_1x1_in_10x10: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.counts_1x1_in_10x10}.parquet",
+                cn.annual_1x1_inputs: f"{stage}__v{cn.veg_model_version_underscore}__{cn.annual_1x1_inputs}.parquet",
+                cn.other_1x1_inputs: f"{stage}__v{cn.veg_model_version_underscore}__{cn.other_1x1_inputs}.parquet",
+                cn.gross_outputs_1x1: f"{stage}__v{cn.veg_model_version_underscore}__{cn.gross_outputs_1x1}.parquet",
+                cn.net_outputs_1x1: f"{stage}__v{cn.veg_model_version_underscore}__{cn.net_outputs_1x1}.parquet",
+                cn.other_outputs_1x1: f"{stage}__v{cn.veg_model_version_underscore}__{cn.other_outputs_1x1}.parquet",
+                cn.min_max_for_layers_1x1: f"{stage}__v{cn.veg_model_version_underscore}__{cn.min_max_for_layers_1x1}.parquet",
+                cn.counts_1x1_in_10x10: f"{stage}__v{cn.veg_model_version_underscore}__{cn.counts_1x1_in_10x10}.parquet",
             }
 
         if not no_upload:

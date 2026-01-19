@@ -5,6 +5,7 @@ import os
 import statistics
 import sys
 import time
+import numpy as np
 
 from dask.distributed import print
 
@@ -55,7 +56,6 @@ def populate_main_log_header(client, cluster, log_note, run_local, model_type, s
 
     main_logger.info(f"Model type: {model_type}")
     main_logger.info(f"Stage: {stage}")
-    main_logger.info(f"Model version: {cn.veg_model_version}")
     main_logger.info(f"Number of workers: {n_workers}")
     main_logger.info(f"Memory per worker: {worker_memory}")
     main_logger.info(f"Threads per worker: {nthreads}")
@@ -151,7 +151,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
 
         # Time extraction from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/691f42e3-cd2c-800a-b9e1-715190ad3024
         # Extracts seconds from lines for core calculation processing
-        numba_proc_times__sec = [int(m) for m in re.findall(r'Calculated using numba.*?(\d+) seconds', log_content)]
+        calc_proc_times__sec = [int(m) for m in re.findall(r'Calculated.*?(\d+) seconds', log_content)]
 
         # Extract seconds from lines for zarr insertion
         zarr_insert_proc_times__sec = [int(m) for m in re.findall(r'Wrote outputs to global zarrs.*?(\d+) seconds', log_content)]
@@ -162,37 +162,44 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
         # Extract seconds from lines for total chunk processing
         total_chunk_proc_times__sec = [int(m) for m in re.findall(r'Total chunk processing.*?(\d+) seconds', log_content)]
 
+        # Extract peak memory usage
+        peak_memory__GB = [np.float32(m) for m in re.findall(r'Peak memory for [^:]+: ([0-9]+(?:\.[0-9]+)?) GB', log_content)]
+
         # Averages
-        avg_numba_proc_times__sec = sum(numba_proc_times__sec) / len(numba_proc_times__sec) if numba_proc_times__sec else 0
+        avg_calc_proc_times__sec = sum(calc_proc_times__sec) / len(calc_proc_times__sec) if calc_proc_times__sec else 0
         avg_zarr_pop_proc_times__sec = sum(zarr_insert_proc_times__sec) / len(zarr_insert_proc_times__sec) if zarr_insert_proc_times__sec else 0
         avg_uploads_proc_times__sec = sum(uploads_proc_times__sec) / len(uploads_proc_times__sec) if uploads_proc_times__sec else 0
         avg_total_chunk_proc_times__sec = sum(total_chunk_proc_times__sec) / len(total_chunk_proc_times__sec) if total_chunk_proc_times__sec else 0
+        avg_peak_memory__GB = sum(peak_memory__GB) / len(peak_memory__GB) if peak_memory__GB else 0
 
         # Standard deviations
-        stdev_numba_proc_times__sec = statistics.stdev(numba_proc_times__sec) if len(numba_proc_times__sec) > 1 else 0
+        stdev_calc_proc_times__sec = statistics.stdev(calc_proc_times__sec) if len(calc_proc_times__sec) > 1 else 0
         stdev_zarr_pop_proc_times__sec = statistics.stdev(zarr_insert_proc_times__sec) if len(zarr_insert_proc_times__sec) > 1 else 0
         stdev_uploads_proc_times__sec = statistics.stdev(uploads_proc_times__sec) if len(uploads_proc_times__sec) > 1 else 0
         stdev_total_chunk_proc_times__sec = statistics.stdev(total_chunk_proc_times__sec) if len(total_chunk_proc_times__sec) > 1 else 0
+        stdev_peak_memory__GB = statistics.stdev(peak_memory__GB) if len(peak_memory__GB) > 1 else 0
 
         # Mins
-        min_numba_proc_times__sec = min(numba_proc_times__sec) if numba_proc_times__sec else 0
+        min_calc_proc_times__sec = min(calc_proc_times__sec) if calc_proc_times__sec else 0
         min_zarr_pop_proc_times__sec = min(zarr_insert_proc_times__sec) if zarr_insert_proc_times__sec else 0
         min_uploads_proc_times__sec = min(uploads_proc_times__sec) if uploads_proc_times__sec else 0
         min_total_chunk_proc_times__sec = min(total_chunk_proc_times__sec) if total_chunk_proc_times__sec else 0
+        min_peak_memory__GB = min(peak_memory__GB) if peak_memory__GB else 0
 
         # Maxes
-        max_numba_proc_times__sec = max(numba_proc_times__sec) if numba_proc_times__sec else 0
+        max_calc_proc_times__sec = max(calc_proc_times__sec) if calc_proc_times__sec else 0
         max_zarr_pop_proc_times__sec = max(zarr_insert_proc_times__sec) if zarr_insert_proc_times__sec else 0
         max_uploads_proc_times__sec = max(uploads_proc_times__sec) if uploads_proc_times__sec else 0
         max_total_chunk_proc_times__sec = max(total_chunk_proc_times__sec) if total_chunk_proc_times__sec else 0
+        max_peak_memory__GB = max(peak_memory__GB) if peak_memory__GB else 0
 
         # Step 3: Append results to the log file
         with open(combined_local_log, "a") as outfile:
             outfile.write("\n")
             outfile.write("=== Chunk-level processing times (approximate because worker log may be missing end) ===\n")
-            outfile.write(f"Processing stats for numba code ({len(numba_proc_times__sec)} tasks):\n")
-            outfile.write(f"  Average and stdev: {avg_numba_proc_times__sec:.0f} seconds (stdev: {stdev_numba_proc_times__sec:.0f})\n")
-            outfile.write(f"  Min and max: {min_numba_proc_times__sec:.0f} - {max_numba_proc_times__sec:.0f}\n")
+            outfile.write(f"Processing stats for calculation code ({len(calc_proc_times__sec)} tasks):\n")
+            outfile.write(f"  Average and stdev: {avg_calc_proc_times__sec:.0f} seconds (stdev: {stdev_calc_proc_times__sec:.0f})\n")
+            outfile.write(f"  Min and max: {min_calc_proc_times__sec:.0f} - {max_calc_proc_times__sec:.0f}\n")
 
             outfile.write(f"Processing stats for zarr insertion code ({len(zarr_insert_proc_times__sec)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_zarr_pop_proc_times__sec:.0f} seconds (stdev: {stdev_zarr_pop_proc_times__sec:.0f})\n")
@@ -205,6 +212,11 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
             outfile.write(f"Processing stats for full tasks ({len(total_chunk_proc_times__sec)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_total_chunk_proc_times__sec:.0f} seconds (stdev: {stdev_total_chunk_proc_times__sec:.0f})\n")
             outfile.write(f"  Min and max: {min_total_chunk_proc_times__sec:.0f} - {max_total_chunk_proc_times__sec:.0f}\n")
+
+            outfile.write(f"Peak memory usage for tasks ({len(peak_memory__GB)} tasks):\n")
+            outfile.write(f"  Average and stdev: {avg_peak_memory__GB:.2f} GB (stdev: {stdev_peak_memory__GB:.2f})\n")
+            outfile.write(f"  Min and max: {min_peak_memory__GB:.2f} - {max_peak_memory__GB:.2f}\n")
+
             outfile.write("--- End of log---\n")
 
             print(f"Combined log saved as {combined_local_log}")  # Does not go in the log because it's closed
@@ -215,7 +227,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
     # Removes the main log if the stage doesn't run in batches.
     # The main log must be kept for stages that run in batches because each batch uses the same main log.
     # The main log can be manually deleted after the run is done.
-    if stage not in ["create_forest_age_2010_2015__1x1_deg", "LULUCF_fluxes", "soil_carbon_densities_and_changes"]:
+    if stage not in ["create_forest_age_2010_2015__1x1_deg", "vegetation_fluxes", "soil_carbon_densities_and_changes"]:
         os.remove(main_log)
 
     if not no_log:

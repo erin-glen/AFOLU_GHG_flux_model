@@ -208,7 +208,7 @@ def create_LULUCF_outputs(bounds, interval_type, interval_year_diff_list,
     ### Part 3: Writes outputs to pre-existing global mega-zarr (only if requested)
 
     zu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, raw_mega_zarr_path,
-                     out_dict, outputs_to_zarr, process, stage, tile_id)
+                     out_dict, outputs_to_zarr, stage, tile_id)
 
     ### Part 4: Calculates per ha min, per ha mean, per ha max, and per pixel sum for each output chunk.
     ### Useful for QC-- to see if there are any egregiously incorrect or unexpected values.
@@ -220,7 +220,7 @@ def create_LULUCF_outputs(bounds, interval_type, interval_year_diff_list,
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
 
     # Gets numpy arrays of the model output being analyzed and the area (m^2) per pixel
-    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, bounds, chunk_length_pixels, 'Float32')
+    pixel_area_chunk = uu.get_tile_dataset_rio(pixel_area_uri, bounds, chunk_length_pixels, logger_worker,'Float32')
     pixel_area_chunk = pixel_area_chunk[0]  # Converts downloaded tuple (array, status) to just the array
 
     # Calculates stats for the output layers as a dictionary with chunk attributes
@@ -373,7 +373,7 @@ def main(cluster_name, run_date, veg_input_date, organic_soil_input_date, minera
     # Creates a list of input directories used in summative output creation based on specifics of the model run
     veg_inputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.veg_summative_for_LULUCF_output_dirs, "annual",
                                                                            cn.first_model_year_annual,
-                                                                           chunk_size_pixels, model_type,
+                                                                           chunk_size_pixels, cn.veg_model_version_underscore, model_type,
                                                                            interval_end_years_list_veg,
                                                                            interval_year_diff_list_veg, veg_input_date, False,
                                                                            "per_ha")
@@ -401,8 +401,7 @@ def main(cluster_name, run_date, veg_input_date, organic_soil_input_date, minera
     # Creates a list of output directories for LULUCF totals
     LULUCF_summative_outputs_by_interval_dir_list = uu.create_output_dir_name_list(cn.LULUCF_output_dirs, "annual",
                                                                             cn.first_model_year_annual,
-                                                                            chunk_size_pixels, model_type,
-                                                                            interval_end_years_list_veg,
+                                                                            chunk_size_pixels, model_type, cn.veg_model_version_underscore,
                                                                             interval_year_diff_list_veg, veg_input_date,False,
                                                                             "per_ha")
 
@@ -436,7 +435,8 @@ def main(cluster_name, run_date, veg_input_date, organic_soil_input_date, minera
         # main_logger.info(f"x range: {ds.x.values.min()}, {ds.x.values.max()}")
         # main_logger.info(f"mega-zarr chunk size (years, y, x): {ds.chunksizes}")
 
-        raw_mega_zarr_path = zu.create_mega_zarr_path(cn.LULUCF_outputs_path_mega_zarr, chunk_size_pixels, interval_type_veg, model_type, run_date, main_logger)
+        raw_mega_zarr_path = zu.create_mega_zarr_path(cn.LULUCF_outputs_path_mega_zarr, chunk_size_pixels, interval_type_veg,
+                                                      model_type, model_version, run_date, main_logger)
         outputs_to_zarr = cn.LULUCF_output_patterns  # [0:2] # For testing
 
         # Creates the global mega-zarr with metadata only
