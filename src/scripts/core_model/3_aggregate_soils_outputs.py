@@ -27,7 +27,7 @@ DEFAULT_OUTPUT_DATE = "20251007"
 
 def get_output_folders(
     interval_type: str,
-    pixel_resolution: str = "4000_pixels",
+    output_pixel_resolution: str,
     run_name: str = "ogh_standard_model",
     output_date: str = DEFAULT_OUTPUT_DATE,
 ) -> list:
@@ -38,7 +38,7 @@ def get_output_folders(
         for dtype in DATA_TYPES:
             path = (
                 f"{BASE_URL}/{dtype}/{run_name}/"
-                f"{interval_folder}/{period}/{pixel_resolution}/{output_date}"
+                f"{interval_folder}/{period}/{output_pixel_resolution}/{output_date}"
             )
             paths.append(path)
     return paths
@@ -66,7 +66,7 @@ def create_10x10_outputs_from_zarr(
     tile_id: str,
     zarr_path: str,
     interval_type: str,
-    pixel_resolution: str,
+    output_pixel_resolution: str,
     run_name: str,
     output_date: str,
     is_final: bool,
@@ -93,7 +93,7 @@ def create_10x10_outputs_from_zarr(
     output_interval_folder = f"{interval_type}_intervals"
     output_dir_per_ha = (
         f"{BASE_URL}/{dataset}/{run_name}/{output_interval_folder}/"
-        f"{period}/{pixel_resolution}/{output_date}/"
+        f"{period}/{output_pixel_resolution}/{output_date}/"
     )
     output_name_per_ha = f"{tile_id}__{dataset}__{period}.tif"
 
@@ -103,7 +103,7 @@ def create_10x10_outputs_from_zarr(
         dataset_pixel = dataset.replace("_ha_", "_pixel_")
         output_dir_per_pixel = (
             f"{BASE_URL}/{dataset_pixel}/{run_name}/{output_interval_folder}/"
-            f"{period}/{pixel_resolution}/{output_date}/"
+            f"{period}/{output_pixel_resolution}/{output_date}/"
         )
         output_name_per_pixel = f"{tile_id}__{dataset_pixel}__{period}.tif"
 
@@ -198,6 +198,7 @@ def main(
     lu.print_and_log(f"Stage {stage} started at: {start_time}", False, logger)
 
     chunk_size_pixels = int(pixel_resolution.replace("_pixels", ""))
+    output_pixel_resolution = f"{cn.full_raster_dims}_pixels"
     year_index, year_lookup = build_year_indices(interval_type)
     period_lookup = build_period_lookup()
 
@@ -233,7 +234,7 @@ def main(
                         tile_id,
                         zarr_path,
                         interval_type,
-                        pixel_resolution,
+                        output_pixel_resolution,
                         run_name,
                         output_date,
                         is_final,
@@ -254,7 +255,7 @@ def main(
     )
 
     output_folders = get_output_folders(
-        interval_type, pixel_resolution, run_name, output_date
+        interval_type, output_pixel_resolution, run_name, output_date
     )
     output_folders_pixel = [
         folder.replace("_ha_", "_pixel_") for folder in output_folders
