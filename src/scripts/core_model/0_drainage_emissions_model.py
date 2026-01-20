@@ -841,19 +841,6 @@ def calculate_and_upload_drainage(
         if old in outputs:
             outputs[new] = outputs.pop(old) / interval_length
 
-    if "drained_co2_Mg_CO2_ha_yr" in outputs:
-        outputs["drained_total_co2_Mg_CO2_ha_yr"] = (
-            outputs["drained_co2_Mg_CO2_ha_yr"] + outputs["drained_co2_offsite_Mg_CO2_ha_yr"]
-        )
-    if "drained_ch4_land_Mg_CO2e_ha_yr" in outputs:
-        outputs["drained_total_ch4_Mg_CO2e_ha_yr"] = (
-            outputs["drained_ch4_land_Mg_CO2e_ha_yr"] + outputs["drained_ch4_ditch_Mg_CO2e_ha_yr"]
-        )
-    if "burned_co2_Mg_CO2_ha_yr" in outputs:
-        outputs["burned_total_co2_Mg_CO2_ha_yr"] = outputs["burned_co2_Mg_CO2_ha_yr"]
-    if "burned_ch4_Mg_CO2e_ha_yr" in outputs:
-        outputs["burned_total_ch4_Mg_CO2e_ha_yr"] = outputs["burned_ch4_Mg_CO2e_ha_yr"]
-
     pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tid}.tif"
     pixel_area_chunk = uu.get_tile_dataset_rio(
         pixel_area_uri,
