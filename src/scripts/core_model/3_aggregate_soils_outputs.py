@@ -78,6 +78,15 @@ def create_10x10_outputs_from_zarr(
     bstr = uu.boundstr(bounds)
 
     data_per_ha = load_zarr_window(zarr_path, dataset, bounds, year_idx)
+    has_data = np.any(np.isfinite(data_per_ha) & (data_per_ha != 0))
+    if not has_data:
+        logger.info(
+            "Skipping %s %s %s (no nonzero data in tile).",
+            tile_id,
+            dataset,
+            period,
+        )
+        return f"Skipped empty {tile_id} {dataset} {period}", []
 
     dtype_str = cn.drainage_output_dtypes.get(dataset, "float32")
     is_numeric = dtype_str == "float32"
