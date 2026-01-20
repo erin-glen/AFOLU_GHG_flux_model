@@ -548,7 +548,7 @@ def combine_burned_area(
     layers: dict,
     iv_start: int,
     iv_end: int,
-    count_burned_years: bool = False,
+    count_burned_years: bool = True,
 ):
     """Combine annual burned area layers over an interval.
 
@@ -592,7 +592,7 @@ def calculate_and_upload_drainage(
     peat_dataset="ogh",
     run_name="ogh_standard_model",
     peat_threshold: Optional[float] = None,
-    count_burned_years=False,
+    count_burned_years: bool = True,
     emission_factor_variant: str = "default",
     mega_zarr_path: Optional[str] = None,
     outputs_to_zarr: Optional[list[str]] = None,
@@ -622,19 +622,19 @@ def calculate_and_upload_drainage(
         Threshold applied to the peat probability layer when using the OGH
         dataset. Values strictly greater than the threshold are treated as
         peat. ``None`` disables thresholding and uses the raw probabilities.
-        count_burned_years : bool, optional
-            If ``True``, count the number of burned years within the interval and
-            multiply burned emissions accordingly.
-        emission_factor_variant : {"low", "default", "high"}, optional
-            Select which emission factor table set to use for drainage and
-            burned‑area emissions.
-        mega_zarr_path : str, optional
-            Path to the global mega-zarr store for chunk output writes.
-        outputs_to_zarr : list[str], optional
-            Output datasets to populate into the mega-zarr.
-        interval_end_years : list[int], optional
-            Ordered year index used to locate the interval end year in zarr.
-            This can be the full-model year index when populating a global store.
+    count_burned_years : bool, optional
+        If ``True``, count the number of burned years within the interval and
+        multiply burned emissions accordingly.
+    emission_factor_variant : {"low", "default", "high"}, optional
+        Select which emission factor table set to use for drainage and
+        burned‑area emissions.
+    mega_zarr_path : str, optional
+        Path to the global mega-zarr store for chunk output writes.
+    outputs_to_zarr : list[str], optional
+        Output datasets to populate into the mega-zarr.
+    interval_end_years : list[int], optional
+        Ordered year index used to locate the interval end year in zarr.
+        This can be the full-model year index when populating a global store.
     """
 
     logger = lu.setup_logging_worker()
@@ -1045,7 +1045,7 @@ def run_drainage_model(
     peat_dataset="ogh",
     run_name="ogh_standard_model",
     peat_threshold: Optional[float] = DEFAULT_OGH_THRESHOLD,
-    count_burned_years=False,
+    count_burned_years: bool = True,
     emission_factor_variant: str = "default",
     mega_zarr_path: Optional[str] = None,
     outputs_to_zarr: Optional[list[str]] = None,
@@ -1311,7 +1311,7 @@ def main(argv=None):
             peat_dataset="ogh",
             run_name="ogh_standard_model",
             peat_threshold=DEFAULT_OGH_THRESHOLD,
-            count_burned_years=False,
+            count_burned_years=True,
             emission_factor_variant="default",
         )
         return
@@ -1390,8 +1390,12 @@ def main(argv=None):
     )
     p.add_argument(
         "--count_burned_years",
-        action="store_true",
-        help="Multiply burned emissions by the number of burned years in each interval",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Multiply burned emissions by the number of burned years in each interval "
+            "(use --no-count_burned_years to disable)."
+        ),
     )
     p.add_argument(
         "--emission_factor_variant",
