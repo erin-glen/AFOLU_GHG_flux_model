@@ -37,6 +37,7 @@ import psutil
 import sys
 import time
 import fsspec
+import math
 import xarray as xr
 import resource
 from concurrent.futures import ThreadPoolExecutor
@@ -83,7 +84,10 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
     # Used only to determine starting C pools for pixels with TCL 2001-2014
     TCL_block = in_dict_uint8[cn.TCL_pattern]
-    planted_forest_RF_block = in_dict_float32[cn.planted_forest_AGC_BGC_removal_factor_pattern]
+    planted_forest_AGC_RF_block = in_dict_float32[cn.planted_forest_AGC_removal_factor_pattern]
+    oil_palm_2000_extent_block = in_dict_uint8[cn.oil_palm_2000_extent_pattern]
+    oil_palm_first_year_block = in_dict_int16[cn.oil_palm_first_year_pattern]
+    # NOTE: Uses just the 0-5 year Robinson regrowth rate, regardless of how many years of regrowth there are. This just keeps things simpler than using the different age rates.
     natural_forest_growth_curve_pattern_block = in_dict_float32[cn.natural_forest_growth_curve_pattern]
 
     # AGB block sources (mangrove and non-mangrove) depend on the starting year
@@ -124,7 +128,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     for row in range(continent_ecozone_block.shape[0]):
         for col in range(continent_ecozone_block.shape[1]):
 
-            ### Part 1: Pixel-level values
+            ### Part 1: Pixel-level input values
 
             # Input values for this specific cell
             agb_non_mang_cell = agb_non_mang_block[row, col]
@@ -139,6 +143,12 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             veg_height_cell = veg_height_block[row, col]
             mangrove_extent_cell = mangrove_extent_block[row, col]
 
+            TCL_cell = TCL_block[row, col]
+            planted_forest_AGC_RF_cell = planted_forest_AGC_RF_block[row, col]
+            oil_palm_2000_extent_cell = oil_palm_2000_extent_block[row, col]
+            oil_palm_first_year_cell = oil_palm_first_year_block[row, col]
+            natural_forest_growth_curve_pattern_cell = natural_forest_growth_curve_pattern_block[row, col]
+
             # Applies the continent_ecozne fallback value when there isn't a value for the pixel
             if continent_ecozone_cell == 0:
                 continent_ecozone_cell = continent_ecozone_fallback
@@ -151,7 +161,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             mangrove_pixel = (mangrove_agb_cell > 0) or (mangrove_extent_cell > 0)
 
 
-            ### Part 2: Calculation of raw carbon density outputs (not masked by veg height/land cover)
+            ### Part 2: Calculation of raw carbon density outputs (not masked by veg height/land cover/TCL history)
 
             # If mangrove pixel, AGC is calculated from it, overwriting any AGC that is based on non-mang AGB that is already there
             if mangrove_pixel == True:  # Checks if it's a mangrove pixel
@@ -174,11 +184,10 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
             # Mangrove carbon pool ratio branch
             # From IPCC 2013 Wetland Supplement
-            if mangrove_pixel == True:  # Only replaces non-mangrove AGB if mangrove chunk exists and if mangrove value in that pixel
+            if mangrove_pixel == True:  # Only replaces non-mangrove AGB if mangrove value in that pixel
 
-                bgc_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 1]
-                deadwood_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 2]
-                litter_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 3]
+                mangrove_AGC_RF, bgc_ratio, deadwood_c_ratio, litter_c_ratio = (
+                    nu.calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array))
 
 
             # Non-mangrove carbon pool ratio branch
@@ -227,7 +236,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             litter_c_raw_out_cell = agc_raw_out_cell * litter_c_ratio
 
 
-            ### Part 3: Calculation of carbon density outputs masked by veg height/land cover
+            ### Part 3: Calculation of carbon density outputs masked by veg height/land cover/TCL history
 
             bare_ground_LC, short_veg_LC, tall_veg_LC = nu.classify_GLAD_composite(LC_composite_cell)
 
@@ -235,13 +244,37 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             # and adjusted for vegetation cover fraction
             short_veg_AGC_adj, short_veg_BGC_adj = nu.calc_short_veg_removals(climate_zone_cell, LC_composite_cell)
 
+
             # Assigns carbon densities based on vegetation height and composite landcover.
             # Tall vegetation and/or mangrove (i.e. mangrove pixels without tall vegetation keep all C pools)
             if (veg_height_cell >= cn.tree_threshold) or (mangrove_pixel == True):
-                agc_LC_masked_out_cell = agc_raw_out_cell
-                bgc_LC_masked_out_cell = bgc_raw_out_cell
-                deadwood_c_LC_masked_out_cell = deadwood_c_raw_out_cell
-                litter_c_LC_masked_out_cell = litter_c_raw_out_cell
+
+                # When pixels had TCL before model start, starting C densities are adjusted
+                if (TCL_cell > 0) and (TCL_cell < 15):
+                    years_of_regrowth = math.floor((15-TCL_cell)/2)
+                    if mangrove_extent_cell:  # For mangroves
+                        agc_LC_masked_out_cell = years_of_regrowth * mangrove_AGC_RF
+                        r_s_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 1]
+                        deadwood_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 2]
+                        litter_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 3]
+                    elif oil_palm_2000_extent_cell or (oil_palm_first_year_cell < 15):
+                        agc_LC_masked_out_cell = years_of_regrowth * cn.oil_palm_agc_rf
+                    elif planted_forest_AGC_RF_cell:   # For planted trees
+                        agc_LC_masked_out_cell = years_of_regrowth * planted_forest_AGC_RF_cell
+                    elif not tall_veg_LC:   # For trees in other land uses
+                        agc_LC_masked_out_cell = years_of_regrowth * cn.trees_outside_forests_agc_rf_max
+                    else:   # For everything else
+                        agc_LC_masked_out_cell = years_of_regrowth * natural_forest_growth_curve_pattern_cell
+
+                    bgc_LC_masked_out_cell = agc_LC_masked_out_cell * r_s_ratio
+                    deadwood_c_LC_masked_out_cell = agc_LC_masked_out_cell * deadwood_c_ratio
+                    litter_c_LC_masked_out_cell = agc_LC_masked_out_cell * litter_c_ratio
+                else:
+                    agc_LC_masked_out_cell = agc_raw_out_cell
+                    bgc_LC_masked_out_cell = bgc_raw_out_cell
+                    deadwood_c_LC_masked_out_cell = deadwood_c_raw_out_cell
+                    litter_c_LC_masked_out_cell = litter_c_raw_out_cell
+
             elif short_veg_LC:  # Short vegetation
                 agc_LC_masked_out_cell = short_veg_AGC_adj
                 bgc_LC_masked_out_cell = short_veg_BGC_adj
@@ -436,7 +469,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         output_per_pixel = array_per_ha * pixel_area_chunk * cn.m2_to_ha
 
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
-    print(chunk_stats)
+    # print(chunk_stats)
 
     ### Part 7: Saves numpy arrays as rasters and uploads to s3
 
@@ -603,9 +636,12 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
         download_dict[cn.vegetation_height_pattern] = f"{cn.vegetation_height_annual_path}2015/{sample_tile_id}.tif"
         download_dict[cn.mangrove_extent_processed_pattern] = f"{cn.mangrove_extent_processed_dir}2015/{sample_tile_id}__{cn.mangrove_extent_processed_pattern}_2015.tif"
 
-        # These inputs are exclusively used to adjust C pools in 2015 for TCL that occurred 2001-2014
+        # These inputs are exclusively used to adjust C pools in 2015 for TCL that occurred 2001-2014.
+        # NOTE: Uses just the 0-5 year Robinson regrowth rate, regardless of how many years of regrowth there are. This just keeps things simpler than using the different age rates.
         download_dict[cn.TCL_pattern] = f"{cn.TCL_dir}{cn.TCL_pattern}_{sample_tile_id}.tif"
-        download_dict[cn.planted_forest_AGC_BGC_removal_factor_pattern] = f"{cn.planted_forest_AGC_BGC_removal_factor_dir}{sample_tile_id}_{cn.planted_forest_AGC_BGC_removal_factor_pattern}.tif"
+        download_dict[cn.planted_forest_AGC_removal_factor_pattern] = f"{cn.planted_forest_AGC_removal_factor_dir}{sample_tile_id}_{cn.planted_forest_AGC_removal_factor_pattern}.tif"
+        download_dict[cn.oil_palm_2000_extent_pattern] = f"{cn.oil_palm_2000_extent_dir}{sample_tile_id}_{cn.oil_palm_2000_extent_pattern}.tif"
+        download_dict[cn.oil_palm_first_year_pattern] = f"{cn.oil_palm_first_year_dir}{cn.oil_palm_first_year_pattern}_{sample_tile_id}.tif"   # Pattern is before tile_id for this input
         download_dict[f"{cn.natural_forest_growth_curve_pattern}"] = \
             f"{cn.natural_forest_growth_curve_dir}rate_0_5/{sample_tile_id}_{cn.natural_forest_growth_curve_pattern}__0_5_years__nibble_{cn.secondary_forest_curve_run_date}.tif"
 
