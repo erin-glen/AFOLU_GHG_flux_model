@@ -322,15 +322,17 @@ agb_2000_pattern = "t_aboveground_biomass_ha_2000"
 # https://data.ceda.ac.uk/neodc/esacci/biomass/data/agb/maps/v5.01/geotiff
 # Bulk downloaded to computer (/mnt/c/GIS/AFOLU_flux_model/ESA_CCI_2015/) using WSL Ubuntu:
 # wget -e robots=off --mirror --no-parent -r https://dap.ceda.ac.uk/neodc/esacci/biomass/data/agb/maps/v6.0/geotiff/2015/
-esa_AGB_v = 'v6_0'
+esa_AGB_v = 'v5_01'  #TODO for testing
+# esa_AGB_v = 'v6_0'
 agb_2015_dir_raw = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/AGB/raw/"
 agb_2015_pattern_raw = "ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv6.0"
-agb_2015_dir_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/AGB/processed/20250217/"
+# agb_2015_dir_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/AGB/processed/20260120/"
+agb_2015_dir_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/AGB/processed/20250217/" #TODO for testing
 agb_2015_pattern = "AGB_2015_ESA_CCI_Mg_AGB_ha"
 
 agb_stdev_2015_dir_raw = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/AGB_stdev/raw/"
 agb_stdev_2015_pattern_raw = "ESACCI-BIOMASS-L4-AGB_SD-MERGED-100m-2015-fv6.0"
-agb_stdev_2015_dir_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/AGB_stdev/processed/20250217/"
+agb_stdev_2015_dir_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/AGB_stdev/processed/20260120/"
 agb_stdev_2015_pattern = "AGB_stdev_2015_ESA_CCI_Mg_AGB_ha"
 
 mangrove_agb_2000_dir = f"{full_bucket_prefix}/climate/carbon_model/mangrove_biomass/processed/standard/20190220/"
@@ -404,7 +406,7 @@ starting_C_densities_2000_path_mega_zarr = f"{full_bucket_prefix}/climate/WHRC_b
 
 
 ## 2015
-carbon_2015_creation_date = '20260120'
+carbon_2015_creation_date = '20260121'
 
 agc_2015_raw_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/year_2015_derived_carbon_pools/{agc_raw_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
 agc_2015_raw_pattern = f"{agc_raw_dens_pattern}_2015"

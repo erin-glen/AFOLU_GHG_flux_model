@@ -2590,7 +2590,7 @@ def main(cluster_name, year_range, model_type,
             resize_cluster.resize_coiled_cluster(cluster_name, n_workers/3)
 
     # TODO move output counting after everything else (chunk stats, zarr comparison, model log aggregation) because cluster times out during this. Can end cluster, and print outputs directly to end of combined log.
-    # TODO Base it on 2_aggregate_outputs_to_10x10deg, where I already made this change
+    # TODO Base it on 1_create_starting_carbon_pools, where I already made this change
     # Iterates through select output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
     keywords = ["gross", "net", "state"]
     output_dir_list_to_count = [

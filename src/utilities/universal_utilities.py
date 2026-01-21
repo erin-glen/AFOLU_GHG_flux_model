@@ -2478,7 +2478,7 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt, ma
     upload_s3_file(output_vrt_s3, local_vrt)
 
     #If successfully uploaded, delete local vrt
-    if check_s3_file_created(output_vrt_s3, main_logger):
+    if check_s3_file_created(output_vrt_s3):
         #Delete local VRT file     #TODO create a microservice to do this instead of repeating code in multiple functions
         try:
             os.remove(local_vrt)
@@ -2557,13 +2557,16 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
     logger_worker = lu.setup_logging_worker()
     lu.print_and_log(f"Creating {filename}: {timestr('time')}", False, logger_worker)
 
+    startup_delay = random.uniform(0, 3)  # Slight delay before s3 is accessed so that request quota isn't exceeded
+    time.sleep(startup_delay)
+
     # Check that pixel window arguments are given if tiled = True
     if tiled and not (x_pixel_window and y_pixel_window):
         raise ValueError("If tiled = True, x_pixel_window and y_pixel_window must be passed as arguments")
 
     # Open the VRT
     source_vrt_path = source_vrt_path.replace("s3://", "/vsis3/")
-    print(f"in hansen function, vrt path is {source_vrt_path}")
+    # print(f"in hansen function, vrt path is {source_vrt_path}")
     dataset = gdal.Open(str(Path(source_vrt_path)))
 
     #Code to run gdal warp using Python API

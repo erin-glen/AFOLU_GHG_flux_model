@@ -28,10 +28,16 @@ from src.utilities.constants_and_names import intervals_annual
 # var_name = 'carbon_density__AGC__MgC'
 # interval_end_years = cn.interval_end_years_annual
 
-bounds = [110, -1 ,111, 0]
-zarr_path = 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_soil_organic_carbon/version_1_0_0__standard__test_box/mega_zarr/4000_pixels/20251223/SOC_zarr.zarr'
-var_name = 'SOC_density__full_extent__0-30cm_MgC'
-interval_end_years = cn.SOC_density_intervals
+# bounds = [110, -1 ,111, 0]
+# zarr_path = 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_soil_organic_carbon/version_1_0_0__standard__test_box/mega_zarr/4000_pixels/20251223/SOC_zarr.zarr'
+# var_name = 'SOC_density__full_extent__0-30cm_MgC'
+# interval_end_years = cn.SOC_density_intervals
+
+# For starting carbon density
+bounds = [114, -4, 115, -3]
+zarr_path = 's3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/mega_zarr/4000_pixels/20260121/starting_C_densities_zarr.zarr'
+var_name = 'carbon_density__BGC__landcover_masked__MgC'
+interval_end_years = [2015]
 
 
 bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0

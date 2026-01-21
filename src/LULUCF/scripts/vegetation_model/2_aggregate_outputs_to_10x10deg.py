@@ -476,10 +476,9 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
         uu.stage_duration(start_time, uu.timestr(), f"{stage} worker log compilation", main_logger)
 
 
-    ### Step 4: Compares pixel counts in original 1x1 deg geotifs to pixel counts in 10x10 deg geotifs
+    ### Step 4: Resize cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    ### cluster, not all the workers.
 
-    # Resizes cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
-    # cluster, not all the workers.
     if not run_local:
         workers = client.scheduler_info()["workers"]
         n_workers = len(workers)
@@ -489,6 +488,9 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
             main_logger.info("Resizing cluster to 1 worker")
 
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
+
+
+    ### Step 5: Compare pixel counts in original 1x1 deg geotifs to pixel counts in 10x10 deg geotifs
 
     # Extracts the per-ha and per-pixel dictionaries from the returned tile stats so they are separate flat lists
     # https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/693c28bf-ade0-8325-b28b-de531cad2408
@@ -541,7 +543,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with chunk stat comparison", main_logger)
 
 
-    ### Step 5: Counts 10x10 deg tiles
+    ### Step 6: Count output geotifs in s3
 
     # Counts per-hectare outputs
     output_dir_list_per_ha = uu.create_output_dir_name_list(cn.veg_summative_output_dirs, 'annual', cn.first_model_year_annual,
@@ -598,7 +600,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with output counts", main_logger)
 
 
-    ### Step 6: Merges worker and local logs
+    ### Step 7: Merge worker and local logs
     if not run_local:
 
         # Adds the workers' logs to the main log and uploads to s3
