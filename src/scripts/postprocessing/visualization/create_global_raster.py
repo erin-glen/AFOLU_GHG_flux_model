@@ -32,9 +32,7 @@ python -m src.scripts.postprocessing.visualization.create_global_raster \
 
 # Aggregate at 0.01° using a local Dask scheduler (smaller local batch by default)
 AGG_LOCAL_BATCH=8 \
-python -m src.scripts.postprocessing.visualization.create_global_raster \
-  -cn local --run_name ogh_sensitivity_500m --run_local \
-  --model_version 0_9_5 --date_tag 20251117 --target_deg 0.01 --native_deg 0.00025
+python -m src.scripts.postprocessing.visualization.create_global_raster -cn create_maps --run_name gpd_standard_model_500m --model_version 0_9_7 --date_tag 20251120 --target_deg 0.01 --native_deg 0.00025
 """
 
 from __future__ import annotations

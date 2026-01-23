@@ -181,3 +181,7 @@ if __name__ == "__main__":
         arch=args.arch,
         scheduler_vm_types=args.scheduler_vm_types,
     )
+
+"""
+python -m src.scripts.utilities.create_cluster -n 4 -m 32 -cn drainage_cluster --spot-policy on-demand
+"""
