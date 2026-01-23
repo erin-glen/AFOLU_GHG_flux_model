@@ -406,7 +406,7 @@ starting_C_densities_2000_path_mega_zarr = f"{full_bucket_prefix}/climate/WHRC_b
 
 
 ## 2015
-carbon_2015_creation_date = '20260121'
+carbon_2015_creation_date = '20260122'
 
 agc_2015_raw_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/year_2015_derived_carbon_pools/{agc_raw_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
 agc_2015_raw_pattern = f"{agc_raw_dens_pattern}_2015"

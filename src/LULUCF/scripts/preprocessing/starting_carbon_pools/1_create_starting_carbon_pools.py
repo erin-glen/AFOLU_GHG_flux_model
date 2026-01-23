@@ -245,16 +245,16 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             # Tall vegetation and/or mangrove (i.e. mangrove pixels without tall vegetation keep all C pools)
             if (veg_height_cell >= cn.tree_threshold) or (mangrove_pixel == True):
 
-                # When pixels had TCL before model start, starting C densities are adjusted
-                if (TCL_cell > 0) and (TCL_cell < 15):
-                    years_of_regrowth = math.floor((15-TCL_cell)/2)
+                # When tall veg pixels had TCL before model start, starting C densities are adjusted
+                if (TCL_cell > 0) and (TCL_cell < (cn.first_model_year_annual-2000)):
+                    years_of_regrowth = math.floor(((cn.first_model_year_annual-2000)-TCL_cell)/2)
                     if mangrove_extent_cell:  # For mangroves
                         agc_LC_masked_out_cell = years_of_regrowth * mangrove_AGC_RF
                         r_s_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 1]
                         deadwood_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 2]
                         litter_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 3]
                         LC_masked_state = 1
-                    elif (oil_palm_2000_extent_cell > 0) or ((oil_palm_first_year_cell > 0) and (oil_palm_first_year_cell < 15)):   # For oil palm
+                    elif (oil_palm_2000_extent_cell > 0) or ((oil_palm_first_year_cell > 0) and (oil_palm_first_year_cell < (cn.first_model_year_annual-2000))):   # For oil palm
                         agc_LC_masked_out_cell = years_of_regrowth * cn.oil_palm_agc_rf
                         LC_masked_state = 2
                     elif planted_forest_AGC_RF_cell > 0:   # For planted trees
@@ -270,6 +270,8 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                     bgc_LC_masked_out_cell = agc_LC_masked_out_cell * r_s_ratio
                     deadwood_c_LC_masked_out_cell = agc_LC_masked_out_cell * deadwood_c_ratio
                     litter_c_LC_masked_out_cell = agc_LC_masked_out_cell * litter_c_ratio
+
+                # No TCL- uses raw tall veg carbon densities
                 else:
                     agc_LC_masked_out_cell = agc_raw_out_cell
                     bgc_LC_masked_out_cell = bgc_raw_out_cell
@@ -604,8 +606,8 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
-    is_large_run = False
-    # is_large_run = True  # For simulating a large run
+    # is_large_run = False
+    is_large_run = True  # For simulating a large run  #TODO for testing
     if len(chunk_list) > 20:
         is_large_run = True
         main_logger.info("Running as final model.")
@@ -688,7 +690,8 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
 
     # Creates numpy array of ratios of BGC, deadwood C, and litter C relative to AGC. Relevant columns must be specified.
     mangrove_C_ratio_array = uu.convert_lookup_table_to_array(cn.RF_C_ratio_spreadsheet_full_path, cn.mangrove_rate_ratio_tab,
-                                                              ['gainEcoCon', 'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
+                                                              ['gainEcoCon', 'AGB_gain_tons_ha_yr',
+                                                               'BGC_AGC', 'deadwood_AGC', 'litter_AGC'])
 
     # Makes a txt for each task in the list. These are deleted as tasks are completed.
     main_logger.info("Creating task txts in s3...")
