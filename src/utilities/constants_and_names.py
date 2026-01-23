@@ -441,6 +441,11 @@ non_soil_c_2015_LC_masked_pattern = f"{non_soil_c_LC_masked_dens_pattern}_2015"
 
 starting_C_densities_2015_path_mega_zarr = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/year_2015_derived_carbon_pools/mega_zarr/CHUNK_SIZE_pixels/RUN_DATE/starting_C_densities_zarr.zarr"
 
+# Code that describes the source for the starting carbon densities in the landcover-masked outputs
+starting_C_pools_LC_masked_state_pattern = "carbon_density_node_code_landcover_masked"
+starting_C_pools_LC_masked_state_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/year_2015_derived_carbon_pools/{starting_C_pools_LC_masked_state_pattern}/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
+
+
 ### Other inputs
 
 elevation_dir = f"{full_bucket_prefix}/climate/carbon_model/inputs_for_carbon_pools/processed/elevation/20190418/"

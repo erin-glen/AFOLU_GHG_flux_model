@@ -64,6 +64,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     # This is because a dictionary in a Numba function cannot have arrays with multiple data types, so each dictionary has to store only one data type,
     # just like inputs to the function.
     out_dict_float32 = {}
+    out_dict_uint8 = {}
 
     # print(in_dict_uint8)
     # print(in_dict_uint16)
@@ -100,8 +101,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
         agb_non_mang_block = in_dict_uint16[cn.agb_2015_pattern].astype(np.int16)
         mangrove_agb_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
     else:
-        out_dict_float32[f"{cn.agc_raw_dens_pattern}_{year}"] = np.full(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape, 9999).astype('float32')
-        return out_dict_float32
+        raise ValueError("invalid start year: must be 2000 or 2015")
 
     # Output blocks
     # Need to specify the output datatype or it will default to float32
@@ -116,6 +116,9 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     deadwood_c_LC_masked_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
     litter_c_LC_masked_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
     non_soil_c_LC_masked_out_block = np.zeros(in_dict_float32[cn.r_s_ratio_non_mang_pattern].shape).astype('float32')
+
+    # Code that describes the source for the starting carbon densities in the landcover-masked outputs
+    LC_masked_state_block = np.zeros(in_dict_uint8[cn.oil_palm_2000_extent_pattern].shape).astype('uint8')
 
     # Gets a fallback value for continent_ecozone for the chunk in case some pixels don't have one
     continent_ecozone_fallback = nu.fallback_conteco_climzone_value(continent_ecozone_block, 2020)
@@ -179,6 +182,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             else:
                 agc_raw_out_cell = 0
 
+
             # Separate branches for assigning BGC, deadwood C, and litter C ratios depending on whether the pixel has mangroves.
             # Calculation of BGC, deadwood C, and litter C are done after the decision tree assigns the ratios.
 
@@ -189,7 +193,6 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                 mangrove_AGC_RF, bgc_ratio, deadwood_c_ratio, litter_c_ratio = (
                     nu.calc_mangrove_RF_and_ratios(continent_ecozone_cell, mangrove_C_ratio_array))
 
-
             # Non-mangrove carbon pool ratio branch
             # Deadwood and litter carbon as fractions of AGC are from
             # https://cdm.unfccc.int/methodologies/ARmethodologies/tools/ar-am-tool-12-v3.0.pdf
@@ -197,7 +200,8 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             # Estimation of carbon stocks and change in carbon stocks in dead wood and litter in A/R CDM project activities version 03.0"
             # Tables on pages 18 (deadwood) and 19 (litter).
             # They depend on the climate domain, elevation, and precipitation.
-            elif agb_non_mang_cell > 0:  # Non-mangrove
+            # elif agb_non_mang_cell > 0:  # Non-mangrove
+            else:
 
                 # If no mapped R:S (=0), uses the global default value instead
                 if r_s_ratio == 0:
@@ -221,14 +225,6 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                 else:  # Temperate/boreal
                     deadwood_c_ratio = cn.non_tropical_deadwood_c_ratio
                     litter_c_ratio = cn.non_tropical_litter_c_ratio
-
-            else:
-
-                # Ridiculous default BGC, deadwood C, and litter C ratios that will make it very clear if they are being used instead of
-                # something being assigned in the decision tree above
-                bgc_ratio = -5
-                deadwood_c_ratio = -10
-                litter_c_ratio = -20
 
             # Actually calculates BGC, deadwood C, and litter C using the ratios assigned in the above decision tree for raw outputs
             bgc_raw_out_cell = agc_raw_out_cell * bgc_ratio
@@ -257,14 +253,19 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                         r_s_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 1]
                         deadwood_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 2]
                         litter_c_ratio = mangrove_C_ratio_array[np.where(mangrove_C_ratio_array[:, 0] == continent_ecozone_cell)][0, 3]
-                    elif oil_palm_2000_extent_cell or (oil_palm_first_year_cell < 15):
+                        LC_masked_state = 1
+                    elif (oil_palm_2000_extent_cell > 0) or ((oil_palm_first_year_cell > 0) and (oil_palm_first_year_cell < 15)):   # For oil palm
                         agc_LC_masked_out_cell = years_of_regrowth * cn.oil_palm_agc_rf
-                    elif planted_forest_AGC_RF_cell:   # For planted trees
+                        LC_masked_state = 2
+                    elif planted_forest_AGC_RF_cell > 0:   # For planted trees
                         agc_LC_masked_out_cell = years_of_regrowth * planted_forest_AGC_RF_cell
+                        LC_masked_state = 3
                     elif not tall_veg_LC:   # For trees in other land uses
                         agc_LC_masked_out_cell = years_of_regrowth * cn.trees_outside_forests_agc_rf_max
+                        LC_masked_state = 4
                     else:   # For everything else
                         agc_LC_masked_out_cell = years_of_regrowth * natural_forest_growth_curve_pattern_cell
+                        LC_masked_state = 5
 
                     bgc_LC_masked_out_cell = agc_LC_masked_out_cell * r_s_ratio
                     deadwood_c_LC_masked_out_cell = agc_LC_masked_out_cell * deadwood_c_ratio
@@ -275,21 +276,26 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                     deadwood_c_LC_masked_out_cell = deadwood_c_raw_out_cell
                     litter_c_LC_masked_out_cell = litter_c_raw_out_cell
 
+                    LC_masked_state = 6
+
             elif short_veg_LC:  # Short vegetation
                 agc_LC_masked_out_cell = short_veg_AGC_adj
                 bgc_LC_masked_out_cell = short_veg_BGC_adj
                 deadwood_c_LC_masked_out_cell = 0
                 litter_c_LC_masked_out_cell = 0
+                LC_masked_state = 7
             elif LC_composite_cell == cn.cropland:  # Cropland
                 agc_LC_masked_out_cell = cn.cropland_agc_dens
                 bgc_LC_masked_out_cell = 0
                 deadwood_c_LC_masked_out_cell = 0
                 litter_c_LC_masked_out_cell = 0
+                LC_masked_state = 8
             else:  # Anything else
                 agc_LC_masked_out_cell = 0
                 bgc_LC_masked_out_cell = 0
                 deadwood_c_LC_masked_out_cell = 0
                 litter_c_LC_masked_out_cell = 0
+                LC_masked_state = 9
 
             # Assigns cell outputs to blocks
             agc_raw_out_block[row, col] = agc_raw_out_cell
@@ -306,6 +312,8 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             non_soil_c_LC_masked_out_block[row, col] = (agc_LC_masked_out_cell + bgc_LC_masked_out_cell +
                                                         deadwood_c_LC_masked_out_cell + litter_c_LC_masked_out_cell)
 
+            LC_masked_state_block[row, col] = LC_masked_state
+
     # Adds the output arrays to the dictionary with the appropriate data type
     # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
     out_dict_float32[cn.agc_raw_dens_pattern] = agc_raw_out_block.copy()
@@ -320,8 +328,12 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     out_dict_float32[cn.litter_c_LC_masked_dens_pattern] = litter_c_LC_masked_out_block.copy()
     out_dict_float32[cn.non_soil_c_LC_masked_dens_pattern] = non_soil_c_LC_masked_out_block.copy()
 
+    out_dict_uint8[cn.starting_C_pools_LC_masked_state_pattern] = LC_masked_state_block.copy()
+
+    # print(out_dict_uint8)
+
     # return output dictionary/ies
-    return out_dict_float32
+    return out_dict_uint8, out_dict_float32
 
 
 # All steps for creating starting non-soil carbon pools in a chunk: download chunks, calculate carbon densities, upload to s3
@@ -409,7 +421,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
     numba_start = time.time()
 
     # Create AGC, BGC, deadwood C and litter C densities in selected starting year
-    out_dict_float32 = create_starting_C_densities(
+    out_dict_uint8, out_dict_float32 = create_starting_C_densities(
         typed_dict_uint8, typed_dict_uint16, typed_dict_int16, typed_dict_int32, typed_dict_float32,
         mangrove_C_ratio_array, year
     )
@@ -427,7 +439,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
     out_dict_all_dtypes = {}
 
     # Transfers the dictionaries of numpy arrays for each data type to a new, Pythonic array
-    out_dicts = [out_dict_float32]
+    out_dicts = [out_dict_uint8, out_dict_float32]
 
     # Loop through each dictionary and update out_dict_all_dtypes
     for out_dict in out_dicts:
@@ -486,6 +498,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
 
             data_type = value.dtype.name
             # print("key:", key)
+            # print("output_folders:", output_folders)
 
             # Retrieves the file name pattern and date(s) covered for the output file for use in s3 folder construction
             out_pattern, year_range = uu.strip_and_extract_years(key)
@@ -646,7 +659,8 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
             f"{cn.natural_forest_growth_curve_dir}rate_0_5/{sample_tile_id}_{cn.natural_forest_growth_curve_pattern}__0_5_years__nibble_{cn.secondary_forest_curve_run_date}.tif"
 
         output_dir_list = [cn.agc_2015_raw_dir, cn.bgc_2015_raw_dir, cn.deadwood_c_2015_raw_dir, cn.litter_c_2015_raw_dir, cn.non_soil_c_2015_raw_dir,
-                           cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir, cn.non_soil_c_2015_LC_masked_dir]
+                           cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir, cn.non_soil_c_2015_LC_masked_dir,
+                           cn.starting_C_pools_LC_masked_state_dir]
 
     else:
         print(f"Year input {year} not valid. Terminating.")
@@ -689,7 +703,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
                        cn.deadwood_c_raw_dens_pattern, cn.litter_c_raw_dens_pattern, cn.non_soil_c_raw_dens_pattern,
                        cn.agc_LC_masked_dens_pattern, cn.bgc_LC_masked_dens_pattern,
                        cn.deadwood_c_LC_masked_dens_pattern, cn.litter_c_LC_masked_dens_pattern,
-                       cn.non_soil_c_LC_masked_dens_pattern]
+                       cn.non_soil_c_LC_masked_dens_pattern, cn.starting_C_pools_LC_masked_state_pattern]
 
     # Only creates the global mega-zarr if needed (large runs or otherwise specified)
     if create_zarr:
