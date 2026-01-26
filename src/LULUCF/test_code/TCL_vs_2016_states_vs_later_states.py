@@ -1,5 +1,7 @@
 """
-Produces counts of the state nodes for each year in a given chunk
+For a given chunk, produces counts of the state nodes and AGC emissions for each year, categorized by whether pre-2015 TCL occurred
+and whether Potapov loss in 2016 occurred.
+The goal is to see how much loss and emissions occur in pixels that had pre-model TCL and/or first model year loss.
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/src/LULUCF/test_code
 python TCL_vs_2016_states_vs_later_states.py
@@ -96,13 +98,3 @@ if __name__ == "__main__":
                 count = np.sum(val_mask)
                 emissions_sum = np.sum(masked_emissions[val_mask])
                 print(f"  Year: {year}, Mask: {label}, Pixel Value: {val}, Count: {count}, Emissions MgCO2: {emissions_sum:.2f}")
-
-            # # Count land state values
-            # pixel_counts = count_values_with_masks(year_data, mask)
-            #
-            # # Sum emissions
-            # total_emissions = np.sum(emissions_per_pixel[mask])
-            #
-            # # print(f"\nMask: {label}")
-            # for value, count in pixel_counts.items():
-            #     print(f"  Year: {year}, Mask: {label}, Pixel Value: {value}, Count: {count}, Emissions MgAGCO2: {total_emissions:.2f}")
