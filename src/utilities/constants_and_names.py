@@ -7,7 +7,8 @@ import numpy as np
 ########
 
 ### Model version
-veg_model_version = "1.0.5"
+veg_model_version = "1.0.4" #TODO change
+# veg_model_version = "1.0.5"
 veg_model_version_underscore = veg_model_version.replace(".", "_")
 
 SOC_soil_model_version = "1.0.0"
@@ -1044,8 +1045,20 @@ dpi_jpeg = 300 # dpi for output jpegs
 legend_fontsize = 9 # Font size for legend titles and labels
 colorbar_dimensions = [0.12, 0.17, 0.02, 0.13] # [left, bottom, width, height]
 
-pres_text = (f"Land use vegetation fluxes (model v{veg_model_version}, 2016-2024) \n"
+# Colors in RGB. Gross emissions and removals are subset of net flux palette.
+# From https://colorbrewer2.org/#type=diverging&scheme=BrBG&n=10
+net_colors_rgb = [(0, 60, 48), (1, 102, 94), (53, 151, 143), (128, 205, 193), (199, 234, 229),  # Used for removals
+                  (246, 232, 195), (223, 194, 125), (191, 129, 45), (140, 81, 10), (84, 48, 5)  # Used for emissions
+                  ]
+removals_colors_rgb = net_colors_rgb[0:5]
+emissions_colors_rgb = net_colors_rgb[5:]
+
+veg_pres_text = (f"Land use vegetation fluxes (model v{veg_model_version}, 2016-2024) \n"
              f"Legend value range represents 1 and 99 percentiles of fluxes across all years.")
+veg_cropland_pres_text = (f"Vegetation fluxes: v{veg_model_version}, 2020; cropland: YYYYMMDD \n"
+             f"Legend value range represents 1 and 99 percentiles of fluxes.")
+veg_livestock_pres_text = (f"Vegetation fluxes: v{veg_model_version}, 2020; livestock: YYYYMMDD \n"
+             f"Legend value range represents 1 and 99 percentiles of fluxes.")
 
 # Output global aggregated jpeg names
 three_panel_jpeg_base = f"three_panels__4km_aggregation__v{veg_model_version}"

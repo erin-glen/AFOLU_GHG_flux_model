@@ -1,10 +1,6 @@
 """
 Global:
-ython -m src.synthesis.scripts.create_sector_level_0_04deg_global_display_maps -mpd global
---input_vegetation_date 20251224
--cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif
--ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif
--veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v1_0_4__standard__global/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_4_2020_global_reproj.tif
+python -m src.synthesis.scripts.create_sector_level_0_04deg_global_display_maps -mpd global --input_vegetation_date 20251224 -cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif -ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif -veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v1_0_4__standard__global/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_4_2020_global_reproj.tif
 
 For Central Africa:
 python -m src.LULUCF.scripts.vegetation_model.create_sector_level_0_04deg_global_display_maps -mt standard -mpd global --input_date YYYYMMDD --center_latitude 0 --center_longitude 20 --lat_height 20 -bbd central_Africa
@@ -17,6 +13,7 @@ from that information. That keeps all zoomed in maps in the same shape as the gl
 
 With https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67634e63-bbcc-800a-8267-004e88ced2e4
 Continued at https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d6d26f-b054-8323-98bb-731a86582e74
+This specific code at https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69778c22-2538-8325-a70e-1a2b70312505
 """
 
 import argparse
@@ -26,6 +23,7 @@ import os
 import rasterio
 import math
 import numpy as np
+import re
 from rasterio.windows import from_bounds
 from rasterio.warp import reproject, Resampling, calculate_default_transform
 from matplotlib.colors import Normalize, TwoSlopeNorm, LinearSegmentedColormap
@@ -37,55 +35,31 @@ from src.utilities import constants_and_names as cn
 from src.utilities import map_utilities as mu
 from src.utilities import universal_utilities as uu
 
-def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_geotif_s3, local_reproj_folder,
-                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_colors_rgb, country_shapefile, bounding_box, bounding_box_description):
+# Reprojects global geotifs to the projection/extent/resolution that the vegetation geotifs use, if not already reprojected
+def reproject_to_vegetation(geotif_to_reproj, local_reproj_folder, net_all_gases_geotif_local):
 
-    series_start_time = time.time()
-
-    out_maps_for_gif = []
-
-    # If bounding_box was given in degrees, transforms to match the raster CRS (Robinson)
-    if bounding_box is not None:
-        bounding_box_proj = mu.transform_bbox_to_robinson(bounding_box)
-    else:
-        bounding_box_proj = None
-
-    all_valid_values = []
-
-    print(f"\n\n---Reprojecting cropland for 2020")
-
-    # Extract the file name with extension
-    filename_with_ext = os.path.basename(cropland_geotif_s3)
-
-    # Removes the extension
+    # Extracts the file name with extension, then removes extension
+    filename_with_ext = os.path.basename(geotif_to_reproj)
     filename = os.path.splitext(filename_with_ext)[0]
 
-    path_unproj = cropland_geotif_s3
+    path_unproj = geotif_to_reproj
     path_reproj = f"{local_reproj_folder}/{filename}_reproj.tif"
 
-    print(f"Unprojected raster: {path_unproj}")
-    print(f"Reprojected raster: {path_reproj}")
-
-    # Reprojects cropland raster to match the vegetation net flux raster, if not already reprojected
-    # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69778c22-2538-8325-a70e-1a2b70312505
     if not os.path.exists(path_reproj):
+
         print("  Reprojected raster does not exist. Reprojecting now...")
+        print(f"   Unprojected raster: {path_unproj}")
+        print(f"   Reprojected raster: {path_reproj}")
 
-        # Input file paths
-        src_path = path_unproj  # File you want to reproject
-        ref_path = net_all_gases_geotif_local  # File whose projection and grid you want to match
-        dst_path = path_reproj  # File to write the reprojected result
-
-        # Open reference raster to extract desired CRS, transform, and shape
-        with rasterio.open(ref_path) as ref:
+        # Opens reference raster to extract desired CRS, transform, and shape
+        with rasterio.open(net_all_gases_geotif_local) as ref:
             dst_crs = ref.crs
             dst_transform = ref.transform
             dst_width = ref.width
             dst_height = ref.height
 
-        # Open source raster to reproject
-        with rasterio.open(src_path) as src:
+        # Opens source raster to reproject
+        with rasterio.open(path_unproj) as src:
 
             # Prepare output metadata
             kwargs = src.meta.copy()
@@ -98,8 +72,8 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
                 'compress': 'lzw'
             })
 
-            # Reproject and write to file
-            with rasterio.open(dst_path, 'w', **kwargs) as dst:
+            # Reprojects and write to file
+            with rasterio.open(path_reproj, 'w', **kwargs) as dst:
                 for i in range(1, src.count + 1):
                     reproject(
                         source=rasterio.band(src, i),
@@ -111,11 +85,16 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
                         resampling=Resampling.nearest  # or bilinear/cubic as needed
                     )
 
+    return path_reproj
+
+# Converts geotif from kg to megagrams (tonnes)
+def convert_kg_to_Mg(path_reproj):
 
     # Unit-converted raster
     converted_path = path_reproj.replace("kg_CO2_reproj.tif", "Mg_CO2e_reproj.tif")
 
     if not os.path.exists(converted_path):
+
         print("  Unit-converted raster does not exist. Converting kg to Mg now...")
 
         with rasterio.open(path_reproj) as src:
@@ -123,21 +102,18 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
             meta = src.meta.copy()
             nodata = src.nodata
 
-            # Mask nodata values (e.g., 0) to avoid dividing them
+            # Masks nodata values (e.g., 0) to avoid dividing them
             data = np.where(data == nodata, nodata, data / 1000.0)
 
             with rasterio.open(converted_path, 'w', **meta) as dst:
                 dst.write(data.astype('float32'), 1)
 
+    return converted_path
 
-    print("Combining vegetation net flux and cropland emissions")
+# Sums the vegetation net flux and other dataset
+def add_veg_and_other_data(output_sum_path, all_valid_values, converted_path, net_all_gases_geotif_local):
 
-    # Inputs
-    raster_a_path = net_all_gases_geotif_local  # e.g. vegetation net flux raster (already reprojected)
-    raster_b_path = converted_path  # e.g. cropland raster reprojected and divided by 1000
-    output_sum_path = f"{cn.local_jpeg_folder_AFOLU}/veg_cropland_combined.tif"
-
-    with rasterio.open(raster_a_path) as src_a, rasterio.open(raster_b_path) as src_b:
+    with rasterio.open(net_all_gases_geotif_local) as src_a, rasterio.open(converted_path) as src_b:
         data_a = src_a.read(1)
         data_b = src_b.read(1)
 
@@ -154,168 +130,200 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
         valid = data_sum[data_sum != 0]
         if valid.size > 0:
             all_valid_values.append(valid)
-
-    # Calculates min, center and max across all years
-    all_valid_values = np.concatenate(all_valid_values)
-
-    percentile_for_saturation = 1
-    breaks_all_yrs = np.percentile(all_valid_values, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
-
-    lower_lim_all_yrs = breaks_all_yrs[0]
-    global_neutral = 0
-    upper_lim_all_yrs = breaks_all_yrs[-1]
-
-    print("Across vegetation+cropland:")
-    print(f"  lower limit ({percentile_for_saturation} percentile):", lower_lim_all_yrs)
-    print(f"  neutral:", global_neutral)
-    print(f"  upper limit ({(100-percentile_for_saturation)} percentile):", upper_lim_all_yrs)
-
-    # Creates the min and max values for the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
-    # Rounds data_min down and data_max up for legend.
-    rounded_lower_lim_all_yrs = math.ceil(lower_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds up
-    rounded_upper_lim_all_yrs = math.floor(upper_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds down
-    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f}  (sink)",  # Spaces are to horizontally align the text explanations
-                   "0        (neutral)",
-                   f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
-    print(tick_labels)
+    return output_sum_path
 
 
+def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_geotif_s3, local_reproj_folder,
+                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                 net_colors_rgb, country_shapefile, bounding_box, bounding_box_description):
 
-    print(f"\n\n---Mapping cropland+vegetation")
+    start_time = time.time()
 
-    # Reads raster data for year
-    with rasterio.open(output_sum_path) as src:
+    out_maps_for_gif = []
 
+    # If bounding_box was given in degrees, transforms to match the raster CRS (Robinson)
+    if bounding_box is not None:
+        bounding_box_proj = mu.transform_bbox_to_robinson(bounding_box)
+    else:
+        bounding_box_proj = None
+
+    all_valid_values = []
+
+    data_to_add = {"cropland": [cropland_geotif_s3, cn.veg_cropland_pres_text],
+                   "livestock": [livestock_geotif_s3, cn.veg_livestock_pres_text]}
+
+    analysis_year = 2020
+
+    # Version of the vegetation model being used
+    veg_version = re.search(r'v\d+_\d+_\d+', net_all_gases_geotif_local).group(0)
+
+    for key, value in data_to_add.items():
+
+        input_s3_path = value[0]
+        presentation_slide_text = value[1]
+
+        print(f"\n\n---Reprojecting {key} to vegetation projection")
+
+        # Date of the other dataset being used
+        additional_data_date = re.search(r'/(\d{8})/', input_s3_path).group(1)
+
+        # Reprojects to match vegetation net flux (if not already reprojected)
+        path_reproj = reproject_to_vegetation(input_s3_path, local_reproj_folder, net_all_gases_geotif_local)
+
+        # Converts from kg to Mg (if not already converted)
+        converted_path = convert_kg_to_Mg(path_reproj)
+
+
+        print(f"Combining vegetation net flux and {key} emissions")
+
+        output_name = f"vegetation_net_flux_all_pools_all_gases_{veg_version}__{key}_{additional_data_date}__{analysis_year}__Mg_CO2e"
+        output_sum_path = f"{cn.local_jpeg_folder_AFOLU}/{output_name}.tif"
+
+        # Sums the vegetation net flux and other data
+        output_sum_path = add_veg_and_other_data(output_sum_path, all_valid_values, converted_path, net_all_gases_geotif_local)
+
+
+        print(f"\n\n---Preparing legend")
+
+        # Calculates min, center and max across all years
+        all_valid_values = np.concatenate(all_valid_values)
+
+        percentile_for_saturation = 1
+        breaks_all_yrs = np.percentile(all_valid_values, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
+
+        lower_lim_all_yrs = breaks_all_yrs[0]
+        global_neutral = 0
+        upper_lim_all_yrs = breaks_all_yrs[-1]
+
+        print("Across vegetation+cropland:")
+        print(f"  lower limit ({percentile_for_saturation} percentile):", lower_lim_all_yrs)
+        print(f"  neutral:", global_neutral)
+        print(f"  upper limit ({(100-percentile_for_saturation)} percentile):", upper_lim_all_yrs)
+
+        # Creates the min and max values for the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
+        # Rounds data_min down and data_max up for legend.
+        rounded_lower_lim_all_yrs = math.ceil(lower_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds up
+        rounded_upper_lim_all_yrs = math.floor(upper_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds down
+        tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f}  (sink)",  # Spaces are to horizontally align the text explanations
+                       "0        (neutral)",
+                       f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
+        # print(tick_labels)
+
+
+        print(f"\n\n---Mapping vegetation + {key}")
+
+        # Reads raster data for year
+        with rasterio.open(output_sum_path) as src:
+
+            if bounding_box_proj is not None:
+                minx, miny, maxx, maxy = bounding_box_proj
+
+                window = from_bounds(minx, miny, maxx, maxy, src.transform)
+
+                data = src.read(1, window=window)
+
+                # Update extent from the window
+                left, bottom, right, top = rasterio.windows.bounds(window, src.transform)
+                raster_extent = (left, right, bottom, top)
+
+            else:
+                data = src.read(1)
+                b = src.bounds
+                raster_extent = (b.left, b.right, b.bottom, b.top)
+
+        # Calculates the percentile for 0 for the year (neutral, no flux) for mapping
+        print(f"  Calculating percentiles and breaks")
+        percentile_0 = mu.percentile_for_0(data)
+        print(f"  0 is at the {percentile_0}th percentile of the raster.")
+        percentiles = [percentile_0 / 6, percentile_0 / 4, percentile_0 / 2, percentile_0 / 1.3, percentile_0 / 1.05,
+                       percentile_0 * 1.05, percentile_0 * 1.1, percentile_0 * 1.2, percentile_0 * 1.3, percentile_0 * 1.5]
+        # print("percentiles:", percentiles)
+
+        # Converts RGB color palette to matplotlib color palette
+        colors_matplotlib = mu.rgb_to_mpl_palette(net_colors_rgb)
+
+        # Matches percentile breaks with colors for the map.
+        # Normalizes percentiles to a 0-1 scale.
+        percentiles_normalized = np.linspace(0, 1, len(percentiles))
+        # print("percentiles_normalized:", percentiles_normalized)
+        cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
+
+        print(f"  Masking raster to non-0 values")
+        masked_data = np.ma.masked_where(data == 0, data)
+
+        # For map (not legend)
+        norm = TwoSlopeNorm(
+            vmin=lower_lim_all_yrs,
+            vcenter=global_neutral,
+            vmax=upper_lim_all_yrs
+        )
+
+        print(f"  Plotting map ")
+        ax, fig = mu.create_plot()
+
+        # Sets the ocean color
+        mu.set_ocean_color(ax)
+
+        # Limits shapefile to focal extent (if requested)
         if bounding_box_proj is not None:
-            minx, miny, maxx, maxy = bounding_box_proj
+            bbox_geom = box(*bounding_box_proj)
+            country_shapefile = country_shapefile.clip(bbox_geom)
 
-            window = from_bounds(minx, miny, maxx, maxy, src.transform)
+        # Plots the country polygons first
+        mu.plot_country_polygons(ax, country_shapefile)
 
-            data = src.read(1, window=window)
+        # Raster extent
+        extent = list(raster_extent)
 
-            # Update extent from the window
-            left, bottom, right, top = rasterio.windows.bounds(window, src.transform)
-            raster_extent = (left, right, bottom, top)
+        # Plots the raster next
+        img = mu.plot_raster(ax, cmap, extent, masked_data, norm)
 
-        else:
-            data = src.read(1)
-            b = src.bounds
-            raster_extent = (b.left, b.right, b.bottom, b.top)
+        # Plots the country boundaries on top
+        mu.plot_country_boundaries(ax, country_shapefile)
 
-    # Calculates the percentile for 0 for the year (neutral, no flux) for mapping
-    percentile_0 = mu.percentile_for_0(data)
-    print(f"  0 is at the {percentile_0}th percentile of the raster.")
-    percentiles = [percentile_0 / 6, percentile_0 / 4, percentile_0 / 2, percentile_0 / 1.3, percentile_0 / 1.05,
-                   percentile_0 * 1.05, percentile_0 * 1.1, percentile_0 * 1.2, percentile_0 * 1.3, percentile_0 * 1.5]
-    # print("percentiles:", percentiles)
+        # Explicitly sets the bounding box for the plot image
+        if bounding_box_proj is not None:
+            ax.set_xlim(extent[0], extent[1])
+            ax.set_ylim(extent[2], extent[3])
 
-    print(f"  Calculating percentiles and breaks")
+        # Title
+        title_text = f"Net vegetation GHG flux + {key}\nkt CO$_2$e in {analysis_year}"
 
-    # Converts RGB color palette to matplotlib color palette
-    colors_matplotlib = mu.rgb_to_mpl_palette(net_colors_rgb)
+        # Creates legend
+        mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
+                                           title_text, tick_labels,
+                                              analysis_year, net_colors_rgb, percentiles, percentile_0)
 
-    # Matches percentile breaks with colors for the map.
-    # Normalizes percentiles to a 0-1 scale.
-    percentiles_normalized = np.linspace(0, 1, len(percentiles))
-    # print("percentiles_normalized:", percentiles_normalized)
-    cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
+        # Removes axis ticks and labels
+        mu.remove_ticks(ax)
 
-    print(f"  Masking raster to non-0 values")
-    masked_data = np.ma.masked_where(data == 0, data)
+        core_jpeg_name = f"{output_name}__{uu.timestr()[0:8]}"
+        if bounding_box_description:  # Adds bounding box description to file name, if supplied
+            core_jpeg_name = f"{core_jpeg_name}_{bounding_box_description}"
+        jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
+        jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
-    # For map (not legend)
-    norm = TwoSlopeNorm(
-        vmin=lower_lim_all_yrs,
-        vcenter=global_neutral,
-        vmax=upper_lim_all_yrs
-    )
+        # Saves two versions of the map: without and with a source note in the bottom right
+        veg_addtl_pres_text = presentation_slide_text.replace("YYYYMMDD", additional_data_date)
+        out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", veg_addtl_pres_text)
 
-    print(f"  Plotting map ")
-    ax, fig = mu.create_plot()
-
-    # Sets the ocean color
-    mu.set_ocean_color(ax)
-
-    # Limits shapefile to focal extent (if requested)
-    if bounding_box_proj is not None:
-        bbox_geom = box(*bounding_box_proj)
-        country_shapefile = country_shapefile.clip(bbox_geom)
-
-    # Plots the country polygons first
-    mu.plot_country_polygons(ax, country_shapefile)
-
-    # Raster extent
-    extent = list(raster_extent)
-
-    # Plots the raster next
-    img = mu.plot_raster(ax, cmap, extent, masked_data, norm)
-
-    # Plots the country boundaries on top
-    mu.plot_country_boundaries(ax, country_shapefile)
-
-    # Explicitly sets the bounding box for the plot image
-    if bounding_box_proj is not None:
-        ax.set_xlim(extent[0], extent[1])
-        ax.set_ylim(extent[2], extent[3])
-
-    # Title
-    title_text = f"Net greenhouse gas flux vegetation+cropland\nAll vegetation pools, all gases\nkt CO$_2$e yr$^{{-1}}$"
-
-    # Creates legend
-    mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
-                                       title_text, tick_labels,
-                                       2020, net_colors_rgb, percentiles, percentile_0)
-
-    # Removes axis ticks and labels
-    mu.remove_ticks(ax)
-
-    core_jpeg_name = f"veg_cropland__2020__v{cn.veg_model_version_underscore}__{uu.timestr()[0:8]}"
-    if bounding_box_description:  # Adds bounding box description to file name, if supplied
-        core_jpeg_name = f"{core_jpeg_name}_{bounding_box_description}"
-    jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
-    jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
-
-    # Saves two versions of the map: without and with a source note in the bottom right
-    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, 2020)
-
-    series_end_time = time.time()
-    print(f"vegetation+cropland took {round(series_end_time - series_start_time)} seconds: {uu.timestr()}")
+        end_time = time.time()
+        print(f"vegetation+cropland {bounding_box_description} took {round(end_time - start_time)} seconds: {uu.timestr()}")
 
 
 def main(net_all_gases_geotif_local,input_vegetation_date, cropland_geotif_s3=None, livestock_geotif_s3=None, vegetation_model_path_description=None,
          center_latitude=None, center_longitude=None, lat_height=None, bounding_box_description=None):
 
-    # Defines desired percentiles for colors. Specifies where colors transition in the data.
-    # Setting neutral ends of sink and source is empirically based on the 0 value being around the 82nd percentile.
-    # From some experimentation, it's better not to encode a neutral percentile (or associated color) here or below.
-    # It dampens the colors around the neutral value (low emissions and removals) even more.
-    # net_percentiles = [5, 30, 60, 70, 81,   # Sink
-    #                    83, 88, 97, 94, 99]  # Source
-    removals_percentiles = [5, 25, 50, 75, 99]
-    emissions_percentiles = [5, 25, 50, 75, 99]
-
-    # Colors in RGB. Gross emissions and removals are subset of net flux palette.
-    # From https://colorbrewer2.org/#type=diverging&scheme=BrBG&n=10
-    net_colors_rgb = [(0, 60, 48), (1, 102, 94), (53, 151, 143), (128, 205, 193), (199, 234, 229),  # Used for removals
-                         (246, 232, 195), (223, 194, 125), (191, 129, 45), (140, 81, 10), (84, 48, 5)  # Used for emissions
-                         ]
-    removals_colors_rgb = net_colors_rgb[0:5]
-    emissions_colors_rgb = net_colors_rgb[5:]
-
-    # Datasets that need to be expanded to all output years
-    vegetation_dir =f"{cn.veg_outputs_path}{cn.net_flux_all_C_pools_all_gases_pattern}/annual_intervals/2020/{cn.flux_aggreg_pixel_meaning}/global/{input_vegetation_date}/"
-
-
     # Folders for local outputs
     cropland_reproj_folder = Path(cn.local_jpeg_folder_cropland)
     cropland_reproj_folder.mkdir(parents=True, exist_ok=True)
 
-    local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}/jpegs_non_pres")
-    local_jpeg_non_pres_folder.mkdir(parents=True, exist_ok=True)
-    local_jpeg_pres_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}/jpegs_pres")
-    local_jpeg_pres_folder.mkdir(parents=True, exist_ok=True)
-    local_gif_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}/gifs")
-    local_gif_folder.mkdir(parents=True, exist_ok=True)
+    AFOLU_local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}/jpegs_non_pres")
+    AFOLU_local_jpeg_non_pres_folder.mkdir(parents=True, exist_ok=True)
+    AFOLU_local_jpeg_pres_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}/jpegs_pres")
+    AFOLU_local_jpeg_pres_folder.mkdir(parents=True, exist_ok=True)
+    AFOLU_local_gif_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}/gifs")
+    AFOLU_local_gif_folder.mkdir(parents=True, exist_ok=True)
 
     # Reprojects simplified country boundary shapefile, if needed
     country_shapefile = mu.check_and_reproject_shapefile(
@@ -339,8 +347,8 @@ def main(net_all_gases_geotif_local,input_vegetation_date, cropland_geotif_s3=No
 
     # Generates jpegs for net flux, gross emissions, and gross removals
     map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_geotif_s3, cropland_reproj_folder,
-                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
+                 AFOLU_local_jpeg_non_pres_folder, AFOLU_local_jpeg_pres_folder, AFOLU_local_gif_folder,
+                 cn.net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
 
 
 

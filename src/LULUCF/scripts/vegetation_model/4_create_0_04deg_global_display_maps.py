@@ -34,14 +34,6 @@ def main(input_date, model_type, model_path_description=None,
     removals_percentiles = [5, 25, 50, 75, 99]
     emissions_percentiles = [5, 25, 50, 75, 99]
 
-    # Colors in RGB. Gross emissions and removals are subset of net flux palette.
-    # From https://colorbrewer2.org/#type=diverging&scheme=BrBG&n=10
-    net_colors_rgb = [(0, 60, 48), (1, 102, 94), (53, 151, 143), (128, 205, 193), (199, 234, 229),  # Used for removals
-                         (246, 232, 195), (223, 194, 125), (191, 129, 45), (140, 81, 10), (84, 48, 5)  # Used for emissions
-                         ]
-    removals_colors_rgb = net_colors_rgb[0:5]
-    emissions_colors_rgb = net_colors_rgb[5:]
-
     # Datasets that need to be expanded to all output years
     basic_dirs_to_expand = [
         f"{cn.veg_outputs_path}{cn.gross_emis_all_C_pools_CO2_only_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
@@ -124,27 +116,27 @@ def main(input_date, model_type, model_path_description=None,
     # Generates jpegs for net flux, gross emissions, and gross removals
     mu.map_net_flux(net_all_gases_input_folders_s3, model_type, model_path_description, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
+                 cn.net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
 
     mu.map_net_flux(net_CO2_only_input_folders_s3, model_type, model_path_description, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
+                 cn.net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
 
     mu.map_gross(gross_emis_CO2_only_input_folders_s3, model_type, model_path_description, local_reproj_folder,
                      local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                     emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
+                     cn.emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
 
     mu.map_gross(gross_emis_non_CO2_input_folders_s3, model_type, model_path_description, local_reproj_folder,
                      local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                     emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
+                     cn.emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
 
     mu.map_gross(gross_emis_all_gases_input_folders_s3, model_type, model_path_description, local_reproj_folder,
                      local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                     emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
+                     cn.emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
 
     mu.map_gross(gross_removals_input_folders_s3, model_type, model_path_description, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 removals_colors_rgb, removals_percentiles, country_shapefile, bounding_box, bounding_box_description)
+                 cn.removals_colors_rgb, removals_percentiles, country_shapefile, bounding_box, bounding_box_description)
 
     # # Generates three-panel map
     # create_three_panel_map()

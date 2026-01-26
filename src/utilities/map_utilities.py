@@ -406,7 +406,7 @@ def save_jpeg(out_jpeg, year):
     print(f"  Saving {out_jpeg} for {year}")
     plt.savefig(out_jpeg, dpi=cn.dpi_jpeg, bbox_inches="tight", pad_inches=0)
 
-def save_pres_non_pres_jpegs(ax, out_jpeg, out_jpeg_for_pres, year):
+def save_pres_non_pres_jpegs(ax, out_jpeg, out_jpeg_for_pres, year, pres_text):
 
     # Adds year label inside the plot, bottom center
     ax.text(
@@ -420,7 +420,7 @@ def save_pres_non_pres_jpegs(ax, out_jpeg, out_jpeg_for_pres, year):
     save_jpeg(out_jpeg, year)
 
     # Note in bottom right of panel
-    ax.text(0.99, 0.07, cn.pres_text, transform=ax.transAxes, fontsize=7,   #Vertical, horizontal
+    ax.text(0.99, 0.07, pres_text, transform=ax.transAxes, fontsize=7,   #Vertical, horizontal
             ha="right", va="top", color="black")
 
     # Saves jpeg with journal name and update notes in bottom right
@@ -708,7 +708,7 @@ def map_net_flux(s3_folders, model_type, model_path_description,
         jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
         # Saves two versions of the map: without and with a source note in the bottom right
-        out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, year)
+        out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, year, cn.veg_pres_text)
 
         out_maps_for_gif.append(out_jpeg_for_pres)
 
@@ -962,7 +962,7 @@ def map_gross(s3_folders, model_type, model_path_description,
         jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
         # Saves two versions of the map: without and with a source note in the bottom right
-        out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, year)
+        out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, year, cn.veg_pres_text)
 
         out_maps_for_gif.append(out_jpeg_for_pres)
 
