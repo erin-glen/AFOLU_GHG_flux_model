@@ -132,7 +132,10 @@ def add_veg_and_other_data(output_sum_path, converted_path, net_all_gases_geotif
         with rasterio.open(output_sum_path, 'w', **meta) as dst:
             dst.write(data_sum.astype('float32'), 1)
 
-    return output_sum_path, data_sum
+        # All non-zero values (used for calculating legend values)
+        non_zero_values = data_sum[data_sum != 0]
+
+    return output_sum_path, non_zero_values
 
 
 def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_geotif_s3,
@@ -150,11 +153,9 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
     else:
         bounding_box_proj = None
 
-    all_valid_values = []
-
     data_to_add = {
-        "cropland": [cropland_geotif_s3, cropland_reproj_folder, cn.veg_cropland_pres_text],
-        "livestock": [livestock_geotif_s3, livestock_reproj_folder, cn.veg_livestock_pres_text]
+        "cropland management": [cropland_geotif_s3, cropland_reproj_folder, cn.veg_cropland_pres_text],
+        "livestock management": [livestock_geotif_s3, livestock_reproj_folder, cn.veg_livestock_pres_text]
     }
 
     analysis_year = 2020
@@ -188,14 +189,14 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
         output_sum_path = f"{cn.local_jpeg_folder_AFOLU}/{output_name}.tif"
 
         # Sums the vegetation net flux and other data
-        output_sum_path, summed_rasters = add_veg_and_other_data(output_sum_path, unit_converted_path, net_all_gases_geotif_local)
+        output_sum_path, non_zero_values = add_veg_and_other_data(output_sum_path, unit_converted_path, net_all_gases_geotif_local)
 
 
         print(f"\n\n---Preparing legend")
 
         # Calculates min, center and max across all years
         percentile_for_saturation = 1
-        breaks_all_yrs = np.percentile(summed_rasters, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
+        breaks_all_yrs = np.percentile(non_zero_values, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
 
         lower_lim_all_yrs = breaks_all_yrs[0]
         global_neutral = 0
@@ -293,7 +294,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
             ax.set_ylim(extent[2], extent[3])
 
         # Title
-        title_text = f"Net vegetation GHG flux + {key}\nkt CO$_2$e in {analysis_year}"
+        title_text = f"Net vegetation GHG flux + \n{key}\nkt CO$_2$e in {analysis_year}"
 
         # Creates legend
         mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
