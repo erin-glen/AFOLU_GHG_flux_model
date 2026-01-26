@@ -1,7 +1,6 @@
 """
 Global:
-python -m src.synthesis.scripts.create_sector_level_0_04deg_global_display_maps -mpd global --input_vegetation_date 20251224 -cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif -ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif -veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v1_0_4__standard__global/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_4_2020_global_reproj.tif
-
+ python -m src.synthesis.scripts.create_sector_level_0_04deg_global_display_maps -mpd global --input_vegetation_date 20251224 -cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif -ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif -veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v1_0_4__standard__global/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_4_2020_global_reproj.tif
 For Central Africa:
 python -m src.LULUCF.scripts.vegetation_model.create_sector_level_0_04deg_global_display_maps -mt standard -mpd global --input_date YYYYMMDD --center_latitude 0 --center_longitude 20 --lat_height 20 -bbd central_Africa
 
@@ -85,17 +84,20 @@ def reproject_to_vegetation(geotif_to_reproj, local_reproj_folder, net_all_gases
                         resampling=Resampling.nearest  # or bilinear/cubic as needed
                     )
 
+    else:
+        print("  Reprojected raster already exists")
+
     return path_reproj
 
 # Converts geotif from kg to megagrams (tonnes)
 def convert_kg_to_Mg(path_reproj):
 
     # Unit-converted raster
-    converted_path = path_reproj.replace("kg_CO2_reproj.tif", "Mg_CO2e_reproj.tif")
+    converted_path = path_reproj.replace("kg", "Mg")
 
     if not os.path.exists(converted_path):
 
-        print("  Unit-converted raster does not exist. Converting kg to Mg now...")
+        print("  Unit-converted raster does not exist. Converting kg to Mg...")
 
         with rasterio.open(path_reproj) as src:
             data = src.read(1)
@@ -108,10 +110,13 @@ def convert_kg_to_Mg(path_reproj):
             with rasterio.open(converted_path, 'w', **meta) as dst:
                 dst.write(data.astype('float32'), 1)
 
+    else:
+        print("  Unit-converted raster already exists")
+
     return converted_path
 
 # Sums the vegetation net flux and other dataset
-def add_veg_and_other_data(output_sum_path, all_valid_values, converted_path, net_all_gases_geotif_local):
+def add_veg_and_other_data(output_sum_path, converted_path, net_all_gases_geotif_local):
 
     with rasterio.open(net_all_gases_geotif_local) as src_a, rasterio.open(converted_path) as src_b:
         data_a = src_a.read(1)
@@ -127,15 +132,13 @@ def add_veg_and_other_data(output_sum_path, all_valid_values, converted_path, ne
         with rasterio.open(output_sum_path, 'w', **meta) as dst:
             dst.write(data_sum.astype('float32'), 1)
 
-        valid = data_sum[data_sum != 0]
-        if valid.size > 0:
-            all_valid_values.append(valid)
-    return output_sum_path
+    return output_sum_path, data_sum
 
 
-def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_geotif_s3, local_reproj_folder,
-                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 net_colors_rgb, country_shapefile, bounding_box, bounding_box_description):
+def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_geotif_s3,
+                     cropland_reproj_folder, livestock_reproj_folder,
+                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+                     net_colors_rgb, country_shapefile, bounding_box, bounding_box_description):
 
     start_time = time.time()
 
@@ -149,8 +152,10 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
 
     all_valid_values = []
 
-    data_to_add = {"cropland": [cropland_geotif_s3, cn.veg_cropland_pres_text],
-                   "livestock": [livestock_geotif_s3, cn.veg_livestock_pres_text]}
+    data_to_add = {
+        "cropland": [cropland_geotif_s3, cropland_reproj_folder, cn.veg_cropland_pres_text],
+        "livestock": [livestock_geotif_s3, livestock_reproj_folder, cn.veg_livestock_pres_text]
+    }
 
     analysis_year = 2020
 
@@ -160,7 +165,8 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
     for key, value in data_to_add.items():
 
         input_s3_path = value[0]
-        presentation_slide_text = value[1]
+        local_reproj_folder = value[1]
+        presentation_slide_text = value[2]
 
         print(f"\n\n---Reprojecting {key} to vegetation projection")
 
@@ -169,9 +175,11 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
 
         # Reprojects to match vegetation net flux (if not already reprojected)
         path_reproj = reproject_to_vegetation(input_s3_path, local_reproj_folder, net_all_gases_geotif_local)
+        # print("path_reproj:", path_reproj)
 
         # Converts from kg to Mg (if not already converted)
-        converted_path = convert_kg_to_Mg(path_reproj)
+        unit_converted_path = convert_kg_to_Mg(path_reproj)
+        # print("unit_converted_path:", unit_converted_path)
 
 
         print(f"Combining vegetation net flux and {key} emissions")
@@ -180,22 +188,20 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
         output_sum_path = f"{cn.local_jpeg_folder_AFOLU}/{output_name}.tif"
 
         # Sums the vegetation net flux and other data
-        output_sum_path = add_veg_and_other_data(output_sum_path, all_valid_values, converted_path, net_all_gases_geotif_local)
+        output_sum_path, summed_rasters = add_veg_and_other_data(output_sum_path, unit_converted_path, net_all_gases_geotif_local)
 
 
         print(f"\n\n---Preparing legend")
 
         # Calculates min, center and max across all years
-        all_valid_values = np.concatenate(all_valid_values)
-
         percentile_for_saturation = 1
-        breaks_all_yrs = np.percentile(all_valid_values, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
+        breaks_all_yrs = np.percentile(summed_rasters, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
 
         lower_lim_all_yrs = breaks_all_yrs[0]
         global_neutral = 0
         upper_lim_all_yrs = breaks_all_yrs[-1]
 
-        print("Across vegetation+cropland:")
+        print(f"Across vegetation+{key}:")
         print(f"  lower limit ({percentile_for_saturation} percentile):", lower_lim_all_yrs)
         print(f"  neutral:", global_neutral)
         print(f"  upper limit ({(100-percentile_for_saturation)} percentile):", upper_lim_all_yrs)
@@ -308,7 +314,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
         out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", veg_addtl_pres_text)
 
         end_time = time.time()
-        print(f"vegetation+cropland {bounding_box_description} took {round(end_time - start_time)} seconds: {uu.timestr()}")
+        print(f"vegetation+{key} {bounding_box_description} took {round(end_time - start_time)} seconds: {uu.timestr()}")
 
 
 def main(net_all_gases_geotif_local,input_vegetation_date, cropland_geotif_s3=None, livestock_geotif_s3=None, vegetation_model_path_description=None,
@@ -317,6 +323,8 @@ def main(net_all_gases_geotif_local,input_vegetation_date, cropland_geotif_s3=No
     # Folders for local outputs
     cropland_reproj_folder = Path(cn.local_jpeg_folder_cropland)
     cropland_reproj_folder.mkdir(parents=True, exist_ok=True)
+    livestock_reproj_folder = Path(cn.local_jpeg_folder_livestock)
+    livestock_reproj_folder.mkdir(parents=True, exist_ok=True)
 
     AFOLU_local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}/jpegs_non_pres")
     AFOLU_local_jpeg_non_pres_folder.mkdir(parents=True, exist_ok=True)
@@ -346,9 +354,10 @@ def main(net_all_gases_geotif_local,input_vegetation_date, cropland_geotif_s3=No
         print("No bounding box specified; using global extent.")
 
     # Generates jpegs for net flux, gross emissions, and gross removals
-    map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_geotif_s3, cropland_reproj_folder,
-                 AFOLU_local_jpeg_non_pres_folder, AFOLU_local_jpeg_pres_folder, AFOLU_local_gif_folder,
-                 cn.net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
+    map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_geotif_s3,
+                     cropland_reproj_folder, livestock_reproj_folder,
+                     AFOLU_local_jpeg_non_pres_folder, AFOLU_local_jpeg_pres_folder, AFOLU_local_gif_folder,
+                     cn.net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
 
 
 

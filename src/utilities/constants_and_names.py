@@ -1025,7 +1025,7 @@ reprojected_shapefile_path = "/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregate
 
 local_jpeg_folder_LULUCF = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v{veg_model_version_underscore}__standard__global/"
 local_jpeg_folder_cropland = f"/mnt/c/GIS/AFOLU_flux_model/cropland_emissions/20250828/4x4km_aggregated_maps/"
-local_jpeg_folder_livestock = f"/mnt/c/GIS/AFOLU_flux_modellivestock_emissions/20251223/4x4km_aggregated_maps/"
+local_jpeg_folder_livestock = f"/mnt/c/GIS/AFOLU_flux_model/livestock_emissions/20251223/4x4km_aggregated_maps/"
 local_jpeg_folder_AFOLU = f"/mnt/c/GIS/AFOLU_flux_model/AFOLU_totals/4x4km_aggregated_maps/v{veg_model_version_underscore}__standard__global/"
 
 # CRS for jpegs (Robinson equal area)
