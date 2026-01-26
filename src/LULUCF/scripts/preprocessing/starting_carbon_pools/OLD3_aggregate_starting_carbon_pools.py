@@ -11,12 +11,12 @@ python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_preprocessi
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools -cn vegetation_preprocessing --year 2000 --first_10x10s_to_process 2
 
 Full run 2000:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools -cn vegetation_preprocessing -nw 200 --year 2000 -ln "This is intended to be the definitive global per-pixel run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn vegetation_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools -cn vegetation_preprocessing --year 2000 -ln "This is intended to be the definitive global per-pixel run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
 
 Full run 2015:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools -cn vegetation_preprocessing -nw 200 --year 2015 -ln "This is intended to be the definitive global per-pixel run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn vegetation_preprocessing
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.3_aggregate_starting_carbon_pools -cn vegetation_preprocessing --year 2015 -ln "This is intended to be the definitive global per-pixel run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
 
 Notes on optimizing threads/worker: https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210803828525318?focus=true
 Tests of LULUCF output aggregation show that 1 thread/worker with 4GB workers is low in Coiled credit usage

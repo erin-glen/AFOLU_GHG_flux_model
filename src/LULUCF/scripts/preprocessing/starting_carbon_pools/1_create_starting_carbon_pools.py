@@ -12,7 +12,7 @@ python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starti
 
 Coiled shapefile test:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn vegetation_preprocessing --create_zarr -mt standard -mpd test_feature -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1 --year YYYY
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn vegetation_preprocessing --create_zarr -mt standard -mpd test_feature --year YYYY -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1
 
 Full run 2000:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn vegetation_preprocessing
@@ -606,8 +606,8 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
-    # is_large_run = False
-    is_large_run = True  # For simulating a large run  #TODO for testing
+    is_large_run = False
+    # is_large_run = True  # For simulating a large run
     if len(chunk_list) > 20:
         is_large_run = True
         main_logger.info("Running as final model.")

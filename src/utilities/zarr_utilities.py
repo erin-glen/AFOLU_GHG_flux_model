@@ -396,18 +396,18 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
     # Need to flatten the list because each chunk for each dataset is a list of dictionaries, where each element is a year.
     # So, flattening the list makes all years for all variables and chunks flat, rather than years being nested in each chunk-dataset.
     chunk_stats_variable_zarr_flat = uu.flatten_list(chunk_stats_variable_zarr)
-    print("chunk_stats_variable_zarr_flat:", chunk_stats_variable_zarr_flat)
+    # print("chunk_stats_variable_zarr_flat:", chunk_stats_variable_zarr_flat)
     zarr_df = pd.DataFrame(chunk_stats_variable_zarr_flat)
-    print("zarr_df:", zarr_df)
+    # print("zarr_df:", zarr_df)
 
     # Subsets model chunk stats to relevant pattern
     subset_model_table = model_table[(model_table['pattern'].str.contains(var_name, na=False))]
-    print("subset_model_table", subset_model_table)
+    # print("subset_model_table", subset_model_table)
 
     # Selects only the needed columns from rechunked_zarr_table
     # main_logger.info(f"    Subsetting zarr table to numeric columns for {var_name}: {uu.timestr()}")
     zarr_subset_table = zarr_df[['chunk_name', 'min_value', 'mean_value', 'max_value', 'count_value']].copy()
-    print("zarr_subset_table", zarr_subset_table)
+    # print("zarr_subset_table", zarr_subset_table)
 
     # Renames columns in raw_subset to distinguish them after merge
     # main_logger.info(f"    Renaming zarr columns for {var_name}: {uu.timestr()}")
@@ -417,7 +417,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
         'max_value': 'max_value_zarr',
         'count_value': 'count_value_zarr'
     })
-    print("zarr_subset_table", zarr_subset_table)
+    # print("zarr_subset_table", zarr_subset_table)
 
     # Converts all zarr value columns to numeric, coercing errors to NaN
     # main_logger.info(f"    Converting zarr columns to numeric for {var_name}: {uu.timestr()}")
@@ -429,7 +429,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
     print("subset_model_table[chunk_name]:", subset_model_table.iloc[0]['chunk_name'])
     print("zarr_subset_table[chunk_name]:", zarr_subset_table.iloc[0]['chunk_name'])
     merged_table = subset_model_table.merge(zarr_subset_table, on='chunk_name', how='left')
-    print("merged_table:", merged_table)
+    # print("merged_table:", merged_table)
 
     # Calculates differences for four metrics and stores in new columns
     main_logger.info(f"    Calculating differences for {var_name} ({merged_table['count_value_zarr'].sum().item():.0f} pixels in zarr): {uu.timestr()}")
@@ -437,7 +437,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
     merged_table['mean_value_diff'] = merged_table['mean_value'] - merged_table['mean_value_zarr']
     merged_table['max_value_diff'] = merged_table['max_value'] - merged_table['max_value_zarr']
     merged_table['count_value_diff'] = merged_table['count_value'] - merged_table['count_value_zarr']
-    print(merged_table.head())
+    # print(merged_table.head())
 
     # Calculates max absolute difference across the four metrics' difference columns
     merged_table['maximum_diff_value'] = merged_table[
