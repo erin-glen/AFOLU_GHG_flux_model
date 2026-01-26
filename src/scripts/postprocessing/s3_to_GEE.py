@@ -28,7 +28,7 @@ Important:
 python -m src.scripts.postprocessing.s3_to_GEE \
   --run-name wwf_run \
   --output-date 20260120 \
-  --inventory-periods 2021_2024 \
+  --inventory-periods all \
   --datasets "drained burned" \
   --include-pixel-outputs \
   --gee-root users/erineglen/organic_soils \
@@ -58,8 +58,9 @@ If your data uses a different layout, override `--s3-template`.
 - Use `--dry-run` to preview actions without downloading, staging, or uploading.
 - For non-default AWS accounts or regions, set `--aws-profile`/`--aws-region`.
 - `--run-date` is a legacy alias for `--output-date`.
-- Use `--inventory-periods` for five-year outputs or `--years` to map years
-  into inventory periods (annual intervals use the year directly).
+- Use `--inventory-periods` for five-year outputs (supports `all`, a single year
+  like `2021`, or `start_end` labels) or `--years` to map years into inventory
+  periods (annual intervals use the year directly).
 - Dataset aliases: use `drained`, `burned`, or `all` to expand to the
   model output dataset names defined in `cn.drainage_outputs_to_zarr`.
 - Use `--include-pixel-outputs` to include the per-pixel datasets created
@@ -113,20 +114,52 @@ def parse_periods(raw: str) -> List[str]:
     return [t for t in re.split(r"[\s,]+", raw.strip()) if t]
 
 
+def build_period_lookup() -> dict[int, str]:
+    return {end: f"{start}_{end}" for start, end in cn.five_year_inventory_periods}
+
+
+def period_for_year(year: int) -> str:
+    for start, end in cn.five_year_inventory_periods:
+        if start <= year <= end:
+            return f"{start}_{end}"
+    raise ValueError(f"No inventory period found for year {year}.")
+
+
 def periods_from_years(years: Sequence[int], interval_type: str) -> List[str]:
     if interval_type == cn.intervals_annual:
         return [str(year) for year in years]
-    period_strings: List[str] = []
-    for year in years:
-        matched = False
-        for start, end in cn.five_year_inventory_periods:
-            if start <= year <= end:
-                period_strings.append(f"{start}_{end}")
-                matched = True
-                break
-        if not matched:
-            raise ValueError(f"No inventory period found for year {year}.")
-    return sorted(set(period_strings))
+    return sorted({period_for_year(year) for year in years})
+
+
+def normalize_inventory_periods(raw: str, interval_type: str) -> List[str]:
+    tokens = parse_periods(raw)
+    if interval_type == cn.intervals_annual:
+        if any(token.lower() == "all" for token in tokens):
+            raise ValueError("Token 'all' is only supported for five-year intervals.")
+        years = parse_years(" ".join(tokens))
+        return [str(year) for year in years]
+
+    if any(token.lower() == "all" for token in tokens):
+        return [f"{start}_{end}" for start, end in cn.five_year_inventory_periods]
+
+    period_lookup = build_period_lookup()
+    normalized: List[str] = []
+    for token in tokens:
+        if token.isdigit():
+            year = int(token)
+            normalized.append(period_for_year(year))
+            continue
+        match = re.match(r"^(?P<start>\d{4})[-_](?P<end>\d{4})$", token)
+        if match:
+            start = int(match.group("start"))
+            end = int(match.group("end"))
+            if period_lookup.get(end) != f"{start}_{end}":
+                raise ValueError(f"Unknown inventory period: {token}")
+            normalized.append(period_lookup[end])
+            continue
+        raise ValueError(f"Invalid inventory period token: {token}")
+
+    return sorted(set(normalized))
 
 
 def build_dataset_catalog(include_pixel_outputs: bool) -> List[str]:
@@ -370,7 +403,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--inventory-periods",
-        help="Inventory periods to process (e.g. '2001_2005 2021_2024').",
+        help=(
+            "Inventory periods to process (e.g. 'all', '2001_2005 2021_2024', or years like '2021'). "
+            "Five-year intervals normalize to canonical start_end labels."
+        ),
     )
     parser.add_argument(
         "--datasets",
@@ -483,7 +519,7 @@ def main() -> None:
 
     years = parse_years(args.years) if args.years else []
     periods = (
-        parse_periods(args.inventory_periods)
+        normalize_inventory_periods(args.inventory_periods, args.interval_type)
         if args.inventory_periods
         else periods_from_years(years, args.interval_type)
     )
