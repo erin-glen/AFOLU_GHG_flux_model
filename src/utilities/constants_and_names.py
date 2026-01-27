@@ -1055,9 +1055,11 @@ emissions_colors_rgb = net_colors_rgb[5:]
 
 veg_pres_text = (f"Land use vegetation fluxes (model v{veg_model_version}, 2016-2024) \n"
              f"Legend value range represents 1 and 99 percentiles of fluxes across all years.")
-veg_cropland_pres_text = (f"Vegetation fluxes: v{veg_model_version}, 2020; cropland: YYYYMMDD \n"
+veg_cropland_pres_text = (f"Vegetation fluxes: v{veg_model_version}; cropland: YYYYMMDD \n"
              f"Legend value range represents 1 and 99 percentiles of fluxes.")
-veg_livestock_pres_text = (f"Vegetation fluxes: v{veg_model_version}, 2020; livestock: YYYYMMDD \n"
+veg_livestock_pres_text = (f"Vegetation fluxes: v{veg_model_version}; livestock: YYYYMMDD \n"
+             f"Legend value range represents 1 and 99 percentiles of fluxes.")
+veg_cropland_livestock_pres_text = (f"Vegetation fluxes: v{veg_model_version}; cropland: YYYYMMDD; livestock: YYYYMMDD \n"
              f"Legend value range represents 1 and 99 percentiles of fluxes.")
 
 # Output global aggregated jpeg names

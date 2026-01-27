@@ -46,26 +46,12 @@ Full run:
 python -m src.utilities.create_cluster -n 80 -m 8 -cn starting_forest_age
 python -m src.LULUCF.scripts.preprocessing.starting_forest_age.1_create_starting_forest_age_2010_2015 -cn starting_forest_age -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "Global forest age for 2015 using GAMI v3.1."
 
-In the three times I've run this, I've found that it gets through more and more batches the more workers I give it.
--n 10 could only get through a few batches at a time in data-dense latitudes and took over a dozen restarts to get through all the batches.
--n 20 did better and took about 7 restarts to get through all the batches.
--n 40 did best yet and required only 2 restarts to get through all the batches.
-The first two starts with -n 40 eventually failed with "No disk space left of workers" errors
-(https://cloud.coiled.io/clusters/1014981/account/wri-forest-research/information?organization=wri&tab=Alerts).
--n 40 used approximately 1600 Coiled credits and $80 in AWS charges over all three clusters. It took nearly 20 hours to run.
-Part 1: https://cloud.coiled.io/clusters/1014981/account/wri-forest-research/information?organization=wri
-Part 2: https://cloud.coiled.io/clusters/1015660/account/wri-forest-research/information?organization=wri
-Part 3: https://cloud.coiled.io/clusters/1016516/account/wri-forest-research/information?organization=wri
-
-I didn't try lots of different configurations, like the number of threads/worker.
-More optimization is possible but I hope to never have to do this again.
-If I do run it again, try with -m 16.
-
-I also noticed that the batches took wildly different amounts of time depending on where they were.
-Some batches in the 60N band took 1 hour to run, while those around 50S took 20 minutes to run, and batches in 70N
-and 80N took just a few minutes to run. I suppose this makes sense, but is worth noting all the same.
-
-chunk_list = chunk_list[1501:] is how I resumed the processing at the batch that failed.
+In the four times I've run this, I've used more workers each time. When I first tried with 10 workers,
+it kept running out of memory after a few hundred chunks. With 20 workers, it ran for much longer.
+With about 40 workers, it ran all the way through.
+I don't know what memory per worker is best to use. It doesn't seem to use more than about 3 GB/worker,
+so maybe 8GB/worker is enough next time.
+There's definitely more performance testing I could do with this, but it's not worth it because I run it very infrequently.
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67dcb99b-edb8-800a-abd8-f718de76043c
 https://chatgpt.com/share/e/67e1b7f6-c0d4-800a-a945-3133de9bf3a0

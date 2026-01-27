@@ -154,8 +154,8 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
         bounding_box_proj = None
 
     data_to_add = {
-        "cropland management": [cropland_geotif_s3, cropland_reproj_folder, cn.veg_cropland_pres_text],
-        "livestock management": [livestock_geotif_s3, livestock_reproj_folder, cn.veg_livestock_pres_text]
+        "cropland": [cropland_geotif_s3, cropland_reproj_folder, cn.veg_cropland_pres_text],
+        "livestock": [livestock_geotif_s3, livestock_reproj_folder, cn.veg_livestock_pres_text]
     }
 
     analysis_year = 2020
@@ -178,6 +178,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
 
         # Date of the other dataset being used
         additional_data_date = re.search(r'/(\d{8})/', input_s3_path).group(1)
+        value.append(additional_data_date)
 
         # Reprojects to match vegetation net flux (if not already reprojected)
         path_reproj = reproject_to_vegetation(input_s3_path, local_reproj_folder, net_all_gases_geotif_local)
@@ -329,14 +330,148 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
         print(f"vegetation+{key} {bounding_box_description} took {round(end_time - start_time)} seconds: {uu.timestr()}")
 
 
+
     print("\n\n---Mapping vegetation + the following subsectors:")
     print(", ".join(data_to_add.keys()))
 
+    # Iteratively collects that names of datasets and dates for the non-vegetation data
+    non_veg_dates = ''
+    for key, values in data_to_add.items():
+        non_veg_dates = f"{non_veg_dates}_{key}_{values[3]}"
+
     # Final combined output
-    output_name = f"vegetation_net_flux_all_pools_all_gases_{veg_version}__{key}_{additional_data_date}__{analysis_year}__Mg_CO2e"
+    output_name = f"vegetation_net_flux_all_pools_all_gases_{veg_version}_{non_veg_dates}__{analysis_year}__Mg_CO2e"
     final_total_path = f"{cn.local_jpeg_folder_AFOLU}/{output_name}.tif"
     with rasterio.open(final_total_path, 'w', **veg_meta) as dst:
         dst.write(total_across_subsectors.astype('float32'), 1)
+
+    non_zero_values = total_across_subsectors[total_across_subsectors != 0]
+
+    print(f"\n\n---Preparing legend")
+
+    # Calculates min, center and max across all years
+    percentile_for_saturation = 1
+    breaks_all_yrs = np.percentile(non_zero_values, [1, (100 - percentile_for_saturation)])  # The min and max percentiles at which colors saturate
+
+    lower_lim_all_yrs = breaks_all_yrs[0]
+    global_neutral = 0
+    upper_lim_all_yrs = breaks_all_yrs[-1]
+
+    print(f"Across vegetation+{non_veg_dates}:")
+    print(f"  lower limit ({percentile_for_saturation} percentile):", lower_lim_all_yrs)
+    print(f"  neutral:", global_neutral)
+    print(f"  upper limit ({(100 - percentile_for_saturation)} percentile):", upper_lim_all_yrs)
+
+    # Creates the min and max values for the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
+    # Rounds data_min down and data_max up for legend.
+    rounded_lower_lim_all_yrs = math.ceil(lower_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds up
+    rounded_upper_lim_all_yrs = math.floor(upper_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds down
+    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f}  (sink)",
+                   # Spaces are to horizontally align the text explanations
+                   "0        (neutral)",
+                   f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
+    # print(tick_labels)
+
+    print(f"\n\n---Mapping vegetation + {non_veg_dates}")
+
+    # Reads raster data
+    with rasterio.open(final_total_path) as src:
+
+        if bounding_box_proj is not None:
+            minx, miny, maxx, maxy = bounding_box_proj
+
+            window = from_bounds(minx, miny, maxx, maxy, src.transform)
+
+            data = src.read(1, window=window)
+
+            # Update extent from the window
+            left, bottom, right, top = rasterio.windows.bounds(window, src.transform)
+            raster_extent = (left, right, bottom, top)
+
+        else:
+            data = src.read(1)
+            b = src.bounds
+            raster_extent = (b.left, b.right, b.bottom, b.top)
+
+    # Calculates the percentile for 0 for the year (neutral, no flux) for mapping
+    print(f"  Calculating percentiles and breaks")
+    percentile_0 = mu.percentile_for_0(data)
+    print(f"  0 is at the {percentile_0}th percentile of the raster.")
+    percentiles = [percentile_0 / 6, percentile_0 / 4, percentile_0 / 2, percentile_0 / 1.3, percentile_0 / 1.05,
+                   percentile_0 * 1.05, percentile_0 * 1.1, percentile_0 * 1.2, percentile_0 * 1.3, percentile_0 * 1.5]
+    # print("percentiles:", percentiles)
+
+    # Converts RGB color palette to matplotlib color palette
+    colors_matplotlib = mu.rgb_to_mpl_palette(net_colors_rgb)
+
+    # Matches percentile breaks with colors for the map.
+    # Normalizes percentiles to a 0-1 scale.
+    percentiles_normalized = np.linspace(0, 1, len(percentiles))
+    # print("percentiles_normalized:", percentiles_normalized)
+    cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
+
+    print(f"  Masking raster to non-0 values")
+    masked_data = np.ma.masked_where(data == 0, data)
+
+    # For map (not legend)
+    norm = TwoSlopeNorm(
+        vmin=lower_lim_all_yrs,
+        vcenter=global_neutral,
+        vmax=upper_lim_all_yrs
+    )
+
+    print(f"  Plotting map ")
+    ax, fig = mu.create_plot()
+
+    # Sets the ocean color
+    mu.set_ocean_color(ax)
+
+    # Limits shapefile to focal extent (if requested)
+    if bounding_box_proj is not None:
+        bbox_geom = box(*bounding_box_proj)
+        country_shapefile = country_shapefile.clip(bbox_geom)
+
+    # Plots the country polygons first
+    mu.plot_country_polygons(ax, country_shapefile)
+
+    # Raster extent
+    extent = list(raster_extent)
+
+    # Plots the raster next
+    img = mu.plot_raster(ax, cmap, extent, masked_data, norm)
+
+    # Plots the country boundaries on top
+    mu.plot_country_boundaries(ax, country_shapefile)
+
+    # Explicitly sets the bounding box for the plot image
+    if bounding_box_proj is not None:
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
+
+    # Title
+    title_text = f"Vegetation, cropland, and livestock\nkt CO$_2$e in {analysis_year}"
+
+    # Creates legend
+    mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
+                                          title_text, tick_labels,
+                                          analysis_year, net_colors_rgb, percentiles, percentile_0)
+
+    # Removes axis ticks and labels
+    mu.remove_ticks(ax)
+
+    core_jpeg_name = f"{output_name}__{uu.timestr()[0:8]}"
+    if bounding_box_description:  # Adds bounding box description to file name, if supplied
+        core_jpeg_name = f"{core_jpeg_name}_{bounding_box_description}"
+    jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
+    jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
+
+    # Saves two versions of the map: without and with a source note in the bottom right
+    veg_addtl_pres_text = cn.veg_cropland_livestock_pres_text.replace("cropland: YYYYMMDD", f"cropland: {data_to_add['cropland'][3]}")
+    veg_addtl_pres_text = veg_addtl_pres_text.replace("livestock: YYYYMMDD", f"livestock: {data_to_add['livestock'][3]}")
+    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", veg_addtl_pres_text)
+
+    end_time = time.time()
+    print(f"vegetation+{data_to_add} {bounding_box_description} took {round(end_time - start_time)} seconds: {uu.timestr()}")
 
 
 def main(net_all_gases_geotif_local,input_vegetation_date, cropland_geotif_s3=None, livestock_geotif_s3=None, vegetation_model_path_description=None,
