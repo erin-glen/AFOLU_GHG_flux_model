@@ -135,7 +135,7 @@ def add_veg_and_other_data(output_sum_path, converted_path, net_all_gases_geotif
         # All non-zero values (used for calculating legend values)
         non_zero_values = data_sum[data_sum != 0]
 
-    return output_sum_path, non_zero_values
+    return non_zero_values
 
 
 def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_geotif_s3,
@@ -163,13 +163,18 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
     # Version of the vegetation model being used
     veg_version = re.search(r'v\d+_\d+_\d+', net_all_gases_geotif_local).group(0)
 
+    # Step 1: Load base vegetation raster once
+    with rasterio.open(net_all_gases_geotif_local) as src_veg:
+        veg_meta = src_veg.meta.copy()
+        total_across_subsectors = src_veg.read(1).astype('float32')  # base raster to accumulate into
+
     for key, value in data_to_add.items():
 
         input_s3_path = value[0]
         local_reproj_folder = value[1]
         presentation_slide_text = value[2]
 
-        print(f"\n\n---Reprojecting {key} to vegetation projection")
+        print(f"\n---Reprojecting {key} to vegetation projection")
 
         # Date of the other dataset being used
         additional_data_date = re.search(r'/(\d{8})/', input_s3_path).group(1)
@@ -182,6 +187,11 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
         unit_converted_path = convert_kg_to_Mg(path_reproj)
         # print("unit_converted_path:", unit_converted_path)
 
+        # Loads unit-converted raster and add it to the running total
+        with rasterio.open(unit_converted_path) as src:
+            data = src.read(1).astype('float32')
+            total_across_subsectors += data
+
 
         print(f"Combining vegetation net flux and {key} emissions")
 
@@ -189,7 +199,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
         output_sum_path = f"{cn.local_jpeg_folder_AFOLU}/{output_name}.tif"
 
         # Sums the vegetation net flux and other data
-        output_sum_path, non_zero_values = add_veg_and_other_data(output_sum_path, unit_converted_path, net_all_gases_geotif_local)
+        non_zero_values = add_veg_and_other_data(output_sum_path, unit_converted_path, net_all_gases_geotif_local)
 
 
         print(f"\n\n---Preparing legend")
@@ -237,6 +247,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
                 data = src.read(1)
                 b = src.bounds
                 raster_extent = (b.left, b.right, b.bottom, b.top)
+
 
         # Calculates the percentile for 0 for the year (neutral, no flux) for mapping
         print(f"  Calculating percentiles and breaks")
@@ -294,7 +305,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
             ax.set_ylim(extent[2], extent[3])
 
         # Title
-        title_text = f"Net vegetation GHG flux + \n{key}\nkt CO$_2$e in {analysis_year}"
+        title_text = f"Vegetation and {key}\nkt CO$_2$e in {analysis_year}"
 
         # Creates legend
         mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
@@ -316,6 +327,16 @@ def map_AFOLU_totals(net_all_gases_geotif_local, cropland_geotif_s3, livestock_g
 
         end_time = time.time()
         print(f"vegetation+{key} {bounding_box_description} took {round(end_time - start_time)} seconds: {uu.timestr()}")
+
+
+    print("\n\n---Mapping vegetation + the following subsectors:")
+    print(", ".join(data_to_add.keys()))
+
+    # Final combined output
+    output_name = f"vegetation_net_flux_all_pools_all_gases_{veg_version}__{key}_{additional_data_date}__{analysis_year}__Mg_CO2e"
+    final_total_path = f"{cn.local_jpeg_folder_AFOLU}/{output_name}.tif"
+    with rasterio.open(final_total_path, 'w', **veg_meta) as dst:
+        dst.write(total_across_subsectors.astype('float32'), 1)
 
 
 def main(net_all_gases_geotif_local,input_vegetation_date, cropland_geotif_s3=None, livestock_geotif_s3=None, vegetation_model_path_description=None,
