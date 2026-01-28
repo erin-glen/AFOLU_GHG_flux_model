@@ -2,25 +2,25 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model/
 
 Local:
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year YYYY
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -bb 116 -3 116.25 -2.75 -cs 0.25 --run_local --no_stats --no_upload --year 2015
 
 Needs 8GB Coiled workers with 1 thread for 1x1 deg chunks; 4GB workers are too small.
 
 Coiled small test:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn vegetation_preprocessing -bb 114 -4 115 -3 -cs 1  --create_zarr -mt standard -mpd test_box --year YYYY
+python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn starting_carbon_pools
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn starting_carbon_pools -bb 23 -4 24 -3 -cs 1  --create_zarr -mt standard -mpd test_23_-4_24_-3 --year 2015
 
 Coiled shapefile test:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn vegetation_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn vegetation_preprocessing --create_zarr -mt standard -mpd test_feature --year YYYY -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1
+python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn starting_carbon_pools
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn starting_carbon_pools --create_zarr -mt standard -mpd test_feature --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1
 
 Full run 2000:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn vegetation_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn vegetation_preprocessing --create_zarr -mt standard -mpd global --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation using GADM v4.1, raw and LC masked versions."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn starting_carbon_pools
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn starting_carbon_pools --create_zarr -mt standard -mpd global --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation using ESA CCI AGB v6, raw and adjusted versions."
 
 Full run 2015:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn vegetation_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn vegetation_preprocessing --create_zarr -mt standard -mpd global --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using GADM v4.1, raw and LC masked versions."
+python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn starting_carbon_pools
+python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn starting_carbon_pools --create_zarr -mt standard -mpd global --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using ESA CCI AGB v6, raw and adjusted versions."
 
 
 To create a vrt of the 10x10 deg outputs, do:
@@ -80,7 +80,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     continent_ecozone_block = in_dict_int16[cn.continent_ecozone_pattern]
     climate_zone_block = in_dict_uint8[cn.climate_zone_pattern]
     LC_composite_block = in_dict_uint8[cn.land_cover_pattern]  # LC composite of the year being processed. Pattern is the same regardless of starting year.
-    veg_height_block = in_dict_uint8[cn.vegetation_height_pattern]  # Veg height of the year being processed. Pattern is the same regardless of starting year.
+    veg_height_block = in_dict_uint8[f"{cn.vegetation_height_pattern}_start_year"]  # Veg height of the year being processed. Pattern is the same regardless of starting year.
     mangrove_extent_block = in_dict_uint8[cn.mangrove_extent_processed_pattern]  # Veg height of the year being processed. Pattern is the same regardless of starting year.
 
     # Used only to determine starting C pools for pixels with TCL 2001-2014
@@ -90,6 +90,29 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     oil_palm_first_year_block = in_dict_int16[cn.oil_palm_first_year_pattern]
     # NOTE: Uses just the 0-5 year Robinson regrowth rate, regardless of how many years of regrowth there are. This just keeps things simpler than using the different age rates.
     natural_forest_growth_curve_pattern_block = in_dict_float32[cn.natural_forest_growth_curve_pattern]
+
+    # Counts how many times each pixel experiences tall vegetation loss during the model,
+    # so that starting carbon density can be adjusted.
+    # List of arrays of height in the chunk for each year
+    model_years = list(range(cn.first_model_year_annual, cn.last_model_year_annual + 1))
+    vegetation_heights_block = [
+        in_dict_uint8[f"{cn.vegetation_height_pattern}_{model_year}"]
+        for model_year in model_years
+    ]
+    # print(vegetation_heights_block)
+
+    # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6978fc47-951c-8332-94a5-24b0a2036c24
+    # Count of instances of tree loss in each pixel during the model run
+    loss_count_block = np.zeros_like(vegetation_heights_block[0], dtype=np.uint8)
+
+    # Iterates through year pairs to count up tall vegetation losses
+    for t in range(len(vegetation_heights_block) - 1):
+        current = vegetation_heights_block[t]
+        next = vegetation_heights_block[t + 1]
+
+        loss = (current >= int(cn.tree_threshold)) & (next < int(cn.tree_threshold))
+        loss_count_block += loss.astype(np.uint8)
+    # print("loss_count_block:", loss_count_block)
 
     # AGB block sources (mangrove and non-mangrove) depend on the starting year
     # Numba can't handle two different possible datatypes for agb_non_mang_block,
@@ -151,6 +174,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             oil_palm_2000_extent_cell = oil_palm_2000_extent_block[row, col]
             oil_palm_first_year_cell = oil_palm_first_year_block[row, col]
             natural_forest_growth_curve_pattern_cell = natural_forest_growth_curve_pattern_block[row, col]
+            loss_count_cell = loss_count_block[row, col]
 
             # Applies the continent_ecozne fallback value when there isn't a value for the pixel
             if continent_ecozone_cell == 0:
@@ -232,7 +256,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
             litter_c_raw_out_cell = agc_raw_out_cell * litter_c_ratio
 
 
-            ### Part 3: Calculation of carbon density outputs masked by veg height/land cover/TCL history
+            ### Part 3: Calculation of carbon density outputs masked by veg height/land cover/TCL history/repeat loss
 
             bare_ground_LC, short_veg_LC, tall_veg_LC = nu.classify_GLAD_composite(LC_composite_cell)
 
@@ -271,33 +295,42 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
                     deadwood_c_LC_masked_out_cell = agc_LC_masked_out_cell * deadwood_c_ratio
                     litter_c_LC_masked_out_cell = agc_LC_masked_out_cell * litter_c_ratio
 
+                # When there is repeat loss during the model, starting carbon densities are set to 0.
+                # Rationale is that this is shifting cultivation or some rapid cycle harvest area and
+                # whatever high ESA CCI starting value there is, is likely much too high.
+                elif loss_count_cell >= 2:
+                    agc_LC_masked_out_cell = 0
+                    bgc_LC_masked_out_cell = 0
+                    deadwood_c_LC_masked_out_cell = 0
+                    litter_c_LC_masked_out_cell = 0
+                    LC_masked_state = 6
+
                 # No TCL- uses raw tall veg carbon densities
                 else:
                     agc_LC_masked_out_cell = agc_raw_out_cell
                     bgc_LC_masked_out_cell = bgc_raw_out_cell
                     deadwood_c_LC_masked_out_cell = deadwood_c_raw_out_cell
                     litter_c_LC_masked_out_cell = litter_c_raw_out_cell
-
-                    LC_masked_state = 6
+                    LC_masked_state = 7
 
             elif short_veg_LC:  # Short vegetation
                 agc_LC_masked_out_cell = short_veg_AGC_adj
                 bgc_LC_masked_out_cell = short_veg_BGC_adj
                 deadwood_c_LC_masked_out_cell = 0
                 litter_c_LC_masked_out_cell = 0
-                LC_masked_state = 7
+                LC_masked_state = 8
             elif LC_composite_cell == cn.cropland:  # Cropland
                 agc_LC_masked_out_cell = cn.cropland_agc_dens
                 bgc_LC_masked_out_cell = 0
                 deadwood_c_LC_masked_out_cell = 0
                 litter_c_LC_masked_out_cell = 0
-                LC_masked_state = 8
+                LC_masked_state = 9
             else:  # Anything else
                 agc_LC_masked_out_cell = 0
                 bgc_LC_masked_out_cell = 0
                 deadwood_c_LC_masked_out_cell = 0
                 litter_c_LC_masked_out_cell = 0
-                LC_masked_state = 9
+                LC_masked_state = 10
 
             # Assigns cell outputs to blocks
             agc_raw_out_block[row, col] = agc_raw_out_cell
@@ -330,7 +363,7 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
     out_dict_float32[cn.litter_c_LC_masked_dens_pattern] = litter_c_LC_masked_out_block.copy()
     out_dict_float32[cn.non_soil_c_LC_masked_dens_pattern] = non_soil_c_LC_masked_out_block.copy()
 
-    out_dict_uint8[cn.starting_C_pools_LC_masked_state_pattern] = LC_masked_state_block.copy()
+    out_dict_uint8[cn.starting_C_pools_LC_masked_source_flag_pattern] = LC_masked_state_block.copy()
 
     # print(out_dict_uint8)
 
@@ -639,7 +672,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
         download_dict[cn.agb_2000_pattern] = f"{cn.agb_2000_dir}{sample_tile_id}_{cn.agb_2000_pattern}.tif"
         download_dict[cn.mangrove_agb_2000_pattern] = f"{cn.mangrove_agb_2000_dir}{sample_tile_id}_{cn.mangrove_agb_2000_pattern}.tif"
         download_dict[cn.land_cover_pattern] = f"{cn.land_cover_5_year_path}2000/{sample_tile_id}.tif"
-        download_dict[cn.vegetation_height_pattern] = f"{cn.vegetation_height_5_year_path}2000/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_2000.tif"
+        download_dict[f"{cn.vegetation_height_pattern}_start_year"] = f"{cn.vegetation_height_5_year_path}2000/{sample_tile_id}_{cn.vegetation_height_5_year_pattern}_2000.tif"
         download_dict[cn.mangrove_extent_processed_pattern] = f"{cn.mangrove_extent_processed_dir}1996/{sample_tile_id}__{cn.mangrove_extent_processed_pattern}_1996.tif"
 
         output_dir_list = [cn.agc_2000_raw_dir, cn.bgc_2000_raw_dir, cn.deadwood_c_2000_raw_dir, cn.litter_c_2000_raw_dir, cn.non_soil_c_2000_raw_dir,
@@ -648,7 +681,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     elif year == 2015:   # No mangrove-specific AGB for 2015-- uses ESA CCI everywhere
         download_dict[cn.agb_2015_pattern] = f"{cn.agb_2015_dir_processed}{sample_tile_id}_{cn.agb_2015_pattern}.tif"
         download_dict[cn.land_cover_pattern] = f"{cn.land_cover_annual_path}2015/{sample_tile_id}.tif"
-        download_dict[cn.vegetation_height_pattern] = f"{cn.vegetation_height_annual_path}2015/{sample_tile_id}.tif"
+        download_dict[f"{cn.vegetation_height_pattern}_start_year"] = f"{cn.vegetation_height_annual_path}2015/{sample_tile_id}.tif"
         download_dict[cn.mangrove_extent_processed_pattern] = f"{cn.mangrove_extent_processed_dir}2015/{sample_tile_id}__{cn.mangrove_extent_processed_pattern}_2015.tif"
 
         # These inputs are exclusively used to adjust C pools in 2015 for TCL that occurred 2001-2014.
@@ -660,6 +693,10 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
         download_dict[f"{cn.natural_forest_growth_curve_pattern}"] = \
             f"{cn.natural_forest_growth_curve_dir}rate_0_5/{sample_tile_id}_{cn.natural_forest_growth_curve_pattern}__0_5_years__nibble_{cn.secondary_forest_curve_run_date}.tif"
 
+        # Land cover and vegetation height rasters (annual intervals)
+        for LC_year in range(cn.first_model_year_annual, cn.last_model_year_annual + 1):
+            download_dict[f"{cn.vegetation_height_pattern}_{LC_year}"] = f"{cn.vegetation_height_annual_path}{LC_year}/{sample_tile_id}.tif"
+
         output_dir_list = [cn.agc_2015_raw_dir, cn.bgc_2015_raw_dir, cn.deadwood_c_2015_raw_dir, cn.litter_c_2015_raw_dir, cn.non_soil_c_2015_raw_dir,
                            cn.agc_2015_LC_masked_dir, cn.bgc_2015_LC_masked_dir, cn.deadwood_c_2015_LC_masked_dir, cn.litter_c_2015_LC_masked_dir, cn.non_soil_c_2015_LC_masked_dir,
                            cn.starting_C_pools_LC_masked_state_dir]
@@ -668,6 +705,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
         print(f"Year input {year} not valid. Terminating.")
         sys.exit()
     # print(download_dict)
+
 
     # Creates list of output directories specific to the run
     output_dir_list = [path.replace("CHUNK_SIZE", str(chunk_size_pixels)) for path in output_dir_list]
@@ -706,7 +744,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
                        cn.deadwood_c_raw_dens_pattern, cn.litter_c_raw_dens_pattern, cn.non_soil_c_raw_dens_pattern,
                        cn.agc_LC_masked_dens_pattern, cn.bgc_LC_masked_dens_pattern,
                        cn.deadwood_c_LC_masked_dens_pattern, cn.litter_c_LC_masked_dens_pattern,
-                       cn.non_soil_c_LC_masked_dens_pattern, cn.starting_C_pools_LC_masked_state_pattern]
+                       cn.non_soil_c_LC_masked_dens_pattern, cn.starting_C_pools_LC_masked_source_flag_pattern]
 
     # Only creates the global mega-zarr if needed (large runs or otherwise specified)
     if create_zarr:

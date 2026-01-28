@@ -154,7 +154,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
         calc_proc_times__sec = [int(m) for m in re.findall(r'Calculated.*?(\d+) seconds', log_content)]
 
         # Extract seconds from lines for zarr insertion
-        zarr_insert_proc_times__sec = [int(m) for m in re.findall(r'Wrote outputs to global zarrs.*?(\d+) seconds', log_content)]
+        zarr_insert_proc_times__sec = [int(m) for m in re.findall(r'Wrote outputs to global zarr.*?(\d+) seconds', log_content)]
 
         # Extract seconds from lines for geotif uploads
         uploads_proc_times__sec = [int(m) for m in re.findall(r'Uploads completed for.*?(\d+) seconds', log_content)]

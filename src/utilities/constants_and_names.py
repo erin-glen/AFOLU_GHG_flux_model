@@ -7,8 +7,7 @@ import numpy as np
 ########
 
 ### Model version
-veg_model_version = "1.0.4" #TODO change
-# veg_model_version = "1.0.5"
+veg_model_version = "1.0.5"
 veg_model_version_underscore = veg_model_version.replace(".", "_")
 
 SOC_soil_model_version = "1.0.0"
@@ -323,12 +322,10 @@ agb_2000_pattern = "t_aboveground_biomass_ha_2000"
 # https://data.ceda.ac.uk/neodc/esacci/biomass/data/agb/maps/v5.01/geotiff
 # Bulk downloaded to computer (/mnt/c/GIS/AFOLU_flux_model/ESA_CCI_2015/) using WSL Ubuntu:
 # wget -e robots=off --mirror --no-parent -r https://dap.ceda.ac.uk/neodc/esacci/biomass/data/agb/maps/v6.0/geotiff/2015/
-esa_AGB_v = 'v5_01'  #TODO for testing
-# esa_AGB_v = 'v6_0'
+esa_AGB_v = 'v6_0'
 agb_2015_dir_raw = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/AGB/raw/"
 agb_2015_pattern_raw = "ESACCI-BIOMASS-L4-AGB-MERGED-100m-2015-fv6.0"
-# agb_2015_dir_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/AGB/processed/20260120/"
-agb_2015_dir_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/AGB/processed/20250217/" #TODO for testing
+agb_2015_dir_processed = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/AGB/processed/20260120/"
 agb_2015_pattern = "AGB_2015_ESA_CCI_Mg_AGB_ha"
 
 agb_stdev_2015_dir_raw = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/AGB_stdev/raw/"
@@ -407,7 +404,7 @@ starting_C_densities_2000_path_mega_zarr = f"{full_bucket_prefix}/climate/WHRC_b
 
 
 ## 2015
-carbon_2015_creation_date = '20260122'
+carbon_2015_creation_date = '20260128'
 
 agc_2015_raw_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/year_2015_derived_carbon_pools/{agc_raw_dens_pattern}/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
 agc_2015_raw_pattern = f"{agc_raw_dens_pattern}_2015"
@@ -443,8 +440,8 @@ non_soil_c_2015_LC_masked_pattern = f"{non_soil_c_LC_masked_dens_pattern}_2015"
 starting_C_densities_2015_path_mega_zarr = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/year_2015_derived_carbon_pools/mega_zarr/CHUNK_SIZE_pixels/RUN_DATE/starting_C_densities_zarr.zarr"
 
 # Code that describes the source for the starting carbon densities in the landcover-masked outputs
-starting_C_pools_LC_masked_state_pattern = "carbon_density_node_code_landcover_masked"
-starting_C_pools_LC_masked_state_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/year_2015_derived_carbon_pools/{starting_C_pools_LC_masked_state_pattern}/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
+starting_C_pools_LC_masked_source_flag_pattern = "carbon_density_source_flag_landcover_masked"
+starting_C_pools_LC_masked_state_dir = f"{full_bucket_prefix}/climate/ESA_CCI_biomass/{esa_AGB_v}/2015/year_2015_derived_carbon_pools/{starting_C_pools_LC_masked_source_flag_pattern}/CHUNK_SIZE_pixels/{carbon_2015_creation_date}/"
 
 
 ### Other inputs

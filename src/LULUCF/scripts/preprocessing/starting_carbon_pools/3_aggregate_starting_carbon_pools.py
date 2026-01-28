@@ -103,7 +103,8 @@ def main(cluster_name, year, run_local=False, no_stats=False, no_log=False, no_u
     main_logger.info(f"tile_ids to aggregate within: {chunk_list} ({len(chunk_list)}) tile_ids")
 
     # Determines if the output file names for final versions of outputs should be used
-    is_final = False
+    # is_final = False
+    is_final = True
     if len(chunk_list) > 20:
         is_final = True
         main_logger.info("Running as final model.")
