@@ -627,6 +627,8 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     start_time = uu.timestr()
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Year for carbon pools: {year}")
+    main_logger.info(f"Model path descriptor: {model_path_description}")
+    main_logger.info(f"ESA CCI AGB version: {cn.esa_AGB_v}")
 
     # Returns a dataframe of chunk_id and ISO for the GADM4.1 1x1 deg fishnet.
     # chunk_ids for making chunk list if shapefile is supplied in command line.

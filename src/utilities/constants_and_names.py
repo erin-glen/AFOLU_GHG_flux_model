@@ -106,7 +106,7 @@ IPCC_removal_factor_table_tab = "natrl fores gain, for std model"
 mangrove_rate_ratio_tab = 'mang gain and Cratios,for model'
 
 # Emission factors for partial disturbances (by 1km driver)
-partial_disturbance_emission_factor_table_name = "partial_disturbance_emission_factors_LULUCF_model__20250415.xlsx"
+partial_disturbance_emission_factor_table_name = "partial_disturbance_emission_factors_LULUCF_model_20260128.xlsx"
 partial_disturbance_emission_factor_table_full_path = f"{EF_RF_C_ratio_spreadsheet_URL}{partial_disturbance_emission_factor_table_name}"
 partial_disturbance_emission_factor_table_tab = "EF_combined"
 
