@@ -1,12 +1,12 @@
 """
 Script to create global, stacked COGS:
-1) builds global VRT per dataset per year from all 10 x 10 tiles in input s3 dir,
+1) builds global VRT per dataset per year from all 10 x 10 tiles in an s3 folder,
 2) builds a global COG for per dataset per year, and
-3) combine annual COGs into single, stacked global COG per dataset
+3) combines annual COGs into single, stacked global COG per dataset
 
 run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
-python -m src.utilities.create_cluster -cn WWF_flux_global_cogs_V2 -n 9 -m 16
-python -m src.LULUCF.scripts.postprocessing.GEE.1_create_cogs -cn WWF_flux_global_cogs_V2 -p emissions
+python -m src.utilities.create_cluster -cn WWF_flux_global_cogs -n 9 -m 8
+python -m src.LULUCF.scripts.postprocessing.GEE.1_create_cogs -cn WWF_flux_global_cogs -p emissions
 
 TODO: Update creation option based on GDAL type. Check block_size. Right now using COs for float. Look up optimal COs by datatype.
 """
@@ -28,42 +28,30 @@ def check_s3_upload_and_clean_local(s3_path, local_path, logger_worker):
         try:
             os.remove(local_path)
         except Exception as e:
-            lu.print_and_log(f"Warning: could not delete {local_path}: {e}", False, logger_worker)
+            lu.print_and_log(f"Warning: could not delete {local_path} - {e}", False, logger_worker)
 #TODO: update usage in other places
 
-def gdal_translate_cog(vrt, cog, dt, compress="ZSTD", zstd_level=12, blocksize=1024, nodata_value=None):
+#From Engineering: Appropriate compression (COMPRESS=DEFLATE, ZLEVEL=9, or LZW)
+def gdal_translate_cog(vrt, cog, dt, compress="LZW", blocksize=1024):
 
     predictor = 3 if "float" in dt.lower() else 2
-    creation_opts = [
-        f"COMPRESS={compress}",
-        f"BLOCKSIZE={blocksize}",
-        f"PREDICTOR={predictor}",
-        "BIGTIFF=IF_SAFER",
-        "NUM_THREADS=ALL_CPUS",
-    ]
-    if compress.upper() == "ZSTD":
-        creation_opts.append(f"ZSTD_LEVEL={zstd_level}")
-
-    if nodata_value is not None:
-        opts = gdal.TranslateOptions(
-            format="COG",
-            outputType=gdal.GetDataTypeByName(dt),
-            creationOptions=creation_opts,
-            noData=nodata_value
-        )
-    else:
-        opts = gdal.TranslateOptions(
-            format="COG",
-            outputType=gdal.GetDataTypeByName(dt),
-            creationOptions=creation_opts,
-        )
+    opts = gdal.TranslateOptions(
+        format="COG",
+        creationOptions=[
+            f"COMPRESS={compress}",
+            f"BLOCKSIZE={blocksize}",
+            f"PREDICTOR={predictor}",
+            "BIGTIFF=IF_SAFER",
+            "NUM_THREADS=ALL_CPUS",
+        ]
+    )
     ds = gdal.Translate(cog, vrt, options=opts)
 
     if ds is None:
         error = gdal.GetLastErrorMsg()
         raise RuntimeError(f"COG creation failed for {cog}: {error}")
 
-    ds = None  # flush/close
+    ds = None  # close
 
 def build_overviews(cog, resampling="AVERAGE", levels=None):
     ds = gdal.Open(cog, gdal.GA_Update)
@@ -79,14 +67,14 @@ def build_overviews(cog, resampling="AVERAGE", levels=None):
         raise RuntimeError(f"Overviews build failed for {cog}")
 
 def create_cog_from_vrt(output_vrt_s3_path, dt, tmp_cog_path, output_cog_s3_path, nodata_value=None):
-    os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
-    os.environ.setdefault("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff,.vrt,.ovr,.aux.xml")
+    os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
+    os.environ["CPL_VSIL_CURL_ALLOWED_EXTENSIONS"] = ".tif,.tiff,.vrt,.ovr,.aux.xml"
 
     # Recommended from ChatGPT for vsis3 performance
-    os.environ.setdefault("VSI_CACHE", "TRUE")
-    os.environ.setdefault("VSI_CACHE_SIZE", str(1 * 1024 * 1024 * 1024))  # 1GB
-    os.environ.setdefault("GDAL_HTTP_MAX_RETRY", "10")
-    os.environ.setdefault("GDAL_HTTP_RETRY_DELAY", "1")
+    os.environ["VSI_CACHE"] = "TRUE"
+    os.environ["VSI_CACHE_SIZE"] = str( 1 * 1024 * 1024 * 1024)  # 1GB
+    os.environ["GDAL_HTTP_MAX_RETRY"] = "10"
+    os.environ["GDAL_HTTP_RETRY_DELAY"] = "1"
 
     logger_worker = lu.setup_logging_worker()
 
@@ -97,7 +85,7 @@ def create_cog_from_vrt(output_vrt_s3_path, dt, tmp_cog_path, output_cog_s3_path
     # Build COG via GDAL Python
     src_vrt = output_vrt_s3_path.replace("s3://", "/vsis3/")
     try:
-        gdal_translate_cog(src_vrt, tmp_cog_path, dt,"ZSTD",  12, 1024, nodata_value)
+        gdal_translate_cog(src_vrt, tmp_cog_path, dt,"LZW", 1024)
     except Exception as e:
         lu.print_and_log(f"COG build failed for {src_vrt}: {e}", False, logger_worker)
         raise
@@ -105,7 +93,8 @@ def create_cog_from_vrt(output_vrt_s3_path, dt, tmp_cog_path, output_cog_s3_path
 
     # Per ChatGPT: OVERVIEW_RESAMPLING=AVERAGE during translate step can trigger expensive overview building in some GDAL setups or cause weird behavior
     # Build overviews for COG after COG creation
-    build_overviews(tmp_cog_path, resampling="AVERAGE", levels=[2, 4, 8, 16, 32])
+    #build_overviews(tmp_cog_path, resampling="AVERAGE", levels=[2, 4, 8, 16, 32])
+    #TODO: uncomment after testing
 
     # Upload COG to S3
     uu.upload_s3_file(output_cog_s3_path, tmp_cog_path)
@@ -199,7 +188,8 @@ def main(cluster_name, process):
                 'cog': f"/tmp/WWF_{wwf_emissions_pattern}_{year}.tif"
             }
     if 'removals' in process:
-        for year in cn.years_annual:
+        for year in [2016]:
+        #for year in cn.years_annual: #TODO: uncomment
             download_upload_dictionary[f"removals_{year}"] = {
                 'raw_dir': wwf_removals_path.replace("YYYY", f"{year}"),
                 'raw_pattern': wwf_removals_pattern,
