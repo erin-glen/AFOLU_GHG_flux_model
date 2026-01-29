@@ -4,8 +4,15 @@ Script to create WWF GEE assets:
 2) ingest data into GEE (each dataset x year is its own ee.Image asset)
 
 run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
-python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d mineral_soil -y 2010 -b lulucf -f WWF -r users/melrose -t /mnt/c/GIS/rasters/AFOLU_cogs/tile_ids.txt --skip_existing
+To run locally:
+python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d mineral_soil -y 2010 -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/tile_ids.txt --skip_existing
 
+To run in coiled:
+python -m src.utilities.create_cluster -cn GEE_mineral_soils_2015 -n 1 -m 4
+python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -cn GEE_mineral_soils_2015 -d mineral_soil -y 2015 -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/tile_ids.txt --skip_existing
+
+Notes:
+    - It took ~40 minutes to upload 378 1x1 tiles (tiles that overlap with WWF sites) for 2010 mineral soils (local run)
 """
 from __future__ import annotations
 
@@ -17,33 +24,14 @@ from functools import lru_cache
 from google.cloud import storage
 import time
 import boto3
+from dask.distributed import as_completed
 
 from src.utilities import constants_and_names as cn
 from src.utilities import universal_utilities as uu
 from src.utilities import log_utilities as lu
 
-# Export these from your bashrc to use here
 gee_project = os.environ.get("GOOGLE_CLOUD_PROJECT")
 
-# def norm_prefix(prefix: str | None) -> str:
-#     return (prefix or "").strip("/")
-#
-#
-# def _parse_years(raw: str | None, default_years: list[int]) -> list[int]:
-#     if not raw:
-#         return default_years
-#     years: set[int] = set()
-#     for tok in raw.replace(" ", "").split(","):
-#         if not tok:
-#             continue
-#         if "-" in tok:
-#             a, b = tok.split("-", 1)
-#             years.update(range(int(a), int(b) + 1))
-#         else:
-#             years.add(int(tok))
-#     return sorted(years)
-#
-#
 # Read tile_ids from .txt file
 def read_tile_ids(path):
     if not path:
@@ -51,61 +39,8 @@ def read_tile_ids(path):
     with open(path, "r", encoding="utf-8") as f:
         return {ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")}
 
-#
-# def _tile_ok(name_or_key: str, tile_ids: set[str] | None) -> bool:
-#     if not tile_ids:
-#         return True
-#     return any(tid in name_or_key for tid in tile_ids)
-#
-#
-# def _is_tif(key: str) -> bool:
-#     k = key.lower()
-#     return k.endswith(".tif") or k.endswith(".tiff")
-#
-#
-# def _ensure_ee_folder(folder_id: str) -> None:
-#     # folder_id like users/melrose/WWF/mineral_soil/2010
-#     parts = folder_id.split("/")
-#     for i in range(2, len(parts) + 1):
-#         path = "/".join(parts[:i])
-#         try:
-#             ee.data.createAsset({"type": "FOLDER"}, path)
-#         except Exception:
-#             # Folder likely exists (or parent missing in older EE backends) — ignore.
-#             pass
-#
-#
-# def _ee_asset_exists(asset_id: str) -> bool:
-#     try:
-#         ee.data.getAsset(asset_id)
-#         return True
-#     except Exception:
-#         return False
-#
-#
-# def _start_ingestion_from_gcs(*, gcs_uri: str, asset_id: str) -> str:
-#     """
-#     Ingest a single GeoTIFF from GCS -> EE asset via EE Python API.
-#
-#     Assumption: these rasters are single-band; if not, ingestion may need a bands manifest.
-#     """
-#     manifest = {
-#         "name": asset_id,
-#         "tilesets": [{"sources": [{"uris": [gcs_uri]}]}],
-#         "bands": [{"id": "b1"}],
-#     }
-#     task_id = ee.data.startIngestion(None, manifest)
-#     return task_id
-#
-#
-# def _gs_uri(bucket: str, *parts: str) -> str:
-#     clean = [p.strip("/") for p in parts if p and p.strip("/")]
-#     if clean:
-#         return f"gs://{bucket}/" + "/".join(clean)
-#     return f"gs://{bucket}"
-
-# List s3 files with tile_ids
-def list_s3_tifs_from_tile_ids(s3_path, tile_ids):
+# List s3 files. Option to match list of tile_ids
+def list_s3_tiles_from_tile_ids(s3_path, tile_ids):
     s3 = boto3.client("s3")
     bucket_name, prefix = uu.split_s3_path(s3_path)
 
@@ -134,29 +69,28 @@ def list_s3_tifs_from_tile_ids(s3_path, tile_ids):
 
     return matching_tiles
 
+# Checks to see if tile already exists in GCS
 def gcs_blob_exists(gcs_storage_client, bucket, blob_name):
     return gcs_storage_client.bucket(bucket).blob(blob_name).exists(client=gcs_storage_client)
 
-
-# Upload S3 file to GCS storage without writing local file
+# Upload tile to GCS storage without writing local file
 def upload_s3_to_gcs(s3_client, gcs_storage_client, s3_bucket, s3_file, gcs_bucket, gcs_blob):
-    object = s3_client.get_object(Bucket=s3_bucket, Key=s3_file)
-    body = object["Body"]  # streaming file-like object
+    obj = s3_client.get_object(Bucket=s3_bucket, Key=s3_file)
+    body = obj["Body"]  # streaming file-like object
     blob = gcs_storage_client.bucket(gcs_bucket).blob(gcs_blob)
     blob.upload_from_file(body, rewind=False)
 
-@lru_cache(maxsize=1)
+
 # One pair of s3 and GCS clients per worker to parallelize tasks using dask
+@lru_cache(maxsize=1)
 def worker_clients():
     return boto3.Session().client("s3"), storage.Client()
 
-# Upload all s3 files from list -> gs://gcs_bucket/gcs_folder/<basename> (skips existing files)
+# Upload all s3 tiles from list -> gs://gcs_bucket/gcs_folder/<basename> (skips existing files)
 # Returns count of # of files uploaded vs skipped for log
 def gcs_upload(s3_path, s3_files, gcs_bucket, gcs_folder):
     s3_client, gcs_storage_client = worker_clients()
-
     s3_bucket, _ = uu.split_s3_path(s3_path)
-    
     uploaded = 0
     skipped = 0
 
@@ -172,6 +106,105 @@ def gcs_upload(s3_path, s3_files, gcs_bucket, gcs_folder):
         uploaded += 1
 
     return {"uploaded": uploaded, "skipped": skipped, "total": len(s3_files)}
+
+def chunked(xs, n):
+    for i in range(0, len(xs), n):
+        yield xs[i:i + n]
+
+# List tiles in GCS bucket
+def list_gcs_tifs(gcs_storage_client, bucket, prefix):
+    out = []
+    for blob in gcs_storage_client.list_blobs(bucket, prefix=prefix):
+        name = blob.name
+        if name.lower().endswith(".tif") or name.lower().endswith(".tiff"):
+            out.append(name)
+    return out
+
+# Remove s3 tiles from upload list that already exist in GCS storage
+def filter_s3_list_by_existing_gcs(s3_files, gcs_bucket, gcs_folder):
+    gcs_storage_client = storage.Client()
+    existing = {os.path.basename(tile) for tile in list_gcs_tifs(gcs_storage_client, gcs_bucket, gcs_folder)}
+    if not existing:
+        return s3_files
+    return [file for file in s3_files if os.path.basename(file) not in existing]
+
+# Formats GEE asset path into ee folder structure
+def ensure_ee_folder(folder_id):
+    parts = folder_id.split("/")
+    for i in range(2, len(parts) + 1):
+        path = "/".join(parts[:i])
+        try:
+            ee.data.createAsset({"type": "FOLDER"}, to_cloud_asset_name(path))
+        except Exception:
+            pass
+
+# Checks if GEE asset already exists
+def ee_asset_exists(asset_id):
+    try:
+        ee.data.getAsset(to_cloud_asset_name(asset_id))
+        return True
+    except Exception:
+        return False
+
+# Kicks of GEE task to ingest all tiles in GCS storage as a singe, mosaiced ee.Image asset
+def start_image_ingestion_from_gcs(gcs_uris, asset_id, band_name="b1"):
+    # Sources needs a single tile per ImageSource
+    sources = [{"uris": [uri]} for uri in gcs_uris]
+
+    # Ingestion manifest for all tiles
+    manifest = {
+        "name": to_cloud_asset_name(asset_id),
+        "tilesets": [{"sources": sources}],
+        "bands": [{"id": band_name}],
+    }
+    return ee.data.startIngestion(None, manifest)
+
+# Makes sure GEE asset name is formatted correctly
+def to_cloud_asset_name(asset_id):
+    asset_id = asset_id.strip("/")
+    if asset_id.startswith("projects/"):
+        return asset_id
+    if asset_id.startswith("users/"):
+        return f"projects/earthengine-legacy/assets/{asset_id}"
+    raise ValueError(f"Bad asset id: {asset_id}")
+
+# Initialize GEE project in each ingest_dataset_year call so can parrallelize in dask
+@lru_cache(maxsize=1)
+def ee_init():
+    ee.Initialize(project=gee_project)
+
+# Main function to submit ee.Image asset ingestion  for each dataset x year
+def ingest_dataset_year(item, tile_ids, skip_existing):
+    ee_init()  # Initialize GEE project
+    gcs_storage_client = storage.Client()
+
+    gcs_bucket = item["gcs_bucket"]
+    gcs_folder = item["gcs_folder"]
+    year = item["year"]
+
+    blob_names = list_gcs_tifs(gcs_storage_client, gcs_bucket, gcs_folder)
+
+    if tile_ids:
+        blob_names = [blob for blob in blob_names if any(tile_id in blob for tile_id in tile_ids)]
+    if not blob_names:
+        return {"asset_id": None, "task_id": None, "n_tiles": 0}
+    blob_names = sorted(blob_names)
+    gcs_uris = [f"gs://{gcs_bucket}/{blob}" for blob in blob_names]
+
+    # GEE folder
+    ee_folder = posixpath.join(item["ee_dir"], str(year))
+    ensure_ee_folder(ee_folder)
+
+    # Asset name
+    asset_name = f"{item['ee_pattern']}__{year}"
+    asset_id = posixpath.join(ee_folder, asset_name)
+
+    if skip_existing and ee_asset_exists(asset_id):
+        return {"asset_id": asset_id, "task_id": None, "n_tiles": len(gcs_uris), "skipped": True}
+
+    task_id = start_image_ingestion_from_gcs(gcs_uris=gcs_uris, asset_id=asset_id)
+    return {"asset_id": asset_id, "task_id": task_id, "n_tiles": len(gcs_uris), "skipped": False}
+
 
 def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_ids, skip_existing):
 
@@ -192,11 +225,6 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
     wwf_removals_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_3_WWF_sites/gross_removals__all_C_pools__MgCO2/standard_model/annual_intervals/YYYY/_pixel_yr/40000_pixels/20251211/"
     wwf_net_flux_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_3_WWF_sites/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/YYYY/_pixel_yr/40000_pixels/20251211/"
     wwf_mineral_soil_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_soil_organic_carbon/version_1_0_0__standard__global/SOC_change__mineral_soil_extent__0-30cm_MgC/YYYY/_ha_yr/4000_pixels/20251224/"
-
-    # wwf_emissions_pattern = "gross_emissions__all_C_pools__all_gases__MgCO2e_pixel_yr"
-    # wwf_removals_pattern = "gross_removals__all_C_pools__MgCO2_pixel_yr"
-    # wwf_net_flux_pattern = "net_flux__all_C_pools__all_gases__MgCO2e_pixel_yr"
-    # wwf_mineral_soil_pattern = "SOC_change__mineral_soil_extent__0-30cm_MgC_ha_yr"
 
     wwf_emissions_gee_folder = "WWF_annual_emissions"
     wwf_removals_gee_folder = "WWF_annual_removals"
@@ -234,22 +262,18 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
         for year in ds_years:
             if dataset == "emissions":
                 s3_dir = wwf_emissions_path.replace("YYYY", str(year))
-                #s3_pattern = wwf_emissions_pattern
                 gee_dir = wwf_emissions_gee_folder
                 gee_pattern = wwf_emissions_gee_pattern
             elif dataset == "removals":
                 s3_dir = wwf_removals_path.replace("YYYY", str(year))
-                #s3_pattern = wwf_removals_pattern
                 gee_dir = wwf_removals_gee_folder
                 gee_pattern = wwf_removals_gee_pattern
             elif dataset == "net_flux":
                 s3_dir = wwf_net_flux_path.replace("YYYY", str(year))
-                #s3_pattern = wwf_net_flux_pattern
                 gee_dir = wwf_net_flux_gee_folder
                 gee_pattern = wwf_net_flux_gee_pattern
             elif dataset == "mineral_soil":
                 s3_dir = wwf_mineral_soil_path.replace("YYYY", str(year))
-                #s3_pattern = wwf_mineral_soil_pattern
                 gee_dir = wwf_mineral_soil_gee_folder
                 gee_pattern = wwf_mineral_soil_gee_pattern
             else:
@@ -259,7 +283,6 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
                 "dataset": dataset,
                 "year": year,
                 "s3_dir": s3_dir.rstrip("/") + "/",
-                #"s3_pattern": s3_pattern,
                 "gcs_bucket": gcs_bucket,
                 "gcs_folder": "/".join([p for p in [gcs_folder, dataset, str(year)] if p]), # GCS layout: <bucket>/<gcs_folder>/<dataset>/<year>/
                 "ee_dir": posixpath.join(gee_repo, gcs_folder, gee_dir),
@@ -270,21 +293,19 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
     # -------------------------------------------------------------------------------------------------------------------
 
     # Step 2: Upload tiles from s3 storage directly to GCS bucket storage
-
-    # Earth Engine: uses existing credentials on the machine/container
-    ee.Initialize(project=gee_project)
-
     start_time = time.time()
     main_logger.info(f"STEP 2 - Uploading data from s3 to GCS bucket")
 
-    # Create list of rasters to upload to GCS (filtered if tile_ids provided)
+    # Create list of rasters to upload to GCS (filtered if tile_ids if provided) (existing tiles in GCS skipped from upload)
     keys_to_remove = []
     for key, items in download_upload_dictionary.items():
-        s3_raster_list = list_s3_tifs_from_tile_ids(items["s3_dir"], tile_ids)
+        s3_raster_list = list_s3_tiles_from_tile_ids(items["s3_dir"], tile_ids)
         if not s3_raster_list:
-            main_logger.warning(f"{key} - There were no rasters found. Skipping upload.")
+            main_logger.warning(f"{key} - There were no rasters found in s3. Skipping upload.")
             keys_to_remove.append(key)
             continue
+        if skip_existing:
+            s3_raster_list = filter_s3_list_by_existing_gcs(s3_raster_list, items["gcs_bucket"], items["gcs_folder"])
 
         download_upload_dictionary[key]['s3_raster_list'] = s3_raster_list
         main_logger.info(f" {key} - There are {len(s3_raster_list)} rasters in s3 to upload to GCS")
@@ -295,70 +316,96 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
 
 
     # Upload all data from s3 to GCS using futures (Coiled) or locally
-    if not run_local:
-        gcs_futures = []
-        for key, items in download_upload_dictionary.items():
-            main_logger.info(f" Uploading data for {key} to GCS: {uu.timestr('time')}")
-            gcs_future = client.submit(
-                gcs_upload,
-                s3_path=items["s3_dir"],
-                s3_files=items["s3_raster_list"],
-                gcs_bucket=items["gcs_bucket"],
-                gcs_folder=items["gcs_folder"]
-            )
-            gcs_futures.append((key, gcs_future))
-
-        # Wait for all GCS uploads to finish before moving on to asset ingestion
-        for key, future in gcs_futures:
-            result = future.result()
-            main_logger.info("%s - uploaded=%s skipped=%s total=%s", key, result["uploaded"], result["skipped"], result["total"])
-
+    total_to_upload = sum(len(i["s3_raster_list"]) for i in download_upload_dictionary.values())
+    if total_to_upload == 0:
+        main_logger.info(" Nothing to upload (all tiles missing or already in GCS).")
     else:
-        for key, items in download_upload_dictionary.items():
-            main_logger.info(f" Uploading data for {key} to GCS: {uu.timestr('time')}")
-            result = gcs_upload(
-                s3_path=items["s3_dir"],
-                s3_files=items["s3_raster_list"],
-                gcs_bucket=items["gcs_bucket"],
-                gcs_folder=items["gcs_folder"]
-            )
-            main_logger.info("%s - uploaded=%s skipped=%s total=%s", key, result["uploaded"], result["skipped"], result["total"])
+        uploaded_so_far = 0
+        batch_size = 25     # edit this (smaller -> more progress updates; larger -> less overhead)
+        if not run_local:
+            gcs_futures = []
+            for key, items in download_upload_dictionary.items():
+                for batch in chunked(items["s3_raster_list"], batch_size):
+                    gcs_future = client.submit(
+                        gcs_upload,
+                        s3_path=items["s3_dir"],
+                        s3_files=batch,
+                        gcs_bucket=items["gcs_bucket"],
+                        gcs_folder=items["gcs_folder"],
+                        pure=False
+                    )
+                    gcs_futures.append((key, gcs_future))
+
+            # Wait for all GCS uploads to finish before moving on to asset ingestion
+            future_to_key = {future: key for key, future in gcs_futures}
+            for future in as_completed(list(future_to_key)):
+                result = future.result()
+                uploaded_so_far += result["uploaded"]
+                percent = (uploaded_so_far / total_to_upload) * 100
+                main_logger.info("STEP 2 progress: %.1f%% (%s/%s uploaded)", percent, uploaded_so_far, total_to_upload)
+
+        else:
+            for key, items in download_upload_dictionary.items():
+                for batch in chunked(items["s3_raster_list"], batch_size):
+                    result = gcs_upload(
+                        s3_path=items["s3_dir"],
+                        s3_files=batch,
+                        gcs_bucket=items["gcs_bucket"],
+                        gcs_folder=items["gcs_folder"]
+                    )
+                    uploaded_so_far += result["uploaded"]
+                    percent = (uploaded_so_far / total_to_upload) * 100
+                    main_logger.info("STEP 2 progress: %.1f%% (%s/%s uploaded)", percent, uploaded_so_far, total_to_upload)
 
     end_time = time.time()
-    main_logger.info(f"STEP 2 Complete - All data uploaded to GCS storage in {round(end_time - start_time)} seconds\n")
+    main_logger.info(f"STEP 2 Complete - All data uploaded to GCS storage in {round(end_time - start_time)/60.0} minutes\n")
 
+    # -------------------------------------------------------------------------------------------------------------------
 
-    # # -----------------------------
-    # # Step 3: Ingest all tiles per dataset/year folder -> EE
-    # # -----------------------------
-    # for _, job in download_upload_dictionary.items():
-    #     gcs_bucket_name = job["gcs_bucket"]
-    #     gcs_prefix_key = job["gcs_prefix"]
-    #     ee_folder = job["ee_folder"]
-    #     ds = job["dataset"]
-    #     yr = job["year"]
-    #
-    #     _ensure_ee_folder(ee_folder)
-    #     tiles = _list_gcs_tifs(gcs, bucket=gcs_bucket_name, prefix=gcs_prefix_key)
-    #     tiles = [u for u in tiles if _tile_ok(u, tile_ids_set)]
-    #
-    #     if not tiles:
-    #         main_logger.warning(f"No tiles found to ingest for {ds} {yr}: gs://{gcs_bucket_name}/{gcs_prefix_key}/")
-    #         continue
-    #
-    #     main_logger.info(f"Ingest {ds} {yr}: {len(tiles)} tiles -> {ee_folder}/")
-    #
-    #     for gcs_uri in tiles:
-    #         name = os.path.splitext(os.path.basename(gcs_uri))[0]
-    #         asset_id = posixpath.join(ee_folder, name)
-    #
-    #         if skip_existing and _ee_asset_exists(asset_id):
-    #             continue
-    #
-    #         task_id = _start_ingestion_from_gcs(gcs_uri=gcs_uri, asset_id=asset_id)
-    #         main_logger.info(f"Started ingestion: {asset_id} (task={task_id})")
-    #
-    # main_logger.info("done")
+    # Step 3: Ingest all tiles in each dataset×year folder as its own ee.Image asset
+    start_time = time.time()
+    main_logger.info("STEP 3 - Ingesting dataset×year assets into Earth Engine")
+
+    # Earth Engine uses existing credentials on the machine
+    if not gee_project:
+        raise ValueError("GOOGLE_CLOUD_PROJECT is not set")
+    ee.Initialize(project=gee_project)
+
+    items = list(download_upload_dictionary.items())
+
+    if not run_local:
+        asset_futures = []
+        for key, item in items:
+            asset_future = client.submit(
+                ingest_dataset_year,
+                item,
+                tile_ids=tile_ids,
+                skip_existing=skip_existing,
+                pure=False,
+            )
+            asset_futures.append((key, asset_future))
+
+        for key, future in asset_futures:
+            result = future.result()
+            if result.get("asset_id") is None:
+                main_logger.warning("%s - no tiles found in GCS to ingest", key)
+            elif result.get("skipped"):
+                main_logger.info("%s - skip existing asset: %s (%s tiles)", key, result["asset_id"], result["n_tiles"])
+            else:
+                main_logger.info("%s - started ingestion: %s (task=%s, %s tiles)", key, result["asset_id"], result["task_id"], result["n_tiles"])
+
+    else:
+        for key, item in items:
+            result = ingest_dataset_year(item, tile_ids=tile_ids, skip_existing=skip_existing)
+            if result.get("asset_id") is None:
+                main_logger.warning("%s - no tiles found in GCS to ingest", key)
+            elif result.get("skipped"):
+                main_logger.info("%s - skip existing asset: %s (%s tiles)", key, result["asset_id"], result["n_tiles"])
+            else:
+                main_logger.info("%s - started ingestion: %s (task=%s, %s tiles)", key, result["asset_id"], result["task_id"], result["n_tiles"])
+
+    end_time = time.time()
+    main_logger.info("STEP 3 Complete - started all ingestions in %s seconds\n", round(end_time - start_time))
 
 
 if __name__ == "__main__":
