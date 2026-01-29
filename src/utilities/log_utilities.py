@@ -103,7 +103,7 @@ def compile_worker_logs(no_log, cluster, stage, start_time_str, logger):
     worker_log_name = f"{cn.combined_log}_workers_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
     worker_log_local_path = f"{cn.local_log_path}{worker_log_name}"
 
-    logger.info(f"Preparing consolidated log {worker_log_name}")
+    logger.info(f"Combining worker logs into {worker_log_name}")
 
     # Recovers legs from Coiled
     logs = cluster.get_logs()

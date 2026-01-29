@@ -2460,6 +2460,7 @@ def main(cluster_name, year_range, model_type,
                                                   run_date, main_logger)
 
         # These variables are added to the mega-zarr
+        #TODO include units (per_ha) in zarr variable names, where relevant
         outputs_to_zarr = cn.full_outputs_to_zarr
 
         # Creates the global mega-zarr with metadata only
@@ -2674,7 +2675,7 @@ def main(cluster_name, year_range, model_type,
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
 
 
-    ### Step 7: Resize cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    ### Step 7: Resize cluster down to 1 worker for remaining steps since they only need a minimal remainder of the
     ### cluster, not all the workers.
 
     if not run_local:
@@ -2688,29 +2689,7 @@ def main(cluster_name, year_range, model_type,
             resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
 
-
-
-
-
-
-
-
-
-
-    ### Step 4: Counts files in output folders, aggregates chunk stats for 1x1 degree outputs
-
-    # Resizes cluster down for all subsequent steps (chunk stats, zarr stats comparison, and log aggregation)
-    if not run_local:
-        workers = client.scheduler_info()["workers"]
-        n_workers = len(workers)
-
-        # Reduces number of workers in the cluster if there are more than 10
-        if n_workers > 10:
-            main_logger.info("Downsizing cluster.")
-            resize_cluster.resize_coiled_cluster(cluster_name, n_workers/3)
-
-    # TODO move output counting after everything else (chunk stats, zarr comparison, model log aggregation) because cluster times out during this. Can end cluster, and print outputs directly to end of combined log.
-    # TODO Base it on 1_create_starting_carbon_pools, where I already made this change
+    ### Step 8: Count output geotifs in s3
     # Iterates through select output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
     keywords = ["gross", "net", "state"]
     output_dir_list_to_count = [
@@ -2724,29 +2703,12 @@ def main(cluster_name, year_range, model_type,
             # print(geotiff_files)
 
 
-
-
-
-
-
-    ### Step 6: Aggregates logs
-
-    # Worker logs are not aggregated if doing a local run (since there are no workers)
+    ### Step 9: Merge compiled worker log and main log
     if not run_local:
-
-        # Resizes down to 1 worker if it's a large run
-        if is_large_run:
-
-            main_logger.info("Resizing cluster to 1 worker")
-            resize_cluster.resize_coiled_cluster(cluster_name, 1)
-
-        # # Creates combined log from all workers if not deactivated
-        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
 
         # Adds the workers' logs to the main log and uploads to s3
         lu.merge_main_and_worker_upload_logs(no_log, main_log_local_path, worker_log_local_path, stage)
 
-        uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats, zarr comparison, and worker log compilation", main_logger)
 
     # Closes the Dask client if not running locally
     if not run_local:

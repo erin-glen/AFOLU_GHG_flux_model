@@ -888,7 +888,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
 
 
-    ### Step 7: Resize cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    ### Step 7: Resize cluster down to 1 worker for remaining steps since they only need a minimal remainder of the
     ### cluster, not all the workers.
 
     if not run_local:
@@ -914,7 +914,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with output counts", main_logger)
 
 
-    ### Step 7: Merge worker and local logs
+    ### Step 9: Merge compiled worker log and main log
     if not run_local:
 
         # Adds the workers' logs to the main log and uploads to s3
@@ -934,8 +934,8 @@ if __name__ == "__main__":
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-f', '--first_chunks', type=int, help='Number of chunks to process from shapefile')
     parser.add_argument('--year', type=int, required=True, help='Year for carbon pools: must be 2000 or 2015')
-    parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard).')
-    parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area).')
+    parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard). Not currently using.')
+    parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area). Not currently using.')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--run_local', action='store_true', help='Run locally without Dask/Coiled')
