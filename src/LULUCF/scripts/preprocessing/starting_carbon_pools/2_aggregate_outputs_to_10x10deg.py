@@ -182,7 +182,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
 
             future = client.submit(zu.create_10x10_deg_geotif_from_zarr,
                                    var_name, 0, tile_id, mega_zarr_path, output_base,
-                                   model_type, model_path_description, no_upload)
+                                   model_type, model_path_description, no_upload, True)
             futures.append(future)
 
     # Results is a list of tuples, where each tuple is the per-ha and per-pixel chunk stats, each of which is a dictionary
@@ -212,8 +212,8 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
         uu.stage_duration(start_time, uu.timestr(), f"{stage} worker log compilation", main_logger)
 
 
-    ### Step 4: Resize cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
-    ### cluster, not all the workers.
+    ### Step 4: Resize cluster down to 1 worker for pixel count comparison, output counts, and log merging since those
+    ### only needs a minimal remainder of the cluster, not all the workers.
 
     if not run_local:
         workers = client.scheduler_info()["workers"]
@@ -241,6 +241,11 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
 
     # Merges the per-ha pixel counts for the 10x10 tiles against the pixel counts for the 1x1s
     merged_10x10_counts_per_ha_df = model_10x10_counts_df.merge(counts_per_ha_10x10_df, on='tile_name', how='left')
+    # print("model_10x10_counts_df:", model_10x10_counts_df)
+    print("model_10x10_counts_df:", model_10x10_counts_df['tile_name'].iloc[0])
+    # print("counts_per_ha_10x10_df:", counts_per_ha_10x10_df)
+    print("counts_per_ha_10x10_df:", counts_per_ha_10x10_df['tile_name'].iloc[0])
+    # print("merged_10x10_counts_per_ha_df:", merged_10x10_counts_per_ha_df)
 
     # Renames the counts in the 1x1 df from ha to pixel so that their tile names match the per-pixel output
     # and they can be joined. Otherwise, the per-pixel tile names won't match the pixel counts from the 1x1s (since they say ha).

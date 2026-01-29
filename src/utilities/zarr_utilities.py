@@ -223,7 +223,7 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
         if var in z
     }
 
-    # Computes spatial indices ONCE
+    # Computes spatial indices once
     lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
     lat_end, lon_end = latlon_to_global_zarr_indices(bounds[1], bounds[2], cn.resolution)  # south, east
 
@@ -394,6 +394,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
         # For reasons I can't really trace back, the year datatype for C densities is object, not int.
         # So, it needs to be recast to a str or int to match the chunk_stats table.
         # year = str(year)
+    # print("model_table:", model_table)
 
     # Converts zarr chunk stats from list of dictionaries to dataframe.
     # Need to flatten the list because each chunk for each dataset is a list of dictionaries, where each element is a year.
@@ -405,6 +406,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
 
     # Subsets model chunk stats to relevant pattern
     subset_model_table = model_table[(model_table['pattern'].str.contains(var_name, na=False))]
+    # print("var_name:", var_name)
     # print("subset_model_table", subset_model_table)
 
     # Selects only the needed columns from rechunked_zarr_table
@@ -429,8 +431,8 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
 
     # Merges with subset_model_table on 'chunk_name', left join (keeps all model output rows)
     # main_logger.info(f"    Merging zarr data to original model data for {var_name}: {uu.timestr()}")
-    print("subset_model_table[chunk_name]:", subset_model_table.iloc[0]['chunk_name'])
-    print("zarr_subset_table[chunk_name]:", zarr_subset_table.iloc[0]['chunk_name'])
+    # print("subset_model_table[chunk_name]:", subset_model_table.iloc[0]['chunk_name'])
+    # print("zarr_subset_table[chunk_name]:", zarr_subset_table.iloc[0]['chunk_name'])
     merged_table = subset_model_table.merge(zarr_subset_table, on='chunk_name', how='left')
     # print("merged_table:", merged_table)
 
@@ -440,7 +442,8 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
     merged_table['mean_value_diff'] = merged_table['mean_value'] - merged_table['mean_value_zarr']
     merged_table['max_value_diff'] = merged_table['max_value'] - merged_table['max_value_zarr']
     merged_table['count_value_diff'] = merged_table['count_value'] - merged_table['count_value_zarr']
-    # print(merged_table.head())
+    # print("merged_table.head():", merged_table.head())
+
 
     # Calculates max absolute difference across the four metrics' difference columns
     merged_table['maximum_diff_value'] = merged_table[
@@ -647,7 +650,7 @@ def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_with
 
 # Extracts a 10x10° tile from a Zarr store and writes to GeoTIFF on S3
 def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_base,
-                                      model_type, model_path_description, no_upload):
+                                      model_type, model_path_description, no_upload, use_start_year):
 
     process = psutil.Process(os.getpid())
 
@@ -656,7 +659,12 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     # Convert tile_id to bounding box (W, S, E, N)
     min_x, min_y, max_x, max_y = uu.get_10x10_tile_bounds(tile_id)
 
-    year = cn.interval_end_years_annual[year_idx]
+    # If creating outputs from the model start year, it just uses that year.
+    # Otherwise, uses the year for the annual outputs.
+    if use_start_year == True:
+        year = cn.first_model_year_annual
+    else:
+        year = cn.interval_end_years_annual[year_idx]
 
     # Open Zarr group using fsspec mapper
     fs = fsspec.filesystem("s3", anon=False)

@@ -14,14 +14,13 @@ Coiled shapefile test:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 8 -cn starting_carbon_pools
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn starting_carbon_pools --create_zarr -mt standard -mpd test_feature --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -f 1
 
-Full run 2000:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn starting_carbon_pools
+Full run 2000 (using 200 workers seems to overload requests to s3):
+python -m src.utilities.create_cluster -n 100 -t 1 -m 8 -cn starting_carbon_pools
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn starting_carbon_pools --create_zarr -mt standard -mpd global --year 2000 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2000 creation using ESA CCI AGB v6, raw and adjusted versions."
 
-Full run 2015:
-python -m src.utilities.create_cluster -n 200 -t 1 -m 8 -cn starting_carbon_pools
+Full run 2015 (using 200 workers seems to overload requests to s3)::
+python -m src.utilities.create_cluster -n 100 -t 1 -m 8 -cn starting_carbon_pools
 python -m src.LULUCF.scripts.preprocessing.starting_carbon_pools.1_create_starting_carbon_pools -cn starting_carbon_pools --create_zarr -mt standard -mpd global --year 2015 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive global run for carbon pool 2015 creation using ESA CCI AGB v6, raw and adjusted versions."
-
 
 To create a vrt of the 10x10 deg outputs, do:
 aws s3 ls s3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/litter_C_density_MgC_ha/40000_pixels/ --recursive | grep .tif$ | awk '{print "/vsis3/gfw2-data/"$4}' > litter_C_2015_file_list.txt
@@ -351,19 +350,19 @@ def create_starting_C_densities(in_dict_uint8, in_dict_uint16, in_dict_int16,
 
     # Adds the output arrays to the dictionary with the appropriate data type
     # Outputs need .copy() so that previous intervals' arrays in dictionary aren't overwritten because arrays in dictionaries are mutable (courtesy of ChatGPT).
-    out_dict_float32[cn.agc_raw_dens_pattern] = agc_raw_out_block.copy()
-    out_dict_float32[cn.bgc_raw_dens_pattern] = bgc_raw_out_block.copy()
-    out_dict_float32[cn.deadwood_c_raw_dens_pattern] = deadwood_c_raw_out_block.copy()
-    out_dict_float32[cn.litter_c_raw_dens_pattern] = litter_c_raw_out_block.copy()
-    out_dict_float32[cn.non_soil_c_raw_dens_pattern] = non_soil_c_raw_out_block.copy()
+    out_dict_float32[f"{cn.agc_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = agc_raw_out_block.copy()
+    out_dict_float32[f"{cn.bgc_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = bgc_raw_out_block.copy()
+    out_dict_float32[f"{cn.deadwood_c_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = deadwood_c_raw_out_block.copy()
+    out_dict_float32[f"{cn.litter_c_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = litter_c_raw_out_block.copy()
+    out_dict_float32[f"{cn.non_soil_c_raw_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = non_soil_c_raw_out_block.copy()
 
-    out_dict_float32[cn.agc_LC_masked_dens_pattern] = agc_LC_masked_out_block.copy()
-    out_dict_float32[cn.bgc_LC_masked_dens_pattern] = bgc_LC_masked_out_block.copy()
-    out_dict_float32[cn.deadwood_c_LC_masked_dens_pattern] = deadwood_c_LC_masked_out_block.copy()
-    out_dict_float32[cn.litter_c_LC_masked_dens_pattern] = litter_c_LC_masked_out_block.copy()
-    out_dict_float32[cn.non_soil_c_LC_masked_dens_pattern] = non_soil_c_LC_masked_out_block.copy()
+    out_dict_float32[f"{cn.agc_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = agc_LC_masked_out_block.copy()
+    out_dict_float32[f"{cn.bgc_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = bgc_LC_masked_out_block.copy()
+    out_dict_float32[f"{cn.deadwood_c_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = deadwood_c_LC_masked_out_block.copy()
+    out_dict_float32[f"{cn.litter_c_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = litter_c_LC_masked_out_block.copy()
+    out_dict_float32[f"{cn.non_soil_c_LC_masked_dens_pattern}{cn.C_density_pixel_meaning}_{year}"] = non_soil_c_LC_masked_out_block.copy()
 
-    out_dict_uint8[cn.starting_C_pools_LC_masked_source_flag_pattern] = LC_masked_state_block.copy()
+    out_dict_uint8[f"{cn.starting_C_pools_LC_masked_source_flag_pattern}_{year}"] = LC_masked_state_block.copy()
 
     # print(out_dict_uint8)
 
@@ -464,7 +463,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
     numba_end = time.time()
     lu.print_and_log(f"Done calculating carbon densities in {bounds_str} in {tile_id}: {uu.timestr()}", False, logger_worker)
     lu.print_and_log(f"Memory usage after numba calculations completed for {bounds_str}: {process.memory_info().rss / 1024 ** 2:.2f} MB", is_large_run, logger_worker)
-    lu.print_and_log(f"Calculated carbon densities in {bounds_str} in {tile_id} in {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"Calculated carbon densities for {bounds_str} in {tile_id} in {round(numba_end-numba_start)} seconds: {uu.timestr()}", False, logger_worker)
 
 
     # Fresh non-Numba-constrained dictionary that stores all output numpy arrays of all datatypes.
@@ -641,8 +640,8 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     main_logger.info(f"Chunks to process: {len(chunk_list)}")
 
     # Determines if the output file names for final versions of outputs should be used
-    is_large_run = False
-    # is_large_run = True  # For simulating a large run
+    # is_large_run = False
+    is_large_run = True  # For simulating a large run
     if len(chunk_list) > 20:
         is_large_run = True
         main_logger.info("Running as final model.")
@@ -747,6 +746,9 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
                        cn.agc_LC_masked_dens_pattern, cn.bgc_LC_masked_dens_pattern,
                        cn.deadwood_c_LC_masked_dens_pattern, cn.litter_c_LC_masked_dens_pattern,
                        cn.non_soil_c_LC_masked_dens_pattern, cn.starting_C_pools_LC_masked_source_flag_pattern]
+    # Adds units and year to zarr variable names
+    outputs_to_zarr_with_pattern_year = [pattern.replace("MgC", f"MgC{cn.C_density_pixel_meaning}") for pattern in outputs_to_zarr]
+    outputs_to_zarr_with_pattern_year = [pattern + f"_{year}" for pattern in outputs_to_zarr_with_pattern_year]
 
     # Only creates the global mega-zarr if needed (large runs or otherwise specified)
     if create_zarr:
@@ -757,7 +759,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
                                                   run_date, main_logger)
 
         # Creates the global mega-zarr with metadata only
-        zu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, 1,
+        zu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr_with_pattern_year, 1,
                                     (1, chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
@@ -771,7 +773,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
 
     else:
         mega_zarr_path = None
-        outputs_to_zarr = False
+        outputs_to_zarr_with_pattern_year = False
 
 
     ### Step 3: Create 1x1 degree outputs
@@ -783,7 +785,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     C_pool_1x1_deg_delayed_results = [dask.delayed(create_and_upload_starting_C_densities)
                        (chunk, mangrove_C_ratio_array, download_dict_with_data_types, year,
                         is_large_run, no_upload, create_zarr, output_dir_list, stage,
-                        model_type, mega_zarr_path, outputs_to_zarr)
+                        model_type, mega_zarr_path, outputs_to_zarr_with_pattern_year)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results
@@ -833,16 +835,16 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     #     chunks_without_zarr_stats_total = 0
     #
     #     # Iterates through select variables/datasets for chunk stats comparison. Can modify as needed.
-    #     for var_name in outputs_to_zarr:
+    #     for var_name_with_pattern_year, var_name in zip(outputs_to_zarr_with_pattern_year, outputs_to_zarr):
     #
-    #         main_logger.info(f"Starting {var_name}: {uu.timestr()}")
+    #         main_logger.info(f"Starting {var_name_with_pattern_year}: {uu.timestr()}")
     #         var_start_time = time.time()
     #
     #         # Runs chunk stats for a dataset (all years) in the zarr in parallel
     #         chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
     #             client=client,
     #             chunk_list=chunk_list,
-    #             var=var_name,
+    #             var=var_name_with_pattern_year,
     #             zarr_path=mega_zarr_path,
     #             interval_end_years=[year]
     #         )
@@ -868,7 +870,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     #         chunks_without_zarr_stats_total += chunks_without_zarr_stats
     #
     #         var_end_time = time.time()
-    #         main_logger.info(f"  Processed {var_name} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
+    #         main_logger.info(f"  Processed {var_name_with_pattern_year} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
     #
     #     # Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
     #     zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_without_zarr_stats_total,

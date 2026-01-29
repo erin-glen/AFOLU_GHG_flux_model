@@ -2577,43 +2577,21 @@ def main(cluster_name, year_range, model_type,
         uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
 
 
-    ### Step 4: Counts files in output folders, aggregates chunk stats for 1x1 degree outputs
-
-    # Resizes cluster down for all subsequent steps (chunk stats, zarr stats comparison, and log aggregation)
-    if not run_local:
-        workers = client.scheduler_info()["workers"]
-        n_workers = len(workers)
-
-        # Reduces number of workers in the cluster if there are more than 10
-        if n_workers > 10:
-            main_logger.info("Downsizing cluster.")
-            resize_cluster.resize_coiled_cluster(cluster_name, n_workers/3)
-
-    # TODO move output counting after everything else (chunk stats, zarr comparison, model log aggregation) because cluster times out during this. Can end cluster, and print outputs directly to end of combined log.
-    # TODO Base it on 1_create_starting_carbon_pools, where I already made this change
-    # Iterates through select output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
-    keywords = ["gross", "net", "state"]
-    output_dir_list_to_count = [
-        item for item in output_dir_list
-        if any(keyword in item for keyword in keywords)
-    ]
-    if not no_upload and is_large_run:
-        for output_folder in output_dir_list_to_count:
-            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
-            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
-            # print(geotiff_files)
+    ### Step 4: Consolidate chunk stats and export
 
     # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # and min and max values across all chunks for all inputs and outputs
     # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
     if (not no_stats) and (success_count > 0):
         model_chunk_stats_path = uu.compile_1x1_chunk_stats(all_stats, chunk_shapefile_uri, stage, no_upload, main_logger)
-
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with tile stats", main_logger)
 
 
-    ### Step 5: Compares model output chunk stats to zarr chunk stats for each variable-year (only if chunk stats created)
+    ### Step 5: Compare model output chunk stats to zarr chunk stats for each variable (only if chunk stats and zarr created)
 
+    # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
+    # and min and max values across all chunks for all inputs and outputs
+    # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
     if (not no_stats) and create_zarr:
 
         main_logger.info(f"Starting zarr chunk stats comparison: {uu.timestr()}")
@@ -2684,6 +2662,71 @@ def main(cluster_name, year_range, model_type,
         zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_without_zarr_stats_total,
                                               main_logger, model_chunk_stats_table_name,
                                               stage, start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
+
+
+    ### Step 6: Gather worker logs
+
+    # Collects worker logs before moving to processing that doesn't need the cluster
+    if not run_local:
+
+        # Creates combined log from all workers if not deactivated
+        worker_log_local_path = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with worker log compilation", main_logger)
+
+
+    ### Step 7: Resize cluster down to 1 worker for chunk stats and log aggregation since that only needs a minimal remainder of the
+    ### cluster, not all the workers.
+
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
+
+        # Reduces number of workers in the cluster down to 1 if there is more than 10
+        if n_workers > 10:
+            main_logger.info("Resizing cluster to 1 worker")
+
+            resize_cluster.resize_coiled_cluster(cluster_name, 1)
+
+
+
+
+
+
+
+
+
+
+
+    ### Step 4: Counts files in output folders, aggregates chunk stats for 1x1 degree outputs
+
+    # Resizes cluster down for all subsequent steps (chunk stats, zarr stats comparison, and log aggregation)
+    if not run_local:
+        workers = client.scheduler_info()["workers"]
+        n_workers = len(workers)
+
+        # Reduces number of workers in the cluster if there are more than 10
+        if n_workers > 10:
+            main_logger.info("Downsizing cluster.")
+            resize_cluster.resize_coiled_cluster(cluster_name, n_workers/3)
+
+    # TODO move output counting after everything else (chunk stats, zarr comparison, model log aggregation) because cluster times out during this. Can end cluster, and print outputs directly to end of combined log.
+    # TODO Base it on 1_create_starting_carbon_pools, where I already made this change
+    # Iterates through select output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
+    keywords = ["gross", "net", "state"]
+    output_dir_list_to_count = [
+        item for item in output_dir_list
+        if any(keyword in item for keyword in keywords)
+    ]
+    if not no_upload and is_large_run:
+        for output_folder in output_dir_list_to_count:
+            geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
+            main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+            # print(geotiff_files)
+
+
+
+
+
 
 
     ### Step 6: Aggregates logs
