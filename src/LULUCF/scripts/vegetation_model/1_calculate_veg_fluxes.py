@@ -674,14 +674,16 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 else:
                     raise ValueError("interval_length not valid: must be 1 or 5")
 
-                # All planted trees in the given interval
-                all_planted_trees = (SDPT_planted_trees or oil_palm_pre_2000 or oil_palm_year_of_Descals_or_later)
+                # All oil palm in the given interval.
+                # This excludes oil palm that is in SDPT (of any kind) and Descals extent but precedes Descals extent (i.e. before oil palm in that pixel).
+                all_oil_palm = (oil_palm_pre_2000 or oil_palm_year_of_Descals_or_later or (SDPT_oil_palm and (oil_palm_first_year_cell == 0)))
 
-                # All oil palm in the given interval
-                all_oil_palm = (SDPT_oil_palm or oil_palm_pre_2000 or oil_palm_year_of_Descals_or_later)
+                # All planted trees in the given interval.
+                # This excludes oil palm that is in SDPT (of any kind) and Descals extent but precedes Descals extent (i.e. before oil palm in that pixel).
+                all_planted_trees = (all_oil_palm or (SDPT_planted_trees and (oil_palm_first_year_cell == 0)))
 
                 # All tree crops in the given interval (including oil palm) (does not including planted forests)
-                all_tree_crops = (all_oil_palm or (planted_forest_tree_crop_cell == 2))
+                all_tree_crops = (all_oil_palm or ((planted_forest_tree_crop_cell == 2) and (oil_palm_first_year_cell == 0)))
 
                 # Flag for whether the Descals year of planting is:
                 # Annual intervals: planting year one year after the end of the interval
@@ -1082,7 +1084,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                     composite_primary_cell = 0   # Sets composite primary forest value to 0 for this entire branch because loss has occurred
                     if all_planted_trees:  # Full loss of planted trees (31)
                         node = nu.accrete_node(node, 1)
-                        if all_oil_palm:  # Full loss of oil palm (incl. SDPT) (311->3119/3112)
+                        if all_oil_palm:  # Full loss of oil palm (incl. SDPT) (311->3119/3112)  #TODO This could have a conversion to short veg option (with short veg post-loss removals)
                             node = nu.accrete_node(node, 1)
                             agc_rf_in = cn.oil_palm_agc_rf  # 5-year intervals only
                             bgc_rf_in = cn.oil_palm_bgc_rf  # 5-year intervals only
@@ -1360,7 +1362,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
                 ### Trees remaining trees
                 elif (tree_prev) and (tree_curr):  # Trees remaining trees (4)
                     node = nu.accrete_node(node, 4)
-                    if (not all_planted_trees) and interval_before_converted_to_oil_palm: # Non-planted trees with oil palm planted in the next interval (41->419/412)
+                    if interval_before_converted_to_oil_palm and (not oil_palm_pre_2000): # Non-planted trees with oil palm planted in the next interval (41->419/412)
                         node = nu.accrete_node(node, 1)
                         agc_rf_in = natrl_forest_age_dependent_agc_rf
                         bgc_rf_in = agc_rf_in * r_s_ratio_non_mang

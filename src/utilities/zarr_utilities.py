@@ -358,7 +358,7 @@ def zarr_1x1_deg_stats(bounds, var_name, zarr_path, interval_end_years):
         zarr_chunk_array_year = zarr_chunk_array[year_idx]
 
         # The dataset pattern being analyzed, with year and units added
-        print("var_name:", var_name)
+        # print("var_name:", var_name)
         pattern_with_units, pattern_with_units_years = add_units_year_to_pattern(var_name, year)
         # print("pattern_with_units_years:", pattern_with_units_years)
 
