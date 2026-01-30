@@ -747,8 +747,8 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
                        cn.deadwood_c_LC_masked_dens_pattern, cn.litter_c_LC_masked_dens_pattern,
                        cn.non_soil_c_LC_masked_dens_pattern, cn.starting_C_pools_LC_masked_source_flag_pattern]
     # Adds units and year to zarr variable names
-    outputs_to_zarr_with_pattern_year = [pattern.replace("MgC", f"MgC{cn.C_density_pixel_meaning}") for pattern in outputs_to_zarr]
-    outputs_to_zarr_with_pattern_year = [pattern + f"_{year}" for pattern in outputs_to_zarr_with_pattern_year]
+    outputs_to_zarr_with_unit_year = [pattern.replace("MgC", f"MgC{cn.C_density_pixel_meaning}") for pattern in outputs_to_zarr]
+    outputs_to_zarr_with_unit_year = [pattern + f"_{year}" for pattern in outputs_to_zarr_with_unit_year]
 
     # Only creates the global mega-zarr if needed (large runs or otherwise specified)
     if create_zarr:
@@ -759,7 +759,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
                                                   run_date, main_logger)
 
         # Creates the global mega-zarr with metadata only
-        zu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr_with_pattern_year, 1,
+        zu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr_with_unit_year, 1,
                                     (1, chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
@@ -773,7 +773,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
 
     else:
         mega_zarr_path = None
-        outputs_to_zarr_with_pattern_year = False
+        outputs_to_zarr_with_unit_year = False
 
 
     ### Step 3: Create 1x1 degree outputs
@@ -785,7 +785,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     C_pool_1x1_deg_delayed_results = [dask.delayed(create_and_upload_starting_C_densities)
                        (chunk, mangrove_C_ratio_array, download_dict_with_data_types, year,
                         is_large_run, no_upload, create_zarr, output_dir_list, stage,
-                        model_type, mega_zarr_path, outputs_to_zarr_with_pattern_year)
+                        model_type, mega_zarr_path, outputs_to_zarr_with_unit_year)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results
@@ -835,7 +835,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     #     chunks_without_zarr_stats_total = 0
     #
     #     # Iterates through select variables/datasets for chunk stats comparison. Can modify as needed.
-    #     for var_name_with_pattern_year, var_name in zip(outputs_to_zarr_with_pattern_year, outputs_to_zarr):
+    #     for var_name_with_pattern_year, var_name in zip(outputs_to_zarr_with_unit_year, outputs_to_zarr):
     #
     #         main_logger.info(f"Starting {var_name_with_pattern_year}: {uu.timestr()}")
     #         var_start_time = time.time()

@@ -106,7 +106,7 @@ IPCC_removal_factor_table_tab = "natrl fores gain, for std model"
 mangrove_rate_ratio_tab = 'mang gain and Cratios,for model'
 
 # Emission factors for partial disturbances (by 1km driver)
-partial_disturbance_emission_factor_table_name = "partial_disturbance_emission_factors_LULUCF_model_20260128.xlsx"
+partial_disturbance_emission_factor_table_name = "partial_disturbance_emission_factors_LULUCF_model__20260128.xlsx"
 partial_disturbance_emission_factor_table_full_path = f"{EF_RF_C_ratio_spreadsheet_URL}{partial_disturbance_emission_factor_table_name}"
 partial_disturbance_emission_factor_table_tab = "EF_combined"
 
@@ -875,8 +875,8 @@ core_veg_outputs_to_zarr = [
 
 # Also want to add the metadata for the summative outputs to the global zarr upfront for simplicity,
 # rather than having to add more empty layers to the zarr at the summative stage
-full_outputs_to_zarr = core_veg_outputs_to_zarr
-full_outputs_to_zarr.extend(veg_summative_output_patterns)
+full_veg_outputs_to_zarr = core_veg_outputs_to_zarr
+full_veg_outputs_to_zarr.extend(veg_summative_output_patterns)
 
 # Summative outputs from core vegetation model
 veg_summative_output_dirs = [

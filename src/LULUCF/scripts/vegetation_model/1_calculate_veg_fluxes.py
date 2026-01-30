@@ -51,6 +51,7 @@ import fsspec
 import xarray as xr
 import resource
 import traceback
+import re
 
 from concurrent.futures import ThreadPoolExecutor
 from dask.distributed import print
@@ -2459,12 +2460,24 @@ def main(cluster_name, year_range, model_type,
                                                   model_type, cn.veg_model_version_underscore, model_path_description,
                                                   run_date, main_logger)
 
-        # These variables are added to the mega-zarr
-        #TODO include units (per_ha) in zarr variable names, where relevant
-        outputs_to_zarr = cn.full_outputs_to_zarr
+        # These variables are added to the mega-zarr.
+        # Adds the unit to the zarr variable names (uses re.sub to apply to end of string only so that these don't overwrite each other).
+        outputs_to_zarr = cn.full_veg_outputs_to_zarr
+        outputs_to_zarr_with_unit = [
+            re.sub(r"MgC$", f"MgC{cn.C_density_pixel_meaning}", pattern)
+            for pattern in outputs_to_zarr
+        ]
+        outputs_to_zarr_with_unit = [
+            re.sub(r"MgCO2$", f"MgCO2{cn.flux_density_pixel_meaning}", pattern)
+            for pattern in outputs_to_zarr_with_unit
+        ]
+        outputs_to_zarr_with_unit = [
+            re.sub(r"MgCO2e$", f"MgCO2e{cn.flux_density_pixel_meaning}", pattern)
+            for pattern in outputs_to_zarr_with_unit
+        ]
 
         # Creates the global mega-zarr with metadata only
-        zu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list),
+        zu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr_with_unit, len(interval_year_diff_list),
                                     ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent

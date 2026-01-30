@@ -290,8 +290,8 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     ### Step 6: Count output geotifs in s3
 
     # Counts per-hectare outputs
-    output_dir_list = [path.replace("CHUNK_SIZE", str(cn.full_raster_dims)) for path in output_dir_list]
-    output_dir_list_per_ha = [path.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning) for path in output_dir_list]
+    output_dir_list_per_ha = [path.replace("CHUNK_SIZE", str(cn.full_raster_dims)) for path in output_dir_list]
+    output_dir_list_per_ha = [path.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning) for path in output_dir_list_per_ha]
 
     output_dir_list_per_ha.sort()  # Alphabetically order the outputs (modifies output_dir_list_per_ha)
     if is_large_run:
@@ -308,8 +308,8 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
             # print(geotiff_files)
 
     # Counts per-pixel outputs
-    output_dir_list_per_pixel = [path.replace("PER_HA_OR_PIXEL", cn.C_per_pixel_pixel_meaning) for path in output_dir_list]
-
+    output_dir_list_per_pixel = [path.replace("CHUNK_SIZE", str(cn.full_raster_dims)) for path in output_dir_list]
+    output_dir_list_per_pixel = [path.replace("PER_HA_OR_PIXEL", cn.C_per_pixel_pixel_meaning) for path in output_dir_list_per_pixel]
     output_dir_list_per_pixel.sort()
     if is_large_run:
         main_logger.info(f"output_dir_list_per_pixel for {stage}:")
@@ -324,7 +324,8 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
             # print(geotiff_files)
 
     # Counts 0.04x0.04 deg outputs
-    output_dir_list_aggreg = [path.replace("PER_HA_OR_PIXEL", cn.C_density_aggreg_pixel_meaning) for path in output_dir_list]
+    output_dir_list_aggreg = [path.replace("CHUNK_SIZE", str(cn.global_aggregation_factor)) for path in output_dir_list]
+    output_dir_list_aggreg = [path.replace("PER_HA_OR_PIXEL", cn.C_density_aggreg_pixel_meaning) for path in output_dir_list_aggreg]
     output_dir_list_aggreg.sort()
     if is_large_run:
         main_logger.info(f"output_dir_list_aggreg for {stage}:")
