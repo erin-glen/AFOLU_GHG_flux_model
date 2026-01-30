@@ -14,6 +14,7 @@ import resource
 import psutil
 import zarr
 import time
+import re
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -201,7 +202,8 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
                   out_dict_all_dtypes, outputs_to_zarr, stage, tile_id):
 
     if not create_zarr:
-        lu.print_and_log(f"Not writing outputs for {bounds_str} in {tile_id} to global zarr: {uu.timestr()}", False, logger_worker)
+        lu.print_and_log(f"Not writing outputs for {bounds_str} in {tile_id} to global zarr: {uu.timestr()}", False,
+                         logger_worker)
         return
 
     lu.print_and_log(f"Writing select outputs to global zarr for {bounds_str} in {tile_id}: {uu.timestr()}", is_large_run, logger_worker)
@@ -214,14 +216,22 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
     mapper = fs.get_mapper(mega_zarr_path)
     z = zarr.open(mapper, mode="r+")
 
-    lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}: {uu.timestr()}", is_large_run, logger_worker)
+    lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}: {uu.timestr()}",is_large_run, logger_worker)
+    # print("outputs_to_zarr:", outputs_to_zarr)
+
+    # Creates list of zarr datasets with unit (but not year)
+    outputs_to_zarr_with_pattern = []
+    for output_to_zarr in outputs_to_zarr:
+        pattern_with_units, pattern_with_units_years = add_units_year_to_pattern(output_to_zarr, 0)
+        outputs_to_zarr_with_pattern.append(pattern_with_units)
 
     # Pre-opens Zarr arrays once rather than repeatedly for each dataset during the for loop
     zarr_arrays = {
         var: z[var]
-        for var in outputs_to_zarr
+        for var in outputs_to_zarr_with_pattern
         if var in z
     }
+    # print("zarr_arrays:", zarr_arrays)
 
     # Computes spatial indices once
     lat_start, lon_start = latlon_to_global_zarr_indices(bounds[3], bounds[0], cn.resolution)  # north, west
@@ -232,24 +242,26 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
     nx = lon_end - lon_start
 
     # Writes each variable as a full time block
-    for output_to_zarr_pattern, zarr_array in zarr_arrays.items():
+    for output_to_zarr_pattern_unit, zarr_array in zarr_arrays.items():
 
         dtype = zarr_array.dtype
 
         block = np.empty((n_years, ny, nx), dtype=dtype)
 
         has_any_data = False
+        # print("output_to_zarr_pattern_unit:", output_to_zarr_pattern_unit)
 
         for i, year in enumerate(interval_end_years):
-            pattern_with_units = add_units_year_to_pattern(output_to_zarr_pattern, year)
+            pattern_with_units_years = f"{output_to_zarr_pattern_unit}_{year}"
+            # print("pattern_with_units_years:", pattern_with_units_years)
 
             # Used for output dictionary with years, e.g., vegetation model outputs.
-            if pattern_with_units in out_dict_all_dtypes:
-                block[i, :, :] = out_dict_all_dtypes[pattern_with_units]
+            if pattern_with_units_years in out_dict_all_dtypes:
+                block[i, :, :] = out_dict_all_dtypes[pattern_with_units_years]
                 has_any_data = True
             # In case the output dictionary doesn't have unit/years. Used for starting carbon pools.
-            elif output_to_zarr_pattern in out_dict_all_dtypes:
-                block[i, :, :] = out_dict_all_dtypes[output_to_zarr_pattern]
+            elif output_to_zarr_pattern_unit in out_dict_all_dtypes:
+                block[i, :, :] = out_dict_all_dtypes[output_to_zarr_pattern_unit]
                 has_any_data = True
             else:
                 # Fills with Zarr fill_value if missing
@@ -261,12 +273,12 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
         # Only writes if at least one year exists for this variable
         if has_any_data:
             zarr_array[
-                0:n_years,
-                lat_start:lat_end,
-                lon_start:lon_end
+            0:n_years,
+            lat_start:lat_end,
+            lon_start:lon_end
             ] = block
         else:
-            lu.print_and_log(f"Skipping {output_to_zarr_pattern}: no data found for any year", False, logger_worker)
+            lu.print_and_log(f"Skipping {output_to_zarr_pattern_unit}: no data found for any year", False, logger_worker)
 
         del block
         gc.collect()
@@ -326,6 +338,10 @@ def zarr_1x1_deg_stats(bounds, var_name, zarr_path, interval_end_years):
 
     fs = fsspec.filesystem("s3", anon=False)
 
+    pattern_with_units, pattern_with_units_years = add_units_year_to_pattern(var_name, 0)
+    # print("pattern_with_units:", pattern_with_units)
+    # print("pattern_with_units_years:", pattern_with_units_years)
+
     # Calculates chunk stats on the chunk of the zarr.
     # Rather than encoding rows as input or output layer, they are encoded by whether they are raw or rechunked zarr
     # since all of these are outputs.
@@ -335,23 +351,25 @@ def zarr_1x1_deg_stats(bounds, var_name, zarr_path, interval_end_years):
     # print(f"Opening zarr for {bounds_str}")
     zarr_group = zarr.open(zarr_mapper, mode="r")
     # print(f"Getting array for {bounds_str}")
-    zarr_chunk_array = zarr_group[var_name][:, lat0:lat1, lon0:lon1]
+    zarr_chunk_array = zarr_group[pattern_with_units][:, lat0:lat1, lon0:lon1]
 
     for year_idx, year in enumerate(interval_end_years):
 
         zarr_chunk_array_year = zarr_chunk_array[year_idx]
 
         # The dataset pattern being analyzed, with year and units added
-        pattern_with_units = add_units_year_to_pattern(var_name, year)
+        print("var_name:", var_name)
+        pattern_with_units, pattern_with_units_years = add_units_year_to_pattern(var_name, year)
+        # print("pattern_with_units_years:", pattern_with_units_years)
 
         # print(f"Calculating stats for {bounds_str}")
-        zarr_stats_raw_year = uu.calculate_stats(zarr_chunk_array_year, pattern_with_units, bounds_str, tile_id, 'zarr_stats')
+        zarr_stats_raw_year = uu.calculate_stats(zarr_chunk_array_year, pattern_with_units_years, bounds_str, tile_id, 'zarr_stats')
         # print(zarr_stats_raw_year)
 
         zarr_stats_raw_all_years.append(zarr_stats_raw_year)
 
     # end_time = time.time()
-    # print(f"  Calculated stats for {pattern_with_units} for {year} for {bounds} in {round(end_time - start_time)} seconds: {uu.timestr()}")
+    # print(f"  Calculated stats for {pattern_with_units_years} for {year} for {bounds} in {round(end_time - start_time)} seconds: {uu.timestr()}")
 
     # print(f"zarr_stats_raw for {bounds_str}: {zarr_stats_raw}")
 
@@ -521,7 +539,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
 
 
     # Need to return the combined table so that it can be added to in the next iteration
-    return all_merged_tables, len(differences_exceeding_tolerance), chunks_without_zarr_stats
+    return len(differences_exceeding_tolerance), chunks_without_zarr_stats
 
 
 # Gets the names of the gross, other, and net chunk stats tables that should be compared against
@@ -578,26 +596,35 @@ def get_table_names_for_zarr_stats_comparison(comparison_insert, main_logger, mo
 # Adds units and year specifications to core pattern
 def add_units_year_to_pattern(core_pattern, year):
     if "density" in core_pattern:
-        pattern_with_units = f"{core_pattern}_ha_{year}"
+        pattern_with_units = f"{core_pattern}_ha"
+        pattern_with_units_years = f"{core_pattern}_ha_{year}"
     elif "change" in core_pattern:
-        pattern_with_units = f"{core_pattern}_ha_yr_{year}"
+        pattern_with_units = f"{core_pattern}_ha_yr"
+        pattern_with_units_years = f"{core_pattern}_ha_yr_{year}"
     elif "emis" in core_pattern:
-        pattern_with_units = f"{core_pattern}_ha_yr_{year}"
+        pattern_with_units = f"{core_pattern}_ha_yr"
+        pattern_with_units_years = f"{core_pattern}_ha_yr_{year}"
     elif "removals" in core_pattern:
-        pattern_with_units = f"{core_pattern}_ha_yr_{year}"
+        pattern_with_units = f"{core_pattern}_ha_yr"
+        pattern_with_units_years = f"{core_pattern}_ha_yr_{year}"
     elif "net" in core_pattern:
-        pattern_with_units = f"{core_pattern}_ha_yr_{year}"
+        pattern_with_units = f"{core_pattern}_ha_yr"
+        pattern_with_units_years = f"{core_pattern}_ha_yr_{year}"
     elif cn.land_state_pattern in core_pattern:
-        pattern_with_units = f"{core_pattern}_{year}"
+        pattern_with_units = f"{core_pattern}"
+        pattern_with_units_years = f"{core_pattern}_{year}"
     elif cn.composite_primary_forest in core_pattern:
-        pattern_with_units = f"{core_pattern}_{year}"
+        pattern_with_units = f"{core_pattern}"
+        pattern_with_units_years = f"{core_pattern}_{year}"
     elif cn.forest_age_output_pattern in core_pattern:
-        pattern_with_units = f"{core_pattern}_{year}"
+        pattern_with_units = f"{core_pattern}"
+        pattern_with_units_years = f"{core_pattern}_{year}"
     else:
-        pattern_with_units = f"{core_pattern}_{year}"
+        pattern_with_units = f"{core_pattern}"
+        pattern_with_units_years = f"{core_pattern}_{year}"
         # sys.exit(f"Dataset {core_pattern} not assigned a pattern with units for addition to global zarr")  # Using this led to hard-to-trace errors
 
-    return pattern_with_units
+    return pattern_with_units, pattern_with_units_years
 
 
 def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_without_zarr_stats_total,

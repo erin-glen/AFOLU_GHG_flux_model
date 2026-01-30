@@ -23,21 +23,21 @@ from src.utilities import zarr_utilities as zu
 from src.utilities.constants_and_names import intervals_annual
 
 # Settings-- modify these
-# bounds = [124, -30, 125, -29]
-# zarr_path = 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_3_AUS_only/mega_zarr/standard_model/annual_intervals/10000_pixels/20251209'
-# var_name = 'carbon_density__AGC__MgC'
-# interval_end_years = cn.interval_end_years_annual
+bounds = [23, -4, 24, -3]
+zarr_path = 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_5__standard__test_box/mega_zarr/annual_intervals/4000_pixels/20260130/vegetation_zarr.zarr'
+var_name = 'gross_emissions__all_C_pools__CO2_only__MgCO2_ha_yr'
+interval_end_years = cn.interval_end_years_annual
 
 # bounds = [110, -1 ,111, 0]
 # zarr_path = 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_soil_organic_carbon/version_1_0_0__standard__test_box/mega_zarr/4000_pixels/20251223/SOC_zarr.zarr'
 # var_name = 'SOC_density__full_extent__0-30cm_MgC'
 # interval_end_years = cn.SOC_density_intervals
 
-# For starting carbon density
-bounds = [114, -4, 115, -3]
-zarr_path = 's3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/mega_zarr/4000_pixels/20260121/starting_C_densities_zarr.zarr'
-var_name = 'carbon_density__BGC__landcover_masked__MgC'
-interval_end_years = [2015]
+# # For starting carbon density
+# bounds = [114, -4, 115, -3]
+# zarr_path = 's3://gfw2-data/climate/ESA_CCI_biomass/v5_01/2015/year_2015_derived_carbon_pools/mega_zarr/4000_pixels/20260121/starting_C_densities_zarr.zarr'
+# var_name = 'carbon_density__BGC__landcover_masked__MgC'
+# interval_end_years = [2015]
 
 
 bounds_str = uu.boundstr(bounds)  # String form of chunk bounds, from e.g., [8, -1, 9, 0] to 8_-1_9_0
@@ -77,12 +77,10 @@ for year_idx, year in enumerate(interval_end_years):
     zarr_chunk_array_year = zarr_chunk_array[year_idx]
     print("zarr_chunk_array_year:", zarr_chunk_array_year)
 
-    # The dataset pattern being analyzed, with year and units added
-    pattern_with_units = zu.add_units_year_to_pattern(var_name, year)
-    print("pattern_with_units:", pattern_with_units)
+    pattern_with_year = f"{var_name}_{year}"
 
     # print(f"Calculating stats for {bounds_str}")
-    zarr_stats_raw_year = uu.calculate_stats(zarr_chunk_array_year, pattern_with_units, bounds_str, tile_id,'zarr_stats')
+    zarr_stats_raw_year = uu.calculate_stats(zarr_chunk_array_year, pattern_with_year, bounds_str, tile_id,'zarr_stats')
     # print(zarr_stats_raw_year)
 
     zarr_stats_raw_all_years.append(zarr_stats_raw_year)

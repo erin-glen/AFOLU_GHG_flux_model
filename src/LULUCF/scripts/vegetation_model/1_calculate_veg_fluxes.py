@@ -1976,7 +1976,6 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
     # print(layers[cn.climate_zone_pattern].dtype)
     # print(layers['GPW_height_2015'].dtype)
     # print("layers['GPW_height_2015']:", layers['GPW_height_2015'])
-    # sys.quit()
 
 
     ### Part 2: Calculates min, mean, and max for each input chunk.
@@ -2392,11 +2391,10 @@ def main(cluster_name, year_range, model_type,
         key: value.replace("PER_HA_OR_PIXEL", cn.C_density_pixel_meaning)
         for key, value in download_dict.items()
     }
-    # print(download_dict)
 
-    print("Download dictionary:")
+    main_logger.info("Download dictionary:")
     for key, item in download_dict.items():
-        print(f"{key}: {item}")
+        main_logger.info(f"{key}: {item}")
 
     # Returns the first tile in each input so that the datatype can be determined.
     # This is done up front, once per tile set, rather than on each chunk, since
@@ -2550,7 +2548,7 @@ def main(cluster_name, year_range, model_type,
         # That way there are some basic chunk stats (not sorted or anything) to fall back on.
         if len(chunk_batches) > 1:
 
-            main_logger.info(f"Writing batch stats to disk: {uu.timestr()}")
+            main_logger.info(f"Writing batch stats locally: {uu.timestr()}")
             df_batch_stats = pd.DataFrame(batch_stats)
 
             timestamp = uu.timestr()
@@ -2636,6 +2634,7 @@ def main(cluster_name, year_range, model_type,
             cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
             cn.non_soil_c_modeled_dens_pattern, cn.land_state_pattern
         ]
+
         for var_name in outputs_to_compare:
 
             main_logger.info(f"Starting {var_name}: {uu.timestr()}")
@@ -2649,6 +2648,7 @@ def main(cluster_name, year_range, model_type,
                 zarr_path=mega_zarr_path,
                 interval_end_years=interval_end_years
             )
+            # print("chunk_stats_variable_year_rechunked_zarr:", chunk_stats_variable_year_rechunked_zarr)
 
             # After all zarr chunk stats is done for the dataset-year combination,
             # the chunk stats from the zarr are compared to the chunk stats from the model.
@@ -2657,12 +2657,12 @@ def main(cluster_name, year_range, model_type,
             # The model output vs. zarr comparison is done after each dataset-year combination
             # to get more real-time feedback on how the datasets compare (rather than waiting until after
             # all zarr chunk stats have been calculated to do the metric comparisons).
-            all_merged_tables, chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
-                                                                                    chunk_stats_variable_year_rechunked_zarr,
-                                                                                    main_logger,
-                                                                                    tables_to_compare_dict,
-                                                                                    var_name,
-                                                                                    zarr_comparison_stats_path)
+            chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
+                                                                   chunk_stats_variable_year_rechunked_zarr,
+                                                                   main_logger,
+                                                                   tables_to_compare_dict,
+                                                                   var_name,
+                                                                   zarr_comparison_stats_path)
 
             # Total number of chunks that have differences in metrics between the model and zarr
             # that exceed the tolerance

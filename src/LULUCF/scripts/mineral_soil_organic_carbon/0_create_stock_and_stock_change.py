@@ -580,12 +580,12 @@ def main(cluster_name, model_type,
             # The model output vs. zarr comparison is done after each dataset-year combination
             # to get more real-time feedback on how the datasets compare (rather than waiting until after
             # all zarr chunk stats have been calculated to do the metric comparisons).
-            all_merged_tables, chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
-                                                                                    chunk_stats_variable_year_rechunked_zarr,
-                                                                                    main_logger,
-                                                                                    tables_to_compare_dict,
-                                                                                    var_name,
-                                                                                    zarr_comparison_stats_path)
+            chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
+                                                                   chunk_stats_variable_year_rechunked_zarr,
+                                                                   main_logger,
+                                                                   tables_to_compare_dict,
+                                                                   var_name,
+                                                                   zarr_comparison_stats_path)
 
             # Total number of chunks that have differences in metrics between the model and zarr
             # that exceed the tolerance
