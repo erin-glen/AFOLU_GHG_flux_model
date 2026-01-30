@@ -659,12 +659,46 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     # Convert tile_id to bounding box (W, S, E, N)
     min_x, min_y, max_x, max_y = uu.get_10x10_tile_bounds(tile_id)
 
+    # Establishes year/year range and units for dataset
+    if ("density" in var) and (not cn.starting_C_pools_LC_masked_source_flag_pattern in var):
+        per_ha_units = cn.C_density_pixel_meaning
+        per_pixel_units = cn.C_per_pixel_pixel_meaning
+        coarse_units = cn.C_density_aggreg_pixel_meaning
+        var_per_ha = f"{var}{per_ha_units}"
+    elif "emis" in var:
+        per_ha_units = cn.flux_density_pixel_meaning
+        per_pixel_units = cn.flux_per_pixel_pixel_meaning
+        coarse_units = cn.flux_aggreg_pixel_meaning
+        var_per_ha = f"{var}{per_ha_units}"
+    elif "removals" in var:
+        per_ha_units = cn.flux_density_pixel_meaning
+        per_pixel_units = cn.flux_per_pixel_pixel_meaning
+        coarse_units = cn.flux_aggreg_pixel_meaning
+        var_per_ha = f"{var}{per_ha_units}"
+    elif "net" in var:
+        per_ha_units = cn.flux_density_pixel_meaning
+        per_pixel_units = cn.flux_per_pixel_pixel_meaning
+        coarse_units = cn.flux_aggreg_pixel_meaning
+        var_per_ha = f"{var}{per_ha_units}"
+    elif cn.land_state_pattern in var:
+        per_ha_units = ""
+        per_pixel_units = ""
+        coarse_units = ""
+        var_per_ha = var
+    else:
+        per_ha_units = ""
+        per_pixel_units = ""
+        coarse_units = ""
+        var_per_ha = var
+
     # If creating outputs from the model start year, it just uses that year.
-    # Otherwise, uses the year for the annual outputs.
+    # Renames variable to use units and year.
     if use_start_year == True:
         year = cn.first_model_year_annual
-    else:
+        var_with_unit = f"{var_per_ha}_{year}"
+    else:      # For annual data, uses the year for the annual outputs.
         year = cn.interval_end_years_annual[year_idx]
+        var_with_unit = var_per_ha  # Doesn't add year to variable/unit name
 
     # Open Zarr group using fsspec mapper
     fs = fsspec.filesystem("s3", anon=False)
@@ -685,11 +719,11 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     if y0_model > y1_model:
         y0_model, y1_model = y1_model, y0_model
 
-    lu.print_and_log(f"Extracting {var} for {year} for {tile_id}: {uu.timestr()}", True, logger_worker)
+    lu.print_and_log(f"Extracting {var_with_unit} for {year} for {tile_id}: {uu.timestr()}", True, logger_worker)
     extract_start_time = time.time()
 
     # Loads model output data block
-    data_per_ha = model_zarr_store[var][year_idx, y0_model:y1_model, x0_model:x1_model]
+    data_per_ha = model_zarr_store[var_with_unit][year_idx, y0_model:y1_model, x0_model:x1_model]
 
     # Calculates per-pixel output (for numeric outputs only)
     pixel_area_zarr_store = uu.get_pixel_area_store()
@@ -739,34 +773,8 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     ).sum(axis=(1, 3))
 
     extract_end_time = time.time()
-    lu.print_and_log(f"  Calculated {var} for year {year} for {tile_id} in {round(extract_end_time - extract_start_time)} seconds: {uu.timestr()}", False, logger_worker)
-    lu.print_and_log(f"  Memory usage after 10x10 extraction for {var} for year {year} for {tile_id}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
-
-    # Establishes year/year range and units for dataset
-    if "density" in var:
-        per_ha_units = cn.C_density_pixel_meaning
-        per_pixel_units = cn.C_per_pixel_pixel_meaning
-        coarse_units = cn.C_density_aggreg_pixel_meaning
-    elif "emis" in var:
-        per_ha_units = cn.flux_density_pixel_meaning
-        per_pixel_units = cn.flux_per_pixel_pixel_meaning
-        coarse_units = cn.flux_aggreg_pixel_meaning
-    elif "removals" in var:
-        per_ha_units = cn.flux_density_pixel_meaning
-        per_pixel_units = cn.flux_per_pixel_pixel_meaning
-        coarse_units = cn.flux_aggreg_pixel_meaning
-    elif "net" in var:
-        per_ha_units = cn.flux_density_pixel_meaning
-        per_pixel_units = cn.flux_per_pixel_pixel_meaning
-        coarse_units = cn.flux_aggreg_pixel_meaning
-    elif cn.land_state_pattern in var:
-        per_ha_units = ""
-        per_pixel_units = ""
-        coarse_units = ""
-    else:
-        per_ha_units = ""
-        per_pixel_units = ""
-        coarse_units = ""
+    lu.print_and_log(f"  Calculated {var_with_unit} for year {year} for {tile_id} in {round(extract_end_time - extract_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"  Memory usage after 10x10 extraction for {var_with_unit} for year {year} for {tile_id}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
 
     # Name and s3 folder for per-hectare output
     output_path = output_base.replace("PATTERN", var)
@@ -806,7 +814,7 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
         valid_pixel_count_per_ha = uu.write_single_geotiff_to_s3(var, year, tile_id, data_per_ha, transform, s3_filename_per_ha, logger_worker)
 
         # Conditionally writes per-pixel output and 0.04x0.04 res output (only if dataset is float32, i.e. numeric output from model).
-        if model_zarr_store[var].dtype == np.float32:
+        if model_zarr_store[var_with_unit].dtype == np.float32:
             valid_pixel_count_per_pixel = uu.write_single_geotiff_to_s3(
                 var, year, tile_id, data_per_pixel, transform, s3_filename_per_pixel, logger_worker
             )

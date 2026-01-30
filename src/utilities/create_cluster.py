@@ -85,10 +85,11 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
         worker_options["nthreads"] = threads_per_worker
 
     # Uses on-demand workers for large jobs. Otherwise, prefers spot workers.
-    if n_workers > 110:
-        purchase_option = "on-demand"
-    else:
-        purchase_option = "spot_with_fallback"
+    purchase_option = "spot_with_fallback"
+    # if n_workers > 110:
+    #     purchase_option = "on-demand"
+    # else:
+    #     purchase_option = "spot_with_fallback"
 
     cluster = coiled.Cluster(
         n_workers=n_workers,
