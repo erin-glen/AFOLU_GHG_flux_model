@@ -216,7 +216,7 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
     mapper = fs.get_mapper(mega_zarr_path)
     z = zarr.open(mapper, mode="r+")
 
-    lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}: {uu.timestr()}",is_large_run, logger_worker)
+    # lu.print_and_log(f"Available datasets in global mega-zarr: {list(z.array_keys())}: {uu.timestr()}", is_large_run, logger_worker)
     # print("outputs_to_zarr:", outputs_to_zarr)
 
     # Creates list of zarr datasets with unit (but not year)
@@ -479,14 +479,14 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
 
     # From those valid rows, counts how many have no zarr stats
     chunks_without_zarr_stats = merged_table[valid_count_mask]['count_value_diff'].isna().sum().item()
-    main_logger.info(f"    Rows with data without pixel count comparison: {chunks_without_zarr_stats}")
+    main_logger.info(f"    {chunks_without_zarr_stats} rows with data without pixel count comparison")
 
     # Applies the mask to filter those rows
     differences_exceeding_tolerance = merged_table[mask]
 
     # Prints rows that exceed the tolerance for difference between original and zarr chunk stats
     if len(differences_exceeding_tolerance) > 0:
-        main_logger.warning(f"    WARNING: There are {len(differences_exceeding_tolerance)} rows in {var_name} that have differences exceeding the tolerance!")
+        main_logger.warning(f"    WARNING: {len(differences_exceeding_tolerance)} rows in {var_name} have differences exceeding the tolerance!")
 
         # Selects chunk_id and all difference to print in the console for easy viewing
         cols_to_print = [
@@ -501,7 +501,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
         main_logger.warning(differences_exceeding_tolerance[cols_to_print])
 
     else:
-        main_logger.info(f"    No rows in {var_name} have metrics with differences exceeding the tolerance.")
+        main_logger.info(f"    0 rows in {var_name} have metrics with differences exceeding the tolerance.")
 
     # Adds df for this dataset-year combination to the list of all the dataset-year dfs
     all_merged_tables.append(merged_table)
@@ -566,7 +566,7 @@ def get_table_names_for_zarr_stats_comparison(comparison_insert, main_logger, mo
 
     elif "parquet" in model_chunk_stats_path:
         main_logger.info(f"Reading parquet tables from local parquet files: {model_chunk_stats_path}")
-        parquet_base = f"{model_chunk_stats_path}/vegetation_fluxes__v{cn.veg_model_version_underscore}__"
+        parquet_base = f"{model_chunk_stats_path}__"
         chunk_stats_model_gross = pd.read_parquet(f"{parquet_base}{cn.gross_outputs_1x1}.parquet")
         chunk_stats_model_other = pd.read_parquet(f"{parquet_base}{cn.other_outputs_1x1}.parquet")
         chunk_stats_model_net = pd.read_parquet(f"{parquet_base}{cn.net_outputs_1x1}.parquet")

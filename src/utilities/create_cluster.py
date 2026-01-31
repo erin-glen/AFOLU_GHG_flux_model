@@ -85,21 +85,26 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
         worker_options["nthreads"] = threads_per_worker
 
     # Uses on-demand workers for large jobs. Otherwise, prefers spot workers.
-    purchase_option = "spot_with_fallback"
-    # if n_workers > 110:
-    #     purchase_option = "on-demand"
-    # else:
-    #     purchase_option = "spot_with_fallback"
+    # purchase_option = "spot_with_fallback"
+    if n_workers > 110:
+        purchase_option = "on-demand"
+        use_best_zone = False  # Should allow workers to be split across different zones, to help obtain large requested amount of workers
+        allow_cross_zone = True  # Allows workers in different availability zones, to help obtain large requested amount of workers
+    else:
+        purchase_option = "spot_with_fallback"
+        use_best_zone=True
+        allow_cross_zone = False
 
     cluster = coiled.Cluster(
         n_workers=n_workers,
-        use_best_zone=True,
+        use_best_zone=use_best_zone,
         compute_purchase_option=purchase_option,
         idle_timeout=idle_timeout,
         region="us-east-1",
         name=cluster_name,
         workspace='wri-forest-research',
         tags = {"project": "AFOLU_flux_model"},
+        allow_cross_zone=allow_cross_zone,
         scheduler_vm_types = scheduler_vm_type,
         worker_vm_types = worker_vm_type,
         worker_options = worker_options,

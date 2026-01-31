@@ -100,10 +100,10 @@ def compile_worker_logs(no_log, cluster, stage, start_time_str, logger):
     if no_log:
         return
 
-    worker_log_name = f"{cn.combined_log}_workers_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
-    worker_log_local_path = f"{cn.local_log_path}{worker_log_name}"
+    combined_worker_log_name = f"{cn.combined_log}_workers_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
+    worker_log_local_path = f"{cn.local_log_path}{combined_worker_log_name}"
 
-    logger.info(f"Combining worker logs into {worker_log_name}")
+    logger.info(f"Combining worker logs into {combined_worker_log_name}")
 
     # Recovers legs from Coiled
     logs = cluster.get_logs()
@@ -196,7 +196,7 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
         # Step 3: Append results to the log file
         with open(combined_local_log, "a") as outfile:
             outfile.write("\n")
-            outfile.write("=== Chunk-level processing times (approximate because worker log may be missing end) ===\n")
+            outfile.write("=== Chunk-level processing times (approximate because some of worker log may be missing) ===\n")
             outfile.write(f"Processing stats for calculation code ({len(calc_proc_times__sec)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_calc_proc_times__sec:.0f} seconds (stdev: {stdev_calc_proc_times__sec:.0f})\n")
             outfile.write(f"  Min and max: {min_calc_proc_times__sec:.0f} - {max_calc_proc_times__sec:.0f}\n")

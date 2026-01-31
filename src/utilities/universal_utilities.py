@@ -1673,7 +1673,7 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
     # other_1x1_outputs is the output table that has the most rows, so it's the best way to judge what's output is too large for Excel.
     # Excel's row limit is more like 1.5 million, but that'd be a really unwieldy spreadsheet.
     if (len(other_1x1_outputs) > 900000) or (len(net_flux_1x1_outputs) > 900000) or (len(gross_flux_1x1_outputs) > 900000):
-    # if (len(other_1x1_outputs) > 2) or (len(net_flux_1x1_outputs) > 2) or (len(gross_flux_1x1_outputs) > 2):   # For testing
+    # if (len(other_1x1_outputs) > 2) or (len(net_flux_1x1_outputs) > 2) or (len(gross_flux_1x1_outputs) > 2):   # large-scale testing
         main_logger.info(f"Row count {len(other_1x1_outputs)} greater than 900,000. Writing all outputs to Parquet.")
 
         # Saves each output DataFrame as Parquet
@@ -1715,13 +1715,13 @@ def compile_1x1_chunk_stats(all_1x1_stats, chunk_shapefile_uri, stage, no_upload
 
         # Uploads to S3 if needed
         parquet_files = {
-                cn.annual_1x1_inputs: f"{stage}__v{cn.veg_model_version_underscore}__{cn.annual_1x1_inputs}.parquet",
-                cn.other_1x1_inputs: f"{stage}__v{cn.veg_model_version_underscore}__{cn.other_1x1_inputs}.parquet",
-                cn.gross_outputs_1x1: f"{stage}__v{cn.veg_model_version_underscore}__{cn.gross_outputs_1x1}.parquet",
-                cn.net_outputs_1x1: f"{stage}__v{cn.veg_model_version_underscore}__{cn.net_outputs_1x1}.parquet",
-                cn.other_outputs_1x1: f"{stage}__v{cn.veg_model_version_underscore}__{cn.other_outputs_1x1}.parquet",
-                cn.min_max_for_layers_1x1: f"{stage}__v{cn.veg_model_version_underscore}__{cn.min_max_for_layers_1x1}.parquet",
-                cn.counts_1x1_in_10x10: f"{stage}__v{cn.veg_model_version_underscore}__{cn.counts_1x1_in_10x10}.parquet",
+                cn.annual_1x1_inputs: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.annual_1x1_inputs}.parquet",
+                cn.other_1x1_inputs: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.other_1x1_inputs}.parquet",
+                cn.gross_outputs_1x1: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.gross_outputs_1x1}.parquet",
+                cn.net_outputs_1x1: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.net_outputs_1x1}.parquet",
+                cn.other_outputs_1x1: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.other_outputs_1x1}.parquet",
+                cn.min_max_for_layers_1x1: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.min_max_for_layers_1x1}.parquet",
+                cn.counts_1x1_in_10x10: f"{out_base}__v{cn.veg_model_version_underscore}__{cn.counts_1x1_in_10x10}.parquet",
             }
 
         if not no_upload:

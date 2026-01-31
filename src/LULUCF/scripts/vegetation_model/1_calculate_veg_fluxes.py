@@ -2155,7 +2155,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
             executor.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
 
         upload_end_time = time.time()
-        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} using {cn.veg_outputs_path} in {round(upload_end_time - upload_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+        lu.print_and_log(f"Uploads completed for {bounds_str} in {tile_id} in {round(upload_end_time - upload_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
     chunk_end_time = time.time()
     lu.print_and_log(f"Total chunk processing for {bounds_str} in {round(chunk_end_time - chunk_start_time)} seconds: {uu.timestr()}", False, logger_worker)
@@ -2210,7 +2210,7 @@ def main(cluster_name, year_range, model_type,
     # Runs chunks in batches of specified size.
     # Each batch slows down processing because chunks inevitably lag and that happens more the more batches there are.
     batch_size = 3800  # 5 batches to cover all chunks
-    # batch_size = 2  # For testing batch processing
+    # batch_size = 8  # large-scale testing
 
     # Determines if arguments for start and end year are valid
     if year_range not in [[cn.first_model_year_5_years, cn.last_model_year_5_years],  # 2000-2020
@@ -2262,7 +2262,7 @@ def main(cluster_name, year_range, model_type,
 
     # Determines if the output file names for final versions of outputs should be used
     is_large_run = False
-    # is_large_run = True  # For simulating a large run
+    # is_large_run = True  # large-scale testing
     if len(chunk_list) > 20:
         is_large_run = True
         main_logger.info(f"Running as large-scale run model: {is_large_run}")
@@ -2557,6 +2557,7 @@ def main(cluster_name, year_range, model_type,
 
             # Writes batch output to parquet file if output is large
             if len(df_batch_stats) > 900_000:
+            # if len(df_batch_stats) > 7: # large-scale testing
                 out_file = f"TEMP_BATCH_{stage}__batch_{i}_{timestamp}.parquet"
                 local_path = f"{cn.local_chunk_stats_path}{out_file}"
 
@@ -2589,6 +2590,16 @@ def main(cluster_name, year_range, model_type,
         client.run(gc.collect)
 
         uu.stage_duration(start_time, uu.timestr(), f"{stage}, batch {i}", main_logger)
+
+
+    ### Step 4: Gather worker logs (preliminary, just in case later step goes awry)
+
+    # Collects worker logs before moving to processing that doesn't need the cluster
+    if not run_local:
+
+        # Creates combined log from all workers if not deactivated
+        worker_log_local_path_prelin = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+        uu.stage_duration(start_time, uu.timestr(), f"{stage} with preliminary worker log compilation", main_logger)
 
 
     ### Step 4: Consolidate chunk stats and export
@@ -2706,6 +2717,7 @@ def main(cluster_name, year_range, model_type,
 
     ### Step 8: Count output geotifs in s3
     # Iterates through select output folders and counts the number of output rasters (only if uploads enabled and a large run (to save console space))
+    main_logger.info(f"Counting geotifs in select output folders. Expecting {len(chunk_list)} in each: {uu.timestr()}")
     keywords = ["gross", "net", "state"]
     output_dir_list_to_count = [
         item for item in output_dir_list
@@ -2715,6 +2727,8 @@ def main(cluster_name, year_range, model_type,
         for output_folder in output_dir_list_to_count:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output rasters in {output_folder}: {file_count}")
+            if file_count != len(chunk_list):
+                main_logger.warning("WARNING: Output file count in {output_folder} does not match expectations!")
             # print(geotiff_files)
 
 
