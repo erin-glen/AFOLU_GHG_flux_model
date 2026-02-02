@@ -130,13 +130,6 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
         tile_ids_to_process = unique_tile_ids
     main_logger.info(f"tile_ids to aggregate to 10x10 deg and compare chunk stats for: {tile_ids_to_process} ({len(tile_ids_to_process)} out of {len(unique_tile_ids)})")
 
-    # Determines if the output file names for final versions of outputs should be used
-    is_large_run = False
-    # is_large_run = True  # For simulating a large run
-    if len(tile_ids) > 20:
-        is_large_run = True
-        main_logger.info(f"Running as large-scale run model: {is_large_run}")
-
     # lat-long chunk size for source zarr
     source_zarr_chunk_size = cn.chunk_dims  #4000x4000
 
@@ -172,6 +165,17 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
 
 
     ### Step 3: Create 10x10 deg outputs
+
+    all_task_count = len(vars_to_process) * len(tile_ids_to_process)
+
+    # Determines if the output file names for final versions of outputs should be used
+    is_large_run = False
+    # is_large_run = True  # For simulating a large run
+    if all_task_count > 20:
+        is_large_run = True
+        main_logger.info(f"Running as large-scale run model: {is_large_run}")
+
+    main_logger.info(f"There are {all_task_count} tasks to process ({len(vars_to_process)} variables x {len(tile_ids_to_process)} tiles)")
 
     futures = []
 

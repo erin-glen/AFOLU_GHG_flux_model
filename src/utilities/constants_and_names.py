@@ -931,24 +931,6 @@ veg_summative_for_LULUCF_output_dirs = [
     f"{veg_outputs_path}{net_flux_all_C_pools_all_gases_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
 
-soil_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_soil/version_{veg_model_version_underscore}/"
-soil_outputs_path_mega_zarr = f"{soil_outputs_path}mega_zarr/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"
-
-soil_output_patterns = [
-    gross_emis_all_C_pools_CO2_only_soil_pattern,
-    gross_emis_all_C_pools_non_CO2_only_soil_pattern,
-    gross_emis_all_C_pools_all_gases_soil_pattern,
-    net_flux_all_C_pools_CO2_only_soil_pattern,
-    net_flux_all_C_pools_CO2_only_soil_pattern
-]
-soil_output_dirs = [
-    f"{soil_outputs_path}{gross_emis_all_C_pools_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{soil_outputs_path}{gross_emis_all_C_pools_non_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{soil_outputs_path}{gross_emis_all_C_pools_all_gases_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{soil_outputs_path}{net_flux_all_C_pools_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{soil_outputs_path}{net_flux_all_C_pools_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
-]
-
 ### Soil organic carbon (SOC) timeseries from OpenGeoHub (OGH) (URIs from https://github.com/openlandmap/soildb/blob/main/tables/OpenLandMap_soildb_COGS.csv)
 # From Hengl et al. under review (https://essd.copernicus.org/preprints/essd-2025-336/)
 # Confirmed to be up-to-date by Tom Hengl on 2025-12-19 via email.
@@ -989,8 +971,25 @@ SOC_outputs_to_zarr = [
 ]
 
 
+### Soil summative outputs
 
-### LULUCF outputs
+soil_output_patterns = [
+    gross_emis_all_C_pools_CO2_only_soil_pattern,
+    gross_emis_all_C_pools_non_CO2_only_soil_pattern,
+    gross_emis_all_C_pools_all_gases_soil_pattern,
+    net_flux_all_C_pools_CO2_only_soil_pattern,
+    net_flux_all_C_pools_CO2_only_soil_pattern
+]
+soil_output_dirs = [
+    f"{SOC_outputs_path}{gross_emis_all_C_pools_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{SOC_outputs_path}{gross_emis_all_C_pools_non_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{SOC_outputs_path}{gross_emis_all_C_pools_all_gases_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{SOC_outputs_path}{net_flux_all_C_pools_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{SOC_outputs_path}{net_flux_all_C_pools_CO2_only_soil_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
+]
+
+
+### LULUCF summative outputs
 
 LULUCF_outputs_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs_LULUCF/{model_version_type_description_placeholder}/"
 LULUCF_outputs_path_mega_zarr = f"{LULUCF_outputs_path}mega_zarr/MODEL_INTERVAL_TYPE_intervals/CHUNK_SIZE_pixels/RUN_DATE/"

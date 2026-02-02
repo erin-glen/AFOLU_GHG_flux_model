@@ -2,19 +2,19 @@
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -bb 110 -1 111 0 -cs 1 -mt standard -mpd test_box
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.1_SOC_stock_and_stock_change -bb 110 -1 111 0 -cs 1 -mt standard -mpd test_box
 
 Coiled small test (1x1 deg):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -bb 110 -1 111 0 -cs 1 -mt standard -mpd test_box --create_zarr
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.1_SOC_stock_and_stock_change -cn mineral_soil -bb 110 -1 111 0 -cs 1 -mt standard -mpd test_box --create_zarr
 
 Coiled large shapefile test:
 python -m src.utilities.create_cluster -n 100 -t 1 -m 4 -cn mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -mt standard -mpd 1884_features-cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -ln "SOC timeseries for 1884-feature shapefile."
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.1_SOC_stock_and_stock_change -cn mineral_soil -mt standard -mpd 1884_features-cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp -ln "SOC timeseries for 1884-feature shapefile."
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.0_create_stock_and_stock_change -cn mineral_soil -mt standard -mpd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive SOC timeseries creation for 2000-2022."
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.1_SOC_stock_and_stock_change -cn mineral_soil -mt standard -mpd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive SOC timeseries creation for 2000-2022."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6877a34b-02cc-800a-88cc-a123cdc9ed1b
 """

@@ -1,7 +1,5 @@
 """
 Creates 10x10 deg per-hectare and per-pixel geotifs from global zarr for numeric model outputs.
-Coded to run for summative outputs + land state nodes but can change code to run for more or less variables.
-Limited to just summative + land state nodes for now because it is quite expensive for just these variables.
 It creates a task list for all datasets, years, and 10x10 deg tiles for the variables, years, and area of interest,
 then runs that giant task list in parallel in batches (as a safeguard against failure during a large task list).
 
@@ -16,32 +14,32 @@ creation.
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test (Dask part does not work because of client.submit()):
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -bb 10 49 11 50 --run_local --no_upload -mt standard -mpd global -fy 1 -fv 1 -ft 1 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_SOC_outputs_to_10x10deg -bb 10 49 11 50 --run_local --no_upload -mt standard -mpd global -fy 1 -fv 1 -ft 1 --input_date YYYYMMDD
 
 Coiled small tests (needs 32 GB because of per-ha and per-pixel outputs):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -bb 10 49 11 50 -fy 2 -fv 2 -ft 2 -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx  --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -bb 10 49 11 50 -fy 2 -fv 2 -ft 2 -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_SOC_outputs_to_10x10deg -cn vegetation_postprocessing -bb 10 49 11 50 -fy 2 -fv 2 -ft 2 -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx  --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_SOC_outputs_to_10x10deg -cn vegetation_postprocessing -bb 10 49 11 50 -fy 2 -fv 2 -ft 2 -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -bb -64 -22 -63 -21 -fy 3 -fv 3 -ft 3 -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -bb -64 -22 -63 -21 -fy 3 -fv 3 -ft 3 -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_SOC_outputs_to_10x10deg -cn vegetation_postprocessing -bb -64 -22 -63 -21 -fy 3 -fv 3 -ft 3 -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_SOC_outputs_to_10x10deg -cn vegetation_postprocessing -bb -64 -22 -63 -21 -fy 3 -fv 3 -ft 3 -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 --input_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_SOC_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_SOC_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_SOC_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_SOC_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -log_note "10x10 deg tile creation for vegetation model v1.0.5 (2016-2024)."
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "10x10 deg tile creation for vegetation model v1.0.5 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.2_SOC_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -log_note "10x10 deg tile creation for vegetation model v1.0.5 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.2_SOC_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "10x10 deg tile creation for vegetation model v1.0.5 (2016-2024)."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/690a21cd-2ea0-8333-9c7f-7091f8016fb3
 """
@@ -67,7 +65,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = 'vegetation_aggregation_to_10x10_deg'
+    stage = 'soil_carbon_aggregation_to_10x10_deg'
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -79,14 +77,13 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
-    batch_size = 5000  # 8 batches to cover all tasks
+    batch_size = 3000  # X batches to cover all tasks
     # batch_size = 4  # large-scale testing
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Model version: {cn.veg_model_version}")
     main_logger.info(f"Model path descriptor: {model_path_description}")
-    main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
     main_logger.info(f"Batch size: {batch_size} tasks")
@@ -113,8 +110,8 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     unique_tile_ids = sorted(list(set(tile_ids)))
 
     # Outputs to turn into 10x10 tile
-    # full_list_of_vars = cn.full_outputs_to_zarr   # If all variables are to be made into 10x10s (but very expensive)
-    full_list_of_vars = cn.veg_summative_output_patterns + [cn.land_state_pattern] # Summative outputs + land state nodes
+    full_list_of_vars = [cn.SOC_density_full_extent_dir, cn.SOC_change_full_extent_dir,
+                        cn.SOC_density_min_soil_extent_dir, cn.SOC_change_min_soil_extent_dir]
 
     # Limits the processed variables to the supplied number (for testing)
     if first_variables_to_process:
@@ -127,7 +124,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     if first_years_to_process:
         years_to_process = first_years_to_process
     else:
-        years_to_process = len(cn.interval_end_years_annual)
+        years_to_process = len(cn.SOC_density_intervals)
     main_logger.info(f"Years to aggregate to 10x10 deg and compare chunk stats for: {years_to_process} out of {len(cn.interval_end_years_annual)}")
 
     if first_tiles_to_process:
@@ -140,7 +137,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     source_zarr_chunk_size = cn.chunk_dims  #4000x4000
 
     # The zarr path that's being used
-    mega_zarr_path = zu.create_mega_zarr_path(cn.veg_outputs_path_mega_zarr, source_zarr_chunk_size, 'annual',
+    mega_zarr_path = zu.create_mega_zarr_path(cn.SOC_path_mega_zarr, source_zarr_chunk_size, 'N/A',
                                                      model_type, cn.veg_model_version_underscore, model_path_description,
                                                      input_date, main_logger)
     main_logger.info(f"Aggregating from zarr ({source_zarr_chunk_size} pixel chunks): {mega_zarr_path}")
