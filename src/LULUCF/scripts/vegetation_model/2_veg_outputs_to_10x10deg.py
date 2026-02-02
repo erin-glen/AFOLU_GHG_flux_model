@@ -79,6 +79,9 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
+    batch_size = 5000  # 8 batches to cover all tasks
+    # batch_size = 4  # large-scale testing
+
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Model version: {cn.veg_model_version}")
@@ -86,6 +89,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
+    main_logger.info(f"Batch size: {batch_size} tasks")
 
     # Calculates the interval type, difference between start and end years of intervals, and the model output years
     # for the model run
@@ -175,34 +179,51 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
 
     ### Step 3: Create 10x10 deg outputs
 
-    futures = []
+    # Creates full list of tasks to run (var_name, year_idx, tile_id)
+    all_tasks = [
+        (var_name, year_idx, tile_id)
+        for var_name in vars_to_process
+        for year_idx in range(years_to_process)
+        for tile_id in tile_ids_to_process
+    ]
 
-    main_logger.info(f"Starting processing: {uu.timestr()}")
+    task_batches = [all_tasks[i:i + batch_size] for i in range(0, len(all_tasks), batch_size)]
 
-    for var_name in vars_to_process:
+    main_logger.info(f"There are {len(all_tasks)} tasks to process ({len(vars_to_process)} variables x {years_to_process} years x {len(tile_ids_to_process)} tiles)")
 
-        for year_idx in range(years_to_process):
+    main_logger.info(f"Tasks divided into {len(task_batches)} batches of up to {batch_size} tasks: {uu.timestr()}")
 
-            for tile_id in tile_ids_to_process:
+    all_results = []
 
-                future = client.submit(zu.create_10x10_deg_geotif_from_zarr,
-                                       var_name, year_idx, tile_id, mega_zarr_path, output_base,
-                                       model_type, model_path_description, no_upload, False)
-                futures.append(future)
+    # Iterates through the batches
+    # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6980e192-5198-8332-8e69-b994315e91c0
+    for i, task_batch in enumerate(task_batches):
+        main_logger.info(f"Processing batch {i + 1}/{len(task_batches)} ({len(task_batch)} tasks): {uu.timestr()}")
 
-    # Results is a list of tuples, where each tuple is the per-ha and per-pixel chunk stats, each of which is a dictionary
-    # for a single variable-year-tile
-    # e.g., ([{'chunk_id': 'N/A', 'tile_id': '00N_050W', 'layer_name': '00N_050W__gross_emissions__all_C_pools__CO2_only__MgCO2_ha_yr_2016.tif',
-    # 'tile_name': '00N_050W__gross_emissions__all_C_pools__CO2_only__MgCO2_ha_yr_2016.tif', 'in_out': 'output_layer',
-    # 'pattern': 'gross_emissions__all_C_pools__CO2_only__MgCO2', 'years': 2016, 'min_value': 'no data', 'mean_value': 'no data', 'max_value': 'no data',
-    # 'count_value': 7912448, 'sum_value': 'no data', 'data_type': 'no data'}],
-    # [{'chunk_id': 'N/A', 'tile_id': '00N_050W', 'layer_name': '00N_050W__gross_emissions__all_C_pools__CO2_only__MgCO2_pixel_yr_2016.tif',
-    # 'tile_name': '00N_050W__gross_emissions__all_C_pools__CO2_only__MgCO2_pixel_yr_2016.tif', 'in_out': 'output_layer',
-    # 'pattern': 'gross_emissions__all_C_pools__CO2_only__MgCO2', 'years': 2016, 'min_value': 'no data', 'mean_value': 'no data',
-    # 'max_value': 'no data', 'count_value': 7912448, 'sum_value': 'no data', 'data_type': 'no data'}]),
-    # ([{'chunk_id': 'N/A', ... 'data_type': 'no data'}])]
-    results = client.gather(futures)
-    # print(results)
+        futures = []
+
+        for var_name, year_idx, tile_id in task_batch:  # Must be the same order as the tuple in all_tasks
+
+            future = client.submit(zu.create_10x10_deg_geotif_from_zarr,
+                                   var_name, year_idx, tile_id, mega_zarr_path, output_base,
+                                   model_type, model_path_description, no_upload, False, retries=3)
+            futures.append(future)
+
+        # Results is a list of tuples, where each tuple is the per-ha and per-pixel chunk stats, each of which is a dictionary
+        # for a single variable-year-tile
+        # e.g., ([{'chunk_id': 'N/A', 'tile_id': '00N_050W', 'layer_name': '00N_050W__gross_emissions__all_C_pools__CO2_only__MgCO2_ha_yr_2016.tif',
+        # 'tile_name': '00N_050W__gross_emissions__all_C_pools__CO2_only__MgCO2_ha_yr_2016.tif', 'in_out': 'output_layer',
+        # 'pattern': 'gross_emissions__all_C_pools__CO2_only__MgCO2', 'years': 2016, 'min_value': 'no data', 'mean_value': 'no data', 'max_value': 'no data',
+        # 'count_value': 7912448, 'sum_value': 'no data', 'data_type': 'no data'}],
+        # [{'chunk_id': 'N/A', 'tile_id': '00N_050W', 'layer_name': '00N_050W__gross_emissions__all_C_pools__CO2_only__MgCO2_pixel_yr_2016.tif',
+        # 'tile_name': '00N_050W__gross_emissions__all_C_pools__CO2_only__MgCO2_pixel_yr_2016.tif', 'in_out': 'output_layer',
+        # 'pattern': 'gross_emissions__all_C_pools__CO2_only__MgCO2', 'years': 2016, 'min_value': 'no data', 'mean_value': 'no data',
+        # 'max_value': 'no data', 'count_value': 7912448, 'sum_value': 'no data', 'data_type': 'no data'}]),
+        # ([{'chunk_id': 'N/A', ... 'data_type': 'no data'}])]
+        batch_results = client.gather(futures)
+        # print(batch_results)
+
+        all_results.extend(batch_results)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 
@@ -235,8 +256,8 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
 
     # Extracts the per-ha and per-pixel dictionaries from the returned tile stats so they are separate flat lists
     # https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/693c28bf-ade0-8325-b28b-de531cad2408
-    counts_per_ha_10x10_stats_list = [ha_dict for (ha_group, pixel_group) in results for ha_dict in ha_group]
-    counts_per_pixel_10x10_stats_list = [pixel_dict for (ha_group, pixel_group) in results for pixel_dict in pixel_group]
+    counts_per_ha_10x10_stats_list = [ha_dict for (ha_group, pixel_group) in all_results for ha_dict in ha_group]
+    counts_per_pixel_10x10_stats_list = [pixel_dict for (ha_group, pixel_group) in all_results for pixel_dict in pixel_group]
     # print(counts_per_ha_10x10_stats_list)
     # print(counts_per_pixel_10x10_stats_list)
 

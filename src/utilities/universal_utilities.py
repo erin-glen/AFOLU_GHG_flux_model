@@ -35,6 +35,7 @@ import zarr
 import tempfile
 import rasterio.errors
 from urllib.parse import urlparse
+import botocore
 
 
 # Turns off a FutureWarning about gdal.UseExceptions() vs. gdal.DontUseExceptions()
@@ -2041,6 +2042,8 @@ def get_cluster_info(client, cluster):
 def write_single_geotiff_to_s3(var, year, tile_id, data, transform, s3_path, logger_worker):
 
     fs = fsspec.filesystem("s3", anon=False)
+    max_retries = 5
+    base_wait_seconds = 2
 
     lu.print_and_log(f"  Writing {var} for year {year} for {tile_id} to {s3_path}: {timestr()}", False, logger_worker)
     upload_start_time = time.time()
@@ -2070,9 +2073,22 @@ def write_single_geotiff_to_s3(var, year, tile_id, data, transform, s3_path, log
     with tempfile.NamedTemporaryFile(suffix=".tif", delete=True) as tmpfile:
         with rasterio.open(tmpfile.name, "w", **profile) as dst:
             dst.write(data, 1)
+            dst.close()  # Ensures file is flushed before upload, per ChatGPT
 
-        # Uploads efficiently using multipart S3 upload
-        fs.put_file(tmpfile.name, s3_path)
+        # Retries S3 upload
+        # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6980e192-5198-8332-8e69-b994315e91c0
+        # Added this because I got a Content-Length HTTP header error during 10x10 deg aggregation uploads once
+        # and didn't have any retries set ip.
+        for attempt in range(1, max_retries + 1):
+            try:
+                fs.put_file(tmpfile.name, s3_path)
+                break  # Success
+            except (OSError, botocore.exceptions.BotoCoreError) as e:
+                lu.print_and_log( f"  WARNING: S3 upload failed (attempt {attempt}/{max_retries}) for {tile_id}: {e}",True, logger_worker)
+                if attempt == max_retries:
+                    raise
+                sleep_time = base_wait_seconds * (2 ** (attempt - 1))
+                time.sleep(sleep_time)
 
     upload_end_time = time.time()
     lu.print_and_log(f"  Uploads completed for {var} for year {year} for {tile_id} to {s3_path} in {round(upload_end_time-upload_start_time)} seconds: {timestr()}", False, logger_worker)
