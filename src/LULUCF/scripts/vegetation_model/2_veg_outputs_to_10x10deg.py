@@ -21,27 +21,27 @@ python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -bb 10 4
 Coiled small tests (needs 32 GB because of per-ha and per-pixel outputs):
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_postprocessing
 python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -bb 10 49 11 50 -fy 2 -fv 2 -ft 2 -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx  --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -bb 10 49 11 50 -fy 2 -fv 2 -ft 2 -mt standard -mpd global -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -bb 10 49 11 50 -fy 2 -fv 2 -ft 2 -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 32 -cn vegetation_postprocessing
 python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -bb -64 -22 -63 -21 -fy 3 -fv 3 -ft 3 -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -bb -64 -22 -63 -21 -fy 3 -fv 3 -ft 3 -mt standard -mpd global -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -bb -64 -22 -63 -21 -fy 3 -fv 3 -ft 3 -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 --input_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 20 -t 1 -m 32 -cn vegetation_postprocessing
 python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
 python -m src.utilities.create_cluster -n 100 -t 1 -m 32 -cn vegetation_postprocessing
 python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
-python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20250921_17_33_57__XYX/vegetation_fluxes__v1_0_4 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "This is a global run for model v1.0.0 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn vegetation_fluxes_1x1_chunk_statistics_XYZ.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -log_note "10x10 deg tile creation for vegetation model v1.0.5 (2016-2024)."
+python -m src.LULUCF.scripts.vegetation_model.2_veg_outputs_to_10x10deg -cn vegetation_postprocessing -mt standard -mpd global -mcstn parquet_20260131_10_37_46__KEEP/vegetation_fluxes_20260131_10_37_28__v1_0_5 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "10x10 deg tile creation for vegetation model v1.0.5 (2016-2024)."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/690a21cd-2ea0-8333-9c7f-7091f8016fb3
 """
@@ -50,8 +50,6 @@ import argparse
 import pandas as pd
 import os
 from dask.distributed import print
-import psutil
-import fsspec
 
 # Project imports
 from src.utilities import constants_and_names as cn

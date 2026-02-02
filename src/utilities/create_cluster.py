@@ -85,7 +85,6 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
         worker_options["nthreads"] = threads_per_worker
 
     # Uses on-demand workers for large jobs. Otherwise, prefers spot workers.
-    # purchase_option = "spot_with_fallback"
     if n_workers > 110:
         purchase_option = "on-demand"
         use_best_zone = False  # Should allow workers to be split across different zones, to help obtain large requested amount of workers
