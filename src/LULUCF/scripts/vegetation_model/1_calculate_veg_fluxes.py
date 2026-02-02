@@ -2598,7 +2598,7 @@ def main(cluster_name, year_range, model_type,
     if not run_local:
 
         # Creates combined log from all workers if not deactivated
-        worker_log_local_path_prelin = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
+        worker_log_local_path_prelim = lu.compile_worker_logs(no_log, cluster, stage, start_time, main_logger)
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with preliminary worker log compilation", main_logger)
 
 
@@ -2730,6 +2730,8 @@ def main(cluster_name, year_range, model_type,
             if file_count != len(chunk_list):
                 main_logger.warning("WARNING: Output file count in {output_folder} does not match expectations!")
             # print(geotiff_files)
+
+    uu.stage_duration(start_time, uu.timestr(), f"{stage} with output counts", main_logger)
 
 
     ### Step 9: Merge compiled worker log and main log
