@@ -357,6 +357,8 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
         for output_folder in output_dir_list_aggreg:
             geotiff_files, file_count = uu.list_raster_full_paths_in_s3_folder_and_count(output_folder)
             main_logger.info(f"Output aggregated rasters in {output_folder}: {file_count}")
+            if file_count != len(tile_ids_to_process):
+                main_logger.warning(f"WARNING: Output file count in {output_folder} does not match expectations!")
             # print(geotiff_files)
 
     uu.stage_duration(start_time, uu.timestr(), f"{stage} with output counts", main_logger)
