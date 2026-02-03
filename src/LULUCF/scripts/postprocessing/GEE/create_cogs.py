@@ -5,7 +5,7 @@ Script to create global, stacked COGS:
 3) combines annual COGs into single, stacked global COG per dataset
 
 run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
-python -m src.utilities.create_cluster -cn WWF_flux_global_cogs -n 9 -m 8
+python -m src.utilities.create_cluster -cn WWF_flux_global_cogs -n 1 -m 4
 python -m src.LULUCF.scripts.postprocessing.GEE.1_create_cogs -cn WWF_flux_global_cogs -p emissions
 
 TODO: Update creation option based on GDAL type. Check block_size. Right now using COs for float. Look up optimal COs by datatype.

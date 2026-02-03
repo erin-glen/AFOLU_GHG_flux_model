@@ -1,18 +1,25 @@
 """
 Script to create WWF GEE assets:
-1) uploads data from s3 storage to GCS bucket (with option to filter which tiles to upload)
-2) ingest data into GEE (each dataset x year is its own ee.Image asset)
+1) uploads data from s3 storage to GCS bucket directly (with option to filter which tiles to upload, passed in as a .txt file)
+2) ingest data into GEE as ee asset (each dataset x year is its own ee.Image asset)
 
 run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 To run locally:
-python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d mineral_soil -y 2010 -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/tile_ids.txt --skip_existing
+gcloud auth application-default login
+earthengine authenticate
+python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d mineral_soil -y 2022 -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/tile_ids.txt --skip_existing
 
 To run in coiled:
-python -m src.utilities.create_cluster -cn GEE_mineral_soils_2015 -n 1 -m 4
-python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -cn GEE_mineral_soils_2015 -d mineral_soil -y 2015 -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/tile_ids.txt --skip_existing
+gcloud auth application-default login
+earthengine authenticate
+python -m src.utilities.create_cluster -cn GEE_mineral_soils_2022 -n 1 -m 4
+python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -cn GEE_mineral_soils_2022 -d mineral_soil -y 2022 -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/tile_ids.txt --skip_existing
 
 Notes:
-    - It took ~40 minutes to upload 378 1x1 tiles (tiles that overlap with WWF sites) for 2010 mineral soils (local run)
+    - Make sure to set up your Google Cloud account credentials in your environment and refresh token prior to run.
+    - It took ~40 minutes to upload 378 1x1 tiles (tiles that overlap with WWF sites) for 2010 mineral soils
+    - Step 3 does not currently run in coiled because workers do not have access to your local ee credentials. You can mount
+      your local config directory into the worker, but for now running this step locally even when other steps run through coiled
 """
 from __future__ import annotations
 
@@ -20,7 +27,6 @@ import argparse
 import os
 import posixpath
 import ee
-from functools import lru_cache
 from google.cloud import storage
 import time
 import boto3
@@ -30,7 +36,9 @@ from src.utilities import constants_and_names as cn
 from src.utilities import universal_utilities as uu
 from src.utilities import log_utilities as lu
 
+ee.Authenticate()
 gee_project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+ee_initialized = False
 
 # Read tile_ids from .txt file
 def read_tile_ids(path):
@@ -80,9 +88,7 @@ def upload_s3_to_gcs(s3_client, gcs_storage_client, s3_bucket, s3_file, gcs_buck
     blob = gcs_storage_client.bucket(gcs_bucket).blob(gcs_blob)
     blob.upload_from_file(body, rewind=False)
 
-
 # One pair of s3 and GCS clients per worker to parallelize tasks using dask
-@lru_cache(maxsize=1)
 def worker_clients():
     return boto3.Session().client("s3"), storage.Client()
 
@@ -168,14 +174,12 @@ def to_cloud_asset_name(asset_id):
         return f"projects/earthengine-legacy/assets/{asset_id}"
     raise ValueError(f"Bad asset id: {asset_id}")
 
-# Initialize GEE project in each ingest_dataset_year call so can parrallelize in dask
-@lru_cache(maxsize=1)
-def ee_init():
-    ee.Initialize(project=gee_project)
-
-# Main function to submit ee.Image asset ingestion  for each dataset x year
+# Main function to submit ee.Image asset ingestion for each dataset x year
 def ingest_dataset_year(item, tile_ids, skip_existing):
-    ee_init()  # Initialize GEE project
+    global ee_initialized
+    if not ee_initialized:
+        ee.Initialize(project=gee_project)
+        ee_initialized = True
     gcs_storage_client = storage.Client()
 
     gcs_bucket = item["gcs_bucket"]
@@ -192,7 +196,7 @@ def ingest_dataset_year(item, tile_ids, skip_existing):
     gcs_uris = [f"gs://{gcs_bucket}/{blob}" for blob in blob_names]
 
     # GEE folder
-    ee_folder = posixpath.join(item["ee_dir"], str(year))
+    ee_folder = posixpath.join(item["ee_dir"])
     ensure_ee_folder(ee_folder)
 
     # Asset name
@@ -234,7 +238,7 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
     wwf_emissions_gee_pattern = "emissions__all_C_pools__all_gases__MgCO2e_per_pixel"
     wwf_removals_gee_pattern = "removals__all_C_pools__MgCO2_per_pixel"
     wwf_net_flux_gee_pattern = "net_flux__all_C_pools__all_gases__MgCO2e_per_pixel"
-    wwf_mineral_soil_gee_pattern = "SOC_change__mineral_soil_extent__0-30cm_MgC_per_hectare"
+    wwf_mineral_soil_gee_pattern = "SOC_change__mineral_soil_extent__0-30cm_MgC_per_hectare_per_year"
 
     # ------------------------------------------------------------------------------------------------------------------
     # Step 1: Create download/ upload/ ingestion dictionary for the datasets we want to create GEE assets for.
@@ -373,36 +377,14 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
 
     items = list(download_upload_dictionary.items())
 
-    if not run_local:
-        asset_futures = []
-        for key, item in items:
-            asset_future = client.submit(
-                ingest_dataset_year,
-                item,
-                tile_ids=tile_ids,
-                skip_existing=skip_existing,
-                pure=False,
-            )
-            asset_futures.append((key, asset_future))
-
-        for key, future in asset_futures:
-            result = future.result()
-            if result.get("asset_id") is None:
-                main_logger.warning("%s - no tiles found in GCS to ingest", key)
-            elif result.get("skipped"):
-                main_logger.info("%s - skip existing asset: %s (%s tiles)", key, result["asset_id"], result["n_tiles"])
-            else:
-                main_logger.info("%s - started ingestion: %s (task=%s, %s tiles)", key, result["asset_id"], result["task_id"], result["n_tiles"])
-
-    else:
-        for key, item in items:
-            result = ingest_dataset_year(item, tile_ids=tile_ids, skip_existing=skip_existing)
-            if result.get("asset_id") is None:
-                main_logger.warning("%s - no tiles found in GCS to ingest", key)
-            elif result.get("skipped"):
-                main_logger.info("%s - skip existing asset: %s (%s tiles)", key, result["asset_id"], result["n_tiles"])
-            else:
-                main_logger.info("%s - started ingestion: %s (task=%s, %s tiles)", key, result["asset_id"], result["task_id"], result["n_tiles"])
+    for key, item in items:
+        result = ingest_dataset_year(item, tile_ids=tile_ids, skip_existing=skip_existing)
+        if result.get("asset_id") is None:
+            main_logger.warning("%s - no tiles found in GCS to ingest", key)
+        elif result.get("skipped"):
+            main_logger.info("%s - skip existing asset: %s (%s tiles)", key, result["asset_id"], result["n_tiles"])
+        else:
+            main_logger.info("%s - started ingestion: %s (task=%s, %s tiles)", key, result["asset_id"], result["task_id"], result["n_tiles"])
 
     end_time = time.time()
     main_logger.info("STEP 3 Complete - started all ingestions in %s seconds\n", round(end_time - start_time))
@@ -415,7 +397,7 @@ if __name__ == "__main__":
     parser.add_argument('-b', '--gcs_bucket', required=True, help="GCS bucket name (ex: my-bucket)")
     parser.add_argument('-f', '--gcs_folder',  help="Folder in GCS bucket (ex: wwf)")
     parser.add_argument('-r', '--gee_repo', help="GEE repo to ingest asset to (ex: my-asset-repo)")
-    parser.add_argument('-y', '--years', nargs='+', type=int, help="Which year(s) to run? Defaults to use all available years if not specified.")
+    parser.add_argument('-y', '--years', nargs='+', help="Which year(s) to run? Defaults to use all available years if not specified.")
     parser.add_argument('-t', "--tile_ids", help="Optional text file with tile ids to filter to (one per line)")
     parser.add_argument("--skip_existing", action="store_true")
 
