@@ -199,23 +199,23 @@ def merge_main_and_worker_upload_logs(no_log, main_log, worker_log, stage):
             outfile.write("=== Chunk-level processing times (approximate because some of worker log may be missing) ===\n")
             outfile.write(f"Processing stats for calculation code ({len(calc_proc_times__sec)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_calc_proc_times__sec:.0f} seconds (stdev: {stdev_calc_proc_times__sec:.0f})\n")
-            outfile.write(f"  Min and max: {min_calc_proc_times__sec:.0f} - {max_calc_proc_times__sec:.0f}\n")
+            outfile.write(f"  Min and max: {min_calc_proc_times__sec:.0f}-{max_calc_proc_times__sec:.0f}\n")
 
             outfile.write(f"Processing stats for zarr insertion code ({len(zarr_insert_proc_times__sec)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_zarr_pop_proc_times__sec:.0f} seconds (stdev: {stdev_zarr_pop_proc_times__sec:.0f})\n")
-            outfile.write(f"  Min and max: {min_zarr_pop_proc_times__sec:.0f} - {max_zarr_pop_proc_times__sec:.0f}\n")
+            outfile.write(f"  Min and max: {min_zarr_pop_proc_times__sec:.0f}-{max_zarr_pop_proc_times__sec:.0f}\n")
 
             outfile.write(f"Processing stats for geotif upload code ({len(uploads_proc_times__sec)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_uploads_proc_times__sec:.0f} seconds (stdev: {stdev_uploads_proc_times__sec:.0f})\n")
-            outfile.write(f"  Min and max: {min_uploads_proc_times__sec:.0f} - {max_uploads_proc_times__sec:.0f}\n")
+            outfile.write(f"  Min and max: {min_uploads_proc_times__sec:.0f}-{max_uploads_proc_times__sec:.0f}\n")
 
             outfile.write(f"Processing stats for full tasks ({len(total_chunk_proc_times__sec)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_total_chunk_proc_times__sec:.0f} seconds (stdev: {stdev_total_chunk_proc_times__sec:.0f})\n")
-            outfile.write(f"  Min and max: {min_total_chunk_proc_times__sec:.0f} - {max_total_chunk_proc_times__sec:.0f}\n")
+            outfile.write(f"  Min and max: {min_total_chunk_proc_times__sec:.0f}-{max_total_chunk_proc_times__sec:.0f}\n")
 
             outfile.write(f"Peak memory usage for tasks ({len(peak_memory__GB)} tasks):\n")
             outfile.write(f"  Average and stdev: {avg_peak_memory__GB:.2f} GB (stdev: {stdev_peak_memory__GB:.2f})\n")
-            outfile.write(f"  Min and max: {min_peak_memory__GB:.2f} - {max_peak_memory__GB:.2f}\n")
+            outfile.write(f"  Min and max: {min_peak_memory__GB:.2f}-{max_peak_memory__GB:.2f}\n")
 
             outfile.write("--- End of log---\n")
 

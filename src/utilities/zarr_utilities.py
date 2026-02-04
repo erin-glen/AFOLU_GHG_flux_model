@@ -794,10 +794,19 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     data_fine_trim = data_per_pixel[:ny_trim, :nx_trim]
 
     # Reshapes and sums over each block
-    coarse_agg = data_fine_trim.reshape(
-        ny_trim // cn.global_aggregation_factor, cn.global_aggregation_factor,
-        nx_trim // cn.global_aggregation_factor, cn.global_aggregation_factor
-    ).sum(axis=(1, 3))
+    # Deals with NaNs-- otherwise, individual aggregated pixels with NaN might get dropped.
+    # per https://chatgpt.com/c/6941b3f0-30c8-8332-ab19-9b154c0a2b43
+    coarse_agg = np.nansum(
+        data_fine_trim.reshape(
+            ny_trim // cn.global_aggregation_factor, cn.global_aggregation_factor,
+            nx_trim // cn.global_aggregation_factor, cn.global_aggregation_factor
+        ),
+        axis=(1, 3)
+    )
+
+    # Warning if there are no valid aggregated pixels
+    if not np.isfinite(coarse_agg).any():
+        logger_worker.warning(f"All-NaN coarse aggregation for {tile_id}, {var}, {year}")
 
     extract_end_time = time.time()
     lu.print_and_log(f"  Calculated {var_with_unit} for year {year} for {tile_id} in {round(extract_end_time - extract_start_time)} seconds: {uu.timestr()}", False, logger_worker)
@@ -845,6 +854,7 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
             valid_pixel_count_per_pixel = uu.write_single_geotiff_to_s3(
                 var, year, tile_id, data_per_pixel, transform, s3_filename_per_pixel, logger_worker
             )
+
             # valid_pixel_count_coarse not used. Not doing anything with stats from the aggregated output
             valid_pixel_count_coarse = uu.write_single_geotiff_to_s3(
                 var, year, tile_id, coarse_agg, coarse_transform, s3_filename_coarse, logger_worker

@@ -114,6 +114,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
 
     # Outputs to turn into 10x10 tile
     # full_list_of_vars = cn.full_outputs_to_zarr   # If all variables are to be made into 10x10s (but very expensive)
+    # full_list_of_vars = [cn.net_flux_all_C_pools_all_gases_pattern] # For testing
     full_list_of_vars = cn.veg_summative_output_patterns + [cn.land_state_pattern] # Summative outputs + land state nodes
 
     # Limits the processed variables to the supplied number (for testing)

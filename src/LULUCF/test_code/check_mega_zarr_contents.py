@@ -23,9 +23,10 @@ from src.utilities import zarr_utilities as zu
 from src.utilities.constants_and_names import intervals_annual
 
 # Settings-- modify these
-bounds = [23, -4, 24, -3]
-zarr_path = 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_5__standard__test_box/mega_zarr/annual_intervals/4000_pixels/20260130/vegetation_zarr.zarr'
-var_name = 'gross_emissions__all_C_pools__CO2_only__MgCO2_ha_yr'
+# bounds = [23, -4, 24, -3]
+bounds = [-83, 54, -82, 55]
+zarr_path = 's3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_5__standard__global/mega_zarr/annual_intervals/4000_pixels/20260130/vegetation_zarr.zarr'
+var_name = 'net_flux__all_C_pools__all_gases__MgCO2e_ha_yr'
 interval_end_years = cn.interval_end_years_annual
 
 # bounds = [110, -1 ,111, 0]
@@ -75,7 +76,7 @@ zarr_chunk_array = zarr_group[var_name][:, lat0:lat1, lon0:lon1]
 ### For [years]x4000x4000 zarr
 for year_idx, year in enumerate(interval_end_years):
     zarr_chunk_array_year = zarr_chunk_array[year_idx]
-    print("zarr_chunk_array_year:", zarr_chunk_array_year)
+    # print("zarr_chunk_array_year:", zarr_chunk_array_year)
 
     pattern_with_year = f"{var_name}_{year}"
 
@@ -85,8 +86,17 @@ for year_idx, year in enumerate(interval_end_years):
 
     zarr_stats_raw_all_years.append(zarr_stats_raw_year)
 
-# Returns the chunk stats from the zarr as a list of dictionaries, with each element being one chunk
-print(zarr_stats_raw_all_years)
+    for key, value in zarr_stats_raw_year.items():
+        print(f"{key}: {value}")
+    print("")
+
+    # print(f"Year {year} array stats: min={np.nanmin(zarr_chunk_array_year)}, mean={np.nanmean(zarr_chunk_array_year)}, max={np.nanmax(zarr_chunk_array_year)}")
+    # print(f"  Shape: {zarr_chunk_array_year.shape}, Num NaNs: {np.isnan(zarr_chunk_array_year).sum()}")
+
+    # sys.quit()
+
+# # Returns the chunk stats from the zarr as a list of dictionaries, with each element being one chunk
+# print(zarr_stats_raw_all_years)
 
 
 # ### For 1x10000x10000 zarr

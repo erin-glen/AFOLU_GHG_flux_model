@@ -1507,7 +1507,6 @@ def count_successful_chunks(chunk_list, is_final, main_logger, results):
     return success_count, all_stats
 
 
-
 # Calculates stats for a chunk (numpy array), mostly using per hectare values
 # but optionally summing per pixel values to get a chunk total.
 # Also joins ISO from GADM to each entry.
@@ -1543,6 +1542,17 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'data_type': 'no data'
         }
     else:    # Only calculates stats if there is data in the array
+        # Ignores NaN in chunk stats calculation. Otherwise, min, mean and max might not be calculated, even if count is.
+        # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/698215a2-bbdc-8332-991d-ab2ff90bb0ef
+        if np.isnan(array_per_ha).all():
+            min_val = mean_val = max_val = 'nan'
+            count_val = 0
+        else:
+            min_val = float(np.nanmin(array_per_ha))
+            mean_val = float(np.nanmean(array_per_ha))
+            max_val = float(np.nanmax(array_per_ha))
+            count_val = np.count_nonzero(array_per_ha)
+
         return {
             'chunk_id': bounds_str,
             'tile_id': tile_id,
@@ -1552,10 +1562,10 @@ def calculate_stats(array_per_ha, name, bounds_str, tile_id, in_out, array_per_p
             'chunk_name': f'{tile_id}__{bounds_str}__{out_pattern}_{year_range}.tif',
             'tile_name': f'{tile_id}__{out_pattern}_{year_range}.tif',
             'in_out': in_out,
-            'min_value': float(np.min(array_per_ha)),
-            'mean_value': float(np.mean(array_per_ha)),
-            'max_value': float(np.max(array_per_ha)),
-            'count_value': np.count_nonzero(array_per_ha),
+            'min_value': min_val,
+            'mean_value': mean_val,
+            'max_value': max_val,
+            'count_value': count_val,
             'sum_value': sum_value,
             'data_type': array_per_ha.dtype.name
         }
@@ -2091,7 +2101,7 @@ def write_single_geotiff_to_s3(var, year, tile_id, data, transform, s3_path, log
                 time.sleep(sleep_time)
 
     upload_end_time = time.time()
-    lu.print_and_log(f"  Uploads completed for {var} for year {year} for {tile_id} to {s3_path} in {round(upload_end_time-upload_start_time)} seconds: {timestr()}", False, logger_worker)
+    lu.print_and_log(f"  Upload completed for {var} for year {year} for {tile_id} to {s3_path} in {round(upload_end_time-upload_start_time)} seconds: {timestr()}", False, logger_worker)
 
     return valid_pixel_count
 
