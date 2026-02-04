@@ -7,7 +7,9 @@ run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 To run locally:
 gcloud auth application-default login
 earthengine authenticate
-python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d mineral_soil -y 2022 -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/tile_ids.txt --skip_existing
+python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d mineral_soil -y 2010 -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/tile_ids.txt --skip_existing
+python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d mineral_soil -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/tile_ids.txt --skip_existing --clean_gcs --make_public
+
 
 To run in coiled:
 gcloud auth application-default login
@@ -174,7 +176,12 @@ def to_cloud_asset_name(asset_id):
         return f"projects/earthengine-legacy/assets/{asset_id}"
     raise ValueError(f"Bad asset id: {asset_id}")
 
-# Main function to submit ee.Image asset ingestion for each dataset x year
+def get_asset_id_for_item(item):
+    ee_folder = posixpath.join(item["ee_dir"])
+    asset_name = f"{item['ee_pattern']}__{item['year']}"
+    return posixpath.join(ee_folder, asset_name)
+
+# Main function to submit ee.Image asset ingestion task for each dataset x year
 def ingest_dataset_year(item, tile_ids, skip_existing):
     global ee_initialized
     if not ee_initialized:
@@ -209,8 +216,36 @@ def ingest_dataset_year(item, tile_ids, skip_existing):
     task_id = start_image_ingestion_from_gcs(gcs_uris=gcs_uris, asset_id=asset_id)
     return {"asset_id": asset_id, "task_id": task_id, "n_tiles": len(gcs_uris), "skipped": False}
 
+# Deletes tile in the gcs_folder (dataset x year).
+# If tile_ids is provided, only deletes tiles whose names contain those tile_ids
+def delete_gcs_dataset_year(gcs_bucket, gcs_folder, tile_ids):
+    gcs_storage_client = storage.Client()
+    bucket = gcs_storage_client.bucket(gcs_bucket)
 
-def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_ids, skip_existing):
+    deleted = 0
+    kept = 0
+    seen = 0
+
+    for blob in gcs_storage_client.list_blobs(gcs_bucket, prefix=gcs_folder.rstrip("/") + "/"):
+        name = blob.name
+        if not (name.lower().endswith(".tif") or name.lower().endswith(".tiff")):
+            continue
+        seen += 1
+        if tile_ids and not any(tile_id in name for tile_id in tile_ids):
+            kept += 1
+            continue
+        bucket.blob(name).delete()
+        deleted += 1
+
+    return {"seen": seen, "deleted": deleted, "kept": kept}
+
+# Makes an EE asset publicly readable
+def make_gee_asset_public(asset_id):
+    ee.data.setAssetAcl(to_cloud_asset_name(asset_id), {"all_users_can_read": True})
+
+
+
+def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_ids, skip_existing, clean_gcs, make_public):
 
     # Connects to Coiled cluster and the named cluster exists
     if cluster_name:
@@ -246,16 +281,16 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
     gcs_folder = gcs_folder.rstrip("/") if gcs_folder else ""
     tile_ids = read_tile_ids(tile_ids) if tile_ids else None
 
-    # Default to all available years if years not provided by users
+    # Default to all available years if years are not provided by users
     if years is None:
         years = {
-            "emissions": list(cn.interval_end_years_annual),
-            "removals": list(cn.interval_end_years_annual),
-            "net_flux": list(cn.interval_end_years_annual),
-            "mineral_soil": [2010, 2015, 2020, 2022],
+            "emissions": cn.interval_end_years_annual,
+            "removals": cn.interval_end_years_annual,
+            "net_flux": cn.interval_end_years_annual,
+            "mineral_soil": cn.SOC_change_intervals,
         }
 
-    # Datasets to create GEE assets for
+    # Datasets to pass in arguments for tile upload + GEE asset creation
     download_upload_dictionary = {}
 
     for dataset in datasets:
@@ -288,7 +323,7 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
                 "year": year,
                 "s3_dir": s3_dir.rstrip("/") + "/",
                 "gcs_bucket": gcs_bucket,
-                "gcs_folder": "/".join([p for p in [gcs_folder, dataset, str(year)] if p]), # GCS layout: <bucket>/<gcs_folder>/<dataset>/<year>/
+                "gcs_folder": "/".join([p for p in [gcs_folder, dataset, str(year)] if p]),     # GCS layout: <bucket>/<gcs_folder>/<dataset>/<year>/
                 "ee_dir": posixpath.join(gee_repo, gcs_folder, gee_dir),
                 "ee_pattern": gee_pattern
             }
@@ -319,7 +354,7 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
         download_upload_dictionary.pop(key, None)
 
 
-    # Upload all data from s3 to GCS using futures (Coiled) or locally
+    # Upload data from s3 to GCS using futures (Coiled) or locally
     total_to_upload = sum(len(i["s3_raster_list"]) for i in download_upload_dictionary.values())
     if total_to_upload == 0:
         main_logger.info(" Nothing to upload (all tiles missing or already in GCS).")
@@ -330,14 +365,7 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
             gcs_futures = []
             for key, items in download_upload_dictionary.items():
                 for batch in chunked(items["s3_raster_list"], batch_size):
-                    gcs_future = client.submit(
-                        gcs_upload,
-                        s3_path=items["s3_dir"],
-                        s3_files=batch,
-                        gcs_bucket=items["gcs_bucket"],
-                        gcs_folder=items["gcs_folder"],
-                        pure=False
-                    )
+                    gcs_future = client.submit(gcs_upload, items["s3_dir"], batch, items["gcs_bucket"], items["gcs_folder"], False)
                     gcs_futures.append((key, gcs_future))
 
             # Wait for all GCS uploads to finish before moving on to asset ingestion
@@ -351,12 +379,7 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
         else:
             for key, items in download_upload_dictionary.items():
                 for batch in chunked(items["s3_raster_list"], batch_size):
-                    result = gcs_upload(
-                        s3_path=items["s3_dir"],
-                        s3_files=batch,
-                        gcs_bucket=items["gcs_bucket"],
-                        gcs_folder=items["gcs_folder"]
-                    )
+                    result = gcs_upload(items["s3_dir"], batch, items["gcs_bucket"], items["gcs_folder"])
                     uploaded_so_far += result["uploaded"]
                     percent = (uploaded_so_far / total_to_upload) * 100
                     main_logger.info("STEP 2 progress: %.1f%% (%s/%s uploaded)", percent, uploaded_so_far, total_to_upload)
@@ -375,10 +398,8 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
         raise ValueError("GOOGLE_CLOUD_PROJECT is not set")
     ee.Initialize(project=gee_project)
 
-    items = list(download_upload_dictionary.items())
-
-    for key, item in items:
-        result = ingest_dataset_year(item, tile_ids=tile_ids, skip_existing=skip_existing)
+    for key, item in download_upload_dictionary.items():
+        result = ingest_dataset_year(item, tile_ids, skip_existing)
         if result.get("asset_id") is None:
             main_logger.warning("%s - no tiles found in GCS to ingest", key)
         elif result.get("skipped"):
@@ -387,8 +408,51 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
             main_logger.info("%s - started ingestion: %s (task=%s, %s tiles)", key, result["asset_id"], result["task_id"], result["n_tiles"])
 
     end_time = time.time()
-    main_logger.info("STEP 3 Complete - started all ingestions in %s seconds\n", round(end_time - start_time))
+    main_logger.info("STEP 3 Complete - all ingestions completed in %s seconds\n", round(end_time - start_time))
 
+
+    # -------------------------------------------------------------------------------------------------------------------
+
+    # Step 4: Delete tiles in GCS storage after asset has successfully been ingested and QCed
+    start_time = time.time()
+    main_logger.info("STEP 4 - Optional: Deleting tiles from GCS storage")
+
+    if clean_gcs:
+        for key, item in download_upload_dictionary.items():
+            try:
+                stats = delete_gcs_dataset_year(item["gcs_bucket"], item["gcs_folder"], tile_ids)
+                main_logger.info("%s - deleted tiles in GCS storage (seen=%s, deleted=%s, kept=%s)",
+                                 key, stats["seen"], stats["deleted"], stats["kept"])
+            except Exception as e:
+                main_logger.warning("%s - failed to delete tiles in gs://%s/%s: %s",
+                                    key, item["gcs_bucket"], item["gcs_folder"], e)
+
+    end_time = time.time()
+    main_logger.info("STEP 4 Complete - tiles deleted in %s seconds\n", round(end_time - start_time))
+
+    # -------------------------------------------------------------------------------------------------------------------
+
+    # Step 5: Make asset publicly accessible after asset has successfully been ingested and QCed
+    start_time = time.time()
+    main_logger.info("STEP 5 - Optional: Make GEE assets publicly accessible")
+
+    if make_public:
+        if not gee_project:
+            raise ValueError("GOOGLE_CLOUD_PROJECT is not set")
+        ee.Initialize(project=gee_project)
+
+        for key, item in download_upload_dictionary.items():
+            asset_id = get_asset_id_for_item(item)
+            try:
+                make_gee_asset_public(asset_id)
+                main_logger.info("%s - set public access: %s", key, asset_id)
+            except Exception as e:
+                main_logger.warning("%s - failed to set public access on %s: %s", key, asset_id, e)
+
+    end_time = time.time()
+    main_logger.info("STEP 5 Complete - all assets set to public access in %s seconds\n", round(end_time - start_time))
+
+    # -------------------------------------------------------------------------------------------------------------------
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="S3 -> GCS upload --> GEE asset ingestion")
@@ -400,6 +464,8 @@ if __name__ == "__main__":
     parser.add_argument('-y', '--years', nargs='+', help="Which year(s) to run? Defaults to use all available years if not specified.")
     parser.add_argument('-t', "--tile_ids", help="Optional text file with tile ids to filter to (one per line)")
     parser.add_argument("--skip_existing", action="store_true")
+    parser.add_argument("--clean_gcs", action="store_true")
+    parser.add_argument("--make_public", action="store_true")
 
     args = parser.parse_args()
     cluster_name = args.cluster_name
@@ -410,5 +476,7 @@ if __name__ == "__main__":
     years = args.years
     tile_ids = args.tile_ids
     skip_existing = args.skip_existing
+    clean_gcs = args.clean_gcs
+    make_public = args.make_public
 
-    main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_ids, skip_existing)
+    main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_ids, skip_existing, clean_gcs, make_public)
