@@ -1046,6 +1046,8 @@ colorbar_dimensions = [0.12, 0.17, 0.02, 0.13] # [left, bottom, width, height]
 net_colors_rgb = [(0, 60, 48), (1, 102, 94), (53, 151, 143), (128, 205, 193), (199, 234, 229),  # Used for removals
                   (246, 232, 195), (223, 194, 125), (191, 129, 45), (140, 81, 10), (84, 48, 5)  # Used for emissions
                   ]
+net_percentiles = [0.17, 0.25, 0.5, 0.77, 0.95,
+                   1.05, 1.1, 1.2, 1.3, 1.5]
 removals_colors_rgb = net_colors_rgb[0:5]
 emissions_colors_rgb = net_colors_rgb[5:]
 

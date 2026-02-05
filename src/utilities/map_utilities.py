@@ -8,7 +8,7 @@ from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-import pyproj
+import warnings
 
 from matplotlib.colors import Normalize, TwoSlopeNorm, LinearSegmentedColormap
 from rasterio.warp import calculate_default_transform, reproject, Resampling
@@ -429,6 +429,7 @@ def save_pres_non_pres_jpegs(ax, out_jpeg, out_jpeg_for_pres, year, pres_text):
 
     return out_jpeg_for_pres
 
+
 # Creates gifs of timeseries (fast and slow)
 def create_gif(out_maps_for_gif, output_gif_path):
     """
@@ -445,7 +446,7 @@ def create_gif(out_maps_for_gif, output_gif_path):
     # I was finding that even if the color palettes looked the same in each jpeg,
     # they were different by year in the gif for some reason.
     # Using a single color palette fixes that.
-    print("Generating global color palette from all frames...")
+    print("\n\n---Generating global color palette from all frames...")
     combined_height = frames[0].height * len(frames)
     combined = Image.new("RGB", (frames[0].width, combined_height))
     for i, frame in enumerate(frames):
@@ -486,6 +487,41 @@ def create_gif(out_maps_for_gif, output_gif_path):
         disposal=2  # Clears previous frame
     )
 
+# Saves the mean of years as geotif
+def save_mean_annual_geotif(local_reproj_folder, pattern_segment, year_path_reproj, yearly_data_stack):
+
+    # Computes average across years (ignoring NaNs)
+    # Known issue is that if there are only two years of values and they are equal with opposite signs (e.g., -0.5 and 0.5),
+    # they cancel out, the mean is 0, and the pixel shows up as NoData (and doesn't get a color).
+    # This is pretty rare and doesn't affect the global visualization.
+    print("  Computing and saving annual average raster")
+    with warnings.catch_warnings():  # Suppresses RunTime warning about empty slices (for pixels that are NaN every year)
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        mean_data = np.nanmean(np.stack(yearly_data_stack, axis=0), axis=0)
+
+    # Masks no-data for writing (0 as nodata to match others)
+    mean_data_to_write = np.where(np.isnan(mean_data), 0, mean_data)
+
+    # Gets metadata from any of the reprojected rasters (uses the last one) to save geotif of mean
+    with rasterio.open(year_path_reproj) as src:
+        profile = src.profile
+        profile.update({
+            'dtype': 'float32',
+            'count': 1,
+            'compress': 'lzw',
+            'nodata': 0  # Match your other rasters
+        })
+
+        out_path_mean_geotiff = f"{local_reproj_folder}/{pattern_segment}{cn.flux_aggreg_pixel_meaning}_v{cn.veg_model_version_underscore}_{cn.interval_end_years_annual[0]}_{cn.interval_end_years_annual[-1]}_mean_global_reproj.tif"
+
+        with rasterio.open(out_path_mean_geotiff, 'w', **profile) as dst:
+            dst.write(mean_data_to_write, 1)
+
+    print(f"  Saved mean annual GeoTIFF to: {out_path_mean_geotiff}")
+
+    return mean_data
+
+
 # Makes jpegs and gifs of net fluxes
 def map_net_flux(s3_folders, model_type, model_path_description,
                  local_reproj_folder, local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
@@ -504,8 +540,8 @@ def map_net_flux(s3_folders, model_type, model_path_description,
     all_valid_values = []
 
     # First pass: Reprojects input rasters
-    for i, year in enumerate(cn.years_annual[1:]):
-    # for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
+    for i, year in enumerate(cn.interval_end_years_annual[0:]):
+    # for i, year in enumerate(cn.interval_end_years_annual[2:3]): # For testing a specific year
 
         # The s3 folder to process for this year
         s3_folder = s3_folders[i]
@@ -535,9 +571,9 @@ def map_net_flux(s3_folders, model_type, model_path_description,
         reproject_raster(year_path_unproj, year_path_reproj)
 
     # Second pass: Gets the range of values across years to standardize legend across years
-    print("Pre-scanning rasters to determine full time series upper and lower limits...")
-    for i, year in enumerate(cn.years_annual[1:]):
-    # for i, year in enumerate(cn.years_annual[2:3]):
+    print("\n\n---Pre-scanning rasters to determine full time series upper and lower limits...")
+    for i, year in enumerate(cn.interval_end_years_annual[0:]):
+    # for i, year in enumerate(cn.interval_end_years_annual[2:3]):
 
         # print(f"Scanning {year}")
         s3_folder = s3_folders[i]
@@ -592,8 +628,9 @@ def map_net_flux(s3_folders, model_type, model_path_description,
     # Stores yearly arrays to compute annual average for annual average map
     yearly_data_stack = []
 
-    # for i, year in enumerate(cn.years_annual[1:]):
-    for i, year in enumerate(cn.years_annual[2:4]): # For testing a specific year
+    for i, year in enumerate(cn.interval_end_years_annual[0:]):
+    # for i, year in enumerate(cn.interval_end_years_annual[0:2]): # For testing a specific year
+    # for i, year in enumerate(cn.interval_end_years_annual[0:4]): # For testing a specific year
 
         # The s3 folder to process for this year
         s3_folder = s3_folders[i]
@@ -637,8 +674,10 @@ def map_net_flux(s3_folders, model_type, model_path_description,
         # Calculates the percentile for 0 for the year (neutral, no flux) for mapping
         percentile_0 = percentile_for_0(data)
         print(f"  0 is at the {percentile_0}th percentile of the raster for {year}.")
-        percentiles = [percentile_0/6, percentile_0/4, percentile_0/2, percentile_0/1.3, percentile_0/1.05,
-                       percentile_0*1.05, percentile_0*1.1, percentile_0*1.2, percentile_0*1.3, percentile_0*1.5]
+        percentiles = [percentile_0*cn.net_percentiles[0], percentile_0*cn.net_percentiles[1], percentile_0*cn.net_percentiles[2],
+                       percentile_0*cn.net_percentiles[3], percentile_0*cn.net_percentiles[4],
+                       percentile_0*cn.net_percentiles[5], percentile_0*cn.net_percentiles[6], percentile_0*cn.net_percentiles[7],
+                       percentile_0*cn.net_percentiles[8], percentile_0*cn.net_percentiles[9]]
         # print("percentiles:", percentiles)
 
         print(f"  Calculating percentiles and breaks for {year}")
@@ -717,8 +756,7 @@ def map_net_flux(s3_folders, model_type, model_path_description,
         out_maps_for_gif.append(out_jpeg_for_pres)
 
         # Adds annual data to stack for creating annual average map.
-        # Replaces 0s with NaN so they don't affect mean
-        data[data == 0] = np.nan
+        # Uses 0s in calculation of mean (doesn't replace them with NaN).
         yearly_data_stack.append(data)
 
         # Saves the percentile for neutral flux (0) for use in the mean map.
@@ -727,45 +765,20 @@ def map_net_flux(s3_folders, model_type, model_path_description,
             percentile_0_ref = percentile_0
 
     # Creates gifs of timeseries
-    gif_base_name = f"veg_{pattern_segment_revised}__{cn.years_annual[1]}_{cn.years_annual[-1]}__v{cn.veg_model_version_underscore}"
+    gif_base_name = f"veg_{pattern_segment_revised}__{cn.interval_end_years_annual[0]}_{cn.interval_end_years_annual[-1]}__v{cn.veg_model_version_underscore}"
     create_gif(
         out_maps_for_gif,
         output_gif_path=f"{local_gif_folder}/{gif_base_name}"
     )
 
+
     ### Creates map of annual average
 
     print(f"\n\n---Mapping mean across all years")
+    mean_data = save_mean_annual_geotif(local_reproj_folder, pattern_segment, year_path_reproj, yearly_data_stack)
 
-    # Computes average across years (ignoring NaNs)
-    # Known issue is that if there are only two years of values and they are equal with opposite signs (e.g., -0.5 and 0.5),
-    # they cancel out, the mean is 0, and the pixel shows up as NoData (and doesn't get a color).
-    # This is pretty rare and doesn't affect the global visualization.
-    print("Computing and saving annual average raster")
-    mean_data = np.nanmean(np.stack(yearly_data_stack, axis=0), axis=0)
-
-    # Masks no-data for writing (0 as nodata to match others)
-    mean_data_to_write = np.where(np.isnan(mean_data), 0, mean_data)
-
-    # Gets metadata from any of the reprojected rasters (uses the last one) to save geotif of mean
-    with rasterio.open(year_path_reproj) as src:
-        profile = src.profile
-        profile.update({
-            'dtype': 'float32',
-            'count': 1,
-            'compress': 'lzw',
-            'nodata': 0  # Match your other rasters
-        })
-
-        out_path_mean_geotiff = f"{local_reproj_folder}/{pattern_segment}{cn.flux_aggreg_pixel_meaning}_v{cn.veg_model_version_underscore}_{cn.years_annual[1]}_{cn.years_annual[-1]}_mean_global_reproj.tif"
-
-        with rasterio.open(out_path_mean_geotiff, 'w', **profile) as dst:
-            dst.write(mean_data_to_write, 1)
-
-    print(f"Saved mean annual GeoTIFF to: {out_path_mean_geotiff}")
-
-    # Mask the mean raster
-    masked_mean_data = np.ma.masked_where(np.isnan(mean_data), mean_data)
+    # Mask 0s from the mean raster for mapping only (e.g., water)
+    masked_mean_data = np.ma.masked_where(mean_data==0, mean_data)
 
     print("Plotting annual average map")
 
@@ -789,26 +802,26 @@ def map_net_flux(s3_folders, model_type, model_path_description,
         title_text = "Mean annual net greenhouse gas flux\nAll vegetation pools, CO$_2$ only\nkt CO$_2$e yr$^{{-1}}$"
 
     # Reuse 0 percentile from first year (for simplicity)
-    percentile_0_avg = percentile_0_ref
-    print(f"  0 is at the {percentile_0_avg}th percentile of the raster for the mean of the series")
-    percentiles_avg = [percentile_0_avg / 6, percentile_0_avg / 4, percentile_0_avg / 2, percentile_0_avg / 1.3,
-                       percentile_0_avg / 1.05, percentile_0_avg * 1.05, percentile_0_avg * 1.1,
-                       percentile_0_avg * 1.2, percentile_0_avg * 1.3, percentile_0_avg * 1.5]
+    print(f"  0 is at the {percentile_0_ref}th percentile of the raster for the mean of the series")
+    percentiles_avg = [percentile_0_ref * cn.net_percentiles[0], percentile_0_ref * cn.net_percentiles[1], percentile_0_ref * cn.net_percentiles[2],
+                       percentile_0_ref * cn.net_percentiles[3], percentile_0_ref * cn.net_percentiles[4],
+                       percentile_0_ref * cn.net_percentiles[5], percentile_0_ref * cn.net_percentiles[6], percentile_0_ref * cn.net_percentiles[7],
+                       percentile_0_ref * cn.net_percentiles[8], percentile_0_ref * cn.net_percentiles[9]]
 
     create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
                                        title_text, tick_labels,
-                                       "avg", colors_rgb, percentiles_avg, percentile_0_avg)
+                                       "avg", colors_rgb, percentiles_avg, percentile_0_ref)
 
     remove_ticks(ax)
 
     # Save the JPEG
-    core_jpeg_name_avg = f"veg_{pattern_segment_revised}__{cn.years_annual[1]}_{cn.years_annual[-1]}_mean__v{cn.veg_model_version_underscore}__{uu.timestr()[0:8]}"
+    core_jpeg_name_avg = f"veg_{pattern_segment_revised}__mean_{cn.interval_end_years_annual[0]}_{cn.interval_end_years_annual[-1]}__v{cn.veg_model_version_underscore}__{uu.timestr()[0:8]}"
     if bounding_box_description:
         core_jpeg_name_avg += f"_{bounding_box_description}"
 
     jpeg_path_avg = f"{local_jpeg_non_pres_folder}/{core_jpeg_name_avg}.jpeg"
     jpeg_for_pres_path_avg = f"{local_jpeg_pres_folder}/{core_jpeg_name_avg}__for_pres.jpeg"
-    save_pres_non_pres_jpegs(ax, jpeg_path_avg, jpeg_for_pres_path_avg, f'{cn.years_annual[1]}-{cn.years_annual[-1]}', cn.veg_pres_text)
+    save_pres_non_pres_jpegs(ax, jpeg_path_avg, jpeg_for_pres_path_avg, f'{cn.interval_end_years_annual[0]}-{cn.interval_end_years_annual[-1]}', cn.veg_pres_text)
 
     series_end_time = time.time()
     print(f"{pattern_segment} took {round(series_end_time - series_start_time)} seconds: {uu.timestr()}")
@@ -832,8 +845,8 @@ def map_gross(s3_folders, model_type, model_path_description,
     all_valid_values = []
 
     # First pass: Reprojects input rasters
-    for i, year in enumerate(cn.years_annual[1:]):
-    # for i, year in enumerate(cn.years_annual[2:3]): # For testing a specific year
+    for i, year in enumerate(cn.interval_end_years_annual[0:]):
+    # for i, year in enumerate(cn.interval_end_years_annual[2:3]): # For testing a specific year
 
         # The s3 folder to process for this year
         s3_folder = s3_folders[i]
@@ -865,9 +878,9 @@ def map_gross(s3_folders, model_type, model_path_description,
     pattern_segment = ''
 
     # Second pass: Gets the range of values across years to standardize legend across years
-    print("Pre-scanning rasters to determine full time series upper and lower limits...")
-    for i, year in enumerate(cn.years_annual[1:]):
-    # for i, year in enumerate(cn.years_annual[2:3]):
+    print("\n\n---Pre-scanning rasters to determine full time series upper and lower limits...")
+    for i, year in enumerate(cn.interval_end_years_annual[0:]):
+    # for i, year in enumerate(cn.interval_end_years_annual[2:3]):
 
         # print(f"Scanning {year}")
         s3_folder = s3_folders[i]
@@ -931,8 +944,13 @@ def map_gross(s3_folders, model_type, model_path_description,
     print(tick_labels)
 
     # Final pass: Iterates through modeled years to create the jpegs
-    for i, year in enumerate(cn.years_annual[1:]):
-    # for i, year in enumerate(cn.years_annual[2:4]): # For testing a specific year
+
+    # Stores yearly arrays to compute annual average for annual average map
+    yearly_data_stack = []
+
+    for i, year in enumerate(cn.interval_end_years_annual[0:]):
+    # for i, year in enumerate(cn.interval_end_years_annual[0:2]): # For testing a specific year
+    # for i, year in enumerate(cn.interval_end_years_annual[0:4]): # For testing a specific year
 
         # The s3 folder to process for this year
         s3_folder = s3_folders[i]
@@ -943,18 +961,6 @@ def map_gross(s3_folders, model_type, model_path_description,
         # Gets the segment for the input interval
         interval_idx = parts.index(f"annual_intervals")
         interval_segment = parts[interval_idx + 1]
-
-        # # Names before and after reprojection
-        # year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{interval_segment}_{cn.veg_model_version_underscore}__global"
-        # year_path_unproj = f"{s3_folder}{year_file}.tif"
-        #
-        # # For reasons I couldn't figure out, gross removals and CO2-only emissions just wouldn't work for some files
-        # # using the reprojected file names I wanted. So, these two need special reprojected file names.
-        # # From https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
-        # if ("removals" in pattern_segment) or ("all_C_pools__CO2_only" in pattern_segment):
-        #     year_path_reproj = f"{local_reproj_folder}/{pattern_segment}{cn.flux_aggreg_pixel_meaning}_{year}_reproj.tif"
-        # else:
-        #     year_path_reproj = f"{local_reproj_folder}/{year_file}_reproj.tif"
 
         # Names after reprojection
         year_file = f"{pattern_segment}{cn.flux_aggreg_pixel_meaning}_v{cn.veg_model_version_underscore}_{interval_segment}_global"
@@ -1039,7 +1045,7 @@ def map_gross(s3_folders, model_type, model_path_description,
             ax.set_xlim(extent[0], extent[1])
             ax.set_ylim(extent[2], extent[3])
 
-
+        # Legend for gross fluxes
         create_unidirection_legend(fig, img, lower_lim_all_yrs, upper_lim_all_yrs,
                                    title_text, tick_labels,
                                    year, colors_rgb, percentiles)
@@ -1057,12 +1063,53 @@ def map_gross(s3_folders, model_type, model_path_description,
 
         out_maps_for_gif.append(out_jpeg_for_pres)
 
+        # Adds annual data to stack for creating annual average map.
+        # Uses 0s in calculation of mean (doesn't replace them with NaN).
+        yearly_data_stack.append(data)
+
+
     # Creates gifs of timeseries
-    gif_base_name = f"veg_{pattern_segment_revised}__{cn.years_annual[1]}_{cn.years_annual[-1]}__v{cn.veg_model_version_underscore}"
-    create_gif(
-        out_maps_for_gif,
-        output_gif_path=f"{local_gif_folder}/{gif_base_name}"
-    )
+    gif_base_name = f"veg_{pattern_segment_revised}__{cn.interval_end_years_annual[0]}_{cn.interval_end_years_annual[-1]}__v{cn.veg_model_version_underscore}"
+    create_gif(out_maps_for_gif, output_gif_path=f"{local_gif_folder}/{gif_base_name}")
+
+    ### Creates map of annual average
+
+    print(f"\n\n---Mapping mean across all years")
+    mean_data = save_mean_annual_geotif(local_reproj_folder, pattern_segment, year_path_reproj, yearly_data_stack)
+
+    # Mask 0s from the mean raster for mapping only (e.g., water)
+    masked_mean_data = np.ma.masked_where(mean_data==0, mean_data)
+
+    print("  Plotting annual average map")
+
+    ax, fig = create_plot()
+    set_ocean_color(ax)
+
+    plot_country_polygons(ax, country_shapefile)
+    extent = list(raster_extent)  # Use the extent from last year (they should all match)
+
+    img = plot_raster(ax, cmap, extent, masked_mean_data, norm)
+    plot_country_boundaries(ax, country_shapefile)
+
+    if bounding_box_proj is not None:
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
+
+    # Legend for gross fluxes
+    create_unidirection_legend(fig, img, lower_lim_all_yrs, upper_lim_all_yrs,
+                               title_text, tick_labels,
+                               'avg', colors_rgb, percentiles)
+
+    remove_ticks(ax)
+
+    # Saves the JPEG
+    core_jpeg_name_avg = f"veg_{pattern_segment_revised}__mean_{cn.interval_end_years_annual[0]}_{cn.interval_end_years_annual[-1]}__v{cn.veg_model_version_underscore}__{uu.timestr()[0:8]}"
+    if bounding_box_description:
+        core_jpeg_name_avg += f"_{bounding_box_description}"
+
+    jpeg_path_avg = f"{local_jpeg_non_pres_folder}/{core_jpeg_name_avg}.jpeg"
+    jpeg_for_pres_path_avg = f"{local_jpeg_pres_folder}/{core_jpeg_name_avg}__for_pres.jpeg"
+    save_pres_non_pres_jpegs(ax, jpeg_path_avg, jpeg_for_pres_path_avg, f'{cn.interval_end_years_annual[0]}-{cn.interval_end_years_annual[-1]}', cn.veg_pres_text)
 
     series_end_time = time.time()
     print(f"{pattern_segment} took {round(series_end_time - series_start_time)} seconds: {uu.timestr()}")
