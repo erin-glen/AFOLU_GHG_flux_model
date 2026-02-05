@@ -13,6 +13,7 @@ from that information. That keeps all zoomed in maps in the same shape as the gl
 
 With https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67634e63-bbcc-800a-8267-004e88ced2e4
 Continued at https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d6d26f-b054-8323-98bb-731a86582e74
+Annual average maps from https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69835153-d804-832e-a9bf-ecf01d221a11
 """
 
 import argparse
@@ -118,25 +119,25 @@ def main(input_date, model_type, model_path_description=None,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
                  cn.net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
 
-    mu.map_net_flux(net_CO2_only_input_folders_s3, model_type, model_path_description, local_reproj_folder,
-                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 cn.net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
-
-    mu.map_gross(gross_emis_CO2_only_input_folders_s3, model_type, model_path_description, local_reproj_folder,
-                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                     cn.emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
-
-    mu.map_gross(gross_emis_non_CO2_input_folders_s3, model_type, model_path_description, local_reproj_folder,
-                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                     cn.emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
-
-    mu.map_gross(gross_emis_all_gases_input_folders_s3, model_type, model_path_description, local_reproj_folder,
-                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                     cn.emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
-
-    mu.map_gross(gross_removals_input_folders_s3, model_type, model_path_description, local_reproj_folder,
-                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 cn.removals_colors_rgb, removals_percentiles, country_shapefile, bounding_box, bounding_box_description)
+    # mu.map_net_flux(net_CO2_only_input_folders_s3, model_type, model_path_description, local_reproj_folder,
+    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #              cn.net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
+    #
+    # mu.map_gross(gross_emis_CO2_only_input_folders_s3, model_type, model_path_description, local_reproj_folder,
+    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #                  cn.emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
+    #
+    # mu.map_gross(gross_emis_non_CO2_input_folders_s3, model_type, model_path_description, local_reproj_folder,
+    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #                  cn.emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
+    #
+    # mu.map_gross(gross_emis_all_gases_input_folders_s3, model_type, model_path_description, local_reproj_folder,
+    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #                  cn.emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
+    #
+    # mu.map_gross(gross_removals_input_folders_s3, model_type, model_path_description, local_reproj_folder,
+    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #              cn.removals_colors_rgb, removals_percentiles, country_shapefile, bounding_box, bounding_box_description)
 
     # # Generates three-panel map
     # create_three_panel_map()
