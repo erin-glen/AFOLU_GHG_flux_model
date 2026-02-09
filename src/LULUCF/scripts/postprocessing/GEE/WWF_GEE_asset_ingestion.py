@@ -4,24 +4,36 @@ Script to create WWF GEE assets:
 2) ingest data into GEE as ee asset (each dataset x year is its own ee.Image asset)
 
 run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
-To run locally:
+Run locally to create assets (filtered to tile_IDs):
 python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d net_flux -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_1x1_tile_ids.txt --skip_existing
+
+Run locally after QC to delete tiles from GCS + make assets public:
 python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d net_flux -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_1x1_tile_ids.txt --skip_existing --clean_gcs --make_public
 
 To run in coiled:
-python -m src.utilities.create_cluster -cn GEE_net_flux_2016 -n 10 -m 4 --gcp_project --gcp_credentials_file
+python -m src.utilities.create_cluster -cn GEE_net_flux_2016 -n 10 -m 4 --gcp
 python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -cn GEE_net_flux_2016 -d net_flux -y 2016 -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_1x1_tile_ids.txt --skip_existing
 *repeated on different clusters for 2016-2024 to run in parallel
 
-python -m src.utilities.create_cluster -cn GEE_mineral_soils_2010 -n 10 -m 4 --gcp_project --gcp_credentials_file
+python -m src.utilities.create_cluster -cn GEE_mineral_soils_2010 -n 10 -m 4 --gcp
 python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -cn GEE_mineral_soils_2010 -d mineral_soil -y 2010 -b lulucf -f WWF -r projects/wri-datalab/global_afolu/ -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_1x1_tile_ids.txt --skip_existing
 *repeated on different clusters for 2010, 2015, 2020, and 2022 to run in parallel
 
+python -m src.utilities.create_cluster -cn GEE_emissions_2016 -n 10 -m 4 --gcp
+python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -cn GEE_emissions_2016 -d emissions -y 2016 -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_1x1_tile_ids.txt --skip_existing
+*repeated on different clusters for 2016-2024 to run in parallel
+
 Notes:
-    - Make sure to set up your Google Cloud account credentials in your environment and refresh token prior to run.
     - It took ~40 minutes to upload 378 1x1 tiles (tiles that overlap with WWF project sites) for 2010 mineral soils locally
-    - It took ~12 minutes to upload 5,175 1x1 tiles (tiles that overlap with WWF operational landscapes) for net flux, all years in Coiled.
-      Ran each year in a separate cluster to parallelize all years (~18 credits).
+    - It took ~12 minutes to upload 5,175 1x1 tiles (tiles that overlap with WWF operational landscapes) for net flux in Coiled.
+      Ran each year in a separate cluster to parallelize all years (~18 credits). Each year was also parallelized w/in the cluster in batches using 10 workers.
+      All net flux assets were ingested into my users/melrose/ GEE assets repo (take 204 GB of my 250 GB asset storage limit)
+    - It took ~13 minutes to upload 5,175 1x1 tiles (tiles that overlap with WWF operational landscapes) for mineral soil in Coiled.
+      Ran each year in a separate cluster to parallelize all years (~10 credits). Each year was also parallelized w/in the cluster in batches using 10 workers.
+      All mineral soils assets were ingested into the projects/wri-datalab/global_afolu/ GEE assets repo (take ~300 GB).
+    - It took ~8 minutes to upload 5,175 1x1 tiles (tiles that overlap with WWF operational landscapes) for emissions in Coiled.
+      Ran each year in a separate cluster to parallelize all years (~12 credits). Each year was also parallelized w/in the cluster in batches using 10 workers.
+      All emissions assets were ingested into my users/melrose/ GEE assets repo (take x GB of my 250 GB asset storage limit)
 
 """
 from __future__ import annotations
@@ -36,6 +48,7 @@ import boto3
 from dask.distributed import as_completed
 import json
 from google.oauth2.credentials import Credentials
+import os, base64
 
 from src.utilities import constants_and_names as cn
 from src.utilities import universal_utilities as uu
@@ -46,19 +59,41 @@ gee_project = os.environ.get("GOOGLE_CLOUD_PROJECT")
 google_credentials = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 ee_initialized = False
 
-# @lru_cache(maxsize=1)
-# def get_gcs_client():
-#     if google_credentials:
-#         with open(google_credentials, "r", encoding="utf-8") as f:
-#             info = json.load(f)
-#
-#         # IMPORTANT: don't force scopes here; forcing causes invalid_scope
-#         creds = Credentials.from_authorized_user_info(info)
-#
-#         return storage.Client(project=gee_project, credentials=creds)
-#
-#     # local ADC fallback
-#     return storage.Client(project=gee_project)
+# Ensures every worker has GOOGLE_APPLICATION_CREDENTIALS if workers restart / get replaced
+def ensure_gcp_creds_on_workers(client, dest="/tmp/gcp.json"):
+    def ensure_gcp_creds():
+        dest_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or dest
+        if os.path.exists(dest_path):
+            return {"ok": True, "dest": dest_path, "already_present": True}
+
+        b64 = os.environ.get("GCP_CREDENTIALS_B64")
+        if not b64:
+            return {"ok": False, "reason": "missing GCP_CREDENTIALS_B64"}
+
+        os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
+        with open(dest_path, "wb") as f:
+            f.write(base64.b64decode(b64))
+
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = dest_path
+        return {"ok": True, "dest": dest_path, "already_present": False}
+
+    return client.run(ensure_gcp_creds)
+
+# Function to make GCS storage credential from environment (works locally and in Coiled is passed to workers)
+def make_gcs_client_from_env():
+    gee_project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+    google_credentials = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or "/tmp/gcp.json"
+
+    if not os.path.exists(google_credentials):
+        raise FileNotFoundError(f"Credentials file not found on this machine: {google_credentials}.")
+
+    with open(google_credentials, "r", encoding="utf-8") as f:
+        info = json.load(f)
+
+    creds = Credentials.from_authorized_user_info(info)
+    return storage.Client(project=gee_project, credentials=creds)
+
+#-----------------------------------------------------------------------------------------------------------------------
 
 # Read tile_ids from .txt file
 def read_tile_ids(path):
@@ -67,7 +102,8 @@ def read_tile_ids(path):
     with open(path, "r", encoding="utf-8") as f:
         return {ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")}
 
-# List s3 files. Option to match list of tile_ids
+# List s3 files in a path
+# Option to filter the list to only files that match a list of tile_ids
 def list_s3_tiles_from_tile_ids(s3_path, tile_ids):
     s3 = boto3.client("s3")
     bucket_name, prefix = uu.split_s3_path(s3_path)
@@ -97,100 +133,35 @@ def list_s3_tiles_from_tile_ids(s3_path, tile_ids):
 
     return matching_tiles
 
-# Checks to see if tile already exists in GCS
+# List tiles in a GCS bucket
+def list_gcs_tifs(gcs_storage_client, bucket, prefix):
+    out = []
+    for blob in gcs_storage_client.list_blobs(bucket, prefix=prefix):
+        name = blob.name
+        if name.lower().endswith(".tif") or name.lower().endswith(".tiff"):
+            out.append(name)
+    return out
+
+# Remove s3 tiles from list that already exist in GCS storage
+def filter_s3_list_by_existing_gcs(s3_files, gcs_bucket, gcs_folder):
+    gcs_storage_client = make_gcs_client_from_env()
+    existing = {os.path.basename(tile) for tile in list_gcs_tifs(gcs_storage_client, gcs_bucket, gcs_folder)}
+    if not existing:
+        return s3_files
+    return [file for file in s3_files if os.path.basename(file) not in existing]
+
+# Checks to see if a tile already exists in GCS
 def gcs_blob_exists(gcs_storage_client, bucket, blob_name):
     return gcs_storage_client.bucket(bucket).blob(blob_name).exists(client=gcs_storage_client)
 
-# Upload tile to GCS storage without writing local file
+# Upload a tile from s3 to GCS storage without writing local file
 def upload_s3_to_gcs(s3_client, gcs_storage_client, s3_bucket, s3_file, gcs_bucket, gcs_blob):
     obj = s3_client.get_object(Bucket=s3_bucket, Key=s3_file)
-    body = obj["Body"]  # streaming file-like object
+    body = obj["Body"]
     blob = gcs_storage_client.bucket(gcs_bucket).blob(gcs_blob)
     blob.upload_from_file(body, rewind=False)
 
-def ensure_gcp_creds_on_workers(client):
-    """
-    Ensure every worker has a credentials JSON file written to a writable path
-    and that GOOGLE_APPLICATION_CREDENTIALS points to it.
-    """
-    def _write():
-        import os, base64
-
-        b64 = os.environ.get("GCP_CREDENTIALS_B64")
-        if not b64:
-            return {"ok": False, "reason": "missing GCP_CREDENTIALS_B64 on worker"}
-
-        # Prefer the env var path, but fall back to /tmp if it's not writable
-        dest = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or "/tmp/gcp.json"
-
-        # Try to create the directory; if permission denied (e.g., /opt), fall back to /tmp
-        try:
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-        except PermissionError:
-            dest = "/tmp/gcp.json"
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = dest
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-
-        with open(dest, "wb") as f:
-            f.write(base64.b64decode(b64))
-
-        return {
-            "ok": True,
-            "dest": dest,
-            "exists": os.path.exists(dest),
-            "size": os.path.getsize(dest),
-        }
-
-    return client.run(_write)
-
-
-# One pair of s3 and GCS clients per worker to parallelize tasks using dask
-# def worker_clients():
-#     return boto3.Session().client("s3"), get_gcs_client()
-
-# Upload all s3 tiles from list -> gs://gcs_bucket/gcs_folder/<basename> (skips existing files)
-# Returns count of # of files uploaded vs skipped for log
-# def gcs_upload(s3_path, s3_files, gcs_bucket, gcs_folder):
-#     s3_client, gcs_storage_client = worker_clients()
-#     s3_bucket, _ = uu.split_s3_path(s3_path)
-#     uploaded = 0
-#     skipped = 0
-#
-#     for s3_file in s3_files:
-#         filename = os.path.basename(s3_file)
-#         gcs_blob = "/".join([p for p in [gcs_folder, filename] if p])
-#
-#         if gcs_blob_exists(gcs_storage_client, gcs_bucket, gcs_blob):
-#             skipped += 1
-#             continue
-#
-#         upload_s3_to_gcs(s3_client, gcs_storage_client, s3_bucket, s3_file, gcs_bucket, gcs_blob)
-#         uploaded += 1
-#
-#     return {"uploaded": uploaded, "skipped": skipped, "total": len(s3_files)}
-#
-def chunked(xs, n):
-    for i in range(0, len(xs), n):
-        yield xs[i:i + n]
-
-def make_gcs_client_from_env():
-    gee_project = os.environ.get("GOOGLE_CLOUD_PROJECT")
-    google_credentials = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or "/tmp/gcp.json"
-
-    if not os.path.exists(google_credentials):
-        raise FileNotFoundError(
-            f"Credentials file not found on this machine: {google_credentials}. "
-            "If running on Coiled, ensure ensure_gcp_creds_on_workers(client) ran successfully."
-        )
-
-    with open(google_credentials, "r", encoding="utf-8") as f:
-        info = json.load(f)
-
-    creds = Credentials.from_authorized_user_info(info)
-    return storage.Client(project=gee_project, credentials=creds)
-
-
-
+# Main function to stream list of tiles from s3 directly to GCS storage
 def gcs_upload(s3_path, s3_files, gcs_bucket, gcs_folder):
     s3_client = boto3.Session().client("s3")
     gcs_storage_client = make_gcs_client_from_env()
@@ -212,22 +183,22 @@ def gcs_upload(s3_path, s3_files, gcs_bucket, gcs_folder):
 
     return {"uploaded": uploaded, "skipped": skipped, "total": len(s3_files)}
 
-# List tiles in GCS bucket
-def list_gcs_tifs(gcs_storage_client, bucket, prefix):
-    out = []
-    for blob in gcs_storage_client.list_blobs(bucket, prefix=prefix):
-        name = blob.name
-        if name.lower().endswith(".tif") or name.lower().endswith(".tiff"):
-            out.append(name)
-    return out
+# Function to chunk tasks
+def chunked(xs, n):
+    for i in range(0, len(xs), n):
+        yield xs[i:i + n]
 
-# Remove s3 tiles from upload list that already exist in GCS storage
-def filter_s3_list_by_existing_gcs(s3_files, gcs_bucket, gcs_folder):
-    gcs_storage_client = make_gcs_client_from_env()
-    existing = {os.path.basename(tile) for tile in list_gcs_tifs(gcs_storage_client, gcs_bucket, gcs_folder)}
-    if not existing:
-        return s3_files
-    return [file for file in s3_files if os.path.basename(file) not in existing]
+#-----------------------------------------------------------------------------------------------------------------------
+
+# Makes sure GEE asset name is formatted correctly
+def to_cloud_asset_name(asset_id):
+    asset_id = asset_id.strip("/")
+    if asset_id.startswith("users/") or asset_id.startswith("projects/wri-datalab/"):
+        return f"projects/earthengine-legacy/assets/{asset_id}"
+    elif asset_id.startswith("projects/"):
+        return asset_id
+    else:
+        raise ValueError(f"Bad asset id: {asset_id}")
 
 # Formats GEE asset path into ee folder structure
 def ensure_ee_folder(folder_id):
@@ -247,10 +218,9 @@ def ee_asset_exists(asset_id):
     except Exception:
         return False
 
-# Kicks of GEE task to ingest all tiles in GCS storage as a singe, mosaiced ee.Image asset
+# Kicks of GEE task to ingest all tiles in GCS storage as a singe ee.Image asset
 def start_image_ingestion_from_gcs(gcs_uris, asset_id, band_name="b1"):
-    # Sources needs a single tile per ImageSource
-    sources = [{"uris": [uri]} for uri in gcs_uris]
+    sources = [{"uris": [uri]} for uri in gcs_uris]     # needs a single tile per ImageSource
 
     # Ingestion manifest for all tiles
     manifest = {
@@ -259,21 +229,6 @@ def start_image_ingestion_from_gcs(gcs_uris, asset_id, band_name="b1"):
         "bands": [{"id": band_name}],
     }
     return ee.data.startIngestion(None, manifest)
-
-# Makes sure GEE asset name is formatted correctly
-def to_cloud_asset_name(asset_id):
-    asset_id = asset_id.strip("/")
-    if asset_id.startswith("users/") or asset_id.startswith("projects/wri-datalab/"):
-        return f"projects/earthengine-legacy/assets/{asset_id}"
-    elif asset_id.startswith("projects/"):
-        return asset_id
-    else:
-        raise ValueError(f"Bad asset id: {asset_id}")
-
-def get_asset_id_for_item(item):
-    ee_folder = posixpath.join(item["ee_dir"])
-    asset_name = f"{item['ee_pattern']}__{item['year']}"
-    return posixpath.join(ee_folder, asset_name)
 
 # Main function to submit ee.Image asset ingestion task for each dataset x year
 def ingest_dataset_year(item, tile_ids, skip_existing):
@@ -296,11 +251,9 @@ def ingest_dataset_year(item, tile_ids, skip_existing):
     blob_names = sorted(blob_names)
     gcs_uris = [f"gs://{gcs_bucket}/{blob}" for blob in blob_names]
 
-    # GEE folder
     ee_folder = posixpath.join(item["ee_dir"])
     ensure_ee_folder(ee_folder)
 
-    # Asset name
     asset_name = f"{item['ee_pattern']}__{year}"
     asset_id = posixpath.join(ee_folder, asset_name)
 
@@ -310,8 +263,10 @@ def ingest_dataset_year(item, tile_ids, skip_existing):
     task_id = start_image_ingestion_from_gcs(gcs_uris=gcs_uris, asset_id=asset_id)
     return {"asset_id": asset_id, "task_id": task_id, "n_tiles": len(gcs_uris), "skipped": False}
 
-# Deletes tile in the gcs_folder (dataset x year).
-# If tile_ids is provided, only deletes tiles whose names contain those tile_ids
+#-----------------------------------------------------------------------------------------------------------------------
+
+# Deletes tiles in the gcs_folder (dataset x year).
+# Option to delete only tiles whose names match those in the tile_id list
 def delete_gcs_dataset_year(gcs_bucket, gcs_folder, tile_ids):
     gcs_storage_client = make_gcs_client_from_env()
     bucket = gcs_storage_client.bucket(gcs_bucket)
@@ -333,11 +288,13 @@ def delete_gcs_dataset_year(gcs_bucket, gcs_folder, tile_ids):
 
     return {"seen": seen, "deleted": deleted, "kept": kept}
 
+#-----------------------------------------------------------------------------------------------------------------------
+
 # Makes an EE asset publicly readable
 def make_gee_asset_public(asset_id):
     ee.data.setAssetAcl(to_cloud_asset_name(asset_id), {"all_users_can_read": True})
 
-
+#-----------------------------------------------------------------------------------------------------------------------
 
 def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_ids, skip_existing, clean_gcs, make_public):
 
@@ -356,7 +313,7 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path, n_workers= lu.populate_main_log_header(client, cluster, "GEE asset creation", run_local, 'standard', 'GEE asset creation')
 
-    #TODO: Change to cn paths when switching to global AFOLU ouput
+    #TODO: This branch is behind the current model (v1.0.5). Remove these and update to cn after merging.
     wwf_emissions_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_5__standard__global/gross_emissions__all_C_pools__all_gases__MgCO2e/annual_intervals/YYYY/_ha_yr/4000_pixels/20260130/"
     wwf_removals_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_5__standard__global/gross_removals__all_C_pools__MgCO2/annual_intervals/YYYY/_ha_yr/4000_pixels/20260130/"
     wwf_net_flux_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_5__standard__global/net_flux__all_C_pools__all_gases__MgCO2e/annual_intervals/YYYY/_ha_yr/4000_pixels/20260130/"
@@ -512,10 +469,11 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
     # -------------------------------------------------------------------------------------------------------------------
 
     # Step 4: Delete tiles in GCS storage after asset has successfully been ingested and QCed
-    start_time = time.time()
-    main_logger.info("STEP 4 - Optional: Deleting tiles from GCS storage")
 
     if clean_gcs:
+        start_time = time.time()
+        main_logger.info("STEP 4 - Optional: Deleting tiles from GCS storage")
+
         for key, item in download_upload_dictionary.items():
             try:
                 stats = delete_gcs_dataset_year(item["gcs_bucket"], item["gcs_folder"], tile_ids)
@@ -525,30 +483,36 @@ def main(cluster_name, datasets, gcs_bucket, gcs_folder, gee_repo, years, tile_i
                 main_logger.warning("%s - failed to delete tiles in gs://%s/%s: %s",
                                     key, item["gcs_bucket"], item["gcs_folder"], e)
 
-    end_time = time.time()
-    main_logger.info("STEP 4 Complete - tiles deleted in %s seconds\n", round(end_time - start_time))
+        end_time = time.time()
+        main_logger.info("STEP 4 Complete - tiles deleted in %s seconds\n", round(end_time - start_time))
 
     # -------------------------------------------------------------------------------------------------------------------
 
     # Step 5: Make asset publicly accessible after asset has successfully been ingested and QCed
-    start_time = time.time()
-    main_logger.info("STEP 5 - Optional: Make GEE assets publicly accessible")
 
     if make_public:
+        start_time = time.time()
+        main_logger.info("STEP 5 - Optional: Make GEE assets publicly accessible")
+
         if not gee_project:
             raise ValueError("GOOGLE_CLOUD_PROJECT is not set")
         ee.Initialize(project=gee_project)
 
         for key, item in download_upload_dictionary.items():
-            asset_id = get_asset_id_for_item(item)
+            ee_folder = posixpath.join(item["ee_dir"])
+            ensure_ee_folder(ee_folder)
+
+            asset_name = f"{item['ee_pattern']}__{item['year']}"
+            asset_id = posixpath.join(ee_folder, asset_name)
+
             try:
                 make_gee_asset_public(asset_id)
                 main_logger.info("%s - set public access: %s", key, asset_id)
             except Exception as e:
                 main_logger.warning("%s - failed to set public access on %s: %s", key, asset_id, e)
 
-    end_time = time.time()
-    main_logger.info("STEP 5 Complete - all assets set to public access in %s seconds\n", round(end_time - start_time))
+        end_time = time.time()
+        main_logger.info("STEP 5 Complete - all assets set to public access in %s seconds\n", round(end_time - start_time))
 
     # -------------------------------------------------------------------------------------------------------------------
 

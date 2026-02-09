@@ -4,7 +4,8 @@ python -m src.utilities.create_cluster -n 1 -t 1 -m 16 -cn LULUCF_model
 python -m src.utilities.create_cluster -n 5 -t 1 -m 32 -cn LULUCF_model
 python -m src.utilities.create_cluster -n 20 -t 1 -m 64 -cn LULUCF_model
 
-python -m src.utilities.create_cluster -cn GEE_net_flux_2016 -n 1 -m 4 --gcp_project --gcp_credentials_file
+To pass in Google Cloud local environment variables:
+python -m src.utilities.create_cluster -cn GEE_net_flux_2016 -n 1 -m 4 --gcp
 
 Table of instance types (and pricing): https://instances.vantage.sh/?id=9c1a108b13a45889fc00951e867ca5295e82dd2c
 Table of spot pricing: https://aws.amazon.com/ec2/spot/pricing/
@@ -26,9 +27,18 @@ from dask.distributed import Client
 from dask import config
 
 
+# Function to write Google Cloud Project credentials to all workers
+def write_gcp_creds():
+    import os, base64
+    destination = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+    b64 = os.environ["GCP_CREDENTIALS_B64"]
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    with open(destination, "wb") as f:
+        f.write(base64.b64decode(b64))
+    return destination, os.path.exists(destination)
 
 def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=None,
-                   gcp_project=None, gcp_credentials_file=None, gcp_credentials_dest="/tmp/gcp.json"):
+                   gcp=None, gcp_credentials_file=None, gcp_credentials_dest=None):
 
     # Converts worker_memory from an integer to the required format (e.g., 8 to "8GiB")
     worker_memory_str = f"{worker_memory}GiB"
@@ -95,36 +105,27 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
     else:
         purchase_option = "spot_with_fallback"
 
+    # If gcp flag is initialized, pass in local GOOGLE_CLOUD_PROJECT and GOOGLE_APPLICATION_CREDENTIALS to all workers
     env = {}
+    gcp_creds_b64 = None
 
-    if gcp_project is not None and not isinstance(gcp_project, str):
-        raise ValueError(f"gcp_project must be a string or None, got {type(gcp_project)}: {gcp_project!r}")
+    if gcp:
+        gcp_project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        gcp_credentials_file = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        gcp_credentials_dest = "/tmp/gcp.json"
 
-    if gcp_project is None:
-        raise ValueError(
-            "No GCP project provided. Either pass --gcp_project <PROJECT> "
-            "or set GOOGLE_CLOUD_PROJECT in your environment and run with --gcp_project."
-        )
+        if not gcp_project:
+            raise ValueError("GOOGLE_CLOUD_PROJECT is not set in your environment.")
+        if not gcp_credentials_file:
+            raise ValueError("GOOGLE_APPLICATION_CREDENTIALS is not set in your environment.")
+        if not os.path.exists(gcp_credentials_file):
+            raise FileNotFoundError(f"Credentials file not found: {gcp_credentials_file}")
 
-    if gcp_project:
         env["GOOGLE_CLOUD_PROJECT"] = gcp_project
+        env["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials_dest
 
-    if gcp_credentials_file is None:
-        raise ValueError(
-            "No credentials file provided. Either pass --gcp_credentials_file <PATH> "
-            "or set GOOGLE_APPLICATION_CREDENTIALS in your environment and run with --gcp_credentials_file."
-        )
-
-    if gcp_credentials_file and not os.path.exists(gcp_credentials_file):
-        raise FileNotFoundError(f"Credentials file not found: {gcp_credentials_file}")
-
-    # Read local JSON and base64-encode it so it can be shipped as an env var
-    if gcp_credentials_file:
         with open(gcp_credentials_file, "rb") as f:
             gcp_creds_b64 = base64.b64encode(f.read()).decode("ascii")
-
-        # Tell your app where the file will be on the worker
-        env["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials_dest
 
     cluster = coiled.Cluster(
         n_workers=n_workers,
@@ -142,21 +143,12 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
         # send_dask_config = True
     )
 
-    cluster.send_private_envs({"GCP_CREDENTIALS_B64": gcp_creds_b64})
-
-    # Write creds file onto every worker at GOOGLE_APPLICATION_CREDENTIALS
     client = Client(cluster)
 
-    def _write_gcp_creds():
-        import os, base64
-        dest = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
-        b64 = os.environ["GCP_CREDENTIALS_B64"]
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with open(dest, "wb") as f:
-            f.write(base64.b64decode(b64))
-        return dest, os.path.exists(dest)
-
-    client.run(_write_gcp_creds)
+    # If gcp flag is initialized, write Google credentials file onto every worker
+    if gcp:
+        cluster.send_private_envs({"GCP_CREDENTIALS_B64": gcp_creds_b64})
+        client.run(write_gcp_creds)
 
     print(f"Cluster created with name: {cluster.name}")
     print(f"Number of workers: {n_workers}; worker memory: {worker_memory_str}; scheduler memory: {scheduler_memory_str}; "
@@ -180,12 +172,8 @@ if __name__ == "__main__":
     parser.add_argument('-m', '--worker_memory', type=int, help='Memory per worker')
     parser.add_argument('-t', '--threads_per_worker', type=int, help='Number of threads/worker')
 
-    ENV = object()
-    parser.add_argument("--gcp_project", nargs="?", const=ENV, default=None,
-                        help="GCP project id. If provided with no value, uses $GOOGLE_CLOUD_PROJECT.")
-    parser.add_argument("--gcp_credentials_file", nargs="?", const=ENV, default=None,
-                        help="Path to authorized_user JSON. If provided with no value, uses $GOOGLE_APPLICATION_CREDENTIALS.")
-    parser.add_argument("--gcp_credentials_dest", type=str, default="/tmp/gcp.json", help="Path on workers where creds JSON should be written")
+    # Options to copy certain local environments into Coiled workers
+    parser.add_argument("--gcp", action="store_true", help="If set, copy local GOOGLE_CLOUD_PROJECT and GOOGLE_APPLICATION_CREDENTIALS into the Coiled cluster.")
 
     args = parser.parse_args()
 
@@ -193,16 +181,8 @@ if __name__ == "__main__":
     n_workers = args.n_workers
     worker_memory = args.worker_memory
     threads_per_worker = args.threads_per_worker
+    gcp = args.gcp
 
-    gcp_project = args.gcp_project
-    if gcp_project is ENV:
-        gcp_project = os.environ.get("GOOGLE_CLOUD_PROJECT")
-
-    gcp_credentials_file = args.gcp_credentials_file
-    if gcp_credentials_file is ENV:
-        gcp_credentials_file = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-
-    gcp_credentials_dest = args.gcp_credentials_dest
 
     # Create the cluster with command line arguments
     cluster = create_cluster(
@@ -210,9 +190,7 @@ if __name__ == "__main__":
         n_workers=n_workers,
         worker_memory=worker_memory,
         threads_per_worker=threads_per_worker,
-        gcp_project=gcp_project,
-        gcp_credentials_file=gcp_credentials_file,
-        gcp_credentials_dest=gcp_credentials_dest,
+        gcp=gcp,    #Google Cloud Project flag
     )
 
     # client = Client(cluster)
