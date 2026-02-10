@@ -804,10 +804,12 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with chunk stats", main_logger)
 
 
-    # ### Not running zarr chunk stats comparison. I was having trouble getting it to work because of problems with
+
+    # ### Step 5: Compare model output chunk stats to zarr chunk stats for each variable (only if chunk stats and zarr created)
+    # ### 2016-02-10: This may work now, based on changes I made for starting_composite_primary_forest. Need to test again.
+    # ### OLD NOTE: Not running zarr chunk stats comparison. I was having trouble getting it to work because of problems with
     # ### variable names and years, and I don't think it's worth fiddling with more.
     # ### Leaving the code in here just in case I do want to revisit it, but for now I'm not worried about zarr population.
-    # ### Step 5: Compare model output chunk stats to zarr chunk stats for each variable (only if chunk stats and zarr created)
     #
     # # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
     # # and min and max values across all chunks for all inputs and outputs
@@ -842,14 +844,14 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     #         var_start_time = time.time()
     #
     #         # Runs chunk stats for a dataset (all years) in the zarr in parallel
-    #         chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
+    #         chunk_stats_variable_year_zarr = zu.run_parallel_stats(
     #             client=client,
     #             chunk_list=chunk_list,
     #             var=var_name_with_pattern_year,
     #             zarr_path=mega_zarr_path,
     #             interval_end_years=[year]
     #         )
-    #         print("chunk_stats_variable_year_rechunked_zarr:", chunk_stats_variable_year_rechunked_zarr)
+    #         print("chunk_stats_variable_year_zarr:", chunk_stats_variable_year_zarr)
     #
     #         # After all zarr chunk stats is done for the dataset-year combination,
     #         # the chunk stats from the zarr are compared to the chunk stats from the model.
@@ -859,7 +861,7 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     #         # to get more real-time feedback on how the datasets compare (rather than waiting until after
     #         # all zarr chunk stats have been calculated to do the metric comparisons).
     #         chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
-    #                                                                                 chunk_stats_variable_year_rechunked_zarr,
+    #                                                                                 chunk_stats_variable_year_zarr,
     #                                                                                 main_logger,
     #                                                                                 tables_to_compare_dict,
     #                                                                                 var_name,

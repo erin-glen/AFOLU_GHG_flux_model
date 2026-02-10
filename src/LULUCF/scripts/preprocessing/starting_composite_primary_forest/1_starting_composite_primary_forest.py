@@ -396,79 +396,79 @@ def main(cluster_name,
         uu.stage_duration(start_time, uu.timestr(), f"{stage} with chunk stats", main_logger)
 
 
-    # ### Not running zarr chunk stats comparison. I was having trouble getting it to work because of problems with
-    # ### variable names and years, and I don't think it's worth fiddling with more.
-    # ### Leaving the code in here just in case I do want to revisit it, but for now I'm not worried about zarr population.
-    # ### Step 5: Compare model output chunk stats to zarr chunk stats for each variable (only if chunk stats and zarr created)
-    #
-    # # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
-    # # and min and max values across all chunks for all inputs and outputs
-    # # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
-    # if (not no_stats) and create_zarr:
-    #
-    #     main_logger.info(f"Starting zarr chunk stats comparison: {uu.timestr()}")
-    #
-    #     # Text added to output chunk stats table name(s) (Excel or Parquet)
-    #     comparison_insert = "_original_zarr_comparison"
-    #
-    #     # The name of the chunk stats table from the model
-    #     model_chunk_stats_table_name = os.path.basename(model_chunk_stats_path)
-    #     # print(model_chunk_stats_table_name)
-    #
-    #     tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
-    #         comparison_insert, main_logger, model_chunk_stats_path)
-    #
-    #     # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
-    #     all_merged_tables = []
-    #
-    #     # Number of chunks with differences between original and zarr exceeding tolerance
-    #     chunks_count_exceeding_total = 0
-    #
-    #     # Number of chunks that have model chunk stats but not corresponding zarr chunk stats
-    #     chunks_without_zarr_stats_total = 0
-    #
-    #     # Iterates through select variables/datasets for chunk stats comparison. Can modify as needed.
-    #     for var_name_with_pattern_year, var_name in zip(outputs_to_zarr_with_unit_year, outputs_to_zarr):
-    #
-    #         main_logger.info(f"Starting {var_name_with_pattern_year}: {uu.timestr()}")
-    #         var_start_time = time.time()
-    #
-    #         # Runs chunk stats for a dataset (all years) in the zarr in parallel
-    #         chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
-    #             client=client,
-    #             chunk_list=chunk_list,
-    #             var=var_name_with_pattern_year,
-    #             zarr_path=mega_zarr_path,
-    #             interval_end_years=[year]
-    #         )
-    #         print("chunk_stats_variable_year_rechunked_zarr:", chunk_stats_variable_year_rechunked_zarr)
-    #
-    #         # After all zarr chunk stats is done for the dataset-year combination,
-    #         # the chunk stats from the zarr are compared to the chunk stats from the model.
-    #         # This is done with Pandas dataframes and is not parallelized because it's just table manipulation
-    #         # for each dataset-year combination.
-    #         # The model output vs. zarr comparison is done after each dataset-year combination
-    #         # to get more real-time feedback on how the datasets compare (rather than waiting until after
-    #         # all zarr chunk stats have been calculated to do the metric comparisons).
-    #         chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
-    #                                                                                 chunk_stats_variable_year_rechunked_zarr,
-    #                                                                                 main_logger,
-    #                                                                                 tables_to_compare_dict,
-    #                                                                                 var_name,
-    #                                                                                 zarr_comparison_stats_path)
-    #
-    #         # Total number of chunks that have differences in metrics between the model and zarr
-    #         # that exceed the tolerance
-    #         chunks_count_exceeding_total += chunks_count_exceeding
-    #         chunks_without_zarr_stats_total += chunks_without_zarr_stats
-    #
-    #         var_end_time = time.time()
-    #         main_logger.info(f"  Processed {var_name_with_pattern_year} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
-    #
-    #     # Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
-    #     zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_without_zarr_stats_total,
-    #                                           main_logger, model_chunk_stats_table_name,
-    #                                           stage, start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
+    ### Step 5: Compare model output chunk stats to zarr chunk stats for each variable (only if chunk stats and zarr created)
+    ### Not running zarr chunk stats comparison. I was having trouble getting it to work because of problems with
+    ### variable names and years, and I don't think it's worth fiddling with more.
+    ### Leaving the code in here just in case I do want to revisit it, but for now I'm not worried about zarr population.
+
+    # Prepares chunk stats spreadsheet: min, mean, max, and sum for all input and output chunks,
+    # and min and max values across all chunks for all inputs and outputs
+    # only if not suppressed by the --no_stats flag and at least one chunk was successful (wasn't skipped).
+    if (not no_stats) and create_zarr:
+
+        main_logger.info(f"Starting zarr chunk stats comparison: {uu.timestr()}")
+
+        # Text added to output chunk stats table name(s) (Excel or Parquet)
+        comparison_insert = "_original_zarr_comparison"
+
+        # The name of the chunk stats table from the model
+        model_chunk_stats_table_name = os.path.basename(model_chunk_stats_path)
+        # print(model_chunk_stats_table_name)
+
+        tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
+            comparison_insert, main_logger, model_chunk_stats_path)
+
+        # List of dataframes with original and zarr chunk stats and their difference for each dataset-year combination
+        all_merged_tables = []
+
+        # Number of chunks with differences between original and zarr exceeding tolerance
+        chunks_count_exceeding_total = 0
+
+        # Number of chunks that have model chunk stats but not corresponding zarr chunk stats
+        chunks_without_zarr_stats_total = 0
+
+        # Iterates through select variables/datasets for chunk stats comparison. Can modify as needed.
+        for var_name_with_pattern_year, var_name in zip(outputs_to_zarr, outputs_to_zarr):
+
+            main_logger.info(f"Starting {var_name_with_pattern_year}: {uu.timestr()}")
+            var_start_time = time.time()
+
+            # Runs chunk stats for a dataset (all years) in the zarr in parallel
+            chunk_stats_variable_year_zarr = zu.run_parallel_stats(
+                client=client,
+                chunk_list=chunk_list,
+                var=var_name_with_pattern_year,
+                zarr_path=zarr_path,
+                interval_end_years=[year]
+            )
+            # print("chunk_stats_variable_year_zarr:", chunk_stats_variable_year_zarr)
+
+            # After all zarr chunk stats is done for the dataset-year combination,
+            # the chunk stats from the zarr are compared to the chunk stats from the model.
+            # This is done with Pandas dataframes and is not parallelized because it's just table manipulation
+            # for each dataset-year combination.
+            # The model output vs. zarr comparison is done after each dataset-year combination
+            # to get more real-time feedback on how the datasets compare (rather than waiting until after
+            # all zarr chunk stats have been calculated to do the metric comparisons).
+            chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
+                                                                                    chunk_stats_variable_year_zarr,
+                                                                                    main_logger,
+                                                                                    tables_to_compare_dict,
+                                                                                    var_name,
+                                                                                    zarr_comparison_stats_path)
+
+            # Total number of chunks that have differences in metrics between the model and zarr
+            # that exceed the tolerance
+            chunks_count_exceeding_total += chunks_count_exceeding
+            chunks_without_zarr_stats_total += chunks_without_zarr_stats
+
+            var_end_time = time.time()
+            main_logger.info(f"  Processed {var_name_with_pattern_year} in {round(var_end_time - var_start_time)} seconds: {uu.timestr()}")
+
+        # Counts up chunks that had differences exceeding the tolerance and uploads chunk stats comparisons.
+        zu.upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_without_zarr_stats_total,
+                                              main_logger, model_chunk_stats_table_name,
+                                              stage, start_time, zarr_comparison_stats_name, zarr_comparison_stats_path)
 
 
     ### Step 6: Gather worker logs

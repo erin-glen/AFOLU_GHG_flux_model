@@ -565,7 +565,7 @@ def main(cluster_name, model_type,
             var_start_time = time.time()
 
             # Runs chunk stats for a dataset (all years) in the zarr in parallel
-            chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
+            chunk_stats_variable_year_zarr = zu.run_parallel_stats(
                 client=client,
                 chunk_list=chunk_list,
                 var=var_name,
@@ -581,7 +581,7 @@ def main(cluster_name, model_type,
             # to get more real-time feedback on how the datasets compare (rather than waiting until after
             # all zarr chunk stats have been calculated to do the metric comparisons).
             chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(all_merged_tables,
-                                                                   chunk_stats_variable_year_rechunked_zarr,
+                                                                   chunk_stats_variable_year_zarr,
                                                                    main_logger,
                                                                    tables_to_compare_dict,
                                                                    var_name,

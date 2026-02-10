@@ -418,14 +418,18 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
     # Need to flatten the list because each chunk for each dataset is a list of dictionaries, where each element is a year.
     # So, flattening the list makes all years for all variables and chunks flat, rather than years being nested in each chunk-dataset.
     chunk_stats_variable_zarr_flat = uu.flatten_list(chunk_stats_variable_zarr)
-    # print("chunk_stats_variable_zarr_flat:", chunk_stats_variable_zarr_flat)
+    print("chunk_stats_variable_zarr_flat:", chunk_stats_variable_zarr_flat)
     zarr_df = pd.DataFrame(chunk_stats_variable_zarr_flat)
     # print("zarr_df:", zarr_df)
 
     # Subsets model chunk stats to relevant pattern
     subset_model_table = model_table[(model_table['pattern'].str.contains(var_name, na=False))]
-    # print("var_name:", var_name)
-    # print("subset_model_table", subset_model_table)
+
+    # For chunk stat comparisons of starting year data, the geotif chunk stats chunk_name has 'no year range'. Need to replace with the starting year.
+    subset_model_table['chunk_name'] = subset_model_table['chunk_name'].str.replace('_no year range', f'_{cn.first_model_year_annual}', regex=False)
+    print("var_name:", var_name)
+    print("subset_model_table", subset_model_table)
+    print("subset_model_table chunk_name", subset_model_table['chunk_name'].iloc[0])
 
     # Selects only the needed columns from rechunked_zarr_table
     # main_logger.info(f"    Subsetting zarr table to numeric columns for {var_name}: {uu.timestr()}")

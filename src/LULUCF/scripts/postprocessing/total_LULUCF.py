@@ -549,7 +549,7 @@ def main(cluster_name, run_date, veg_input_date, organic_soil_input_date, minera
     #             year_start_time = time.time()
     #
     #             # Runs chunk stats for a dataset-year in the zarr in parallel
-    #             chunk_stats_variable_year_rechunked_zarr = zu.run_parallel_stats(
+    #             chunk_stats_variable_year_zarr = zu.run_parallel_stats(
     #                 client=client,
     #                 chunk_list=chunk_list,
     #                 var=var_name,
@@ -569,7 +569,7 @@ def main(cluster_name, run_date, veg_input_date, organic_soil_input_date, minera
     #             # all zarr chunk stats have been calculated to do the metric comparisons).
     #             all_merged_tables, chunks_count_exceeding, chunks_without_zarr_stats = zu.compare_dataset_year_chunk_stats(
     #                 all_merged_tables,
-    #                 chunk_stats_variable_year_rechunked_zarr,
+    #                 chunk_stats_variable_year_zarr,
     #                 main_logger,
     #                 tables_to_compare_dict,
     #                 var_name, year,
