@@ -435,13 +435,13 @@ def main(cluster_name, run_date, veg_input_date, organic_soil_input_date, minera
         # main_logger.info(f"x range: {ds.x.values.min()}, {ds.x.values.max()}")
         # main_logger.info(f"mega-zarr chunk size (years, y, x): {ds.chunksizes}")
 
-        raw_mega_zarr_path = zu.create_mega_zarr_path(cn.LULUCF_outputs_path_mega_zarr, chunk_size_pixels, interval_type_veg,
-                                                      model_type, model_version, run_date, main_logger)
+        raw_mega_zarr_path = zu.create_zarr_path(cn.LULUCF_outputs_path_mega_zarr, chunk_size_pixels, interval_type_veg,
+                                                 model_type, model_version, run_date, main_logger)
         outputs_to_zarr = cn.LULUCF_output_patterns  # [0:2] # For testing
 
         # Creates the global mega-zarr with metadata only
-        zu.initialize_global_mega_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list_veg),
-                                    ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
+        zu.initialize_global_zarr(raw_mega_zarr_path, outputs_to_zarr, len(interval_year_diff_list_veg),
+                                  ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)

@@ -22,9 +22,9 @@ from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 
 # Creates the s3 paths for the raw and rechunked mega-zarrs
-def create_mega_zarr_path(zarr_basic_path, chunk_size_pixels, interval_type,
-                          model_type, model_version, model_path_description,
-                          run_date, main_logger):
+def create_zarr_path(zarr_basic_path, chunk_size_pixels, interval_type,
+                     model_type, model_version, model_path_description,
+                     run_date, main_logger):
 
     # Sets the output zarr location based on the model run
     mega_zarr_path = zarr_basic_path.replace(cn.model_version_type_description_placeholder, f"version_{model_version}__{model_type}__{model_path_description}")
@@ -55,7 +55,7 @@ def latlon_to_global_zarr_indices(lat, lon, resolution):
 # In addition to x and y dimensions, there is also a time dimension (intervals), which uses an index (not the actual year).
 # This zarr-related code from https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68f984c6-9aa0-8327-a910-5ad9a8d170fc
 # and maybe some later chats, too.
-def initialize_global_mega_zarr(store_url, dataset_keys, n_years, chunk_size, main_logger, fill_value= np.nan):
+def initialize_global_zarr(store_url, dataset_keys, n_years, chunk_size, main_logger, fill_value= np.nan):
 
     fs = fsspec.filesystem("s3", anon=False)
 
@@ -722,7 +722,7 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     # Renames variable to use units and year.
     if use_start_year == True:
         year = cn.first_model_year_annual
-        var_with_unit = f"{var_per_ha}_{year}"
+        var_with_unit = var_per_ha
     else:      # For annual data, uses the year for the annual outputs.
         year = cn.interval_end_years_annual[year_idx]
         var_with_unit = var_per_ha  # Doesn't add year to variable/unit name

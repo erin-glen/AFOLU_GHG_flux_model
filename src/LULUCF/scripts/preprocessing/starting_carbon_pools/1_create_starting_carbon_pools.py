@@ -517,6 +517,7 @@ def create_and_upload_starting_C_densities(bounds, mangrove_C_ratio_array, downl
         chunk_stats.append(uu.calculate_stats(array_per_ha, key, bounds_str, tile_id, 'output_layer', output_per_pixel))
     # print(chunk_stats)
 
+
     ### Part 7: Saves numpy arrays as rasters and uploads to s3
 
     uu.rename_s3_task_file(stage, bounds, "uploading_", is_large_run, logger_worker)
@@ -754,13 +755,13 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     if create_zarr:
 
         # Creates s3 paths for the raw mega-zarr
-        mega_zarr_path = zu.create_mega_zarr_path(cn.starting_C_densities_2015_path_mega_zarr, chunk_size_pixels, str(year),
-                                                  model_type, cn.veg_model_version_underscore, model_path_description,
-                                                  run_date, main_logger)
+        mega_zarr_path = zu.create_zarr_path(cn.starting_C_densities_2015_path_mega_zarr, chunk_size_pixels, str(year),
+                                             model_type, cn.veg_model_version_underscore, model_path_description,
+                                             run_date, main_logger)
 
         # Creates the global mega-zarr with metadata only
-        zu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr_with_unit_year, 1,
-                                    (1, chunk_size_pixels, chunk_size_pixels), main_logger)
+        zu.initialize_global_zarr(mega_zarr_path, outputs_to_zarr_with_unit_year, 1,
+                                  (1, chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
@@ -782,16 +783,16 @@ def main(cluster_name, year, model_type, run_local=False, no_stats=False, no_log
     main_logger.info(f"Creating tasks and starting processing: {uu.timestr()}")
     main_logger.info("Workers' logs to be appended after main function log"+ "\n")
 
-    C_pool_1x1_deg_delayed_results = [dask.delayed(create_and_upload_starting_C_densities)
+    delayed_results_1x1deg = [dask.delayed(create_and_upload_starting_C_densities)
                        (chunk, mangrove_C_ratio_array, download_dict_with_data_types, year,
                         is_large_run, no_upload, create_zarr, output_dir_list, stage,
                         model_type, mega_zarr_path, outputs_to_zarr_with_unit_year)
                        for chunk in chunk_list]
 
     # Runs analysis and gathers results
-    C_pool_1x1_deg_results = dask.compute(*C_pool_1x1_deg_delayed_results)
+    results_1x1deg = dask.compute(*delayed_results_1x1deg)
 
-    success_count, all_stats = uu.count_successful_chunks(chunk_list, is_large_run, main_logger, C_pool_1x1_deg_results)
+    success_count, all_stats = uu.count_successful_chunks(chunk_list, is_large_run, main_logger, results_1x1deg)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
 

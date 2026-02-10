@@ -399,16 +399,16 @@ def main(cluster_name, model_type,
     if create_zarr:
 
         # Creates s3 paths for the raw mega-zarr
-        mega_zarr_path = zu.create_mega_zarr_path(cn.SOC_path_mega_zarr, chunk_size_pixels, 'N/A',
-                                                  model_type, cn.SOC_soil_model_version_underscore, model_path_description,
-                                                  run_date, main_logger)
+        mega_zarr_path = zu.create_zarr_path(cn.SOC_path_mega_zarr, chunk_size_pixels, 'N/A',
+                                             model_type, cn.SOC_soil_model_version_underscore, model_path_description,
+                                             run_date, main_logger)
 
         # These variables are added to the mega-zarr
         outputs_to_zarr = cn.SOC_outputs_to_zarr
 
         # Creates the global mega-zarr with metadata only
-        zu.initialize_global_mega_zarr(mega_zarr_path, outputs_to_zarr, len(cn.SOC_density_intervals),
-                                    ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
+        zu.initialize_global_zarr(mega_zarr_path, outputs_to_zarr, len(cn.SOC_density_intervals),
+                                  ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
