@@ -812,14 +812,9 @@ times_burned_in_interval = "times_burned_in_current_interval"
 agc_emission_factor = "AGC_emission_factor_CO2_only__fraction"
 composite_primary_forest = "composite_primary_forest"
 
-zarr_output_pattern = "global_zarr"
-zarr_pixel_chunks = 10000
-
 # Tolerance for difference between model and zarr chunk stat metrics.
 # There's often some rounding/float error between them, so a small difference (~10^-8) is expected.
 zarr_difference_tolerance = 0.05
-
-pixel_area_global_zarr = "s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20251209_fillValue_removed/global_pixel_area_20251209.zarr"
 
 model_version_type_description_placeholder = 'version_MODEL_VERSION__TYPE__DESCRIPTION'
 
@@ -1016,6 +1011,42 @@ LULUCF_output_dirs = [
     f"{LULUCF_outputs_path}{net_flux_all_C_pools_CO2_only_LULUCF_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{LULUCF_outputs_path}{net_flux_all_C_pools_all_gases_LULUCF_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
+
+
+#######
+### Zonal stats zarrs
+#######
+
+contextual_zarr_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/contextual_layer_global_zarr/"
+
+# adm0_zarr_date = '20251209'
+adm0_zarr_date = '20260211'
+adm0_zarr_dtype = 'uint16'
+adm0_geotif_path = "s3://gfw2-data/gadm_administrative_boundaries/v4.1/v4.1.64__from_gfw-data-lake/raster/epsg-4326/10/40000/adm0/gdal-geotiff/"
+adm0_zarr_path = f"{contextual_zarr_path}GADM4_1_adm0_global/{adm0_zarr_date}_fillValue_removed/global_GADM41_adm0_{adm0_zarr_date}.zarr"
+
+pixel_area_zarr_date = '20251209'
+pixel_area_zarr_dtype = 'float32'
+pixel_area_geotif_path = "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
+pixel_area_zarr_path = f"{contextual_zarr_path}pixel_area/{pixel_area_zarr_date}_fillValue_removed/global_pixel_area_{pixel_area_zarr_date}.zarr"
+
+wdpa_zarr_date = '20251229'
+wdpa_zarr_dtype = 'uint8'
+wdpa_geotif_path = "s3://gfw2-data/conservation/wdpa_licensed_proteced_areas__from_data_lake/v202511/raster/epsg-4326/10/40000/detailed_iucn_cat/gdal-geotiff/"
+wdpa_zarr_path = f"{contextual_zarr_path}WDPAv202511/{wdpa_zarr_date}_fillValue_removed/wdpa_{wdpa_zarr_date}.zarr"
+
+BRA_biomes_zarr_date = '20251229'
+BRA_biomes_zarr_dtype = 'uint8'
+BRA_biomes_geotif_path = "s3://gfw2-data/country/bra/bra_biomes_geotif/"
+BRA_biomes_zarr_path = f"{contextual_zarr_path}BRA_biomes/{BRA_biomes_zarr_date}_fillValue_removed/BRA_biomes_{BRA_biomes_zarr_date}.zarr"
+
+cont_eco_zarr_date = '20260206'
+cont_eco_zarr_dtype = 'uint16'
+cont_eco_geotif_path = "s3://gfw2-data/climate/carbon_model/fao_ecozones/ecozone_continent/20190116/processed/"
+cont_eco_zarr_path = f"{contextual_zarr_path}FAO_ecozone_continents/{cont_eco_zarr_date}_fillValue_removed/FAO_ecozone_continents_{cont_eco_zarr_date}.zarr"
+
+
+
 
 #######
 ### Output jpeg creation

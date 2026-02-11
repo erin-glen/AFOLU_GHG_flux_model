@@ -84,8 +84,8 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
-    main_logger.info(f"Model version: {cn.veg_model_version}")
-    main_logger.info(f"Model path descriptor: {model_path_description}")
+    main_logger.info(f"Vegetation model version: {cn.veg_model_version}")
+    main_logger.info(f"Vegatation model path descriptor: {model_path_description}")
     main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")

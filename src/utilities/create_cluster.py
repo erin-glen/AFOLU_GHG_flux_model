@@ -18,12 +18,23 @@ which is the situation for large analyses, obviously.
 import coiled
 import argparse
 import sys
+import os
+import base64
 from dask.distributed import Client
 from dask import config
 
+# Function to write Google Cloud Project credentials to all workers
+def write_gcp_creds():
+    import os, base64
+    destination = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+    b64 = os.environ["GCP_CREDENTIALS_B64"]
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    with open(destination, "wb") as f:
+        f.write(base64.b64decode(b64))
+    return destination, os.path.exists(destination)
 
 
-def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=None):
+def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=None, on_demand=False, gcp=None):
 
     # Converts worker_memory from an integer to the required format (e.g., 8 to "8GiB")
     worker_memory_str = f"{worker_memory}GiB"
@@ -36,10 +47,8 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
 
     elif worker_memory == 64:
         idle_timeout = 15
-        # scheduler_vm_type = "x2gd.xlarge"    # 4 vCPU/worker
-        # worker_vm_type = "x2gd.xlarge"
-        scheduler_vm_type = "x8aedz.large"    # 4 vCPU/worker
-        worker_vm_type = "x8aedz.large"
+        scheduler_vm_type = "x8g.xlarge"    # 4 vCPU/worker
+        worker_vm_type = "x8g.xlarge"
 
     elif worker_memory == 32:
         idle_timeout = 20
@@ -85,7 +94,7 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
         worker_options["nthreads"] = threads_per_worker
 
     # Uses on-demand workers for large jobs. Otherwise, prefers spot workers.
-    if n_workers > 110:
+    if n_workers > 110 or on_demand:
         purchase_option = "on-demand"
         use_best_zone = False  # Should allow workers to be split across different zones, to help obtain large requested amount of workers
         allow_cross_zone = True  # Allows workers in different availability zones, to help obtain large requested amount of workers
@@ -93,6 +102,29 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
         purchase_option = "spot_with_fallback"
         use_best_zone=True
         allow_cross_zone = False
+
+    # If gcp flag is initialized, pass in local GOOGLE_CLOUD_PROJECT and GOOGLE_APPLICATION_CREDENTIALS to all workers
+    env = {}
+    gcp_creds_b64 = None
+
+    if gcp:
+        gcp_project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        gcp_credentials_file = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        gcp_credentials_dest = "/tmp/gcp.json"
+
+        if not gcp_project:
+            raise ValueError("GOOGLE_CLOUD_PROJECT is not set in your environment.")
+        if not gcp_credentials_file:
+            raise ValueError("GOOGLE_APPLICATION_CREDENTIALS is not set in your environment.")
+        if not os.path.exists(gcp_credentials_file):
+            raise FileNotFoundError(f"Credentials file not found: {gcp_credentials_file}")
+
+        env["GOOGLE_CLOUD_PROJECT"] = gcp_project
+        env["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials_dest
+
+        with open(gcp_credentials_file, "rb") as f:
+            gcp_creds_b64 = base64.b64encode(f.read()).decode("ascii")
+
 
     cluster = coiled.Cluster(
         n_workers=n_workers,
@@ -107,13 +139,22 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
         scheduler_vm_types = scheduler_vm_type,
         worker_vm_types = worker_vm_type,
         worker_options = worker_options,
+        environ=env  # pass env vars to scheduler/workers
         # send_dask_config = True
     )
+
+    client = Client(cluster)
+
+    # If gcp flag is initialized, write Google credentials file onto every worker
+    if gcp:
+        cluster.send_private_envs({"GCP_CREDENTIALS_B64": gcp_creds_b64})
+        client.run(write_gcp_creds)
 
     print(f"Cluster created with name: {cluster.name}")
     print(f"Number of workers: {n_workers}; worker memory: {worker_memory_str}; scheduler memory: {scheduler_memory_str}; "
           f"'threads per worker: {threads_per_worker}; worker purchase option: {purchase_option}")
     return cluster
+
 
 # # Gets worker memory configuration that is specified in ~/.config/dask/distributed.yaml
 # # Check from https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
