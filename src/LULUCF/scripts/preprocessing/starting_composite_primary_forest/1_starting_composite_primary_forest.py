@@ -4,6 +4,11 @@ Uses the same code to create 2015 composite primary forest as 1_calculate_veg_fl
 This is currently used only as a contextual layer for zonal stats (via zarr), not as an input to the vegetation model.
 The vegetation model generates a 2015 composite primary forest map at the top of the numba function and
 then iterates on that.
+The vegetation model creates geotifs of composite primary forest in 2015 but doesn't put them in the vegetation mega-zarr
+because that would be an extra year of data for one variable in the zarr, which throws off the time dimension.
+This script is essentially just to make a composite primary forest zarr for 2015 to use for zonal stats and anything
+else a zarr is needed for.
+
 In future vegetation model runs, this could be used as an input to the vegetation model.
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
@@ -35,22 +40,16 @@ python -m src.LULUCF.scripts.preprocessing.starting_composite_primary_forest.1_s
 import argparse
 import concurrent.futures
 import dask
-import gc
 import os
 import psutil
 import time
-import sys
-import pandas as pd
 import numpy as np
 import fsspec
 import xarray as xr
 import resource
-import traceback
-import re
 
 from concurrent.futures import ThreadPoolExecutor
 from dask.distributed import print
-from datetime import date
 
 # Project imports
 from src.utilities import constants_and_names as cn
