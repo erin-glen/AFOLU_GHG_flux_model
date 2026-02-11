@@ -418,7 +418,7 @@ def compare_dataset_year_chunk_stats(all_merged_tables, chunk_stats_variable_zar
     # Need to flatten the list because each chunk for each dataset is a list of dictionaries, where each element is a year.
     # So, flattening the list makes all years for all variables and chunks flat, rather than years being nested in each chunk-dataset.
     chunk_stats_variable_zarr_flat = uu.flatten_list(chunk_stats_variable_zarr)
-    print("chunk_stats_variable_zarr_flat:", chunk_stats_variable_zarr_flat)
+    # print("chunk_stats_variable_zarr_flat:", chunk_stats_variable_zarr_flat)
     zarr_df = pd.DataFrame(chunk_stats_variable_zarr_flat)
     # print("zarr_df:", zarr_df)
 

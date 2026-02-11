@@ -1,5 +1,10 @@
 """
 Maps composite primary forest in 2015 (model start).
+Uses the same code to create 2015 composite primary forest as 1_calculate_veg_fluxes.py does.
+This is currently used only as a contextual layer for zonal stats (via zarr), not as an input to the vegetation model.
+The vegetation model generates a 2015 composite primary forest map at the top of the numba function and
+then iterates on that.
+In future vegetation model runs, this could be used as an input to the vegetation model.
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
@@ -24,15 +29,7 @@ python -m src.LULUCF.scripts.preprocessing.starting_composite_primary_forest.1_s
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn vegetation_preprocessing
-python -m src.LULUCF.scripts.preprocessing.starting_composite_primary_forest.1_starting_composite_primary_forest -cn vegetation_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --log_note "This is a global run for model v1.0.4 (2016-2024). Hopefully, it is the run used for the published model."
-
-To download all outputs locally:
-python src/utilities/download_outputs_local.py v1_test_name 23_-4_24_-3
-
-Using more than 1 thread/worker slows down processing a lot when there are more tasks than workers for the core vegetation model,
-which is the situation for large analyses, obviously.
-https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210641504248464?focus=true
-
+python -m src.LULUCF.scripts.preprocessing.starting_composite_primary_forest.1_starting_composite_primary_forest -cn vegetation_preprocessing -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --log_note "Creating starting composite primary forest for 2015 for model v1.0.5 (2016-2024)."
 """
 
 import argparse
