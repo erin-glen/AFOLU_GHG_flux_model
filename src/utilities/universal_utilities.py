@@ -2439,8 +2439,8 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
     logger_worker = lu.setup_logging_worker()
 
     # Check if the VRT file already exists in S3
-    if vrt_exists_in_s3(output_vrt_s3):
-        return lu.print_and_log(f"VRT file already exists in S3: {output_vrt_s3}. Skipping creation.", False, logger_worker)
+    # if vrt_exists_in_s3(output_vrt_s3):
+    #     return lu.print_and_log(f"VRT file already exists in S3: {output_vrt_s3}. Skipping creation.", False, logger_worker)
     vsis3_paths = []
     for s3_path in raw_raster_paths_list_s3:
         vsis3_path = s3_path.replace("s3://", "/vsis3/")
@@ -2454,20 +2454,17 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
     try:
         vrt_dataset = rasterio.open(local_vrt)
     except rasterio.errors.RasterioIOError:
-        print("Error: VRT file not found or invalid.")
-        exit()
+        raise RuntimeError("Error: VRT file not found or invalid.")
 
     if vrt_dataset.count == 0:
-        print("VRT has no data or invalid sources.")
-        exit()
+        raise RuntimeError("Error: VRT has no data or invalid sources.")
     else:
         lu.print_and_log("VRT contains data.", True, logger_worker)
 
     if vrt_dataset.bounds:
         lu.print_and_log("VRT contains data or has valid metadata.", True, logger_worker)
     else:
-        print("VRT has no data or invalid metadata.")
-        exit()
+        raise RuntimeError("VRT has no data or invalid metadata.")
 
     vrt_dataset.close()
 

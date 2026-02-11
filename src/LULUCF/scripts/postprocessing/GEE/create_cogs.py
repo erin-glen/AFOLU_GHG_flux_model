@@ -1,28 +1,43 @@
 """
-Script to create global, stacked COGS:
-1) builds global VRT per dataset per year from all 10 x 10 tiles in an s3 folder,
-2) builds a global COG for per dataset per year, and
-3) combines annual COGs into single, stacked global COG per dataset
+Script to create global COGS:
+1) builds global VRT per dataset per year from all tiles in an s3 folder,
+2) builds a global COG per dataset per year
 
 run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
-python -m src.utilities.create_cluster -cn WWF_flux_global_cogs -n 1 -m 4
-python -m src.LULUCF.scripts.postprocessing.GEE.1_create_cogs -cn WWF_flux_global_cogs -p emissions
+python -m src.utilities.create_cluster -cn WWF_2016_emissions_cog -n 1 -m 64 --on_demand
+python -m src.LULUCF.scripts.postprocessing.GEE.create_cogs -cn WWF_2016_emissions_cog -d emissions -y 2016 -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_10x10_tile_ids.txt
 
-TODO: Update creation option based on GDAL type. Check block_size. Right now using COs for float. Look up optimal COs by datatype.
+python -m src.utilities.create_cluster -cn WWF_2016_removals_cog -n 1 -m 64 --on_demand
+python -m src.LULUCF.scripts.postprocessing.GEE.create_cogs -cn WWF_2016_removals_cog -d removals -y 2016 -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_10x10_tile_ids.txt
+
+Notes:
+For WWF Operational Landscapes:
+    - Took 1.5 minutes to build VRT from 200 10x10 degree per pixel tiles (1 worker w/ 32 GB memory)
+
+
+TODO:
+-Use on-demand workers for COG creation
+-Pass in creation option based on GDAL type (i.e. resampling algorithm for overviews, etc)
+-Add progrss bars to VRT and COG creation step
+-Split by continent or quadrant to reduce metadata file size for COG-backed GEE assets?
+-Add step to upload COGs to GCS storage?
+
 """
 import os
 import argparse
 import time
-import subprocess
 from osgeo import gdal
+import boto3
 
 # Project imports
 from src.utilities import constants_and_names as cn
 from src.utilities import universal_utilities as uu
 from src.utilities import log_utilities as lu
 
-#TODO: move to UU
-def check_s3_upload_and_clean_local(s3_path, local_path, logger_worker):
+# TODO: move to UU
+# Checks that file exists in s3 before deleting local copy
+def check_s3_upload_and_clean_local(s3_path, local_path):
+    logger_worker = lu.setup_logging_worker()
     if uu.exists_in_s3(s3_path):
         lu.print_and_log(f"File uploaded to S3: {s3_path}", False, logger_worker)
         try:
@@ -31,48 +46,89 @@ def check_s3_upload_and_clean_local(s3_path, local_path, logger_worker):
             lu.print_and_log(f"Warning: could not delete {local_path} - {e}", False, logger_worker)
 #TODO: update usage in other places
 
-#From Engineering: Appropriate compression (COMPRESS=DEFLATE, ZLEVEL=9, or LZW)
-def gdal_translate_cog(vrt, cog, dt, compress="LZW", blocksize=1024):
+# Read tile_ids from .txt file
+def read_tile_ids(path):
+    if not path:
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return {ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")}
 
-    predictor = 3 if "float" in dt.lower() else 2
-    opts = gdal.TranslateOptions(
-        format="COG",
-        creationOptions=[
-            f"COMPRESS={compress}",
-            f"BLOCKSIZE={blocksize}",
-            f"PREDICTOR={predictor}",
+# List s3 files in a path
+# Option to filter the list to only files that match a list of tile_ids
+def list_s3_tiles_from_tile_ids(s3_path, tile_ids):
+    s3 = boto3.client("s3")
+    bucket_name, prefix = uu.split_s3_path(s3_path)
+
+    tile_ids = set(tile_ids) if tile_ids else None
+    matching_tiles = []
+    token = None
+
+    while True:
+        kwargs = {"Bucket": bucket_name, "Prefix": prefix}
+        if token:
+            kwargs["ContinuationToken"] = token
+        response = s3.list_objects_v2(**kwargs)
+
+        for object in response.get("Contents", []):
+            key = object["Key"]
+            if not (key.lower().endswith(".tif") or key.lower().endswith(".tiff")):
+                continue
+            if tile_ids and not any(tile_id in key for tile_id in tile_ids):
+                continue
+            matching_tiles.append(key)
+
+        if response.get("IsTruncated"):
+            token = response["NextContinuationToken"]
+        else:
+            break
+
+    return matching_tiles
+
+# From Engineering: gdal_translate -of COG -co COMPRESS=DEFLATE -co PREDICTOR=2 -co BLOCKSIZE="${BLOCK_SIZE}" -co BIGTIFF=IF_SAFER -co NUM_THREADS=ALL_CPUS -co OVERVIEWS=AUTO -r "${RESAMPLE}" --config COMPRESS_OVERVIEW DEFLATE -co SPARSE_OK=TRUE --config GDAL_CACHEMAX 70% --config GDAL_NUM_THREADS ALL_CPUS
+# From Michelle: tile_size=2048 for global 30m datasets
+# From GEE documentation: COPY_SRC_OVERVIEWS=YES, TILED=YES, BLOCKXSIZE=512, BLOCKYSIZE=512, COMPRESS=ZSTD, ZSTD_LEVEL=22, INTERLEAVE=BAND, NUM_THREADS=ALL_CPUS
+# From OpenGeoHub GPW: GDAL_CACHEMAX 10240, BLOCKSIZE=2048, BIGTIFF=YES, COMPRESS=DEFLATE, PREDICTOR=2,
+def gdal_translate_cog(vrt, cog, build_overviews=False, resample=None, nodata=None):
+
+    logger_worker = lu.setup_logging_worker()
+    lu.print_and_log(f"Translating COG: {vrt} -> {cog}", False, logger_worker)
+
+    # Creation options
+    co = [
+            "COMPRESS=DEFLATE",
+            "BLOCKSIZE=2048",
+            "PREDICTOR=2",
             "BIGTIFF=IF_SAFER",
             "NUM_THREADS=ALL_CPUS",
+            "SPARSE_OK=TRUE",
         ]
+
+    # Internal overview generation when requested (only for final data)
+    if build_overviews:
+        co.append("OVERVIEWS=AUTO")
+
+    # GDAL translate call
+    opts = gdal.TranslateOptions(
+        format="COG",
+        creationOptions=co,
+        resampleAlg=resample,
+        noData=nodata,
     )
-    ds = gdal.Translate(cog, vrt, options=opts)
 
-    if ds is None:
-        error = gdal.GetLastErrorMsg()
-        raise RuntimeError(f"COG creation failed for {cog}: {error}")
+    # Set config options for GDAL translate
+    with gdal.config_options({"GDAL_CACHEMAX": "70%", "GDAL_NUM_THREADS": "ALL_CPUS", "COMPRESS_OVERVIEW": "DEFLATE"}):
+        ds = gdal.Translate(cog, vrt, options=opts)
+        if ds is None:
+            raise RuntimeError(f"GDAL Translate failed: {cog}: {gdal.GetLastErrorMsg()}")
+        ds = None   #close
 
-    ds = None  # close
 
-def build_overviews(cog, resampling="AVERAGE", levels=None):
-    ds = gdal.Open(cog, gdal.GA_Update)
-    if ds is None:
-        raise RuntimeError(f"Failed to open {cog} for overview build")
-
-    if levels is None:
-        levels = [2, 4, 8, 16, 32, 64]         # Typical powers of two; you can trim this list to reduce size/time
-
-    error = ds.BuildOverviews(resampling, levels)
-    ds = None
-    if error != 0:
-        raise RuntimeError(f"Overviews build failed for {cog}")
-
-def create_cog_from_vrt(output_vrt_s3_path, dt, tmp_cog_path, output_cog_s3_path, nodata_value=None):
+def create_cog_from_vrt(vrt_s3_path, tmp_cog_path, output_cog_s3_path):
+    # Recommended from ChatGPT for vsis3 performance
     os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
     os.environ["CPL_VSIL_CURL_ALLOWED_EXTENSIONS"] = ".tif,.tiff,.vrt,.ovr,.aux.xml"
-
-    # Recommended from ChatGPT for vsis3 performance
     os.environ["VSI_CACHE"] = "TRUE"
-    os.environ["VSI_CACHE_SIZE"] = str( 1 * 1024 * 1024 * 1024)  # 1GB
+    os.environ["VSI_CACHE_SIZE"] = str(1 * 1024 * 1024 * 1024)  # 1GB
     os.environ["GDAL_HTTP_MAX_RETRY"] = "10"
     os.environ["GDAL_HTTP_RETRY_DELAY"] = "1"
 
@@ -83,127 +139,109 @@ def create_cog_from_vrt(output_vrt_s3_path, dt, tmp_cog_path, output_cog_s3_path
         return lu.print_and_log(f"COG file already exists in S3: {output_cog_s3_path}. Skipping creation.", False, logger_worker)
 
     # Build COG via GDAL Python
-    src_vrt = output_vrt_s3_path.replace("s3://", "/vsis3/")
+    vrt = vrt_s3_path.replace("s3://", "/vsis3/")
     try:
-        gdal_translate_cog(src_vrt, tmp_cog_path, dt,"LZW", 1024)
+        gdal_translate_cog(vrt, tmp_cog_path, build_overviews=False)
     except Exception as e:
-        lu.print_and_log(f"COG build failed for {src_vrt}: {e}", False, logger_worker)
+        lu.print_and_log(f"COG build failed for {vrt}: {e}", False, logger_worker)
         raise
     lu.print_and_log(f"COG created locally at: {tmp_cog_path}", False, logger_worker)
-
-    # Per ChatGPT: OVERVIEW_RESAMPLING=AVERAGE during translate step can trigger expensive overview building in some GDAL setups or cause weird behavior
-    # Build overviews for COG after COG creation
-    #build_overviews(tmp_cog_path, resampling="AVERAGE", levels=[2, 4, 8, 16, 32])
-    #TODO: uncomment after testing
 
     # Upload COG to S3
     uu.upload_s3_file(output_cog_s3_path, tmp_cog_path)
 
     # If successfully uploaded to s3, delete local COG
-    check_s3_upload_and_clean_local(output_cog_s3_path, tmp_cog_path, logger_worker)
-
-def stack_annual_cogs(dataset_name, dt, year_to_cog_s3, tmp_stacked_vrt, tmp_stacked_cog, output_stacked_vrt_s3_path, output_stacked_cog_s3_path):
-    os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
-    os.environ.setdefault("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff,.vrt,.ovr,.aux.xml")
-
-    logger_worker = lu.setup_logging_worker()
-
-    # Check if the stacked COG already exists in S3
-    if uu.exists_in_s3(output_stacked_cog_s3_path):
-        return lu.print_and_log( f"{dataset_name} stacked COG already exists in S3: {output_stacked_cog_s3_path}. Skipping creation.",False, logger_worker)
-
-    # Build the stacked VRT locally
-    years_sorted = sorted(year_to_cog_s3.keys())    # ensure chronological order
-    inputs_vsis3 = [year_to_cog_s3[y].replace("s3://", "/vsis3/") for y in years_sorted]
-    cmd_vrt = ["gdalbuildvrt", "-overwrite", "-separate", tmp_stacked_vrt, *inputs_vsis3]
-    subprocess.run(cmd_vrt,stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    lu.print_and_log(f"Built stacked local VRT: {tmp_stacked_vrt}", False, logger_worker)
-
-    # TODO can change to gdal python package instead of subprocess
-    # Translate the stacked VRT to multiband COG
-    cmd_cog = [
-        "gdal_translate",
-        tmp_stacked_vrt,
-        tmp_stacked_cog,
-        "-of", "COG",
-        "-ot", f"{dt}",
-        "-co", "COMPRESS=DEFLATE",
-        "-co", "BLOCKSIZE=1024",
-        "-co", "PREDICTOR=3",
-        "-co", "BIGTIFF=IF_SAFER",
-        "-co", "OVERVIEW_RESAMPLING=AVERAGE",
-    ]
-    subprocess.run(cmd_cog, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    lu.print_and_log(f"Built stacked local COG: {tmp_stacked_cog}", False, logger_worker)
-
-    # Upload stacked VRT to s3
-    uu.upload_s3_file(output_stacked_vrt_s3_path, tmp_stacked_vrt)
-    if uu.exists_in_s3(output_stacked_vrt_s3_path):
-        lu.print_and_log(f"Uploaded stacked VRT to S3: {output_stacked_vrt_s3_path}", False, logger_worker)
-        try:
-            os.remove(tmp_stacked_vrt)
-        except Exception as e:
-            lu.print_and_log(f"Warning: could not delete {tmp_stacked_vrt}: {e}", False, logger_worker)
-
-    # Upload stacked COG to s3
-    uu.upload_s3_file(output_stacked_cog_s3_path, tmp_stacked_cog)
-    if uu.exists_in_s3(output_stacked_cog_s3_path):
-        lu.print_and_log(f"Uploaded stacked COG to S3: {output_stacked_cog_s3_path}", False, logger_worker)
-        try:
-            os.remove(tmp_stacked_cog)
-        except Exception as e:
-            lu.print_and_log(f"Warning: could not delete {tmp_stacked_cog}: {e}", False, logger_worker)
+    check_s3_upload_and_clean_local(output_cog_s3_path, tmp_cog_path)
 
 
-def main(cluster_name, process):
-    # Connects to Coiled cluster and the named cluster exists
-    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, False)
+
+def main(cluster_name, datasets, years, tile_ids, skip_existing):
+
+    # Connects to Coiled cluster if the named cluster exists
+    if cluster_name:
+        run_local = False
+    else:
+        run_local = True
+
+    cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
     client
 
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path, n_workers= lu.populate_main_log_header(client, cluster, "Global COG creation",
-                                                                   run_local, 'standard', 'Global COG creation')
+    main_logger, main_log_local_path, n_workers= lu.populate_main_log_header(client, cluster, "Global COG creation", run_local, 'standard', 'Global COG creation')
 
-    #TODO: Change to cn paths when switching back to global AFOLU ouput
-    wwf_emissions_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_3_WWF_sites/gross_emissions__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/YYYY/_pixel_yr/40000_pixels/20251211/"
-    wwf_removals_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_3_WWF_sites/gross_removals__all_C_pools__MgCO2/standard_model/annual_intervals/YYYY/_pixel_yr/40000_pixels/20251211/"
-    wwf_net_flux_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_3_WWF_sites/net_flux__all_C_pools__all_gases__MgCO2e/standard_model/annual_intervals/YYYY/_pixel_yr/40000_pixels/20251211/"
+    #TODO: This branch is behind the current model version (1.0.5) Change to cn paths after merging to updated model branch.
+    emissions_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_5__standard__global/gross_emissions__all_C_pools__all_gases__MgCO2e/annual_intervals/YYYY/_pixel_yr/40000_pixels/20260130/"
+    removals_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_5__standard__global/gross_removals__all_C_pools__MgCO2/annual_intervals/YYYY/_pixel_yr/40000_pixels/20260130/"
+    net_flux_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_vegetation/version_1_0_5__standard__global/net_flux__all_C_pools__all_gases__MgCO2e/annual_intervals/YYYY/_pixel_yr/40000_pixels/20260130/"
+    mineral_soil_path = "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_soil_organic_carbon/version_1_0_0__standard__global/SOC_change__mineral_soil_extent__0-30cm_MgC/YYYY/_ha_yr/4000_pixels/20251224/"
+    pixel_area_path = "s3://gfw2-data/analyses/area_28m/"
 
-    wwf_emissions_pattern = "gross_emissions__all_C_pools__all_gases__MgCO2e_pixel_yr"
-    wwf_removals_pattern = "gross_removals__all_C_pools__MgCO2_pixel_yr"
-    wwf_net_flux_pattern = "net_flux__all_C_pools__all_gases__MgCO2e_pixel_yr"
+    emissions_pattern = "gross_emissions__all_C_pools__all_gases__MgCO2e_pixel_yr"
+    removals_pattern = "gross_removals__all_C_pools__MgCO2_pixel_yr"
+    net_flux_pattern = "net_flux__all_C_pools__all_gases__MgCO2e_pixel_yr"
+    mineral_soil_pattern = "SOC_change__mineral_soil_extent__0-30cm_MgC_ha_yr"
+    pixel_area_pattern = "hansen_pixel_area"
 
     # ------------------------------------------------------------------------------------------------------------------
 
     # Step 1: Create download/ upload dictionary for the datasets we want to create global COGs for.
+    tile_ids = read_tile_ids(tile_ids) if tile_ids else None
+
+    # Default to all available years if years are not provided by user
+    if years is None:
+        years = {
+            "emissions": cn.interval_end_years_annual,
+            "removals": cn.interval_end_years_annual,
+            "net_flux": cn.interval_end_years_annual,
+            "mineral_soil": cn.SOC_change_intervals,
+            "pixel_area": [2013]
+        }
+
+    # Datasets to pass in arguments for tile upload + GEE asset creation
     download_upload_dictionary = {}
 
-    # Datasets to create global COGs for
-    if 'emissions' in process:
-        for year in cn.years_annual:
-            download_upload_dictionary[f"emissions_{year}"] = {
-                'raw_dir': wwf_emissions_path.replace("YYYY", f"{year}"),
-                'raw_pattern': wwf_emissions_pattern,
-                'vrt': f"/tmp/WWF_{wwf_emissions_pattern}_{year}.vrt",
-                'cog': f"/tmp/WWF_{wwf_emissions_pattern}_{year}.tif"
-            }
-    if 'removals' in process:
-        for year in [2016]:
-        #for year in cn.years_annual: #TODO: uncomment
-            download_upload_dictionary[f"removals_{year}"] = {
-                'raw_dir': wwf_removals_path.replace("YYYY", f"{year}"),
-                'raw_pattern': wwf_removals_pattern,
-                'vrt': f"/tmp/WWF_{wwf_removals_pattern}_{year}.vrt",
-                'cog': f"/tmp/WWF_{wwf_removals_pattern}_{year}.tif"
-            }
-    if 'net_flux' in process:
-        for year in cn.years_annual:
-            download_upload_dictionary[f"net_flux_{year}"] = {
-                'raw_dir': wwf_net_flux_path.replace("YYYY", f"{year}"),
-                'raw_pattern': wwf_net_flux_pattern,
-                'vrt': f"/tmp/WWF_{wwf_net_flux_pattern}_{year}.vrt",
-                'cog': f"/tmp/WWF_{wwf_net_flux_pattern}_{year}.tif"
-            }
+    for dataset in datasets:
+        ds_years = years if isinstance(years, list) else years[dataset]
+        if not ds_years:
+            raise ValueError(f"No years found for dataset={dataset}. Pass --years or add defaults.")
+
+        for year in ds_years:
+            if dataset == "emissions":
+                s3_dir = emissions_path.replace("YYYY", str(year))
+                pattern = emissions_pattern
+            elif dataset == "removals":
+                s3_dir = removals_path.replace("YYYY", str(year))
+                pattern = removals_pattern
+            elif dataset == "net_flux":
+                s3_dir = net_flux_path.replace("YYYY", str(year))
+                pattern = net_flux_pattern
+            elif dataset == "mineral_soil":
+                s3_dir = mineral_soil_path.replace("YYYY", str(year))
+                pattern = mineral_soil_pattern
+            elif dataset == "pixel_area":
+                s3_dir = pixel_area_path
+                pattern = pixel_area_pattern
+            else:
+                raise ValueError(f"Unknown dataset: {dataset}")
+
+            if dataset != "pixel_area":
+                download_upload_dictionary[f"{dataset}_{year}"] = {
+                    "dataset": dataset,
+                    "year": year,
+                    "s3_dir": s3_dir.rstrip("/") + "/",
+                    "vrt_dir" : s3_dir.replace("40000_pixels", "global").rstrip("/") + "/",
+                    'vrt': f"/tmp/{pattern}_{year}.vrt",
+                    'cog': f"/tmp/{pattern}_{year}.tif"
+                }
+            else:
+                download_upload_dictionary[f"{dataset}"] = {
+                    "dataset": dataset,
+                    "s3_dir": s3_dir.rstrip("/") + "/",
+                    "vrt_dir": s3_dir.replace("area_28m", "area_28m_global_cog").rstrip("/") + "/",
+                    'vrt': f"/tmp/{pattern}.vrt",
+                    'cog': f"/tmp/{pattern}.tif"
+                }
+            #TODO: delete pixel area logic after running globally
 
     # -------------------------------------------------------------------------------------------------------------------
 
@@ -211,37 +249,57 @@ def main(cluster_name, process):
     start_time = time.time()
     main_logger.info(f"STEP 2 - Building VRTs")
 
-    # Create VRTs in parallel for each year x dataset using futures
-    vrt_futures = []
     keys_to_remove = []
     for key, items in download_upload_dictionary.items():
 
         # Add output VRT s3 path to the dictionary
-        output_vrt_s3 = f"{items['raw_dir']}{os.path.basename(items['vrt'])}"
-        download_upload_dictionary[key]['output_vrt_s3'] = output_vrt_s3
+        vrt_s3_path = f"{items['vrt_dir']}{os.path.basename(items['vrt'])}"
+        download_upload_dictionary[key]['vrt_s3_path'] = vrt_s3_path
 
-        # Find all files in s3 that match the raw pattern (w/ '*.tif') and add to the dictionary
-        input_raster_list_s3 = uu.list_s3_files_with_pattern(items['raw_dir'], items['raw_pattern'])
-        if input_raster_list_s3:
-            download_upload_dictionary[key]['raw_raster_list'] = input_raster_list_s3
-            main_logger.info(f" {key} - There are {len(input_raster_list_s3)} rasters in the raw data folder to include in the vrt")
-        else:
-            main_logger.warning(f"{key} - There were no rasters found. Skipping VRT/COG creation.")
+        # If skip_existing flag is passed and VRT already exists in S3, skip VRT creation step
+        download_upload_dictionary[key]["skip_vrt"] = False
+        if skip_existing and uu.exists_in_s3(vrt_s3_path):
+            main_logger.info(f"{key} - VRT exists in S3, skipping VRT build: {vrt_s3_path}")
+            download_upload_dictionary[key]["skip_vrt"] = True
+            continue
+
+        # Otherwise, find all tiles in s3 directory (filtered if tile_ids if provided)
+        bucket, prefix = uu.split_s3_path(items["s3_dir"])
+        keys = list_s3_tiles_from_tile_ids(items["s3_dir"], tile_ids)
+        s3_raster_list = [f"s3://{bucket}/{k}" for k in keys]
+
+        # Remove datasetS with no tiles in s3 from the VRT + COG pipeline
+        if not s3_raster_list:
+            main_logger.warning(f"{key} - There were no rasters found in s3. Skipping VRT/COG creation.")
             keys_to_remove.append(key)
             continue
 
-        # Create a VRT from all input rasters
-        main_logger.info(f" Submitting VRT build for {key}: {uu.timestr('time')}")
-        vrt_future = client.submit(uu.build_vrt_gdal_coiled, input_raster_list_s3, output_vrt_s3, items['vrt'], 0)
-        vrt_futures.append((key, vrt_future))
+        download_upload_dictionary[key]['s3_raster_list'] = s3_raster_list
+        main_logger.info( f" {key} - There are {len(s3_raster_list)} rasters in s3 to include in the vrt")
 
-    # Wait for all VRTs to finish before moving on to Step 3
-    for key, future in vrt_futures:
-        future.result()
-
-    # Remove datasets from the download_upload dictionary that don't have any rasters in their raw_dir
+    # Remove datasets from the download_upload dictionary that don't have any rasters in their s3_dir
     for key in keys_to_remove:
         download_upload_dictionary.pop(key, None)
+
+    # Create VRTs for each year x dataset in parallel using futures (Coiled) or locally
+    if not run_local:
+        vrt_futures = []
+        for key, items in download_upload_dictionary.items():
+            if items["skip_vrt"]:
+                continue
+            main_logger.info(f" Submitting VRT build for {key}: {uu.timestr('time')}")
+            vrt_future = client.submit(uu.build_vrt_gdal_coiled, items['s3_raster_list'], items['vrt_s3_path'], items['vrt'])
+            vrt_futures.append((key, vrt_future))
+
+        # Wait for all VRTs to finish before moving on to Step 3
+        for key, future in vrt_futures:
+            future.result()
+    else:
+        for key, items in download_upload_dictionary.items():
+            if items["skip_vrt"]:
+                continue
+            main_logger.info(f" Submitting VRT build for {key}: {uu.timestr('time')}")
+            uu.build_vrt_gdal_coiled(items['s3_raster_list'], items['vrt_s3_path'], items['vrt'])
 
     end_time = time.time()
     main_logger.info(f"STEP 2 Complete - All VRTs built in {round(end_time-start_time)} seconds\n")
@@ -253,9 +311,8 @@ def main(cluster_name, process):
     main_logger.info(f"STEP 3 - Getting GDAL datatypes")
 
     for key, items in download_upload_dictionary.items():
-        # Dictionary that matches format expected by function that gets name of first tile in an s3 folder
         simple_dict = {}
-        simple_dict[key] = items["raw_dir"]
+        simple_dict[key] = items["s3_dir"]
 
         # Path of first tile in the dataset
         first_tile = uu.first_file_name_in_s3_folder(simple_dict)
@@ -275,74 +332,42 @@ def main(cluster_name, process):
 
     # -------------------------------------------------------------------------------------------------------------------
 
-    # Step 4: Building global COG for each dataset (per year)
+    # Step 4: Building global COGs for each dataset x year
     start_time = time.time()
     main_logger.info(f"STEP 4 - Building global COGs")
 
-    cog_futures = []
     for key, items in download_upload_dictionary.items():
+        cog_s3_path = f"{items['vrt_dir']}{os.path.basename(items['cog'])}"
+        download_upload_dictionary[key]['cog_s3_path'] = cog_s3_path
 
-        # Add output COG s3 path to the dictionary
-        output_cog_s3 = f"{items['raw_dir']}{os.path.basename(items['cog'])}"
-        download_upload_dictionary[key]['output_cog_s3'] = output_cog_s3
+        # If skip_existing flag is passed and COG exists in S3, skip COG creation step
+        download_upload_dictionary[key]["skip_cog"] = False
+        if skip_existing and uu.exists_in_s3(cog_s3_path):
+            main_logger.info(f"{key} - COG exists in S3, skipping COG creation: {cog_s3_path}")
+            download_upload_dictionary[key]["skip_cog"] = True
+            continue
 
-        main_logger.info(f" Submitting global COG build for {key}")
-        cog_future = client.submit(create_cog_from_vrt, items["output_vrt_s3"], items["dt"], items["cog"], items["output_cog_s3"], 0)
-        cog_futures.append((key, cog_future))
+    if not run_local:
+        cog_futures = []
+        for key, items in download_upload_dictionary.items():
+            if items["skip_cog"]:
+                continue
+            main_logger.info(f" Submitting global COG build for {key}")
+            cog_future = client.submit(create_cog_from_vrt, items["vrt_s3_path"], items["cog"], items["cog_s3_path"])
+            cog_futures.append((key, cog_future))
 
-    # Wait for all COGs to finish before moving on to Step 5
-    for key, future in cog_futures:
-        future.result()
+        for key, future in cog_futures:
+            future.result()
+
+    else:
+        for key, items in download_upload_dictionary.items():
+            if items["skip_cog"]:
+                continue
+            main_logger.info(f" Submitting global COG build for {key}")
+            create_cog_from_vrt(items["vrt_s3_path"], items["cog"], items["cog_s3_path"])
 
     end_time = time.time()
     main_logger.info(f"STEP 4 Complete - All global COGs built in {round(end_time - start_time)} seconds\n")
-
-    # -------------------------------------------------------------------------------------------------------------------
-
-    # Step 5: Combine annual timeseries into a single, stacked global COG
-    start_time = time.time()
-    main_logger.info("STEP 5 - Creating single, stacked global COG from annual COGs")
-
-    # Limit stacking to datasets with timeseries
-    allowed_datasets = {"emissions", "removals", "net_flux"}
-    dataset_to_year_cog = {}
-    for key, items in download_upload_dictionary.items():
-        dataset, year_str = key.rsplit("_", 1)
-        if dataset not in allowed_datasets:
-            continue
-        dataset_to_year_cog.setdefault(dataset, {})
-        dataset_to_year_cog[dataset][int(year_str)] = items["output_cog_s3"]
-
-    stack_futures = []
-    for dataset, year_map in dataset_to_year_cog.items():
-        years_sorted = sorted(year_map.keys())
-        min_year, max_year = years_sorted[0], years_sorted[-1]
-        stacked_interval = f"{min_year}_{max_year}"
-
-        # Local temp stacked outputs
-        dataset_items = download_upload_dictionary[f"{dataset}_{min_year}"]
-        dt = dataset_items["dt"]
-        tmp_stacked_vrt_path = dataset_items["vrt"].replace(str(min_year), stacked_interval)
-        tmp_stacked_cog_path = dataset_items["cog"].replace(str(min_year), stacked_interval)
-
-        # S3 stacked outputs:
-        raw_dir_prefix = dataset_items["raw_dir"].split("/annual_intervals", 1)[0].rstrip("/")
-        stacked_vrt_filename = os.path.basename(dataset_items["vrt"]).replace(str(min_year), stacked_interval)
-        stacked_cog_filename = os.path.basename(dataset_items["cog"]).replace(str(min_year), stacked_interval)
-        output_stacked_vrt_s3_path = f"{raw_dir_prefix}/stacked_interval/{stacked_vrt_filename}"
-        output_stacked_cog_s3_path = f"{raw_dir_prefix}/stacked_interval/{stacked_cog_filename}"
-        #TODO: Add tmp_stacked_vrt_path, etc to dataset_to_year_cog dictionary?
-
-        # Submit stacked VRT + COG build
-        main_logger.info(f" Submitting stacked VRT + COG build for {dataset}: {uu.timestr('time')}")
-        stack_future = client.submit(stack_annual_cogs, dataset, dt, year_map, tmp_stacked_vrt_path, tmp_stacked_cog_path, output_stacked_vrt_s3_path, output_stacked_cog_s3_path)
-        stack_futures.append((dataset, stack_future))
-
-    for dataset, future in stack_futures:
-        future.result()
-
-    end_time = time.time()
-    main_logger.info(f"STEP 5 Complete - All stacked COGs built in {round(end_time - start_time)} seconds\n")
 
     # -------------------------------------------------------------------------------------------------------------------
 
@@ -353,10 +378,16 @@ def main(cluster_name, process):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create global COGs")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-p', '--processes', action='store', nargs='+', help='What datasets do you want to convert to global COGs?')
+    parser.add_argument('-d', '--datasets', required=True, nargs='+', help='What datasets do you want to convert to global COGs? Current options: emissions, removals, net flux, mineral soil soc change')
+    parser.add_argument('-y', '--years', nargs='+', help="Which year(s) to run? Defaults to use all available years if not specified.")
+    parser.add_argument('-t', "--tile_ids", help="Optional text file with tile ids to filter to (one per line)")
+    parser.add_argument("--skip_existing", action="store_true")
 
     args = parser.parse_args()
     cluster_name = args.cluster_name
-    processes = args.processes
+    datasets = args.datasets
+    years = args.years
+    tile_ids = args.tile_ids
+    skip_existing = args.skip_existing
 
-    main(cluster_name, processes)
+    main(cluster_name, datasets, years, tile_ids, skip_existing)
