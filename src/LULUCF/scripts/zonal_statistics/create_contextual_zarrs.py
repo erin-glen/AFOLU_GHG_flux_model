@@ -217,8 +217,8 @@ def main(cluster_name, layers_to_process, input_date, model_type, no_log, no_upl
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
-    start_time = uu.timestr() # Starting time for stage
-    main_logger.info(f"Stage {stage} started at: {start_time}")
+    start_time = time.time() # Starting time for stage
+    main_logger.info(f"Stage {stage} started at: {uu.timestr()}")
     main_logger.info(f"Vegetation model version: {cn.veg_model_version}")
     main_logger.info(f"Vegetation model path descriptor: {model_path_description}")
     main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
@@ -235,46 +235,95 @@ def main(cluster_name, layers_to_process, input_date, model_type, no_log, no_upl
             'zarr_dir': cn.adm0_zarr_path,
         }
 
-    main_logger.info(f"Contextual layers to zarr: {layers_to_zarr}")
+    if 'pixel_area' in layers_to_process:
+        layers_to_zarr["pixel_area"] = {
+            'zarr_date': cn.pixel_area_zarr_date,
+            'zarr_dtype': cn.pixel_area_zarr_dtype,
+            'geotif_dir': cn.pixel_area_geotif_path,
+            'zarr_dir': cn.pixel_area_zarr_path,
+        }
+
+    if 'wdpa' in layers_to_process:
+        layers_to_zarr["wdpa"] = {
+            'zarr_date': cn.wdpa_zarr_date,
+            'zarr_dtype': cn.wdpa_zarr_dtype,
+            'geotif_dir': cn.wdpa_geotif_path,
+            'zarr_dir': cn.wdpa_zarr_path,
+        }
+
+    if 'brazil_biomes' in layers_to_process:
+        layers_to_zarr["brazil_biomes"] = {
+            'zarr_date': cn.BRA_biomes_zarr_date,
+            'zarr_dtype': cn.BRA_biomes_zarr_dtype,
+            'geotif_dir': cn.BRA_biomes_geotif_path,
+            'zarr_dir': cn.BRA_biomes_zarr_path,
+        }
+
+    if 'cont_eco' in layers_to_process:
+        layers_to_zarr["cont_eco"] = {
+            'zarr_date': cn.cont_eco_zarr_date,
+            'zarr_dtype': cn.cont_eco_zarr_dtype,
+            'geotif_dir': cn.cont_eco_geotif_path,
+            'zarr_dir': cn.cont_eco_zarr_path,
+        }
+
+    if 'landmark' in layers_to_process:
+        layers_to_zarr["landmark"] = {
+            'zarr_date': cn.landmark_zarr_date,
+            'zarr_dtype': cn.landmark_zarr_dtype,
+            'geotif_dir': cn.landmark_geotif_path,
+            'zarr_dir': cn.landmark_zarr_path,
+        }
+
+    if 'KBA' in layers_to_process:
+        layers_to_zarr["KBA"] = {
+            'zarr_date': cn.KBA_zarr_date,
+            'zarr_dtype': cn.KBA_zarr_dtype,
+            'geotif_dir': cn.KBA_geotif_path,
+            'zarr_dir': cn.KBA_zarr_path,
+        }
+
+    if 'watersheds' in layers_to_process:
+        layers_to_zarr["KBA"] = {
+            'zarr_date': cn.watershed_zarr_date,
+            'zarr_dtype': cn.watershed_zarr_dtype,
+            'geotif_dir': cn.watershed_geotif_path,
+            'zarr_dir': cn.watershed_zarr_path,
+        }
+
+
+    main_logger.info(f"Contextual layers to zarr ({len(layers_to_zarr)} layers): {layers_to_zarr}")
 
     for layer_to_zarr, values in layers_to_zarr.items():
 
         main_logger.info(f"Processing {layer_to_zarr}: {uu.timestr()}")
-        start_time = time.time()
+        layer_start_time = time.time()
 
         geotif_uris = list_folder_uris(values['geotif_dir'])
         main_logger.info(f"  Input s3 geotif folder: {values['geotif_dir']}")
         main_logger.info(f"  First geotif in folder: {geotif_uris[0]}")
         main_logger.info(f"  Tile count in {layer_to_zarr}: {len(geotif_uris)}")
 
-        print(layer_to_zarr)
+        main_logger.info(f"  Reading {layer_to_zarr}: {uu.timestr()}")
+        layer_xarray_chunks = make_xarray_chunks(geotif_uris, cn.chunk_dims)
+        layer_xarray_chunks['band_data'] = layer_xarray_chunks['band_data'].astype(values['zarr_dtype'])
 
-        sys.quit()
+        main_logger.info(f"  Zarring {layer_to_zarr}: {uu.timestr()}")
+        layer_xarray_chunks.to_zarr(values['zarr_dir'], mode='w')
+        remove_FillValue(values['zarr_dir'])  # Added per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d to deal with FillValue problems
 
-        # main_logger.info(f"  Reading {layer_to_zarr}: {uu.timestr()}")
-        # layer_xarray_chunks = make_xarray_chunks(geotif_uris, cn.chunk_dims)
-        # layer_xarray_chunks['band_data'] = layer_xarray_chunks['band_data'].astype(values['zarr_dtype'])
-        #
-        # main_logger.info(f"  Zarring {layer_to_zarr}: {uu.timestr()}")
-        # layer_xarray_chunks.to_zarr(values['zarr_dir'], mode='w')
-        # remove_FillValue(values['zarr_dir'])  # Added per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d to deal with FillValue problems
-        #
-        # end_time = time.time()
-        # main_logger.info(f"  Finished zarring {layer_to_zarr}, took {round(end_time) - round(start_time)} seconds: {uu.timestr()}")
+        layer_end_time = time.time()
+        main_logger.info(f"  Finished zarring {layer_to_zarr}, took {round(layer_end_time - layer_start_time)} seconds: {uu.timestr()}")
 
-
-
-
-
-
-
+    end_time = time.time()
+    main_logger.info(f"  Finished zarring {len(layers_to_zarr)} contextual layers, took {round(end_time - start_time)} seconds: {uu.timestr()}")
 
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Create 10x10 deg per-ha and per-pixel output geotifs")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
-    parser.add_argument('-l', '--layers_to_process', help='Contextual layers to convert to zarrs')
+    parser.add_argument('-l', '--layers_to_process', action='store', nargs='+', help='Contextual layers to convert to zarrs')
     parser.add_argument('-id', '--input_date', required=True, help='Date of run, in YYYYMMDD')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
     parser.add_argument('-fv', '--first_variables_to_process', type=int, help='Number of variables to process from raw mega-zarr (for testing)')
