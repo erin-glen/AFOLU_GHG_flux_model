@@ -4,21 +4,44 @@ Script to create global COGS:
 2) builds a global COG per dataset per year
 
 run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
-python -m src.utilities.create_cluster -cn WWF_2016_emissions_cog -n 1 -m 64 --on_demand
+python -m src.utilities.create_cluster -cn WWF_2016_emissions_cog -n 1 -m 32 --on_demand
 python -m src.LULUCF.scripts.postprocessing.GEE.create_cogs -cn WWF_2016_emissions_cog -d emissions -y 2016 -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_10x10_tile_ids.txt
 
-python -m src.utilities.create_cluster -cn WWF_2016_removals_cog -n 1 -m 64 --on_demand
-python -m src.LULUCF.scripts.postprocessing.GEE.create_cogs -cn WWF_2016_removals_cog -d removals -y 2016 -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_10x10_tile_ids.txt
+python -m src.utilities.create_cluster -cn WWF_2016_removals_cog -t 1 -n 1 -m 64 -d 300 --on_demand
+python -m src.LULUCF.scripts.postprocessing.GEE.create_cogs -cn WWF_2016_removals_cog -d removals -y 2016 -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_10x10_tile_ids.txt --skip_existing
 
 Notes:
 For WWF Operational Landscapes:
-    - Took 1.5 minutes to build VRT from 200 10x10 degree per pixel tiles (1 worker w/ 32 GB memory)
+    - Took 1.5 minutes to build VRT from 191 10x10 degree, per pixel tiles
+    - For emissions, it took 5 hours to create a cog (with no overviews) from 191 10x10 degree, per pixel tiles (28% of global extent).
+      I used a x2gd.xlarge wokrer (memory = 64 GB, CPU = 4, disk = 100 GB) which used 40 credits in total.
+      GDAL_CACHEMAX = 70% and BIG_TIFF=IF_SAFER.
+      It looks like memory peaked at 8.5 GB, disk peaked at about 25 GB, and required 4 CPUs.
+      So for global run, try:
+            - disk = 200 GB. Consider increasing CPU?
+      The final COG only ended up being 12 GB.
+    - For removals, it failed after 6.5 hours the first time I tried to create a cog (with no overviews) from 191 10x10 degree, per pixel tiles.
+      Got the following error:
+        No disk space left on workers (first happened at 2026-02-10 23:27:40) Some of your workers have run out of
+        available disk space. This typically happens when you shuffle large amounts of data via the P2P shuffling
+        mechanism, or you have to spill large amounts of data to disk because of memory pressure. To avoid your workers
+        running out of disk space, you can manually request more disk space via coiled.Cluster(..., worker_disk_size="XYZ GB") or
+        coiled.function(..., disk_size="XYZ GB").
+      I used one 64 GB worker (type = x2gd.xlarge) with 100 GB of disk space which used 52 credits in total.
+      It looks like memory peaked at 9 GB, disk peaked at 152 GB before crashing.
+
+      Ran removals again and it finished successfully this time in 7 hours. The final COG was 85 GB.
+      I used a r7i.2xlarge worker (memory = 64 GB, CPU = 8, disk = 300 GB) which used 110 credits.
+      Memory peaked a little over 9 GB. The majority of the time it used 4 CPUs but spiked two-third of the way though
+      and at the end where it used all CPUs. Disk peaked at around 151 GB.
+      GDAL_CACHEMAX = 50% and BIG_TIFF=YES.
+
 
 
 TODO:
--Use on-demand workers for COG creation
+- Decide on worker type, disk space, and GDAL_CACHEMAX, and BIG_TIFF for future runs
 -Pass in creation option based on GDAL type (i.e. resampling algorithm for overviews, etc)
--Add progrss bars to VRT and COG creation step
+-Add progress bars to VRT and COG creation step
 -Split by continent or quadrant to reduce metadata file size for COG-backed GEE assets?
 -Add step to upload COGs to GCS storage?
 
@@ -98,7 +121,7 @@ def gdal_translate_cog(vrt, cog, build_overviews=False, resample=None, nodata=No
             "COMPRESS=DEFLATE",
             "BLOCKSIZE=2048",
             "PREDICTOR=2",
-            "BIGTIFF=IF_SAFER",
+            "BIGTIFF=YES",
             "NUM_THREADS=ALL_CPUS",
             "SPARSE_OK=TRUE",
         ]
@@ -116,7 +139,7 @@ def gdal_translate_cog(vrt, cog, build_overviews=False, resample=None, nodata=No
     )
 
     # Set config options for GDAL translate
-    with gdal.config_options({"GDAL_CACHEMAX": "70%", "GDAL_NUM_THREADS": "ALL_CPUS", "COMPRESS_OVERVIEW": "DEFLATE"}):
+    with gdal.config_options({"GDAL_CACHEMAX": "60%", "GDAL_NUM_THREADS": "ALL_CPUS", "COMPRESS_OVERVIEW": "DEFLATE"}):
         ds = gdal.Translate(cog, vrt, options=opts)
         if ds is None:
             raise RuntimeError(f"GDAL Translate failed: {cog}: {gdal.GetLastErrorMsg()}")

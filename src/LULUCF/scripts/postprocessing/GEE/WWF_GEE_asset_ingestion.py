@@ -3,12 +3,17 @@ Script to create WWF GEE assets:
 1) uploads data from s3 storage to GCS bucket directly (with option to filter which tiles to upload, passed in as a .txt file)
 2) ingest data into GEE as ee asset (each dataset x year is its own ee.Image asset)
 
+gcloud auth application-default login
+earthengine authenticate
+
 run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 Run locally to create assets (filtered to tile_IDs):
 python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d net_flux -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_1x1_tile_ids.txt --skip_existing
 
 Run locally after QC to delete tiles from GCS + make assets public:
 python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d net_flux -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_1x1_tile_ids.txt --skip_existing --clean_gcs --make_public
+python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d emissions -b lulucf -f WWF -r users/melrose/ -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_1x1_tile_ids.txt --skip_existing --clean_gcs --make_public
+python -m src.LULUCF.scripts.postprocessing.GEE.WWF_GEE_asset_ingestion -d mineral_soil -b lulucf -f WWF -r projects/wri-datalab/global_afolu/ -t /mnt/c/GIS/rasters/AFOLU_cogs/operational_landscapes_1x1_tile_ids.txt --skip_existing --clean_gcs --make_public
 
 To run in coiled:
 python -m src.utilities.create_cluster -cn GEE_net_flux_2016 -n 10 -m 4 --gcp

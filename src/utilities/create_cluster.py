@@ -37,7 +37,7 @@ def write_gcp_creds():
         f.write(base64.b64decode(b64))
     return destination, os.path.exists(destination)
 
-def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=None, on_demand=False, gcp=None):
+def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=None, disk_space = None, on_demand=False, gcp=None):
 
     # Converts worker_memory from an integer to the required format (e.g., 8 to "8GiB")
     worker_memory_str = f"{worker_memory}GiB"
@@ -60,12 +60,15 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
 
     elif worker_memory == 64:
         idle_timeout = 15
-        scheduler_vm_type = "x2gd.xlarge"    # 4 vCPU/worker
+        # scheduler_vm_type = "r7i.2xlarge"     # Used for COG creation
+        # worker_vm_type = "r7i.2xlarge"        # 8 vCPU/worker
+        scheduler_vm_type = "x2gd.xlarge"       # 4 vCPU/worker
         worker_vm_type = "x2gd.xlarge"
         # scheduler_vm_type = "x8aedz.large"    # 4 vCPU/worker
         # worker_vm_type = "x8aedz.large"
-        #TODO: the instance type 'x8aedz.large' is not supported for the cloud provider 'aws', please confirm your
+        # Got this error: the instance type 'x8aedz.large' is not supported for the cloud provider 'aws', please confirm your
         # instance type or see the available instance types by running the command `coiled.list_instance_types(backend='aws')`
+        #TODO create seperate configs for COGs (memory optimized)
 
     elif worker_memory == 32:
         idle_timeout = 20
@@ -138,21 +141,39 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
         with open(gcp_credentials_file, "rb") as f:
             gcp_creds_b64 = base64.b64encode(f.read()).decode("ascii")
 
-    cluster = coiled.Cluster(
-        n_workers=n_workers,
-        use_best_zone=True,
-        compute_purchase_option=purchase_option,
-        idle_timeout=idle_timeout,
-        region="us-east-1",
-        name=cluster_name,
-        workspace='wri-forest-research',
-        tags = {"project": "AFOLU_flux_model"},
-        scheduler_vm_types = scheduler_vm_type,
-        worker_vm_types = worker_vm_type,
-        worker_options = worker_options,
-        environ=env,  # pass env vars to scheduler/workers
-        # send_dask_config = True
-    )
+    if disk_space is not None:
+        cluster = coiled.Cluster(
+            n_workers=n_workers,
+            use_best_zone=True,
+            compute_purchase_option=purchase_option,
+            idle_timeout=idle_timeout,
+            region="us-east-1",
+            name=cluster_name,
+            workspace='wri-forest-research',
+            tags={"project": "AFOLU_flux_model"},
+            scheduler_vm_types=scheduler_vm_type,
+            worker_vm_types=worker_vm_type,
+            worker_options=worker_options,
+            worker_disk_size=f"{disk_space} GiB",
+            environ=env,  # pass env vars to scheduler/workers
+            # send_dask_config = True
+        )
+    else:
+        cluster = coiled.Cluster(
+            n_workers=n_workers,
+            use_best_zone=True,
+            compute_purchase_option=purchase_option,
+            idle_timeout=idle_timeout,
+            region="us-east-1",
+            name=cluster_name,
+            workspace='wri-forest-research',
+            tags = {"project": "AFOLU_flux_model"},
+            scheduler_vm_types = scheduler_vm_type,
+            worker_vm_types = worker_vm_type,
+            worker_options = worker_options,
+            environ=env,  # pass env vars to scheduler/workers
+            # send_dask_config = True
+        )
 
     client = Client(cluster)
 
@@ -182,7 +203,9 @@ if __name__ == "__main__":
     parser.add_argument('-n', '--n_workers', type=int, default=1, help='Number of workers for the cluster')
     parser.add_argument('-m', '--worker_memory', type=int, help='Memory per worker')
     parser.add_argument('-t', '--threads_per_worker', type=int, help='Number of threads/worker')
+    parser.add_argument('-d', '--disk_space', type=int, help='Disk space')
     parser.add_argument('--on_demand', action="store_true", help='Whether to use an on-demand worker even if large job requirement is not met (i.e. COG creation)')
+
 
     # Options to copy certain local environments into Coiled workers
     parser.add_argument("--gcp", action="store_true", help="If set, copy local GOOGLE_CLOUD_PROJECT and GOOGLE_APPLICATION_CREDENTIALS into the Coiled cluster.")
@@ -193,6 +216,7 @@ if __name__ == "__main__":
     n_workers = args.n_workers
     worker_memory = args.worker_memory
     threads_per_worker = args.threads_per_worker
+    disk_space = args.disk_space
     on_demand = args.on_demand
     gcp = args.gcp
 
@@ -203,6 +227,7 @@ if __name__ == "__main__":
         n_workers=n_workers,
         worker_memory=worker_memory,
         threads_per_worker=threads_per_worker,
+        disk_space=disk_space,
         on_demand=on_demand,
         gcp=gcp,    #Google Cloud Project flag
     )
