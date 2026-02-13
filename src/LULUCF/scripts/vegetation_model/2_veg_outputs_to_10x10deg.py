@@ -141,10 +141,10 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     source_zarr_chunk_size = cn.chunk_dims  #4000x4000
 
     # The zarr path that's being used
-    mega_zarr_path = zu.create_zarr_path(cn.veg_outputs_path_mega_zarr, source_zarr_chunk_size, 'annual',
+    zarr_path = zu.create_zarr_path(cn.veg_outputs_path_mega_zarr, source_zarr_chunk_size, 'annual',
                                          model_type, cn.veg_model_version_underscore, model_path_description,
                                          input_date, main_logger)
-    main_logger.info(f"Aggregating from zarr ({source_zarr_chunk_size} pixel chunks): {mega_zarr_path}")
+    main_logger.info(f"Aggregating from zarr ({source_zarr_chunk_size} pixel chunks): {zarr_path}")
 
     output_base = f"{cn.veg_outputs_path}PATTERN/annual_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{input_date}/"
     main_logger.info(f"Core output path for aggregation: {output_base}")
@@ -206,7 +206,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
         for var_name, year_idx, tile_id in task_batch:  # Must be the same order as the tuple in all_tasks
 
             future = client.submit(zu.create_10x10_deg_geotif_from_zarr,
-                                   var_name, year_idx, tile_id, mega_zarr_path, output_base,
+                                   var_name, year_idx, tile_id, zarr_path, output_base,
                                    model_type, model_path_description, no_upload, False, retries=3)
             futures.append(future)
 

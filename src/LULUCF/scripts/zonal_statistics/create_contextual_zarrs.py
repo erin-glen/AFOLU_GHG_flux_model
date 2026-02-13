@@ -10,13 +10,10 @@ python -m src.LULUCF.scripts.zonal_statistics.create_contextual_zarrs -cn vegeta
 """
 
 import argparse
-import psutil
 import time
-import s3fs
 import sys
 import pandas as pd
 import numpy as np
-import xarray as xr
 import boto3
 import fsspec
 import zarr
@@ -29,8 +26,6 @@ from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 from src.utilities import zarr_utilities as zu
-
-
 
 
 def main(cluster_name, layers_to_process, no_upload, log_note=None):

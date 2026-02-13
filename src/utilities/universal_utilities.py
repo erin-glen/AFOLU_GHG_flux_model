@@ -2516,8 +2516,6 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt, ma
             main_logger.warning(f"Error deleting local VRT file: {local_vrt} — {e}")
 
 
-
-
 # Function to read a VRT from S3 using GDAL and vsis3
 def warp_to_hansen_local(source_raster_s3_path, output_raster_s3_path, xmin, ymin, xmax, ymax, dt, no_data, tiled=True,
                    x_pixel_window=400, y_pixel_window=400):

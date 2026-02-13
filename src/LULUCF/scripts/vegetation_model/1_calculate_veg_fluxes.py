@@ -1814,8 +1814,8 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
         out_dict_float32[f"{cn.litter_c_gross_removals_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (litter_c_gross_removals_out_block * cn.C_to_CO2_numba / interval_length).copy()
 
         # Converts non-CO2 emissions from Mg CO2e/ha/interval to Mg CO2e/ha/yr. No conversion of Mg C/ha to Mg CO2 because these are already in Mg CO2e/ha.
-        out_dict_float32[f"{cn.ch4_flux_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (ch4_gross_emis_out_block / interval_length).copy()
-        out_dict_float32[f"{cn.n2o_flux_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (n2o_gross_emis_out_block / interval_length).copy()
+        out_dict_float32[f"{cn.ch4_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (ch4_gross_emis_out_block / interval_length).copy()
+        out_dict_float32[f"{cn.n2o_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (n2o_gross_emis_out_block / interval_length).copy()
 
         # Still Mg C/ha at the interval end year
         out_dict_float32[f"{cn.agc_modeled_dens_pattern}{cn.C_density_pixel_meaning}_{interval_end_year}"] = agc_dens_block.copy()
@@ -1833,8 +1833,8 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
 
         # Gross emissions for non-CO2 emissions
         out_dict_float32[f"{cn.gross_emis_all_C_pools_non_CO2_only_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
-                out_dict_float32[f"{cn.ch4_flux_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
-                + out_dict_float32[f"{cn.n2o_flux_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"])
+                out_dict_float32[f"{cn.ch4_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"]
+                + out_dict_float32[f"{cn.n2o_gross_emis_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"])
 
         # Gross emissions for all carbon pools and all gases
         out_dict_float32[f"{cn.gross_emis_all_C_pools_all_gases_pattern}{cn.flux_density_pixel_meaning}_{interval_end_year}"] = (
@@ -1901,7 +1901,7 @@ def vegetation_fluxes(in_dict_uint8, in_dict_uint16, in_dict_int16, in_dict_int3
 def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                                            download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
                                            interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
-                                           output_folders, stage, model_type, mega_zarr_path=None, outputs_to_zarr=None):
+                                           output_folders, stage, model_type, zarr_path=None, outputs_to_zarr=None):
 
     # Stores the min, mean, and max chunks for inputs and outputs for the chunk
     chunk_stats = []
@@ -2060,7 +2060,7 @@ def calculate_and_upload_vegetation_fluxes(bounds, primary_forest_RF_array, part
 
     ### Part 5: Writes outputs to pre-existing global mega-zarr (only if activated)
 
-    zu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, mega_zarr_path,
+    zu.populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_run, logger_worker, zarr_path,
                   out_dict_all_dtypes, outputs_to_zarr, stage, tile_id)
 
 
@@ -2456,7 +2456,7 @@ def main(cluster_name, year_range, model_type,
     if create_zarr:
 
         # Creates s3 paths for the raw mega-zarr
-        mega_zarr_path = zu.create_zarr_path(cn.veg_outputs_path_mega_zarr, chunk_size_pixels, interval_type,
+        zarr_path = zu.create_zarr_path(cn.veg_outputs_path_mega_zarr, chunk_size_pixels, interval_type,
                                              model_type, cn.veg_model_version_underscore, model_path_description,
                                              run_date, main_logger)
 
@@ -2477,12 +2477,12 @@ def main(cluster_name, year_range, model_type,
         ]
 
         # Creates the global mega-zarr with metadata only
-        zu.initialize_global_zarr(mega_zarr_path, outputs_to_zarr_with_unit, len(interval_year_diff_list),
+        zu.initialize_global_zarr(zarr_path, outputs_to_zarr_with_unit, len(interval_year_diff_list),
                                   ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
-        mapper = fs.get_mapper(mega_zarr_path)
+        mapper = fs.get_mapper(zarr_path)
         ds = xr.open_zarr(mapper, consolidated=False)
         main_logger.info(f"mega-zarr coords: {ds.coords}")
         main_logger.info(f"y range: {ds.y.values.min()}, {ds.y.values.max()}")
@@ -2490,7 +2490,7 @@ def main(cluster_name, year_range, model_type,
         main_logger.info(f"mega-zarr chunk size (years, y, x): {ds.chunksizes}")
 
     else:
-        mega_zarr_path = None
+        zarr_path = None
         outputs_to_zarr = False
 
 
@@ -2526,7 +2526,7 @@ def main(cluster_name, year_range, model_type,
                         chunk, primary_forest_RF_array, partial_disturbance_EF_array, mangrove_C_ratio_array,
                         download_dict_with_data_types, start_year, end_year, interval_type, interval_year_diff_list,
                         interval_length_list, interval_end_years, is_large_run, no_upload, create_zarr,
-                        output_dir_list, stage, model_type, mega_zarr_path, outputs_to_zarr,
+                        output_dir_list, stage, model_type, zarr_path, outputs_to_zarr,
                         retries=1, key=f"vegflux-{chunk}")  # Designed to prevent infinite retries and rerunning completed tasks (happens in global runs)
             futures.append(future)
 
@@ -2658,7 +2658,7 @@ def main(cluster_name, year_range, model_type,
                 client=client,
                 chunk_list=chunk_list,
                 var=var_name,
-                zarr_path=mega_zarr_path,
+                zarr_path=zarr_path,
                 interval_end_years=interval_end_years
             )
             # print("chunk_stats_variable_year_zarr:", chunk_stats_variable_year_zarr)

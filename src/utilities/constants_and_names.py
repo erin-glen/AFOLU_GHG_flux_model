@@ -356,7 +356,7 @@ litter_c_LC_masked_dens_pattern = "carbon_density__litter_C__landcover_masked__M
 non_soil_c_LC_masked_dens_pattern = "carbon_density__non_soil__landcover_masked__MgC"
 soil_c_dens_LC_masked_pattern = "carbon_density__soil_C__landcover_masked__MgC"
 
-# Carbon density pattern for LULUCF model outputs
+# Carbon density pattern for vegetation model outputs
 agc_modeled_dens_pattern = "carbon_density__AGC__MgC"
 bgc_modeled_dens_pattern = "carbon_density__BGC__MgC"
 deadwood_c_modeled_dens_pattern = "carbon_density__deadwood_C__MgC"
@@ -778,6 +778,9 @@ bgc_gross_emis_pattern = "gross_emissions__BGC__MgCO2"
 deadwood_c_gross_emis_pattern = "gross_emissions__deadwood_C__MgCO2"
 litter_c_gross_emis_pattern = "gross_emissions__litter_C__MgCO2"
 
+ch4_gross_emis_pattern = "gross_emissions__CH4__MgCO2e"
+n2o_gross_emis_pattern = "gross_emissions__N2O__MgCO2e"
+
 agc_gross_removals_pattern = "gross_removals__AGC__MgCO2"
 bgc_gross_removals_pattern = "gross_removals__BGC__MgCO2"
 deadwood_c_gross_removals_pattern = "gross_removals__deadwood_C__MgCO2"
@@ -787,9 +790,6 @@ net_flux_agc_pattern = "net_flux__AGC__MgCO2"
 net_flux_bgc_pattern = "net_flux__BGC__MgCO2"
 net_flux_deadwood_c_pattern = "net_flux__deadwood_C__MgCO2"
 net_flux_litter_c_pattern = "net_flux__litter_C__MgCO2"
-
-ch4_flux_pattern = "gross_emissions__CH4__MgCO2e"
-n2o_flux_pattern = "gross_emissions__N2O__MgCO2e"
 
 gross_emis_all_C_pools_CO2_only_pattern = "gross_emissions__all_C_pools__CO2_only__MgCO2"
 gross_emis_all_C_pools_non_CO2_only_pattern = "gross_emissions__all_C_pools__non_CO2_only__MgCO2e"
@@ -835,8 +835,8 @@ veg_core_output_dirs = [
     f"{veg_outputs_path}{bgc_gross_removals_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{veg_outputs_path}{deadwood_c_gross_removals_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{veg_outputs_path}{litter_c_gross_removals_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{ch4_flux_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
-    f"{veg_outputs_path}{n2o_flux_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{ch4_gross_emis_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
+    f"{veg_outputs_path}{n2o_gross_emis_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{veg_outputs_path}{land_state_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/CHUNK_SIZE_pixels/RUN_DATE/",
     f"{veg_outputs_path}{agc_rf_pre_dist_pattern}/MODEL_INTERVAL_TYPE_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/RUN_DATE/"
 ]
@@ -869,7 +869,7 @@ veg_summative_output_patterns = [
 core_veg_outputs_to_zarr = [
     agc_modeled_dens_pattern, bgc_modeled_dens_pattern, deadwood_c_modeled_dens_pattern, litter_c_modeled_dens_pattern,
     agc_gross_emis_pattern, bgc_gross_emis_pattern, deadwood_c_gross_emis_pattern, litter_c_gross_emis_pattern,
-    ch4_flux_pattern, n2o_flux_pattern,
+    ch4_gross_emis_pattern, n2o_gross_emis_pattern,
     agc_gross_removals_pattern, bgc_gross_removals_pattern, deadwood_c_gross_removals_pattern, litter_c_gross_removals_pattern,
     land_state_pattern, composite_primary_forest, forest_age_output_pattern
 ]
@@ -1014,8 +1014,10 @@ LULUCF_output_dirs = [
 
 
 #######
-### Zonal stats zarrs
+### Zonal stats resources
 #######
+
+### Contextual layer zarrs
 
 contextual_zarr_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/contextual_layer_global_zarr/"
 
@@ -1065,7 +1067,299 @@ watershed_zarr_date = '20260213'
 watershed_zarr_dtype = 'uint16'
 watershed_geotif_path = "s3://gfw2-data/water/mapbox_river_basins__from_gfw-data-lake/v2018/raster/epsg-4326/10/40000/id/gdal-geotiff/"
 watershed_zarr_path = f"{contextual_zarr_path}river_basins/v2018/{watershed_zarr_date}_fillValue_removed/river_basins_{watershed_zarr_date}.zarr"
-watershed_test_chunk = [29, -1, 30, 0]  # 7005 in upper and lower left corners, 7003 in upper and lower right corners; should have full coverage (00N_020E)
+watershed_test_chunk = [29, -1, 30, 0]  # 7005 in upper and lower left corners, 7003 in upper and lower right corners; should have nearly full coverage (00N_020E)
+
+### Value options for contextual layer values.
+### Every contextual layer needs to have all possible values listed here.
+
+state_node_lookup_table_local = "/mnt/c/GIS/git/AFOLU_GHG_flux_model/src/LULUCF/LULUCF_state_node_lookup_table.xlsx"
+state_node_lookup_table_s3 = "http://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_model/LULUCF/state_node_lookup_tables/LULUCF_state_node_lookup_table.xlsx"
+sheet = "v102_20251027"
+
+BRA_biome_codes = np.array([1, 2, 3, 4, 5, 6], dtype=np.uint8)
+
+WDPA_codes = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], dtype=np.uint8)
+
+# GADM v4.1 adm0 IDs (from Solomon Negusse's notebook)
+gadm_adm0_ids = np.array([  0.,   4.,   8.,  10.,  12.,  16.,  20.,  24.,  28.,  31.,  32.,
+        36.,  40.,  44.,  48.,  50.,  51.,  52.,  56.,  60.,  64.,  68.,
+        70.,  72.,  74.,  76.,  84.,  86.,  90.,  92.,  96., 100., 104.,
+       108., 112., 116., 120., 124., 132., 136., 140., 144., 148., 152.,
+       156., 158., 162., 166., 170., 174., 175., 178., 180., 184., 188.,
+       191., 192., 196., 203., 204., 208., 212., 214., 218., 222., 226.,
+       231., 232., 233., 234., 238., 239., 242., 246., 248., 250., 254.,
+       258., 260., 262., 266., 268., 270., 275., 276., 288., 292., 296.,
+       300., 304., 308., 312., 316., 320., 324., 328., 332., 334., 336.,
+       340., 348., 352., 356., 360., 364., 368., 372., 376., 380., 384.,
+       388., 392., 398., 400., 404., 408., 410., 414., 417., 418., 422.,
+       426., 428., 430., 434., 438., 440., 442., 450., 454., 458., 462.,
+       466., 470., 474., 478., 480., 484., 492., 496., 498., 499., 500.,
+       504., 508., 512., 516., 520., 524., 528., 531., 533., 534., 535.,
+       540., 548., 554., 558., 562., 566.,70., 574., 578., 580., 581.,
+       583., 584., 585., 586., 591., 598., 600., 604., 608., 612., 616.,
+       620., 624., 626., 630., 634., 638., 642., 643., 646., 652., 654.,
+       659., 660., 662., 663., 666., 670., 674., 678., 682., 686., 688.,
+       690., 694., 702., 703., 704., 705., 706., 710., 716., 724., 728.,
+       729., 732., 740., 744., 748., 752., 756., 760., 762., 764., 768.,
+       772., 776., 780., 784., 788., 792., 795., 796., 798., 800., 804.,
+       807., 818., 826., 831., 832., 833., 834., 840., 850., 854., 858.,
+       860., 862., 876., 882., 887., 894.], dtype=np.uint16)
+
+cont_eco_codes = np.array([0,
+    1004, 1007, 1008, 1009, 1010, 1014, 1016, 1017, 1018, 1018,
+    1019, 1020, 1021, 1022,
+    2001, 2002, 2003, 2004, 2004, 2005, 2006, 2007, 2007, 2008,
+    2008, 2009, 2009, 2010, 2010, 2011, 2012, 2013, 2013,
+    2014, 2014, 2014, 2014, 2015, 2015, 2016, 2017, 2017,
+    2018, 2018, 2018, 2019, 2019, 2020, 2020, 2021, 2021, 2022,
+    3004, 3005,
+    4001, 4002, 4003, 4004, 4005, 4006, 4008, 4009, 4011, 4012,
+    4013, 4014, 4015, 4016, 4017, 4018, 4019, 4020, 4022,
+    5007, 5010, 5021,
+    6007, 6010, 6021,
+    7001, 7002, 7003, 7004, 7005, 7007, 7009, 7011, 7012,
+    7013, 7014, 7015, 7022,
+    8004, 8008, 8013, 8014
+], dtype=np.uint16)
+
+# Converts numeric ISO values to ISO codes
+# From https://github.com/wri/project-zeno-data-infra/blob/main/notebooks/grasslands_areas_gadm_2000-2022.ipynb
+numeric_to_alpha3 = {
+    4: 'AFG', 248: 'ALA', 8: 'ALB', 12: 'DZA', 16: 'ASM', 20: 'AND', 24: 'AGO', 660: 'AIA',
+    10: 'ATA', 28: 'ATG', 32: 'ARG', 51: 'ARM', 533: 'ABW', 36: 'AUS', 40: 'AUT', 31: 'AZE',
+    44: 'BHS', 48: 'BHR', 50: 'BGD', 52: 'BRB', 112: 'BLR', 56: 'BEL', 84: 'BLZ', 204: 'BEN',
+    60: 'BMU', 64: 'BTN', 68: 'BOL', 535: 'BES', 70: 'BIH', 72: 'BWA', 74: 'BVT', 76: 'BRA',
+    86: 'IOT', 96: 'BRN', 100: 'BGR', 854: 'BFA', 108: 'BDI', 132: 'CPV', 116: 'KHM', 120: 'CMR',
+    124: 'CAN', 136: 'CYM', 140: 'CAF', 148: 'TCD', 152: 'CHL', 156: 'CHN', 162: 'CXR', 166: 'CCK',
+    170: 'COL', 174: 'COM', 178: 'COG', 180: 'COD', 184: 'COK', 188: 'CRI', 384: 'CIV', 191: 'HRV',
+    192: 'CUB', 531: 'CUW', 196: 'CYP', 203: 'CZE', 208: 'DNK', 262: 'DJI', 212: 'DMA', 214: 'DOM',
+    218: 'ECU', 818: 'EGY', 222: 'SLV', 226: 'GNQ', 232: 'ERI', 233: 'EST', 748: 'SWZ', 231: 'ETH',
+    238: 'FLK', 234: 'FRO', 242: 'FJI', 246: 'FIN', 250: 'FRA', 254: 'GUF', 258: 'PYF', 260: 'ATF',
+    266: 'GAB', 270: 'GMB', 268: 'GEO', 276: 'DEU', 288: 'GHA', 292: 'GIB', 300: 'GRC', 304: 'GRL',
+    308: 'GRD', 312: 'GLP', 316: 'GUM', 320: 'GTM', 831: 'GGY', 324: 'GIN', 624: 'GNB', 328: 'GUY',
+    332: 'HTI', 334: 'HMD', 336: 'VAT', 340: 'HND', 344: 'HKG', 348: 'HUN', 352: 'ISL', 356: 'IND',
+    360: 'IDN', 364: 'IRN', 368: 'IRQ', 372: 'IRL', 833: 'IMN', 376: 'ISR', 380: 'ITA', 388: 'JAM',
+    392: 'JPN', 832: 'JEY', 400: 'JOR', 398: 'KAZ', 404: 'KEN', 296: 'KIR', 408: 'PRK', 410: 'KOR',
+    414: 'KWT', 417: 'KGZ', 418: 'LAO', 428: 'LVA', 422: 'LBN', 426: 'LSO', 430: 'LBR', 434: 'LBY',
+    438: 'LIE', 440: 'LTU', 442: 'LUX', 446: 'MAC', 450: 'MDG', 454: 'MWI', 458: 'MYS', 462: 'MDV',
+    466: 'MLI', 470: 'MLT', 584: 'MHL', 474: 'MTQ', 478: 'MRT', 480: 'MUS', 175: 'MYT', 484: 'MEX',
+    583: 'FSM', 498: 'MDA', 492: 'MCO', 496: 'MNG', 499: 'MNE', 500: 'MSR', 504: 'MAR', 508: 'MOZ',
+    104: 'MMR', 516: 'NAM', 520: 'NRU', 524: 'NPL', 528: 'NLD', 540: 'NCL', 554: 'NZL', 558: 'NIC',
+    562: 'NER', 566: 'NGA', 570: 'NIU', 574: 'NFK', 807: 'MKD', 580: 'MNP', 578: 'NOR', 512: 'OMN',
+    586: 'PAK', 585: 'PLW', 275: 'PSE', 591: 'PAN', 598: 'PNG', 600: 'PRY', 604: 'PER', 608: 'PHL',
+    612: 'PCN', 616: 'POL', 620: 'PRT', 630: 'PRI', 634: 'QAT', 638: 'REU', 642: 'ROU', 643: 'RUS',
+    646: 'RWA', 652: 'BLM', 654: 'SHN', 659: 'KNA', 662: 'LCA', 663: 'MAF', 666: 'SPM', 670: 'VCT',
+    882: 'WSM', 674: 'SMR', 678: 'STP', 682: 'SAU', 686: 'SEN', 688: 'SRB', 690: 'SYC', 694: 'SLE',
+    702: 'SGP', 534: 'SXM', 703: 'SVK', 705: 'SVN', 90: 'SLB', 706: 'SOM', 710: 'ZAF', 239: 'SGS',
+    728: 'SSD', 724: 'ESP', 144: 'LKA', 729: 'SDN', 740: 'SUR', 744: 'SJM', 752: 'SWE', 756: 'CHE',
+    760: 'SYR', 158: 'TWN', 762: 'TJK', 834: 'TZA', 764: 'THA', 626: 'TLS', 768: 'TGO', 772: 'TKL',
+    776: 'TON', 780: 'TTO', 788: 'TUN', 792: 'TUR', 795: 'TKM', 796: 'TCA', 798: 'TUV', 800: 'UGA',
+    804: 'UKR', 784: 'ARE', 826: 'GBR', 840: 'USA', 581: 'UMI', 858: 'URY', 860: 'UZB', 548: 'VUT',
+    862: 'VEN', 704: 'VNM', 92: 'VGB', 850: 'VIR', 876: 'WLF', 732: 'ESH', 887: 'YEM', 894: 'ZMB',
+    716: 'ZWE', 0: 'NA'
+}
+
+iso_to_country = {
+    'ABW': 'Aruba', 'AFG': 'Afghanistan', 'AGO': 'Angola', 'AIA': 'Anguilla', 'ALA': 'Åland Islands', 'ALB': 'Albania', 'AND': 'Andorra', 'ARE': 'United Arab Emirates', 'ARG': 'Argentina',
+    'ARM': 'Armenia', 'ATF': 'French Southern Territories', 'ATG': 'Antigua and Barbuda', 'AUS': 'Australia', 'AUT': 'Austria', 'AZE': 'Azerbaijan', 'BDI': 'Burundi', 'BEL': 'Belgium', 'BEN': 'Benin',
+    'BES': 'Bonaire', 'BFA': 'Burkina Faso', 'BGD': 'Bangladesh', 'BGR': 'Bulgaria', 'BHR': 'Bahrain', 'BHS': 'Bahamas', 'BIH': 'Bosnia and Herzegovina', 'BLM': 'Saint Barthélemy', 'BLR': 'Belarus',
+    'BLZ': 'Belize', 'BMU': 'Bermuda', 'BOL': 'Bolivia', 'BRA': 'Brazil', 'BRB': 'Barbados', 'BRN': 'Brunei', 'BTN': 'Bhutan', 'BWA': 'Botswana', 'CAF': 'Central African Republic', 'CAN': 'Canada',
+    'CHE': 'Switzerland', 'CHL': 'Chile', 'CHN': 'China', 'CIV': 'Côte d Ivoire', 'CMR': 'Cameroon', 'COD': 'Democratic Republic of the Congo', 'COG': 'Republic of Congo', 'COL': 'Colombia',
+    'COM': 'Comoros', 'CPV': 'Cape Verde', 'CRI': 'Costa Rica', 'CUB': 'Cuba', 'CUW': 'Curaçao', 'CYM': 'Cayman Islands', 'CYP': 'Cyprus', 'CZE': 'Czechia', 'DEU': 'Germany', 'DJI': 'Djibouti',
+    'DMA': 'Dominica', 'DNK': 'Denmark', 'DOM': 'Dominican Republic', 'DZA': 'Algeria', 'ECU': 'Ecuador', 'EGY': 'Egypt', 'ERI': 'Eritrea', 'ESH': 'Western Sahara', 'ESP': 'Spain', 'EST': 'Estonia',
+    'ETH': 'Ethiopia', 'FIN': 'Finland', 'FJI': 'Fiji', 'FLK': 'Falkland Islands', 'FRA': 'France', 'FRO': 'Faroe Islands', 'FSM': 'Micronesia (Federated States of)', 'GAB': 'Gabon', 'GBR': 'United Kingdom of Great Britain and Northern Ireland',
+    'GEO': 'Georgia', 'GGY': 'Guernsey', 'GHA': 'Ghana', 'GIB': 'Gibraltar', 'GIN': 'Guinea', 'GLP': 'Guadeloupe', 'GMB': 'Gambia', 'GNB': 'Guinea-Bissau', 'GNQ': 'Equatorial Guinea', 'GRC': 'Greece',
+    'GRD': 'Grenada', 'GRL': 'Greenland', 'GTM': 'Guatemala', 'GUF': 'French Guiana', 'GUY': 'Guyana', 'HKG': 'Hong Kong', 'HND': 'Honduras', 'HRV': 'Croatia', 'HTI': 'Haiti', 'HUN': 'Hungary',
+    'IDN': 'Indonesia', 'IMN': 'Isle of Man', 'IND': 'India', 'IRL': 'Ireland', 'IRN': 'Iran', 'IRQ': 'Iraq', 'ISL': 'Iceland', 'ISR': 'Israel', 'ITA': 'Italy', 'JAM': 'Jamaica', 'JEY': 'Jersey',
+    'JOR': 'Jordan', 'JPN': 'Japan', 'KAZ': 'Kazakhstan', 'KEN': 'Kenya', 'KGZ': 'Kyrgyzstan', 'KHM': 'Cambodia', 'KIR': 'Kiribati', 'KNA': 'Saint Kitts and Nevis', 'KOR': 'Korea', 'KWT': 'Kuwait',
+    'LAO': 'Laos', 'LBN': 'Lebanon', 'LBR': 'Liberia', 'LBY': 'Libya', 'LCA': 'Saint Lucia', 'LIE': 'Liechtenstein', 'LKA': 'Sri Lanka', 'LSO': 'Lesotho', 'LTU': 'Lithuania', 'LUX': 'Luxembourg',
+    'LVA': 'Latvia', 'MAC': 'Macao', 'MAF': 'Saint Martin (French part)', 'MAR': 'Morocco', 'MCO': 'Monaco', 'MDA': 'Moldova', 'MDG': 'Madagascar', 'MDV': 'Maldives',
+    'MEX': 'Mexico', 'MKD': 'North Macedonia', 'MLI': 'Mali', 'MLT': 'Malta', 'MMR': 'Myanmar', 'MNE': 'Montenegro', 'MNG': 'Mongolia', 'MOZ': 'Mozambique', 'MRT': 'Mauritania', 'MSR': 'Montserrat', 'MTQ': 'Martinique', 'MUS': 'Mauritius',
+    'MWI': 'Malawi', 'MYS': 'Malaysia', 'MYT': 'Mayotte', 'NAM': 'Namibia', 'NCL': 'New Caledonia', 'NER': 'Niger', 'NFK': 'Norfolk Island', 'NGA': 'Nigeria', 'NIC': 'Nicaragua', 'NLD': 'Netherlands',
+    'NOR': 'Norway', 'NPL': 'Nepal', 'NRU': 'Nauru', 'NZL': 'New Zealand', 'OMN': 'Oman', 'PAK': 'Pakistan', 'PAN': 'Panama', 'PER': 'Peru', 'PHL': 'Philippines', 'PLW': 'Palau', 'PNG': 'Papua New Guinea',
+    'POL': 'Poland', 'PRI': 'Puerto Rico', 'PRK': 'Korea (the Democratic Peoples Republic of)', 'PRT': 'Portugal', 'PRY': 'Paraguay', 'PSE': 'Palestine, State of', 'QAT': 'Qatar', 'REU': 'Réunion',
+    'ROU': 'Romania', 'RUS': 'Russian Federation', 'RWA': 'Rwanda', 'SAU': 'Saudi Arabia', 'SDN': 'Sudan', 'SEN': 'Senegal',
+    'SGP': 'Singapore',
+    'SJM': 'Svalbard and Jan Mayen',
+    'SLB': 'Solomon Islands',
+    'SLE': 'Sierra Leone',
+    'SLV': 'El Salvador',
+    'SMR': 'San Marino',
+    'SOM': 'Somalia',
+    'SPM': 'Saint Pierre and Miquelon',
+    'SRB': 'Serbia',
+    'SSD': 'South Sudan',
+    'STP': 'Sao Tome and Principe',
+    'SUR': 'Suriname',
+    'SVK': 'Slovakia',
+    'SVN': 'Slovenia',
+    'SWE': 'Sweden',
+    'SWZ': 'Swaziland',
+    'SXM': 'Sint Maarten',
+    'SYC': 'Seychelles',
+    'SYR': 'Syria',
+    'TCA': 'Turks and Caicos Islands',
+    'TCD': 'Chad',
+    'TGO': 'Togo',
+    'THA': 'Thailand',
+    'TJK': 'Tajikistan',
+    'TKM': 'Turkmenistan',
+    'TLS': 'East Timor',
+    'TTO': 'Trinidad and Tobago',
+    'TUN': 'Tunisia',
+    'TUR': 'Turkey',
+    'TUV': 'Tuvalu',
+    'TWN': 'Taiwan',
+    'TZA': 'Tanzania',
+    'UGA': 'Uganda',
+    'UKR': 'Ukraine',
+    'UMI': 'United States Minor Outlying Islands',
+    'URY': 'Uruguay',
+    'USA': 'United States of America (the)',
+    'UZB': 'Uzbekistan',
+    'VAT': 'Holy See',
+    'VCT': 'Saint Vincent and the Grenadines',
+    'VEN': 'Venezuela',
+    'VGB': 'British Virgin Islands',
+    'VIR': 'Virgin Islands, U.S.',
+    'VNM': 'Vietnam',
+    'VUT': 'Vanuatu',
+    'XAD': 'nan',
+    'XCA': 'nan',
+    'XCL': 'nan',
+    'XKO': 'nan',
+    'XNC': 'nan',
+    'XPI': 'nan',
+    'XSP': 'nan',
+    'YEM': 'Yemen',
+    'ZAF': 'South Africa',
+    'ZMB': 'Zambia',
+    'ZWE': 'Zimbabwe',
+    'NA': 'no_country'
+}
+
+iso_to_region = {
+    'ABW': 'Tropical LAC', 'AFG': 'Non-tropical Asia', 'AGO': 'Tropical Africa', 'AIA': 'Tropical LAC', 'ALA': 'Europe', 'ALB': 'Europe', 'AND': 'Europe', 'ARE': 'Non-tropical Asia',
+    'ARG': 'Non-tropical LAC', 'ARM': 'Non-tropical Asia', 'ATF': 'Non-tropical Africa', 'ATG': 'Tropical LAC', 'AUS': 'Non-tropical Asia', 'AUT': 'Europe', 'AZE': 'Non-tropical Asia',
+    'BDI': 'Tropical Africa', 'BEL': 'Europe', 'BEN': 'Tropical Africa', 'BES': 'Tropical LAC', 'BFA': 'Tropical Africa', 'BGD': 'Tropical Asia', 'BGR': 'Europe', 'BHR': 'Non-tropical Asia',
+    'BHS': 'Tropical LAC', 'BIH': 'Europe', 'BLM': 'Tropical LAC', 'BLR': 'Europe', 'BLZ': 'Tropical LAC', 'BMU': 'Tropical LAC', 'BOL': 'Tropical LAC', 'BRA': 'Tropical LAC', 'BRB': 'Tropical LAC',
+    'BRN': 'Tropical Asia', 'BTN': 'Tropical Asia', 'BWA': 'Tropical Africa', 'CAF': 'Tropical Africa', 'CAN': 'North America', 'CHE': 'Europe', 'CHL': 'Non-tropical LAC', 'CHN': 'Non-tropical Asia',
+    'CIV': 'Tropical Africa', 'CMR': 'Tropical Africa', 'COD': 'Tropical Africa', 'COG': 'Tropical Africa', 'COL': 'Tropical LAC', 'COM': 'Tropical Africa', 'CPV': 'Tropical Africa',
+    'CRI': 'Tropical LAC', 'CUB': 'Tropical LAC', 'CUW': 'Tropical LAC', 'CYM': 'Tropical LAC', 'CYP': 'Europe', 'CZE': 'Europe', 'DEU': 'Europe', 'DJI': 'Tropical Africa', 'DMA': 'Tropical LAC',
+    'DNK': 'Europe', 'DOM': 'Tropical LAC', 'DZA': 'Non-tropical Africa', 'ECU': 'Tropical LAC', 'EGY': 'Non-tropical Africa', 'ERI': 'Tropical Africa', 'ESH': 'Non-tropical Africa', 'ESP': 'Europe', 'EST': 'Europe',
+    'ETH': 'Tropical Africa', 'FIN': 'Europe', 'FJI': 'Tropical Asia', 'FLK': 'Non-tropical LAC', 'FRA': 'Europe', 'FRO': 'Europe', 'FSM': 'Tropical Asia', 'GAB': 'Tropical Africa', 'GBR': 'Europe',
+    'GEO': 'Non-tropical Asia', 'GGY': 'Europe', 'GHA': 'Tropical Africa', 'GIB': 'Europe', 'GIN': 'Tropical Africa', 'GLP': 'Tropical LAC', 'GMB': 'Tropical Africa', 'GNB': 'Tropical Africa',
+    'GNQ': 'Tropical Africa', 'GRC': 'Europe', 'GRD': 'Tropical LAC', 'GRL': 'Europe', 'GTM': 'Tropical LAC', 'GUF': 'Tropical LAC', 'GUY': 'Tropical LAC', 'HKG': 'Non-tropical Asia', 'HND': 'Tropical LAC',
+    'HRV': 'Europe', 'HTI': 'Tropical LAC', 'HUN': 'Europe', 'IDN': 'Tropical Asia', 'IMN': 'Europe', 'IND': 'Tropical Asia', 'IRL': 'Europe', 'IRN': 'Non-tropical Asia', 'IRQ': 'Non-tropical Asia',
+    'ISL': 'Europe', 'ISR': 'Non-tropical Asia', 'ITA': 'Europe', 'JAM': 'Tropical LAC', 'JEY': 'Europe', 'JOR': 'Non-tropical Asia', 'JPN': 'Non-tropical Asia', 'KAZ': 'Non-tropical Asia', 'KEN': 'Tropical Africa',
+    'KGZ': 'Non-tropical Asia', 'KHM': 'Tropical Asia', 'KIR': 'Tropical Asia', 'KNA': 'Tropical LAC', 'KOR': 'Non-tropical Asia', 'KWT': 'Non-tropical Asia', 'LAO': 'Tropical Asia',
+    'LBN': 'Non-tropical Asia', 'LBR': 'Tropical Africa', 'LBY': 'Non-tropical Africa', 'LCA': 'Tropical LAC', 'LIE': 'Europe', 'LKA': 'Tropical Asia', 'LSO': 'Non-tropical Africa', 'LTU': 'Europe',
+    'LUX': 'Europe', 'LVA': 'Europe', 'MAC': 'Tropical Asia', 'MAF': 'Tropical LAC', 'MAR': 'Non-tropical Africa', 'MCO': 'Europe', 'MDA': 'Europe', 'MDG': 'Tropical Africa', 'MDV': 'Tropical Africa',
+    'MEX': 'Tropical LAC', 'MKD': 'Europe', 'MLI': 'Tropical Africa', 'MLT': 'Europe', 'MMR': 'Tropical Asia', 'MNE': 'Europe', 'MNG': 'Non-tropical Asia', 'MOZ': 'Tropical Africa', 'MRT': 'Tropical Africa',
+    'MSR': 'Tropical LAC', 'MTQ': 'Tropical LAC', 'MUS': 'Tropical Africa', 'MWI': 'Tropical Africa', 'MYS': 'Tropical Asia', 'MYT': 'Tropical Africa', 'NAM': 'Tropical Africa', 'NCL': 'Tropical Asia', 'NER': 'Tropical Africa',
+    'NFK': 'Non-tropical Asia', 'NGA': 'Tropical Africa', 'NIC': 'Tropical LAC', 'NLD': 'Europe', 'NOR': 'Europe', 'NPL': 'Tropical Asia', 'NRU': 'Non-tropical Asia', 'NZL': 'Non-tropical Asia',
+    'OMN': 'Non-tropical Asia', 'PAK': 'Non-tropical Asia', 'PAN': 'Tropical LAC', 'PER': 'Tropical LAC', 'PHL': 'Tropical Asia', 'PLW': 'Tropical Asia', 'PNG': 'Tropical Asia', 'POL': 'Europe',
+    'PRI': 'Tropical LAC', 'PRK': 'Non-tropical Asia', 'PRT': 'Europe', 'PRY': 'Tropical LAC', 'PSE': 'Non-tropical Asia', 'QAT': 'Non-tropical Asia', 'REU': 'Tropical Africa', 'ROU': 'Europe',
+    'RUS': 'Non-tropical Asia', 'RWA': 'Tropical Africa', 'SAU': 'Non-tropical Asia', 'SDN': 'Tropical Africa', 'SEN': 'Tropical Africa', 'SGP': 'Tropical Asia', 'SJM': 'Europe', 'SLB': 'Tropical Asia',
+    'SLE': 'Tropical Africa', 'SLV': 'Tropical LAC', 'SMR': 'Europe', 'SOM': 'Tropical Africa', 'SPM': 'North America', 'SRB': 'Europe', 'SSD': 'Tropical Africa', 'STP': 'Non-tropical Africa', 'SUR': 'Tropical LAC',
+    'SVK': 'Europe', 'SVN': 'Europe', 'SWE': 'Europe', 'SWZ': 'Tropical Africa', 'SXM': 'Tropical LAC', 'SYC': 'Tropical Africa', 'SYR': 'Non-tropical Asia', 'TCA': 'Tropical LAC', 'TCD': 'Tropical Africa',
+    'TGO': 'Tropical Africa', 'THA': 'Tropical Asia', 'TJK': 'Non-tropical Asia', 'TKM': 'Non-tropical Asia', 'TLS': 'Tropical Asia', 'TTO': 'Tropical LAC', 'TUN': 'Non-tropical Africa',
+    'TUR': 'Non-tropical Asia', 'TUV': 'Tropical Asia', 'TWN': 'Non-tropical Asia', 'TZA': 'Tropical Africa', 'UGA': 'Tropical Africa', 'UKR': 'Europe', 'UMI': 'Tropical Asia', 'URY': 'Non-tropical LAC',
+    'USA': 'North America', 'UZB': 'Non-tropical Asia', 'VAT': 'Europe', 'VCT': 'Tropical LAC', 'VEN': 'Tropical LAC', 'VGB': 'Tropical LAC', 'VIR': 'Tropical LAC', 'VNM': 'Tropical Asia',
+    'VUT': 'Tropical Asia', 'XAD': 'Not tropical misc', 'XCA': 'Not tropical misc', 'XCL': 'Not tropical misc', 'XKO': 'Not tropical misc', 'XNC': 'Not tropical misc', 'XPI': 'Not tropical misc',
+    'XSP': 'Not tropical misc', 'YEM': 'Non-tropical Asia', 'ZAF': 'Non-tropical Africa', 'ZMB': 'Tropical Africa', 'ZWE': 'Tropical Africa', 'NA': 'no_country'
+}
+
+# Converst continent-ecozone codes to continent and ecozone labels
+cont_eco_to_text = {
+    1004: {"ecozone": "No data", "continent": "Africa"},
+    1007: {"ecozone": "Subtropical dry forest", "continent": "Africa"},
+    1008: {"ecozone": "Subtropical humid forest", "continent": "Africa"},
+    1009: {"ecozone": "Subtropical mountain system", "continent": "Africa"},
+    1010: {"ecozone": "Subtropical steppe", "continent": "Africa"},
+    1014: {"ecozone": "No data- Assigned to temperate oceanic forest", "continent": "Africa"},
+    1016: {"ecozone": "Tropical desert", "continent": "Africa"},
+    1017: {"ecozone": "Tropical dry forest", "continent": "Africa"},
+    1018: {"ecozone": "Tropical moist deciduous forest", "continent": "Africa"},
+    1019: {"ecozone": "Tropical mountain system", "continent": "Africa"},
+    1020: {"ecozone": "Tropical rainforest", "continent": "Africa"},
+    1021: {"ecozone": "Tropical shrubland", "continent": "Africa"},
+    1022: {"ecozone": "Water", "continent": "Africa"},
+
+    2001: {"ecozone": "Boreal coniferous forest", "continent": "America North"},
+    2002: {"ecozone": "Boreal mountain system", "continent": "America North"},
+    2003: {"ecozone": "Boreal tundra woodland", "continent": "America North"},
+    2004: {"ecozone": "No data", "continent": "America South"},
+    2005: {"ecozone": "Polar", "continent": "America North"},
+    2006: {"ecozone": "Subtropical desert", "continent": "America North"},
+    2007: {"ecozone": "Subtropical dry forest", "continent": "America South"},
+    2008: {"ecozone": "Subtropical humid forest", "continent": "America South"},
+    2009: {"ecozone": "Subtropical mountain system", "continent": "America South"},
+    2010: {"ecozone": "Subtropical steppe", "continent": "America South"},
+    2011: {"ecozone": "Temperate continental forest", "continent": "America North"},
+    2012: {"ecozone": "Temperate desert", "continent": "America North"},
+    2013: {"ecozone": "Temperate mountain system", "continent": "America South"},
+    2014: {"ecozone": "Temperate oceanic forest", "continent": "America South"},
+    2015: {"ecozone": "Temperate steppe", "continent": "America South"},
+    2016: {"ecozone": "Tropical desert", "continent": "America South"},
+    2017: {"ecozone": "Tropical dry forest", "continent": "America South"},
+    2018: {"ecozone": "Tropical moist deciduous forest", "continent": "America South"},
+    2019: {"ecozone": "Tropical mountain system", "continent": "America South"},
+    2020: {"ecozone": "Tropical rainforest", "continent": "America South"},
+    2021: {"ecozone": "Tropical shrubland", "continent": "America South"},
+    2022: {"ecozone": "Water", "continent": "America North"},
+
+    3004: {"ecozone": "No data", "continent": "Antarctica"},
+    3005: {"ecozone": "Polar", "continent": "Antarctica"},
+
+    4001: {"ecozone": "Boreal coniferous forest", "continent": "Asia"},
+    4002: {"ecozone": "Boreal mountain system", "continent": "Asia"},
+    4003: {"ecozone": "Boreal tundra woodland", "continent": "Asia"},
+    4004: {"ecozone": "No data", "continent": "Asia"},
+    4005: {"ecozone": "Polar", "continent": "Asia"},
+    4006: {"ecozone": "Subtropical desert", "continent": "Asia"},
+    4008: {"ecozone": "Subtropical humid forest", "continent": "Asia"},
+    4009: {"ecozone": "Subtropical mountain system", "continent": "Asia"},
+    4011: {"ecozone": "Temperate continental forest", "continent": "Asia"},
+    4012: {"ecozone": "Temperate desert", "continent": "Asia"},
+    4013: {"ecozone": "Temperate mountain system", "continent": "Asia"},
+    4014: {"ecozone": "Temperate oceanic forest", "continent": "Asia"},
+    4015: {"ecozone": "Temperate steppe", "continent": "Asia"},
+    4016: {"ecozone": "Tropical desert", "continent": "Asia"},
+    4017: {"ecozone": "Tropical dry forest", "continent": "Asia"},
+    4018: {"ecozone": "Tropical moist deciduous forest", "continent": "Asia"},
+    4019: {"ecozone": "Tropical mountain system", "continent": "Asia"},
+    4020: {"ecozone": "Tropical rainforest", "continent": "Asia"},
+    4022: {"ecozone": "Water", "continent": "Asia"},
+
+    5007: {"ecozone": "Subtropical dry forest", "continent": "Asia continental"},
+    5010: {"ecozone": "Subtropical steppe", "continent": "Asia continental"},
+    5021: {"ecozone": "Tropical shrubland", "continent": "Asia continental"},
+
+    6007: {"ecozone": "Subtropical dry forest", "continent": "Asia insular"},
+    6010: {"ecozone": "Subtropical steppe", "continent": "Asia insular"},
+    6021: {"ecozone": "Tropical shrubland", "continent": "Asia insular"},
+
+    7001: {"ecozone": "Boreal coniferous forest", "continent": "Europe"},
+    7002: {"ecozone": "Boreal mountain system", "continent": "Europe"},
+    7003: {"ecozone": "Boreal tundra woodland", "continent": "Europe"},
+    7004: {"ecozone": "No data", "continent": "Europe"},
+    7005: {"ecozone": "Polar", "continent": "Europe"},
+    7007: {"ecozone": "Subtropical dry forest", "continent": "Europe"},
+    7009: {"ecozone": "Subtropical mountain system", "continent": "Europe"},
+    7011: {"ecozone": "Temperate continental forest", "continent": "Europe"},
+    7012: {"ecozone": "Temperate desert", "continent": "Europe"},
+    7013: {"ecozone": "Temperate mountain system", "continent": "Europe"},
+    7014: {"ecozone": "Temperate oceanic forest", "continent": "Europe"},
+    7015: {"ecozone": "Temperate steppe", "continent": "Europe"},
+    7022: {"ecozone": "Water", "continent": "Europe"},
+
+    8004: {"ecozone": "No data", "continent": "New Zealand"},
+    8008: {"ecozone": "Subtropical humid forest", "continent": "New Zealand"},
+    8013: {"ecozone": "Temperate mountain system", "continent": "New Zealand"},
+    8014: {"ecozone": "Temperate oceanic forest", "continent": "New Zealand"},
+}
+
 
 
 
