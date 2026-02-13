@@ -61,6 +61,7 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
             'zarr_dtype': cn.adm0_zarr_dtype,
             'geotif_dir': cn.adm0_geotif_path,
             'zarr_dir': cn.adm0_zarr_path,
+            'test_chunk': cn.adm0_test_chunk
         }
 
     if 'pixel_area' in layers_to_process:
@@ -69,6 +70,7 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
             'zarr_dtype': cn.pixel_area_zarr_dtype,
             'geotif_dir': cn.pixel_area_geotif_path,
             'zarr_dir': cn.pixel_area_zarr_path,
+            'test_chunk': cn.pixel_area_test_chunk
         }
 
     if 'wdpa' in layers_to_process:
@@ -77,6 +79,7 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
             'zarr_dtype': cn.wdpa_zarr_dtype,
             'geotif_dir': cn.wdpa_geotif_path,
             'zarr_dir': cn.wdpa_zarr_path,
+            'test_chunk': cn.wdpa_test_chunk
         }
 
     if 'brazil_biomes' in layers_to_process:
@@ -85,6 +88,7 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
             'zarr_dtype': cn.BRA_biomes_zarr_dtype,
             'geotif_dir': cn.BRA_biomes_geotif_path,
             'zarr_dir': cn.BRA_biomes_zarr_path,
+            'test_chunk': cn.BRA_biomes_test_chunk
         }
 
     if 'cont_eco' in layers_to_process:
@@ -93,6 +97,7 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
             'zarr_dtype': cn.cont_eco_zarr_dtype,
             'geotif_dir': cn.cont_eco_geotif_path,
             'zarr_dir': cn.cont_eco_zarr_path,
+            'test_chunk': cn.cont_eco_test_chunk
         }
 
     if 'landmark' in layers_to_process:
@@ -101,6 +106,7 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
             'zarr_dtype': cn.landmark_zarr_dtype,
             'geotif_dir': cn.landmark_geotif_path,
             'zarr_dir': cn.landmark_zarr_path,
+            'test_chunk': cn.landmark_test_chunk
         }
 
     if 'KBA' in layers_to_process:
@@ -109,14 +115,16 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
             'zarr_dtype': cn.KBA_zarr_dtype,
             'geotif_dir': cn.KBA_geotif_path,
             'zarr_dir': cn.KBA_zarr_path,
+            'test_chunk': cn.KBA_test_chunk
         }
 
     if 'watersheds' in layers_to_process:
-        layers_to_zarr["KBA"] = {
+        layers_to_zarr["watersheds"] = {
             'zarr_date': cn.watershed_zarr_date,
             'zarr_dtype': cn.watershed_zarr_dtype,
             'geotif_dir': cn.watershed_geotif_path,
             'zarr_dir': cn.watershed_zarr_path,
+            'test_chunk': cn.watershed_test_chunk
         }
 
     fs = fsspec.filesystem("s3", anon=False)
@@ -129,20 +137,21 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
         main_logger.info(f"Processing {layer_to_zarr}: {uu.timestr()}")
         layer_start_time = time.time()
 
-        # geotif_uris_list, geotif_count = uu.list_raster_full_paths_in_s3_folder_and_count(values['geotif_dir'])
-        # geotif_uris_series = pd.Series(geotif_uris_list)
-        #
-        # main_logger.info(f"  Input s3 geotif folder: {values['geotif_dir']}")
-        # main_logger.info(f"  First geotif in folder: {geotif_uris_series[0]}")
-        # main_logger.info(f"  Tile count in {layer_to_zarr}: {geotif_count}")
-        #
-        # main_logger.info(f"  Reading {layer_to_zarr}: {uu.timestr()}")
-        # layer_xarray_chunks = zu.make_xarray_chunks(geotif_uris_series, cn.chunk_dims)
-        # layer_xarray_chunks['band_data'] = layer_xarray_chunks['band_data'].astype(values['zarr_dtype'])
-        #
-        # main_logger.info(f"  Zarring {layer_to_zarr}: {uu.timestr()}")
-        # layer_xarray_chunks.to_zarr(values['zarr_dir'], mode='w')
-        # zu.remove_FillValue(values['zarr_dir'])  # Added per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d to deal with FillValue problems
+        # Get list of geotifs and convert to a series
+        geotif_uris_list, geotif_count = uu.list_raster_full_paths_in_s3_folder_and_count(values['geotif_dir'])
+        geotif_uris_series = pd.Series(geotif_uris_list)
+
+        main_logger.info(f"  Input s3 geotif folder: {values['geotif_dir']}")
+        main_logger.info(f"  First geotif in folder: {geotif_uris_series[0]}")
+        main_logger.info(f"  Tile count in {layer_to_zarr}: {geotif_count}")
+
+        main_logger.info(f"  Reading {layer_to_zarr}: {uu.timestr()}")
+        layer_xarray_chunks = zu.make_xarray_chunks(geotif_uris_series, cn.chunk_dims)
+        layer_xarray_chunks['band_data'] = layer_xarray_chunks['band_data'].astype(values['zarr_dtype'])
+
+        main_logger.info(f"  Zarring {layer_to_zarr}: {uu.timestr()}")
+        layer_xarray_chunks.to_zarr(values['zarr_dir'], mode='w')
+        zu.remove_FillValue(values['zarr_dir'])  # Added per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d to deal with FillValue problems
 
         layer_end_time = time.time()
         main_logger.info(f"  Finished zarring {layer_to_zarr}, took {round(layer_end_time - layer_start_time)} seconds: {uu.timestr()}")
@@ -199,7 +208,7 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
     main_logger.info(f"  Finished zarring {len(layers_to_zarr)} contextual layers, took {round(end_time - start_time)} seconds: {uu.timestr()}")
 
     s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
-    log_name = f"{cn.combined_log}_main_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
+    log_name = f"{cn.combined_log}_main_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}__{layers_to_process}.log"
     s3_client.upload_file(main_log_local_path, "gfw2-data", Key=f"{cn.s3_log_path}{log_name}")
 
 
