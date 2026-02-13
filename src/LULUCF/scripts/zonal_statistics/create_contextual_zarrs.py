@@ -191,17 +191,17 @@ def main(cluster_name, layers_to_process, no_upload, log_note=None):
         # Gets lat and long indices for chunk based on the indices of this zarr (as opposed to global zarr indices)
         lat_vals = y_coords  # usually descending
         lon_vals = x_coords  # usually ascending
-        lat0, lat1 = zu.get_index_range(lat_vals, test_chunk[3], test_chunk[1], descending=True)
-        lon0, lon1 = zu.get_index_range(lon_vals, test_chunk[0], test_chunk[2])
+        lat0, lat1 = zu.get_index_range(lat_vals, values['test_chunk'][3], values['test_chunk'][1], descending=True)
+        lon0, lon1 = zu.get_index_range(lon_vals, values['test_chunk'][0], values['test_chunk'][2])
 
         # Array from zarr chunk
         zarr_chunk_array = zarr_array[lat0:lat1, lon0:lon1]
 
         main_logger.info(f"  zarr_chunk_array: {zarr_chunk_array}")
-        main_logger.info(f"  Min for {test_chunk}: {float(np.nanmin(zarr_chunk_array))}")
-        main_logger.info(f"  Mean for {test_chunk}: {float(np.nanmean(zarr_chunk_array))}")
-        main_logger.info(f"  Max for {test_chunk}: {float(np.nanmax(zarr_chunk_array))}")
-        main_logger.info(f"  Count for {test_chunk}: {np.count_nonzero(zarr_chunk_array)}")
+        main_logger.info(f"  Min for {values['test_chunk']}: {float(np.nanmin(zarr_chunk_array))}")
+        main_logger.info(f"  Mean for {values['test_chunk']}: {float(np.nanmean(zarr_chunk_array))}")
+        main_logger.info(f"  Max for {values['test_chunk']}: {float(np.nanmax(zarr_chunk_array))}")
+        main_logger.info(f"  Count for {values['test_chunk']}: {np.count_nonzero(zarr_chunk_array)}")
 
     end_time = time.time()
     main_logger.info(f"  Finished zarring {len(layers_to_zarr)} contextual layers, took {round(end_time - start_time)} seconds: {uu.timestr()}")
