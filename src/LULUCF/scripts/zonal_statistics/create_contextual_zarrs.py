@@ -5,7 +5,7 @@ Creating adm0, pixel area and IFL/primary forest used 54 credits $3.05 AWS charg
 https://cloud.coiled.io/clusters/1311444/account/wri-forest-research/information?workspace=WRI-forest-research
 
 python -m src.utilities.create_cluster -n 50 -m 64 -cn vegetation_zonal_stats
-python -m src.LULUCF.scripts.zonal_statistics.create_contextual_zarrs -mt standard -mpd test_box -bb 116.25 -2.25 116.5 -2 -cs 0.25 -id 20260130 -l adm0
+python -m src.LULUCF.scripts.zonal_statistics.create_contextual_zarrs -cn vegetation_zonal_stats -l X -ln "X zarr creation for zonal stats"
 
 """
 
@@ -33,7 +33,7 @@ from src.utilities import zarr_utilities as zu
 
 
 
-def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_box=None, log_note=None):
+def main(cluster_name, layers_to_process, no_upload, log_note=None):
 
     ### Step 1: Preparation
 
@@ -55,7 +55,7 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
 
     layers_to_zarr = {}
 
-    if 'adm0' in layers_to_process:
+    if 'adm0' in layers_to_process:  # Didn't use this script to create zarr; used notebook predecessor
         layers_to_zarr["adm0"] = {
             'zarr_date': cn.adm0_zarr_date,
             'zarr_dtype': cn.adm0_zarr_dtype,
@@ -64,7 +64,7 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
             'test_chunk': cn.adm0_test_chunk
         }
 
-    if 'pixel_area' in layers_to_process:
+    if 'pixel_area' in layers_to_process:  # Didn't use this script to create zarr; used notebook predecessor
         layers_to_zarr["pixel_area"] = {
             'zarr_date': cn.pixel_area_zarr_date,
             'zarr_dtype': cn.pixel_area_zarr_dtype,
@@ -73,7 +73,7 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
             'test_chunk': cn.pixel_area_test_chunk
         }
 
-    if 'wdpa' in layers_to_process:
+    if 'wdpa' in layers_to_process:  # Didn't use this script to create zarr; used notebook predecessor
         layers_to_zarr["wdpa"] = {
             'zarr_date': cn.wdpa_zarr_date,
             'zarr_dtype': cn.wdpa_zarr_dtype,
@@ -82,7 +82,7 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
             'test_chunk': cn.wdpa_test_chunk
         }
 
-    if 'brazil_biomes' in layers_to_process:
+    if 'brazil_biomes' in layers_to_process:  # Didn't use this script to create zarr; used notebook predecessor
         layers_to_zarr["brazil_biomes"] = {
             'zarr_date': cn.BRA_biomes_zarr_date,
             'zarr_dtype': cn.BRA_biomes_zarr_dtype,
@@ -91,7 +91,7 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
             'test_chunk': cn.BRA_biomes_test_chunk
         }
 
-    if 'cont_eco' in layers_to_process:
+    if 'cont_eco' in layers_to_process:  # Didn't use this script to create zarr; used notebook predecessor
         layers_to_zarr["cont_eco"] = {
             'zarr_date': cn.cont_eco_zarr_date,
             'zarr_dtype': cn.cont_eco_zarr_dtype,
@@ -156,53 +156,52 @@ def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_b
         layer_end_time = time.time()
         main_logger.info(f"  Finished zarring {layer_to_zarr}, took {round(layer_end_time - layer_start_time)} seconds: {uu.timestr()}")
 
-        ### Checks contents of contextual zarr (no year dimension) in a specified chunk (if bounds supplied).
+        ### Checks contents of contextual zarr (no year dimension) in a specified chunk.
         ### It works even for zarrs that do not have global coverage (e.g., Brazil biomes)
         ### From https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6986043f-c8b0-832c-837f-7329873aa948
-        if test_chunk:
 
-            # zarrs without time dimension have the variable name band_data
-            var_name = 'band_data'
+        # zarrs without time dimension have the variable name band_data
+        var_name = 'band_data'
 
-            # print(f"  Getting array for {test_chunk}")
-            zarr_mapper_band_data = fs.get_mapper(f"{values['zarr_dir']}/{var_name}")
-            zarr_array = zarr.open_array(zarr_mapper_band_data, mode="r")
+        # print(f"  Getting array for {test_chunk}")
+        zarr_mapper_band_data = fs.get_mapper(f"{values['zarr_dir']}/{var_name}")
+        zarr_array = zarr.open_array(zarr_mapper_band_data, mode="r")
 
-            # Points to the Zarr group
-            fs = fsspec.filesystem("s3", anon=False)
-            zarr_store = fs.get_mapper(values['zarr_dir'])
-            zarr_group = zarr.open_group(zarr_store, mode="r")
+        # Points to the Zarr group
+        fs = fsspec.filesystem("s3", anon=False)
+        zarr_store = fs.get_mapper(values['zarr_dir'])
+        zarr_group = zarr.open_group(zarr_store, mode="r")
 
-            # Lists keys in zarr
-            main_logger.info(f"  Zarr keys: {list(zarr_group.array_keys())}")
+        # Lists keys in zarr
+        main_logger.info(f"  Zarr keys: {list(zarr_group.array_keys())}")
 
-            # Tries reading coordinate arrays
-            if "y" in zarr_group:
-                y_coords = zarr_group["y"][:]
-                main_logger.info(f"  y shape: {y_coords.shape}")
-            else:
-                sys.exit("No y coordinate array")
+        # Tries reading coordinate arrays
+        if "y" in zarr_group:
+            y_coords = zarr_group["y"][:]
+            main_logger.info(f"  y shape: {y_coords.shape}")
+        else:
+            sys.exit("No y coordinate array")
 
-            if "x" in zarr_group:
-                x_coords = zarr_group["x"][:]
-                main_logger.info(f"  x shape: {x_coords.shape}")
-            else:
-                sys.exit("No x coordinate array")
+        if "x" in zarr_group:
+            x_coords = zarr_group["x"][:]
+            main_logger.info(f"  x shape: {x_coords.shape}")
+        else:
+            sys.exit("No x coordinate array")
 
-            # Gets lat and long indices for chunk based on the indices of this zarr (as opposed to global zarr indices)
-            lat_vals = y_coords  # usually descending
-            lon_vals = x_coords  # usually ascending
-            lat0, lat1 = zu.get_index_range(lat_vals, test_chunk[3], test_chunk[1], descending=True)
-            lon0, lon1 = zu.get_index_range(lon_vals, test_chunk[0], test_chunk[2])
+        # Gets lat and long indices for chunk based on the indices of this zarr (as opposed to global zarr indices)
+        lat_vals = y_coords  # usually descending
+        lon_vals = x_coords  # usually ascending
+        lat0, lat1 = zu.get_index_range(lat_vals, test_chunk[3], test_chunk[1], descending=True)
+        lon0, lon1 = zu.get_index_range(lon_vals, test_chunk[0], test_chunk[2])
 
-            # Array from zarr chunk
-            zarr_chunk_array = zarr_array[lat0:lat1, lon0:lon1]
+        # Array from zarr chunk
+        zarr_chunk_array = zarr_array[lat0:lat1, lon0:lon1]
 
-            main_logger.info(f"  zarr_chunk_array: {zarr_chunk_array}")
-            main_logger.info(f"  Min for {test_chunk}: {float(np.nanmin(zarr_chunk_array))}")
-            main_logger.info(f"  Mean for {test_chunk}: {float(np.nanmean(zarr_chunk_array))}")
-            main_logger.info(f"  Max for {test_chunk}: {float(np.nanmax(zarr_chunk_array))}")
-            main_logger.info(f"  Count for {test_chunk}: {np.count_nonzero(zarr_chunk_array)}")
+        main_logger.info(f"  zarr_chunk_array: {zarr_chunk_array}")
+        main_logger.info(f"  Min for {test_chunk}: {float(np.nanmin(zarr_chunk_array))}")
+        main_logger.info(f"  Mean for {test_chunk}: {float(np.nanmean(zarr_chunk_array))}")
+        main_logger.info(f"  Max for {test_chunk}: {float(np.nanmax(zarr_chunk_array))}")
+        main_logger.info(f"  Count for {test_chunk}: {np.count_nonzero(zarr_chunk_array)}")
 
     end_time = time.time()
     main_logger.info(f"  Finished zarring {len(layers_to_zarr)} contextual layers, took {round(end_time - start_time)} seconds: {uu.timestr()}")
@@ -217,21 +216,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create global zarrs for contextual layers for zonal stats")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-l', '--layers_to_process', action='store', nargs='+', help='Contextual layers to convert to zarrs')
-    parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
-    parser.add_argument('-tc', '--test_chunk', nargs=4, type=float, help='Chunk to get stats from in zarr to confirm it created correctly (W, S, E, N (degrees))')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 
     args = parser.parse_args()
-
     cluster_name = args.cluster_name
     layers_to_process = args.layers_to_process
-    bounding_box = args.bounding_box
-    test_chunk = args.test_chunk
     log_note = args.log_note
 
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, layers_to_process, no_upload, test_chunk, bounding_box=bounding_box, log_note=log_note)
+    main(cluster_name, layers_to_process, no_upload, log_note=log_note)
