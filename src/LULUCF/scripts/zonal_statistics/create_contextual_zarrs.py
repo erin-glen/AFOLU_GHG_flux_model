@@ -10,24 +10,17 @@ python -m src.LULUCF.scripts.zonal_statistics.create_contextual_zarrs -mt standa
 """
 
 import argparse
-import concurrent.futures
-import dask
-import gc
-import os
 import psutil
 import time
 import s3fs
 import sys
 import pandas as pd
 import numpy as np
-import fsspec
 import xarray as xr
-import resource
-import traceback
-import re
+import boto3
+import fsspec
 import zarr
 
-from concurrent.futures import ThreadPoolExecutor
 from dask.distributed import print
 from datetime import date
 
@@ -36,171 +29,11 @@ from src.utilities import constants_and_names as cn
 from src.utilities import log_utilities as lu
 from src.utilities import universal_utilities as uu
 from src.utilities import zarr_utilities as zu
-from src.utilities import resize_cluster
 
 
-# # GADM adm0
-# adm0_uris = list_folder_uris(adm0_folder)
-# print("adm0_folder:", adm0_folder)
-# print(adm0_uris[0])
-# print(f"Tile count in {adm0_folder}: {len(adm0_uris)}")
-
-# print(f"   Reading adm0: {timestr()}")
-# adm0_xarray_chunks = make_xarray_chunks(adm0_uris, chunk_size)
-# adm0_xarray_chunks['band_data'] = adm0_xarray_chunks['band_data'].astype('uint16')  # adm0 should be uint16 but make_xarray_chunks makes it float64 for some reason
-# # print("adm0_xarray_chunks:", adm0_xarray_chunks)  # Print to confirm that the zarr datatype is correct
-
-# print(f"   zarring adm0: {timestr()}")
-# adm0_xarray_chunks.to_zarr(adm0_zarr_path, mode='w')
-# remove_FillValue(adm0_zarr_path)  # Added per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d to deal with FillValue problems
-# print(f"   Finished zarring adm0: {timestr()}")
 
 
-# # Pixel area
-# pixel_area_uris = list_folder_uris(pixel_area_folder)
-# print("pixel_area_folder:", pixel_area_folder)
-# print(pixel_area_uris[0])
-# print(f"Tile count in {pixel_area_folder}: {len(pixel_area_uris)}")
-
-# print(f"   Reading pixel_area: {timestr()}")
-# pixel_area_xarray_chunks = make_xarray_chunks(pixel_area_uris, chunk_size)
-# print("pixel_area_xarray_chunks:", pixel_area_xarray_chunks)
-
-# print(f"   zarring pixel_area: {timestr()}")
-# pixel_area_xarray_chunks.to_zarr(pixel_area_zarr_path, mode='w')
-# remove_FillValue(pixel_area_zarr_path)  # Added per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d to deal with FillValue problems
-# print(f"   Finished zarring pixel_area: {timestr()}")
-
-
-# # Humid tropical primary forest/IFL merged
-# # Took 5.5 minutes with 50 workers. Got several PerformanceWarning about increasing number of chunks by factor of 10.
-# # Also, Dask graph of 210MB, then a pause of several minutes.
-# primary_forest_IFL_uris = list_folder_uris(primary_forest_IFL_folder)
-# print("primary_forest_IFL_folder:", primary_forest_IFL_folder)
-# print(primary_forest_IFL_uris[0])
-# print(f"Tile count in {primary_forest_IFL_folder}: {len(primary_forest_IFL_uris)}")
-
-# print(f"   Reading primary_forest_IFL: {timestr()}")
-# primary_forest_IFL_xarray_chunks = make_xarray_chunks(primary_forest_IFL_uris, chunk_size)
-# primary_forest_IFL_xarray_chunks['band_data'] = primary_forest_IFL_xarray_chunks['band_data'].astype('uint8')  # should be uint8 but make_xarray_chunks makes it float32 for some reason
-# print("primary_forest_IFL_xarray_chunks:", primary_forest_IFL_xarray_chunks)  # Print to confirm that the zarr datatype is correct
-
-# print(f"   zarring primary_forest_IFL: {timestr()}")
-# primary_forest_IFL_xarray_chunks.to_zarr(primary_forest_IFL_zarr_path, mode='w')
-# remove_FillValue(primary_forest_IFL_zarr_path)  # Added per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d to deal with FillValue problems
-# print(f"   Finished zarring primary_forest_IFL: {timestr()}")
-
-
-# # WDPA (v202511)
-# # Took 8 minutes with 50 workers. Got several PerformanceWarning about increasing number of chunks by factor of 10.
-# # Also, Dask graph of 306MB, then a pause of several minutes.
-# # https://cloud.coiled.io/clusters/1348054/account/wri-forest-research/information?workspace=WRI-forest-research
-# wdpa_uris = list_folder_uris(wdpa_folder)
-# print("wdpa_folder:", wdpa_folder)
-# print(wdpa_uris[0])
-# print(f"Tile count in {wdpa_folder}: {len(wdpa_uris)}")
-
-# print(f"   Reading WDPA: {timestr()}")
-# wdpa_xarray_chunks = make_xarray_chunks(wdpa_uris, chunk_size)
-# wdpa_xarray_chunks['band_data'] = wdpa_xarray_chunks['band_data'].astype('uint8')  # should be uint8 but make_xarray_chunks makes it float32 for some reason
-# print("wdpa_xarray_chunks:", wdpa_xarray_chunks)  # Print to confirm that the zarr datatype is correct
-
-# print(f"   zarring WDPA: {timestr()}")
-# wdpa_xarray_chunks.to_zarr(wdpa_zarr_path, mode='w')
-# remove_FillValue(wdpa_zarr_path)  # Added per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d to deal with FillValue problems
-# print(f"   Finished zarring WDPA: {timestr()}")
-
-
-# # Brazil biomes
-# # Took 15 seconds with 50 workers. No warnings.
-# # https://cloud.coiled.io/clusters/1348054/account/wri-forest-research/information?workspace=WRI-forest-research
-# BRA_biomes_uris = list_folder_uris(BRA_biomes_folder)
-# print("BRA_biomes_folder:", BRA_biomes_folder)
-# print(BRA_biomes_uris[0])
-# print(f"Tile count in {BRA_biomes_folder}: {len(BRA_biomes_uris)}")
-
-# print(f"   Reading BRA biomes: {timestr()}")
-# BRA_biomes_chunks = make_xarray_chunks(BRA_biomes_uris, chunk_size)
-# BRA_biomes_chunks['band_data'] = BRA_biomes_chunks['band_data'].astype('uint8')  # should be uint8 but make_xarray_chunks makes it float32 for some reason
-# print("BRA_biomes_chunks:", BRA_biomes_chunks)  # Print to confirm that the zarr datatype is correct
-
-# print(f"   zarring BRA biomes: {timestr()}")
-# BRA_biomes_chunks.to_zarr(BRA_biomes_zarr_path, mode='w')
-# remove_FillValue(BRA_biomes_zarr_path)  # Added per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d to deal with FillValue problems
-# print(f"   Finished zarring BRA biomes: {timestr()}")
-
-
-# # FAO ecozones 2000 x continent
-# # Took 5.5 minutes with 50 workers. Several warnings of PerformanceWarning: Increasing number of chunks by factor of 10. Don't know why, and didn't try to fix.
-# # Also, Dask graph of 246MB, then a pause of several minutes.
-# # Cluster: https://cloud.coiled.io/clusters/1423362/account/wri-forest-research/information?workspace=WRI-forest-research
-# cont_eco_uris = list_folder_uris(cont_eco_folder)
-# print("cont_eco_folder:", cont_eco_folder)
-# print(cont_eco_uris[0])
-# print(f"Tile count in {cont_eco_folder}: {len(cont_eco_uris)}")
-
-# print(f"   Reading continent x ecozone: {timestr()}")
-# cont_eco_chunks = make_xarray_chunks(cont_eco_uris, chunk_size)
-# cont_eco_chunks['band_data'] = cont_eco_chunks['band_data'].astype('uint16')  # should be uint16 but make_xarray_chunks makes it float32 for some reason
-# print("cont_eco_chunks:", cont_eco_chunks)  # Print to confirm that the zarr datatype is correct
-
-# print(f"   zarring cont_eco: {timestr()}")
-# cont_eco_chunks.to_zarr(cont_eco_zarr_path, mode='w')
-# remove_FillValue(cont_eco_zarr_path)  # Added per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d to deal with FillValue problems
-# print(f"   Finished zarring cont_eco: {timestr()}")
-
-# Lists uris in an s3 folder, for creating zarr of them
-# per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/682201ec-1f84-800a-a9f9-c9564f613208
-def list_folder_uris(base_uri):
-    # Initializes S3 filesystem
-    fs = s3fs.S3FileSystem(anon=False)  # Set anon=True if public bucket
-
-    # Lists all files in the directory
-    all_files = fs.ls(base_uri)
-
-    # Filters for GeoTIFFs
-    tif_files = [f"s3://{f}" for f in all_files if f.endswith(".tif")]
-
-    # Converts to a Pandas Series
-    series = pd.Series(tif_files)
-
-    return series
-
-
-# Makes xarray dataframe (I think not a dataset) from list of s3 uris.
-# This came from Solomon Negusse and I haven't really changed it.
-# He said that an online forum suggested using xr.openmfdataset to open non-overlapping geotifs.
-def make_xarray_chunks(tile_uris, chunk_size):
-
-    xarray_chunks = xr.open_mfdataset(
-        tile_uris.values.tolist(),
-        parallel=True,
-        chunks={'x': chunk_size, 'y':chunk_size}
-    ).squeeze()
-
-    return xarray_chunks
-
-
-# Removes the zarr FillValue attribute from each dataset, which is necessary to avoid Float32 datatype errors
-def remove_FillValue(zarr_path):
-
-    fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(zarr_path)
-    z = zarr.open_group(mapper, mode="r+")
-
-    # Loop through each array and remove _FillValue if present
-    for key in z.array_keys():
-        arr = z[key]
-        if "_FillValue" in arr.attrs:
-            print(f"   Removing _FillValue from {key}")
-            del arr.attrs["_FillValue"]
-
-    print(f"   FillValues removed from {zarr_path}")
-
-
-def main(cluster_name, layers_to_process, input_date, model_type, no_log, no_upload, chunk_shapefile_uri, bounding_box=None,
-     first_variables_to_process=None, first_contextual_layers_to_process=None,
-     first_tiles_to_process=None, model_path_description=None, log_note=None):
+def main(cluster_name, layers_to_process, no_upload, test_chunk=None, bounding_box=None, log_note=None):
 
     ### Step 1: Preparation
 
@@ -210,19 +43,14 @@ def main(cluster_name, layers_to_process, input_date, model_type, no_log, no_upl
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, False)
 
-    # Shapefile of chunk footprints to use if none is supplied on the command line
-    if not chunk_shapefile_uri:
-        chunk_shapefile_uri = cn.fishnet_1x1deg_uri
-
     # Creates the log for the main function and populates it with basic run information
-    main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
+    main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, 'N/A', stage)
 
     start_time = time.time() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {uu.timestr()}")
     main_logger.info(f"Vegetation model version: {cn.veg_model_version}")
-    main_logger.info(f"Vegetation model path descriptor: {model_path_description}")
     main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
-    main_logger.info(f"Input date: {input_date}")
+    main_logger.info(f"Run date: {date.today().strftime("%Y%m%d")}")
     main_logger.info(f"no_upload: {no_upload}")
 
     layers_to_zarr = {}
@@ -291,70 +119,110 @@ def main(cluster_name, layers_to_process, input_date, model_type, no_log, no_upl
             'zarr_dir': cn.watershed_zarr_path,
         }
 
+    fs = fsspec.filesystem("s3", anon=False)
 
     main_logger.info(f"Contextual layers to zarr ({len(layers_to_zarr)} layers): {layers_to_zarr}")
 
+    # Iterates through supplied contextual layers
     for layer_to_zarr, values in layers_to_zarr.items():
 
         main_logger.info(f"Processing {layer_to_zarr}: {uu.timestr()}")
         layer_start_time = time.time()
 
-        geotif_uris = list_folder_uris(values['geotif_dir'])
-        main_logger.info(f"  Input s3 geotif folder: {values['geotif_dir']}")
-        main_logger.info(f"  First geotif in folder: {geotif_uris[0]}")
-        main_logger.info(f"  Tile count in {layer_to_zarr}: {len(geotif_uris)}")
-
-        main_logger.info(f"  Reading {layer_to_zarr}: {uu.timestr()}")
-        layer_xarray_chunks = make_xarray_chunks(geotif_uris, cn.chunk_dims)
-        layer_xarray_chunks['band_data'] = layer_xarray_chunks['band_data'].astype(values['zarr_dtype'])
-
-        main_logger.info(f"  Zarring {layer_to_zarr}: {uu.timestr()}")
-        layer_xarray_chunks.to_zarr(values['zarr_dir'], mode='w')
-        remove_FillValue(values['zarr_dir'])  # Added per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d to deal with FillValue problems
+        # geotif_uris_list, geotif_count = uu.list_raster_full_paths_in_s3_folder_and_count(values['geotif_dir'])
+        # geotif_uris_series = pd.Series(geotif_uris_list)
+        #
+        # main_logger.info(f"  Input s3 geotif folder: {values['geotif_dir']}")
+        # main_logger.info(f"  First geotif in folder: {geotif_uris_series[0]}")
+        # main_logger.info(f"  Tile count in {layer_to_zarr}: {geotif_count}")
+        #
+        # main_logger.info(f"  Reading {layer_to_zarr}: {uu.timestr()}")
+        # layer_xarray_chunks = zu.make_xarray_chunks(geotif_uris_series, cn.chunk_dims)
+        # layer_xarray_chunks['band_data'] = layer_xarray_chunks['band_data'].astype(values['zarr_dtype'])
+        #
+        # main_logger.info(f"  Zarring {layer_to_zarr}: {uu.timestr()}")
+        # layer_xarray_chunks.to_zarr(values['zarr_dir'], mode='w')
+        # zu.remove_FillValue(values['zarr_dir'])  # Added per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6912af84-deb4-832d-81f0-da2b22b0737d to deal with FillValue problems
 
         layer_end_time = time.time()
         main_logger.info(f"  Finished zarring {layer_to_zarr}, took {round(layer_end_time - layer_start_time)} seconds: {uu.timestr()}")
 
+        ### Checks contents of contextual zarr (no year dimension) in a specified chunk (if bounds supplied).
+        ### It works even for zarrs that do not have global coverage (e.g., Brazil biomes)
+        ### From https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6986043f-c8b0-832c-837f-7329873aa948
+        if test_chunk:
+
+            # zarrs without time dimension have the variable name band_data
+            var_name = 'band_data'
+
+            # print(f"  Getting array for {test_chunk}")
+            zarr_mapper_band_data = fs.get_mapper(f"{values['zarr_dir']}/{var_name}")
+            zarr_array = zarr.open_array(zarr_mapper_band_data, mode="r")
+
+            # Points to the Zarr group
+            fs = fsspec.filesystem("s3", anon=False)
+            zarr_store = fs.get_mapper(values['zarr_dir'])
+            zarr_group = zarr.open_group(zarr_store, mode="r")
+
+            # Lists keys in zarr
+            main_logger.info(f"  Zarr keys: {list(zarr_group.array_keys())}")
+
+            # Tries reading coordinate arrays
+            if "y" in zarr_group:
+                y_coords = zarr_group["y"][:]
+                main_logger.info(f"  y shape: {y_coords.shape}")
+            else:
+                sys.exit("No y coordinate array")
+
+            if "x" in zarr_group:
+                x_coords = zarr_group["x"][:]
+                main_logger.info(f"  x shape: {x_coords.shape}")
+            else:
+                sys.exit("No x coordinate array")
+
+            # Gets lat and long indices for chunk based on the indices of this zarr (as opposed to global zarr indices)
+            lat_vals = y_coords  # usually descending
+            lon_vals = x_coords  # usually ascending
+            lat0, lat1 = zu.get_index_range(lat_vals, test_chunk[3], test_chunk[1], descending=True)
+            lon0, lon1 = zu.get_index_range(lon_vals, test_chunk[0], test_chunk[2])
+
+            # Array from zarr chunk
+            zarr_chunk_array = zarr_array[lat0:lat1, lon0:lon1]
+
+            main_logger.info(f"  zarr_chunk_array: {zarr_chunk_array}")
+            main_logger.info(f"  Min for {test_chunk}: {float(np.nanmin(zarr_chunk_array))}")
+            main_logger.info(f"  Mean for {test_chunk}: {float(np.nanmean(zarr_chunk_array))}")
+            main_logger.info(f"  Max for {test_chunk}: {float(np.nanmax(zarr_chunk_array))}")
+            main_logger.info(f"  Count for {test_chunk}: {np.count_nonzero(zarr_chunk_array)}")
+
     end_time = time.time()
     main_logger.info(f"  Finished zarring {len(layers_to_zarr)} contextual layers, took {round(end_time - start_time)} seconds: {uu.timestr()}")
+
+    s3_client = boto3.client("s3")  # Needs to be in the same function as the upload_file call
+    log_name = f"{cn.combined_log}_main_{stage}_{time.strftime('%Y%m%d_%H_%M_%S')}.log"
+    s3_client.upload_file(main_log_local_path, "gfw2-data", Key=f"{cn.s3_log_path}{log_name}")
 
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="Create 10x10 deg per-ha and per-pixel output geotifs")
+    parser = argparse.ArgumentParser(description="Create global zarrs for contextual layers for zonal stats")
     parser.add_argument('-cn', '--cluster_name', help='Coiled cluster name')
     parser.add_argument('-l', '--layers_to_process', action='store', nargs='+', help='Contextual layers to convert to zarrs')
-    parser.add_argument('-id', '--input_date', required=True, help='Date of run, in YYYYMMDD')
     parser.add_argument('-bb', '--bounding_box', nargs=4, type=float, help='W, S, E, N (degrees)')
-    parser.add_argument('-fv', '--first_variables_to_process', type=int, help='Number of variables to process from raw mega-zarr (for testing)')
-    parser.add_argument('-fcl', '--first_contextual_layers_to_process', type=int, help='Number of contextual layers to process from raw mega-zarr (for testing)')
-    parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
-    parser.add_argument('-ft', '--first_tiles_to_process', type=int, help='Number of tiles to process (for testing)')
-    parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard).')
-    parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area).')
+    parser.add_argument('-tc', '--test_chunk', nargs=4, type=float, help='Chunk to get stats from in zarr to confirm it created correctly (W, S, E, N (degrees))')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
-    parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
     layers_to_process = args.layers_to_process
-    input_date = args.input_date
     bounding_box = args.bounding_box
-    chunk_shapefile_uri = args.chunk_shapefile_uri
-    first_tiles_to_process = args.first_tiles_to_process
-    first_variables_to_process = args.first_variables_to_process
-    first_contextual_layers_to_process = args.first_contextual_layers_to_process
-    model_type = args.model_type
-    model_path_description = args.model_path_description
+    test_chunk = args.test_chunk
     log_note = args.log_note
 
-    no_log = args.no_log
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, layers_to_process, input_date, model_type, no_log, no_upload, chunk_shapefile_uri, bounding_box=bounding_box,
-         first_variables_to_process=first_variables_to_process, first_contextual_layers_to_process=first_contextual_layers_to_process,
-         first_tiles_to_process=first_tiles_to_process, model_path_description=model_path_description, log_note=log_note)
+    main(cluster_name, layers_to_process, no_upload, test_chunk, bounding_box=bounding_box, log_note=log_note)

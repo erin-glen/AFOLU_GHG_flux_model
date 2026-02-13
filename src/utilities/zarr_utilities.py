@@ -1,7 +1,6 @@
 import os
 import boto3
 import fsspec
-import numpy as np
 import pandas as pd
 import sys
 from dask.distributed import print
@@ -14,7 +13,7 @@ import resource
 import psutil
 import zarr
 import time
-import re
+from bisect import bisect_left, bisect_right
 
 # Project imports
 from src.utilities import constants_and_names as cn
@@ -287,29 +286,35 @@ def populate_zarr(bounds, bounds_str, create_zarr, interval_end_years, is_large_
     lu.print_and_log(f"Wrote outputs to global zarr for {bounds_str} in {tile_id} in {round(zarr_end - zarr_start)} seconds: {uu.timestr()}",False, logger_worker)
 
 
-# Checks the stats for a bounding box in a zarr for a given dataset and year
-def check_region_stats(store_url, dataset_key, year_idx, target_box, logger_worker=None, main_logger=None):
+# Makes xarray dataframe (I think not a dataset) from list of s3 uris.
+# This came from Solomon Negusse and I haven't really changed it.
+# He said that an online forum suggested using xr.open_mfdataset to open non-overlapping geotifs.
+def make_xarray_chunks(tile_uris, chunk_size):
 
-    """Check min/max of the region written."""
+    xarray_chunks = xr.open_mfdataset(
+        tile_uris.values.tolist(),
+        parallel=True,
+        chunks={'x': chunk_size, 'y':chunk_size}
+    ).squeeze()
+
+    return xarray_chunks
+
+
+# Removes the zarr FillValue attribute from each dataset, which is necessary to avoid Float32 datatype errors
+def remove_FillValue(zarr_path):
+
     fs = fsspec.filesystem("s3", anon=False)
-    mapper = fs.get_mapper(store_url)
-    z = zarr.open(mapper, mode="r")
+    mapper = fs.get_mapper(zarr_path)
+    z = zarr.open_group(mapper, mode="r+")
 
-    lat0, lon0 = latlon_to_global_zarr_indices(target_box["lat_max"], target_box["lon_min"], cn.resolution)
-    lat1, lon1 = latlon_to_global_zarr_indices(target_box["lat_min"], target_box["lon_max"], cn.resolution)
+    # Loop through each array and remove _FillValue if present
+    for key in z.array_keys():
+        arr = z[key]
+        if "_FillValue" in arr.attrs:
+            print(f"   Removing _FillValue from {key}")
+            del arr.attrs["_FillValue"]
 
-    region_array = z[dataset_key][year_idx, lat0:lat1, lon0:lon1]
-
-    # Non-zero pixels in the array
-    non_zero_count = np.count_nonzero(region_array)
-
-    statement = f"      {dataset_key} year {year_idx}: min={region_array.min()}, mean={region_array.mean()}, max={region_array.max()}, non-zero cells={non_zero_count}"
-
-    # This can be accessed either by the main function or a worker, so it is designed to print to the log from either
-    if logger_worker:
-        lu.print_and_log(statement, False, logger_worker)
-    if main_logger:
-        main_logger.info(statement)
+    print(f"   FillValues removed from {zarr_path}")
 
 
 # Calculates regular chunk stats in 1x1 deg chunk of dataset-year slice of zarr.
@@ -953,3 +958,17 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     lu.print_and_log(f"Peak memory for {tile_id}: {peak_gb:.2f} GB", False, logger_worker)
 
     return chunk_stats_per_ha, chunk_stats_per_pixel
+
+
+# Gets indexes of zarr (regardless of its geographic coverage)
+# From https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6986043f-c8b0-832c-837f-7329873aa948
+def get_index_range(coords, min_val, max_val, descending=False):
+    if descending:
+        coords = coords[::-1]
+        i0 = bisect_left(coords, max_val)
+        i1 = bisect_right(coords, min_val)
+        return len(coords) - i1, len(coords) - i0
+    else:
+        i0 = bisect_left(coords, min_val)
+        i1 = bisect_right(coords, max_val)
+        return i0, i1

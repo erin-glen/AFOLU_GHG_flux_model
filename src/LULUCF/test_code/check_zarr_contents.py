@@ -71,104 +71,104 @@ tile_id = uu.xy_to_tile_id(bounds[0], bounds[3])  # tile_id in YYN/S_XXXE/W
 print(f"Getting stats for {bounds_str}: {uu.timestr()}")
 fs = fsspec.filesystem("s3", anon=False)
 
-## For zarrs with year dimension
-
-zarr_stats_raw_all_years = []
-# Bounding box to get stats for, reformatted for zarr extraction
-target_box = {
-    "lat_min": bounds[1],
-    "lat_max": bounds[3],
-    "lon_min": bounds[0],
-    "lon_max": bounds[2]
-}
-
-# print(f"Getting indices for {bounds_str}")
-lat0, lon0 = zu.latlon_to_global_zarr_indices(target_box["lat_max"], target_box["lon_min"], cn.resolution)
-lat1, lon1 = zu.latlon_to_global_zarr_indices(target_box["lat_min"], target_box["lon_max"], cn.resolution)
-
-print(f"Getting mapper for {bounds_str}")
-zarr_mapper = fs.get_mapper(zarr_path)
-print(f"Opening zarr for {bounds_str}")
-zarr_group = zarr.open(zarr_mapper, mode="r")
-print(zarr_group)
-# print(f"Getting array for {bounds_str}")
-zarr_chunk_array = zarr_group[var_name][:, lat0:lat1, lon0:lon1]
-
-# For [years]x4000x4000 zarr
-for year_idx, year in enumerate(interval_end_years):
-    zarr_chunk_array_year = zarr_chunk_array[year_idx]
-    # print("zarr_chunk_array_year:", zarr_chunk_array_year)
-
-    pattern_with_year = f"{var_name}_{year}"
-
-    # print(f"Calculating stats for {bounds_str}")
-    zarr_stats_raw_year = uu.calculate_stats(zarr_chunk_array_year, pattern_with_year, bounds_str, tile_id,'zarr_stats')
-    # print(zarr_stats_raw_year)
-
-    zarr_stats_raw_all_years.append(zarr_stats_raw_year)
-
-    for key, value in zarr_stats_raw_year.items():
-        print(f"{key}: {value}\n")
-
-
-####################################################
-
-# ### For zarrs with no year dimension (no time component; may not be global, so spatial indexes are different)
-# ### From https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6986043f-c8b0-832c-837f-7329873aa948
+# ### For zarrs with year dimension
 #
-# # For bounds = [lon_min, lat_min, lon_max, lat_max]
-# def get_index_range(coords, min_val, max_val, descending=False):
-#     if descending:
-#         coords = coords[::-1]
-#         i0 = bisect_left(coords, max_val)
-#         i1 = bisect_right(coords, min_val)
-#         return len(coords) - i1, len(coords) - i0
-#     else:
-#         i0 = bisect_left(coords, min_val)
-#         i1 = bisect_right(coords, max_val)
-#         return i0, i1
+# zarr_stats_raw_all_years = []
+# # Bounding box to get stats for, reformatted for zarr extraction
+# target_box = {
+#     "lat_min": bounds[1],
+#     "lat_max": bounds[3],
+#     "lon_min": bounds[0],
+#     "lon_max": bounds[2]
+# }
 #
-# # zarrs without time dimension have the variable name band_data
-# var_name = 'band_data'
+# # print(f"Getting indices for {bounds_str}")
+# lat0, lon0 = zu.latlon_to_global_zarr_indices(target_box["lat_max"], target_box["lon_min"], cn.resolution)
+# lat1, lon1 = zu.latlon_to_global_zarr_indices(target_box["lat_min"], target_box["lon_max"], cn.resolution)
 #
+# print(f"Getting mapper for {bounds_str}")
+# zarr_mapper = fs.get_mapper(zarr_path)
+# print(f"Opening zarr for {bounds_str}")
+# zarr_group = zarr.open(zarr_mapper, mode="r")
+# print(zarr_group)
 # # print(f"Getting array for {bounds_str}")
-# zarr_mapper_band_data = fs.get_mapper(f"{zarr_path}/{var_name}")
-# zarr_array = zarr.open_array(zarr_mapper_band_data, mode="r")
+# zarr_chunk_array = zarr_group[var_name][:, lat0:lat1, lon0:lon1]
 #
-# # Step 1: Points to the Zarr group
-# fs = fsspec.filesystem("s3", anon=False)
-# zarr_store = fs.get_mapper(zarr_path)
-# zarr_group = zarr.open_group(zarr_store, mode="r")
+# # For [years]x4000x4000 zarr
+# for year_idx, year in enumerate(interval_end_years):
+#     zarr_chunk_array_year = zarr_chunk_array[year_idx]
+#     # print("zarr_chunk_array_year:", zarr_chunk_array_year)
 #
-# # Step 2: Lists keys
-# print("Zarr keys:", list(zarr_group.array_keys()))
+#     pattern_with_year = f"{var_name}_{year}"
 #
-# # Step 3: Tries reading coordinate arrays
-# if "y" in zarr_group:
-#     y_coords = zarr_group["y"][:]
-#     print("y shape:", y_coords.shape)
-# else:
-#     sys.exit("No y coordinate array")
+#     # print(f"Calculating stats for {bounds_str}")
+#     zarr_stats_raw_year = uu.calculate_stats(zarr_chunk_array_year, pattern_with_year, bounds_str, tile_id,'zarr_stats')
+#     # print(zarr_stats_raw_year)
 #
-# if "x" in zarr_group:
-#     x_coords = zarr_group["x"][:]
-#     print("x shape:", x_coords.shape)
-# else:
-#     sys.exit("No x coordinate array")
+#     zarr_stats_raw_all_years.append(zarr_stats_raw_year)
 #
-# lat_vals = y_coords  # usually descending
-# lon_vals = x_coords  # usually ascending
-#
-# lat0, lat1 = get_index_range(lat_vals, bounds[3], bounds[1], descending=True)
-# lon0, lon1 = get_index_range(lon_vals, bounds[0], bounds[2])
-#
-# zarr_chunk_array = zarr_array[lat0:lat1, lon0:lon1]
-# print("zarr_chunk_array:", zarr_chunk_array)
-#
-# print("min:", float(np.nanmin(zarr_chunk_array)))
-# print("mean:", float(np.nanmean(zarr_chunk_array)))
-# print("max:", float(np.nanmax(zarr_chunk_array)))
-# print("count:", np.count_nonzero(zarr_chunk_array))
+#     for key, value in zarr_stats_raw_year.items():
+#         print(f"{key}: {value}\n")
+
+
+###################################################
+
+### For zarrs with no year dimension (no time component; may not be global, so spatial indexes are different)
+### From https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6986043f-c8b0-832c-837f-7329873aa948
+
+# For bounds = [lon_min, lat_min, lon_max, lat_max]
+def get_index_range(coords, min_val, max_val, descending=False):
+    if descending:
+        coords = coords[::-1]
+        i0 = bisect_left(coords, max_val)
+        i1 = bisect_right(coords, min_val)
+        return len(coords) - i1, len(coords) - i0
+    else:
+        i0 = bisect_left(coords, min_val)
+        i1 = bisect_right(coords, max_val)
+        return i0, i1
+
+# zarrs without time dimension have the variable name band_data
+var_name = 'band_data'
+
+# print(f"Getting array for {bounds_str}")
+zarr_mapper_band_data = fs.get_mapper(f"{zarr_path}/{var_name}")
+zarr_array = zarr.open_array(zarr_mapper_band_data, mode="r")
+
+# Step 1: Points to the Zarr group
+fs = fsspec.filesystem("s3", anon=False)
+zarr_store = fs.get_mapper(zarr_path)
+zarr_group = zarr.open_group(zarr_store, mode="r")
+
+# Step 2: Lists keys
+print("Zarr keys:", list(zarr_group.array_keys()))
+
+# Step 3: Tries reading coordinate arrays
+if "y" in zarr_group:
+    y_coords = zarr_group["y"][:]
+    print("y shape:", y_coords.shape)
+else:
+    sys.exit("No y coordinate array")
+
+if "x" in zarr_group:
+    x_coords = zarr_group["x"][:]
+    print("x shape:", x_coords.shape)
+else:
+    sys.exit("No x coordinate array")
+
+lat_vals = y_coords  # usually descending
+lon_vals = x_coords  # usually ascending
+
+lat0, lat1 = get_index_range(lat_vals, bounds[3], bounds[1], descending=True)
+lon0, lon1 = get_index_range(lon_vals, bounds[0], bounds[2])
+
+zarr_chunk_array = zarr_array[lat0:lat1, lon0:lon1]
+print("zarr_chunk_array:", zarr_chunk_array)
+
+print("min:", float(np.nanmin(zarr_chunk_array)))
+print("mean:", float(np.nanmean(zarr_chunk_array)))
+print("max:", float(np.nanmax(zarr_chunk_array)))
+print("count:", np.count_nonzero(zarr_chunk_array))
 
 
 

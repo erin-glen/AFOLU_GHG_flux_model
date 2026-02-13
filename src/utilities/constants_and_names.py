@@ -1023,42 +1023,50 @@ adm0_zarr_date = '20251209'
 adm0_zarr_dtype = 'uint16'
 adm0_geotif_path = "s3://gfw2-data/gadm_administrative_boundaries/v4.1/v4.1.64__from_gfw-data-lake/raster/epsg-4326/10/40000/adm0/gdal-geotiff/"
 adm0_zarr_path = f"{contextual_zarr_path}GADM4_1_adm0_global/{adm0_zarr_date}_fillValue_removed/global_GADM41_adm0_{adm0_zarr_date}.zarr"
+adm0_test_chunk = []
 
 pixel_area_zarr_date = '20251209'
 pixel_area_zarr_dtype = 'float32'
 pixel_area_geotif_path = "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
 pixel_area_zarr_path = f"{contextual_zarr_path}pixel_area/{pixel_area_zarr_date}_fillValue_removed/global_pixel_area_{pixel_area_zarr_date}.zarr"
+adm0_test_chunk = []
 
 wdpa_zarr_date = '20251229'
 wdpa_zarr_dtype = 'uint8'
 wdpa_geotif_path = "s3://gfw2-data/conservation/wdpa_licensed_proteced_areas__from_data_lake/v202511/raster/epsg-4326/10/40000/detailed_iucn_cat/gdal-geotiff/"
 wdpa_zarr_path = f"{contextual_zarr_path}WDPAv202511/{wdpa_zarr_date}_fillValue_removed/wdpa_{wdpa_zarr_date}.zarr"
+adm0_test_chunk = []
 
 BRA_biomes_zarr_date = '20251229'
 BRA_biomes_zarr_dtype = 'uint8'
 BRA_biomes_geotif_path = "s3://gfw2-data/country/bra/bra_biomes_geotif/"
 BRA_biomes_zarr_path = f"{contextual_zarr_path}BRA_biomes/{BRA_biomes_zarr_date}_fillValue_removed/BRA_biomes_{BRA_biomes_zarr_date}.zarr"
+adm0_test_chunk = []
 
 # cont_eco_zarr_date = '20260206'
 cont_eco_zarr_date = '20260212'
 cont_eco_zarr_dtype = 'uint16'
 cont_eco_geotif_path = "s3://gfw2-data/climate/carbon_model/fao_ecozones/ecozone_continent/20190116/processed/"
 cont_eco_zarr_path = f"{contextual_zarr_path}FAO_ecozone_continents/{cont_eco_zarr_date}_fillValue_removed/FAO_ecozone_continents_{cont_eco_zarr_date}.zarr"
+adm0_test_chunk = []
 
-landmark_zarr_date = '20260212'
+landmark_zarr_date = '20260213'
 landmark_zarr_dtype = 'uint8'
 landmark_geotif_path = "s3://gfw2-data/landmark/gfw-data-lake/landmark_ip_lc_and_indicative_poly/v20250909/raster/epsg-4326/10/40000/is/geotiff/"
 landmark_zarr_path = f"{contextual_zarr_path}landmark/{landmark_zarr_date}_fillValue_removed/landmark_{landmark_zarr_date}.zarr"
+adm0_test_chunk = []
 
 KBA_zarr_date = '20260212'
 KBA_zarr_dtype = 'uint16'
 KBA_geotif_path = "s3://gfw2-data/conservation/Key_Biodiversity_Areas/KBA_2024_09/KBA_v20250903__from_gfw-data-lake/raster/epsg-4326/10/40000/is/geotiff/"
 KBA_zarr_path = f"{contextual_zarr_path}KBA/{KBA_zarr_date}_fillValue_removed/KBA_v20250903_{KBA_zarr_date}.zarr"
+adm0_test_chunk = []
 
 watershed_zarr_date = '20260212'
 watershed_zarr_dtype = 'uint16'
 watershed_geotif_path = "s3://gfw2-data/water/mapbox_river_basins__from_gfw-data-lake/v2018/raster/epsg-4326/10/40000/id/gdal-geotiff/"
-watershed_zarr_path = f"{contextual_zarr_path}river_basins/{river_basin_zarr_date}_fillValue_removed/river_basins_v2018_{river_basin_zarr_date}.zarr"
+watershed_zarr_path = f"{contextual_zarr_path}river_basins/{watershed_zarr_date}_fillValue_removed/river_basins_v2018_{watershed_zarr_date}.zarr"
+adm0_test_chunk = []
 
 
 
