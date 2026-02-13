@@ -1063,11 +1063,11 @@ KBA_geotif_path = "s3://gfw2-data/conservation/Key_Biodiversity_Areas/KBA_2024_0
 KBA_zarr_path = f"{contextual_zarr_path}KBA/v20240903/{KBA_zarr_date}_fillValue_removed/KBA_{KBA_zarr_date}.zarr"
 KBA_test_chunk = [29, -1, 30, 0]  # 1 in upper right; roughly 1/3-1/2 of chunk is KBA (00N_020E)
 
-watershed_zarr_date = '20260213'
-watershed_zarr_dtype = 'uint16'
-watershed_geotif_path = "s3://gfw2-data/water/mapbox_river_basins__from_gfw-data-lake/v2018/raster/epsg-4326/10/40000/id/gdal-geotiff/"
-watershed_zarr_path = f"{contextual_zarr_path}river_basins/v2018/{watershed_zarr_date}_fillValue_removed/river_basins_{watershed_zarr_date}.zarr"
-watershed_test_chunk = [29, -1, 30, 0]  # 7005 in upper and lower left corners, 7003 in upper and lower right corners; should have nearly full coverage (00N_020E)
+watersheds_zarr_date = '20260213'
+watersheds_zarr_dtype = 'uint16'
+watersheds_geotif_path = "s3://gfw2-data/water/mapbox_river_basins__from_gfw-data-lake/v2018/raster/epsg-4326/10/40000/id/gdal-geotiff/"
+watersheds_zarr_path = f"{contextual_zarr_path}river_basins/v2018/{watersheds_zarr_date}_fillValue_removed/river_basins_{watersheds_zarr_date}.zarr"
+watersheds_test_chunk = [29, -1, 30, 0]  # 7005 in upper and lower left corners, 7003 in upper and lower right corners; should have nearly full coverage (00N_020E)
 
 ### Value options for contextual layer values.
 ### Every contextual layer needs to have all possible values listed here.
@@ -1076,7 +1076,7 @@ state_node_lookup_table_local = "/mnt/c/GIS/git/AFOLU_GHG_flux_model/src/LULUCF/
 state_node_lookup_table_s3 = "http://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_model/LULUCF/state_node_lookup_tables/LULUCF_state_node_lookup_table.xlsx"
 sheet = "v102_20251027"
 
-BRA_biome_codes = np.array([1, 2, 3, 4, 5, 6], dtype=np.uint8)
+BRA_biome_codes = np.array([0, 1, 2, 3, 4, 5, 6], dtype=np.uint8)
 
 WDPA_codes = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], dtype=np.uint8)
 
@@ -1121,6 +1121,8 @@ cont_eco_codes = np.array([0,
     7013, 7014, 7015, 7022,
     8004, 8008, 8013, 8014
 ], dtype=np.uint16)
+
+landmark_codes = np.array([0, 1], dtype=np.uint8)
 
 # Converts numeric ISO values to ISO codes
 # From https://github.com/wri/project-zeno-data-infra/blob/main/notebooks/grasslands_areas_gadm_2000-2022.ipynb
@@ -1360,6 +1362,7 @@ cont_eco_to_text = {
     8014: {"ecozone": "Temperate oceanic forest", "continent": "New Zealand"},
 }
 
+local_zonal_stats_table_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/zonal_statistics/v{veg_model_version_underscore}__standard__global/"
 
 
 

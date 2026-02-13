@@ -115,11 +115,11 @@ def main(cluster_name, layers_to_process, no_upload, log_note=None):
 
     if 'watersheds' in layers_to_process:
         layers_to_zarr["watersheds"] = {
-            'zarr_date': cn.watershed_zarr_date,
-            'zarr_dtype': cn.watershed_zarr_dtype,
-            'geotif_dir': cn.watershed_geotif_path,
-            'zarr_dir': cn.watershed_zarr_path,
-            'test_chunk': cn.watershed_test_chunk
+            'zarr_date': cn.watersheds_zarr_date,
+            'zarr_dtype': cn.watersheds_zarr_dtype,
+            'geotif_dir': cn.watersheds_geotif_path,
+            'zarr_dir': cn.watersheds_zarr_path,
+            'test_chunk': cn.watersheds_test_chunk
         }
 
     fs = fsspec.filesystem("s3", anon=False)
