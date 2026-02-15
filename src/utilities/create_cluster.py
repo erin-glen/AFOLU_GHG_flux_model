@@ -174,6 +174,7 @@ if __name__ == "__main__":
     parser.add_argument('-n', '--n_workers', type=int, default=1, help='Number of workers for the cluster')
     parser.add_argument('-m', '--worker_memory', type=int, help='Memory per worker')
     parser.add_argument('-t', '--threads_per_worker', type=int, help='Number of threads/worker')
+    parser.add_argument('-od', '--on_demand', action='store_true', help='Use on-demand workers (not spot workers)')
 
     args = parser.parse_args()
 
@@ -181,9 +182,10 @@ if __name__ == "__main__":
     n_workers = args.n_workers
     worker_memory = args.worker_memory
     threads_per_worker = args.threads_per_worker
+    on_demand = args.on_demand
 
     # Create the cluster with command line arguments
-    cluster = create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker)
+    cluster = create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker, on_demand=on_demand)
 
     # client = Client(cluster)
     # print(client.run(check_worker_memory_config))

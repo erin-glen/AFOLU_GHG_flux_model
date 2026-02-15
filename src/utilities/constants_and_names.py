@@ -1027,6 +1027,12 @@ adm0_geotif_path = "s3://gfw2-data/gadm_administrative_boundaries/v4.1/v4.1.64__
 adm0_zarr_path = f"{contextual_zarr_path}GADM4_1_adm0_global/{adm0_zarr_date}_fillValue_removed/global_GADM41_adm0_{adm0_zarr_date}.zarr"
 adm0_test_chunk = [13, 48, 14, 49]  # Three countries meet in Europe, with different values in three corners (50N_010E)
 
+primary_forest_IFL_zarr_date = '20251209'
+primary_forest_IFL_zarr_dtype = 'uint8'
+primary_forest_IFL_geotif_path = "s3://gfw2-data/climate/carbon_model/ifl_primary_merged/processed/20200724/"
+primary_forest_IFL_zarr_path = "s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/IFL2000_tropical_primary_forest_2001/20251209_fillValue_removed/ifl_primary_forest_merged_20251209.zarr"
+primary_forest_IFL_test_chunk = [119, -3, 120, -2]  # Extensive primary forest, should have primary forest (1) in lower-left and upper-right corners (00N_110E)
+
 pixel_area_zarr_date = '20251209'
 pixel_area_zarr_dtype = 'float32'
 pixel_area_geotif_path = "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
@@ -1075,6 +1081,8 @@ watersheds_test_chunk = [29, -1, 30, 0]  # 7005 in upper and lower left corners,
 state_node_lookup_table_local = "/mnt/c/GIS/git/AFOLU_GHG_flux_model/src/LULUCF/LULUCF_state_node_lookup_table.xlsx"
 state_node_lookup_table_s3 = "http://gfw2-data.s3.amazonaws.com/climate/AFOLU_flux_model/LULUCF/state_node_lookup_tables/LULUCF_state_node_lookup_table.xlsx"
 sheet = "v102_20251027"
+
+primary_forest_IFL_codes = np.array([0, 1], dtype=np.uint8)
 
 BRA_biome_codes = np.array([0, 1, 2, 3, 4, 5, 6], dtype=np.uint8)
 

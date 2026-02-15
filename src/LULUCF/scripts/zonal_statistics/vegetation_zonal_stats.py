@@ -192,7 +192,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
     # If an area smaller than 10x10 deg is given (for testing), the sub_tile_test flag is activated
     # and the analysis extent changes further down
-    if (abs(bounding_box[0]-bounding_box[2]) < 10) and (abs(bounding_box[1]-bounding_box[4]) < 10):
+    if (abs(bounding_box[0]-bounding_box[2]) < 10) and (abs(bounding_box[1]-bounding_box[3]) < 10):
         sub_tile_test = True
     else:
         sub_tile_test = False
@@ -264,12 +264,13 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
     adm0_xr = xr.open_zarr(cn.adm0_zarr_path, consolidated=False).rename_vars(band_data='adm0')
     pixel_area_xr = xr.open_zarr(cn.pixel_area_zarr_path, consolidated=False).rename_vars(band_data='pixel_area')
+    primary_forest_IFL_xr = xr.open_zarr(cn.primary_forest_IFL_zarr_path, consolidated=False).rename_vars(band_data='primary_forest_IFL')
     WDPA_xr = xr.open_zarr(cn.wdpa_zarr_path, consolidated=False).rename_vars(band_data='WDPA')
     BRA_biomes_xr = xr.open_zarr(cn.BRA_biomes_zarr_path, consolidated=False).rename_vars(band_data='BRA_biomes')
     cont_eco_xr = xr.open_zarr(cn.cont_eco_zarr_path, consolidated=False).rename_vars(band_data='cont_eco')
-    landmark_xr = xr.open_zarr(cn.landmark_zarr_path, consolidated=False).rename_vars(band_data='landmark')
-    KBA_xr = xr.open_zarr(cn.KBA_zarr_path, consolidated=False).rename_vars(band_data='KBA')
-    watersheds_xr = xr.open_zarr(cn.watersheds_zarr_path, consolidated=False).rename_vars(band_data='watersheds')
+    # landmark_xr = xr.open_zarr(cn.landmark_zarr_path, consolidated=False).rename_vars(band_data='landmark')
+    # KBA_xr = xr.open_zarr(cn.KBA_zarr_path, consolidated=False).rename_vars(band_data='KBA')
+    # watersheds_xr = xr.open_zarr(cn.watersheds_zarr_path, consolidated=False).rename_vars(band_data='watersheds')
 
     ds = xr.open_zarr(zarr_path, consolidated=False)
 
@@ -279,23 +280,25 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     reference = round_coords(pixel_area_xr["pixel_area"])
     ds_selected_analysis_vars = round_coords(ds_selected_analysis_vars)
     adm0_xr = round_coords(adm0_xr)
+    primary_forest_IFL_xr = round_coords(primary_forest_IFL_xr)
     WDPA_xr = round_coords(WDPA_xr)
     BRA_biomes_xr = round_coords(BRA_biomes_xr)
     cont_eco_xr = round_coords(cont_eco_xr)
-    landmark_xr = round_coords(landmark_xr)
-    KBA_xr = round_coords(KBA_xr)
-    watersheds_xr = round_coords(watersheds_xr)
+    # landmark_xr = round_coords(landmark_xr)
+    # KBA_xr = round_coords(KBA_xr)
+    # watersheds_xr = round_coords(watersheds_xr)
     land_state_node = round_coords(ds["land_state_node"])
 
     main_logger.info(f"Cropping: {uu.timestr()}")
     pixel_area_aligned = reference
     adm0_aligned = safe_crop(adm0_xr, reference)
     WDPA_aligned = safe_crop(WDPA_xr, reference)
+    primary_forest_IFL_aligned = safe_crop(primary_forest_IFL_xr, reference)
     BRA_biomes_aligned = safe_crop(BRA_biomes_xr, reference)
     cont_eco_aligned = safe_crop(cont_eco_xr, reference)
-    landmark_aligned = safe_crop(landmark_xr, reference)
-    KBA_aligned = safe_crop(KBA_xr, reference)
-    watersheds_aligned = safe_crop(watersheds_xr, reference)
+    # landmark_aligned = safe_crop(landmark_xr, reference)
+    # KBA_aligned = safe_crop(KBA_xr, reference)
+    # watersheds_aligned = safe_crop(watersheds_xr, reference)
     land_state_node_aligned = safe_crop(land_state_node, reference)
     ds_selected_analysis_vars_aligned = safe_crop(ds_selected_analysis_vars, reference)
 
@@ -350,12 +353,13 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     combined_list = []
 
     for i, tile_id in enumerate(tile_ids_to_process):
-        main_logger.info(f"Processing {tile_id} (tile {i} out of {len(tile_ids_to_process)}): {uu.timestr()}")
+        main_logger.info(f"Processing {tile_id} (tile {i+1} out of {len(tile_ids_to_process)}): {uu.timestr()}")
         tile_start_time = time.time()
 
         # If the bounding box is less than 10x10 deg, the exact bounding box is used (to enable small tests)
         if sub_tile_test == True:
             west, south, east, north = bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3]
+            main_logger.info("  Running test area")
         else: # Otherwise, the tiles that intersect the bounding box or shapefile are used
             west, south, east, north = uu.get_10x10_tile_bounds(tile_id)
 
@@ -368,11 +372,12 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
         adm0_aligned_subset = adm0_aligned.sel(x=slice(west, east), y=slice(north, south))
         WDPA_aligned_subset = WDPA_aligned.sel(x=slice(west, east), y=slice(north, south))
+        primary_forest_IFL_aligned_subset = primary_forest_IFL_aligned.sel(x=slice(west, east), y=slice(north, south))
         BRA_biomes_aligned_subset = BRA_biomes_aligned.sel(x=slice(west, east), y=slice(north, south))
         cont_eco_aligned_subset = cont_eco_aligned.sel(x=slice(west, east), y=slice(north, south))
-        landmark_aligned_subset = landmark_aligned.sel(x=slice(west, east), y=slice(north, south))
-        KBA_aligned_subset = KBA_aligned.sel(x=slice(west, east), y=slice(north, south))
-        watersheds_aligned_subset = watersheds_aligned.sel(x=slice(west, east), y=slice(north, south))
+        # landmark_aligned_subset = landmark_aligned.sel(x=slice(west, east), y=slice(north, south))
+        # KBA_aligned_subset = KBA_aligned.sel(x=slice(west, east), y=slice(north, south))
+        # watersheds_aligned_subset = watersheds_aligned.sel(x=slice(west, east), y=slice(north, south))
         land_state_node_aligned_subset = land_state_node_aligned.sel(x=slice(west, east), y=slice(north, south))
         pixel_area_expanded_subset = pixel_area_expanded.sel(x=slice(west, east), y=slice(north, south))
 
@@ -411,17 +416,19 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         (flux_cube_subset,
          pixel_area_expanded_subset,
          adm0_aligned_subset,
+         primary_forest_IFL_aligned_subset,
          WDPA_aligned_subset,
          cont_eco_aligned_subset,
-         landmark_aligned_subset,
+         # landmark_aligned_subset,
          land_state_node_aligned_subset,
          ) = xr.align(
             flux_cube_subset,
             pixel_area_expanded_subset,
             adm0_aligned_subset["adm0"],
+            primary_forest_IFL_aligned_subset["primary_forest_IFL"],
             WDPA_aligned_subset["WDPA"],
             cont_eco_aligned_subset["cont_eco"],
-            landmark_aligned_subset["landmark"],
+            # landmark_aligned_subset["landmark"],
             land_state_node_aligned_subset,
             join="override"
         )
@@ -434,18 +441,20 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
             *(
                 adm0_aligned_subset,
                 land_state_node_aligned_subset,
+                primary_forest_IFL_aligned_subset,
                 WDPA_aligned_subset,
                 cont_eco_aligned_subset,
-                landmark_aligned_subset,
+                # landmark_aligned_subset,
                 flux_cube_subset["year"]
             ),
             func='sum',
             expected_groups=(
                 cn.gadm_adm0_ids,
                 node_codes,
+                cn.primary_forest_IFL_codes,
                 cn.WDPA_codes,
                 cn.cont_eco_codes,
-                cn.landmark_codes,
+                # cn.landmark_codes,
                 flux_cube_subset.year.values,
             ),
             group_dims=["year"],
@@ -457,9 +466,10 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         contextual_layers = [
             'adm0',
             'land_state_node',
+            'primary_forest_IFL',
             'WDPA',
             'cont_eco',
-            'landmark',
+            # 'landmark',
             'year'
         ]
 
@@ -473,7 +483,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
         tile_df_name = f'veg_model_zonal_stats_{tile_id}_v{cn.veg_model_version_underscore}_{time.strftime('%Y%m%d_%H_%M_%S')}'
         df.to_parquet(f"{local_zonal_stats_folder}/{tile_df_name}.parquet")
-        df.to_csv(f"{local_zonal_stats_folder}/{tile_df_name}.csv")
+        # df.to_csv(f"{local_zonal_stats_folder}/{tile_df_name}.csv")
 
         tile_end_time = time.time()
         main_logger.info(f"  Done with {tile_id}, took {round(tile_end_time) - round(tile_start_time)} seconds: {uu.timestr()}")
