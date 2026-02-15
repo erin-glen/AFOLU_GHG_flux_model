@@ -13,7 +13,6 @@ Requirements for model readiness:
 from __future__ import annotations
 
 import argparse
-import os
 import tempfile
 from pathlib import Path
 
@@ -26,14 +25,53 @@ from src.scripts.utilities import universal_utilities as uu
 REQUIRED_COLUMNS = ("chunk_id", "iso")
 
 
+def _is_s3_uri(path_or_uri: str) -> bool:
+    return path_or_uri.startswith("s3://")
+
+
 def _read_vector(path_or_uri: str) -> gpd.GeoDataFrame:
     """Read a local or S3 shapefile into a GeoDataFrame."""
-    if path_or_uri.startswith("s3://"):
+    if _is_s3_uri(path_or_uri):
         bucket, key = uu.split_s3_path(path_or_uri)
         prefix = key[:-4] if key.lower().endswith(".shp") else key
         with tempfile.TemporaryDirectory(prefix="aoi_chunks_") as td:
             return uu.read_shapefile_from_s3(prefix, td, bucket)
     return gpd.read_file(path_or_uri)
+
+
+def _write_vector(gdf: gpd.GeoDataFrame, output_path: str) -> str:
+    """Write output shapefile locally or upload sidecars to S3.
+
+    Returns the written destination as a user-facing path.
+    """
+    if not _is_s3_uri(output_path):
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        gdf.to_file(out)
+        return str(out.resolve())
+
+    bucket, key = uu.split_s3_path(output_path)
+    if not key.lower().endswith(".shp"):
+        raise ValueError("S3 output must end with .shp")
+
+    base_name = Path(key).stem
+    key_prefix = key[:-4]
+
+    with tempfile.TemporaryDirectory(prefix="aoi_chunks_upload_") as td:
+        local_shp = Path(td) / f"{base_name}.shp"
+        gdf.to_file(local_shp)
+
+        # Match repository upload pattern: write locally, then upload shapefile sidecars.
+        for ext in (".shp", ".shx", ".dbf", ".prj", ".cpg"):
+            local_sidecar = local_shp.with_suffix(ext)
+            if local_sidecar.exists():
+                uu.upload_file_to_s3(
+                    str(local_sidecar),
+                    bucket,
+                    f"{key_prefix}{ext}",
+                )
+
+    return output_path
 
 
 def build_model_ready_chunks(
@@ -78,11 +116,8 @@ def build_model_ready_chunks(
     if not keep_all_fishnet_columns:
         selected = selected[["chunk_id", "iso", "geometry"]]
 
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-
-    # Shapefile sidecars are written automatically by geopandas.
-    selected.to_file(out)
+    written_to = _write_vector(selected, output_path)
+    print(f"Wrote {len(selected)} model-ready 1x1 chunks to {written_to}")
     return selected
 
 
@@ -123,9 +158,8 @@ def main() -> None:
         keep_all_fishnet_columns=args.keep_all_fishnet_columns,
     )
 
-    print(
-        f"Wrote {len(result)} model-ready 1x1 chunks to {os.path.abspath(args.output)}"
-    )
+    if result.empty:
+        raise RuntimeError("No output written.")
 
 
 if __name__ == "__main__":
@@ -138,7 +172,7 @@ python -m src.scripts.preprocessing.misc.aoi_to_1x1_model_chunks \
 
 python -m src.scripts.preprocessing.misc.aoi_to_1x1_model_chunks \
   --aoi s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/wwf/raw/ESSF_OperationalLandscapes.shp \
-  --output s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/wwf/fishnet/operational_lanscapes_1x1.shp
+  --output s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/wwf/fishnet/operational_landscapes_1x1.shp
   
 python -m src.scripts.preprocessing.misc.aoi_to_1x1_model_chunks \
   --aoi s3://my-bucket/my-prefix/aoi.shp \
