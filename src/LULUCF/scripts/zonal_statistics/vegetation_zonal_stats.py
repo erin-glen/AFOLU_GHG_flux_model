@@ -216,9 +216,9 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     unique_tile_ids = sorted(list(set(tile_ids)))
 
     # Outputs to performs zonal stats on
-    full_list_of_vars = [cn.gross_emis_all_C_pools_CO2_only_pattern, cn.ch4_gross_emis_pattern, cn.n2o_gross_emis_pattern,
-                         cn.gross_emis_all_C_pools_non_CO2_only_pattern, cn.gross_emis_all_C_pools_all_gases_pattern,
-                         cn.gross_removals_all_C_pools_pattern,
+    full_list_of_vars = [cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
+                         cn.ch4_gross_emis_pattern, cn.n2o_gross_emis_pattern,
+                         cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.gross_removals_all_C_pools_pattern,
                          cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
                          cn.non_soil_c_modeled_dens_pattern]
 
@@ -265,14 +265,13 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
     adm0_xr = xr.open_zarr(cn.adm0_zarr_path, consolidated=False).rename_vars(band_data='adm0')
     pixel_area_xr = xr.open_zarr(cn.pixel_area_zarr_path, consolidated=False).rename_vars(band_data='pixel_area')
-    # primary_forest_IFL_xr = xr.open_zarr(cn.primary_forest_IFL_zarr_path, consolidated=False).rename_vars(band_data='primary_forest_IFL')
     WDPA_xr = xr.open_zarr(cn.wdpa_zarr_path, consolidated=False).rename_vars(band_data='WDPA')
     BRA_biomes_xr = xr.open_zarr(cn.BRA_biomes_zarr_path, consolidated=False).rename_vars(band_data='BRA_biomes')
     cont_eco_xr = xr.open_zarr(cn.cont_eco_zarr_path, consolidated=False).rename_vars(band_data='cont_eco')
-    # landmark_xr = xr.open_zarr(cn.landmark_zarr_path, consolidated=False).rename_vars(band_data='landmark')
+    landmark_xr = xr.open_zarr(cn.landmark_zarr_path, consolidated=False).rename_vars(band_data='landmark')
     composite_primary_xr = xr.open_zarr(cn.starting_composite_primary_forest_zarr_path, consolidated=False)  # No rename because it's created by a different process where the variable is named starting_composite_primary_forest
     KBA_xr = xr.open_zarr(cn.KBA_zarr_path, consolidated=False).rename_vars(band_data='KBA')
-    # watersheds_xr = xr.open_zarr(cn.watersheds_zarr_path, consolidated=False).rename_vars(band_data='watersheds')
+    watersheds_xr = xr.open_zarr(cn.watersheds_zarr_path, consolidated=False).rename_vars(band_data='watersheds')
 
     ds = xr.open_zarr(zarr_path, consolidated=False)
 
@@ -282,27 +281,25 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     reference = round_coords(pixel_area_xr["pixel_area"])
     ds_selected_analysis_vars = round_coords(ds_selected_analysis_vars)
     adm0_xr = round_coords(adm0_xr)
-    # primary_forest_IFL_xr = round_coords(primary_forest_IFL_xr)
     WDPA_xr = round_coords(WDPA_xr)
     BRA_biomes_xr = round_coords(BRA_biomes_xr)
     cont_eco_xr = round_coords(cont_eco_xr)
-    # landmark_xr = round_coords(landmark_xr)
+    landmark_xr = round_coords(landmark_xr)
     composite_primary_xr = round_coords(composite_primary_xr)
     KBA_xr = round_coords(KBA_xr)
-    # watersheds_xr = round_coords(watersheds_xr)
+    watersheds_xr = round_coords(watersheds_xr)
     land_state_node = round_coords(ds["land_state_node"])
 
     main_logger.info(f"Cropping: {uu.timestr()}")
     pixel_area_aligned = reference
     adm0_aligned = safe_crop(adm0_xr, reference)
     WDPA_aligned = safe_crop(WDPA_xr, reference)
-    # primary_forest_IFL_aligned = safe_crop(primary_forest_IFL_xr, reference)
     BRA_biomes_aligned = safe_crop(BRA_biomes_xr, reference)
     cont_eco_aligned = safe_crop(cont_eco_xr, reference)
-    # landmark_aligned = safe_crop(landmark_xr, reference)
+    landmark_aligned = safe_crop(landmark_xr, reference)
     composite_primary_aligned = safe_crop(composite_primary_xr, reference)
     KBA_aligned = safe_crop(KBA_xr, reference)
-    # watersheds_aligned = safe_crop(watersheds_xr, reference)
+    watersheds_aligned = safe_crop(watersheds_xr, reference)
     land_state_node_aligned = safe_crop(land_state_node, reference)
     ds_selected_analysis_vars_aligned = safe_crop(ds_selected_analysis_vars, reference)
 
@@ -376,13 +373,12 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
         adm0_aligned_subset = adm0_aligned.sel(x=slice(west, east), y=slice(north, south))
         WDPA_aligned_subset = WDPA_aligned.sel(x=slice(west, east), y=slice(north, south))
-        # primary_forest_IFL_aligned_subset = primary_forest_IFL_aligned.sel(x=slice(west, east), y=slice(north, south))
         BRA_biomes_aligned_subset = BRA_biomes_aligned.sel(x=slice(west, east), y=slice(north, south))
         cont_eco_aligned_subset = cont_eco_aligned.sel(x=slice(west, east), y=slice(north, south))
-        # landmark_aligned_subset = landmark_aligned.sel(x=slice(west, east), y=slice(north, south))
+        landmark_aligned_subset = landmark_aligned.sel(x=slice(west, east), y=slice(north, south))
         composite_primary_aligned_subset = composite_primary_aligned.sel(x=slice(west, east), y=slice(north, south))
         KBA_aligned_subset = KBA_aligned.sel(x=slice(west, east), y=slice(north, south))
-        # watersheds_aligned_subset = watersheds_aligned.sel(x=slice(west, east), y=slice(north, south))
+        watersheds_aligned_subset = watersheds_aligned.sel(x=slice(west, east), y=slice(north, south))
         land_state_node_aligned_subset = land_state_node_aligned.sel(x=slice(west, east), y=slice(north, south))
         pixel_area_expanded_subset = pixel_area_expanded.sel(x=slice(west, east), y=slice(north, south))
 
@@ -390,7 +386,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         # That allows it to be used with the other contextual layers, which are also just 4000x4000 (no year dimension).
         # Note: composite primary forest has chunks of 1x4000x4000 because of how it's made; it uses the same function as the zarr for the vegetation model,
         # rather than the script of the other contextual layers.
-        composite_primary_aligned_subset_da = composite_primary_aligned_subset["starting_composite_primary_forest"]
+        composite_primary_aligned_subset_da = composite_primary_aligned_subset[cn.starting_composite_primary_forest_pattern]
         if "year" in composite_primary_aligned_subset_da.dims:
             composite_primary_aligned_subset_da = composite_primary_aligned_subset_da.isel(year=0, drop=True)
 
@@ -399,23 +395,23 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         (flux_cube_subset,
          pixel_area_expanded_subset,
          adm0_aligned_subset,
-         # primary_forest_IFL_aligned_subset,
          WDPA_aligned_subset,
          cont_eco_aligned_subset,
-         # landmark_aligned_subset,
+         landmark_aligned_subset,
          composite_primary_aligned_subset_da,
          KBA_aligned_subset,
+         watersheds_aligned_subset,
          land_state_node_aligned_subset,
          ) = xr.align(
             flux_cube_subset,
             pixel_area_expanded_subset,
             adm0_aligned_subset["adm0"],
-            # primary_forest_IFL_aligned_subset["primary_forest_IFL"],
             WDPA_aligned_subset["WDPA"],
             cont_eco_aligned_subset["cont_eco"],
-            # landmark_aligned_subset["landmark"],
+            landmark_aligned_subset["landmark"],
             composite_primary_aligned_subset_da,
             KBA_aligned_subset["KBA"],
+            watersheds_aligned_subset["watersheds"],
             land_state_node_aligned_subset,
             join="override"
         )
@@ -426,24 +422,24 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
             *(
                 adm0_aligned_subset,
                 land_state_node_aligned_subset,
-                # primary_forest_IFL_aligned_subset,
                 WDPA_aligned_subset,
                 cont_eco_aligned_subset,
-                # landmark_aligned_subset,
+                landmark_aligned_subset,
                 composite_primary_aligned_subset_da,
                 KBA_aligned_subset,
+                watersheds_aligned_subset,
                 flux_cube_subset["year"]
             ),
             func='sum',
             expected_groups=(
                 cn.gadm_adm0_ids,
                 node_codes,
-                # cn.primary_forest_IFL_codes,
                 cn.WDPA_codes,
                 cn.cont_eco_codes,
-                # cn.landmark_codes,
+                cn.landmark_codes,
                 cn.composite_primary_codes,
                 cn.KBA_codes,
+                cn.watershed_codes,
                 flux_cube_subset.year.values,
             ),
             group_dims=["year"],
@@ -455,22 +451,24 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         contextual_layers = [
             'adm0',
             'land_state_node',
-            # 'primary_forest_IFL',
             'WDPA',
             'cont_eco',
-            # 'landmark',
-            'starting_composite_primary_forest',
+            'landmark',
+            cn.starting_composite_primary_forest_pattern,
             'KBA',
+            'watersheds',
             'year'
         ]
 
+        main_logger.info(f"  Done computing {tile_id}: {uu.timestr()}")
         coord_dict = convert_to_coord_dict(results, main_logger)
         df = create_df(coord_dict, state_node_df, contextual_layers, tile_id)
-        main_logger.info(f"  Rows in {tile_id} dataframe: {len(df.index)}")
+        main_logger.info(f"  Rows in {tile_id} dataframe: {len(df.index)}: {uu.timestr()}")
 
         # Appends the tile-level df to a list of dfs
         combined_list.append(df)
 
+        main_logger.info(f"  Saving {tile_id} output table: {uu.timestr()}")
         tile_df_name = f'veg_model_zonal_stats_{tile_id}_v{cn.veg_model_version_underscore}_{time.strftime('%Y%m%d_%H_%M_%S')}'
         df.to_parquet(f"{local_zonal_stats_folder}/{tile_df_name}.parquet")
         df.to_csv(f"{local_zonal_stats_folder}/{tile_df_name}.csv")
