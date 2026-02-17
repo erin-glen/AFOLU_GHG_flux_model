@@ -33,6 +33,7 @@ python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetat
 import argparse
 import pandas as pd
 import os
+import gc
 from pathlib import Path
 import time
 from dask.distributed import print
@@ -111,12 +112,15 @@ def convert_to_coord_dict(flux_results, main_logger):
 # adds the interval end year to the dataframe
 # adds the state node meaning to the dataframe
 # converts area from m^2 to ha
-def create_df(coord_dict, state_node_df, merge_keys, tile_id):
+def create_df(coord_dict, state_node_df, merge_keys, tile_id, bases):
 
     df = pd.DataFrame(coord_dict)
     # print(df)
 
     df['tile_id'] = str(tile_id)
+
+    # Decode contextuals from zone_id if present
+    df = decode_zone_id_into_df(df, bases)
 
     # Splits df into pixel area and other analysis layers
     df_area = (
@@ -162,6 +166,49 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     df_with_areas['flux_Mg_ha'] = df_with_areas['value'] / df_with_areas['pixel_area_ha'].replace(0, pd.NA)
 
     return df_with_areas
+
+
+
+def decode_zone_id_into_df(df: pd.DataFrame, bases: dict) -> pd.DataFrame:
+    """
+    Decodes zone_id back into contextual columns.
+
+    zone_id encoding (least significant first):
+        kba (binary)
+        cont_eco
+        WDPA
+        land_state_node
+        adm0
+    """
+    if "zone_id" not in df.columns:
+        return df
+
+    B_kba = bases["B_kba"]
+    B_eco = bases["B_eco"]
+    B_wdpa = bases["B_wdpa"]
+    B_node = bases["B_node"]
+
+    # Ensure integer dtype
+    z = df["zone_id"].astype("int64")
+
+    df["KBA"] = (z % B_kba).astype("int32")
+    z = z // B_kba
+
+    df["cont_eco"] = (z % B_eco).astype("int32")
+    z = z // B_eco
+
+    df["WDPA"] = (z % B_wdpa).astype("int32")
+    z = z // B_wdpa
+
+    df["land_state_node"] = (z % B_node).astype("int32")
+    z = z // B_node
+
+    df["adm0"] = z.astype("int32")
+
+    # Keep zone_id if you want debugging; otherwise drop
+    df = df.drop(columns=["zone_id"])
+
+    return df
 
 
 def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefile_uri=False, bounding_box=None,
@@ -257,6 +304,20 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     local_zonal_stats_folder = Path(cn.local_zonal_stats_table_folder)
     local_zonal_stats_folder.mkdir(parents=True, exist_ok=True)
 
+    # Bases for zone_id encoding (must be > max code for that dimension)
+    # These come from your expected_groups constants so they do not require any compute.
+    bases = {
+        "B_kba": 2,  # binary
+        "B_eco": int(np.max(cn.cont_eco_codes)) + 1,
+        "B_wdpa": int(np.max(cn.WDPA_codes)) + 1,
+        "B_node": int(np.max(node_codes)) + 1,
+    }
+    bases["B_adm0"] = int(np.max(cn.gadm_adm0_ids)) + 1  # not used in decode; included for sanity/logging
+
+    main_logger.info(f"zone_id bases: {bases}")
+
+
+
 
     ### Step 2: Prepare input zarrs
 
@@ -264,12 +325,13 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
     adm0_xr = xr.open_zarr(cn.adm0_zarr_path, consolidated=False).rename_vars(band_data='adm0')
     pixel_area_xr = xr.open_zarr(cn.pixel_area_zarr_path, consolidated=False).rename_vars(band_data='pixel_area')
-    primary_forest_IFL_xr = xr.open_zarr(cn.primary_forest_IFL_zarr_path, consolidated=False).rename_vars(band_data='primary_forest_IFL')
+    # primary_forest_IFL_xr = xr.open_zarr(cn.primary_forest_IFL_zarr_path, consolidated=False).rename_vars(band_data='primary_forest_IFL')
     WDPA_xr = xr.open_zarr(cn.wdpa_zarr_path, consolidated=False).rename_vars(band_data='WDPA')
     BRA_biomes_xr = xr.open_zarr(cn.BRA_biomes_zarr_path, consolidated=False).rename_vars(band_data='BRA_biomes')
     cont_eco_xr = xr.open_zarr(cn.cont_eco_zarr_path, consolidated=False).rename_vars(band_data='cont_eco')
     # landmark_xr = xr.open_zarr(cn.landmark_zarr_path, consolidated=False).rename_vars(band_data='landmark')
-    # KBA_xr = xr.open_zarr(cn.KBA_zarr_path, consolidated=False).rename_vars(band_data='KBA')
+    # composite_primary_xr = xr.open_zarr(cn.starting_composite_primary_forest_zarr_path, consolidated=False)  # No rename because it's created by a different process where the variable is named starting_composite_primary_forest
+    KBA_xr = xr.open_zarr(cn.KBA_zarr_path, consolidated=False).rename_vars(band_data='KBA')
     # watersheds_xr = xr.open_zarr(cn.watersheds_zarr_path, consolidated=False).rename_vars(band_data='watersheds')
 
     ds = xr.open_zarr(zarr_path, consolidated=False)
@@ -280,12 +342,13 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     reference = round_coords(pixel_area_xr["pixel_area"])
     ds_selected_analysis_vars = round_coords(ds_selected_analysis_vars)
     adm0_xr = round_coords(adm0_xr)
-    primary_forest_IFL_xr = round_coords(primary_forest_IFL_xr)
+    # primary_forest_IFL_xr = round_coords(primary_forest_IFL_xr)
     WDPA_xr = round_coords(WDPA_xr)
     BRA_biomes_xr = round_coords(BRA_biomes_xr)
     cont_eco_xr = round_coords(cont_eco_xr)
     # landmark_xr = round_coords(landmark_xr)
-    # KBA_xr = round_coords(KBA_xr)
+    # composite_primary_xr = round_coords(composite_primary_xr)
+    KBA_xr = round_coords(KBA_xr)
     # watersheds_xr = round_coords(watersheds_xr)
     land_state_node = round_coords(ds["land_state_node"])
 
@@ -293,11 +356,12 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     pixel_area_aligned = reference
     adm0_aligned = safe_crop(adm0_xr, reference)
     WDPA_aligned = safe_crop(WDPA_xr, reference)
-    primary_forest_IFL_aligned = safe_crop(primary_forest_IFL_xr, reference)
+    # primary_forest_IFL_aligned = safe_crop(primary_forest_IFL_xr, reference)
     BRA_biomes_aligned = safe_crop(BRA_biomes_xr, reference)
     cont_eco_aligned = safe_crop(cont_eco_xr, reference)
     # landmark_aligned = safe_crop(landmark_xr, reference)
-    # KBA_aligned = safe_crop(KBA_xr, reference)
+    # composite_primary_aligned = safe_crop(composite_primary_xr, reference)
+    KBA_aligned = safe_crop(KBA_xr, reference)
     # watersheds_aligned = safe_crop(watersheds_xr, reference)
     land_state_node_aligned = safe_crop(land_state_node, reference)
     ds_selected_analysis_vars_aligned = safe_crop(ds_selected_analysis_vars, reference)
@@ -372,11 +436,12 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
         adm0_aligned_subset = adm0_aligned.sel(x=slice(west, east), y=slice(north, south))
         WDPA_aligned_subset = WDPA_aligned.sel(x=slice(west, east), y=slice(north, south))
-        primary_forest_IFL_aligned_subset = primary_forest_IFL_aligned.sel(x=slice(west, east), y=slice(north, south))
+        # primary_forest_IFL_aligned_subset = primary_forest_IFL_aligned.sel(x=slice(west, east), y=slice(north, south))
         BRA_biomes_aligned_subset = BRA_biomes_aligned.sel(x=slice(west, east), y=slice(north, south))
         cont_eco_aligned_subset = cont_eco_aligned.sel(x=slice(west, east), y=slice(north, south))
         # landmark_aligned_subset = landmark_aligned.sel(x=slice(west, east), y=slice(north, south))
-        # KBA_aligned_subset = KBA_aligned.sel(x=slice(west, east), y=slice(north, south))
+        # composite_primary_aligned_subset = composite_primary_aligned.sel(x=slice(west, east), y=slice(north, south))
+        KBA_aligned_subset = KBA_aligned.sel(x=slice(west, east), y=slice(north, south))
         # watersheds_aligned_subset = watersheds_aligned.sel(x=slice(west, east), y=slice(north, south))
         land_state_node_aligned_subset = land_state_node_aligned.sel(x=slice(west, east), y=slice(north, south))
         pixel_area_expanded_subset = pixel_area_expanded.sel(x=slice(west, east), y=slice(north, south))
@@ -416,66 +481,113 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         (flux_cube_subset,
          pixel_area_expanded_subset,
          adm0_aligned_subset,
-         primary_forest_IFL_aligned_subset,
+         # primary_forest_IFL_aligned_subset,
          WDPA_aligned_subset,
          cont_eco_aligned_subset,
          # landmark_aligned_subset,
+         # composite_primary_aligned_subset,
+         KBA_aligned_subset,
          land_state_node_aligned_subset,
          ) = xr.align(
             flux_cube_subset,
             pixel_area_expanded_subset,
             adm0_aligned_subset["adm0"],
-            primary_forest_IFL_aligned_subset["primary_forest_IFL"],
+            # primary_forest_IFL_aligned_subset["primary_forest_IFL"],
             WDPA_aligned_subset["WDPA"],
             cont_eco_aligned_subset["cont_eco"],
             # landmark_aligned_subset["landmark"],
+            # composite_primary_aligned_subset["starting_composite_primary_forest"],
+            KBA_aligned_subset["KBA"],
             land_state_node_aligned_subset,
             join="override"
         )
 
-        flux_cube_subset = flux_cube_subset.persist()
+        # flux_cube_subset = flux_cube_subset.persist()
+
+        # Build zone_id lazily in Dask (no .compute())
+        # Use int64 to avoid overflow.
+        main_logger.info(f"  Building zone_id: {uu.timestr()}")
+        adm0_i = adm0_aligned_subset.astype("int64")
+        node_i = land_state_node_aligned_subset.astype("int64")
+        wdpa_i = WDPA_aligned_subset.astype("int64")
+        eco_i = cont_eco_aligned_subset.astype("int64")
+        kba_i = KBA_aligned_subset.astype("int64")
+
+        # Encoding: ((((adm0 * B_node + node) * B_wdpa + wdpa) * B_eco + eco) * 2 + kba)
+        zone_id = (
+            ((((adm0_i * bases["B_node"] + node_i)
+               * bases["B_wdpa"] + wdpa_i)
+               * bases["B_eco"] + eco_i)
+               * bases["B_kba"] + kba_i)
+        ).astype("int64")
+        zone_id = zone_id.rename("zone_id")
+
+        import dask.array as da
+        expected_zone_ids = da.unique(zone_id.data).compute()
+        expected_zone_ids = np.asarray(expected_zone_ids, dtype=np.int64)
+
 
         main_logger.info(f"  Computing: {uu.timestr()}")
+        # results = xarray_reduce(
+        #     flux_cube_subset,
+        #     *(
+        #         adm0_aligned_subset,
+        #         land_state_node_aligned_subset,
+        #         # primary_forest_IFL_aligned_subset,
+        #         WDPA_aligned_subset,
+        #         cont_eco_aligned_subset,
+        #         # landmark_aligned_subset,
+        #         # composite_primary_aligned_subset,
+        #         KBA_aligned_subset,
+        #         flux_cube_subset["year"]
+        #     ),
+        #     func='sum',
+        #     expected_groups=(
+        #         cn.gadm_adm0_ids,
+        #         node_codes,
+        #         # cn.primary_forest_IFL_codes,
+        #         cn.WDPA_codes,
+        #         cn.cont_eco_codes,
+        #         # cn.landmark_codes,
+        #         # cn.composite_primary_codes,
+        #         cn.KBA_codes,
+        #         flux_cube_subset.year.values,
+        #     ),
+        #     group_dims=["year"],
+        #     reindex=ReindexStrategy(blockwise=False, array_type=ReindexArrayType.SPARSE_COO),
+        #     fill_value=0
+        # ).compute()
+
+        # main_logger.info(f"  Computing: {uu.timestr()}")
+        # Critical: reindex=False => observed groups only; no cartesian expansion
         results = xarray_reduce(
             flux_cube_subset,
-            *(
-                adm0_aligned_subset,
-                land_state_node_aligned_subset,
-                primary_forest_IFL_aligned_subset,
-                WDPA_aligned_subset,
-                cont_eco_aligned_subset,
-                # landmark_aligned_subset,
-                flux_cube_subset["year"]
-            ),
-            func='sum',
-            expected_groups=(
-                cn.gadm_adm0_ids,
-                node_codes,
-                cn.primary_forest_IFL_codes,
-                cn.WDPA_codes,
-                cn.cont_eco_codes,
-                # cn.landmark_codes,
-                flux_cube_subset.year.values,
-            ),
+            zone_id,
+            flux_cube_subset["year"],
+            func="sum",
             group_dims=["year"],
+            expected_groups=(expected_zone_ids, flux_cube_subset.year.values),
             reindex=ReindexStrategy(blockwise=False, array_type=ReindexArrayType.SPARSE_COO),
-            fill_value=0
+            fill_value=0,
         ).compute()
+
 
         # Contextual layers to use to merge pixel_area against other analysis layers (to calculate flux/ha)
         contextual_layers = [
             'adm0',
             'land_state_node',
-            'primary_forest_IFL',
+            # 'primary_forest_IFL',
             'WDPA',
             'cont_eco',
             # 'landmark',
+            # 'composite_primary',
+            'KBA',
             'year'
         ]
 
         coord_dict = convert_to_coord_dict(results, main_logger)
         # print(coord_dict)
-        df = create_df(coord_dict, state_node_df, contextual_layers, tile_id)
+        df = create_df(coord_dict, state_node_df, contextual_layers, tile_id, bases)
         main_logger.info(f"  Rows in {tile_id} dataframe: {len(df.index)}")
 
         # Appends the tile-level df to a list of dfs
@@ -487,6 +599,10 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
         tile_end_time = time.time()
         main_logger.info(f"  Done with {tile_id}, took {round(tile_end_time) - round(tile_start_time)} seconds: {uu.timestr()}")
+
+        # Optional: reduce lingering refs between tiles
+        del results, coord_dict, df, zone_id, adm0_i, node_i, wdpa_i, eco_i, kba_i, flux_cube_subset
+        client.run(gc.collect)
 
 
     # Combines all the tile-level dfs in the list into a single df

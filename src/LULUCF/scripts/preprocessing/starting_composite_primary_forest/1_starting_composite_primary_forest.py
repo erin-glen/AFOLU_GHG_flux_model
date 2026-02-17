@@ -342,7 +342,7 @@ def main(cluster_name,
     if create_zarr:
 
         # Creates s3 paths for the raw mega-zarr
-        zarr_path = zu.create_zarr_path(cn.starting_composite_primary_forest_zarr, chunk_size_pixels, str(year),
+        zarr_path = zu.create_zarr_path(cn.starting_composite_primary_forest_zarr_path, chunk_size_pixels, str(year),
                                                   'standard', cn.veg_model_version_underscore, 'NA',
                                         run_date, main_logger)
         outputs_to_zarr = [cn.starting_composite_primary_forest_pattern]

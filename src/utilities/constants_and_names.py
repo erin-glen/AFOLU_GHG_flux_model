@@ -518,8 +518,8 @@ forest_age_output_pattern = "forest_age_at_end_of_interval"
 # Starting composite primary forest (2015)
 starting_composite_primary_forest_run_date = '20260210'
 starting_composite_primary_forest_pattern = "starting_composite_primary_forest"
-starting_composite_primary_forest_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/{starting_composite_primary_forest_pattern}/2015/CHUNK_SIZE_pixels/{starting_composite_primary_forest_run_date}/"
-starting_composite_primary_forest_zarr = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/{starting_composite_primary_forest_pattern}/2015/zarr/CHUNK_SIZE_pixels/{starting_composite_primary_forest_run_date}/{starting_composite_primary_forest_pattern}.zarr"
+starting_composite_primary_forest_dir = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/{starting_composite_primary_forest_pattern}/2015/{chunk_dims}_pixels/{starting_composite_primary_forest_run_date}/"
+starting_composite_primary_forest_zarr_path = f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/{starting_composite_primary_forest_pattern}/2015/zarr/{chunk_dims}_pixels/{starting_composite_primary_forest_run_date}/{starting_composite_primary_forest_pattern}.zarr"
 
 # GEE script that the global rasters are from is https://code.earthengine.google.com/805896f7a511c13eb873c4804a683abc (each file takes about 15 minutes to export to Google Drive).
 # NOTE: GEE export function splits the exported global raster into two pieces. I merged the two pieces into a single file in ArcPro,
@@ -1131,6 +1131,10 @@ cont_eco_codes = np.array([0,
 ], dtype=np.uint16)
 
 landmark_codes = np.array([0, 1], dtype=np.uint8)
+
+composite_primary_codes = np.array([0, 1], dtype=np.uint8)
+
+KBA_codes = np.array([0, 1], dtype=np.uint8)
 
 # Converts numeric ISO values to ISO codes
 # From https://github.com/wri/project-zeno-data-infra/blob/main/notebooks/grasslands_areas_gadm_2000-2022.ipynb
