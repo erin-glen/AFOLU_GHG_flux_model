@@ -357,6 +357,11 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         main_logger.info(f"Processing {tile_id} (tile {i+1} out of {len(tile_ids_to_process)}): {uu.timestr()}")
         tile_start_time = time.time()
 
+        # Skips if any existing file already contains this tile_id (to not repeat that tile if restarting the zonal stats)
+        if any(tile_id in fname for fname in os.listdir(local_zonal_stats_folder)):
+            main_logger.info(f"  Skipping {tile_id}; output already exists")
+            continue
+
         # If the bounding box is less than 10x10 deg, the exact bounding box is used (to enable small tests)
         if sub_tile_test == True:
             west, south, east, north = bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3]
@@ -480,16 +485,18 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         main_logger.info(f"  Done with {tile_id}, took {round(tile_end_time) - round(tile_start_time)} seconds: {uu.timestr()}")
 
 
-    # Combines all the tile-level dfs in the list into a single df
-    combined_df = pd.concat(combined_list, axis=0, ignore_index=True)
+    if len(combined_list) > 0:
 
-    main_logger.info(f"Rows in combined dataframe: {len(combined_df.index)}")
-    main_logger.info(combined_df.head())
+        # Combines all the tile-level dfs in the list into a single df
+        combined_df = pd.concat(combined_list, axis=0, ignore_index=True)
 
-    combined_df_name = f'veg_model_zonal_stats_v{cn.veg_model_version_underscore}_{time.strftime('%Y%m%d_%H_%M_%S')}'
-    combined_df.to_parquet(f"{local_zonal_stats_folder}/{combined_df_name}.parquet")
-    if len(combined_df.index) < 900_000:  # Only writes combined file to Excel if it's not giant
-        combined_df.to_csv(f"{local_zonal_stats_folder}/{combined_df_name}.csv")
+        main_logger.info(f"Rows in combined dataframe: {len(combined_df.index)}")
+        main_logger.info(combined_df.head())
+
+        combined_df_name = f'veg_model_zonal_stats_v{cn.veg_model_version_underscore}_{time.strftime('%Y%m%d_%H_%M_%S')}'
+        combined_df.to_parquet(f"{local_zonal_stats_folder}/{combined_df_name}.parquet")
+        if len(combined_df.index) < 900_000:  # Only writes combined file to Excel if it's not giant
+            combined_df.to_csv(f"{local_zonal_stats_folder}/{combined_df_name}.csv")
 
     end_time = time.time()
     main_logger.info(f"  Finished zonal stats, took {round(end_time - prep_start_time)} seconds: {uu.timestr()}")
