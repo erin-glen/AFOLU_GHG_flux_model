@@ -1026,54 +1026,56 @@ adm0_zarr_dtype = 'uint16'
 adm0_geotif_path = "s3://gfw2-data/gadm_administrative_boundaries/v4.1/v4.1.64__from_gfw-data-lake/raster/epsg-4326/10/40000/adm0/gdal-geotiff/"
 adm0_zarr_path = f"{contextual_zarr_path}GADM4_1_adm0_global/{adm0_zarr_date}_fillValue_removed/global_GADM41_adm0_{adm0_zarr_date}.zarr"
 adm0_test_chunk = [13, 48, 14, 49]  # Three countries meet in Europe, with different values in three corners (50N_010E)
-
-primary_forest_IFL_zarr_date = '20251209'
-primary_forest_IFL_zarr_dtype = 'uint8'
-primary_forest_IFL_geotif_path = "s3://gfw2-data/climate/carbon_model/ifl_primary_merged/processed/20200724/"
-primary_forest_IFL_zarr_path = "s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/IFL2000_tropical_primary_forest_2001/20251209_fillValue_removed/ifl_primary_forest_merged_20251209.zarr"
-primary_forest_IFL_test_chunk = [119, -3, 120, -2]  # Extensive primary forest, should have primary forest (1) in lower-left and upper-right corners (00N_110E)
+adm0_pattern = 'adm0'
 
 pixel_area_zarr_date = '20251209'
 pixel_area_zarr_dtype = 'float32'
 pixel_area_geotif_path = "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
 pixel_area_zarr_path = f"{contextual_zarr_path}pixel_area/{pixel_area_zarr_date}_fillValue_removed/global_pixel_area_{pixel_area_zarr_date}.zarr"
 pixel_area_test_chunk = [13, 48, 14, 49]  # 50N_010E
+pixel_area_pattern = 'pixel_area'
 
 wdpa_zarr_date = '20251229'
 wdpa_zarr_dtype = 'uint8'
 wdpa_geotif_path = "s3://gfw2-data/conservation/wdpa_licensed_proteced_areas__from_data_lake/v202511/raster/epsg-4326/10/40000/detailed_iucn_cat/gdal-geotiff/"
 wdpa_zarr_path = f"{contextual_zarr_path}WDPAv202511/{wdpa_zarr_date}_fillValue_removed/wdpa_{wdpa_zarr_date}.zarr"
 wdpa_test_chunk = [21, -3, 22, -2]  # Has WDPA 0, 3 (bottom left, top right), and 9 (top left) (00N_020E)
+wdpa_pattern = 'WDPA'
 
 BRA_biomes_zarr_date = '20251229'
 BRA_biomes_zarr_dtype = 'uint8'
 BRA_biomes_geotif_path = "s3://gfw2-data/country/bra/bra_biomes_geotif/"
 BRA_biomes_zarr_path = f"{contextual_zarr_path}BRA_biomes/{BRA_biomes_zarr_date}_fillValue_removed/BRA_biomes_{BRA_biomes_zarr_date}.zarr"
 BRA_biomes_test_chunk = [-58, -16, -57, -15]  # Three biomes meet, with different values in three corners (10S_060W)
+BRA_biomes_pattern = 'BRA_biomes'
 
 cont_eco_zarr_date = '20260206'
 cont_eco_zarr_dtype = 'uint16'
 cont_eco_geotif_path = "s3://gfw2-data/climate/carbon_model/fao_ecozones/ecozone_continent/20190116/processed/"
 cont_eco_zarr_path = f"{contextual_zarr_path}FAO_ecozone_continents/{cont_eco_zarr_date}_fillValue_removed/FAO_ecozone_continents_{cont_eco_zarr_date}.zarr"
 cont_eco_test_chunk = [119, -6, 120, -5]  # Mix of 0, 4018 and 4020, with 4020 in upper right (00N_110E)
+cont_eco_pattern = 'cont_eco'
 
 landmark_zarr_date = '20260213'
 landmark_zarr_dtype = 'uint8'
 landmark_geotif_path = "s3://gfw2-data/landmark/gfw-data-lake/landmark_ip_lc_and_indicative_poly/v20250909/raster/epsg-4326/10/40000/is/geotiff/"
 landmark_zarr_path = f"{contextual_zarr_path}landmark/v20250909/{landmark_zarr_date}_fillValue_removed/landmark_{landmark_zarr_date}.zarr"
 landmark_test_chunk = [29, -1, 30, 0]  # 1 in upper left and lower left (00N_020E)
+landmark_pattern = 'Landmark'
 
 KBA_zarr_date = '20260213'
 KBA_zarr_dtype = 'uint16'
 KBA_geotif_path = "s3://gfw2-data/conservation/Key_Biodiversity_Areas/KBA_2024_09/KBA_v20240903__from_gfw-data-lake/raster/epsg-4326/10/40000/is/geotiff/"
 KBA_zarr_path = f"{contextual_zarr_path}KBA/v20240903/{KBA_zarr_date}_fillValue_removed/KBA_{KBA_zarr_date}.zarr"
 KBA_test_chunk = [29, -1, 30, 0]  # 1 in upper right; roughly 1/3-1/2 of chunk is KBA (00N_020E)
+KBA_pattern = 'KBA'
 
 watersheds_zarr_date = '20260213'
 watersheds_zarr_dtype = 'uint16'
 watersheds_geotif_path = "s3://gfw2-data/water/mapbox_river_basins__from_gfw-data-lake/v2018/raster/epsg-4326/10/40000/id/gdal-geotiff/"
 watersheds_zarr_path = f"{contextual_zarr_path}river_basins/v2018/{watersheds_zarr_date}_fillValue_removed/river_basins_{watersheds_zarr_date}.zarr"
 watersheds_test_chunk = [29, -1, 30, 0]  # 7005 in upper and lower left corners, 7003 in upper and lower right corners; should have nearly full coverage (00N_020E)
+watersheds_pattern = 'watershed'
 
 ### Value options for contextual layer values.
 ### Every contextual layer needs to have all possible values listed here.

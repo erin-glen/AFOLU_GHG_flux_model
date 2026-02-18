@@ -226,11 +226,13 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     unique_tile_ids = sorted(list(set(tile_ids)))
 
     # Outputs to performs zonal stats on
-    full_list_of_vars = [cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
-                         cn.ch4_gross_emis_pattern, cn.n2o_gross_emis_pattern,
-                         cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.gross_removals_all_C_pools_pattern,
-                         cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
-                         cn.non_soil_c_modeled_dens_pattern]
+    full_list_of_vars = [
+                         cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
+                         # cn.ch4_gross_emis_pattern, cn.n2o_gross_emis_pattern,
+                         # cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.gross_removals_all_C_pools_pattern,
+                         # cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
+                         # cn.non_soil_c_modeled_dens_pattern
+                         ]
 
     full_list_of_vars_with_units = [
         zu.add_units_year_to_pattern(var_name, 9999)[0]  # Dummy year since we don't need the year to access the datasets in the zarr
@@ -405,13 +407,19 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         if "year" in composite_primary_aligned_subset_da.dims:
             composite_primary_aligned_subset_da = composite_primary_aligned_subset_da.isel(year=0, drop=True)
 
+        # if BRA_biomes_aligned_subset["BRA_biomes"].sizes.get("x", 0) == 0 or BRA_biomes_aligned_subset["BRA_biomes"].sizes.get("y", 0) == 0:
+        #     bra_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename("BRA_biomes")
+        #     print("  BRA biomes not in tile extent. Creating empty xarray.")
+        # else:
+        #     bra_da = BRA_biomes_aligned_subset["BRA_biomes"]
+
         # Final alignment
-        main_logger.info(f"  Aligning: {uu.timestr()}")
+        main_logger.info(f"  Aligning {tile_id}: {uu.timestr()}")
         (flux_cube_subset,
          pixel_area_expanded_subset,
          adm0_aligned_subset,
          WDPA_aligned_subset,
-         BRA_biomes_aligned_subset,
+         # bra_da,
          cont_eco_aligned_subset,
          landmark_aligned_subset,
          composite_primary_aligned_subset_da,
@@ -423,7 +431,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
             pixel_area_expanded_subset,
             adm0_aligned_subset["adm0"],
             WDPA_aligned_subset["WDPA"],
-            BRA_biomes_aligned_subset["BRA_biomes"],
+            # bra_da,
             cont_eco_aligned_subset["cont_eco"],
             landmark_aligned_subset["landmark"],
             composite_primary_aligned_subset_da,
@@ -433,14 +441,14 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
             join="override"
         )
 
-        main_logger.info(f"  Computing: {uu.timestr()}")
+        main_logger.info(f"  Computing {tile_id}: {uu.timestr()}")
         results = xarray_reduce(
             flux_cube_subset,
             *(
                 adm0_aligned_subset,
                 land_state_node_aligned_subset,
                 WDPA_aligned_subset,
-                BRA_biomes_aligned_subset,
+                # bra_da,
                 cont_eco_aligned_subset,
                 landmark_aligned_subset,
                 composite_primary_aligned_subset_da,
@@ -453,7 +461,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
                 cn.gadm_adm0_ids,
                 node_codes,
                 cn.WDPA_codes,
-                cn.BRA_biome_codes,
+                # cn.BRA_biome_codes,
                 cn.cont_eco_codes,
                 cn.landmark_codes,
                 cn.composite_primary_codes,
@@ -471,7 +479,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
             'adm0',
             'land_state_node',
             'WDPA',
-            'BRA_biomes',
+            # 'BRA_biomes',
             'cont_eco',
             'landmark',
             cn.starting_composite_primary_forest_pattern,
