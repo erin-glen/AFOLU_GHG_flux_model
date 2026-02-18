@@ -1403,6 +1403,7 @@ cont_eco_to_text = {
     8014: {"ecozone": "Temperate oceanic forest", "continent": "New Zealand"},
 }
 
+# Converts the watershed code to name
 watershed_to_text = {
     1001: "Gulf of Mexico, North Atlantic Coast",
     1002: "United States, North Atlantic Coast",
@@ -1634,6 +1635,24 @@ watershed_to_text = {
     8007: "South Pacific Islands",
     8008: "New Zealand",
     8009: "Tasmania"
+}
+
+# Converts the WDPA code to type
+WDPA_to_text = {
+    0: "NA",
+    1: "Category Ia",
+    2: "Category Ib",
+    3: "Category II",
+    4: "Category III",
+    5: "Category IV",
+    6: "Category V",
+    7: "Category VI",
+    8: "UNESCO-MAB Biosphere Reserve",
+    9: "World Heritage Site (natural or mixed)",
+    10: "Ramsar Site, Wetland of International Importance",
+    11: "Not Reported",
+    12: "Not Applicable",
+    13: "Not Assigned"
 }
 
 local_zonal_stats_table_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/zonal_statistics/v{veg_model_version_underscore}__standard__global/"

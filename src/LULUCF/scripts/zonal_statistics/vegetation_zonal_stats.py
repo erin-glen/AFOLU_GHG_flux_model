@@ -90,7 +90,7 @@ def round_coords(ds, decimals=5):
 # This code came from Solomon Negusse and I haven't changed it in any substantial way.
 def convert_to_coord_dict(flux_results, main_logger):
 
-    main_logger.info(f"  Postprocessing: {uu.timestr()}")
+    main_logger.info(f"  Creating tile table: {uu.timestr()}")
     sparse_data = flux_results.data
 
     dim_names = flux_results.dims
@@ -136,8 +136,8 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     df_with_areas = df_other.merge(df_area, on=merge_keys, how='left')
 
     # Adds the state_node meaning and classifications to the dataframe
-    df_with_areas = df_with_areas.merge(state_node_df[['state_nodes', 'meaning', 'broad_class', 'detailed_class']],
-              left_on='land_state_node', right_on='state_nodes',
+    df_with_areas = df_with_areas.merge(state_node_df[['land_state', 'land_state_meaning', 'land_state_broad_class', 'land_state_detailed_class']],
+              left_on='land_state_node', right_on='land_state',
               how='left')
     # print("merged:", df_with_areas)
 
@@ -145,7 +145,7 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     df_with_areas['year'] = df_with_areas['year'] + 2016
 
     # Deletes redundant state node column
-    df_with_areas = df_with_areas.drop(columns=['state_nodes'])
+    df_with_areas = df_with_areas.drop(columns=['land_state'])
 
     # Converts numeric codes to ISO codes
     # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/698a53aa-8674-832c-b734-4bd8afc6a6df
@@ -155,12 +155,22 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
         df_with_areas['country_name'] = df_with_areas['adm0'].map(cn.iso_to_country)
         df_with_areas['region'] = df_with_areas['adm0'].map(cn.iso_to_region)
 
-    # Map cont_eco to continent and ecozone
+    # Map cont_eco to continent and ecozone-continent
     # From https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/698a53aa-8674-832c-b734-4bd8afc6a6df
     df_with_areas['continent'] = df_with_areas['cont_eco'].map(lambda x: cn.cont_eco_to_text.get(x, {}).get('continent'))
     df_with_areas['continent_ecozone'] = df_with_areas['cont_eco'].map(lambda x: cn.cont_eco_to_text.get(x, {}).get('ecozone'))
 
-    df_with_areas['flux_Mg_ha'] = df_with_areas['value'] / df_with_areas['pixel_area_ha'].replace(0, pd.NA)
+    # Map watershed codes to names
+    df_with_areas['watershed_name'] = df_with_areas['watersheds'].map(cn.watershed_to_text)
+
+    # Map WDPA codes to names
+    df_with_areas['WDPA_type'] = df_with_areas['WDPA'].map(cn.WDPA_to_text)
+
+    # Calculates flux density (Mg CO2(e)/ha) for each row
+    df_with_areas['density__Mg_ha'] = df_with_areas['value'] / df_with_areas['pixel_area_ha'].replace(0, pd.NA)
+
+    # Renames pixel_area_ha to area_ha
+    df_with_areas = df_with_areas.rename(columns={'pixel_area_ha': 'area_ha'})
 
     return df_with_areas
 
@@ -251,7 +261,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
     # Creates dataframe of state_node codes and meanings
     state_node_df = create_state_node_df(cn.state_node_lookup_table_local, cn.state_node_lookup_table_s3, cn.sheet)
-    node_codes = np.array(list(state_node_df['state_nodes']), dtype=np.uint32)
+    node_codes = np.array(list(state_node_df['land_state']), dtype=np.uint32)
     main_logger.info(f"State nodes are from: {cn.state_node_lookup_table_local} or {cn.state_node_lookup_table_s3}, sheet {cn.sheet}")
     main_logger.info(f"State nodes are: {node_codes}")
 
@@ -401,6 +411,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
          pixel_area_expanded_subset,
          adm0_aligned_subset,
          WDPA_aligned_subset,
+         BRA_biomes_aligned_subset,
          cont_eco_aligned_subset,
          landmark_aligned_subset,
          composite_primary_aligned_subset_da,
@@ -412,6 +423,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
             pixel_area_expanded_subset,
             adm0_aligned_subset["adm0"],
             WDPA_aligned_subset["WDPA"],
+            BRA_biomes_aligned_subset["BRA_biomes"],
             cont_eco_aligned_subset["cont_eco"],
             landmark_aligned_subset["landmark"],
             composite_primary_aligned_subset_da,
@@ -428,6 +440,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
                 adm0_aligned_subset,
                 land_state_node_aligned_subset,
                 WDPA_aligned_subset,
+                BRA_biomes_aligned_subset,
                 cont_eco_aligned_subset,
                 landmark_aligned_subset,
                 composite_primary_aligned_subset_da,
@@ -440,6 +453,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
                 cn.gadm_adm0_ids,
                 node_codes,
                 cn.WDPA_codes,
+                cn.BRA_biome_codes,
                 cn.cont_eco_codes,
                 cn.landmark_codes,
                 cn.composite_primary_codes,
@@ -457,6 +471,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
             'adm0',
             'land_state_node',
             'WDPA',
+            'BRA_biomes',
             'cont_eco',
             'landmark',
             cn.starting_composite_primary_forest_pattern,
@@ -478,13 +493,14 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         df.to_parquet(f"{local_zonal_stats_folder}/{tile_df_name}.parquet")
         df.to_csv(f"{local_zonal_stats_folder}/{tile_df_name}.csv")
 
+        # Clean up at end of tile
         del results, coord_dict, df, flux_cube_subset
         gc.collect()
 
         tile_end_time = time.time()
         main_logger.info(f"  Done with {tile_id}, took {round(tile_end_time) - round(tile_start_time)} seconds: {uu.timestr()}")
 
-
+    # Combines tile tables, if any output
     if len(combined_list) > 0:
 
         # Combines all the tile-level dfs in the list into a single df
