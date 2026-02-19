@@ -70,11 +70,11 @@ def main(cluster_name, layers_to_process, no_upload, log_note=None):
 
     if 'wdpa' in layers_to_process:  # Didn't use this script to create zarr; used notebook predecessor
         layers_to_zarr["wdpa"] = {
-            'zarr_date': cn.wdpa_zarr_date,
-            'zarr_dtype': cn.wdpa_zarr_dtype,
-            'geotif_dir': cn.wdpa_geotif_path,
-            'zarr_dir': cn.wdpa_zarr_path,
-            'test_chunk': cn.wdpa_test_chunk
+            'zarr_date': cn.WDPA_zarr_date,
+            'zarr_dtype': cn.WDPA_zarr_dtype,
+            'geotif_dir': cn.WDPA_geotif_path,
+            'zarr_dir': cn.WDPA_zarr_path,
+            'test_chunk': cn.WDPA_test_chunk
         }
 
     if 'brazil_biomes' in layers_to_process:  # Didn't use this script to create zarr; used notebook predecessor

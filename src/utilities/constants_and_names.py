@@ -1033,14 +1033,14 @@ pixel_area_zarr_dtype = 'float32'
 pixel_area_geotif_path = "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
 pixel_area_zarr_path = f"{contextual_zarr_path}pixel_area/{pixel_area_zarr_date}_fillValue_removed/global_pixel_area_{pixel_area_zarr_date}.zarr"
 pixel_area_test_chunk = [13, 48, 14, 49]  # 50N_010E
-pixel_area_pattern = 'pixel_area'
+pixel_area_zstats_pattern = 'pixel_area'
 
-wdpa_zarr_date = '20251229'
-wdpa_zarr_dtype = 'uint8'
-wdpa_geotif_path = "s3://gfw2-data/conservation/wdpa_licensed_proteced_areas__from_data_lake/v202511/raster/epsg-4326/10/40000/detailed_iucn_cat/gdal-geotiff/"
-wdpa_zarr_path = f"{contextual_zarr_path}WDPAv202511/{wdpa_zarr_date}_fillValue_removed/wdpa_{wdpa_zarr_date}.zarr"
-wdpa_test_chunk = [21, -3, 22, -2]  # Has WDPA 0, 3 (bottom left, top right), and 9 (top left) (00N_020E)
-wdpa_pattern = 'WDPA'
+WDPA_zarr_date = '20251229'
+WDPA_zarr_dtype = 'uint8'
+WDPA_geotif_path = "s3://gfw2-data/conservation/wdpa_licensed_proteced_areas__from_data_lake/v202511/raster/epsg-4326/10/40000/detailed_iucn_cat/gdal-geotiff/"
+WDPA_zarr_path = f"{contextual_zarr_path}WDPAv202511/{WDPA_zarr_date}_fillValue_removed/wdpa_{WDPA_zarr_date}.zarr"
+WDPA_test_chunk = [21, -3, 22, -2]  # Has WDPA 0, 3 (bottom left, top right), and 9 (top left) (00N_020E)
+WDPA_pattern = 'WDPA'
 
 BRA_biomes_zarr_date = '20251229'
 BRA_biomes_zarr_dtype = 'uint8'
@@ -1054,7 +1054,7 @@ cont_eco_zarr_dtype = 'uint16'
 cont_eco_geotif_path = "s3://gfw2-data/climate/carbon_model/fao_ecozones/ecozone_continent/20190116/processed/"
 cont_eco_zarr_path = f"{contextual_zarr_path}FAO_ecozone_continents/{cont_eco_zarr_date}_fillValue_removed/FAO_ecozone_continents_{cont_eco_zarr_date}.zarr"
 cont_eco_test_chunk = [119, -6, 120, -5]  # Mix of 0, 4018 and 4020, with 4020 in upper right (00N_110E)
-cont_eco_pattern = 'cont_eco'
+cont_eco_zstats_pattern = 'cont_eco'
 
 landmark_zarr_date = '20260213'
 landmark_zarr_dtype = 'uint8'
@@ -1086,7 +1086,7 @@ sheet = "v102_20251027"
 
 primary_forest_IFL_codes = np.array([0, 1], dtype=np.uint8)
 
-BRA_biome_codes = np.array([0, 1, 2, 3, 4, 5, 6], dtype=np.uint8)
+BRA_biomes_codes = np.array([0, 1, 2, 3, 4, 5, 6], dtype=np.uint8)
 
 WDPA_codes = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], dtype=np.uint8)
 

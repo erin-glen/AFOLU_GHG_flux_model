@@ -117,6 +117,7 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     df = pd.DataFrame(coord_dict)
     # print(df)
 
+    # Adds column with tile_id
     df['tile_id'] = str(tile_id)
 
     # Splits df into pixel area and other analysis layers
@@ -129,7 +130,7 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     # Non-pixel area analysis layers
     df_other = df[df['analysis_layer'] != 'pixel_area_ha']
 
-    # Removs _ha_yr from analysis layer names
+    # Removes _ha_yr from analysis layer names because these are no longer per-ha values
     df_other.loc[:, 'analysis_layer'] = df_other['analysis_layer'].str.replace('_ha_yr', '', regex=False)
 
     # Merge area values into flux rows
@@ -142,7 +143,7 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     # print("merged:", df_with_areas)
 
     # Replaces the year index with the actual reporting year
-    df_with_areas['year'] = df_with_areas['year'] + 2016
+    df_with_areas['year'] = df_with_areas['year'] + cn.interval_end_years_annual[0]
 
     # Deletes redundant state node column
     df_with_areas = df_with_areas.drop(columns=['land_state'])
@@ -150,21 +151,21 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     # Converts numeric codes to ISO codes
     # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/698a53aa-8674-832c-b734-4bd8afc6a6df
     # Based on https://github.com/wri/project-zeno-data-infra/blob/main/notebooks/grasslands_areas_gadm_2000-2022.ipynb originally
-    if 'adm0' in df_with_areas.columns:
-        df_with_areas['adm0'] = df_with_areas['adm0'].map(cn.numeric_to_alpha3)
-        df_with_areas['country_name'] = df_with_areas['adm0'].map(cn.iso_to_country)
-        df_with_areas['region'] = df_with_areas['adm0'].map(cn.iso_to_region)
+    if cn.adm0_pattern in df_with_areas.columns:
+        df_with_areas[cn.adm0_pattern] = df_with_areas[cn.adm0_pattern].map(cn.numeric_to_alpha3)
+        df_with_areas['country_name'] = df_with_areas[cn.adm0_pattern].map(cn.iso_to_country)
+        df_with_areas['region'] = df_with_areas[cn.adm0_pattern].map(cn.iso_to_region)
 
     # Map cont_eco to continent and ecozone-continent
     # From https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/698a53aa-8674-832c-b734-4bd8afc6a6df
-    df_with_areas['continent'] = df_with_areas['cont_eco'].map(lambda x: cn.cont_eco_to_text.get(x, {}).get('continent'))
-    df_with_areas['continent_ecozone'] = df_with_areas['cont_eco'].map(lambda x: cn.cont_eco_to_text.get(x, {}).get('ecozone'))
+    df_with_areas['continent'] = df_with_areas[cn.cont_eco_zstats_pattern].map(lambda x: cn.cont_eco_to_text.get(x, {}).get('continent'))
+    df_with_areas['continent_ecozone'] = df_with_areas[cn.cont_eco_zstats_pattern].map(lambda x: cn.cont_eco_to_text.get(x, {}).get('ecozone'))
 
     # Map watershed codes to names
-    df_with_areas['watershed_name'] = df_with_areas['watersheds'].map(cn.watershed_to_text)
+    df_with_areas['watershed_name'] = df_with_areas[cn.watersheds_pattern].map(cn.watershed_to_text)
 
     # Map WDPA codes to names
-    df_with_areas['WDPA_type'] = df_with_areas['WDPA'].map(cn.WDPA_to_text)
+    df_with_areas['WDPA_type'] = df_with_areas[cn.WDPA_pattern].map(cn.WDPA_to_text)
 
     # Calculates flux density (Mg CO2(e)/ha) for each row
     df_with_areas['density__Mg_ha'] = df_with_areas['value'] / df_with_areas['pixel_area_ha'].replace(0, pd.NA)
@@ -275,22 +276,22 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
     prep_start_time = time.time()
 
-    adm0_xr = xr.open_zarr(cn.adm0_zarr_path, consolidated=False).rename_vars(band_data='adm0')
-    pixel_area_xr = xr.open_zarr(cn.pixel_area_zarr_path, consolidated=False).rename_vars(band_data='pixel_area')
-    WDPA_xr = xr.open_zarr(cn.wdpa_zarr_path, consolidated=False).rename_vars(band_data='WDPA')
-    BRA_biomes_xr = xr.open_zarr(cn.BRA_biomes_zarr_path, consolidated=False).rename_vars(band_data='BRA_biomes')
-    cont_eco_xr = xr.open_zarr(cn.cont_eco_zarr_path, consolidated=False).rename_vars(band_data='cont_eco')
-    landmark_xr = xr.open_zarr(cn.landmark_zarr_path, consolidated=False).rename_vars(band_data='landmark')
+    adm0_xr = xr.open_zarr(cn.adm0_zarr_path, consolidated=False).rename_vars(band_data=cn.adm0_pattern)
+    pixel_area_xr = xr.open_zarr(cn.pixel_area_zarr_path, consolidated=False).rename_vars(band_data=cn.pixel_area_zstats_pattern)
+    WDPA_xr = xr.open_zarr(cn.WDPA_zarr_path, consolidated=False).rename_vars(band_data=cn.WDPA_pattern)
+    BRA_biomes_xr = xr.open_zarr(cn.BRA_biomes_zarr_path, consolidated=False).rename_vars(band_data=cn.BRA_biomes_pattern)
+    cont_eco_xr = xr.open_zarr(cn.cont_eco_zarr_path, consolidated=False).rename_vars(band_data=cn.cont_eco_zstats_pattern)
+    landmark_xr = xr.open_zarr(cn.landmark_zarr_path, consolidated=False).rename_vars(band_data=cn.landmark_pattern)
     composite_primary_xr = xr.open_zarr(cn.starting_composite_primary_forest_zarr_path, consolidated=False)  # No rename because it's created by a different process where the variable is named starting_composite_primary_forest
-    KBA_xr = xr.open_zarr(cn.KBA_zarr_path, consolidated=False).rename_vars(band_data='KBA')
-    watersheds_xr = xr.open_zarr(cn.watersheds_zarr_path, consolidated=False).rename_vars(band_data='watersheds')
+    KBA_xr = xr.open_zarr(cn.KBA_zarr_path, consolidated=False).rename_vars(band_data=cn.KBA_pattern)
+    watersheds_xr = xr.open_zarr(cn.watersheds_zarr_path, consolidated=False).rename_vars(band_data=cn.watersheds_pattern)
 
     ds = xr.open_zarr(zarr_path, consolidated=False)
 
     ds_selected_analysis_vars = ds[vars_to_process]
 
     main_logger.info(f"Rounding coordinates: {uu.timestr()}")
-    reference = round_coords(pixel_area_xr["pixel_area"])
+    reference = round_coords(pixel_area_xr[cn.pixel_area_zstats_pattern])
     ds_selected_analysis_vars = round_coords(ds_selected_analysis_vars)
     adm0_xr = round_coords(adm0_xr)
     WDPA_xr = round_coords(WDPA_xr)
@@ -300,7 +301,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     composite_primary_xr = round_coords(composite_primary_xr)
     KBA_xr = round_coords(KBA_xr)
     watersheds_xr = round_coords(watersheds_xr)
-    land_state_node = round_coords(ds["land_state_node"])
+    land_state_node = round_coords(ds[cn.land_state_pattern])
 
     main_logger.info(f"Cropping: {uu.timestr()}")
     pixel_area_aligned = reference
@@ -407,11 +408,11 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         if "year" in composite_primary_aligned_subset_da.dims:
             composite_primary_aligned_subset_da = composite_primary_aligned_subset_da.isel(year=0, drop=True)
 
-        # if BRA_biomes_aligned_subset["BRA_biomes"].sizes.get("x", 0) == 0 or BRA_biomes_aligned_subset["BRA_biomes"].sizes.get("y", 0) == 0:
-        #     bra_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename("BRA_biomes")
-        #     print("  BRA biomes not in tile extent. Creating empty xarray.")
-        # else:
-        #     bra_da = BRA_biomes_aligned_subset["BRA_biomes"]
+        if BRA_biomes_aligned_subset[cn.BRA_biomes_pattern].sizes.get("x", 0) == 0 or BRA_biomes_aligned_subset[cn.BRA_biomes_pattern].sizes.get("y", 0) == 0:
+            bra_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.BRA_biomes_pattern)
+            main_logger.info(f"  {cn.BRA_biomes_pattern} not in tile extent. Creating xarray of all 0s.")
+        else:
+            bra_da = BRA_biomes_aligned_subset[cn.BRA_biomes_pattern]
 
         # Final alignment
         main_logger.info(f"  Aligning {tile_id}: {uu.timestr()}")
@@ -419,7 +420,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
          pixel_area_expanded_subset,
          adm0_aligned_subset,
          WDPA_aligned_subset,
-         # bra_da,
+         bra_da,
          cont_eco_aligned_subset,
          landmark_aligned_subset,
          composite_primary_aligned_subset_da,
@@ -429,14 +430,14 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
          ) = xr.align(
             flux_cube_subset,
             pixel_area_expanded_subset,
-            adm0_aligned_subset["adm0"],
-            WDPA_aligned_subset["WDPA"],
-            # bra_da,
-            cont_eco_aligned_subset["cont_eco"],
-            landmark_aligned_subset["landmark"],
+            adm0_aligned_subset[cn.adm0_pattern],
+            WDPA_aligned_subset[cn.WDPA_pattern],
+            bra_da,
+            cont_eco_aligned_subset[cn.cont_eco_zstats_pattern],
+            landmark_aligned_subset[cn.landmark_pattern],
             composite_primary_aligned_subset_da,
-            KBA_aligned_subset["KBA"],
-            watersheds_aligned_subset["watersheds"],
+            KBA_aligned_subset[cn.KBA_pattern],
+            watersheds_aligned_subset[cn.watersheds_pattern],
             land_state_node_aligned_subset,
             join="override"
         )
@@ -448,7 +449,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
                 adm0_aligned_subset,
                 land_state_node_aligned_subset,
                 WDPA_aligned_subset,
-                # bra_da,
+                bra_da,
                 cont_eco_aligned_subset,
                 landmark_aligned_subset,
                 composite_primary_aligned_subset_da,
@@ -461,7 +462,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
                 cn.gadm_adm0_ids,
                 node_codes,
                 cn.WDPA_codes,
-                # cn.BRA_biome_codes,
+                cn.BRA_biomes_codes,
                 cn.cont_eco_codes,
                 cn.landmark_codes,
                 cn.composite_primary_codes,
@@ -476,15 +477,15 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
         # Contextual layers to use to merge pixel_area against other analysis layers (to calculate flux/ha)
         contextual_layers = [
-            'adm0',
-            'land_state_node',
-            'WDPA',
-            # 'BRA_biomes',
-            'cont_eco',
-            'landmark',
+            cn.adm0_pattern,
+            cn.land_state_pattern,
+            cn.WDPA_pattern,
+            cn.BRA_biomes_pattern,
+            cn.cont_eco_zstats_pattern,
+            cn.landmark_pattern,
             cn.starting_composite_primary_forest_pattern,
-            'KBA',
-            'watersheds',
+            cn.KBA_pattern,
+            cn.watersheds_pattern,
             'year'
         ]
 
