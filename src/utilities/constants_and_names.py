@@ -1077,6 +1077,20 @@ watersheds_zarr_path = f"{contextual_zarr_path}river_basins/v2018/{watersheds_za
 watersheds_test_chunk = [29, -1, 30, 0]  # 7005 in upper and lower left corners, 7003 in upper and lower right corners; should have nearly full coverage (00N_020E)
 watersheds_pattern = 'watershed'
 
+mgd_CAN_zarr_date = '20260219'
+mgd_CAN_zarr_dtype = 'uint8'  # 0=unmanaged, 1=managed
+mgd_CAN_geotif_path = "s3://gfw2-data/climate/jrc_managed_land_can__from_gfw-data-lake/v20260218/raster/epsg-4326/10/40000/managed_land_extent/geotiff/"
+mgd_CAN_zarr_path = f"{contextual_zarr_path}jrc_managed_land_can/v20260218/{mgd_CAN_zarr_date}_fillValue_removed/jrc_managed_land_can_{mgd_CAN_zarr_date}.zarr"
+mgd_CAN_test_chunk = [-141, 61, -140, 62]  # 1 (managed) in bottom corners, 0 in top corners. Should have full coverage. (70N_150W)
+mgd_CAN_pattern = 'managed_land_Canada'
+
+mgd_USA_zarr_date = '20260219'
+mgd_USA_zarr_dtype = 'uint8'  # 0=unmanaged, 1=managed
+mgd_USA_geotif_path = "s3://gfw2-data/climate/jrc_managed_land_usa__from_gfw-data-lake/v20260218/raster/epsg-4326/10/40000/managed_land_extent/geotiff/"
+mgd_USA_zarr_path = f"{contextual_zarr_path}jrc_managed_land_usa/v20260218/{mgd_USA_zarr_date}_fillValue_removed/jrc_managed_land_usa_{mgd_USA_zarr_date}.zarr"
+mgd_USA_test_chunk = [-143, 61, -142, 62]  # 1 (managed) in top right, 0 in other corners. Should have full coverage. (70N_150W)
+mgd_USA_pattern = 'managed_land_USA'
+
 ### Value options for contextual layer values.
 ### Every contextual layer needs to have all possible values listed here.
 

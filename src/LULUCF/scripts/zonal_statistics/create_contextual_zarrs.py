@@ -122,6 +122,24 @@ def main(cluster_name, layers_to_process, no_upload, log_note=None):
             'test_chunk': cn.watersheds_test_chunk
         }
 
+    if 'managed_land_Canada' in layers_to_process:
+        layers_to_zarr["managed_land_Canada"] = {
+            'zarr_date': cn.mgd_CAN_zarr_date,
+            'zarr_dtype': cn.mgd_CAN_zarr_dtype,
+            'geotif_dir': cn.mgd_CAN_geotif_path,
+            'zarr_dir': cn.mgd_CAN_zarr_path,
+            'test_chunk': cn.mgd_CAN_test_chunk
+        }
+
+    if 'managed_land_USA' in layers_to_process:
+        layers_to_zarr["managed_land_USA"] = {
+            'zarr_date': cn.mgd_USA_zarr_date,
+            'zarr_dtype': cn.mgd_USA_zarr_dtype,
+            'geotif_dir': cn.mgd_USA_geotif_path,
+            'zarr_dir': cn.mgd_USA_zarr_path,
+            'test_chunk': cn.mgd_USA_test_chunk
+        }
+
     fs = fsspec.filesystem("s3", anon=False)
 
     main_logger.info(f"Contextual layers to zarr ({len(layers_to_zarr)} layers): {layers_to_zarr}")
