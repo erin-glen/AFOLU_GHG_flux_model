@@ -106,42 +106,9 @@ def convert_to_coord_dict(flux_results, main_logger):
     return coord_dict
 
 
-# Creates summative outputs for each contextual layer combination
+# Creates all summative output rows in one go, rather than one summative output type at a time (e.g., AGC net flux, removals all pools, etc.).
 # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69973d0e-2dec-832a-bc6f-8cb1f914f0f6
-def add_summative_rows(df, layer_list, new_layer_name):
-
-    # Selects only rows contributing to this composite
-    df_subset = df[df['analysis_layer'].isin(layer_list)].copy()
-
-    if df_subset.empty:
-        return df
-
-    # All columns except analysis_layer, value, density
-    group_cols = [
-        c for c in df.columns
-        if c not in ['analysis_layer', 'value', 'density__Mg_ha']
-    ]
-
-    # Sums values within each contextual combination
-    df_sum = (
-        df_subset
-        .groupby(group_cols, dropna=False, as_index=False)
-        .agg({'value': 'sum'})
-    )
-
-    # Assigns summative layer name
-    df_sum['analysis_layer'] = new_layer_name
-
-    # Reorders columns to match original
-    df_sum = df_sum[df.columns]
-
-    # Appends to original dataframe
-    df_out = pd.concat([df, df_sum], ignore_index=True)
-
-    return df_out
-
-# Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69973d0e-2dec-832a-bc6f-8cb1f914f0f6
-def add_all_summative_rows(df_other: pd.DataFrame, composites: dict[str, list[str]]) -> pd.DataFrame:
+def add_all_summative_rows(df_other: pd.DataFrame, composites: dict[str, list[str]]):
     """
     Create all summative rows in one pass.
     df_other must already have analysis_layer cleaned (no '_ha_yr') and must contain 'value'.
@@ -172,8 +139,6 @@ def add_all_summative_rows(df_other: pd.DataFrame, composites: dict[str, list[st
 
     # Append to df_other (original + composites)
     return pd.concat([df_other, summed], ignore_index=True)
-
-
 
 
 # Converts flox output to dataframe and does some processing of it:
@@ -217,8 +182,9 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     layers_net_deadwood_C = [cn.deadwood_c_gross_emis_pattern.replace('_ha_yr', ''), cn.deadwood_c_gross_removals_pattern.replace('_ha_yr', '')]
     layers_net_litter_C = [cn.litter_c_gross_emis_pattern.replace('_ha_yr', ''), cn.litter_c_gross_removals_pattern.replace('_ha_yr', '')]
 
-    # After you've removed '_ha_yr' from analysis_layer (or define with replace like you did)
-    composites = {
+    # Dictionary of summative outputs.
+    # Could include net flux CO2-only and net flux all gases here but I prefer to have them directly calculated from the zarrs for safety
+    summative_outputs = {
         cn.gross_emis_all_C_pools_CO2_only_pattern: layers_emissions_all_pools_CO2_only,
         cn.gross_emis_all_C_pools_non_CO2_only_pattern: layers_emissions_all_pools_non_CO2,
         cn.gross_emis_all_C_pools_all_gases_pattern: layers_emissions_all_pools_all_gases,
@@ -228,10 +194,6 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
         cn.net_flux_deadwood_c_pattern: layers_net_deadwood_C,
         cn.net_flux_litter_c_pattern: layers_net_litter_C,
     }
-
-    # # Could get all-pool net fluxes as sums of other columns but I'd rather get them directly from the zarr for safety
-    # layers_net_all_pools_CO2_only = layers_net_AGC + layers_net_BGC + layers_net_deadwood_C + layers_net_litter_C
-    # layers_net_all_pools_all_gases = layers_net_AGC + layers_net_BGC + layers_net_deadwood_C + layers_net_litter_C + layers_emissions_all_pools_non_CO2
 
     # Splits df into pixel area and other analysis layers
     df_area = (
@@ -247,78 +209,7 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     df_other.loc[:, 'analysis_layer'] = df_other['analysis_layer'].str.replace('_ha_yr', '', regex=False)
 
     # Creates all summative rows in one pass
-    df_other = add_all_summative_rows(df_other, composites)
-
-    # # Creates rows of summative outputs in various combinations
-    # # Gross emissions CO2-only
-    # df_other = add_summative_rows(
-    #     df_other,
-    #     layers_emissions_all_pools_CO2_only,
-    #     cn.gross_emis_all_C_pools_CO2_only_pattern
-    # )
-    #
-    # # Gross emissions non-CO2
-    # df_other = add_summative_rows(
-    #     df_other,
-    #     layers_emissions_all_pools_non_CO2,
-    #     cn.gross_emis_all_C_pools_non_CO2_only_pattern
-    # )
-    #
-    # # Gross emissions all pools, all gases
-    # df_other = add_summative_rows(
-    #     df_other,
-    #     layers_emissions_all_pools_all_gases,
-    #     cn.gross_emis_all_C_pools_all_gases_pattern
-    # )
-    #
-    # # Gross removals all pools
-    # df_other = add_summative_rows(
-    #     df_other,
-    #     layers_removals_all_pools,
-    #     cn.gross_removals_all_C_pools_pattern
-    # )
-    #
-    # # Net flux AGC
-    # df_other = add_summative_rows(
-    #     df_other,
-    #     layers_net_AGC,
-    #     cn.net_flux_agc_pattern
-    # )
-    #
-    # # Net flux BGC
-    # df_other = add_summative_rows(
-    #     df_other,
-    #     layers_net_BGC,
-    #     cn.net_flux_bgc_pattern
-    # )
-    #
-    # # Net flux deadwood C
-    # df_other = add_summative_rows(
-    #     df_other,
-    #     layers_net_deadwood_C,
-    #     cn.net_flux_deadwood_c_pattern
-    # )
-    #
-    # # Net flux litter C
-    # df_other = add_summative_rows(
-    #     df_other,
-    #     layers_net_litter_C,
-    #     cn.net_flux_litter_c_pattern
-    # )
-
-    # # Could get net fluxes as sums of other columns but I'd rather get them directly from the zarr for safety
-    # df_other = add_summative_rows(
-    #     df_other,
-    #     layers_net_all_pools_CO2_only,
-    #     cn.net_flux_all_C_pools_CO2_only_pattern
-    # )
-    #
-    # df_other = add_summative_rows(
-    #     df_other,
-    #     layers_net_all_pools_all_gases,
-    #     cn.net_flux_all_C_pools_all_gases_pattern
-    # )
-
+    df_other = add_all_summative_rows(df_other, summative_outputs)
 
     # Merges area values into flux rows
     df_with_areas = df_other.merge(df_area, on=merge_keys, how='left')
@@ -353,6 +244,10 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
 
     # Map WDPA codes to names
     df_with_areas['WDPA_type'] = df_with_areas[cn.WDPA_pattern].map(cn.WDPA_to_text)
+
+    # Replaces managed land numeric values with managed/unmanaged
+    df_with_areas[cn.managed_land_CAN_pattern] = df_with_areas[cn.managed_land_CAN_pattern].map(cn.managed_land_to_text)
+    df_with_areas[cn.managed_land_USA_pattern] = df_with_areas[cn.managed_land_USA_pattern].map(cn.managed_land_to_text)
 
     # Calculates flux density (Mg CO2(e)/ha) for each row
     df_with_areas['density__Mg_ha'] = df_with_areas['value'] / df_with_areas['pixel_area_ha'].replace(0, pd.NA)
@@ -418,7 +313,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
                          cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
                          cn.ch4_gross_emis_pattern, cn.n2o_gross_emis_pattern,
                          cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
-                         cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
+                         cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,  # Could calculate with other summative outputs but prefer to calculate directly for safety
                          cn.non_soil_c_modeled_dens_pattern
                          ]
 
@@ -472,6 +367,8 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     composite_primary_xr = xr.open_zarr(cn.starting_composite_primary_forest_zarr_path, consolidated=False)  # No rename because it's created by a different process where the variable is named starting_composite_primary_forest
     KBA_xr = xr.open_zarr(cn.KBA_zarr_path, consolidated=False).rename_vars(band_data=cn.KBA_pattern)
     watersheds_xr = xr.open_zarr(cn.watersheds_zarr_path, consolidated=False).rename_vars(band_data=cn.watersheds_pattern)
+    managed_land_CAN_xr = xr.open_zarr(cn.managed_land_CAN_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_CAN_pattern)
+    managed_land_USA_xr = xr.open_zarr(cn.managed_land_USA_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_USA_pattern)
 
     ds = xr.open_zarr(zarr_path, consolidated=False)
 
@@ -488,6 +385,8 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     composite_primary_xr = round_coords(composite_primary_xr)
     KBA_xr = round_coords(KBA_xr)
     watersheds_xr = round_coords(watersheds_xr)
+    managed_land_CAN_xr = round_coords(managed_land_CAN_xr)
+    managed_land_USA_xr = round_coords(managed_land_USA_xr)
     land_state_node = round_coords(ds[cn.land_state_pattern])
 
     main_logger.info(f"Cropping: {uu.timestr()}")
@@ -500,6 +399,8 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     composite_primary_aligned = safe_crop(composite_primary_xr, reference)
     KBA_aligned = safe_crop(KBA_xr, reference)
     watersheds_aligned = safe_crop(watersheds_xr, reference)
+    managed_land_CAN_aligned = safe_crop(managed_land_CAN_xr, reference)
+    managed_land_USA_aligned = safe_crop(managed_land_USA_xr, reference)
     land_state_node_aligned = safe_crop(land_state_node, reference)
     ds_selected_analysis_vars_aligned = safe_crop(ds_selected_analysis_vars, reference)
 
@@ -584,6 +485,8 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         composite_primary_aligned_subset = composite_primary_aligned.sel(x=slice(west, east), y=slice(north, south))
         KBA_aligned_subset = KBA_aligned.sel(x=slice(west, east), y=slice(north, south))
         watersheds_aligned_subset = watersheds_aligned.sel(x=slice(west, east), y=slice(north, south))
+        managed_land_CAN_aligned_subset = managed_land_CAN_aligned.sel(x=slice(west, east), y=slice(north, south))
+        managed_land_USA_aligned_subset = managed_land_USA_aligned.sel(x=slice(west, east), y=slice(north, south))
         land_state_node_aligned_subset = land_state_node_aligned.sel(x=slice(west, east), y=slice(north, south))
         pixel_area_expanded_subset = pixel_area_expanded.sel(x=slice(west, east), y=slice(north, south))
 
@@ -633,6 +536,18 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         else:
             watersheds_da = watersheds_aligned_subset[cn.watersheds_pattern]
 
+        if managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern].sizes.get("x", 0) == 0 or managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern].sizes.get("y", 0) == 0:
+            managed_land_CAN_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.managed_land_CAN_pattern)
+            main_logger.info(f"  {cn.managed_land_CAN_pattern} not in tile extent. Creating xarray of all 0s.")
+        else:
+            managed_land_CAN_da = managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern]
+
+        if managed_land_USA_aligned_subset[cn.managed_land_USA_pattern].sizes.get("x", 0) == 0 or managed_land_USA_aligned_subset[cn.managed_land_USA_pattern].sizes.get("y", 0) == 0:
+            managed_land_USA_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.managed_land_USA_pattern)
+            main_logger.info(f"  {cn.managed_land_USA_pattern} not in tile extent. Creating xarray of all 0s.")
+        else:
+            managed_land_USA_da = managed_land_USA_aligned_subset[cn.managed_land_USA_pattern]
+
         if (composite_primary_aligned_subset[cn.starting_composite_primary_forest_pattern].sizes.get("x", 0) == 0 or
                 composite_primary_aligned_subset[cn.starting_composite_primary_forest_pattern].sizes.get("y", 0) == 0):
             composite_primary_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.starting_composite_primary_forest_pattern)
@@ -659,6 +574,8 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
          composite_primary_da,
          KBA_da,
          watersheds_da,
+         managed_land_CAN_da,
+         managed_land_USA_da,
          land_state_node_aligned_subset,
          ) = xr.align(
             flux_cube_subset,
@@ -671,6 +588,8 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
             composite_primary_da,
             KBA_da,
             watersheds_da,
+            managed_land_CAN_da,
+            managed_land_USA_da,
             land_state_node_aligned_subset,
             join="override"
         )
@@ -688,6 +607,8 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
                 composite_primary_da,
                 KBA_da,
                 watersheds_da,
+                managed_land_CAN_da,
+                managed_land_USA_da,
                 flux_cube_subset["year"]
             ),
             func='sum',
@@ -701,6 +622,8 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
                 cn.composite_primary_codes,
                 cn.KBA_codes,
                 cn.watershed_codes,
+                cn.managed_land_codes,  # For Canada
+                cn.managed_land_codes,  # For USA
                 flux_cube_subset.year.values,
             ),
             group_dims=["year"],
@@ -719,6 +642,8 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
             cn.starting_composite_primary_forest_pattern,
             cn.KBA_pattern,
             cn.watersheds_pattern,
+            cn.managed_land_CAN_pattern,
+            cn.managed_land_USA_pattern,
             'year'
         ]
 

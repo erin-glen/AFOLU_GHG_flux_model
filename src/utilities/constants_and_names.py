@@ -1077,19 +1077,19 @@ watersheds_zarr_path = f"{contextual_zarr_path}river_basins/v2018/{watersheds_za
 watersheds_test_chunk = [29, -1, 30, 0]  # 7005 in upper and lower left corners, 7003 in upper and lower right corners; should have nearly full coverage (00N_020E)
 watersheds_pattern = 'watershed'
 
-mgd_CAN_zarr_date = '20260219'
-mgd_CAN_zarr_dtype = 'uint8'  # 0=unmanaged, 1=managed
-mgd_CAN_geotif_path = "s3://gfw2-data/climate/jrc_managed_land_can__from_gfw-data-lake/v20260218/raster/epsg-4326/10/40000/managed_land_extent/geotiff/"
-mgd_CAN_zarr_path = f"{contextual_zarr_path}jrc_managed_land_can/v20260218/{mgd_CAN_zarr_date}_fillValue_removed/jrc_managed_land_can_{mgd_CAN_zarr_date}.zarr"
-mgd_CAN_test_chunk = [-141, 61, -140, 62]  # 1 (managed) in bottom corners, 0 in top corners. Should have full coverage. (70N_150W)
-mgd_CAN_pattern = 'managed_land_Canada'
+managed_land_CAN_zarr_date = '20260219'
+managed_land_CAN_zarr_dtype = 'uint8'  # 1=managed, 2=unmanaged
+managed_land_CAN_geotif_path = "s3://gfw2-data/climate/jrc_managed_land_can__from_gfw-data-lake/v20260218/raster/epsg-4326/10/40000/managed_land_extent/geotiff/"
+managed_land_CAN_zarr_path = f"{contextual_zarr_path}jrc_managed_land_can/v20260218/{managed_land_CAN_zarr_date}_fillValue_removed/jrc_managed_land_can_{managed_land_CAN_zarr_date}.zarr"
+managed_land_CAN_test_chunk = [-141, 61, -140, 62]  # 1 (managed) in bottom corners, 2 (unmanaged) in top corners. Should have full coverage. (70N_150W)
+managed_land_CAN_pattern = 'managed_land_Canada'
 
-mgd_USA_zarr_date = '20260219'
-mgd_USA_zarr_dtype = 'uint8'  # 0=unmanaged, 1=managed
-mgd_USA_geotif_path = "s3://gfw2-data/climate/jrc_managed_land_usa__from_gfw-data-lake/v20260218/raster/epsg-4326/10/40000/managed_land_extent/geotiff/"
-mgd_USA_zarr_path = f"{contextual_zarr_path}jrc_managed_land_usa/v20260218/{mgd_USA_zarr_date}_fillValue_removed/jrc_managed_land_usa_{mgd_USA_zarr_date}.zarr"
-mgd_USA_test_chunk = [-143, 61, -142, 62]  # 1 (managed) in top right, 0 in other corners. Should have full coverage. (70N_150W)
-mgd_USA_pattern = 'managed_land_USA'
+managed_land_USA_zarr_date = '20260219'
+managed_land_USA_zarr_dtype = 'uint8'  # 1=managed, 2=unmanaged
+managed_land_USA_geotif_path = "s3://gfw2-data/climate/jrc_managed_land_usa__from_gfw-data-lake/v20260218/raster/epsg-4326/10/40000/managed_land_extent/geotiff/"
+managed_land_USA_zarr_path = f"{contextual_zarr_path}jrc_managed_land_USA/v20260218/{managed_land_USA_zarr_date}_fillValue_removed/jrc_managed_land_USA_{managed_land_USA_zarr_date}.zarr"
+managed_USA_test_chunk = [-143, 61, -142, 62]  # 1 (managed) in top right, 2 (unmanaged) in other corners. Should have full coverage. (70N_150W)
+managed_land_USA_pattern = 'managed_land_USA'
 
 ### Value options for contextual layer values.
 ### Every contextual layer needs to have all possible values listed here.
@@ -1180,6 +1180,8 @@ watershed_codes = np.array([0,
     7023, 7024, 7025, 7026, 7027,
     8001, 8002, 8003, 8004, 8005, 8006, 8007, 8008, 8009
 ], dtype=np.uint16)
+
+managed_land_codes = np.array([0, 1, 2], dtype=np.uint8)
 
 # Converts numeric ISO values to ISO codes
 # From https://github.com/wri/project-zeno-data-infra/blob/main/notebooks/grasslands_areas_gadm_2000-2022.ipynb
@@ -1669,6 +1671,12 @@ WDPA_to_text = {
     11: "Not Reported",
     12: "Not Applicable",
     13: "Not Assigned"
+}
+
+managed_land_to_text = {
+    0: "NA",
+    1: "managed",
+    2: "unmanaged",
 }
 
 local_zonal_stats_table_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/zonal_statistics/v{veg_model_version_underscore}__standard__global/"
