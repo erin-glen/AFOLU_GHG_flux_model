@@ -86,6 +86,56 @@ def round_coords(ds, decimals=5):
     return ds
 
 
+def prepare_context_layer(obj, var_name, flux_da, logger):
+    """
+    Prepare contextual layer for flox grouping.
+
+    Parameters
+    ----------
+    obj : xr.Dataset or xr.DataArray
+        The subset object.
+    var_name : str
+        Variable name to extract (ignored if obj is DataArray).
+    flux_da : xr.DataArray
+        Flux cube (canonical grid).
+    logger : logger
+        For info messages.
+    """
+
+    # If Dataset, extract variable to make DataArray
+    if isinstance(obj, xr.Dataset):
+        da = obj[var_name]
+    else:  # already DataArray
+        da = obj
+
+    # Ensure it has a name (flox requires this)
+    if da.name is None:
+        da = da.rename(var_name)
+
+    # Empty tile check (only meaningful for spatial dims)
+    if da.sizes.get("x", 0) == 0 or da.sizes.get("y", 0) == 0:
+        logger.info(f"  {var_name} not in tile extent. Creating xarray of all 0s.")
+
+        # Match dims of spatial slice of flux cube
+        template = flux_da.isel(analysis_layer=0, drop=True)
+
+        # If contextual layer has year dimension, preserve it
+        if "year" in da.dims:
+            template = template.expand_dims(year=flux_da.year)
+
+        da = xr.zeros_like(template).rename(var_name)
+
+    # Force canonical grid (critical for flox exact alignment)
+    da = da.assign_coords(
+        x=flux_da.x,
+        y=flux_da.y
+    )
+
+    return da
+
+
+
+
 # Converts results of flox to coordinate dictionary.
 # This code came from Solomon Negusse and I haven't changed it in any substantial way.
 def convert_to_coord_dict(flux_results, main_logger):
@@ -400,63 +450,57 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         land_state_node_aligned_subset = land_state_node_aligned.sel(x=slice(west, east), y=slice(north, south))
         pixel_area_expanded_subset = pixel_area_expanded.sel(x=slice(west, east), y=slice(north, south))
 
-        # Turns the composite primary forest zarr (which has chunks of 1x4000x4000) into something without a year dimension at all (4000x4000).
-        # That allows it to be used with the other contextual layers, which are also just 4000x4000 (no year dimension).
-        # Note: composite primary forest has chunks of 1x4000x4000 because of how it's made; it uses the same function as the zarr for the vegetation model,
-        # rather than the script of the other contextual layers.
-        composite_primary_aligned_subset_da = composite_primary_aligned_subset[cn.starting_composite_primary_forest_pattern]
-        if "year" in composite_primary_aligned_subset_da.dims:
-            composite_primary_aligned_subset_da = composite_primary_aligned_subset_da.isel(year=0, drop=True)
+        # # Turns the composite primary forest zarr (which has chunks of 1x4000x4000) into something without a year dimension at all (4000x4000).
+        # # That allows it to be used with the other contextual layers, which are also just 4000x4000 (no year dimension).
+        # # Note: composite primary forest has chunks of 1x4000x4000 because of how it's made; it uses the same function as the zarr for the vegetation model,
+        # # rather than the script of the other contextual layers.
+        # composite_primary_aligned_subset_da = composite_primary_aligned_subset[cn.starting_composite_primary_forest_pattern]
+        # if "year" in composite_primary_aligned_subset_da.dims:
+        #     composite_primary_aligned_subset_da = composite_primary_aligned_subset_da.isel(year=0, drop=True)
 
-        if BRA_biomes_aligned_subset[cn.BRA_biomes_pattern].sizes.get("x", 0) == 0 or BRA_biomes_aligned_subset[cn.BRA_biomes_pattern].sizes.get("y", 0) == 0:
-            bra_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.BRA_biomes_pattern)
-            main_logger.info(f"  {cn.BRA_biomes_pattern} not in tile extent. Creating xarray of all 0s.")
-        else:
-            bra_da = BRA_biomes_aligned_subset[cn.BRA_biomes_pattern]
+        context_layers = [
+            (adm0_aligned_subset, cn.adm0_pattern),
+            (WDPA_aligned_subset, cn.WDPA_pattern),
+            (BRA_biomes_aligned_subset, cn.BRA_biomes_pattern),
+            (cont_eco_aligned_subset, cn.cont_eco_zstats_pattern),
+            (landmark_aligned_subset, cn.landmark_pattern),
+            # (composite_primary_aligned_subset, cn.starting_composite_primary_forest_pattern),
+            (KBA_aligned_subset, cn.KBA_pattern),
+            (watersheds_aligned_subset, cn.watersheds_pattern),
+            (land_state_node_aligned_subset, cn.land_state_pattern)
+        ]
+
+        prepared_context = []
+
+        for ds_subset, var_name in context_layers:
+            da = prepare_context_layer(
+                ds_subset,
+                var_name,
+                flux_cube_subset,
+                main_logger
+            )
+            prepared_context.append(da)
+
+        print("prepared_context:", prepared_context)
 
         # Final alignment
         main_logger.info(f"  Aligning {tile_id}: {uu.timestr()}")
-        (flux_cube_subset,
-         pixel_area_expanded_subset,
-         adm0_aligned_subset,
-         WDPA_aligned_subset,
-         bra_da,
-         cont_eco_aligned_subset,
-         landmark_aligned_subset,
-         composite_primary_aligned_subset_da,
-         KBA_aligned_subset,
-         watersheds_aligned_subset,
-         land_state_node_aligned_subset,
-         ) = xr.align(
+        (
             flux_cube_subset,
             pixel_area_expanded_subset,
-            adm0_aligned_subset[cn.adm0_pattern],
-            WDPA_aligned_subset[cn.WDPA_pattern],
-            bra_da,
-            cont_eco_aligned_subset[cn.cont_eco_zstats_pattern],
-            landmark_aligned_subset[cn.landmark_pattern],
-            composite_primary_aligned_subset_da,
-            KBA_aligned_subset[cn.KBA_pattern],
-            watersheds_aligned_subset[cn.watersheds_pattern],
-            land_state_node_aligned_subset,
+            *prepared_context,
+        ) = xr.align(
+            flux_cube_subset,
+            pixel_area_expanded_subset,
+            *prepared_context,
             join="override"
         )
 
         main_logger.info(f"  Computing {tile_id}: {uu.timestr()}")
         results = xarray_reduce(
-            flux_cube_subset,
-            *(
-                adm0_aligned_subset,
-                land_state_node_aligned_subset,
-                WDPA_aligned_subset,
-                bra_da,
-                cont_eco_aligned_subset,
-                landmark_aligned_subset,
-                composite_primary_aligned_subset_da,
-                KBA_aligned_subset,
-                watersheds_aligned_subset,
-                flux_cube_subset["year"]
-            ),
+                flux_cube_subset,
+                *prepared_context,
+                flux_cube_subset["year"],
             func='sum',
             expected_groups=(
                 cn.gadm_adm0_ids,
@@ -465,7 +509,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
                 cn.BRA_biomes_codes,
                 cn.cont_eco_codes,
                 cn.landmark_codes,
-                cn.composite_primary_codes,
+                # cn.composite_primary_codes,
                 cn.KBA_codes,
                 cn.watershed_codes,
                 flux_cube_subset.year.values,
@@ -475,6 +519,73 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
             fill_value=0
         ).compute()
 
+        # if BRA_biomes_aligned_subset[cn.BRA_biomes_pattern].sizes.get("x", 0) == 0 or BRA_biomes_aligned_subset[cn.BRA_biomes_pattern].sizes.get("y", 0) == 0:
+        #     bra_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.BRA_biomes_pattern)
+        #     main_logger.info(f"  {cn.BRA_biomes_pattern} not in tile extent. Creating xarray of all 0s.")
+        # else:
+        #     bra_da = BRA_biomes_aligned_subset[cn.BRA_biomes_pattern]
+
+        # # Final alignment
+        # main_logger.info(f"  Aligning {tile_id}: {uu.timestr()}")
+        # (flux_cube_subset,
+        #  pixel_area_expanded_subset,
+        #  adm0_aligned_subset,
+        #  WDPA_aligned_subset,
+        #  bra_da,
+        #  cont_eco_aligned_subset,
+        #  landmark_aligned_subset,
+        #  composite_primary_aligned_subset_da,
+        #  KBA_aligned_subset,
+        #  watersheds_aligned_subset,
+        #  land_state_node_aligned_subset,
+        #  ) = xr.align(
+        #     flux_cube_subset,
+        #     pixel_area_expanded_subset,
+        #     adm0_aligned_subset[cn.adm0_pattern],
+        #     WDPA_aligned_subset[cn.WDPA_pattern],
+        #     bra_da,
+        #     cont_eco_aligned_subset[cn.cont_eco_zstats_pattern],
+        #     landmark_aligned_subset[cn.landmark_pattern],
+        #     composite_primary_aligned_subset_da,
+        #     KBA_aligned_subset[cn.KBA_pattern],
+        #     watersheds_aligned_subset[cn.watersheds_pattern],
+        #     land_state_node_aligned_subset,
+        #     join="override"
+        # )
+        #
+        # main_logger.info(f"  Computing {tile_id}: {uu.timestr()}")
+        # results = xarray_reduce(
+        #     flux_cube_subset,
+        #     *(
+        #         adm0_aligned_subset,
+        #         land_state_node_aligned_subset,
+        #         WDPA_aligned_subset,
+        #         bra_da,
+        #         cont_eco_aligned_subset,
+        #         landmark_aligned_subset,
+        #         composite_primary_aligned_subset_da,
+        #         KBA_aligned_subset,
+        #         watersheds_aligned_subset,
+        #         flux_cube_subset["year"]
+        #     ),
+        #     func='sum',
+        #     expected_groups=(
+        #         cn.gadm_adm0_ids,
+        #         node_codes,
+        #         cn.WDPA_codes,
+        #         cn.BRA_biomes_codes,
+        #         cn.cont_eco_codes,
+        #         cn.landmark_codes,
+        #         cn.composite_primary_codes,
+        #         cn.KBA_codes,
+        #         cn.watershed_codes,
+        #         flux_cube_subset.year.values,
+        #     ),
+        #     group_dims=["year"],
+        #     reindex=ReindexStrategy(blockwise=False, array_type=ReindexArrayType.SPARSE_COO),
+        #     fill_value=0
+        # ).compute()
+
         # Contextual layers to use to merge pixel_area against other analysis layers (to calculate flux/ha)
         contextual_layers = [
             cn.adm0_pattern,
@@ -483,7 +594,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
             cn.BRA_biomes_pattern,
             cn.cont_eco_zstats_pattern,
             cn.landmark_pattern,
-            cn.starting_composite_primary_forest_pattern,
+            # cn.starting_composite_primary_forest_pattern,
             cn.KBA_pattern,
             cn.watersheds_pattern,
             'year'
