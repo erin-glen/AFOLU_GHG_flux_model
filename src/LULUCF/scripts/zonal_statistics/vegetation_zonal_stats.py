@@ -4,8 +4,8 @@ Zonal stats for vegetation.
 Area to analyze can be specified with a shapefile or a bounding box.
 If a shapefile is supplied, all 10x10 deg tiles that intersect the shapefile are analyzed iteratively.
 If a bounding box is supplied:
-   1. If the bounding box is <10x10 deg, the exact area of the bounding box is analyzed. This is to allow tests in areas smaller than 10x10 deg.
-   2. If the bounding box is >10x10 deg, all 10x10 deg tiles that intersect the bounding box are analyzed iteratively.
+   1. If the bounding box is <6x6 deg, the exact area of the bounding box is analyzed. This is to allow tests in areas smaller than 6x6 deg.
+   2. If the bounding box is >6x6 deg, all 10x10 deg tiles that intersect the bounding box are analyzed iteratively.
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
@@ -297,9 +297,9 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
 
-    # If an area smaller than 10x10 deg is given (for testing), the sub_tile_test flag is activated
+    # If an area smaller than 6x6 deg is given (for testing), the sub_tile_test flag is activated
     # and the analysis extent changes further down
-    if (abs(bounding_box[0]-bounding_box[2]) < 10) and (abs(bounding_box[1]-bounding_box[3]) < 10):
+    if (abs(bounding_box[0]-bounding_box[2]) < 6) and (abs(bounding_box[1]-bounding_box[3]) < 6):
         sub_tile_test = True
     else:
         sub_tile_test = False
@@ -432,16 +432,17 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     main_logger.info(f"Replacing coordinates: {uu.timestr()}")
     ds_selected_analysis_vars_aligned = ds_selected_analysis_vars_aligned.assign_coords(x=x_coords, y=y_coords)
 
+    # Convert pixel_area from m² to hectares, then adds to the list of layers to analyze (to get area of contextual layers)
+    main_logger.info(f"Calculating pixel area: {uu.timestr()}")
+    pixel_area_layer = (pixel_area_expanded * cn.m2_to_ha).astype("float32")
+
     # Multiply each flux var by pixel_area
     main_logger.info(f"Calculating per-pixel values for analysis layers: {uu.timestr()}")
     flux_layers = []
     for var in selected_datasets:
-        flux_scaled = ((ds_selected_analysis_vars_aligned[var] * pixel_area_expanded) / 10000).astype("float32")
+        flux_scaled = (ds_selected_analysis_vars_aligned[var] * pixel_area_layer).astype("float32")
         flux_layers.append(flux_scaled)
 
-    # Convert pixel_area from m² to hectares, then adds to the list of layers to analyze (to get area of contextual layers)
-    main_logger.info(f"Calculating pixel area: {uu.timestr()}")
-    pixel_area_layer = (pixel_area_expanded / 10000).astype("float32")
     flux_layers.append(pixel_area_layer)
 
     # Also updates the list of analysis layer names
@@ -469,7 +470,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     parquet_outputs = []
 
     for i, tile_id in enumerate(tile_ids_to_process):
-        main_logger.info(f"Processing {tile_id} (tile {i+1} out of {len(tile_ids_to_process)}): {uu.timestr()}")
+        main_logger.info(f"Processing {tile_id} (tile {i+1} of {len(tile_ids_to_process)}): {uu.timestr()}")
         tile_start_time = time.time()
 
         # Skips if any existing file already contains this tile_id (to not repeat that tile if restarting the zonal stats)
