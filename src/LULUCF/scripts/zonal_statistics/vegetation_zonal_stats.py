@@ -238,20 +238,27 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
         df_with_areas['country_name'] = df_with_areas[cn.adm0_pattern].map(cn.iso_to_country)
         df_with_areas['region'] = df_with_areas[cn.adm0_pattern].map(cn.iso_to_region)
 
-    # Map cont_eco to continent and ecozone-continent
+    # Maps cont_eco to continent and ecozone-continent
     # From https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/698a53aa-8674-832c-b734-4bd8afc6a6df
-    df_with_areas['continent'] = df_with_areas[cn.cont_eco_zstats_pattern].map(lambda x: cn.cont_eco_to_text.get(x, {}).get('continent'))
-    df_with_areas['continent_ecozone'] = df_with_areas[cn.cont_eco_zstats_pattern].map(lambda x: cn.cont_eco_to_text.get(x, {}).get('ecozone'))
+    if cn.cont_eco_zstats_pattern in df_with_areas.columns:
+        df_with_areas['continent'] = df_with_areas[cn.cont_eco_zstats_pattern].map(lambda x: cn.cont_eco_to_text.get(x, {}).get('continent'))
+        df_with_areas['continent_ecozone'] = df_with_areas[cn.cont_eco_zstats_pattern].map(lambda x: cn.cont_eco_to_text.get(x, {}).get('ecozone'))
 
-    # Map watershed codes to names
-    df_with_areas['watershed_name'] = df_with_areas[cn.watersheds_pattern].map(cn.watershed_to_text)
+    # Maps watershed codes to names
+    if cn.watersheds_pattern in df_with_areas.columns:
+        df_with_areas['watershed_name'] = df_with_areas[cn.watersheds_pattern].map(cn.watershed_to_text)
 
-    # Map WDPA codes to names
-    df_with_areas['WDPA_type'] = df_with_areas[cn.WDPA_pattern].map(cn.WDPA_to_text)
+    # Maps WDPA codes to names
+    if cn.WDPA_pattern in df_with_areas.columns:
+        df_with_areas['WDPA_type'] = df_with_areas[cn.WDPA_pattern].map(cn.WDPA_to_text)
 
-    # Replaces managed land numeric values with managed/unmanaged
-    df_with_areas[cn.managed_land_CAN_pattern] = df_with_areas[cn.managed_land_CAN_pattern].map(cn.managed_land_to_text)
-    df_with_areas[cn.managed_land_USA_pattern] = df_with_areas[cn.managed_land_USA_pattern].map(cn.managed_land_to_text)
+    # Replaces managed land numeric values with managed/unmanaged if the columns exist
+    if cn.managed_land_CAN_pattern in df_with_areas.columns:
+        df_with_areas[cn.managed_land_CAN_pattern] = df_with_areas[cn.managed_land_CAN_pattern].map(cn.managed_land_to_text)
+    if cn.managed_land_USA_pattern in df_with_areas.columns:
+        df_with_areas[cn.managed_land_USA_pattern] = df_with_areas[cn.managed_land_USA_pattern].map(cn.managed_land_to_text)
+    if cn.BRA_biomes_pattern in df_with_areas.columns:
+        df_with_areas[cn.BRA_biomes_pattern] = df_with_areas[cn.BRA_biomes_pattern].map(cn.BRA_biomes_to_text)
 
     # Calculates flux density (Mg CO2(e)/ha) for each row
     df_with_areas['density__Mg_ha'] = df_with_areas['value'] / df_with_areas['pixel_area_ha'].replace(0, pd.NA)

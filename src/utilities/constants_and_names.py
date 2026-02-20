@@ -1673,6 +1673,16 @@ WDPA_to_text = {
     13: "Not Assigned"
 }
 
+BRA_biomes_to_text = {
+    0: "NA",
+    1: "Caatinga",
+    2: "Cerrado",
+    3: "Pantanal",
+    4: "Pampa",
+    5: "Amazônia",
+    6: "Mata Atlântica"
+}
+
 managed_land_to_text = {
     0: "NA",
     1: "managed",
