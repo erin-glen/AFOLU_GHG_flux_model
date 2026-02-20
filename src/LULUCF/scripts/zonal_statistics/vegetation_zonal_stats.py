@@ -182,8 +182,10 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     layers_net_deadwood_C = [cn.deadwood_c_gross_emis_pattern.replace('_ha_yr', ''), cn.deadwood_c_gross_removals_pattern.replace('_ha_yr', '')]
     layers_net_litter_C = [cn.litter_c_gross_emis_pattern.replace('_ha_yr', ''), cn.litter_c_gross_removals_pattern.replace('_ha_yr', '')]
 
+    # layers_net_CO2_only = layers_emissions_all_pools_CO2_only + layers_removals_all_pools
+    # layers_net_all_gases = layers_emissions_all_pools_all_gases + layers_removals_all_pools
+
     # Dictionary of summative outputs.
-    # Could include net flux CO2-only and net flux all gases here but I prefer to have them directly calculated from the zarrs for safety
     summative_outputs = {
         cn.gross_emis_all_C_pools_CO2_only_pattern: layers_emissions_all_pools_CO2_only,
         cn.gross_emis_all_C_pools_non_CO2_only_pattern: layers_emissions_all_pools_non_CO2,
@@ -193,6 +195,8 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
         cn.net_flux_bgc_pattern: layers_net_BGC,
         cn.net_flux_deadwood_c_pattern: layers_net_deadwood_C,
         cn.net_flux_litter_c_pattern: layers_net_litter_C,
+        # cn.net_flux_all_C_pools_CO2_only_pattern: layers_net_CO2_only,
+        # cn.net_flux_all_C_pools_all_gases_pattern: layers_net_all_gases,
     }
 
     # Splits df into pixel area and other analysis layers
@@ -258,7 +262,8 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     return df_with_areas
 
 
-def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefile_uri=False, bounding_box=None,
+def main(cluster_name, input_date, model_type, no_upload, zonal_stats_description,
+         chunk_shapefile_uri=False, bounding_box=None,
          first_variables_to_process=None, first_tiles_to_process=None, model_path_description=None, log_note=None):
 
 
@@ -280,6 +285,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     main_logger.info(f"Stage {stage} started at: {uu.timestr()}")
     main_logger.info(f"Vegetation model version: {cn.veg_model_version}")
     main_logger.info(f"Vegatation model path descriptor: {model_path_description}")
+    main_logger.info(f"Vegetation zonal stats descriptor: {zonal_stats_description}")
     main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
@@ -313,7 +319,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
                          cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
                          cn.ch4_gross_emis_pattern, cn.n2o_gross_emis_pattern,
                          cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
-                         cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,  # Could calculate with other summative outputs but prefer to calculate directly for safety
+                         cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
                          cn.non_soil_c_modeled_dens_pattern
                          ]
 
@@ -361,14 +367,14 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     adm0_xr = xr.open_zarr(cn.adm0_zarr_path, consolidated=False).rename_vars(band_data=cn.adm0_pattern)
     pixel_area_xr = xr.open_zarr(cn.pixel_area_zarr_path, consolidated=False).rename_vars(band_data=cn.pixel_area_zstats_pattern)
     WDPA_xr = xr.open_zarr(cn.WDPA_zarr_path, consolidated=False).rename_vars(band_data=cn.WDPA_pattern)
-    BRA_biomes_xr = xr.open_zarr(cn.BRA_biomes_zarr_path, consolidated=False).rename_vars(band_data=cn.BRA_biomes_pattern)
     cont_eco_xr = xr.open_zarr(cn.cont_eco_zarr_path, consolidated=False).rename_vars(band_data=cn.cont_eco_zstats_pattern)
     landmark_xr = xr.open_zarr(cn.landmark_zarr_path, consolidated=False).rename_vars(band_data=cn.landmark_pattern)
     composite_primary_xr = xr.open_zarr(cn.starting_composite_primary_forest_zarr_path, consolidated=False)  # No rename because it's created by a different process where the variable is named starting_composite_primary_forest
     KBA_xr = xr.open_zarr(cn.KBA_zarr_path, consolidated=False).rename_vars(band_data=cn.KBA_pattern)
     watersheds_xr = xr.open_zarr(cn.watersheds_zarr_path, consolidated=False).rename_vars(band_data=cn.watersheds_pattern)
-    managed_land_CAN_xr = xr.open_zarr(cn.managed_land_CAN_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_CAN_pattern)
-    managed_land_USA_xr = xr.open_zarr(cn.managed_land_USA_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_USA_pattern)
+    # BRA_biomes_xr = xr.open_zarr(cn.BRA_biomes_zarr_path, consolidated=False).rename_vars(band_data=cn.BRA_biomes_pattern)
+    # managed_land_CAN_xr = xr.open_zarr(cn.managed_land_CAN_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_CAN_pattern)
+    # managed_land_USA_xr = xr.open_zarr(cn.managed_land_USA_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_USA_pattern)
 
     ds = xr.open_zarr(zarr_path, consolidated=False)
 
@@ -379,28 +385,28 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
     ds_selected_analysis_vars = round_coords(ds_selected_analysis_vars)
     adm0_xr = round_coords(adm0_xr)
     WDPA_xr = round_coords(WDPA_xr)
-    BRA_biomes_xr = round_coords(BRA_biomes_xr)
     cont_eco_xr = round_coords(cont_eco_xr)
     landmark_xr = round_coords(landmark_xr)
     composite_primary_xr = round_coords(composite_primary_xr)
     KBA_xr = round_coords(KBA_xr)
     watersheds_xr = round_coords(watersheds_xr)
-    managed_land_CAN_xr = round_coords(managed_land_CAN_xr)
-    managed_land_USA_xr = round_coords(managed_land_USA_xr)
+    # BRA_biomes_xr = round_coords(BRA_biomes_xr)
+    # managed_land_CAN_xr = round_coords(managed_land_CAN_xr)
+    # managed_land_USA_xr = round_coords(managed_land_USA_xr)
     land_state_node = round_coords(ds[cn.land_state_pattern])
 
     main_logger.info(f"Cropping: {uu.timestr()}")
     pixel_area_aligned = reference
     adm0_aligned = safe_crop(adm0_xr, reference)
     WDPA_aligned = safe_crop(WDPA_xr, reference)
-    BRA_biomes_aligned = safe_crop(BRA_biomes_xr, reference)
     cont_eco_aligned = safe_crop(cont_eco_xr, reference)
     landmark_aligned = safe_crop(landmark_xr, reference)
     composite_primary_aligned = safe_crop(composite_primary_xr, reference)
     KBA_aligned = safe_crop(KBA_xr, reference)
     watersheds_aligned = safe_crop(watersheds_xr, reference)
-    managed_land_CAN_aligned = safe_crop(managed_land_CAN_xr, reference)
-    managed_land_USA_aligned = safe_crop(managed_land_USA_xr, reference)
+    # BRA_biomes_aligned = safe_crop(BRA_biomes_xr, reference)
+    # managed_land_CAN_aligned = safe_crop(managed_land_CAN_xr, reference)
+    # managed_land_USA_aligned = safe_crop(managed_land_USA_xr, reference)
     land_state_node_aligned = safe_crop(land_state_node, reference)
     ds_selected_analysis_vars_aligned = safe_crop(ds_selected_analysis_vars, reference)
 
@@ -443,7 +449,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         analysis_layer=("analysis_layer", selected_datasets)
     )
     flux_cube = round_coords(flux_cube)
-    main_logger.info("flux_cube:", flux_cube)
+    main_logger.info(f"flux_cube: {flux_cube}")
 
     prep_end_time = time.time()
     main_logger.info(f"  Finished zonal stats prep, took {round(prep_end_time - prep_start_time)} seconds: {uu.timestr()}")
@@ -453,6 +459,7 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
     main_logger.info(f"Starting zonal stats: {uu.timestr()}")
     combined_list = []
+    parquet_outputs = []
 
     for i, tile_id in enumerate(tile_ids_to_process):
         main_logger.info(f"Processing {tile_id} (tile {i+1} out of {len(tile_ids_to_process)}): {uu.timestr()}")
@@ -479,14 +486,14 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
 
         adm0_aligned_subset = adm0_aligned.sel(x=slice(west, east), y=slice(north, south))
         WDPA_aligned_subset = WDPA_aligned.sel(x=slice(west, east), y=slice(north, south))
-        BRA_biomes_aligned_subset = BRA_biomes_aligned.sel(x=slice(west, east), y=slice(north, south))
         cont_eco_aligned_subset = cont_eco_aligned.sel(x=slice(west, east), y=slice(north, south))
         landmark_aligned_subset = landmark_aligned.sel(x=slice(west, east), y=slice(north, south))
         composite_primary_aligned_subset = composite_primary_aligned.sel(x=slice(west, east), y=slice(north, south))
         KBA_aligned_subset = KBA_aligned.sel(x=slice(west, east), y=slice(north, south))
         watersheds_aligned_subset = watersheds_aligned.sel(x=slice(west, east), y=slice(north, south))
-        managed_land_CAN_aligned_subset = managed_land_CAN_aligned.sel(x=slice(west, east), y=slice(north, south))
-        managed_land_USA_aligned_subset = managed_land_USA_aligned.sel(x=slice(west, east), y=slice(north, south))
+        # BRA_biomes_aligned_subset = BRA_biomes_aligned.sel(x=slice(west, east), y=slice(north, south))
+        # managed_land_CAN_aligned_subset = managed_land_CAN_aligned.sel(x=slice(west, east), y=slice(north, south))
+        # managed_land_USA_aligned_subset = managed_land_USA_aligned.sel(x=slice(west, east), y=slice(north, south))
         land_state_node_aligned_subset = land_state_node_aligned.sel(x=slice(west, east), y=slice(north, south))
         pixel_area_expanded_subset = pixel_area_expanded.sel(x=slice(west, east), y=slice(north, south))
 
@@ -496,62 +503,63 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6995f836-b304-8333-8b92-cf24f95d812f
         if adm0_aligned_subset[cn.adm0_pattern].sizes.get("x", 0) == 0 or adm0_aligned_subset[cn.adm0_pattern].sizes.get("y", 0) == 0:
             adm0_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.adm0_pattern)
-            main_logger.info(f"  {cn.adm0_pattern} not in tile extent. Creating xarray of all 0s.")
+            main_logger.info(f"  {cn.adm0_pattern} not in {tile_id}. Creating xarray of all 0s.")
         else:
             adm0_da = adm0_aligned_subset[cn.adm0_pattern]
 
         if WDPA_aligned_subset[cn.WDPA_pattern].sizes.get("x", 0) == 0 or WDPA_aligned_subset[cn.WDPA_pattern].sizes.get("y", 0) == 0:
             WDPA_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.WDPA_pattern)
-            main_logger.info(f"  {cn.WDPA_pattern} not in tile extent. Creating xarray of all 0s.")
+            main_logger.info(f"  {cn.WDPA_pattern} not in {tile_id}. Creating xarray of all 0s.")
         else:
             WDPA_da = WDPA_aligned_subset[cn.WDPA_pattern]
 
-        if BRA_biomes_aligned_subset[cn.BRA_biomes_pattern].sizes.get("x", 0) == 0 or BRA_biomes_aligned_subset[cn.BRA_biomes_pattern].sizes.get("y", 0) == 0:
-            bra_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.BRA_biomes_pattern)
-            main_logger.info(f"  {cn.BRA_biomes_pattern} not in tile extent. Creating xarray of all 0s.")
-        else:
-            bra_da = BRA_biomes_aligned_subset[cn.BRA_biomes_pattern]
-
         if cont_eco_aligned_subset[cn.cont_eco_zstats_pattern].sizes.get("x", 0) == 0 or cont_eco_aligned_subset[cn.cont_eco_zstats_pattern].sizes.get("y", 0) == 0:
             cont_eco_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.cont_eco_zstats_pattern)
-            main_logger.info(f"  {cn.cont_eco_zstats_pattern} not in tile extent. Creating xarray of all 0s.")
+            main_logger.info(f"  {cn.cont_eco_zstats_pattern} not in {tile_id}. Creating xarray of all 0s.")
         else:
             cont_eco_da = cont_eco_aligned_subset[cn.cont_eco_zstats_pattern]
 
         if landmark_aligned_subset[cn.landmark_pattern].sizes.get("x", 0) == 0 or landmark_aligned_subset[cn.landmark_pattern].sizes.get("y", 0) == 0:
             landmark_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.landmark_pattern)
-            main_logger.info(f"  {cn.landmark_pattern} not in tile extent. Creating xarray of all 0s.")
+            main_logger.info(f"  {cn.landmark_pattern} not in {tile_id}. Creating xarray of all 0s.")
         else:
             landmark_da = landmark_aligned_subset[cn.landmark_pattern]
 
         if KBA_aligned_subset[cn.KBA_pattern].sizes.get("x", 0) == 0 or KBA_aligned_subset[cn.KBA_pattern].sizes.get("y", 0) == 0:
             KBA_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.KBA_pattern)
-            main_logger.info(f"  {cn.KBA_pattern} not in tile extent. Creating xarray of all 0s.")
+            main_logger.info(f"  {cn.KBA_pattern} not in {tile_id}. Creating xarray of all 0s.")
         else:
             KBA_da = KBA_aligned_subset[cn.KBA_pattern]
 
         if watersheds_aligned_subset[cn.watersheds_pattern].sizes.get("x", 0) == 0 or watersheds_aligned_subset[cn.watersheds_pattern].sizes.get("y", 0) == 0:
             watersheds_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.watersheds_pattern)
-            main_logger.info(f"  {cn.watersheds_pattern} not in tile extent. Creating xarray of all 0s.")
+            main_logger.info(f"  {cn.watersheds_pattern} not in {tile_id}. Creating xarray of all 0s.")
         else:
             watersheds_da = watersheds_aligned_subset[cn.watersheds_pattern]
 
-        if managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern].sizes.get("x", 0) == 0 or managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern].sizes.get("y", 0) == 0:
-            managed_land_CAN_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.managed_land_CAN_pattern)
-            main_logger.info(f"  {cn.managed_land_CAN_pattern} not in tile extent. Creating xarray of all 0s.")
-        else:
-            managed_land_CAN_da = managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern]
-
-        if managed_land_USA_aligned_subset[cn.managed_land_USA_pattern].sizes.get("x", 0) == 0 or managed_land_USA_aligned_subset[cn.managed_land_USA_pattern].sizes.get("y", 0) == 0:
-            managed_land_USA_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.managed_land_USA_pattern)
-            main_logger.info(f"  {cn.managed_land_USA_pattern} not in tile extent. Creating xarray of all 0s.")
-        else:
-            managed_land_USA_da = managed_land_USA_aligned_subset[cn.managed_land_USA_pattern]
+        # if BRA_biomes_aligned_subset[cn.BRA_biomes_pattern].sizes.get("x", 0) == 0 or BRA_biomes_aligned_subset[
+        #     cn.BRA_biomes_pattern].sizes.get("y", 0) == 0:
+        #     bra_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.BRA_biomes_pattern)
+        #     main_logger.info(f"  {cn.BRA_biomes_pattern} not in {tile_id}. Creating xarray of all 0s.")
+        # else:
+        #     bra_da = BRA_biomes_aligned_subset[cn.BRA_biomes_pattern]
+        #
+        # if managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern].sizes.get("x", 0) == 0 or managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern].sizes.get("y", 0) == 0:
+        #     managed_land_CAN_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.managed_land_CAN_pattern)
+        #     main_logger.info(f"  {cn.managed_land_CAN_pattern} not in {tile_id}. Creating xarray of all 0s.")
+        # else:
+        #     managed_land_CAN_da = managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern]
+        #
+        # if managed_land_USA_aligned_subset[cn.managed_land_USA_pattern].sizes.get("x", 0) == 0 or managed_land_USA_aligned_subset[cn.managed_land_USA_pattern].sizes.get("y", 0) == 0:
+        #     managed_land_USA_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.managed_land_USA_pattern)
+        #     main_logger.info(f"  {cn.managed_land_USA_pattern} not in {tile_id}. Creating xarray of all 0s.")
+        # else:
+        #     managed_land_USA_da = managed_land_USA_aligned_subset[cn.managed_land_USA_pattern]
 
         if (composite_primary_aligned_subset[cn.starting_composite_primary_forest_pattern].sizes.get("x", 0) == 0 or
                 composite_primary_aligned_subset[cn.starting_composite_primary_forest_pattern].sizes.get("y", 0) == 0):
             composite_primary_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.starting_composite_primary_forest_pattern)
-            main_logger.info(f"  {cn.starting_composite_primary_forest_pattern} not in tile extent. Creating xarray of all 0s.")
+            main_logger.info(f"  {cn.starting_composite_primary_forest_pattern} not in {tile_id}. Creating xarray of all 0s.")
         else:
             composite_primary_da = composite_primary_aligned_subset[cn.starting_composite_primary_forest_pattern]
 
@@ -568,28 +576,28 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
          pixel_area_expanded_subset,
          adm0_da,
          WDPA_da,
-         bra_da,
          cont_eco_da,
          landmark_da,
          composite_primary_da,
          KBA_da,
          watersheds_da,
-         managed_land_CAN_da,
-         managed_land_USA_da,
+         # bra_da,
+         # managed_land_CAN_da,
+         # managed_land_USA_da,
          land_state_node_aligned_subset,
          ) = xr.align(
             flux_cube_subset,
             pixel_area_expanded_subset,
             adm0_da,
             WDPA_da,
-            bra_da,
             cont_eco_da,
             landmark_da,
             composite_primary_da,
             KBA_da,
             watersheds_da,
-            managed_land_CAN_da,
-            managed_land_USA_da,
+            # bra_da,
+            # managed_land_CAN_da,
+            # managed_land_USA_da,
             land_state_node_aligned_subset,
             join="override"
         )
@@ -601,14 +609,14 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
                 adm0_da,
                 land_state_node_aligned_subset,
                 WDPA_da,
-                bra_da,
                 cont_eco_da,
                 landmark_da,
                 composite_primary_da,
                 KBA_da,
                 watersheds_da,
-                managed_land_CAN_da,
-                managed_land_USA_da,
+                # bra_da,
+                # managed_land_CAN_da,
+                # managed_land_USA_da,
                 flux_cube_subset["year"]
             ),
             func='sum',
@@ -616,14 +624,14 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
                 cn.gadm_adm0_ids,
                 node_codes,
                 cn.WDPA_codes,
-                cn.BRA_biomes_codes,
                 cn.cont_eco_codes,
                 cn.landmark_codes,
                 cn.composite_primary_codes,
                 cn.KBA_codes,
                 cn.watershed_codes,
-                cn.managed_land_codes,  # For Canada
-                cn.managed_land_codes,  # For USA
+                # cn.BRA_biomes_codes,
+                # cn.managed_land_codes,  # For Canada
+                # cn.managed_land_codes,  # For USA
                 flux_cube_subset.year.values,
             ),
             group_dims=["year"],
@@ -636,14 +644,14 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
             cn.adm0_pattern,
             cn.land_state_pattern,
             cn.WDPA_pattern,
-            cn.BRA_biomes_pattern,
             cn.cont_eco_zstats_pattern,
             cn.landmark_pattern,
             cn.starting_composite_primary_forest_pattern,
             cn.KBA_pattern,
             cn.watersheds_pattern,
-            cn.managed_land_CAN_pattern,
-            cn.managed_land_USA_pattern,
+            # cn.BRA_biomes_pattern,
+            # cn.managed_land_CAN_pattern,
+            # cn.managed_land_USA_pattern,
             'year'
         ]
 
@@ -656,9 +664,11 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         combined_list.append(df)
 
         main_logger.info(f"  Saving {tile_id} output table: {uu.timestr()}")
-        tile_df_name = f'veg_model_zonal_stats_{tile_id}_v{cn.veg_model_version_underscore}_{time.strftime('%Y%m%d_%H_%M_%S')}'
+        tile_df_name = f'veg_model_zonal_stats_{tile_id}_v{cn.veg_model_version_underscore}_{zonal_stats_description}_{time.strftime('%Y%m%d_%H_%M_%S')}'
         df.to_parquet(f"{local_zonal_stats_folder}/{tile_df_name}.parquet")
-        df.to_csv(f"{local_zonal_stats_folder}/{tile_df_name}.csv", index=False)
+
+        # List of parquet files (to convert to csvs after cluster is downsized)
+        parquet_outputs.append(f"{local_zonal_stats_folder}/{tile_df_name}.parquet")
 
         # Clean up at end of tile
         del results, coord_dict, df, flux_cube_subset
@@ -667,8 +677,27 @@ def main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefil
         tile_end_time = time.time()
         main_logger.info(f"  Done with {tile_id}, took {round(tile_end_time) - round(tile_start_time)} seconds: {uu.timestr()}")
 
-    # Combines tile tables, if any output
+
+    ### After all tiles completed
+
+    workers = client.scheduler_info()["workers"]
+    n_workers = len(workers)
+
+    # Reduces number of workers in the cluster down to 1 if there is more than 10
+    if n_workers > 10:
+        main_logger.info("Resizing cluster to 1 worker")
+
+        resize_cluster.resize_coiled_cluster(cluster_name, 1)
+
+    # Converts tile parquet to csv and combines tile tables, if any output
     if len(combined_list) > 0:
+
+        # Converts parquet to csv.
+        # Does it here with 1 worker because writing csvs is slow and not a good use of a full cluster
+        for parquet_output in parquet_outputs:
+            df = pd.read_parquet(parquet_output)
+            csv_output = parquet_output.replace('parquet', 'csv')
+            df.to_csv(csv_output, index=False)
 
         # Combines all the tile-level dfs in the list into a single df
         combined_df = pd.concat(combined_list, axis=0, ignore_index=True)
@@ -697,9 +726,9 @@ if __name__ == "__main__":
     parser.add_argument('-ft', '--first_tiles_to_process', type=int, help='Number of tiles to process (for testing)')
     parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard).')
     parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area).')
+    parser.add_argument('-zd', '--zonal_stats_description', help='Description of zonal stats run (e.g., global, Brazil, test area).')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
-    parser.add_argument('--no_log', action='store_true', help='Do not create the combined log')
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
 
     args = parser.parse_args()
@@ -712,12 +741,12 @@ if __name__ == "__main__":
     first_variables_to_process = args.first_variables_to_process
     model_type = args.model_type
     model_path_description = args.model_path_description
+    zonal_stats_description = args.zonal_stats_description
     log_note = args.log_note
 
-    no_log = args.no_log
     no_upload = args.no_upload
 
     # Create the cluster with command line arguments
-    main(cluster_name, input_date, model_type, no_log, no_upload, chunk_shapefile_uri, bounding_box=bounding_box,
+    main(cluster_name, input_date, model_type, no_upload, zonal_stats_description, chunk_shapefile_uri, bounding_box=bounding_box,
          first_variables_to_process=first_variables_to_process,
          first_tiles_to_process=first_tiles_to_process, model_path_description=model_path_description, log_note=log_note)
