@@ -466,7 +466,6 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     # Part 3: Do zonal stats tile by tile
 
     main_logger.info(f"Starting zonal stats: {uu.timestr()}")
-    combined_list = []
     parquet_outputs = []
 
     for i, tile_id in enumerate(tile_ids_to_process):
@@ -474,7 +473,9 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         tile_start_time = time.time()
 
         # Skips if any existing file already contains this tile_id (to not repeat that tile if restarting the zonal stats)
-        if any(tile_id in fname for fname in os.listdir(local_zonal_stats_folder)):
+        # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6998a64b-e568-8329-8a19-e10423d00669
+        existing = set(os.listdir(local_zonal_stats_folder))
+        if any(tile_id in fname for fname in existing):
             main_logger.info(f"  Skipping {tile_id}; output already exists")
             continue
 
@@ -668,8 +669,6 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         df = create_df(coord_dict, state_node_df, contextual_layers, tile_id)
         main_logger.info(f"  Rows in {tile_id} dataframe: {len(df.index)}: {uu.timestr()}")
 
-        # Appends the tile-level df to a list of dfs
-        combined_list.append(df)
 
         main_logger.info(f"  Saving {tile_id} output table: {uu.timestr()}")
         tile_df_name = f'veg_model_zonal_stats_{tile_id}_v{cn.veg_model_version_underscore}_{zonal_stats_description}_{time.strftime('%Y%m%d_%H_%M_%S')}'
@@ -697,26 +696,38 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
 
         resize_cluster.resize_coiled_cluster(cluster_name, 1)
 
-    # Converts tile parquet to csv and combines tile tables, if any output
-    if len(combined_list) > 0:
+    # Collect all tile parquet files
+    parquet_files = sorted(
+        str(local_zonal_stats_folder / f)
+        for f in os.listdir(local_zonal_stats_folder)
+        if f.endswith(".parquet") and "veg_model_zonal_stats_" in f
+    )
 
-        # Converts parquet to csv.
-        # Does it here with 1 worker because writing csvs is slow and not a good use of a full cluster
-        for parquet_output in parquet_outputs:
-            df = pd.read_parquet(parquet_output)
-            csv_output = parquet_output.replace('parquet', 'csv')
-            df.to_csv(csv_output, index=False)
+    if not parquet_files:
+        main_logger.info("No tile parquet files found.")
+        return
 
-        # Combines all the tile-level dfs in the list into a single df
-        combined_df = pd.concat(combined_list, axis=0, ignore_index=True)
+    # List of dataframes from each tile, to be combined
+    df_list = []
 
-        main_logger.info(f"Rows in combined dataframe: {len(combined_df.index)}")
-        main_logger.info(combined_df.head())
+    # Converts parquets to csvs, and makes a list of all the dataframes to combine them into one giant table.
+    # Does it here with 1 worker because writing csvs is slow and not a good use of a full cluster
+    for parquet_output in parquet_outputs:
+        df = pd.read_parquet(parquet_output)
+        csv_output = parquet_output.replace('parquet', 'csv')
+        df.to_csv(csv_output, index=False)
+        df_list.append(df)
 
-        combined_df_name = f'veg_model_zonal_stats_v{cn.veg_model_version_underscore}_{time.strftime('%Y%m%d_%H_%M_%S')}'
-        combined_df.to_parquet(f"{local_zonal_stats_folder}/{combined_df_name}.parquet")
-        if len(combined_df.index) < 900_000:  # Only writes combined file to Excel if it's not giant
-            combined_df.to_csv(f"{local_zonal_stats_folder}/{combined_df_name}.csv", index=False)
+    # Combines all the tile-level df_list in the list into a single df
+    combined_df = pd.concat(df_list, axis=0, ignore_index=True)
+
+    main_logger.info(f"Rows in combined dataframe: {len(combined_df.index)}")
+    main_logger.info(combined_df.head())
+
+    combined_df_name = f'veg_model_zonal_stats_v{cn.veg_model_version_underscore}_{time.strftime('%Y%m%d_%H_%M_%S')}'
+    combined_df.to_parquet(f"{local_zonal_stats_folder}/{combined_df_name}.parquet")
+    if len(combined_df.index) < 900_000:  # Only writes combined file to Excel if it's not giant
+        combined_df.to_csv(f"{local_zonal_stats_folder}/{combined_df_name}.csv", index=False)
 
     end_time = time.time()
     main_logger.info(f"  Finished zonal stats, took {round(end_time - prep_start_time)} seconds: {uu.timestr()}")
