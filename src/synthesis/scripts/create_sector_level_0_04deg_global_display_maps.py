@@ -46,7 +46,7 @@ from src.utilities import universal_utilities as uu
 from src.utilities import log_utilities as lu
 
 # Reprojects global geotifs to the projection/extent/resolution that the vegetation geotifs use, if not already reprojected
-def reproject_to_vegetation(geotif_to_reproj, local_reproj_folder, net_all_gases_geotif_local):
+def reproject_to_vegetation(geotif_to_reproj, local_reproj_folder, net_all_gases_geotif_local, main_logger):
 
     # Extracts the file name with extension, then removes extension
     filename_with_ext = os.path.basename(geotif_to_reproj)
@@ -57,9 +57,9 @@ def reproject_to_vegetation(geotif_to_reproj, local_reproj_folder, net_all_gases
 
     if not os.path.exists(path_reproj):
 
-        print("  Reprojected raster does not exist. Reprojecting now...")
-        print(f"   Unprojected raster: {path_unproj}")
-        print(f"   Reprojected raster: {path_reproj}")
+        main_logger.info("  Reprojected raster does not exist. Reprojecting now...")
+        main_logger.info(f"   Unprojected raster: {path_unproj}")
+        main_logger.info(f"   Reprojected raster: {path_reproj}")
 
         # Opens reference raster to extract desired CRS, transform, and shape
         with rasterio.open(net_all_gases_geotif_local) as ref:
@@ -96,7 +96,7 @@ def reproject_to_vegetation(geotif_to_reproj, local_reproj_folder, net_all_gases
                     )
 
     else:
-        print("  Reprojected raster already exists")
+        main_logger.info("  Reprojected raster already exists")
 
     return path_reproj
 
@@ -127,7 +127,7 @@ def convert_kg_to_Mg(path_reproj, main_logger):
     return converted_path
 
 # Sums the vegetation net flux and other dataset
-def add_veg_and_other_data(output_sum_path, converted_path, net_all_gases_geotif_local):
+def add_veg_and_other_data(output_sum_path, converted_path, net_all_gases_geotif_local, main_logger):
 
     with rasterio.open(net_all_gases_geotif_local) as src_a, rasterio.open(converted_path) as src_b:
         data_a = src_a.read(1)
@@ -242,7 +242,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         value.append(additional_data_date)
 
         # Reprojects to match vegetation net flux (if not already reprojected)
-        path_reproj = reproject_to_vegetation(input_s3_path, local_reproj_folder, net_all_gases_geotif_local)
+        path_reproj = reproject_to_vegetation(input_s3_path, local_reproj_folder, net_all_gases_geotif_local, main_logger)
         # print("path_reproj:", path_reproj)
 
         # Converts from kg to Mg (if not already converted, like for cropland and livestock)
@@ -267,7 +267,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         main_logger.info(f"Combined vegetation and {key} at {output_sum_path}")
 
         # Sums the vegetation net flux and other data
-        non_zero_values = add_veg_and_other_data(output_sum_path, unit_converted_path, net_all_gases_geotif_local)
+        non_zero_values = add_veg_and_other_data(output_sum_path, unit_converted_path, net_all_gases_geotif_local, main_logger)
 
 
         main_logger.info(f"\n\n---Preparing legend")
@@ -377,8 +377,8 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
 
         # Creates legend
         mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
-                                           title_text, tick_labels,
-                                              veg_analysis_years, net_colors_rgb, percentiles, percentile_0)
+                                              title_text, tick_labels,
+                                              veg_analysis_years, net_colors_rgb, percentiles, percentile_0, main_logger)
 
         # Removes axis ticks and labels
         mu.remove_ticks(ax)
@@ -391,7 +391,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
 
         # Saves two versions of the map: without and with a source note in the bottom right
         veg_addtl_pres_text = presentation_slide_text.replace("YYYYMMDD", additional_data_date)
-        out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", veg_addtl_pres_text)
+        out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", veg_addtl_pres_text, main_logger)
 
         end_time = time.time()
         main_logger.info(f"vegetation+{key} {bounding_box_description} took {round(end_time - start_time)} seconds: {uu.timestr()}")
@@ -549,14 +549,14 @@ def main(net_all_gases_geotif_local,
          center_latitude=None, center_longitude=None, lat_height=None, bounding_box_description=None):
 
     # Model stage being run
-    stage = 'summative_4x4km_maps'
+    stage = 'summative_4x4km_LULUCF_and_AFOLU_maps'
     log_note = '4x4 km maps for various AFOLU components'
 
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path, n_workers = lu.populate_main_log_header("NA", "NA", log_note, True, "NA", stage)
 
     # Reprojects simplified country boundary shapefile, if needed
-    country_shapefile = mu.check_and_reproject_shapefile(
+    country_shapefile = mu.check_and_reproject_shapefile(main_logger,
         shapefile_path=cn.original_shapefile_path,
         target_crs=cn.Robinson_crs,
         reprojected_shapefile_path=cn.reprojected_shapefile_path
@@ -564,16 +564,16 @@ def main(net_all_gases_geotif_local,
 
     # Creates bounding box in degrees from given map center and desired latitude range (optional)
     if center_latitude is not None and center_longitude is not None and lat_height is not None:
-        bounding_box = mu.calculate_bbox_centered(
+        bounding_box = mu.calculate_bbox_centered(main_logger,
             center_lat=center_latitude,
             center_lon=center_longitude,
             lat_height=lat_height,
             aspect_ratio=2.0  # panel_dims = (12, 6), same as global map for simplicity
         )
-        print(f"Using custom bounding box: {bounding_box}")
+        main_logger.info(f"Using custom bounding box: {bounding_box}")
     else:
         bounding_box = None
-        print("No bounding box specified; using global extent.")
+        main_logger.info("No bounding box specified; using global extent.")
 
     # Generates jpegs for net flux, gross emissions, and gross removals
     map_AFOLU_totals(net_all_gases_geotif_local,

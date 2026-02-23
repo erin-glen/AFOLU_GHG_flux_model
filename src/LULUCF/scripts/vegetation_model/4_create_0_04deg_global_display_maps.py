@@ -22,9 +22,17 @@ from pathlib import Path
 from src.utilities import constants_and_names as cn
 from src.utilities import map_utilities as mu
 from src.utilities import universal_utilities as uu
+from src.utilities import log_utilities as lu
 
 def main(input_date, model_type, model_path_description=None,
          center_latitude=None, center_longitude=None, lat_height=None, bounding_box_description=None):
+
+    # Model stage being run
+    stage = 'summative_4x4km_vegetation_maps'
+    log_note = '4x4 km maps for vegetation'
+
+    # Creates the log for the main function and populates it with basic run information
+    main_logger, main_log_local_path, n_workers = lu.populate_main_log_header("NA", "NA", log_note, True, "NA", stage)
 
     # Defines desired percentiles for colors. Specifies where colors transition in the data.
     # Setting neutral ends of sink and source is empirically based on the 0 value being around the 82nd percentile.
@@ -95,7 +103,7 @@ def main(input_date, model_type, model_path_description=None,
     local_gif_folder.mkdir(parents=True, exist_ok=True)
 
     # Reprojects simplified country boundary shapefile, if needed
-    country_shapefile = mu.check_and_reproject_shapefile(
+    country_shapefile = mu.check_and_reproject_shapefile(main_logger,
         shapefile_path=cn.original_shapefile_path,
         target_crs=cn.Robinson_crs,
         reprojected_shapefile_path=cn.reprojected_shapefile_path
@@ -103,41 +111,41 @@ def main(input_date, model_type, model_path_description=None,
 
     # Creates bounding box in degrees from given map center and desired latitude range (optional)
     if center_latitude is not None and center_longitude is not None and lat_height is not None:
-        bounding_box = mu.calculate_bbox_centered(
+        bounding_box = mu.calculate_bbox_centered(main_logger,
             center_lat=center_latitude,
             center_lon=center_longitude,
             lat_height=lat_height,
             aspect_ratio=2.0  # panel_dims = (12, 6), same as global map for simplicity
         )
-        print(f"Using custom bounding box: {bounding_box}")
+        main_logger.info(f"Using custom bounding box: {bounding_box}")
     else:
         bounding_box = None
-        print("No bounding box specified; using global extent.")
+        main_logger.info("No bounding box specified; using global extent.")
 
     # Generates jpegs for net flux, gross emissions, and gross removals
     mu.map_net_flux(net_all_gases_input_folders_s3, model_type, model_path_description, local_reproj_folder,
                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 cn.net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
+                 cn.net_colors_rgb, main_logger, country_shapefile, bounding_box, bounding_box_description)
 
-    mu.map_net_flux(net_CO2_only_input_folders_s3, model_type, model_path_description, local_reproj_folder,
-                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 cn.net_colors_rgb, country_shapefile, bounding_box, bounding_box_description)
-
-    mu.map_gross(gross_emis_CO2_only_input_folders_s3, model_type, model_path_description, local_reproj_folder,
-                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                     cn.emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
-
-    mu.map_gross(gross_emis_non_CO2_input_folders_s3, model_type, model_path_description, local_reproj_folder,
-                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                     cn.emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
-
-    mu.map_gross(gross_emis_all_gases_input_folders_s3, model_type, model_path_description, local_reproj_folder,
-                     local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                     cn.emissions_colors_rgb, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
-
-    mu.map_gross(gross_removals_input_folders_s3, model_type, model_path_description, local_reproj_folder,
-                 local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
-                 cn.removals_colors_rgb, removals_percentiles, country_shapefile, bounding_box, bounding_box_description)
+    # mu.map_net_flux(net_CO2_only_input_folders_s3, model_type, model_path_description, local_reproj_folder,
+    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #              cn.net_colors_rgb, main_logger, country_shapefile, bounding_box, bounding_box_description)
+    #
+    # mu.map_gross(gross_emis_CO2_only_input_folders_s3, model_type, model_path_description, local_reproj_folder,
+    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #                  cn.emissions_colors_rgb, main_logger, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
+    #
+    # mu.map_gross(gross_emis_non_CO2_input_folders_s3, model_type, model_path_description, local_reproj_folder,
+    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #                  cn.emissions_colors_rgb, main_logger, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
+    #
+    # mu.map_gross(gross_emis_all_gases_input_folders_s3, model_type, model_path_description, local_reproj_folder,
+    #                  local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #                  cn.emissions_colors_rgb, main_logger, emissions_percentiles, country_shapefile, bounding_box, bounding_box_description)
+    #
+    # mu.map_gross(gross_removals_input_folders_s3, model_type, model_path_description, local_reproj_folder,
+    #              local_jpeg_non_pres_folder, local_jpeg_pres_folder, local_gif_folder,
+    #              cn.removals_colors_rgb, main_logger, removals_percentiles, country_shapefile, bounding_box, bounding_box_description)
 
     # # Generates three-panel map
     # create_three_panel_map()
