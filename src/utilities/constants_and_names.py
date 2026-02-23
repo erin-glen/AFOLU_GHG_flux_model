@@ -1689,7 +1689,7 @@ managed_land_to_text = {
     2: "unmanaged",
 }
 
-local_zonal_stats_table_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/zonal_statistics/v{veg_model_version_underscore}__standard__global/"
+local_zonal_stats_table_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/zonal_statistics/v{veg_model_version_underscore}_standard_global/"
 
 
 
@@ -1701,7 +1701,8 @@ local_zonal_stats_table_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/zonal_stat
 original_shapefile_path = "/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/world-administrative-boundaries_simple__20250102.shp"
 reprojected_shapefile_path = "/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/world-administrative-boundaries_simple__20250102_reproj.shp"
 
-local_jpeg_folder_LULUCF = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/v{veg_model_version_underscore}__standard__global/"
+local_jpeg_folder_vegetation = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v{veg_model_version_underscore}_standard_global/"
+local_jpeg_folder_LULUCF = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/LULUCF_totals/veg_v{veg_model_version_underscore}_standard_global__org_soil_v_{organic_soil_model_version_underscore}__min_soil_v_{SOC_soil_model_version_underscore}/"
 local_jpeg_folder_cropland = f"/mnt/c/GIS/AFOLU_flux_model/cropland_emissions/20250828/4x4km_aggregated_maps/"
 local_jpeg_folder_livestock = f"/mnt/c/GIS/AFOLU_flux_model/livestock_emissions/20251223/4x4km_aggregated_maps/"
 local_jpeg_folder_AFOLU = f"/mnt/c/GIS/AFOLU_flux_model/AFOLU_totals/4x4km_aggregated_maps/v{veg_model_version_underscore}__standard__global/"
@@ -1735,12 +1736,21 @@ emissions_colors_rgb = net_colors_rgb[5:]
 
 veg_pres_text = (f"Land use vegetation fluxes (model v{veg_model_version}, 2016-2024) \n"
              f"Legend value range represents 1 and 99 percentiles of fluxes across all years.")
+veg_organic_soil_pres_text = (f"Vegetation fluxes: v{veg_model_version}; organic soil: v{organic_soil_model_version} \n"
+             f"Legend value range represents 1 and 99 percentiles of fluxes.")
+veg_mineral_soil_pres_text = (f"Vegetation fluxes: v{veg_model_version}; mineral soil: v{SOC_soil_model_version} \n"
+             f"Legend value range represents 1 and 99 percentiles of fluxes.")
+LULUCF_pres_text = (f"Vegetation fluxes: v{veg_model_version}; organic soil: v{organic_soil_model_version}; mineral soil: v{SOC_soil_model_version} \n"
+             f"Legend value range represents 1 and 99 percentiles of fluxes.")
 veg_cropland_pres_text = (f"Vegetation fluxes: v{veg_model_version}; cropland: YYYYMMDD \n"
              f"Legend value range represents 1 and 99 percentiles of fluxes.")
 veg_livestock_pres_text = (f"Vegetation fluxes: v{veg_model_version}; livestock: YYYYMMDD \n"
              f"Legend value range represents 1 and 99 percentiles of fluxes.")
 veg_cropland_livestock_pres_text = (f"Vegetation fluxes: v{veg_model_version}; cropland: YYYYMMDD; livestock: YYYYMMDD \n"
              f"Legend value range represents 1 and 99 percentiles of fluxes.")
+AFOLU_pres_text = (f"Vegetation fluxes: v{veg_model_version}; organic soil: v{organic_soil_model_version}; "
+                   f"mineral soil: v{SOC_soil_model_version}; cropland: YYYYMMDD; livestock: YYYYMMDD \n"
+                   f"Legend value range represents 1 and 99 percentiles of fluxes.")
 
 # Output global aggregated jpeg names
 three_panel_jpeg_base = f"three_panels__4km_aggregation__v{veg_model_version}"

@@ -9,25 +9,25 @@ If a bounding box is supplied:
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
-Coiled small tests (needs 32 GB because of per-ha and per-pixel outputs):
-python -m src.utilities.create_cluster -n 1 -m 64 -cn vegetation_zonal_stats
-python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -bb 10 49 11 50 -fv 2 -ft 2 -mt standard -mpd global --input_date YYYYMMDD
-
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -m 64 -cn vegetation_zonal_stats
-python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -bb -64 -22 -63 -21 -fv 3 -ft 3 -mt standard -mpd global --input_date YYYYMMDD
+python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -bb 10 49 11 50 -fv 2 -ft 2 -mt standard -mpd global -zd test_box --input_date YYYYMMDD
+
+Coiled 8-tile test (Central and East Africa):
+python -m src.utilities.create_cluster -n 50 -m 64 -cn vegetation_zonal_stats
+python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -bb 13 -14 44 -3 -fv 3 -ft 3 -mt standard -mpd global -zd Central_Africa_test --input_date YYYYMMDD
 
 Coiled Cerrado test (174 features):
 python -m src.utilities.create_cluster -n 50 -m 64 -cn vegetation_zonal_stats
-python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -mt standard -mpd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -mt standard -mpd global -zd Cerrado_test -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp --input_date YYYYMMDD
 
 Coiled large shapefile test (1884 features):
 python -m src.utilities.create_cluster -n 50 -m 64 -cn vegetation_zonal_stats
-python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -mt standard -mpd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
+python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -mt standard -mpd global -zd 1884_chunk_test -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD
 
 Full run:
 python -m src.utilities.create_cluster -n 50 -m 64 -cn vegetation_zonal_stats
-python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -mt standard -mpd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "10x10 deg tile creation for vegetation model v1.0.5 (2016-2024)."
+python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -mt standard -mpd global -zd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "Zonal stats for vegetation model v1.0.5 (2016-2024)."
 """
 
 import argparse
@@ -299,7 +299,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
 
     # If an area smaller than 6x6 deg is given (for testing), the sub_tile_test flag is activated
     # and the analysis extent changes further down
-    if (abs(bounding_box[0]-bounding_box[2]) < 6) and (abs(bounding_box[1]-bounding_box[3]) < 6):
+    if (not chunk_shapefile_uri) and ((abs(bounding_box[0]-bounding_box[2]) < 6) and (abs(bounding_box[1]-bounding_box[3]) < 6)):
         sub_tile_test = True
     else:
         sub_tile_test = False
@@ -479,7 +479,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
             main_logger.info(f"  Skipping {tile_id}; output already exists")
             continue
 
-        # If the bounding box is less than 10x10 deg, the exact bounding box is used (to enable small tests)
+        # If the bounding box is less than 6x6 deg, the exact bounding box is used (to enable small tests)
         if sub_tile_test == True:
             west, south, east, north = bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3]
             main_logger.info("  Running test area")
