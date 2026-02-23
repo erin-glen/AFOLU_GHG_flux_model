@@ -2,12 +2,17 @@
 Global:
 python -m src.synthesis.scripts.create_sector_level_0_04deg_global_display_maps
 -veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v1_0_5__standard__global/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_5_2016_2024_mean_global_reproj.tif
--os /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/LULUCF_totals/0_01deg_global__drained_burned_total_Mg_CO2e_pixel_yr_2021_2024.tif
+-os /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/LULUCF_totals/veg_v1_0_5_standard_global__org_soil_v_0_9_7__min_soil_v_1_0_0/0_01deg_global__drained_burned_total_Mg_CO2e_pixel_yr_2021_2024.tif
 -cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif
 -ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif
 
 For Central Africa:
-python -m src.LULUCF.scripts.vegetation_model.create_sector_level_0_04deg_global_display_maps--center_latitude 0 --center_longitude 20 --lat_height 20 -bbd central_Africa
+python -m src.LULUCF.scripts.vegetation_model.create_sector_level_0_04deg_global_display_maps
+-veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v1_0_5__standard__global/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_5_2016_2024_mean_global_reproj.tif
+-os /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/LULUCF_totals/veg_v1_0_5_standard_global__org_soil_v_0_9_7__min_soil_v_1_0_0/0_01deg_global__drained_burned_total_Mg_CO2e_pixel_yr_2021_2024.tif
+-cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif
+-ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif
+--center_latitude 0 --center_longitude 20 --lat_height 20 -bbd central_Africa
 
 Run locally (not in Coiled)
 
@@ -96,14 +101,14 @@ def reproject_to_vegetation(geotif_to_reproj, local_reproj_folder, net_all_gases
     return path_reproj
 
 # Converts geotif from kg to megagrams (tonnes)
-def convert_kg_to_Mg(path_reproj):
+def convert_kg_to_Mg(path_reproj, main_logger):
 
     # Unit-converted raster
     converted_path = path_reproj.replace("kg", "Mg")
 
     if not os.path.exists(converted_path):
 
-        print("  Unit-converted raster does not exist. Converting kg to Mg...")
+        main_logger.info("  Unit-converted raster does not exist. Converting kg to Mg...")
 
         with rasterio.open(path_reproj) as src:
             data = src.read(1)
@@ -117,7 +122,7 @@ def convert_kg_to_Mg(path_reproj):
                 dst.write(data.astype('float32'), 1)
 
     else:
-        print("  Unit-converted raster already exists")
+        main_logger.info("  Unit-converted raster already exists")
 
     return converted_path
 
@@ -185,19 +190,17 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
 
     data_to_add = {}
 
-    print(organic_soil_local)
-
     if organic_soil_local:
-        data_to_add['organic_soil'] = [organic_soil_local, LULUCF_reproj_folder, cn.veg_organic_soil_pres_text]
+        data_to_add['organic_soil'] = [organic_soil_local, LULUCF_reproj_folder, cn.veg_organic_soil_pres_text, LULUCF_local_jpeg_non_pres_folder, LULUCF_local_jpeg_pres_folder]
 
     if mineral_soil_s3:
-        data_to_add['mineral_soil'] = [mineral_soil_s3, LULUCF_reproj_folder, cn.veg_mineral_soil_pres_text]
+        data_to_add['mineral_soil'] = [mineral_soil_s3, LULUCF_reproj_folder, cn.veg_mineral_soil_pres_text, LULUCF_local_jpeg_non_pres_folder, LULUCF_local_jpeg_pres_folder]
 
     if cropland_geotif_s3:
-        data_to_add['cropland'] = [cropland_geotif_s3, cropland_reproj_folder, cn.veg_cropland_pres_text]
+        data_to_add['cropland'] = [cropland_geotif_s3, cropland_reproj_folder, cn.veg_cropland_pres_text, AFOLU_local_jpeg_non_pres_folder, AFOLU_local_jpeg_pres_folder]
 
     if livestock_geotif_s3:
-        data_to_add['livestock'] = [livestock_geotif_s3, livestock_reproj_folder, cn.veg_livestock_pres_text]
+        data_to_add['livestock'] = [livestock_geotif_s3, livestock_reproj_folder, cn.veg_livestock_pres_text, AFOLU_local_jpeg_non_pres_folder, AFOLU_local_jpeg_pres_folder]
 
     main_logger.info(f"Vegetation net flux: {net_all_gases_geotif_local}")
     main_logger.info(f"Inputs to add to vegetation: {data_to_add}")
@@ -219,11 +222,23 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         input_s3_path = value[0]
         local_reproj_folder = value[1]
         presentation_slide_text = value[2]
+        non_pres_folder = value[3]
+        pres_folder = value[4]
 
         main_logger.info(f"\n---Reprojecting {key} to vegetation projection")
 
-        # Date of the other dataset being used
-        additional_data_date = re.search(r'/(\d{8})/', input_s3_path).group(1)
+        # Date/version of the other dataset being used (depends on specific dataset)
+        if key == 'organic_soil':
+            additional_data_date = cn.organic_soil_model_version_underscore
+        elif key == 'mineral_soil':
+            additional_data_date = cn.SOC_soil_model_version_underscore
+        elif key == 'cropland':
+            additional_data_date = re.search(r'/(\d{8})/', input_s3_path).group(1)
+        elif key == 'livestock':
+            additional_data_date = re.search(r'/(\d{8})/', input_s3_path).group(1)
+        else:
+            additional_data_date = 'no_version_info'
+
         value.append(additional_data_date)
 
         # Reprojects to match vegetation net flux (if not already reprojected)
@@ -231,7 +246,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         # print("path_reproj:", path_reproj)
 
         # Converts from kg to Mg (if not already converted, like for cropland and livestock)
-        unit_converted_path = convert_kg_to_Mg(path_reproj)
+        unit_converted_path = convert_kg_to_Mg(path_reproj, main_logger)
         # print("unit_converted_path:", unit_converted_path)
 
         # Loads unit-converted raster and adds it to the running LULUCF total
@@ -246,10 +261,10 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
             total_across_AFOLU += data
 
 
-        main_logger.info(f"Combining vegetation net flux and {key} emissions")
-
+        main_logger.info(f"Combining vegetation net flux and {key}")
         output_name = f"vegetation_net_flux_all_pools_all_gases_{veg_version}__{key}_{additional_data_date}__{veg_analysis_years}__Mg_CO2e"
-        output_sum_path = f"{cn.local_jpeg_folder_AFOLU}/{output_name}.tif"
+        output_sum_path = f"{local_reproj_folder}/{output_name}.tif"
+        main_logger.info(f"Combined vegetation and {key} at {output_sum_path}")
 
         # Sums the vegetation net flux and other data
         non_zero_values = add_veg_and_other_data(output_sum_path, unit_converted_path, net_all_gases_geotif_local)
@@ -266,9 +281,9 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         upper_lim_all_yrs = breaks_all_yrs[-1]
 
         main_logger.info(f"Across vegetation+{key}:")
-        main_logger.info(f"  lower limit ({percentile_for_saturation} percentile):", lower_lim_all_yrs)
-        main_logger.info(f"  neutral:", global_neutral)
-        main_logger.info(f"  upper limit ({(100-percentile_for_saturation)} percentile):", upper_lim_all_yrs)
+        main_logger.info(f"  lower limit ({percentile_for_saturation} percentile): {lower_lim_all_yrs}")
+        main_logger.info(f"  neutral: {global_neutral}")
+        main_logger.info(f"  upper limit ({(100-percentile_for_saturation)} percentile): {upper_lim_all_yrs}")
 
         # Creates the min and max values for the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
         # Rounds data_min down and data_max up for legend.
@@ -371,8 +386,8 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         core_jpeg_name = f"{output_name}__{uu.timestr()[0:8]}"
         if bounding_box_description:  # Adds bounding box description to file name, if supplied
             core_jpeg_name = f"{core_jpeg_name}_{bounding_box_description}"
-        jpeg_path = f"{AFOLU_local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
-        jpeg_for_pres_path = f"{AFOLU_local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
+        jpeg_path = f"{non_pres_folder}/{core_jpeg_name}.jpeg"
+        jpeg_for_pres_path = f"{pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
         # Saves two versions of the map: without and with a source note in the bottom right
         veg_addtl_pres_text = presentation_slide_text.replace("YYYYMMDD", additional_data_date)
