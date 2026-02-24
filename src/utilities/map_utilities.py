@@ -398,7 +398,7 @@ def save_pres_non_pres_jpegs(ax, out_jpeg, out_jpeg_for_pres, year, pres_text, m
     save_jpeg(out_jpeg, year, main_logger)
 
     # Note in bottom right of panel
-    ax.text(0.99, 0.07, pres_text, transform=ax.transAxes, fontsize=7,   #Vertical, horizontal
+    ax.text(0.99, 0.09, pres_text, transform=ax.transAxes, fontsize=7,   #Horizontal (lower value moves left), vertical (lower value moves down)
             ha="right", va="top", color="black")
 
     # Saves jpeg with journal name and update notes in bottom right

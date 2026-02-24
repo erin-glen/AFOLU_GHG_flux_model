@@ -1740,16 +1740,17 @@ veg_organic_soil_pres_text = (f"Vegetation fluxes: v{veg_model_version}; organic
              f"Legend value range represents 1 and 99 percentiles of fluxes.")
 veg_mineral_soil_pres_text = (f"Vegetation fluxes: v{veg_model_version}; mineral soil: v{SOC_soil_model_version} \n"
              f"Legend value range represents 1 and 99 percentiles of fluxes.")
-LULUCF_pres_text = (f"Vegetation fluxes: v{veg_model_version}; organic soil: v{organic_soil_model_version}; mineral soil: v{SOC_soil_model_version} \n"
-             f"Legend value range represents 1 and 99 percentiles of fluxes.")
+LULUCF_pres_text = (f"Vegetation fluxes: v{veg_model_version}, {interval_end_years_annual[0]}-{last_model_year_annual}; \n"
+                    f"Organic soil: v{organic_soil_model_version}, 2021-2024; "
+                    f"Mineral soil: v{SOC_soil_model_version}, 2011-2022 \n"
+                    f"Legend value range represents 1 and 99 percentiles of fluxes.")
 veg_cropland_pres_text = (f"Vegetation fluxes: v{veg_model_version}; cropland: YYYYMMDD \n"
              f"Legend value range represents 1 and 99 percentiles of fluxes.")
 veg_livestock_pres_text = (f"Vegetation fluxes: v{veg_model_version}; livestock: YYYYMMDD \n"
              f"Legend value range represents 1 and 99 percentiles of fluxes.")
-veg_cropland_livestock_pres_text = (f"Vegetation fluxes: v{veg_model_version}; cropland: YYYYMMDD; livestock: YYYYMMDD \n"
-             f"Legend value range represents 1 and 99 percentiles of fluxes.")
-AFOLU_pres_text = (f"Vegetation fluxes: v{veg_model_version}; organic soil: v{organic_soil_model_version}; "
-                   f"mineral soil: v{SOC_soil_model_version}; cropland: YYYYMMDD; livestock: YYYYMMDD \n"
+AFOLU_pres_text = (f"Vegetation fluxes: v{veg_model_version}, {interval_end_years_annual[0]}-{last_model_year_annual}; "
+                   f"organic soil: v{organic_soil_model_version}; mineral soil: v{SOC_soil_model_version}; \n "
+                   f"cropland: YYYYMMDD; livestock: YYYYMMDD \n"
                    f"Legend value range represents 1 and 99 percentiles of fluxes.")
 
 # Output global aggregated jpeg names

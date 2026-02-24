@@ -472,6 +472,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         main_logger.info(f"Processing {tile_id} (tile {i+1} of {len(tile_ids_to_process)}): {uu.timestr()}")
         tile_start_time = time.time()
 
+        # TODO add code to skip tile if it has no fluxes (maybe per a chunk stats spreadsheet)
         # Skips if any existing file already contains this tile_id (to not repeat that tile if restarting the zonal stats)
         # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6998a64b-e568-8329-8a19-e10423d00669
         existing = set(os.listdir(local_zonal_stats_folder))

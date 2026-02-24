@@ -1,14 +1,17 @@
 """
+
+Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
+
 Global:
 python -m src.synthesis.scripts.create_sector_level_0_04deg_global_display_maps
--veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v1_0_5__standard__global/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_5_2016_2024_mean_global_reproj.tif
+-veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v1_0_5_standard_global/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_5_2016_2024_mean_global_reproj.tif
 -os /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/LULUCF_totals/veg_v1_0_5_standard_global__org_soil_v_0_9_7__min_soil_v_1_0_0/0_01deg_global__drained_burned_total_Mg_CO2e_pixel_yr_2021_2024.tif
 -cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif
 -ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif
 
 For Central Africa:
 python -m src.LULUCF.scripts.vegetation_model.create_sector_level_0_04deg_global_display_maps
--veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v1_0_5__standard__global/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_5_2016_2024_mean_global_reproj.tif
+-veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v1_0_5_standard_global/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_5_2016_2024_mean_global_reproj.tif
 -os /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/LULUCF_totals/veg_v1_0_5_standard_global__org_soil_v_0_9_7__min_soil_v_1_0_0/0_01deg_global__drained_burned_total_Mg_CO2e_pixel_yr_2021_2024.tif
 -cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif
 -ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif
@@ -216,6 +219,9 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         total_across_LULUCF = src_veg.read(1).astype('float32')  # base raster to accumulate into for LULUCF total
         total_across_AFOLU = src_veg.read(1).astype('float32')  # base raster to accumulate into for AFOLU total
 
+
+    ### Part 1: Maps vegetation + one other dataset at a time (pairwise)
+
     # Iterates through non-vegetation layers to combine them with vegetation individually
     for key, value in data_to_add.items():
 
@@ -373,7 +379,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
             ax.set_ylim(extent[2], extent[3])
 
         # Title
-        title_text = f"Vegetation and {key}\nkt CO$_2$e in {veg_analysis_years}"
+        title_text = f"Vegetation and {key}\nkt CO$_2$e"
 
         # Creates legend
         mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
@@ -397,24 +403,28 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         main_logger.info(f"vegetation+{key} {bounding_box_description} took {round(end_time - start_time)} seconds: {uu.timestr()}")
 
 
+    ### Part 2: Maps LULUCF
 
-    main_logger.info("\n\n---Mapping vegetation + the following subsectors:")
-    main_logger.info(", ".join(data_to_add.keys()))
+    main_logger.info("\n\n\n---Mapping LULUCF:")
 
-    # Iteratively collects that names of datasets and dates for the non-vegetation data
-    non_veg_dates = ''
-    for key, values in data_to_add.items():
-        non_veg_dates = f"{non_veg_dates}_{key}_{values[3]}"
+    # Iteratively collects the names and versions of non-vegetation datasets
+    non_veg_versions = ''
+    if organic_soil_local:
+        non_veg_versions = f'{non_veg_versions}_organic_soil_v{cn.organic_soil_model_version_underscore}'
+    if mineral_soil_s3:
+        non_veg_versions = f'{non_veg_versions}__mineral_soil_v{cn.SOC_soil_model_version_underscore}'
 
     # Final combined output
-    output_name = f"vegetation_net_flux_all_pools_all_gases_{veg_version}_{non_veg_dates}__{veg_analysis_years}__Mg_CO2e"
-    final_total_path = f"{cn.local_jpeg_folder_AFOLU}/{output_name}.tif"
+    output_name = f"LULUCF__veg_{veg_version}__{non_veg_versions}__Mg_CO2e"
+    # print("output_name:", output_name)
+    final_total_path = f"{cn.local_jpeg_folder_LULUCF}/{output_name}.tif"
+    # print("final_total_path:", final_total_path)
     with rasterio.open(final_total_path, 'w', **veg_meta) as dst:
-        dst.write(total_across_AFOLU.astype('float32'), 1)
+        dst.write(total_across_LULUCF.astype('float32'), 1)
 
-    non_zero_values = total_across_AFOLU[total_across_AFOLU != 0]
+    non_zero_values = total_across_LULUCF[total_across_LULUCF != 0]
 
-    main_logger.info(f"\n\n---Preparing legend")
+    main_logger.info(f"\n\n---Preparing LULUCF legend")
 
     # Calculates min, center and max across all years
     percentile_for_saturation = 1
@@ -424,7 +434,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     global_neutral = 0
     upper_lim_all_yrs = breaks_all_yrs[-1]
 
-    main_logger.info(f"Across vegetation+{non_veg_dates}:")
+    main_logger.info(f"Across LULUCF:")
     main_logger.info(f"  lower limit ({percentile_for_saturation} percentile): {lower_lim_all_yrs}")
     main_logger.info(f"  neutral: {global_neutral}")
     main_logger.info(f"  upper limit ({(100 - percentile_for_saturation)} percentile):{upper_lim_all_yrs}")
@@ -439,7 +449,152 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
                    f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
     # print(tick_labels)
 
-    main_logger.info(f"\n\n---Mapping vegetation + {non_veg_dates}")
+    main_logger.info(f"\n\n---Generating LULUCF map:")
+
+    # Reads raster data
+    with rasterio.open(final_total_path) as src:
+
+        if bounding_box_proj is not None:
+            minx, miny, maxx, maxy = bounding_box_proj
+
+            window = from_bounds(minx, miny, maxx, maxy, src.transform)
+
+            data = src.read(1, window=window)
+
+            # Update extent from the window
+            left, bottom, right, top = rasterio.windows.bounds(window, src.transform)
+            raster_extent = (left, right, bottom, top)
+
+        else:
+            data = src.read(1)
+            b = src.bounds
+            raster_extent = (b.left, b.right, b.bottom, b.top)
+
+    # Calculates the percentile for 0 for the year (neutral, no flux) for mapping
+    main_logger.info(f"  Calculating percentiles and breaks for LULUCF")
+    percentile_0 = mu.percentile_for_0(data)
+    main_logger.info(f"  0 is at the {percentile_0}th percentile of the raster.")
+    percentiles = [percentile_0 / 6, percentile_0 / 4, percentile_0 / 2, percentile_0 / 1.3, percentile_0 / 1.05,
+                   percentile_0 * 1.05, percentile_0 * 1.1, percentile_0 * 1.2, percentile_0 * 1.3, percentile_0 * 1.5]
+    # print("percentiles:", percentiles)
+
+    # Converts RGB color palette to matplotlib color palette
+    colors_matplotlib = mu.rgb_to_mpl_palette(net_colors_rgb)
+
+    # Matches percentile breaks with colors for the map.
+    # Normalizes percentiles to a 0-1 scale.
+    percentiles_normalized = np.linspace(0, 1, len(percentiles))
+    # print("percentiles_normalized:", percentiles_normalized)
+    cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
+
+    main_logger.info(f"  Masking raster to non-0 values for LULUCF")
+    masked_data = np.ma.masked_where(data == 0, data)
+
+    # For map (not legend)
+    norm = TwoSlopeNorm(
+        vmin=lower_lim_all_yrs,
+        vcenter=global_neutral,
+        vmax=upper_lim_all_yrs
+    )
+
+    main_logger.info(f"  Plotting LULUCF map")
+    ax, fig = mu.create_plot()
+
+    # Sets the ocean color
+    mu.set_ocean_color(ax)
+
+    # Limits shapefile to focal extent (if requested)
+    if bounding_box_proj is not None:
+        bbox_geom = box(*bounding_box_proj)
+        country_shapefile = country_shapefile.clip(bbox_geom)
+
+    # Plots the country polygons first
+    mu.plot_country_polygons(ax, country_shapefile)
+
+    # Raster extent
+    extent = list(raster_extent)
+
+    # Plots the raster next
+    img = mu.plot_raster(ax, cmap, extent, masked_data, norm)
+
+    # Plots the country boundaries on top
+    mu.plot_country_boundaries(ax, country_shapefile)
+
+    # Explicitly sets the bounding box for the plot image
+    if bounding_box_proj is not None:
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
+
+    # Title
+    title_text = f"LULUCF net GHG flux (vegetation+soil)\nkt CO$_2$e"
+
+    # Creates legend
+    mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
+                                          title_text, tick_labels,
+                                          veg_analysis_years, net_colors_rgb, percentiles, percentile_0, main_logger)
+
+    # Removes axis ticks and labels
+    mu.remove_ticks(ax)
+
+    core_jpeg_name = f"{output_name}__{uu.timestr()[0:8]}"
+    if bounding_box_description:  # Adds bounding box description to file name, if supplied
+        core_jpeg_name = f"{core_jpeg_name}_{bounding_box_description}"
+    jpeg_path = f"{LULUCF_local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
+    jpeg_for_pres_path = f"{LULUCF_local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
+
+    # Saves two versions of the map: without and with a source note in the bottom right
+    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", cn.LULUCF_pres_text, main_logger)
+
+    end_time = time.time()
+    main_logger.info(f"LULUCF for {bounding_box_description} extent took {round(end_time - start_time)} seconds: {uu.timestr()}")
+
+
+    ### Part 3: Maps AFOLU
+
+    main_logger.info("\n\n\n---Mapping AFOLU:")
+
+    # Iteratively collects the names and versions of non-vegetation datasets (LULUCF versions already collected)
+    if cropland_geotif_s3:
+        cropland_date = re.search(r'/(\d{8})/', cropland_geotif_s3).group(1)
+        non_veg_versions = f'{non_veg_versions}_cropland_v{cropland_date}'
+    if livestock_geotif_s3:
+        livestock_date = re.search(r'/(\d{8})/', livestock_geotif_s3).group(1)
+        non_veg_versions = f'{non_veg_versions}__livestock_v{livestock_date}'
+
+    # Final combined output
+    output_name = f"AFOLU__veg_{veg_version}__{non_veg_versions}__Mg_CO2e"
+    final_total_path = f"{cn.local_jpeg_folder_AFOLU}/{output_name}.tif"
+    with rasterio.open(final_total_path, 'w', **veg_meta) as dst:
+        dst.write(total_across_AFOLU.astype('float32'), 1)
+
+    non_zero_values = total_across_AFOLU[total_across_AFOLU != 0]
+
+    main_logger.info(f"\n\n---Preparing legend for AFOLU")
+
+    # Calculates min, center and max across all years
+    percentile_for_saturation = 1
+    breaks_all_yrs = np.percentile(non_zero_values, [1, (100 - percentile_for_saturation)])  # The min and max percentiles at which colors saturate
+
+    lower_lim_all_yrs = breaks_all_yrs[0]
+    global_neutral = 0
+    upper_lim_all_yrs = breaks_all_yrs[-1]
+
+    main_logger.info(f"Across AFOLU:")
+    main_logger.info(f"  lower limit ({percentile_for_saturation} percentile): {lower_lim_all_yrs}")
+    main_logger.info(f"  neutral: {global_neutral}")
+    main_logger.info(f"  upper limit ({(100 - percentile_for_saturation)} percentile):{upper_lim_all_yrs}")
+
+    # Creates the min and max values for the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
+    # Rounds data_min down and data_max up for legend.
+    rounded_lower_lim_all_yrs = math.ceil(lower_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds up
+    rounded_upper_lim_all_yrs = math.floor(upper_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds down
+    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f}  (sink)",
+                   # Spaces are to horizontally align the text explanations
+                   "0        (neutral)",
+                   f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
+    # print(tick_labels)
+
+    main_logger.info(f"\n\n---Generating AFOLU map:")
 
     # Reads raster data
     with rasterio.open(final_total_path) as src:
@@ -477,7 +632,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     # print("percentiles_normalized:", percentiles_normalized)
     cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
 
-    main_logger.info(f"  Masking raster to non-0 values")
+    main_logger.info(f"  Masking raster to non-0 values for AFOLU")
     masked_data = np.ma.masked_where(data == 0, data)
 
     # For map (not legend)
@@ -487,7 +642,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         vmax=upper_lim_all_yrs
     )
 
-    main_logger.info(f"  Plotting map ")
+    main_logger.info(f"  Plotting AFOLU map")
     ax, fig = mu.create_plot()
 
     # Sets the ocean color
@@ -516,12 +671,12 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         ax.set_ylim(extent[2], extent[3])
 
     # Title
-    title_text = f"Vegetation, cropland, and livestock\nkt CO$_2$e in {veg_analysis_years}"
+    title_text = f"AFOLU net GHG flux\nkt CO$_2$e"
 
     # Creates legend
     mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
                                           title_text, tick_labels,
-                                          veg_analysis_years, net_colors_rgb, percentiles, percentile_0)
+                                          veg_analysis_years, net_colors_rgb, percentiles, percentile_0, main_logger)
 
     # Removes axis ticks and labels
     mu.remove_ticks(ax)
@@ -529,16 +684,14 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     core_jpeg_name = f"{output_name}__{uu.timestr()[0:8]}"
     if bounding_box_description:  # Adds bounding box description to file name, if supplied
         core_jpeg_name = f"{core_jpeg_name}_{bounding_box_description}"
-    jpeg_path = f"{pres_folder}/{core_jpeg_name}.jpeg"
-    jpeg_for_pres_path = f"{non_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
+    jpeg_path = f"{AFOLU_local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
+    jpeg_for_pres_path = f"{AFOLU_local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
     # Saves two versions of the map: without and with a source note in the bottom right
-    veg_addtl_pres_text = cn.veg_cropland_livestock_pres_text.replace("cropland: YYYYMMDD", f"cropland: {data_to_add['cropland'][3]}")
-    veg_addtl_pres_text = veg_addtl_pres_text.replace("livestock: YYYYMMDD", f"livestock: {data_to_add['livestock'][3]}")
-    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", veg_addtl_pres_text, main_logger)
+    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", cn.AFOLU_pres_text, main_logger)
 
     end_time = time.time()
-    main_logger.info(f"vegetation+{data_to_add} {bounding_box_description} took {round(end_time - start_time)} seconds: {uu.timestr()}")
+    main_logger.info(f"AFOLU for {bounding_box_description} extent took {round(end_time - start_time)} seconds: {uu.timestr()}")
 
 
 def main(net_all_gases_geotif_local,
