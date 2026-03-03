@@ -595,9 +595,9 @@ def map_net_flux(s3_folders, model_type, model_path_description,
     # Rounds data_min down and data_max up for legend.
     rounded_lower_lim_all_yrs = math.ceil(lower_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds up
     rounded_upper_lim_all_yrs = math.floor(upper_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds down
-    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f}  (sink)",  # Spaces are to horizontally align the text explanations
-                   "0        (neutral)",
-                   f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
+    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f:10s}  (sink)",  # Spaces are to horizontally align the text explanations
+                   f"{0:10s}        (neutral)",
+                   f"> {rounded_upper_lim_all_yrs:.0f:10s}  (source)"]
     # print(tick_labels)
 
     # Final pass: Iterates through modeled years to create the jpegs

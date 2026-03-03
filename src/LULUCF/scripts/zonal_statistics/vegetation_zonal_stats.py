@@ -251,6 +251,7 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     # Maps WDPA codes to names if the contextual layer is used
     if cn.WDPA_pattern in df_with_areas.columns:
         df_with_areas['WDPA_type'] = df_with_areas[cn.WDPA_pattern].map(cn.WDPA_to_text)
+        df_with_areas["WDPA_high_protection"] = df_with_areas[cn.WDPA_pattern].isin([1, 2, 3]).astype(int)
 
     # Replaces managed land numeric values with managed/unmanaged if the contextual layer is used
     if cn.managed_land_CAN_pattern in df_with_areas.columns:
@@ -667,6 +668,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
 
         main_logger.info(f"  Done computing {tile_id}: {uu.timestr()}")
         coord_dict = convert_to_coord_dict(results, main_logger)
+        #TODO create binary WDPA column (for classes ~3 and below)
         df = create_df(coord_dict, state_node_df, contextual_layers, tile_id)
         main_logger.info(f"  Rows in {tile_id} dataframe: {len(df.index)}: {uu.timestr()}")
 
@@ -687,6 +689,11 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
 
 
     ### After all tiles completed
+
+    all_tiles_end_time = time.time()
+    main_logger.info(f"Finished tile analyses, took {round(all_tiles_end_time - prep_start_time)} seconds: {uu.timestr()}")
+    average_time = (all_tiles_end_time - prep_start_time)/len(tile_ids_to_process) #TODO have this not count the tiles skipped because they have no data
+    main_logger.info(f"Average time per tile (including skipped tiles): {round(average_time)} seconds (for {len(tile_ids_to_process)} tiles)")
 
     workers = client.scheduler_info()["workers"]
     n_workers = len(workers)
@@ -729,6 +736,8 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     combined_df.to_parquet(f"{local_zonal_stats_folder}/{combined_df_name}.parquet")
     if len(combined_df.index) < 900_000:  # Only writes combined file to Excel if it's not giant
         combined_df.to_csv(f"{local_zonal_stats_folder}/{combined_df_name}.csv", index=False)
+
+    #TODO upload outputs to s3
 
     end_time = time.time()
     main_logger.info(f"  Finished zonal stats, took {round(end_time - prep_start_time)} seconds: {uu.timestr()}")
