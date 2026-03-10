@@ -32,6 +32,7 @@ from datetime import date
 import xarray as xr
 import resource
 import time
+import re
 from dask.distributed import print
 from dask import config
 from concurrent.futures import ThreadPoolExecutor
@@ -399,20 +400,30 @@ def main(cluster_name, model_type,
     if create_zarr:
 
         # Creates s3 paths for the raw mega-zarr
-        mega_zarr_path = zu.create_zarr_path(cn.SOC_path_mega_zarr, chunk_size_pixels, 'N/A',
+        zarr_path = zu.create_zarr_path(cn.SOC_path_mega_zarr, chunk_size_pixels, 'N/A',
                                              model_type, cn.SOC_soil_model_version_underscore, model_path_description,
                                              run_date, main_logger)
 
         # These variables are added to the mega-zarr
+        # Adds the unit to the zarr variable names (uses re.sub to apply to end of string only so that these don't overwrite each other).
+        #TODO Need to test this
         outputs_to_zarr = cn.SOC_outputs_to_zarr
+        outputs_to_zarr_with_unit = [
+            re.sub(r'^(SOC_change.*)$', r'\1_ha_yr', pattern)
+            for pattern in outputs_to_zarr
+        ]
+        outputs_to_zarr_with_unit = [
+            re.sub(r'^(SOC_density.*)$', r'\1_ha', pattern)
+            for pattern in outputs_to_zarr_with_unit
+        ]
 
         # Creates the global mega-zarr with metadata only
-        zu.initialize_global_zarr(mega_zarr_path, outputs_to_zarr, len(cn.SOC_density_intervals),
+        zu.initialize_global_zarr(zarr_path, outputs_to_zarr_with_unit, len(cn.SOC_density_intervals),
                                   ((len(cn.interval_end_years_annual)), chunk_size_pixels, chunk_size_pixels), main_logger)
 
         # Checks the zarr coordinates and extent
         fs = fsspec.filesystem("s3", anon=False)
-        mapper = fs.get_mapper(mega_zarr_path)
+        mapper = fs.get_mapper(zarr_path)
         ds = xr.open_zarr(mapper, consolidated=False)
         main_logger.info(f"mega-zarr coords: {ds.coords}")
         main_logger.info(f"y range: {ds.y.values.min()}, {ds.y.values.max()}")
@@ -420,7 +431,7 @@ def main(cluster_name, model_type,
         main_logger.info(f"mega-zarr chunk size (years, y, x): {ds.chunksizes}")
 
     else:
-        mega_zarr_path = None
+        zarr_path = None
         outputs_to_zarr = False
 
 
@@ -450,7 +461,7 @@ def main(cluster_name, model_type,
 
             future = client.submit(create_soil_C_density_and_change, chunk,
                                    is_large_run, stage, no_upload, create_zarr, nodata_val, outputs_by_interval_dir_list,
-                                   mega_zarr_path, outputs_to_zarr)
+                                   zarr_path, outputs_to_zarr)
             futures.append(future)
 
         batch_results = client.gather(futures)
@@ -569,7 +580,7 @@ def main(cluster_name, model_type,
                 client=client,
                 chunk_list=chunk_list,
                 var=var_name,
-                zarr_path=mega_zarr_path,
+                zarr_path=zarr_path,
                 interval_end_years=cn.SOC_density_intervals
             )
 

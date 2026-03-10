@@ -14,19 +14,19 @@ is by telling it to run on only the X first tiles.
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
-python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -mt standard -mpd global -fy 1 -fv 1 -ft 1 --run_local --no_upload --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_veg_create_global_0_04x0_04deg -mt standard -mpd global -fy 1 -fv 1 -ft 1 --run_local --no_upload --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -fy 1 -fv 1 -ft 1 --no_upload --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_veg_create_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -fy 1 -fv 1 -ft 1 --no_upload --input_date YYYYMMDD
 
 Coiled large shapefile test:
 python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -fy 2 -fv 2 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
+python -m src.LULUCF.scripts.vegetation_model.3_veg_create_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -fy 2 -fv 2 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
 
 Full run:
 python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3_create_global_0_04x0_04deg -cn vegetation_postprocessing --input_date 20260130 -mt standard -mpd global --log_note "This is a global run for model v1.0.5 (2016-2024, adjusted starting C densities/oil palm priority). Hopefully, it is the run used for the published model."
+python -m src.LULUCF.scripts.vegetation_model.3_veg_create_global_0_04x0_04deg -cn vegetation_postprocessing --input_date 20260130 -mt standard -mpd global --log_note "This is a global run for model v1.0.5 (2016-2024, adjusted starting C densities/oil palm priority). Hopefully, it is the run used for the published model."
 
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
 """

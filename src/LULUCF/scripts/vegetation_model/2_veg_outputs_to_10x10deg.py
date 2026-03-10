@@ -207,7 +207,8 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
 
             future = client.submit(zu.create_10x10_deg_geotif_from_zarr,
                                    var_name, year_idx, tile_id, zarr_path, output_base,
-                                   model_type, model_path_description, no_upload, False, retries=3)
+                                   cn.veg_model_version_underscore, model_type, model_path_description,
+                                   no_upload, False, retries=3)
             futures.append(future)
 
         # Results is a list of tuples, where each tuple is the per-ha and per-pixel chunk stats, each of which is a dictionary

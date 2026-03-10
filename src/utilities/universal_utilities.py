@@ -2114,7 +2114,7 @@ def get_pixel_area_store():
     global PIXEL_AREA_STORE
     if PIXEL_AREA_STORE is None:
         fs = fsspec.filesystem("s3", anon=False)
-        PIXEL_AREA_STORE = zarr.open_group(fs.get_mapper(cn.pixel_area_global_zarr), mode="r")
+        PIXEL_AREA_STORE = zarr.open_group(fs.get_mapper(cn.pixel_area_zarr_path), mode="r")
     return PIXEL_AREA_STORE
 
 

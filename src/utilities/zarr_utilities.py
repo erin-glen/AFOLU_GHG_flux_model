@@ -686,7 +686,7 @@ def upload_zarr_chunk_stat_comparisons(chunks_count_exceeding_total, chunks_with
 
 # Extracts a 10x10° tile from a Zarr store and writes to GeoTIFF on S3
 def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_base,
-                                      model_type, model_path_description, no_upload, use_start_year):
+                                      model_version, model_type, model_path_description, no_upload, use_start_year):
 
     process = psutil.Process(os.getpid())
 
@@ -700,7 +700,8 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
         per_ha_units = cn.C_density_pixel_meaning
         per_pixel_units = cn.C_per_pixel_pixel_meaning
         coarse_units = cn.C_density_aggreg_pixel_meaning
-        var_per_ha = f"{var}{per_ha_units}"
+        # var_per_ha = f"{var}{per_ha_units}" #TODO
+        var_per_ha = var  # using this for SOC 10x10 creation because zarr layers don't have units at end (added later). Delete for next OGH soil version.
     elif "emis" in var:
         per_ha_units = cn.flux_density_pixel_meaning
         per_pixel_units = cn.flux_per_pixel_pixel_meaning
@@ -721,6 +722,12 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
         per_pixel_units = ""
         coarse_units = ""
         var_per_ha = var
+    elif "change" in var:  # For SOC change
+        per_ha_units = cn.flux_density_pixel_meaning
+        per_pixel_units = cn.flux_per_pixel_pixel_meaning
+        coarse_units = cn.flux_aggreg_pixel_meaning
+        # var_per_ha = f"{var}{per_ha_units}" #TODO
+        var_per_ha = var  # using this for SOC 10x10 creation because zarr layers don't have units at end (added later). Delete for next OGH soil version.
     else:
         per_ha_units = ""
         per_pixel_units = ""
@@ -732,8 +739,13 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     if use_start_year == True:
         year = cn.first_model_year_annual
         var_with_unit = var_per_ha
-    else:      # For annual data, uses the year for the annual outputs.
-        year = cn.interval_end_years_annual[year_idx]
+    else:      # For timeseries data, uses specified output years (e.g., vegetation, SOC density, SOC change)
+        if "SOC_density" in var:
+            year = cn.SOC_density_intervals[year_idx]
+        elif "SOC_change" in var:
+            year = cn.SOC_change_intervals[year_idx]
+        else:  # Vegetation timeseries
+            year = cn.interval_end_years_annual[year_idx]
         var_with_unit = var_per_ha  # Doesn't add year to variable/unit name
 
     # Open Zarr group using fsspec mapper
@@ -824,7 +836,7 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     # Name and s3 folder for per-hectare output
     output_path = output_base.replace("PATTERN", var)
     output_path = output_path.replace("START_END", str(year))
-    output_path = output_path.replace(cn.model_version_type_description_placeholder, f"version_{cn.veg_model_version_underscore}__{model_type}__{model_path_description}")
+    output_path = output_path.replace(cn.model_version_type_description_placeholder, f"version_{model_version}__{model_type}__{model_path_description}")
     output_path_per_ha = output_path.replace("CHUNK_SIZE_pixels", f"{cn.full_raster_dims}_pixels")
     output_path_per_ha = output_path_per_ha.replace("PER_HA_OR_PIXEL", per_ha_units)
     output_name_per_ha = f"{tile_id}__{var}{per_ha_units}_{str(year)}.tif"
