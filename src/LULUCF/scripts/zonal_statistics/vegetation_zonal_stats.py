@@ -219,7 +219,7 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     df_with_areas = df_other.merge(df_area, on=merge_keys, how='left')
 
     # Adds the state_node meaning and classifications to the dataframe
-    df_with_areas = df_with_areas.merge(state_node_df[['land_state', 'land_state_meaning', 'land_state_broad_class', 'land_state_detailed_class']],
+    df_with_areas = df_with_areas.merge(state_node_df[['land_state', 'land_state_meaning', 'land_state_broad_class', 'land_state_detailed_class', 'tall_veg_type']],
               left_on='land_state_node', right_on='land_state',
               how='left')
     # print("merged:", df_with_areas)
@@ -251,7 +251,13 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     # Maps WDPA codes to names if the contextual layer is used
     if cn.WDPA_pattern in df_with_areas.columns:
         df_with_areas['WDPA_type'] = df_with_areas[cn.WDPA_pattern].map(cn.WDPA_to_text)
-        df_with_areas["WDPA_high_protection"] = df_with_areas[cn.WDPA_pattern].isin([1, 2, 3]).astype(int)
+
+        # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69aee45e-ce6c-8325-b1d0-a6c6b0e7ae2e
+        df_with_areas["WDPA_high_protection"] = "Other protection status"
+
+        df_with_areas.loc[df_with_areas["WDPA_type"] == "NA", "WDPA_high_protection"] = "Not protected"
+        df_with_areas.loc[df_with_areas["WDPA_type"].isin(["Cateogry Ia", "Category Ib", "Category II", "Category III"]), "WDPA_high_protection"] = "High protection"
+
 
     # Replaces managed land numeric values with managed/unmanaged if the contextual layer is used
     if cn.managed_land_CAN_pattern in df_with_areas.columns:
