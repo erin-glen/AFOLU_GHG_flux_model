@@ -37,6 +37,10 @@ import rasterio.errors
 from urllib.parse import urlparse
 import botocore
 
+# Project imports
+from src.utilities import constants_and_names as cn
+from src.utilities import log_utilities as lu
+
 
 # Turns off a FutureWarning about gdal.UseExceptions() vs. gdal.DontUseExceptions()
 gdal.UseExceptions()
@@ -44,9 +48,11 @@ gdal.UseExceptions()
 session = boto3.Session()
 aws_session = AWSSession(session)
 
-# Project imports
-from src.utilities import constants_and_names as cn
-from src.utilities import log_utilities as lu
+# Speeds up accessing the input geotifs from s3 when they are in a folder with lots of files.
+# The more files in an s3 folder, the longer it takes to access them without this environment variable.
+# It takes about 9 minutes to access the inputs for a 1x1 deg summative output without this and <1 minute with it.
+# Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
+os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
 ###################################################################################################
 # S3 Utilities
@@ -2414,6 +2420,153 @@ def delete_s3_task_file(stage, chunk_id, is_final, logger_worker):
     if not deleted:
 
         lu.print_and_log(f"No task file found for chunk {chunk_id}. Nothing to delete.", is_final, logger_worker)
+
+
+def gdal_vrt_progress(pct, message, data):
+    """
+    GDAL progress callback.
+    pct: 0.0–1.0
+    message: current operation
+    """
+    pct_int = int(pct * 100)
+    print(f" GDAL VRT build progress for {data}: {pct_int}%: {timestr()}", flush=True)
+    return 1  # return 0 would cancel
+
+
+def gdal_translate_progress(pct, message, data):
+    """
+    GDAL progress callback.
+    pct: 0.0–1.0
+    message: current operation
+    """
+    pct_int = int(pct * 100)
+    print(f" GDAL.translate progress for {data}: {pct_int}%: {timestr()}", flush=True)
+    return 1  # return 0 would cancel
+
+
+# Mosaics geotif tiles to global geotif for a given variable
+def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path, model_version, model_type, model_path_description, no_upload, is_large_run):
+
+    logger_worker = lu.setup_logging_worker()
+
+    start_time = time.time()
+
+    # Gets year based on the specific timeseries
+    if "SOC_density" in var_name:
+        year = cn.SOC_density_intervals[year_idx]
+    elif "SOC_change" in var_name:
+        year = cn.SOC_change_intervals[year_idx]
+    else:  # Vegetation timeseries
+        year = cn.interval_end_years_annual[year_idx]
+
+    # Establishes year/year range and units for dataset
+    if "density" in var_name:  # Vegetation or SOC
+        units = cn.C_density_aggreg_pixel_meaning
+    elif "change" in var_name:  # SOC density change
+        units = cn.flux_aggreg_pixel_meaning
+    elif "emis" in var_name:
+        units = cn.flux_aggreg_pixel_meaning
+    elif "removals" in var_name:
+        units = cn.flux_aggreg_pixel_meaning
+    elif "net" in var_name:
+        units = cn.flux_aggreg_pixel_meaning
+    elif cn.land_state_pattern in var_name:
+        units = ""
+    else:
+        units = ""
+
+    # Input s3 folder for dataset and year
+    base_path = base_path.replace("PATTERN", var_name)
+    base_path = base_path.replace(cn.model_version_type_description_placeholder, f"version_{model_version}__{model_type}__{model_path_description}")
+    base_path = base_path.replace("START_END", str(year))
+    base_path = base_path.replace("PER_HA_OR_PIXEL", units)
+
+    # Hacky way to fix land_state and other unitless outputs that otherwise have in the path YYYY//40000_pixels.
+    # This removes the extra / .
+    base_path = base_path.replace("//CHUNK_SIZE_pixels", "/CHUNK_SIZE_pixels")
+
+    input_path = base_path.replace("CHUNK_SIZE_pixels", f"{cn.global_aggregation_factor}_pixels")
+
+    # Output s3 folder for dataset and year
+    output_path = base_path.replace("CHUNK_SIZE_pixels", "global")
+
+    output_name = f"{var_name}{units}_v{model_version}_{year}_global.tif"
+    # print(output_name)
+
+    # Collects s3 tiles for the dataset-year
+    fs = fsspec.filesystem("s3", anon=False)
+    if first_tiles_to_process == None:  # All tiles in folder
+        tile_files = fs.glob(f"{input_path}*.tif")
+    else:  # Specified first few tiles in folder (for testing)
+        tile_files = fs.glob(f"{input_path}*.tif")[0:first_tiles_to_process]
+    if len(tile_files) == 0:
+        return f"No tiles found in {input_path}"
+    lu.print_and_log(f"{len(tile_files)} tiles to be processed in {input_path}: {timestr()}", False, logger_worker)
+
+    tile_files = [f"/vsis3/{fp}" for fp in tile_files]  # Faster for accessing than using vsis3_streaming, by experiment
+    # print(tile_files)
+
+    # Creates a temporary working directory for worker
+    tmpdir = tempfile.mkdtemp(prefix="mosaic_")
+    safe_name = re.sub(r'[^0-9a-zA-Z]+', '_', input_path.strip('/'))
+    list_path = os.path.join(tmpdir, f"tile_list_{safe_name}.txt")
+    vrt_path = os.path.join(tmpdir, f"mosaic_{safe_name}.vrt")
+
+    with open(list_path, "w") as f:
+        f.write("\n".join(tile_files))
+
+    # Builds VRT
+    lu.print_and_log(f"Building VRT for {input_path} into {vrt_path}: {timestr()}", is_large_run, logger_worker)
+    # Build VRT directly from list of files
+    vrt = gdal.BuildVRT(vrt_path,
+                        tile_files
+                        # callback=gdal_vrt_progress,  # Can use progress tracking if vrt creation is taking a long time
+                        # callback_data=os.path.basename(output_name)
+                        )
+    if vrt is None:
+        raise RuntimeError(f"gdal.BuildVRT failed for {input_path}")
+
+    vrt = None  # flush to disk
+
+    # Validates VRT
+    try:
+        info = gdal.Info(vrt_path, format="json")
+        size = info.get("size", [])
+        vrt_end_time = time.time()
+        lu.print_and_log(f"{vrt_path} created successfully with size {size}, took {round(vrt_end_time - start_time)} seconds: {timestr()}",False, logger_worker)
+    except Exception as e:
+        lu.print_and_log(f"VRT validation failed: {e}", False, logger_worker)
+        raise RuntimeError(f"VRT validation failed for {vrt_path}")
+
+    # Translates VRT → GeoTIFF
+    local_out = os.path.join(tmpdir, output_name)
+    gtiff_options = gdal.TranslateOptions(
+        format="GTiff",
+        creationOptions=[
+            "COMPRESS=DEFLATE",
+            "TILED=YES",
+            "BLOCKXSIZE=512",
+            "BLOCKYSIZE=512"
+        ],
+        # callback=gdal_translate_progress,  # Can use progress tracking if gdal_translate is taking a long time
+        # callback_data=os.path.basename(output_name)
+    )
+    lu.print_and_log(f"Writing vrt to geotif for {output_path}: {timestr()}", is_large_run, logger_worker)
+
+    writing_start_time = time.time()
+    gdal.Translate(local_out, vrt_path, options=gtiff_options)
+    writing_end_time = time.time()
+    lu.print_and_log(f"Wrote vrt to geotif for {output_path}, took {round(writing_end_time - writing_start_time)} seconds: {timestr()}", False, logger_worker)
+
+    if not no_upload:
+        lu.print_and_log(f"Uploading global geotif for {output_path}: {timestr()}", is_large_run, logger_worker)
+        fs.put(local_out, output_path)
+        lu.print_and_log(f"Uploaded global geotif to {output_path}: {timestr()}", False, logger_worker)
+
+    end_time = time.time()
+    lu.print_and_log(f"Total chunk processing for {output_path} took {round(end_time - start_time)} seconds: {timestr()}", False, logger_worker)
+
+    return f"Global geotif written to {output_path}"
 
 
 

@@ -1,7 +1,6 @@
 """
 Creates global outputs at 0.04x0.04 deg resolution (approximately 4x4 km at the equator) for specified inputs.
-Units are Mg CO2(e)/0.04x0.04 deg pixel/year for interval-level outputs and
-Mg CO2(e)/0.04x0.04 deg pixel/full model period for the aggregations over the entire model period (currently 2016-ENDYEAR).
+Units are Mg CO2(e)/0.04x0.04 deg pixel/year for interval-level outputs.
 These are for presentations and other static displays.
 They are not to be used for calculations or statistics.
 
@@ -9,36 +8,30 @@ Can only run on 10x10 degree tiles already in 0.04x0.04 deg resolution.
 
 For testing, it can be run on a specified number of datasets, years, and/or tile_ids.
 It can't be run based on the extent of a shapefile or bounding box; the only way to geographically limit this
-is by telling it to run on only the X first tiles.
+is by telling it to run on only the X first tiles with -ft argument.
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
-python -m src.LULUCF.scripts.vegetation_model.3_veg_create_global_0_04x0_04deg -mt standard -mpd global -fy 1 -fv 1 -ft 1 --run_local --no_upload --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_veg_global_0_04x0_04deg -mt standard -mpd global -fy 1 -fv 1 -ft 1 --run_local --no_upload --input_date YYYYMMDD
 
 Coiled small tests:
 python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3_veg_create_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -fy 1 -fv 1 -ft 1 --no_upload --input_date YYYYMMDD
+python -m src.LULUCF.scripts.vegetation_model.3_create_veg_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -fy 1 -fv 1 -ft 1 --input_date YYYYMMDD
 
 Coiled large shapefile test:
 python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3_veg_create_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -fy 2 -fv 2 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
+python -m src.LULUCF.scripts.vegetation_model.3_create_veg_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -fy 2 -fv 2 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
 
 Full run:
 python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3_veg_create_global_0_04x0_04deg -cn vegetation_postprocessing --input_date 20260130 -mt standard -mpd global --log_note "This is a global run for model v1.0.5 (2016-2024, adjusted starting C densities/oil palm priority). Hopefully, it is the run used for the published model."
+python -m src.LULUCF.scripts.vegetation_model.3_create_veg_global_0_04x0_04deg -cn vegetation_postprocessing --input_date 20260130 -mt standard -mpd global --log_note "This is a global run for model v1.0.5 (2016-2024, adjusted starting C densities/oil palm priority). Hopefully, it is the run used for the published model."
 
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
 """
 
 import argparse
-import time
-import psutil
-from osgeo import gdal
-import fsspec
 import os
-import re
-import tempfile
 from dask.distributed import print
 
 # Project imports
@@ -53,143 +46,6 @@ from src.utilities import resize_cluster
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68bb4948-c75c-8331-bdf7-1d892029dc0f
 os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "TRUE"
 
-def gdal_vrt_progress(pct, message, data):
-    """
-    GDAL progress callback.
-    pct: 0.0–1.0
-    message: current operation
-    """
-    pct_int = int(pct * 100)
-    print(f" GDAL VRT build progress for {data}: {pct_int}%: {uu.timestr()}", flush=True)
-    return 1  # return 0 would cancel
-
-def gdal_translate_progress(pct, message, data):
-    """
-    GDAL progress callback.
-    pct: 0.0–1.0
-    message: current operation
-    """
-    pct_int = int(pct * 100)
-    print(f" GDAL.translate progress for {data}: {pct_int}%: {uu.timestr()}", flush=True)
-    return 1  # return 0 would cancel
-
-
-def mosaic_tiles_to_global(var_name, year_idx, first_tiles_to_process, base_path, model_version, model_type, model_path_description, no_upload, is_large_run):
-
-    logger_worker = lu.setup_logging_worker()
-
-    start_time = time.time()
-
-    year = cn.interval_end_years_annual[year_idx]
-
-    # Establishes year/year range and units for dataset
-    if "density" in var_name:
-        units = cn.C_density_aggreg_pixel_meaning
-    elif "emis" in var_name:
-        units = cn.flux_aggreg_pixel_meaning
-    elif "removals" in var_name:
-        units = cn.flux_aggreg_pixel_meaning
-    elif "net" in var_name:
-        units = cn.flux_aggreg_pixel_meaning
-    elif cn.land_state_pattern in var_name:
-        units = ""
-    else:
-        units = ""
-
-    # Input s3 folder for dataset and year
-    base_path = base_path.replace("PATTERN", var_name)
-    base_path = base_path.replace(cn.model_version_type_description_placeholder, f"version_{model_version}__{model_type}__{model_path_description}")
-    base_path = base_path.replace("START_END", str(year))
-    base_path = base_path.replace("PER_HA_OR_PIXEL", units)
-
-    # Hacky way to fix land_state and other unitless outputs that otherwise have in the path YYYY//40000_pixels.
-    # This removes the extra / .
-    base_path = base_path.replace("//CHUNK_SIZE_pixels", "/CHUNK_SIZE_pixels")
-
-    input_path = base_path.replace("CHUNK_SIZE_pixels", f"{cn.global_aggregation_factor}_pixels")
-
-    # Output s3 folder for dataset and year
-    output_path = base_path.replace("CHUNK_SIZE_pixels", "global")
-
-    output_name = f"{var_name}{units}_v{model_version}_{year}_global.tif"
-    # print(output_name)
-
-    # Collects s3 tiles for the dataset-year
-    fs = fsspec.filesystem("s3", anon=False)
-    if first_tiles_to_process == None:  # All tiles in folder
-        tile_files = fs.glob(f"{input_path}*.tif")
-    else:  # Specified first few tiles in folder (for testing)
-        tile_files = fs.glob(f"{input_path}*.tif")[0:first_tiles_to_process]
-    if len(tile_files) == 0:
-        return f"No tiles found in {input_path}"
-    lu.print_and_log(f"{len(tile_files)} tiles to be processed in {input_path}: {uu.timestr()}", False, logger_worker)
-
-    tile_files = [f"/vsis3/{fp}" for fp in tile_files]  # Faster for accessing than using vsis3_streaming, by experiment
-    # print(tile_files)
-
-    # Creates a temporary working directory for worker
-    tmpdir = tempfile.mkdtemp(prefix="mosaic_")
-    safe_name = re.sub(r'[^0-9a-zA-Z]+', '_', input_path.strip('/'))
-    list_path = os.path.join(tmpdir, f"tile_list_{safe_name}.txt")
-    vrt_path = os.path.join(tmpdir, f"mosaic_{safe_name}.vrt")
-
-    with open(list_path, "w") as f:
-        f.write("\n".join(tile_files))
-
-    # Builds VRT
-    lu.print_and_log(f"Building VRT for {input_path} into {vrt_path}: {uu.timestr()}", is_large_run, logger_worker)
-    # Build VRT directly from list of files
-    vrt = gdal.BuildVRT(vrt_path,
-                        tile_files
-                        # callback=gdal_vrt_progress,  # Can use progress tracking if vrt creation is taking a long time
-                        # callback_data=os.path.basename(output_name)
-                        )
-    if vrt is None:
-        raise RuntimeError(f"gdal.BuildVRT failed for {input_path}")
-
-    vrt = None  # flush to disk
-
-    # Validates VRT
-    try:
-        info = gdal.Info(vrt_path, format="json")
-        size = info.get("size", [])
-        vrt_end_time = time.time()
-        lu.print_and_log(f"{vrt_path} created successfully with size {size}, took {round(vrt_end_time - start_time)} seconds: {uu.timestr()}",False, logger_worker)
-    except Exception as e:
-        lu.print_and_log(f"VRT validation failed: {e}", False, logger_worker)
-        raise RuntimeError(f"VRT validation failed for {vrt_path}")
-
-    # Translates VRT → GeoTIFF
-    local_out = os.path.join(tmpdir, output_name)
-    gtiff_options = gdal.TranslateOptions(
-        format="GTiff",
-        creationOptions=[
-            "COMPRESS=DEFLATE",
-            "TILED=YES",
-            "BLOCKXSIZE=512",
-            "BLOCKYSIZE=512"
-        ],
-        # callback=gdal_translate_progress,  # Can use progress tracking if gdal_translate is taking a long time
-        # callback_data=os.path.basename(output_name)
-    )
-    lu.print_and_log(f"Writing vrt to geotif for {output_path}: {uu.timestr()}", is_large_run, logger_worker)
-
-    writing_start_time = time.time()
-    gdal.Translate(local_out, vrt_path, options=gtiff_options)
-    writing_end_time = time.time()
-    lu.print_and_log(f"Wrote vrt to geotif for {output_path}, took {round(writing_end_time - writing_start_time)} seconds: {uu.timestr()}", False, logger_worker)
-
-    if not no_upload:
-        lu.print_and_log(f"Uploading global geotif for {output_path}: {uu.timestr()}", is_large_run, logger_worker)
-        fs.put(local_out, output_path)
-        lu.print_and_log(f"Uploaded global geotif to {output_path}: {uu.timestr()}", False, logger_worker)
-
-    end_time = time.time()
-    lu.print_and_log(f"Total chunk processing for {output_path} took {round(end_time - start_time)} seconds: {uu.timestr()}", False, logger_worker)
-
-    return f"Global geotif written to {output_path}"
-
-
 def main(cluster_name, input_date, model_type, run_local, no_log, no_upload,
          first_variables_to_process=None, first_years_to_process=None, first_tiles_to_process=None, model_path_description=None, log_note=None):
 
@@ -197,7 +53,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload,
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = 'vegetation_0_04deg_output_global'
+    stage = 'soil_0_04deg_output_global'
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -207,59 +63,95 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload,
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
-    main_logger.info(f"Model version: {cn.veg_model_version}")
+    main_logger.info(f"Model version: {cn.SOC_soil_model_version}")
     main_logger.info(f"Model path descriptor: {model_path_description}")
-    main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
+    main_logger.info(f"Start year: 2000; end year: {cn.SOC_density_intervals[-1]}")
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
 
-    # Outputs to turn into 10x10 tile
-    # full_list_of_vars = cn.full_outputs_to_zarr   # If all variables were made into 10x10s
-    full_list_of_vars = cn.veg_summative_output_patterns
+    # Outputs to turn into 10x10 tiles.
+    # Separate lists for density and change because they have different numbers of years, so they need to be handled separately
+    full_list_of_vars_density = [
+        cn.SOC_density_full_extent_pattern,
+        cn.SOC_density_min_soil_extent_pattern
+    ]
+
+    full_list_of_vars_change = [
+        cn.SOC_change_full_extent_pattern,
+        cn.SOC_change_min_soil_extent_pattern
+    ]
 
     # Limits the processed variables to the supplied number (for testing)
     if first_variables_to_process:
-        vars_to_process = full_list_of_vars[0:first_variables_to_process]
+        vars_to_process_density = full_list_of_vars_density[0:first_variables_to_process]
+        vars_to_process_change = full_list_of_vars_change[0:first_variables_to_process]
     else:
-        vars_to_process = full_list_of_vars
-    main_logger.info(f"Variables to create 10x10 deg tiles for: {vars_to_process} ({len(vars_to_process)} out of {len(full_list_of_vars)})")
+        vars_to_process_density = full_list_of_vars_density
+        vars_to_process_change = full_list_of_vars_change
+    main_logger.info(
+        f"Variables to create 10x10 deg density tiles for: {vars_to_process_density} ({len(vars_to_process_density)} out of {len(full_list_of_vars_density)})")
+    main_logger.info(
+        f"Variables to create 10x10 deg change tiles for: {vars_to_process_change} ({len(vars_to_process_change)} out of {len(full_list_of_vars_change)})")
 
     # Limits the processed years to the supplied number (for testing)
     if first_years_to_process:
-        years_to_process = first_years_to_process
+        years_to_process_density = first_years_to_process
+        years_to_process_change = first_years_to_process
     else:
-        years_to_process = len(cn.interval_end_years_annual)
-    main_logger.info(f"Years to aggregate to 10x10 deg and compare chunk stats for: {years_to_process} out of {len(cn.interval_end_years_annual)}")
+        years_to_process_density = len(cn.SOC_density_intervals)
+        years_to_process_change = len(cn.SOC_change_intervals)
+    main_logger.info(
+        f"Years to aggregate to 10x10 deg density and compare chunk stats for: {years_to_process_density} out of {len(cn.SOC_density_intervals)}")
+    main_logger.info(
+        f"Years to aggregate to 10x10 deg change and compare chunk stats for: {years_to_process_change} out of {len(cn.SOC_change_intervals)}")
 
     # Determines if the output file names for final versions of outputs should be used
     is_large_run = False
     # is_large_run = True  # For simulating a large run
-    if len(vars_to_process * years_to_process) > 20:
+    if ((len(vars_to_process_density)*2) * (years_to_process_density*2)) > 20:
         is_large_run = True
         main_logger.info(f"Running as large-scale run model: {is_large_run}")
 
-    base_path = f"{cn.veg_outputs_path}PATTERN/annual_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{input_date}/"
+    base_path = f"{cn.SOC_outputs_path}PATTERN/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{input_date}/"
     main_logger.info(f"Core output path for aggregation: {base_path}")
 
 
-    ### Step 2: Creates outputs
+    ### Step 2: Creates outputs (separately for density and change because they have different numbers of years
 
-    futures = []
+    main_logger.info(f"Starting processing for density outputs: {uu.timestr()}")
+    futures_density = []
 
-    main_logger.info(f"Starting processing: {uu.timestr()}")
+    for var_name in vars_to_process_density:
 
-    for var_name in vars_to_process:
-
-        for year_idx in range(years_to_process):
+        for year_idx in range(years_to_process_density):
 
             # future = client.submit(uu.create_10x10_deg_geotif_from_zarr,
-            future = client.submit(mosaic_tiles_to_global,
+            future = client.submit(uu.mosaic_tiles_to_global,
                                    var_name, year_idx, first_tiles_to_process, base_path,
-                                   cn.veg_model_version_underscore, model_type, model_path_description,
+                                   cn.SOC_soil_model_version_underscore, model_type, model_path_description,
                                    no_upload, is_large_run)
-            futures.append(future)
+            futures_density.append(future)
 
-    results = client.gather(futures)
+    results = client.gather(futures_density)
+    print(results)
+
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+
+    main_logger.info(f"Starting processing for change outputs: {uu.timestr()}")
+    futures_change = []
+
+    for var_name in vars_to_process_change:
+
+        for year_idx in range(years_to_process_change):
+
+            # future = client.submit(uu.create_10x10_deg_geotif_from_zarr,
+            future = client.submit(uu.mosaic_tiles_to_global,
+                                   var_name, year_idx, first_tiles_to_process, base_path,
+                                   cn.SOC_soil_model_version_underscore, model_type, model_path_description,
+                                   no_upload, is_large_run)
+            futures_change.append(future)
+
+    results = client.gather(futures_change)
     print(results)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)

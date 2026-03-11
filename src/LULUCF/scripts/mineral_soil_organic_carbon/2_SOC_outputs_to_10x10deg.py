@@ -79,6 +79,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     main_logger.info(f"Stage {stage} started at: {start_time}")
     main_logger.info(f"Model version: {cn.SOC_soil_model_version}")
     main_logger.info(f"Model path descriptor: {model_path_description}")
+    main_logger.info(f"Start year: 2000; end year: {cn.SOC_density_intervals[-1]}")
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
     main_logger.info(f"Batch size: {batch_size} tasks")
