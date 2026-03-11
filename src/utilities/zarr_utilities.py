@@ -326,7 +326,7 @@ def zarr_1x1_deg_stats(bounds, var_name, zarr_path, interval_end_years):
 
     zarr_stats_raw_all_years = []
 
-    # print(f"Getting stats for {var_name} for year {year_idx} for {bounds_str}: {uu.timestr()}")
+    # print(f"Getting stats for {var_name} for {year_idx} for {bounds_str}: {uu.timestr()}")
     start_time = time.time()
 
     # Bounding box to get stats for, reformatted for zarr extraction
@@ -700,8 +700,8 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
         per_ha_units = cn.C_density_pixel_meaning
         per_pixel_units = cn.C_per_pixel_pixel_meaning
         coarse_units = cn.C_density_aggreg_pixel_meaning
-        # var_per_ha = f"{var}{per_ha_units}" #TODO
-        var_per_ha = var  # using this for SOC 10x10 creation because zarr layers don't have units at end (added later). Delete for next OGH soil version.
+        # var_per_ha = f"{var}{per_ha_units}"
+        var_per_ha = var  #TODO using this for SOC 10x10 creation because zarr layers don't have units at end (added later). Delete for next OGH soil version.
     elif "emis" in var:
         per_ha_units = cn.flux_density_pixel_meaning
         per_pixel_units = cn.flux_per_pixel_pixel_meaning
@@ -767,11 +767,16 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
     if y0_model > y1_model:
         y0_model, y1_model = y1_model, y0_model
 
-    lu.print_and_log(f"Extracting {var_with_unit} for {year} for {tile_id}: {uu.timestr()}", True, logger_worker)
+    lu.print_and_log(f"  Extracting {var_with_unit} for {year} for {tile_id}: {uu.timestr()}", False, logger_worker)
     extract_start_time = time.time()
 
     # Loads model output data block
-    data_per_ha = model_zarr_store[var_with_unit][year_idx, y0_model:y1_model, x0_model:x1_model]
+    if "SOC_change" in var:
+        # SOC change has no data in the zarr for the first time slice because it has one fewer year than SOC density,
+        # so change intervals are actually shifted back by 1 year compared to SOC density
+        data_per_ha = model_zarr_store[var_with_unit][year_idx+1, y0_model:y1_model, x0_model:x1_model]
+    else:
+        data_per_ha = model_zarr_store[var_with_unit][year_idx, y0_model:y1_model, x0_model:x1_model]
 
     # Calculates per-pixel output (for numeric outputs only)
     pixel_area_zarr_store = uu.get_pixel_area_store()
@@ -830,8 +835,8 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
         logger_worker.warning(f"All-NaN coarse aggregation for {tile_id}, {var}, {year}")
 
     extract_end_time = time.time()
-    lu.print_and_log(f"  Calculated {var_with_unit} for year {year} for {tile_id} in {round(extract_end_time - extract_start_time)} seconds: {uu.timestr()}", False, logger_worker)
-    lu.print_and_log(f"  Memory usage after 10x10 extraction for {var_with_unit} for year {year} for {tile_id}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
+    lu.print_and_log(f"  Calculated {var_with_unit} for {year} for {tile_id} in {round(extract_end_time - extract_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"  Memory usage after 10x10 extraction for {var_with_unit} for {year} for {tile_id}: {process.memory_info().rss / 1024 ** 2:.2f} MB", False, logger_worker)
 
     # Name and s3 folder for per-hectare output
     output_path = output_base.replace("PATTERN", var)
@@ -961,7 +966,7 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
         }]
 
     tile_end_time = time.time()
-    lu.print_and_log(f"  Total chunk processing for tile {var} for year {year} in {round(tile_end_time - extract_start_time)} seconds: {uu.timestr()}", False, logger_worker)
+    lu.print_and_log(f"  Total chunk processing {var} for {year} for {tile_id} in {round(tile_end_time - extract_start_time)} seconds: {uu.timestr()}", False, logger_worker)
 
     # To track peak memory usage
     # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6949a74e-1388-832d-8f8e-5e9bf084ecb8
