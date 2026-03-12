@@ -13,19 +13,19 @@ is by telling it to run on only the X first tiles with -ft argument.
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Local test:
-python -m src.LULUCF.scripts.vegetation_model.3_create_SOC_global_0_04x0_04deg -mt standard -mpd global -fy 1 -fv 1 -ft 1 --run_local --no_upload --input_date YYYYMMDD
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.3_create_veg_global_0_04x0_04deg -mt standard -mpd global -fy 1 -fv 1 -ft 1 --run_local --no_upload --input_date YYYYMMDD
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3_create_SOC_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -fy 1 -fv 1 -ft 1 --no_upload --input_date YYYYMMDD
+python -m src.utilities.create_cluster -n 1 -t 1 -m 4 -cn mineral_soil
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.3_create_SOC_global_0_04x0_04deg -cn mineral_soil -mt standard -mpd global -fy 1 -fv 1 -ft 1 --input_date YYYYMMDD
 
 Coiled large shapefile test:
-python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3_create_SOC_global_0_04x0_04deg -cn vegetation_postprocessing -mt standard -mpd global -fy 2 -fv 2 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "This is intended to be the definitive 1884-chunk 0.04x0.04 deg output run."
+python -m src.utilities.create_cluster -n 5 -t 1 -m 4 -cn mineral_soil
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.3_create_SOC_global_0_04x0_04deg -cn mineral_soil -mt standard -mpd global -fy 2 -fv 2 -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp --input_date YYYYMMDD -ln "Test 1884 chunk run"
 
 Full run:
-python -m src.utilities.create_cluster -n 10 -t 1 -m 4 -cn vegetation_postprocessing
-python -m src.LULUCF.scripts.vegetation_model.3_create_SOC_global_0_04x0_04deg -cn vegetation_postprocessing --input_date 20260130 -mt standard -mpd global --log_note "This is a global run for model v1.0.5 (2016-2024, adjusted starting C densities/oil palm priority). Hopefully, it is the run used for the published model."
+python -m src.utilities.create_cluster -n 5 -t 1 -m 4 -cn mineral_soil
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.3_create_SOC_global_0_04x0_04deg -cn mineral_soil --input_date 20251224 -mt standard -mpd global --log_note "This is a global run for SOC v1.0.0 (2000-2022)."
 
 # Per https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant
 """
@@ -53,7 +53,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload,
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = 'vegetation_0_04deg_output_global'
+    stage = 'soil_0_04deg_output_global'
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, run_local)
@@ -63,59 +63,95 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload,
 
     start_time = uu.timestr() # Starting time for stage
     main_logger.info(f"Stage {stage} started at: {start_time}")
-    main_logger.info(f"Model version: {cn.veg_model_version}")
+    main_logger.info(f"Model version: {cn.SOC_soil_model_version}")
     main_logger.info(f"Model path descriptor: {model_path_description}")
-    main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
+    main_logger.info(f"Start year: 2000; end year: {cn.SOC_density_intervals[-1]}")
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
 
-    # Outputs to turn into 10x10 tiles
-    # full_list_of_vars = cn.full_outputs_to_zarr   # If all variables were made into 10x10s
-    full_list_of_vars = cn.veg_summative_output_patterns
+    # Outputs to turn into 10x10 tiles.
+    # Separate lists for density and change because they have different numbers of years, so they need to be handled separately
+    full_list_of_vars_density = [
+        cn.SOC_density_full_extent_pattern,
+        cn.SOC_density_min_soil_extent_pattern
+    ]
+
+    full_list_of_vars_change = [
+        cn.SOC_change_full_extent_pattern,
+        cn.SOC_change_min_soil_extent_pattern
+    ]
 
     # Limits the processed variables to the supplied number (for testing)
     if first_variables_to_process:
-        vars_to_process = full_list_of_vars[0:first_variables_to_process]
+        vars_to_process_density = full_list_of_vars_density[0:first_variables_to_process]
+        vars_to_process_change = full_list_of_vars_change[0:first_variables_to_process]
     else:
-        vars_to_process = full_list_of_vars
-    main_logger.info(f"Variables to create 10x10 deg tiles for: {vars_to_process} ({len(vars_to_process)} out of {len(full_list_of_vars)})")
+        vars_to_process_density = full_list_of_vars_density
+        vars_to_process_change = full_list_of_vars_change
+    main_logger.info(
+        f"Variables to create 10x10 deg density tiles for: {vars_to_process_density} ({len(vars_to_process_density)} out of {len(full_list_of_vars_density)})")
+    main_logger.info(
+        f"Variables to create 10x10 deg change tiles for: {vars_to_process_change} ({len(vars_to_process_change)} out of {len(full_list_of_vars_change)})")
 
     # Limits the processed years to the supplied number (for testing)
     if first_years_to_process:
-        years_to_process = first_years_to_process
+        years_to_process_density = first_years_to_process
+        years_to_process_change = first_years_to_process
     else:
-        years_to_process = len(cn.interval_end_years_annual)
-    main_logger.info(f"Years to aggregate to 10x10 deg and compare chunk stats for: {years_to_process} out of {len(cn.interval_end_years_annual)}")
+        years_to_process_density = len(cn.SOC_density_intervals)
+        years_to_process_change = len(cn.SOC_change_intervals)
+    main_logger.info(
+        f"Years to aggregate to 10x10 deg density and compare chunk stats for: {years_to_process_density} out of {len(cn.SOC_density_intervals)}")
+    main_logger.info(
+        f"Years to aggregate to 10x10 deg change and compare chunk stats for: {years_to_process_change} out of {len(cn.SOC_change_intervals)}")
 
     # Determines if the output file names for final versions of outputs should be used
     is_large_run = False
     # is_large_run = True  # For simulating a large run
-    if len(vars_to_process * years_to_process) > 20:
+    if ((len(vars_to_process_density)*2) * (years_to_process_density*2)) > 20:
         is_large_run = True
         main_logger.info(f"Running as large-scale run model: {is_large_run}")
 
-    base_path = f"{cn.veg_outputs_path}PATTERN/annual_intervals/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{input_date}/"
+    base_path = f"{cn.SOC_outputs_path}PATTERN/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{input_date}/"
     main_logger.info(f"Core output path for aggregation: {base_path}")
 
 
-    ### Step 2: Creates outputs
+    ### Step 2: Creates outputs (separately for density and change because they have different numbers of years
 
-    futures = []
+    main_logger.info(f"Starting processing for density outputs: {uu.timestr()}")
+    futures_density = []
 
-    main_logger.info(f"Starting processing: {uu.timestr()}")
+    for var_name in vars_to_process_density:
 
-    for var_name in vars_to_process:
-
-        for year_idx in range(years_to_process):
+        for year_idx in range(years_to_process_density):
 
             # future = client.submit(uu.create_10x10_deg_geotif_from_zarr,
             future = client.submit(uu.mosaic_tiles_to_global,
                                    var_name, year_idx, first_tiles_to_process, base_path,
-                                   cn.veg_model_version_underscore, model_type, model_path_description,
+                                   cn.SOC_soil_model_version_underscore, model_type, model_path_description,
                                    no_upload, is_large_run)
-            futures.append(future)
+            futures_density.append(future)
 
-    results = client.gather(futures)
+    results = client.gather(futures_density)
+    print(results)
+
+    uu.stage_duration(start_time, uu.timestr(), stage, main_logger)
+
+    main_logger.info(f"Starting processing for change outputs: {uu.timestr()}")
+    futures_change = []
+
+    for var_name in vars_to_process_change:
+
+        for year_idx in range(years_to_process_change):
+
+            # future = client.submit(uu.create_10x10_deg_geotif_from_zarr,
+            future = client.submit(uu.mosaic_tiles_to_global,
+                                   var_name, year_idx, first_tiles_to_process, base_path,
+                                   cn.SOC_soil_model_version_underscore, model_type, model_path_description,
+                                   no_upload, is_large_run)
+            futures_change.append(future)
+
+    results = client.gather(futures_change)
     print(results)
 
     uu.stage_duration(start_time, uu.timestr(), stage, main_logger)

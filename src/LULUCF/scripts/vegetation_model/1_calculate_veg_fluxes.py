@@ -35,6 +35,10 @@ Using more than 1 thread/worker slows down processing a lot when there are more 
 which is the situation for large analyses, obviously.
 https://app.asana.com/1/25496124013636/task/1206230383901961/comment/1210641504248464?focus=true
 
+#TODO change NoData in flux outputs to something besides 0 because 0 has a meaning for fluxes
+#TODO potential change to 3112/3119
+#TODO potentially add branches for loss of primary forest (currently just have primary forest remaining primary forest)
+
 """
 
 import argparse

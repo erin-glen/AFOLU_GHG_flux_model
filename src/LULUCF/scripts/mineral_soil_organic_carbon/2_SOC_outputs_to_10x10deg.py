@@ -34,7 +34,7 @@ python -m src.LULUCF.scripts.mineral_soil_organic_carbon.2_SOC_outputs_to_10x10d
 
 Full run:
 python -m src.utilities.create_cluster -n 200 -t 1 -m 32 -cn mineral_soil
-python -m src.LULUCF.scripts.mineral_soil_organic_carbon.2_SOC_outputs_to_10x10deg -cn mineral_soil -mt standard -mpd global -mcstn soil_carbon_densities_and_changes_1x1_chunk_statistics_20251224_20_16_36__KEEP.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD -log_note "10x10 deg tile creation for vegetation model v1.0.5 (2016-2024)."
+python -m src.LULUCF.scripts.mineral_soil_organic_carbon.2_SOC_outputs_to_10x10deg -cn mineral_soil -mt standard -mpd global -mcstn soil_carbon_densities_and_changes_1x1_chunk_statistics_20251224_20_16_36__KEEP.xlsx -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --input_date YYYYMMDD --log_note "10x10 deg tile creation for SOC v1.0.0 (2000-2022)."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/690a21cd-2ea0-8333-9c7f-7091f8016fb3
 """
@@ -72,7 +72,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     # Creates the log for the main function and populates it with basic run information
     main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
-    batch_size = 3000  # X batches to cover all tasks
+    batch_size = 4000  # 2 batches to cover all tasks
     # batch_size = 4  # large-scale testing
 
     start_time = uu.timestr() # Starting time for stage

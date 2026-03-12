@@ -700,8 +700,8 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
         per_ha_units = cn.C_density_pixel_meaning
         per_pixel_units = cn.C_per_pixel_pixel_meaning
         coarse_units = cn.C_density_aggreg_pixel_meaning
-        # var_per_ha = f"{var}{per_ha_units}"
-        var_per_ha = var  #TODO using this for SOC 10x10 creation because zarr layers don't have units at end (added later). Delete for next OGH soil version.
+        # var_per_ha = f"{var}{per_ha_units}" #TODO
+        var_per_ha = var  # using this for SOC 10x10 creation because zarr layers don't have units at end (added later). Delete for next OGH soil version.
     elif "emis" in var:
         per_ha_units = cn.flux_density_pixel_meaning
         per_pixel_units = cn.flux_per_pixel_pixel_meaning
@@ -750,7 +750,12 @@ def create_10x10_deg_geotif_from_zarr(var, year_idx, tile_id, raw_path, output_b
 
     # Open Zarr group using fsspec mapper
     fs = fsspec.filesystem("s3", anon=False)
-    model_zarr_store = zarr.open_group(fs.get_mapper(raw_path), mode="r")
+    try:
+        model_zarr_store = zarr.open_group(fs.get_mapper(raw_path), mode="r")
+    except Exception as e:
+        print(f"tile_id: {tile_id}; year: {year}; year_idx: {year_idx}; var: {var}; var_per_ha: {var_per_ha}; var_with_unit: {var_with_unit}--"
+              f" zarr path not working. Path is showing up as {raw_path}")
+        sys.exit()
 
     # Determine pixel indices (applies to model outputs and pixel area)
     lat_array_model = model_zarr_store["y"][:]

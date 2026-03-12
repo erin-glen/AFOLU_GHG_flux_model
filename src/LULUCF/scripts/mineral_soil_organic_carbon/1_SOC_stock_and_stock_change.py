@@ -17,6 +17,10 @@ python -m src.utilities.create_cluster -n 200 -t 1 -m 4 -cn mineral_soil
 python -m src.LULUCF.scripts.mineral_soil_organic_carbon.1_SOC_stock_and_stock_change -cn mineral_soil -mt standard -mpd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp -ln "This is intended to be the definitive SOC timeseries creation for 2000-2022."
 
 Based on https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/6877a34b-02cc-800a-88cc-a123cdc9ed1b
+
+#TODO change NoData in change outputs to something besides 0 because 0 has a meaning here
+#TODO test that zarr layer names having units in them works okay
+#TODO change back var_per_ha in zu.create_10x10_deg_geotif_from_zarr
 """
 
 import argparse
@@ -222,7 +226,7 @@ def create_soil_C_density_and_change(bounds, is_large_run, stage, no_upload, cre
     # Only saves arrays to geotifs and uploads them to s3 if enabled
     if not no_upload:
 
-        out_no_data_val = 0  # NoData value for output raster (optional)
+        out_no_data_val = 0  # NoData value for output raster (optional) #TODO change NoData to something besides 0 because 0 has a meaning here
         upload_start_time = time.time()
 
         # Adds metadata used for uploading outputs to s3 to the dictionary
