@@ -96,11 +96,11 @@ def main(input_date, model_type, model_path_description=None,
     # Folders for local outputs
     local_reproj_folder = Path(cn.local_jpeg_folder_vegetation)
     local_reproj_folder.mkdir(parents=True, exist_ok=True)
-    local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder_vegetation}output_jpegs_and_gifs_{bounding_box_description}/jpegs_non_pres")
+    local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder_vegetation}output_jpegs_and_gifs_{bounding_box_description}_{uu.timestr()[0:8]}/jpegs_non_pres")
     local_jpeg_non_pres_folder.mkdir(parents=True, exist_ok=True)
-    local_jpeg_pres_folder = Path(f"{cn.local_jpeg_folder_vegetation}output_jpegs_and_gifs_{bounding_box_description}/jpegs_pres")
+    local_jpeg_pres_folder = Path(f"{cn.local_jpeg_folder_vegetation}output_jpegs_and_gifs_{bounding_box_description}_{uu.timestr()[0:8]}/jpegs_pres")
     local_jpeg_pres_folder.mkdir(parents=True, exist_ok=True)
-    local_gif_folder = Path(f"{cn.local_jpeg_folder_vegetation}output_jpegs_and_gifs_{bounding_box_description}/gifs")
+    local_gif_folder = Path(f"{cn.local_jpeg_folder_vegetation}output_jpegs_and_gifs_{bounding_box_description}_{uu.timestr()[0:8]}/gifs")
     local_gif_folder.mkdir(parents=True, exist_ok=True)
 
     # Reprojects simplified country boundary shapefile, if needed

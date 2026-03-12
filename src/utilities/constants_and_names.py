@@ -2,6 +2,9 @@ import math
 import boto3
 import numpy as np
 
+# Project imports
+from src.utilities import universal_utilities as uu
+
 ########
 ### Constants
 ########
@@ -1685,24 +1688,12 @@ net_percentiles = [0.17, 0.25, 0.5, 0.77, 0.95,
 removals_colors_rgb = net_colors_rgb[0:5]
 emissions_colors_rgb = net_colors_rgb[5:]
 
-veg_pres_text = (f"Land use vegetation fluxes (model v{veg_model_version}, 2016-2024) \n"
-             f"Legend value range represents 1 and 99 percentiles of fluxes across all years.")
-veg_organic_soil_pres_text = (f"Vegetation fluxes: v{veg_model_version}; organic soil: v{organic_soil_model_version} \n"
-             f"Legend value range represents 1 and 99 percentiles of fluxes.")
-veg_mineral_soil_pres_text = (f"Vegetation fluxes: v{veg_model_version}; mineral soil: v{SOC_soil_model_version} \n"
-             f"Legend value range represents 1 and 99 percentiles of fluxes.")
-LULUCF_pres_text = (f"Vegetation fluxes: v{veg_model_version}, {interval_end_years_annual[0]}-{last_model_year_annual}; \n"
-                    f"Organic soil: v{organic_soil_model_version}, 2021-2024; "
-                    f"Mineral soil: v{SOC_soil_model_version}, 2011-2022 \n"
-                    f"Legend value range represents 1 and 99 percentiles of fluxes.")
-veg_cropland_pres_text = (f"Vegetation fluxes: v{veg_model_version}; cropland: YYYYMMDD \n"
-             f"Legend value range represents 1 and 99 percentiles of fluxes.")
-veg_livestock_pres_text = (f"Vegetation fluxes: v{veg_model_version}; livestock: YYYYMMDD \n"
-             f"Legend value range represents 1 and 99 percentiles of fluxes.")
-AFOLU_pres_text = (f"Vegetation fluxes: v{veg_model_version}, {interval_end_years_annual[0]}-{last_model_year_annual}; "
-                   f"Organic soil: v{organic_soil_model_version}, 2021-2024; Mineral soil: v{SOC_soil_model_version}, 2011-2022; \n "
-                   f"Cropland: YYYYMMDD, 2020; Livestock: YYYYMMDD, 2020 \n"
-                   f"Legend value range represents 1 and 99 percentiles of fluxes.")
+veg_pres_text = f"Vegetation fluxes: v{veg_model_version}, {interval_end_years_annual[0]}-{last_model_year_annual}"
+organic_soil_pres_text = f"Organic soil: v{organic_soil_model_version}, 2021-2024"
+mineral_soil_pres_text = f"Mineral soil: v{SOC_soil_model_version}, 2016-2022"
+cropland_pres_text = f"Cropland: vYYYYMMDD, ca. 2020"
+livestock_pres_text = f"Livestock: vYYYYMMDD, ca. 2020"
+legend_percentile_disclaimer = f"Legend value range represents 1 and 99 percentiles of fluxes."
 
 # Output global aggregated jpeg names
 three_panel_jpeg_base = f"three_panels__4km_aggregation__v{veg_model_version}"

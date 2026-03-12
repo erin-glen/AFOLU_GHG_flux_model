@@ -13,17 +13,25 @@ from that information. That keeps all zoomed in maps in the same shape as the gl
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
-Global:
+Global LULUCF:
 python -m src.synthesis.scripts.create_sector_level_0_04deg_global_display_maps
--veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v1_0_5_standard_global/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_5_2016_2024_mean_global_reproj.tif
+-ms s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_soil_organic_carbon/version_1_0_0__standard__global/SOC_change__mineral_soil_extent__0-30cm_MgC/2022/_0_04deg_yr/global/20251224/SOC_change__mineral_soil_extent__0-30cm_MgC_0_04deg_yr_v1_0_0_2022_global.tif
 -os /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/LULUCF_totals/veg_v1_0_5_standard_global__org_soil_v_0_9_7__min_soil_v_1_0_0/0_01deg_global__drained_burned_total_Mg_CO2e_pixel_yr_2021_2024.tif
+-veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v1_0_5_standard_global_YYYYMMDD/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_5_2016_2024_mean_global_reproj.tif
+
+Global AFOLU:
+python -m src.synthesis.scripts.create_sector_level_0_04deg_global_display_maps
+-veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v1_0_5_standard_global_YYYYMMDD/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_5_2016_2024_mean_global_reproj.tif
+-os /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/LULUCF_totals/veg_v1_0_5_standard_global__org_soil_v_0_9_7__min_soil_v_1_0_0/0_01deg_global__drained_burned_total_Mg_CO2e_pixel_yr_2021_2024.tif
+-ms s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_soil_organic_carbon/version_1_0_0__standard__global/SOC_change__mineral_soil_extent__0-30cm_MgC/2022/_0_04deg_yr/global/20251224/SOC_change__mineral_soil_extent__0-30cm_MgC_0_04deg_yr_v1_0_0_2022_global.tif
 -cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif
 -ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif
 
 For Central Africa:
 python -m src.LULUCF.scripts.vegetation_model.create_sector_level_0_04deg_global_display_maps
--veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v1_0_5_standard_global/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_5_2016_2024_mean_global_reproj.tif
+-veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v1_0_5_standard_global_YYYYMMDD/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_5_2016_2024_mean_global_reproj.tif
 -os /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/LULUCF_totals/veg_v1_0_5_standard_global__org_soil_v_0_9_7__min_soil_v_1_0_0/0_01deg_global__drained_burned_total_Mg_CO2e_pixel_yr_2021_2024.tif
+-ms s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_soil_organic_carbon/version_1_0_0__standard__global/SOC_change__mineral_soil_extent__0-30cm_MgC/2022/_0_04deg_yr/global/20251224/SOC_change__mineral_soil_extent__0-30cm_MgC_0_04deg_yr_v1_0_0_2022_global.tif
 -cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif
 -ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif
 --center_latitude 0 --center_longitude 20 --lat_height 20 -bbd central_Africa
@@ -43,6 +51,7 @@ import argparse
 from pathlib import Path
 import time
 import os
+import sys
 import rasterio
 import math
 import numpy as np
@@ -175,11 +184,11 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     # Folders for local outputs
     LULUCF_reproj_folder = Path(cn.local_jpeg_folder_LULUCF)
     LULUCF_reproj_folder.mkdir(parents=True, exist_ok=True)
-    LULUCF_local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder_LULUCF}output_jpegs_and_gifs_{bounding_box_description}/jpegs_non_pres")
+    LULUCF_local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder_LULUCF}output_jpegs_and_gifs_{bounding_box_description}_{uu.timestr()[0:8]}/jpegs_non_pres")
     LULUCF_local_jpeg_non_pres_folder.mkdir(parents=True, exist_ok=True)
-    LULUCF_local_jpeg_pres_folder = Path(f"{cn.local_jpeg_folder_LULUCF}output_jpegs_and_gifs_{bounding_box_description}/jpegs_pres")
+    LULUCF_local_jpeg_pres_folder = Path(f"{cn.local_jpeg_folder_LULUCF}output_jpegs_and_gifs_{bounding_box_description}_{uu.timestr()[0:8]}/jpegs_pres")
     LULUCF_local_jpeg_pres_folder.mkdir(parents=True, exist_ok=True)
-    LULUCF_local_gif_folder = Path(f"{cn.local_jpeg_folder_LULUCF}output_jpegs_and_gifs_{bounding_box_description}/gifs")
+    LULUCF_local_gif_folder = Path(f"{cn.local_jpeg_folder_LULUCF}output_jpegs_and_gifs_{bounding_box_description}_{uu.timestr()[0:8]}/gifs")
     LULUCF_local_gif_folder.mkdir(parents=True, exist_ok=True)
 
     cropland_reproj_folder = Path(cn.local_jpeg_folder_cropland)
@@ -187,11 +196,11 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     livestock_reproj_folder = Path(cn.local_jpeg_folder_livestock)
     livestock_reproj_folder.mkdir(parents=True, exist_ok=True)
 
-    AFOLU_local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}/jpegs_non_pres")
+    AFOLU_local_jpeg_non_pres_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}_{uu.timestr()[0:8]}/jpegs_non_pres")
     AFOLU_local_jpeg_non_pres_folder.mkdir(parents=True, exist_ok=True)
-    AFOLU_local_jpeg_pres_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}/jpegs_pres")
+    AFOLU_local_jpeg_pres_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}_{uu.timestr()[0:8]}/jpegs_pres")
     AFOLU_local_jpeg_pres_folder.mkdir(parents=True, exist_ok=True)
-    AFOLU_local_gif_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}/gifs")
+    AFOLU_local_gif_folder = Path(f"{cn.local_jpeg_folder_AFOLU}output_jpegs_and_gifs_{bounding_box_description}_{uu.timestr()[0:8]}/gifs")
     AFOLU_local_gif_folder.mkdir(parents=True, exist_ok=True)
 
     out_maps_for_gif = []
@@ -205,16 +214,16 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     data_to_add = {}
 
     if organic_soil_local:
-        data_to_add['organic_soil'] = [organic_soil_local, LULUCF_reproj_folder, cn.veg_organic_soil_pres_text, LULUCF_local_jpeg_non_pres_folder, LULUCF_local_jpeg_pres_folder]
+        data_to_add['organic_soil'] = [organic_soil_local, LULUCF_reproj_folder, cn.organic_soil_pres_text, LULUCF_local_jpeg_non_pres_folder, LULUCF_local_jpeg_pres_folder]
 
     if mineral_soil_s3:
-        data_to_add['mineral_soil'] = [mineral_soil_s3, LULUCF_reproj_folder, cn.veg_mineral_soil_pres_text, LULUCF_local_jpeg_non_pres_folder, LULUCF_local_jpeg_pres_folder]
+        data_to_add['mineral_soil'] = [mineral_soil_s3, LULUCF_reproj_folder, cn.mineral_soil_pres_text, LULUCF_local_jpeg_non_pres_folder, LULUCF_local_jpeg_pres_folder]
 
     if cropland_geotif_s3:
-        data_to_add['cropland'] = [cropland_geotif_s3, cropland_reproj_folder, cn.veg_cropland_pres_text, AFOLU_local_jpeg_non_pres_folder, AFOLU_local_jpeg_pres_folder]
+        data_to_add['cropland'] = [cropland_geotif_s3, cropland_reproj_folder, cn.cropland_pres_text, AFOLU_local_jpeg_non_pres_folder, AFOLU_local_jpeg_pres_folder]
 
     if livestock_geotif_s3:
-        data_to_add['livestock'] = [livestock_geotif_s3, livestock_reproj_folder, cn.veg_livestock_pres_text, AFOLU_local_jpeg_non_pres_folder, AFOLU_local_jpeg_pres_folder]
+        data_to_add['livestock'] = [livestock_geotif_s3, livestock_reproj_folder, cn.livestock_pres_text, AFOLU_local_jpeg_non_pres_folder, AFOLU_local_jpeg_pres_folder]
 
     main_logger.info(f"Vegetation net flux: {net_all_gases_geotif_local}")
     main_logger.info(f"Inputs to add to vegetation: {data_to_add}")
@@ -390,7 +399,8 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
             ax.set_ylim(extent[2], extent[3])
 
         # Title
-        title_text = f"Vegetation and {key}\nkt CO$_2$e"
+        legend_title = key.replace("_", " ")
+        title_text = f"Vegetation and {legend_title}\nkt CO$_2$e yr$^{{-1}}$"
 
         # Creates legend
         mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
@@ -407,7 +417,8 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         jpeg_for_pres_path = f"{pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
         # Saves two versions of the map: without and with a source note in the bottom right
-        veg_addtl_pres_text = presentation_slide_text.replace("YYYYMMDD", additional_data_date)
+        full_slide_text_LULUCF = f"{cn.veg_pres_text}; {presentation_slide_text} \n {cn.legend_percentile_disclaimer}"
+        veg_addtl_pres_text = full_slide_text_LULUCF.replace("YYYYMMDD", additional_data_date)  # For livestock and cropland, whose versions are dates
         out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", veg_addtl_pres_text, main_logger)
 
         end_time = time.time()
@@ -418,12 +429,16 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
 
     main_logger.info("\n\n\n---Mapping LULUCF:")
 
-    # Iteratively collects the names and versions of non-vegetation datasets
+    # Iteratively collects the names and versions of non-vegetation datasets, and text for bottom-right of maps
     non_veg_versions = ''
+    full_slide_text_LULUCF = f'{cn.veg_pres_text}; '
     if organic_soil_local:
         non_veg_versions = f'{non_veg_versions}_organic_soil_v{cn.organic_soil_model_version_underscore}'
+        full_slide_text_LULUCF = f'{full_slide_text_LULUCF}{cn.organic_soil_pres_text};'
     if mineral_soil_s3:
-        non_veg_versions = f'{non_veg_versions}__mineral_soil_v{cn.SOC_soil_model_version_underscore}'
+        non_veg_versions = f'{non_veg_versions}_mineral_soil_v{cn.SOC_soil_model_version_underscore}'
+        full_slide_text_LULUCF = f'{full_slide_text_LULUCF}{cn.mineral_soil_pres_text};'
+    full_slide_text_LULUCF_with_disclaimer = f"{full_slide_text_LULUCF} \n {cn.legend_percentile_disclaimer}"
 
     # Final combined output
     output_name = f"LULUCF__veg_{veg_version}__{non_veg_versions}__kt_CO2e"
@@ -537,7 +552,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         ax.set_ylim(extent[2], extent[3])
 
     # Title
-    title_text = f"LULUCF net GHG flux (vegetation+soil)\nkt CO$_2$e"
+    title_text = f"LULUCF net GHG flux (vegetation+soil)\nkt CO$_2$e yr$^{{-1}}$"
 
     # Creates legend
     mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_LULUCF, rounded_upper_lim_LULUCF,
@@ -554,7 +569,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     jpeg_for_pres_path = f"{LULUCF_local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
     # Saves two versions of the map: without and with a source note in the bottom right
-    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", cn.LULUCF_pres_text, main_logger)
+    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", full_slide_text_LULUCF_with_disclaimer, main_logger)
 
     end_time = time.time()
     main_logger.info(f"LULUCF for {bounding_box_description} extent took {round(end_time - start_time)} seconds: {uu.timestr()}")
@@ -564,13 +579,20 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
 
     main_logger.info("\n\n\n---Mapping AFOLU:")
 
-    # Iteratively collects the names and versions of non-vegetation datasets (LULUCF versions already collected)
+    # Iteratively collects the names and versions of non-vegetation datasets, and text for bottom-right of maps (LULUCF versions already collected)
+    full_slide_text_AFOLU = f"{full_slide_text_LULUCF} \n"
     if cropland_geotif_s3:
         cropland_date = re.search(r'/(\d{8})/', cropland_geotif_s3).group(1)
         non_veg_versions = f'{non_veg_versions}__cropland_v{cropland_date}'
+        full_slide_text_AFOLU = f'{full_slide_text_AFOLU}{cn.cropland_pres_text};'
     if livestock_geotif_s3:
         livestock_date = re.search(r'/(\d{8})/', livestock_geotif_s3).group(1)
         non_veg_versions = f'{non_veg_versions}__livestock_v{livestock_date}'
+        full_slide_text_AFOLU = f'{full_slide_text_AFOLU}{cn.livestock_pres_text};'
+    if cropland_geotif_s3 == None and livestock_geotif_s3 == None:
+        sys.exit("No Agriculture datasets supplied. Not creating total AFOLU maps.")
+    full_slide_text_AFOLU_with_disclaimer = f"{full_slide_text_AFOLU} \n {cn.legend_percentile_disclaimer}"
+
 
     # Final combined output
     output_name = f"AFOLU__veg_{veg_version}_{non_veg_versions}__kt_CO2e"
@@ -698,11 +720,11 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     jpeg_path = f"{AFOLU_local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
     jpeg_for_pres_path = f"{AFOLU_local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
-    AFOLU_pres_text = cn.AFOLU_pres_text.replace("Cropland: YYYYMMDD", f"cropland: {cropland_date}")
-    AFOLU_pres_text = AFOLU_pres_text.replace("Livestock: YYYYMMDD", f"livestock: {livestock_date}")
+    full_slide_text_AFOLU_with_disclaimer = full_slide_text_AFOLU_with_disclaimer.replace("Cropland: YYYYMMDD", f"cropland: {cropland_date}")
+    full_slide_text_AFOLU_with_disclaimer = full_slide_text_AFOLU_with_disclaimer.replace("Livestock: YYYYMMDD", f"livestock: {livestock_date}")
 
     # Saves two versions of the map: without and with a source note in the bottom right
-    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", AFOLU_pres_text, main_logger)
+    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", full_slide_text_AFOLU_with_disclaimer, main_logger)
 
     end_time = time.time()
     main_logger.info(f"AFOLU for {bounding_box_description} extent took {round(end_time - start_time)} seconds: {uu.timestr()}")
