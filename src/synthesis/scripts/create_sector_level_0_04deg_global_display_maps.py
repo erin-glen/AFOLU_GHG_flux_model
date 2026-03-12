@@ -36,6 +36,15 @@ python -m src.LULUCF.scripts.vegetation_model.create_sector_level_0_04deg_global
 -ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif
 --center_latitude 0 --center_longitude 20 --lat_height 20 -bbd central_Africa
 
+For Borneo/Sumatra:
+python -m src.LULUCF.scripts.vegetation_model.create_sector_level_0_04deg_global_display_maps
+-veg /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/vegetation/v1_0_5_standard_global_YYYYMMDD/net_flux__all_C_pools__all_gases__MgCO2e_0_04deg_yr_v1_0_5_2016_2024_mean_global_reproj.tif
+-os /mnt/c/GIS/AFOLU_flux_model/LULUCF/4x4km_aggregated_maps/LULUCF_totals/veg_v1_0_5_standard_global__org_soil_v_0_9_7__min_soil_v_1_0_0/0_01deg_global__drained_burned_total_Mg_CO2e_pixel_yr_2021_2024.tif
+-ms s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_soil_organic_carbon/version_1_0_0__standard__global/SOC_change__mineral_soil_extent__0-30cm_MgC/2022/_0_04deg_yr/global/20251224/SOC_change__mineral_soil_extent__0-30cm_MgC_0_04deg_yr_v1_0_0_2022_global.tif
+-cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif
+-ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif
+--center_latitude 0 --center_longitude 113 --lat_height 20 -bbd central_Africa
+
 Run locally (not in Coiled)
 
 A zoomed in map can be created by supplying central lat-long arguments, as well as a north-south extent for the map to include.
@@ -704,7 +713,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         ax.set_ylim(extent[2], extent[3])
 
     # Title
-    title_text = f"AFOLU net GHG flux\nkt CO$_2$e"
+    title_text = f"AFOLU net GHG flux\nkt CO$_2$e yr$^{{-1}}$"
 
     # Creates legend
     mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_AFOLU, rounded_upper_lim_AFOLU,
@@ -720,8 +729,8 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     jpeg_path = f"{AFOLU_local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
     jpeg_for_pres_path = f"{AFOLU_local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
-    full_slide_text_AFOLU_with_disclaimer = full_slide_text_AFOLU_with_disclaimer.replace("Cropland: YYYYMMDD", f"cropland: {cropland_date}")
-    full_slide_text_AFOLU_with_disclaimer = full_slide_text_AFOLU_with_disclaimer.replace("Livestock: YYYYMMDD", f"livestock: {livestock_date}")
+    full_slide_text_AFOLU_with_disclaimer = full_slide_text_AFOLU_with_disclaimer.replace("Cropland: vYYYYMMDD", f"Cropland: v{cropland_date}")
+    full_slide_text_AFOLU_with_disclaimer = full_slide_text_AFOLU_with_disclaimer.replace("Livestock: vYYYYMMDD", f"Livestock: v{livestock_date}")
 
     # Saves two versions of the map: without and with a source note in the bottom right
     out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", full_slide_text_AFOLU_with_disclaimer, main_logger)
