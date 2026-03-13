@@ -143,10 +143,10 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
     source_zarr_chunk_size = cn.chunk_dims  #4000x4000
 
     # The zarr path that's being used
-    mega_zarr_path = zu.create_zarr_path(cn.SOC_path_mega_zarr, source_zarr_chunk_size, 'N/A',
+    zarr_path = zu.create_zarr_path(cn.SOC_path_mega_zarr, source_zarr_chunk_size, 'N/A',
                                          model_type, cn.SOC_soil_model_version_underscore, model_path_description,
                                          input_date, main_logger)
-    main_logger.info(f"Aggregating from zarr ({source_zarr_chunk_size} pixel chunks): {mega_zarr_path}")
+    main_logger.info(f"Aggregating from zarr ({source_zarr_chunk_size} pixel chunks): {zarr_path}")
 
     output_base = f"{cn.SOC_outputs_path}PATTERN/START_END/PER_HA_OR_PIXEL/CHUNK_SIZE_pixels/{input_date}/"
     main_logger.info(f"Core output path for aggregation: {output_base}")
@@ -218,7 +218,7 @@ def main(cluster_name, input_date, model_type, run_local, no_log, no_upload, mod
         for var_name, year_idx, tile_id in task_batch:  # Must be the same order as the tuple in all_tasks
 
             future = client.submit(zu.create_10x10_deg_geotif_from_zarr,
-                                   var_name, year_idx, tile_id, mega_zarr_path, output_base,
+                                   var_name, year_idx, tile_id, zarr_path, output_base,
                                    cn.SOC_soil_model_version_underscore, model_type, model_path_description, no_upload, False, retries=3)
             futures.append(future)
 
@@ -402,7 +402,7 @@ if __name__ == "__main__":
     parser.add_argument('-cshp', '--chunk_shapefile_uri', help='s3 location for shapefile of 1x1 deg chunk footprints')
     parser.add_argument('-ft', '--first_tiles_to_process', type=int, help='Number of tiles to process (for testing)')
     parser.add_argument('-fy', '--first_years_to_process', type=int, help='Number of years to process from raw mega-zarr (for testing)')
-    parser.add_argument('-mcstn', '--model_chunk_stats_table_name', required=True, help='s3 path for model chunk stats table that will be compared with zarr chunk stats')
+    parser.add_argument('-mcstn', '--model_chunk_stats_table_name', required=True, help='local path for model chunk stats table that will be compared with zarr chunk stats')
     parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard).')
     parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area).')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')

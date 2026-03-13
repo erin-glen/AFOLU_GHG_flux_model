@@ -1,5 +1,5 @@
 """
-Zonal stats for vegetation.
+Zonal stats for soil organic carbon.
 
 Area to analyze can be specified with a shapefile or a bounding box.
 If a shapefile is supplied, all 10x10 deg tiles that intersect the shapefile are analyzed iteratively.
@@ -7,27 +7,33 @@ If a bounding box is supplied:
    1. If the bounding box is <6x6 deg, the exact area of the bounding box is analyzed. This is to allow tests in areas smaller than 6x6 deg.
    2. If the bounding box is >6x6 deg, all 10x10 deg tiles that intersect the bounding box are analyzed iteratively.
 
+Model chunk stats are used to determine if each 10x10 deg tile has any pixels in it (per the 1x1_counts_in_10x10 tab).
+If no pixels, the tile is skipped to save time.
+
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
 Coiled small tests:
-python -m src.utilities.create_cluster -n 1 -m 64 -cn vegetation_zonal_stats
-python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -bb 10 49 11 50 -fv 2 -ft 2 -mt standard -mpd global --input_date YYYYMMDD -zd test_box
+python -m src.utilities.create_cluster -n 1 -m 64 -cn SOC_zonal_stats
+python -m src.LULUCF.scripts.zonal_statistics.SOC_zonal_stats -cn SOC_zonal_stats -bb 10 49 11 50 -fv 2 -ft 2 -mt standard -mpd global --input_date YYYYMMDD -zd test_box  -mcstn KEEP_definitive_runs/SOC_density/v1_0_0__2000_2022__20251224/soil_carbon_densities_and_changes_1x1_chunk_statistics_20251224_20_16_36__KEEP.xlsx
 
 Coiled 8-tile test (Central and East Africa):
-python -m src.utilities.create_cluster -n 50 -m 64 -cn vegetation_zonal_stats
-python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -bb 13 -14 44 -3 -fv 3 -ft 3 -mt standard -mpd global --input_date YYYYMMDD -zd Central_Africa_test
+python -m src.utilities.create_cluster -n 50 -m 64 -cn SOC_zonal_stats
+python -m src.LULUCF.scripts.zonal_statistics.SOC_zonal_stats -cn SOC_zonal_stats -bb 13 -14 44 -3 -fv 3 -ft 3 -mt standard -mpd global --input_date YYYYMMDD -zd Central_Africa_test  -mcstn KEEP_definitive_runs/SOC_density/v1_0_0__2000_2022__20251224/soil_carbon_densities_and_changes_1x1_chunk_statistics_20251224_20_16_36__KEEP.xlsx
 
 Coiled Cerrado test (174 features):
-python -m src.utilities.create_cluster -n 50 -m 64 -cn vegetation_zonal_stats
-python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -mt standard -mpd global --input_date YYYYMMDD -zd Cerrado_test -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp
+python -m src.utilities.create_cluster -n 50 -m 64 -cn SOC_zonal_stats
+python -m src.LULUCF.scripts.zonal_statistics.SOC_zonal_stats -cn SOC_zonal_stats -mt standard -mpd global --input_date YYYYMMDD -zd Cerrado_test -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__Cerrado_center_in.shp
+-mcstn KEEP_definitive_runs/SOC_density/v1_0_0__2000_2022__20251224/soil_carbon_densities_and_changes_1x1_chunk_statistics_20251224_20_16_36__KEEP.xlsx
 
 Coiled large shapefile test (1884 features):
-python -m src.utilities.create_cluster -n 50 -m 64 -cn vegetation_zonal_stats -od
-python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -mt standard -mpd global --input_date YYYYMMDD -zd 1884_chunk_test -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp
+python -m src.utilities.create_cluster -n 50 -m 64 -cn SOC_zonal_stats -od
+python -m src.LULUCF.scripts.zonal_statistics.SOC_zonal_stats -cn SOC_zonal_stats -mt standard -mpd global --input_date YYYYMMDD -zd 1884_chunk_test -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in__1884_test_features.shp
+-mcstn KEEP_definitive_runs/SOC_density/v1_0_0__2000_2022__20251224/soil_carbon_densities_and_changes_1x1_chunk_statistics_20251224_20_16_36__KEEP.xlsx
 
 Full run:
-python -m src.utilities.create_cluster -n 50 -m 64 -cn vegetation_zonal_stats -od
-python -m src.LULUCF.scripts.zonal_statistics.vegetation_zonal_stats -cn vegetation_zonal_stats -mt standard -mpd global --input_date YYYYMMDD -zd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --log_note "Zonal stats for vegetation model v1.0.5 (2016-2024)."
+python -m src.utilities.create_cluster -n 50 -m 64 -cn SOC_zonal_stats -od
+python -m src.LULUCF.scripts.zonal_statistics.SOC_zonal_stats -cn SOC_zonal_stats -mt standard -mpd global --input_date YYYYMMDD -zd global -cshp s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/20250429/fishnet_GADM41_1x1deg__spatial_join_intersect__20250428__center_in.shp --log_note "Zonal stats for vegetation model v1.0.5 (2016-2024)."
+-mcstn KEEP_definitive_runs/SOC_density/v1_0_0__2000_2022__20251224/soil_carbon_densities_and_changes_1x1_chunk_statistics_20251224_20_16_36__KEEP.xlsx
 """
 
 import argparse
@@ -278,13 +284,14 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
 
 def main(cluster_name, input_date, model_type, no_upload, zonal_stats_description,
          chunk_shapefile_uri=False, bounding_box=None,
-         first_variables_to_process=None, first_tiles_to_process=None, model_path_description=None, log_note=None):
+         first_variables_to_process=None, first_tiles_to_process=None, model_path_description=None,
+         model_chunk_stats_table_name=None, log_note=None):
 
 
     ### Step 1: Preparation
 
     # Model stage being run
-    stage = 'vegetation_zonal_statistics'
+    stage = 'SOC_zonal_statistics'
 
     # Connects to Coiled cluster if not running locally and the named cluster exists
     cluster, client, run_local = uu.connect_to_Coiled_cluster(cluster_name, False)
@@ -297,10 +304,10 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     main_logger, main_log_local_path, n_workers = lu.populate_main_log_header(client, cluster, log_note, run_local, model_type, stage)
 
     main_logger.info(f"Stage {stage} started at: {uu.timestr()}")
-    main_logger.info(f"Vegetation model version: {cn.veg_model_version}")
-    main_logger.info(f"Vegatation model path descriptor: {model_path_description}")
-    main_logger.info(f"Vegetation zonal stats descriptor: {zonal_stats_description}")
-    main_logger.info(f"Start year: {cn.first_model_year_annual}; end year: {cn.last_model_year_annual}")
+    main_logger.info(f"Model version: {cn.SOC_soil_model_version}")
+    main_logger.info(f"Model path descriptor: {model_path_description}")
+    main_logger.info(f"Zonal stats descriptor: {zonal_stats_description}")
+    main_logger.info(f"Start year: 2000; end year: {cn.SOC_density_intervals[-1]}")
     main_logger.info(f"Input date: {input_date}")
     main_logger.info(f"no_upload: {no_upload}")
 
@@ -330,17 +337,16 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
 
     # Outputs to performs zonal stats on
     full_list_of_vars = [
-                         cn.agc_gross_emis_pattern, cn.bgc_gross_emis_pattern, cn.deadwood_c_gross_emis_pattern, cn.litter_c_gross_emis_pattern,
-                         cn.ch4_gross_emis_pattern, cn.n2o_gross_emis_pattern,
-                         cn.agc_gross_removals_pattern, cn.bgc_gross_removals_pattern, cn.deadwood_c_gross_removals_pattern, cn.litter_c_gross_removals_pattern,
-                         cn.net_flux_all_C_pools_CO2_only_pattern, cn.net_flux_all_C_pools_all_gases_pattern,
-                         cn.non_soil_c_modeled_dens_pattern
-                         ]
+                        cn.SOC_density_full_extent_pattern, cn.SOC_change_full_extent_pattern,
+                        cn.SOC_density_min_soil_extent_pattern, cn.SOC_change_min_soil_extent_pattern
+                        ]
 
-    full_list_of_vars_with_units = [
-        zu.add_units_year_to_pattern(var_name, 9999)[0]  # Dummy year since we don't need the year to access the datasets in the zarr, just add the units
-        for var_name in full_list_of_vars
-    ]
+    # TODO Use this when I rerun SOC and the zarr layers have units
+    # full_list_of_vars_with_units = [
+    #     zu.add_units_year_to_pattern(var_name, 9999)[0]  # Dummy year since we don't need the year to access the datasets in the zarr, just add the units
+    #     for var_name in full_list_of_vars
+    # ]
+    full_list_of_vars_with_units = full_list_of_vars
 
     # Limits the processed variables to the supplied number (for testing)
     if first_variables_to_process:
@@ -359,10 +365,15 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     source_zarr_chunk_size = cn.chunk_dims  #4000x4000
 
     # The zarr path that's being used
-    zarr_path = zu.create_zarr_path(cn.veg_outputs_path_mega_zarr, source_zarr_chunk_size, 'annual',
-                                         model_type, cn.veg_model_version_underscore, model_path_description,
+    SOC_zarr_path = zu.create_zarr_path(cn.SOC_path_mega_zarr, source_zarr_chunk_size, 'N/A',
+                                         model_type, cn.SOC_soil_model_version_underscore, model_path_description,
                                          input_date, main_logger)
-    main_logger.info(f"Zonal stats from zarr ({source_zarr_chunk_size} pixel chunks): {zarr_path}")
+    main_logger.info(f"Zonal stats from zarr ({source_zarr_chunk_size} pixel chunks): {SOC_zarr_path}")
+
+    # # For land state node
+    # veg_zarr_path = zu.create_zarr_path(cn.veg_outputs_path_mega_zarr, source_zarr_chunk_size, 'annual',
+    #                                      model_type, cn.veg_model_version_underscore, model_path_description,
+    #                                      veg_input_date, main_logger)
 
     # Creates dataframe of state_node codes and meanings
     state_node_df = create_state_node_df(cn.state_node_lookup_table_local, cn.state_node_lookup_table_s3, cn.sheet)
@@ -370,8 +381,19 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     main_logger.info(f"State nodes are from: {cn.state_node_lookup_table_local} or {cn.state_node_lookup_table_s3}, sheet {cn.sheet}")
     main_logger.info(f"State nodes are: {node_codes}")
 
-    local_zonal_stats_folder = Path(cn.veg_local_zonal_stats_table_folder)
+    local_zonal_stats_folder = Path(cn.SOC_local_zonal_stats_table_folder)
     local_zonal_stats_folder.mkdir(parents=True, exist_ok=True)
+
+    if model_chunk_stats_table_name:
+        main_logger.info(f"Reading local model chunk stats tables: {uu.timestr()}")
+        model_chunk_stats_path = os.path.join(cn.local_chunk_stats_path, model_chunk_stats_table_name)
+
+        tables_to_compare_dict, zarr_comparison_stats_name, zarr_comparison_stats_path = zu.get_table_names_for_zarr_stats_comparison(
+            "", main_logger, model_chunk_stats_path)
+        counts_in_10x10 = tables_to_compare_dict['1x1_counts_in_10x10']
+        print("counts_in_10x10:", counts_in_10x10)
+    else:
+        counts_in_10x10 = None
 
 
     ### Step 2: Prepare input zarrs
@@ -390,7 +412,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     # managed_land_CAN_xr = xr.open_zarr(cn.managed_land_CAN_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_CAN_pattern)
     # managed_land_USA_xr = xr.open_zarr(cn.managed_land_USA_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_USA_pattern)
 
-    ds = xr.open_zarr(zarr_path, consolidated=False)
+    ds = xr.open_zarr(SOC_zarr_path, consolidated=False)
 
     ds_selected_analysis_vars = ds[vars_to_process]
 
@@ -407,7 +429,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     # BRA_biomes_xr = round_coords(BRA_biomes_xr)
     # managed_land_CAN_xr = round_coords(managed_land_CAN_xr)
     # managed_land_USA_xr = round_coords(managed_land_USA_xr)
-    land_state_node = round_coords(ds[cn.land_state_pattern])
+    # land_state_node = round_coords(ds[cn.land_state_pattern])
 
     main_logger.info(f"Cropping: {uu.timestr()}")
     pixel_area_aligned = reference
@@ -421,7 +443,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     # BRA_biomes_aligned = safe_crop(BRA_biomes_xr, reference)
     # managed_land_CAN_aligned = safe_crop(managed_land_CAN_xr, reference)
     # managed_land_USA_aligned = safe_crop(managed_land_USA_xr, reference)
-    land_state_node_aligned = safe_crop(land_state_node, reference)
+    # land_state_node_aligned = safe_crop(land_state_node, reference)
     ds_selected_analysis_vars_aligned = safe_crop(ds_selected_analysis_vars, reference)
 
     main_logger.info(f"Selecting datasets: {uu.timestr()}")
@@ -479,12 +501,17 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         main_logger.info(f"Processing {tile_id} (tile {i+1} of {len(tile_ids_to_process)}): {uu.timestr()}")
         tile_start_time = time.time()
 
-        # TODO add code to skip tile if it has no fluxes. Adapt from SOC zonal stats code (implemented there).
         # Skips if any existing file already contains this tile_id (to not repeat that tile if restarting the zonal stats)
         # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6998a64b-e568-8329-8a19-e10423d00669
         existing = set(os.listdir(local_zonal_stats_folder))
         if any(tile_id in fname for fname in existing):
             main_logger.info(f"  Skipping {tile_id}; output already exists")
+            continue
+
+        tile_count = counts_in_10x10.loc[counts_in_10x10["tile_id"] == tile_id, "total_count"].sum()
+        main_logger.info(f"  Pixel count across all analysis layers is {tile_count}")
+        if tile_count == 0:
+            main_logger.info(f"  Skipping {tile_id}; no pixels in it for any analysis layers")
             continue
 
         # If the bounding box is less than 6x6 deg, the exact bounding box is used (to enable small tests)
@@ -511,11 +538,11 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         # BRA_biomes_aligned_subset = BRA_biomes_aligned.sel(x=slice(west, east), y=slice(north, south))
         # managed_land_CAN_aligned_subset = managed_land_CAN_aligned.sel(x=slice(west, east), y=slice(north, south))
         # managed_land_USA_aligned_subset = managed_land_USA_aligned.sel(x=slice(west, east), y=slice(north, south))
-        land_state_node_aligned_subset = land_state_node_aligned.sel(x=slice(west, east), y=slice(north, south))
+        # land_state_node_aligned_subset = land_state_node_aligned.sel(x=slice(west, east), y=slice(north, south))
         pixel_area_expanded_subset = pixel_area_expanded.sel(x=slice(west, east), y=slice(north, south))
 
         # Creates xarrays of 0s if contextual layer doesn't extend to the current tile.
-        # Don't need to do with lnd_state_nodes because those should exist everywhere there are model outputs.
+        # Don't need to do with land_state_nodes because those should exist everywhere there are model outputs.
         # Also, don't need to do with pixel_area because that should exist everywhere.
         # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6995f836-b304-8333-8b92-cf24f95d812f
         if adm0_aligned_subset[cn.adm0_pattern].sizes.get("x", 0) == 0 or adm0_aligned_subset[cn.adm0_pattern].sizes.get("y", 0) == 0:
@@ -601,7 +628,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
          # bra_da,
          # managed_land_CAN_da,
          # managed_land_USA_da,
-         land_state_node_aligned_subset,
+         # land_state_node_aligned_subset,
          ) = xr.align(
             flux_cube_subset,
             pixel_area_expanded_subset,
@@ -615,7 +642,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
             # bra_da,
             # managed_land_CAN_da,
             # managed_land_USA_da,
-            land_state_node_aligned_subset,
+            # land_state_node_aligned_subset,
             join="override"
         )
 
@@ -624,7 +651,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
             flux_cube_subset,
             *(
                 adm0_da,
-                land_state_node_aligned_subset,
+                # land_state_node_aligned_subset,
                 WDPA_da,
                 cont_eco_da,
                 landmark_da,
@@ -639,7 +666,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
             func='sum',
             expected_groups=(
                 cn.gadm_adm0_ids,
-                node_codes,
+                # node_codes,
                 cn.WDPA_codes,
                 cn.cont_eco_codes,
                 cn.landmark_codes,
@@ -659,7 +686,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         # Contextual layers to use to merge pixel_area against other analysis layers (to calculate flux/ha)
         contextual_layers = [
             cn.adm0_pattern,
-            cn.land_state_pattern,
+            # cn.land_state_pattern,
             cn.WDPA_pattern,
             cn.cont_eco_zstats_pattern,
             cn.landmark_pattern,
@@ -762,6 +789,7 @@ if __name__ == "__main__":
     parser.add_argument('-mt', '--model_type', default='standard', help='Type of model run (e.g., standard).')
     parser.add_argument('-mpd', '--model_path_description', help='Description of model run (e.g., global, test, X_area).')
     parser.add_argument('-zd', '--zonal_stats_description', help='Description of zonal stats run (e.g., global, Brazil, test area).')
+    parser.add_argument('-mcstn', '--model_chunk_stats_table_name', required=False, help='local path for model chunk stats to check if tile had any pixels in it, and skip if empty')
     parser.add_argument('-ln', '--log_note', help='Note to include in the log.')
 
     parser.add_argument('--no_upload', action='store_true', help='Do not save and upload outputs to s3')
@@ -777,6 +805,7 @@ if __name__ == "__main__":
     model_type = args.model_type
     model_path_description = args.model_path_description
     zonal_stats_description = args.zonal_stats_description
+    model_chunk_stats_table_name = args.model_chunk_stats_table_name
     log_note = args.log_note
 
     no_upload = args.no_upload
@@ -784,4 +813,5 @@ if __name__ == "__main__":
     # Create the cluster with command line arguments
     main(cluster_name, input_date, model_type, no_upload, zonal_stats_description, chunk_shapefile_uri, bounding_box=bounding_box,
          first_variables_to_process=first_variables_to_process,
-         first_tiles_to_process=first_tiles_to_process, model_path_description=model_path_description, log_note=log_note)
+         first_tiles_to_process=first_tiles_to_process, model_path_description=model_path_description,
+         model_chunk_stats_table_name=model_chunk_stats_table_name, log_note=log_note)

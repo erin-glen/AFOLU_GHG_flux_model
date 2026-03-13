@@ -1643,7 +1643,8 @@ managed_land_to_text = {
     2: "unmanaged",
 }
 
-local_zonal_stats_table_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/zonal_statistics/v{veg_model_version_underscore}_standard_global/"
+veg_local_zonal_stats_table_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/zonal_statistics/vegetation_v{veg_model_version_underscore}_standard_global/"
+SOC_local_zonal_stats_table_folder = f"/mnt/c/GIS/AFOLU_flux_model/LULUCF/zonal_statistics/SOC_v{SOC_soil_model_version_underscore}_standard_global/"
 
 
 
