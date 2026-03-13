@@ -754,7 +754,7 @@ def map_net_flux(s3_folders, model_type, model_path_description,
     main_logger.info(f"\n\n---Mapping mean across all years")
     mean_data = save_mean_annual_geotif(local_reproj_folder, pattern_segment, year_path_reproj, yearly_data_stack, main_logger)
 
-    # Mask 0s from the mean raster for mapping only (e.g., water)
+    # Mask 0s from the mean raster for mapping only (e.g., water)-- not used for calculating percentiles
     masked_mean_data = np.ma.masked_where(mean_data==0, mean_data)
 
     main_logger.info("Plotting annual average map")
@@ -778,16 +778,17 @@ def map_net_flux(s3_folders, model_type, model_path_description,
     else:
         title_text = "Mean annual net greenhouse gas flux\nAll vegetation pools, CO$_2$ only\nkt CO$_2$e yr$^{{-1}}$"
 
-    # Reuse 0 percentile from first year (for simplicity)
-    main_logger.info(f"  0 is at the {percentile_0_ref}th percentile of the raster for the mean of the series")
-    percentiles_avg = [percentile_0_ref * cn.net_percentiles[0], percentile_0_ref * cn.net_percentiles[1], percentile_0_ref * cn.net_percentiles[2],
-                       percentile_0_ref * cn.net_percentiles[3], percentile_0_ref * cn.net_percentiles[4],
-                       percentile_0_ref * cn.net_percentiles[5], percentile_0_ref * cn.net_percentiles[6], percentile_0_ref * cn.net_percentiles[7],
-                       percentile_0_ref * cn.net_percentiles[8], percentile_0_ref * cn.net_percentiles[9]]
+    # 0th percentile for the mean of the timeseries
+    percentile_0_mean = percentile_for_0(mean_data)
+    main_logger.info(f"  0 is at the {percentile_0_mean}th percentile of the mean raster")
+    percentiles_avg = [percentile_0_mean * cn.net_percentiles[0], percentile_0_mean * cn.net_percentiles[1], percentile_0_mean * cn.net_percentiles[2],
+                       percentile_0_mean * cn.net_percentiles[3], percentile_0_mean * cn.net_percentiles[4],
+                       percentile_0_mean * cn.net_percentiles[5], percentile_0_mean * cn.net_percentiles[6], percentile_0_mean * cn.net_percentiles[7],
+                       percentile_0_mean * cn.net_percentiles[8], percentile_0_mean * cn.net_percentiles[9]]
 
     create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
                                        title_text, tick_labels,
-                                       "avg", colors_rgb, percentiles_avg, percentile_0_ref, main_logger)
+                                       "avg", colors_rgb, percentiles_avg, percentile_0_mean, main_logger)
 
     remove_ticks(ax)
 

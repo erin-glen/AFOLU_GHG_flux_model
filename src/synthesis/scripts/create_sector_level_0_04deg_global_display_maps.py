@@ -48,7 +48,7 @@ python -m src.LULUCF.scripts.vegetation_model.create_sector_level_0_04deg_global
 -ms s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs_soil_organic_carbon/version_1_0_0__standard__global/SOC_change__mineral_soil_extent__0-30cm_MgC/2022/_0_04deg_yr/global/20251224/SOC_change__mineral_soil_extent__0-30cm_MgC_0_04deg_yr_v1_0_0_2022_global.tif
 -cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif
 -ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif
---center_latitude 0 --center_longitude 113 --lat_height 20 -bbd central_Africa
+--center_latitude 1 --center_longitude 108 --lat_height 12 -bbd Borneo_Sumatra
 
 With https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67634e63-bbcc-800a-8267-004e88ced2e4
 Continued at https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d6d26f-b054-8323-98bb-731a86582e74
@@ -250,29 +250,27 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         if bounding_box_proj is not None:
             minx, miny, maxx, maxy = bounding_box_proj
 
-            window = from_bounds(minx, miny, maxx, maxy, src.transform)
+            window = from_bounds(minx, miny, maxx, maxy, src_veg.transform)
 
-            data = src_veg.read(1, window=window)
+            mean_veg_data = src_veg.read(1, window=window)
 
             # Update extent from the window
-            left, bottom, right, top = rasterio.windows.bounds(window, src.transform)
+            left, bottom, right, top = rasterio.windows.bounds(window, src_veg.transform)
             raster_extent = (left, right, bottom, top)
 
         else:
-            data = src_veg.read(1)
+            mean_veg_data = src_veg.read(1)
             b = src_veg.bounds
             raster_extent = (b.left, b.right, b.bottom, b.top)
-
 
     ### Part 1: Maps average annual vegetation net flux by itself (for completeness).
     ### This should be equivalent to the full model period annual average output from the vegetation model,
     ### but I'm recreating it here so that maps for all components are created here.
     ### The vegetation jpeg/gif script must have already been run (to create local reprojected vegetation net flux geotif).
 
-    main_logger.info(f"  Plotting vegetation net flux map")
+    main_logger.info(f"  Plotting average annual vegetation net flux map")
 
-    # Calculates the percentile for 0 for the year (neutral, no flux) for mapping
-    percentile_0 = mu.percentile_for_0(data)
+    percentile_0 = mu.percentile_for_0(mean_veg_data)
     main_logger.info(f"  0 is at the {percentile_0}th percentile of the average annual net flux vegetation raster.")
     percentiles = [percentile_0 * cn.net_percentiles[0], percentile_0 * cn.net_percentiles[1],
                    percentile_0 * cn.net_percentiles[2],
@@ -294,23 +292,28 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
 
     main_logger.info(f"  Masking raster for average annual net flux vegetation to non-0 values")
-    masked_data = np.ma.masked_where(data == 0, data)
+    masked_data = np.ma.masked_where(mean_veg_data == 0, mean_veg_data)
 
     percentile_for_saturation = 1
-    breaks_all_yrs = np.percentile(masked_data, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
+    breaks_all_yrs = np.percentile(mean_veg_data, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
 
     lower_lim_all_yrs = breaks_all_yrs[0]
     global_neutral = 0
     upper_lim_all_yrs = breaks_all_yrs[-1]
 
+    main_logger.info("For average raster:")
+    main_logger.info(f"  lower limit ({percentile_for_saturation} percentile): {lower_lim_all_yrs}")
+    main_logger.info(f"  neutral: {global_neutral}")
+    main_logger.info(f"  upper limit ({(100-percentile_for_saturation)} percentile): {upper_lim_all_yrs}")
+
     # Creates the min and max values for the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
     # Rounds data_min down and data_max up for legend.
     rounded_lower_lim_all_yrs = math.ceil(lower_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds up
     rounded_upper_lim_all_yrs = math.floor(upper_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds down
-    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f:10s}  (sink)",  # Spaces are to horizontally align the text explanations
-                   f"{0:10s}        (neutral)",
-                   f"> {rounded_upper_lim_all_yrs:.0f:10s}  (source)"]
-    # print(tick_labels)
+    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f}  (sink)",  # Spaces are to horizontally align the text explanations
+                   f"{0}        (neutral)",
+                   f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
+    print("tick_labels:", tick_labels)
 
     # For map (not legend)
     norm = TwoSlopeNorm(
@@ -365,7 +368,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     jpeg_for_pres_path = f"{LULUCF_local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
     # Saves two versions of the map: without and with a source note in the bottom right
-    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "year", cn.veg_pres_text, main_logger)
+    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", cn.veg_pres_text, main_logger)
 
     sys.quit()
 
