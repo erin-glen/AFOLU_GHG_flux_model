@@ -799,7 +799,7 @@ def map_net_flux(s3_folders, model_type, model_path_description,
 
     jpeg_path_avg = f"{local_jpeg_non_pres_folder}/{core_jpeg_name_avg}.jpeg"
     jpeg_for_pres_path_avg = f"{local_jpeg_pres_folder}/{core_jpeg_name_avg}__for_pres.jpeg"
-    save_pres_non_pres_jpegs(ax, jpeg_path_avg, jpeg_for_pres_path_avg, f'{cn.interval_end_years_annual[0]}-{cn.interval_end_years_annual[-1]}',
+    save_pres_non_pres_jpegs(ax, jpeg_path_avg, jpeg_for_pres_path_avg, "",
                              cn.veg_pres_text, main_logger)
 
     series_end_time = time.time()

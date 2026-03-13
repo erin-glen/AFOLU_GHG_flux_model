@@ -263,114 +263,118 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
             b = src_veg.bounds
             raster_extent = (b.left, b.right, b.bottom, b.top)
 
-    ### Part 1: Maps average annual vegetation net flux by itself (for completeness).
-    ### This should be equivalent to the full model period annual average output from the vegetation model,
-    ### but I'm recreating it here so that maps for all components are created here.
-    ### The vegetation jpeg/gif script must have already been run (to create local reprojected vegetation net flux geotif).
-
-    main_logger.info(f"  Plotting average annual vegetation net flux map")
-
-    percentile_0 = mu.percentile_for_0(mean_veg_data)
-    main_logger.info(f"  0 is at the {percentile_0}th percentile of the average annual net flux vegetation raster.")
-    percentiles = [percentile_0 * cn.net_percentiles[0], percentile_0 * cn.net_percentiles[1],
-                   percentile_0 * cn.net_percentiles[2],
-                   percentile_0 * cn.net_percentiles[3], percentile_0 * cn.net_percentiles[4],
-                   percentile_0 * cn.net_percentiles[5], percentile_0 * cn.net_percentiles[6],
-                   percentile_0 * cn.net_percentiles[7],
-                   percentile_0 * cn.net_percentiles[8], percentile_0 * cn.net_percentiles[9]]
-    # print("percentiles:", percentiles)
-
-    main_logger.info(f"  Calculating percentiles and breaks for average annual net flux vegetation")
-
-    # Converts RGB color palette to matplotlib color palette
-    colors_matplotlib = mu.rgb_to_mpl_palette(cn.net_colors_rgb)
-
-    # Matches percentile breaks with colors for the map.
-    # Normalizes percentiles to a 0-1 scale.
-    percentiles_normalized = np.linspace(0, 1, len(percentiles))
-    # print("percentiles_normalized:", percentiles_normalized)
-    cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
-
-    main_logger.info(f"  Masking raster for average annual net flux vegetation to non-0 values")
-    masked_data = np.ma.masked_where(mean_veg_data == 0, mean_veg_data)
-
-    percentile_for_saturation = 1
-    breaks_all_yrs = np.percentile(mean_veg_data, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
-
-    lower_lim_all_yrs = breaks_all_yrs[0]
-    global_neutral = 0
-    upper_lim_all_yrs = breaks_all_yrs[-1]
-
-    main_logger.info("For average raster:")
-    main_logger.info(f"  lower limit ({percentile_for_saturation} percentile): {lower_lim_all_yrs}")
-    main_logger.info(f"  neutral: {global_neutral}")
-    main_logger.info(f"  upper limit ({(100-percentile_for_saturation)} percentile): {upper_lim_all_yrs}")
-
-    # Creates the min and max values for the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
-    # Rounds data_min down and data_max up for legend.
-    rounded_lower_lim_all_yrs = math.ceil(lower_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds up
-    rounded_upper_lim_all_yrs = math.floor(upper_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds down
-    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f}  (sink)",  # Spaces are to horizontally align the text explanations
-                   f"{0}        (neutral)",
-                   f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
-    print("tick_labels:", tick_labels)
-
-    # For map (not legend)
-    norm = TwoSlopeNorm(
-        vmin=lower_lim_all_yrs,
-        vcenter=global_neutral,
-        vmax=upper_lim_all_yrs
-    )
-
-    main_logger.info(f"  Plotting map for average annual net flux vegetation")
-    ax, fig = mu.create_plot()
-
-    # Sets the ocean color
-    mu.set_ocean_color(ax)
-
-    # Limits shapefile to focal extent (if requested)
-    if bounding_box_proj is not None:
-        bbox_geom = box(*bounding_box_proj)
-        country_shapefile = country_shapefile.clip(bbox_geom)
-
-    # Plots the country polygons first
-    mu.plot_country_polygons(ax, country_shapefile)
-
-    # Raster extent
-    extent = list(raster_extent)
-
-    # Plots the raster next
-    img = mu.plot_raster(ax, cmap, extent, masked_data, norm)
-
-    # Plots the country boundaries on top
-    mu.plot_country_boundaries(ax, country_shapefile)
-
-    # Explicitly sets the bounding box for the plot image
-    if bounding_box_proj is not None:
-        ax.set_xlim(extent[0], extent[1])
-        ax.set_ylim(extent[2], extent[3])
-
-    title_text = f"Net greenhouse gas flux\nAll vegetation pools, all gases\nkt CO$_2$e yr$^{{-1}}$"
-
-    # Creates legend
-    mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
-                                       title_text, tick_labels,
-                                       "", cn.net_colors_rgb, percentiles, percentile_0, main_logger)
-
-    # Removes axis ticks and labels
-    mu.remove_ticks(ax)
-
-
-    core_jpeg_name = f"vegetation_net_flux_all_pools_all_gases_{veg_version}__{veg_analysis_years}__kt_CO2e_yr__{uu.timestr()[0:8]}"
-    if bounding_box_description:  # Adds bounding box description to file name, if supplied
-        core_jpeg_name = f"{core_jpeg_name}_{bounding_box_description}"
-    jpeg_path = f"{LULUCF_local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
-    jpeg_for_pres_path = f"{LULUCF_local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
-
-    # Saves two versions of the map: without and with a source note in the bottom right
-    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", cn.veg_pres_text, main_logger)
-
-    sys.quit()
+    # ### Part 1: Maps average annual vegetation net flux by itself (for completeness).
+    # ### This should be equivalent to the full model period annual average output from the vegetation model,
+    # ### but I'm recreating it here so that maps for all components are created here.
+    # ### The vegetation jpeg/gif script must have already been run (to create local reprojected vegetation net flux geotif).
+    # ### NOTE: I can't get this averge annual net flux map to match the one in 4_create_0_04deg_global_display_maps.
+    # ### The legend here has very different min and max values and the map colors are different.
+    # ### I assume this has to do with masking or removing NoData pixels in some way.
+    #
+    # ### TODO be able to create the same average annual net flux map here as in the vegetation jpeg script
+    # ### so that the vegetation map is created alongside vegetation+[other], LULUCF, and AFOLU.
+    #
+    # main_logger.info(f"  Plotting average annual vegetation net flux map")
+    #
+    # percentile_0 = mu.percentile_for_0(mean_veg_data)
+    # main_logger.info(f"  0 is at the {percentile_0}th percentile of the average annual net flux vegetation raster.")
+    # percentiles = [percentile_0 * cn.net_percentiles[0], percentile_0 * cn.net_percentiles[1],
+    #                percentile_0 * cn.net_percentiles[2],
+    #                percentile_0 * cn.net_percentiles[3], percentile_0 * cn.net_percentiles[4],
+    #                percentile_0 * cn.net_percentiles[5], percentile_0 * cn.net_percentiles[6],
+    #                percentile_0 * cn.net_percentiles[7],
+    #                percentile_0 * cn.net_percentiles[8], percentile_0 * cn.net_percentiles[9]]
+    # # print("percentiles:", percentiles)
+    #
+    # main_logger.info(f"  Calculating percentiles and breaks for average annual net flux vegetation")
+    #
+    # # Converts RGB color palette to matplotlib color palette
+    # colors_matplotlib = mu.rgb_to_mpl_palette(cn.net_colors_rgb)
+    #
+    # # Matches percentile breaks with colors for the map.
+    # # Normalizes percentiles to a 0-1 scale.
+    # percentiles_normalized = np.linspace(0, 1, len(percentiles))
+    # # print("percentiles_normalized:", percentiles_normalized)
+    # cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
+    #
+    # main_logger.info(f"  Masking raster for average annual net flux vegetation to non-0 values")
+    # masked_data = np.ma.masked_where(mean_veg_data == 0, mean_veg_data)
+    #
+    # percentile_for_saturation = 1
+    # breaks_all_yrs = np.percentile(mean_veg_data, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
+    #
+    # lower_lim_all_yrs = breaks_all_yrs[0]
+    # global_neutral = 0
+    # upper_lim_all_yrs = breaks_all_yrs[-1]
+    #
+    # main_logger.info("For average raster:")
+    # main_logger.info(f"  lower limit ({percentile_for_saturation} percentile): {lower_lim_all_yrs}")
+    # main_logger.info(f"  neutral: {global_neutral}")
+    # main_logger.info(f"  upper limit ({(100-percentile_for_saturation)} percentile): {upper_lim_all_yrs}")
+    #
+    # # Creates the min and max values for the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
+    # # Rounds data_min down and data_max up for legend.
+    # rounded_lower_lim_all_yrs = math.ceil(lower_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds up
+    # rounded_upper_lim_all_yrs = math.floor(upper_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds down
+    # tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f}  (sink)",  # Spaces are to horizontally align the text explanations
+    #                f"{0}        (neutral)",
+    #                f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
+    # print("tick_labels:", tick_labels)
+    #
+    # # For map (not legend)
+    # norm = TwoSlopeNorm(
+    #     vmin=lower_lim_all_yrs,
+    #     vcenter=global_neutral,
+    #     vmax=upper_lim_all_yrs
+    # )
+    #
+    # main_logger.info(f"  Plotting map for average annual net flux vegetation")
+    # ax, fig = mu.create_plot()
+    #
+    # # Sets the ocean color
+    # mu.set_ocean_color(ax)
+    #
+    # # Limits shapefile to focal extent (if requested)
+    # if bounding_box_proj is not None:
+    #     bbox_geom = box(*bounding_box_proj)
+    #     country_shapefile = country_shapefile.clip(bbox_geom)
+    #
+    # # Plots the country polygons first
+    # mu.plot_country_polygons(ax, country_shapefile)
+    #
+    # # Raster extent
+    # extent = list(raster_extent)
+    #
+    # # Plots the raster next
+    # img = mu.plot_raster(ax, cmap, extent, masked_data, norm)
+    #
+    # # Plots the country boundaries on top
+    # mu.plot_country_boundaries(ax, country_shapefile)
+    #
+    # # Explicitly sets the bounding box for the plot image
+    # if bounding_box_proj is not None:
+    #     ax.set_xlim(extent[0], extent[1])
+    #     ax.set_ylim(extent[2], extent[3])
+    #
+    # title_text = f"Net greenhouse gas flux\nAll vegetation pools, all gases\nkt CO$_2$e yr$^{{-1}}$"
+    #
+    # # Creates legend
+    # mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
+    #                                    title_text, tick_labels,
+    #                                    "", cn.net_colors_rgb, percentiles, percentile_0, main_logger)
+    #
+    # # Removes axis ticks and labels
+    # mu.remove_ticks(ax)
+    #
+    #
+    # core_jpeg_name = f"vegetation_net_flux_all_pools_all_gases_{veg_version}__{veg_analysis_years}__kt_CO2e_yr__{uu.timestr()[0:8]}"
+    # if bounding_box_description:  # Adds bounding box description to file name, if supplied
+    #     core_jpeg_name = f"{core_jpeg_name}_{bounding_box_description}"
+    # jpeg_path = f"{LULUCF_local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
+    # jpeg_for_pres_path = f"{LULUCF_local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
+    #
+    # # Saves two versions of the map: without and with a source note in the bottom right
+    # out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "", cn.veg_pres_text, main_logger)
 
 
     ### Part 2: Maps average annual vegetation net flux + one other dataset at a time (pairwise)
@@ -474,7 +478,6 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
                 data = src.read(1)
                 b = src.bounds
                 raster_extent = (b.left, b.right, b.bottom, b.top)
-
 
         # Calculates the percentile for 0 for the year (neutral, no flux) for mapping
         main_logger.info(f"  Calculating percentiles and breaks")
