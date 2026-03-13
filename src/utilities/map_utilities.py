@@ -595,9 +595,9 @@ def map_net_flux(s3_folders, model_type, model_path_description,
     # Rounds data_min down and data_max up for legend.
     rounded_lower_lim_all_yrs = math.ceil(lower_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds up
     rounded_upper_lim_all_yrs = math.floor(upper_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds down
-    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f:10s}  (sink)",  # Spaces are to horizontally align the text explanations
-                   f"{0:10s}        (neutral)",
-                   f"> {rounded_upper_lim_all_yrs:.0f:10s}  (source)"]
+    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f}  (sink)",  # Spaces are to horizontally align the text explanations
+                   f"{0}        (neutral)",
+                   f"> {rounded_upper_lim_all_yrs:.0f}  (source)"]
     # print(tick_labels)
 
     # Final pass: Iterates through modeled years to create the jpegs
@@ -721,7 +721,7 @@ def map_net_flux(s3_folders, model_type, model_path_description,
         remove_ticks(ax)
 
         pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
-        core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.veg_model_version_underscore}__{uu.timestr()[0:8]}"
+        core_jpeg_name = f"veg_{pattern_segment_revised}_yr__{year}__v{cn.veg_model_version_underscore}__{uu.timestr()[0:8]}"
         if bounding_box_description:  # Adds bounding box description to file name, if supplied
             core_jpeg_name = f"{core_jpeg_name}_{bounding_box_description}"
         jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
@@ -851,7 +851,7 @@ def map_gross(s3_folders, model_type, model_path_description,
         main_logger.info(f"Reprojected raster: {year_path_reproj}")
 
         # Reprojects raster, if needed
-        reproject_raster(year_path_unproj, year_path_reproj)
+        reproject_raster(year_path_unproj, year_path_reproj, main_logger)
 
     pattern_segment = ''
 
@@ -1031,13 +1031,13 @@ def map_gross(s3_folders, model_type, model_path_description,
         # Removes axis ticks and labels
         remove_ticks(ax)
 
-        pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2")  # Replaces Mg with the mapped unit of kt
-        core_jpeg_name = f"veg_{pattern_segment_revised}__{year}__v{cn.veg_model_version_underscore}__{uu.timestr()[0:8]}"
+        pattern_segment_revised = pattern_segment.replace("MgCO2", "ktCO2_yr")  # Replaces Mg with the mapped unit of kt
+        core_jpeg_name = f"veg_{pattern_segment_revised}_yr__{year}__v{cn.veg_model_version_underscore}__{uu.timestr()[0:8]}"
         jpeg_path = f"{local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
         jpeg_for_pres_path = f"{local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
 
         # Saves two versions of the map: without and with a source note in the bottom right
-        out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, year, cn.veg_pres_text)
+        out_jpeg_for_pres = save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, year, cn.veg_pres_text, main_logger)
 
         out_maps_for_gif.append(out_jpeg_for_pres)
 

@@ -10,8 +10,13 @@ as well as a north-south extent for the map to include.
 The aspect ratio used in the global map of 2:1 (width:height) is maintained, and the east-west extent is determined
 from that information. That keeps all zoomed in maps in the same shape as the global map for simplicity.
 
+A zoomed in map can be created by supplying central lat-long arguments, as well as a north-south extent for the map to include.
+The aspect ratio used in the global map of 2:1 (width:height) is maintained, and the east-west extent is determined
+from that information. That keeps all zoomed in maps in the same shape as the global map for simplicity.
+
 
 Run from /mnt/c/GIS/git/AFOLU_GHG_flux_model
+Runs locally, not in Coiled.
 
 Global LULUCF:
 python -m src.synthesis.scripts.create_sector_level_0_04deg_global_display_maps
@@ -44,12 +49,6 @@ python -m src.LULUCF.scripts.vegetation_model.create_sector_level_0_04deg_global
 -cl s3://gfw2-data/climate/AFOLU_flux_model/cropland_emissions/raw__from_Cornell/20250828/year_2020/all_sources/Global_grid_all_GHGs_cropland_total_amount_CO2eq_all_crops_NonPeatland_2019_kg_CO2.tif
 -ls s3://gfw2-data/climate/AFOLU_flux_model/livestock_emissions/raw__from_Cornell/20251223/Total_GHG_Emissions/Tot_CO2eq_kg_livestock_GHG_emissions.tif
 --center_latitude 0 --center_longitude 113 --lat_height 20 -bbd central_Africa
-
-Run locally (not in Coiled)
-
-A zoomed in map can be created by supplying central lat-long arguments, as well as a north-south extent for the map to include.
-The aspect ratio used in the global map of 2:1 (width:height) is maintained, and the east-west extent is determined
-from that information. That keeps all zoomed in maps in the same shape as the global map for simplicity.
 
 With https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/67634e63-bbcc-800a-8267-004e88ced2e4
 Continued at https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/68d6d26f-b054-8323-98bb-731a86582e74
@@ -248,8 +247,130 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         total_across_LULUCF = src_veg.read(1).astype('float32')  # base raster to accumulate into for LULUCF total
         total_across_AFOLU = src_veg.read(1).astype('float32')  # base raster to accumulate into for AFOLU total
 
+        if bounding_box_proj is not None:
+            minx, miny, maxx, maxy = bounding_box_proj
 
-    ### Part 1: Maps vegetation + one other dataset at a time (pairwise)
+            window = from_bounds(minx, miny, maxx, maxy, src.transform)
+
+            data = src_veg.read(1, window=window)
+
+            # Update extent from the window
+            left, bottom, right, top = rasterio.windows.bounds(window, src.transform)
+            raster_extent = (left, right, bottom, top)
+
+        else:
+            data = src_veg.read(1)
+            b = src_veg.bounds
+            raster_extent = (b.left, b.right, b.bottom, b.top)
+
+
+    ### Part 1: Maps average annual vegetation net flux by itself (for completeness).
+    ### This should be equivalent to the full model period annual average output from the vegetation model,
+    ### but I'm recreating it here so that maps for all components are created here.
+    ### The vegetation jpeg/gif script must have already been run (to create local reprojected vegetation net flux geotif).
+
+    main_logger.info(f"  Plotting vegetation net flux map")
+
+    # Calculates the percentile for 0 for the year (neutral, no flux) for mapping
+    percentile_0 = mu.percentile_for_0(data)
+    main_logger.info(f"  0 is at the {percentile_0}th percentile of the average annual net flux vegetation raster.")
+    percentiles = [percentile_0 * cn.net_percentiles[0], percentile_0 * cn.net_percentiles[1],
+                   percentile_0 * cn.net_percentiles[2],
+                   percentile_0 * cn.net_percentiles[3], percentile_0 * cn.net_percentiles[4],
+                   percentile_0 * cn.net_percentiles[5], percentile_0 * cn.net_percentiles[6],
+                   percentile_0 * cn.net_percentiles[7],
+                   percentile_0 * cn.net_percentiles[8], percentile_0 * cn.net_percentiles[9]]
+    # print("percentiles:", percentiles)
+
+    main_logger.info(f"  Calculating percentiles and breaks for average annual net flux vegetation")
+
+    # Converts RGB color palette to matplotlib color palette
+    colors_matplotlib = mu.rgb_to_mpl_palette(cn.net_colors_rgb)
+
+    # Matches percentile breaks with colors for the map.
+    # Normalizes percentiles to a 0-1 scale.
+    percentiles_normalized = np.linspace(0, 1, len(percentiles))
+    # print("percentiles_normalized:", percentiles_normalized)
+    cmap = LinearSegmentedColormap.from_list("custom_colormap", list(zip(percentiles_normalized, colors_matplotlib)))
+
+    main_logger.info(f"  Masking raster for average annual net flux vegetation to non-0 values")
+    masked_data = np.ma.masked_where(data == 0, data)
+
+    percentile_for_saturation = 1
+    breaks_all_yrs = np.percentile(masked_data, [1, (100-percentile_for_saturation)])  # The min and max percentiles at which colors saturate
+
+    lower_lim_all_yrs = breaks_all_yrs[0]
+    global_neutral = 0
+    upper_lim_all_yrs = breaks_all_yrs[-1]
+
+    # Creates the min and max values for the legend in kt CO2e (converts legend units from Mg (t) to kt with 10**3-- data doesn't change).
+    # Rounds data_min down and data_max up for legend.
+    rounded_lower_lim_all_yrs = math.ceil(lower_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds up
+    rounded_upper_lim_all_yrs = math.floor(upper_lim_all_yrs / 10 ** 3 * 100) / 100  # Rounds down
+    tick_labels = [f"< {rounded_lower_lim_all_yrs:.0f:10s}  (sink)",  # Spaces are to horizontally align the text explanations
+                   f"{0:10s}        (neutral)",
+                   f"> {rounded_upper_lim_all_yrs:.0f:10s}  (source)"]
+    # print(tick_labels)
+
+    # For map (not legend)
+    norm = TwoSlopeNorm(
+        vmin=lower_lim_all_yrs,
+        vcenter=global_neutral,
+        vmax=upper_lim_all_yrs
+    )
+
+    main_logger.info(f"  Plotting map for average annual net flux vegetation")
+    ax, fig = mu.create_plot()
+
+    # Sets the ocean color
+    mu.set_ocean_color(ax)
+
+    # Limits shapefile to focal extent (if requested)
+    if bounding_box_proj is not None:
+        bbox_geom = box(*bounding_box_proj)
+        country_shapefile = country_shapefile.clip(bbox_geom)
+
+    # Plots the country polygons first
+    mu.plot_country_polygons(ax, country_shapefile)
+
+    # Raster extent
+    extent = list(raster_extent)
+
+    # Plots the raster next
+    img = mu.plot_raster(ax, cmap, extent, masked_data, norm)
+
+    # Plots the country boundaries on top
+    mu.plot_country_boundaries(ax, country_shapefile)
+
+    # Explicitly sets the bounding box for the plot image
+    if bounding_box_proj is not None:
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
+
+    title_text = f"Net greenhouse gas flux\nAll vegetation pools, all gases\nkt CO$_2$e yr$^{{-1}}$"
+
+    # Creates legend
+    mu.create_divergent_legend_asymmetric(fig, rounded_lower_lim_all_yrs, rounded_upper_lim_all_yrs,
+                                       title_text, tick_labels,
+                                       "", cn.net_colors_rgb, percentiles, percentile_0, main_logger)
+
+    # Removes axis ticks and labels
+    mu.remove_ticks(ax)
+
+
+    core_jpeg_name = f"vegetation_net_flux_all_pools_all_gases_{veg_version}__{veg_analysis_years}__kt_CO2e_yr__{uu.timestr()[0:8]}"
+    if bounding_box_description:  # Adds bounding box description to file name, if supplied
+        core_jpeg_name = f"{core_jpeg_name}_{bounding_box_description}"
+    jpeg_path = f"{LULUCF_local_jpeg_non_pres_folder}/{core_jpeg_name}.jpeg"
+    jpeg_for_pres_path = f"{LULUCF_local_jpeg_pres_folder}/{core_jpeg_name}__for_pres.jpeg"
+
+    # Saves two versions of the map: without and with a source note in the bottom right
+    out_jpeg_for_pres = mu.save_pres_non_pres_jpegs(ax, jpeg_path, jpeg_for_pres_path, "year", cn.veg_pres_text, main_logger)
+
+    sys.quit()
+
+
+    ### Part 2: Maps average annual vegetation net flux + one other dataset at a time (pairwise)
 
     # Iterates through non-vegetation layers to combine them with vegetation individually
     for key, value in data_to_add.items():
@@ -297,7 +418,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
 
 
         main_logger.info(f"Combining vegetation net flux and {key}")
-        output_name = f"vegetation_net_flux_all_pools_all_gases_{veg_version}__{key}_{additional_data_date}__{veg_analysis_years}__kt_CO2e"
+        output_name = f"vegetation_net_flux_all_pools_all_gases_{veg_version}__{key}_{additional_data_date}__{veg_analysis_years}__kt_CO2e_yr"
         output_sum_path = f"{local_reproj_folder}/{output_name}.tif"
         main_logger.info(f"Combined vegetation and {key} at {output_sum_path}")
 
@@ -332,7 +453,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
 
         main_logger.info(f"\n\n---Mapping vegetation + {key}")
 
-        # Reads raster data for year
+        # Reads raster data
         with rasterio.open(output_sum_path) as src:
 
             if bounding_box_proj is not None:
@@ -379,7 +500,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
             vmax=upper_lim_all_yrs
         )
 
-        main_logger.info(f"  Plotting map ")
+        main_logger.info(f"  Plotting map")
         ax, fig = mu.create_plot()
 
         # Sets the ocean color
@@ -434,7 +555,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
         main_logger.info(f"vegetation+{key} {bounding_box_description} took {round(end_time - start_time)} seconds: {uu.timestr()}")
 
 
-    ### Part 2: Maps LULUCF
+    ### Part 3: Maps LULUCF
 
     main_logger.info("\n\n\n---Mapping LULUCF:")
 
@@ -450,7 +571,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     full_slide_text_LULUCF_with_disclaimer = f"{full_slide_text_LULUCF} \n {cn.legend_percentile_disclaimer}"
 
     # Final combined output
-    output_name = f"LULUCF__veg_{veg_version}__{non_veg_versions}__kt_CO2e"
+    output_name = f"LULUCF__veg_{veg_version}__{non_veg_versions}__kt_CO2e_yr"
     # print("output_name:", output_name)
     final_total_path = f"{cn.local_jpeg_folder_LULUCF}/{output_name}.tif"
     # print("final_total_path:", final_total_path)
@@ -584,7 +705,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
     main_logger.info(f"LULUCF for {bounding_box_description} extent took {round(end_time - start_time)} seconds: {uu.timestr()}")
 
 
-    ### Part 3: Maps AFOLU
+    ### Part 4: Maps AFOLU
 
     main_logger.info("\n\n\n---Mapping AFOLU:")
 
@@ -604,7 +725,7 @@ def map_AFOLU_totals(net_all_gases_geotif_local,
 
 
     # Final combined output
-    output_name = f"AFOLU__veg_{veg_version}_{non_veg_versions}__kt_CO2e"
+    output_name = f"AFOLU__veg_{veg_version}_{non_veg_versions}__kt_CO2e_yr"
     final_total_path = f"{cn.local_jpeg_folder_AFOLU}/{output_name}.tif"
     with rasterio.open(final_total_path, 'w', **veg_meta) as dst:
         dst.write(total_across_AFOLU.astype('float32'), 1)
