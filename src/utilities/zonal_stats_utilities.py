@@ -1,0 +1,234 @@
+import pandas as pd
+from dask.distributed import print
+import xarray as xr
+import numpy as np
+from io import BytesIO
+import requests
+
+# Project imports
+from src.utilities import constants_and_names as cn
+from src.utilities import universal_utilities as uu
+
+
+# Creates a Pandas dataframe with the state_nodes codes and meanings from an Excel spreadsheet
+def create_state_node_df(state_node_lookup_table_local, state_node_lookup_table_s3, sheet_name):
+
+    try:
+        # Tries fetching the file from the S3 URL
+        # print(f"Attempting to download file from URL: {spreadsheet}")
+        response = requests.get(state_node_lookup_table_s3, timeout=10)
+        response.raise_for_status()
+        state_node_df = pd.read_excel(BytesIO(response.content), sheet_name=sheet_name)
+
+    except (requests.exceptions.RequestException, Exception) as e:
+        print(f"Failed to download file from S3. Falling back to local file. Error: {e}")
+
+        print(f"Reading file from local path: {state_node_lookup_table_local}")
+        state_node_df = pd.read_excel(state_node_lookup_table_local, sheet_name=sheet_name)
+
+    return state_node_df
+
+# Crops one input to the other input's extent.
+# ref is the reference dataset that is being cropped to.
+# From long chat in https://chatgpt.com/g/g-vK4oPfjfp-coding-assistant/c/684749fe-7b30-800a-ba8b-c502377f2c3a
+def safe_crop(ds, ref):
+    return ds.sel(x=ref.x, y=ref.y, method="nearest")
+
+
+# Fix floating-point precision issues
+def round_coords(ds, decimals=5):
+    ds = ds.assign_coords({
+        'x': np.round(ds.coords['x'].values, decimals),
+        'y': np.round(ds.coords['y'].values, decimals)
+    })
+    return ds
+
+
+# Converts results of flox to coordinate dictionary.
+# This code came from Solomon Negusse and I haven't changed it in any substantial way.
+def convert_to_coord_dict(flux_results, main_logger):
+
+    main_logger.info(f"  Creating tile table: {uu.timestr()}")
+    sparse_data = flux_results.data
+
+    dim_names = flux_results.dims
+    indices = sparse_data.coords  # tuple of arrays with indices into each dim
+    values = sparse_data.data  # non-zero values
+
+    coord_dict = {
+        dim: flux_results.coords[dim].values[indices[i]]
+        for i, dim in enumerate(dim_names)
+    }
+    coord_dict["value"] = values
+
+    return coord_dict
+
+
+# Creates all summative output rows in one go, rather than one summative output type at a time (e.g., AGC net flux, removals all pools, etc.).
+# Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69973d0e-2dec-832a-bc6f-8cb1f914f0f6
+def add_all_summative_rows(df_other: pd.DataFrame, composites: dict[str, list[str]]):
+    """
+    Create all summative rows in one pass.
+    df_other must already have analysis_layer cleaned (no '_ha_yr') and must contain 'value'.
+    """
+
+    # Build mapping: each (base_layer -> composite_layer) pair becomes one row
+    mapping = pd.DataFrame(
+        [(base, comp) for comp, bases in composites.items() for base in bases],
+        columns=["analysis_layer", "composite_layer"],
+    )
+
+    # Keep only rows that participate in any composite, then attach composite labels
+    df_mapped = df_other.merge(mapping, on="analysis_layer", how="inner")
+
+    if df_mapped.empty:
+        return df_other
+
+    # Group by everything except the layer + value columns
+    group_cols = [c for c in df_other.columns if c not in ["analysis_layer", "value"]]
+
+    # Sum values for each composite and contextual combination
+    summed = (
+        df_mapped
+        .groupby(group_cols + ["composite_layer"], dropna=False, as_index=False)["value"]
+        .sum()
+        .rename(columns={"composite_layer": "analysis_layer"})
+    )
+
+    # Append to df_other (original + composites)
+    return pd.concat([df_other, summed], ignore_index=True)
+
+
+# Converts flox output to dataframe and does some processing of it:
+# replaces the numeric flux type with the name
+# classifies specific flux types to larger groupings
+# adds the interval end year to the dataframe
+# adds the state node meaning to the dataframe
+# converts area from m^2 to ha
+def create_df(coord_dict, state_node_df, merge_keys, tile_id):
+
+    df = pd.DataFrame(coord_dict)
+    # print(df)
+
+    # Adds column with tile_id
+    df['tile_id'] = str(tile_id)
+
+    # Summative outputs
+    layers_emissions_all_pools_CO2_only = [
+        cn.agc_gross_emis_pattern.replace('_ha_yr', ''),
+        cn.bgc_gross_emis_pattern.replace('_ha_yr', ''),
+        cn.deadwood_c_gross_emis_pattern.replace('_ha_yr', ''),
+        cn.litter_c_gross_emis_pattern.replace('_ha_yr', '')
+    ]
+
+    layers_emissions_all_pools_non_CO2 = [
+        cn.ch4_gross_emis_pattern.replace('_ha_yr', ''),
+        cn.n2o_gross_emis_pattern.replace('_ha_yr', '')
+    ]
+
+    layers_removals_all_pools = [
+        cn.agc_gross_removals_pattern.replace('_ha_yr', ''),
+        cn.bgc_gross_removals_pattern.replace('_ha_yr', ''),
+        cn.deadwood_c_gross_removals_pattern.replace('_ha_yr', ''),
+        cn.litter_c_gross_removals_pattern.replace('_ha_yr', '')
+    ]
+
+    layers_emissions_all_pools_all_gases = layers_emissions_all_pools_CO2_only + layers_emissions_all_pools_non_CO2
+
+    layers_net_AGC = [cn.agc_gross_emis_pattern.replace('_ha_yr', ''), cn.agc_gross_removals_pattern.replace('_ha_yr', '')]
+    layers_net_BGC = [cn.bgc_gross_emis_pattern.replace('_ha_yr', ''), cn.bgc_gross_removals_pattern.replace('_ha_yr', '')]
+    layers_net_deadwood_C = [cn.deadwood_c_gross_emis_pattern.replace('_ha_yr', ''), cn.deadwood_c_gross_removals_pattern.replace('_ha_yr', '')]
+    layers_net_litter_C = [cn.litter_c_gross_emis_pattern.replace('_ha_yr', ''), cn.litter_c_gross_removals_pattern.replace('_ha_yr', '')]
+
+    # layers_net_CO2_only = layers_emissions_all_pools_CO2_only + layers_removals_all_pools
+    # layers_net_all_gases = layers_emissions_all_pools_all_gases + layers_removals_all_pools
+
+    # Dictionary of summative outputs.
+    summative_outputs = {
+        cn.gross_emis_all_C_pools_CO2_only_pattern: layers_emissions_all_pools_CO2_only,
+        cn.gross_emis_all_C_pools_non_CO2_only_pattern: layers_emissions_all_pools_non_CO2,
+        cn.gross_emis_all_C_pools_all_gases_pattern: layers_emissions_all_pools_all_gases,
+        cn.gross_removals_all_C_pools_pattern: layers_removals_all_pools,
+        cn.net_flux_agc_pattern: layers_net_AGC,
+        cn.net_flux_bgc_pattern: layers_net_BGC,
+        cn.net_flux_deadwood_c_pattern: layers_net_deadwood_C,
+        cn.net_flux_litter_c_pattern: layers_net_litter_C,
+        # cn.net_flux_all_C_pools_CO2_only_pattern: layers_net_CO2_only,
+        # cn.net_flux_all_C_pools_all_gases_pattern: layers_net_all_gases,
+    }
+
+    # Splits df into pixel area and other analysis layers
+    df_area = (
+        df[df['analysis_layer'] == 'pixel_area_ha']
+          .rename(columns={'value': 'pixel_area_ha'})
+          [merge_keys + ['pixel_area_ha']]
+    )
+
+    # Non-pixel area analysis layers
+    df_other = df[df['analysis_layer'] != 'pixel_area_ha']
+
+    # Removes _ha_yr from analysis layer names because these are no longer per-ha values
+    df_other.loc[:, 'analysis_layer'] = df_other['analysis_layer'].str.replace('_ha_yr', '', regex=False)
+
+    # Creates all summative rows in one pass
+    df_other = add_all_summative_rows(df_other, summative_outputs)
+
+    # Merges area values into flux rows
+    df_with_areas = df_other.merge(df_area, on=merge_keys, how='left')
+
+    # Adds the state_node meaning and classifications to the dataframe
+    df_with_areas = df_with_areas.merge(state_node_df[['land_state', 'land_state_meaning', 'land_state_broad_class', 'land_state_detailed_class', 'tall_veg_type']],
+              left_on='land_state_node', right_on='land_state',
+              how='left')
+    # print("merged:", df_with_areas)
+
+    # Replaces the year index with the actual reporting year
+    df_with_areas['year'] = df_with_areas['year'] + cn.interval_end_years_annual[0]
+
+    # Deletes redundant state node column
+    df_with_areas = df_with_areas.drop(columns=['land_state'])
+
+    # Converts numeric codes to ISO codes
+    # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/698a53aa-8674-832c-b734-4bd8afc6a6df
+    # Based on https://github.com/wri/project-zeno-data-infra/blob/main/notebooks/grasslands_areas_gadm_2000-2022.ipynb originally
+    if cn.adm0_pattern in df_with_areas.columns:
+        df_with_areas[cn.adm0_pattern] = df_with_areas[cn.adm0_pattern].map(cn.numeric_to_alpha3)
+        df_with_areas['country_name'] = df_with_areas[cn.adm0_pattern].map(cn.iso_to_country)
+        df_with_areas['region'] = df_with_areas[cn.adm0_pattern].map(cn.iso_to_region)
+
+    # Maps cont_eco to continent and ecozone-continent if the contextual layer is used
+    # From https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/698a53aa-8674-832c-b734-4bd8afc6a6df
+    if cn.cont_eco_zstats_pattern in df_with_areas.columns:
+        df_with_areas['continent'] = df_with_areas[cn.cont_eco_zstats_pattern].map(lambda x: cn.cont_eco_to_text.get(x, {}).get('continent'))
+        df_with_areas['continent_ecozone'] = df_with_areas[cn.cont_eco_zstats_pattern].map(lambda x: cn.cont_eco_to_text.get(x, {}).get('ecozone'))
+
+    # Maps watershed codes to names if the contextual layer is used
+    if cn.watersheds_pattern in df_with_areas.columns:
+        df_with_areas['watershed_name'] = df_with_areas[cn.watersheds_pattern].map(cn.watershed_to_text)
+
+    # Maps WDPA codes to names if the contextual layer is used
+    if cn.WDPA_pattern in df_with_areas.columns:
+        df_with_areas['WDPA_type'] = df_with_areas[cn.WDPA_pattern].map(cn.WDPA_to_text)
+
+        # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69aee45e-ce6c-8325-b1d0-a6c6b0e7ae2e
+        df_with_areas["WDPA_high_protection"] = "Other protection status"
+
+        df_with_areas.loc[df_with_areas["WDPA_type"] == "NA", "WDPA_high_protection"] = "Not protected"
+        df_with_areas.loc[df_with_areas["WDPA_type"].isin(["Cateogry Ia", "Category Ib", "Category II", "Category III"]), "WDPA_high_protection"] = "High protection"
+
+
+    # Replaces managed land numeric values with managed/unmanaged if the contextual layer is used
+    if cn.managed_land_CAN_pattern in df_with_areas.columns:
+        df_with_areas[cn.managed_land_CAN_pattern] = df_with_areas[cn.managed_land_CAN_pattern].map(cn.managed_land_to_text)
+    if cn.managed_land_USA_pattern in df_with_areas.columns:
+        df_with_areas[cn.managed_land_USA_pattern] = df_with_areas[cn.managed_land_USA_pattern].map(cn.managed_land_to_text)
+    if cn.BRA_biomes_pattern in df_with_areas.columns:
+        df_with_areas[cn.BRA_biomes_pattern] = df_with_areas[cn.BRA_biomes_pattern].map(cn.BRA_biomes_to_text)
+
+    # Calculates flux density (Mg CO2(e)/ha) for each row
+    df_with_areas['density__Mg_ha'] = df_with_areas['value'] / df_with_areas['pixel_area_ha'].replace(0, pd.NA)
+
+    # Renames pixel_area_ha to area_ha
+    df_with_areas = df_with_areas.rename(columns={'pixel_area_ha': 'area_ha'})
+
+    return df_with_areas
