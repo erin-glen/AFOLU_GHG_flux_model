@@ -450,8 +450,8 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         ]
 
         main_logger.info(f"  Done computing {tile_id}: {uu.timestr()}")
-        coord_dict = zsu.convert_to_coord_dict(results, main_logger)
-        df = zsu.create_df(coord_dict, state_node_df, contextual_layers, tile_id)
+        coord_dict = zsu.convert_to_coord_dict(results, tile_id, main_logger)
+        df = zsu.create_df(coord_dict, state_node_df, contextual_layers, tile_id, 'vegetation', main_logger)
         main_logger.info(f"  Rows in {tile_id} dataframe: {len(df.index)}: {uu.timestr()}")
 
 

@@ -401,10 +401,10 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         (flux_cube_subset,
          pixel_area_expanded_subset,
          adm0_da,
-         # WDPA_da,
-         # cont_eco_da,
+         WDPA_da,
+         cont_eco_da,
          # landmark_da,
-         # composite_primary_da,
+         composite_primary_da,
          # KBA_da,
          # watersheds_da,
          # bra_da,
@@ -415,10 +415,10 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
             flux_cube_subset,
             pixel_area_expanded_subset,
             adm0_da,
-            # WDPA_da,
-            # cont_eco_da,
+            WDPA_da,
+            cont_eco_da,
             # landmark_da,
-            # composite_primary_da,
+            composite_primary_da,
             # KBA_da,
             # watersheds_da,
             # bra_da,
@@ -434,10 +434,10 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
             *(
                 adm0_da,
                 # land_state_node_aligned_subset,
-                # WDPA_da,
-                # cont_eco_da,
+                WDPA_da,
+                cont_eco_da,
                 # landmark_da,
-                # composite_primary_da,
+                composite_primary_da,
                 # KBA_da,
                 # watersheds_da,
                 # bra_da,
@@ -449,10 +449,10 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
             expected_groups=(
                 cn.gadm_adm0_ids,
                 # node_codes,
-                # cn.WDPA_codes,
-                # cn.cont_eco_codes,
+                cn.WDPA_codes,
+                cn.cont_eco_codes,
                 # cn.landmark_codes,
-                # cn.composite_primary_codes,
+                cn.composite_primary_codes,
                 # cn.KBA_codes,
                 # cn.watershed_codes,
                 # cn.BRA_biomes_codes,
@@ -469,10 +469,10 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         contextual_layers = [
             cn.adm0_pattern,
             # cn.land_state_pattern,
-            # cn.WDPA_pattern,
-            # cn.cont_eco_zstats_pattern,
+            cn.WDPA_pattern,
+            cn.cont_eco_zstats_pattern,
             # cn.landmark_pattern,
-            # cn.starting_composite_primary_forest_pattern,
+            cn.starting_composite_primary_forest_pattern,
             # cn.KBA_pattern,
             # cn.watersheds_pattern,
             # cn.BRA_biomes_pattern,
@@ -482,14 +482,14 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         ]
 
         main_logger.info(f"  Done computing {tile_id}: {uu.timestr()}")
-        coord_dict = zsu.convert_to_coord_dict(results, main_logger)
-        # df = zsu.create_df(coord_dict, state_node_df, contextual_layers, tile_id)
+        coord_dict = zsu.convert_to_coord_dict(results, tile_id, main_logger)
+        df = zsu.create_df(coord_dict, state_node_df, contextual_layers, tile_id, 'SOC', main_logger)
         main_logger.info(f"  Rows in {tile_id} dataframe: {len(df.index)}: {uu.timestr()}")
 
 
         main_logger.info(f"  Saving {tile_id} output table: {uu.timestr()}")
-        tile_df_name = f'veg_model_zonal_stats_{tile_id}_v{cn.veg_model_version_underscore}_{zonal_stats_description}_{time.strftime('%Y%m%d_%H_%M_%S')}'
-        # df.to_parquet(f"{local_zonal_stats_folder}/{tile_df_name}.parquet")
+        tile_df_name = f'SOC_zonal_stats_{tile_id}_v{cn.SOC_soil_model_version_underscore}_{zonal_stats_description}_{time.strftime('%Y%m%d_%H_%M_%S')}'
+        df.to_parquet(f"{local_zonal_stats_folder}/{tile_df_name}.parquet")
 
         # List of parquet files (to convert to csvs after cluster is downsized)
         parquet_outputs.append(f"{local_zonal_stats_folder}/{tile_df_name}.parquet")
@@ -513,7 +513,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     n_workers = len(workers)
 
     # Reduces number of workers in the cluster down to 1 if there is more than 10
-    if n_workers > 10:
+    if n_workers > 25:
         main_logger.info("Resizing cluster to 1 worker")
 
         resize_cluster.resize_coiled_cluster(cluster_name, 1)
@@ -522,7 +522,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     parquet_files = sorted(
         str(local_zonal_stats_folder / f)
         for f in os.listdir(local_zonal_stats_folder)
-        if f.endswith(".parquet") and "veg_model_zonal_stats_" in f
+        if f.endswith(".parquet") and "SOC_zonal_stats_" in f
     )
 
     if not parquet_files:
@@ -546,7 +546,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     main_logger.info(f"Rows in combined dataframe: {len(combined_df.index)}")
     main_logger.info(combined_df.head())
 
-    combined_df_name = f'veg_model_zonal_stats_v{cn.veg_model_version_underscore}_{time.strftime('%Y%m%d_%H_%M_%S')}'
+    combined_df_name = f'SOC_zonal_stats_v{cn.veg_model_version_underscore}_{time.strftime('%Y%m%d_%H_%M_%S')}'
     combined_df.to_parquet(f"{local_zonal_stats_folder}/{combined_df_name}.parquet")
     if len(combined_df.index) < 900_000:  # Only writes combined file to Excel if it's not giant
         combined_df.to_csv(f"{local_zonal_stats_folder}/{combined_df_name}.csv", index=False)

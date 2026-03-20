@@ -46,9 +46,9 @@ def round_coords(ds, decimals=5):
 
 # Converts results of flox to coordinate dictionary.
 # This code came from Solomon Negusse and I haven't changed it in any substantial way.
-def convert_to_coord_dict(flux_results, main_logger):
+def convert_to_coord_dict(flux_results, tile_id, main_logger):
 
-    main_logger.info(f"  Creating tile table: {uu.timestr()}")
+    main_logger.info(f"  Creating {tile_id} coord_dict: {uu.timestr()}")
     sparse_data = flux_results.data
 
     dim_names = flux_results.dims
@@ -105,7 +105,9 @@ def add_all_summative_rows(df_other: pd.DataFrame, composites: dict[str, list[st
 # adds the interval end year to the dataframe
 # adds the state node meaning to the dataframe
 # converts area from m^2 to ha
-def create_df(coord_dict, state_node_df, merge_keys, tile_id):
+def create_df(coord_dict, state_node_df, merge_keys, tile_id, flux_type, main_logger):
+
+    main_logger.info(f"  Creating {tile_id} data frame: {uu.timestr()}")
 
     df = pd.DataFrame(coord_dict)
     # print(df)
@@ -177,16 +179,27 @@ def create_df(coord_dict, state_node_df, merge_keys, tile_id):
     df_with_areas = df_other.merge(df_area, on=merge_keys, how='left')
 
     # Adds the state_node meaning and classifications to the dataframe
-    df_with_areas = df_with_areas.merge(state_node_df[['land_state', 'land_state_meaning', 'land_state_broad_class', 'land_state_detailed_class', 'tall_veg_type']],
+    if cn.land_state_pattern in df_with_areas.columns:
+        df_with_areas = df_with_areas.merge(state_node_df[['land_state', 'land_state_meaning', 'land_state_broad_class', 'land_state_detailed_class', 'tall_veg_type']],
               left_on='land_state_node', right_on='land_state',
               how='left')
     # print("merged:", df_with_areas)
 
-    # Replaces the year index with the actual reporting year
-    df_with_areas['year'] = df_with_areas['year'] + cn.interval_end_years_annual[0]
+    # Replaces the year index with the actual reporting year (differs for vegetation and SOC)
+    if flux_type == "vegetation":
+        df_with_areas['year'] = df_with_areas['year'] + cn.interval_end_years_annual[0]
+    elif flux_type == "SOC":
+        # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69bcb169-b658-832e-b697-46d22c126cb6
+        # Could also try using .map()-- may be faster (or slower) for large dfs
+        df_with_areas["year"] = [
+            cn.SOC_density_intervals[i] for i in df_with_areas["year"]
+        ]
+    else:
+        main_logger.warning(f"{flux_type} not found for {tile_id}")
 
     # Deletes redundant state node column
-    df_with_areas = df_with_areas.drop(columns=['land_state'])
+    if 'land_state' in df_with_areas.columns:
+        df_with_areas = df_with_areas.drop(columns=['land_state'])
 
     # Converts numeric codes to ISO codes
     # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/698a53aa-8674-832c-b734-4bd8afc6a6df
