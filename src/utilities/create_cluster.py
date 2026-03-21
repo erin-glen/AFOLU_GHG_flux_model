@@ -54,9 +54,11 @@ def create_cluster(cluster_name, n_workers, worker_memory, threads_per_worker=No
 
     elif worker_memory == 32:
         idle_timeout = 20
-        scheduler_vm_type = "x8g.large"   # 2 vCPU/worker. x2gd.large also has this ratio, and theoretically lower interruption rates but has worse hardware.
-        worker_vm_type = "x8g.large"      # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694bfc7f-fab0-8332-b903-d5efa84b61c3
-        # scheduler_vm_type = "x2gd.large"   # 2 vCPU/worker. x8g.large also has this ratio. x2gd.large theoretically has a lower interruption rate.
+        scheduler_vm_type = "r7g.large"    # 4 vCPU/worker, same series as Solomon used for zonal stats
+        worker_vm_type = "r7g.xlarge"
+        # scheduler_vm_type = "x8g.large"   # 2 vCPU/worker. x2gd.large also has this ratio, and theoretically lower interruption rates but has worse hardware.
+        # worker_vm_type = "x8g.large"      # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694bfc7f-fab0-8332-b903-d5efa84b61c3
+        # scheduler_vm_type = "x2gd.large"   # 2 vCPU/worker. x8g.large also has this ratio. x2gd.large theoretically has a lower interruption rate but seems older and slower.
         # worker_vm_type = "x2gd.large"      # per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/694bfc7f-fab0-8332-b903-d5efa84b61c3
 
     elif worker_memory == 16:
