@@ -2050,7 +2050,8 @@ def get_cluster_info(client, cluster):
         worker_memory = "Unknown"
         # worker_type = "Unknown"
 
-    dashboard_link = 'not yet determined'
+    # Per https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69c1440e-15b0-8329-a795-8b0d22800481
+    dashboard_link = cluster.details_url
 
     return worker_memory, n_workers, nthreads, dashboard_link
 

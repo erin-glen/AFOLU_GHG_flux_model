@@ -122,6 +122,9 @@ def main(cluster_name, layers_to_process, no_upload, log_note=None):
             'test_chunk': cn.watersheds_test_chunk
         }
 
+    # I got alignment errors when I tried running SOC zonal stats with this.
+    # Couldn't figure out why.
+    # Tried in https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69c09184-06dc-8332-a90f-7bf0e803ea16
     if 'managed_land_Canada' in layers_to_process:
         layers_to_zarr["managed_land_Canada"] = {
             'zarr_date': cn.managed_land_CAN_zarr_date,

@@ -186,7 +186,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     KBA_xr = xr.open_zarr(cn.KBA_zarr_path, consolidated=False).rename_vars(band_data=cn.KBA_pattern)
     watersheds_xr = xr.open_zarr(cn.watersheds_zarr_path, consolidated=False).rename_vars(band_data=cn.watersheds_pattern)
     BRA_biomes_xr = xr.open_zarr(cn.BRA_biomes_zarr_path, consolidated=False).rename_vars(band_data=cn.BRA_biomes_pattern)
-    # managed_land_CAN_xr = xr.open_zarr(cn.managed_land_CAN_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_CAN_pattern)  # Alignment issues below, so not using it
+    # managed_land_CAN_xr = xr.open_zarr(cn.managed_land_CAN_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_CAN_pattern)  # Alignment issues below, so not using it.     # Tried in https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/69c09184-06dc-8332-a90f-7bf0e803ea16
     managed_land_USA_xr = xr.open_zarr(cn.managed_land_USA_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_USA_pattern)
 
     ds = xr.open_zarr(SOC_zarr_path, consolidated=False)
@@ -406,9 +406,9 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
          composite_primary_da,
          KBA_da,
          watersheds_da,
-         bra_da,
+         # bra_da,
          # managed_land_CAN_da,
-         managed_land_USA_da,
+         # managed_land_USA_da,
          # land_state_node_aligned_subset,
          ) = xr.align(
             flux_cube_subset,
@@ -420,9 +420,9 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
             composite_primary_da,
             KBA_da,
             watersheds_da,
-            bra_da,
+            # bra_da,
             # managed_land_CAN_da,
-            managed_land_USA_da,
+            # managed_land_USA_da,
             # land_state_node_aligned_subset,
             join="override"
         )
@@ -439,9 +439,9 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
                 composite_primary_da,
                 KBA_da,
                 watersheds_da,
-                bra_da,
+                # bra_da,
                 # managed_land_CAN_da,
-                managed_land_USA_da,
+                # managed_land_USA_da,
                 flux_cube_subset["year"]
             ),
             func='sum',
@@ -454,9 +454,9 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
                 cn.composite_primary_codes,
                 cn.KBA_codes,
                 cn.watershed_codes,
-                cn.BRA_biomes_codes,
+                # cn.BRA_biomes_codes,
                 # cn.managed_land_codes,  # For Canada
-                cn.managed_land_codes,  # For USA
+                # cn.managed_land_codes,  # For USA
                 flux_cube_subset.year.values,
             ),
             group_dims=["year"],
@@ -474,9 +474,9 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
             cn.starting_composite_primary_forest_pattern,
             cn.KBA_pattern,
             cn.watersheds_pattern,
-            cn.BRA_biomes_pattern,
+            # cn.BRA_biomes_pattern,
             # cn.managed_land_CAN_pattern,
-            cn.managed_land_USA_pattern,
+            # cn.managed_land_USA_pattern,
             'year'
         ]
 
