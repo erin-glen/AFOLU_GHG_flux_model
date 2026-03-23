@@ -186,7 +186,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     KBA_xr = xr.open_zarr(cn.KBA_zarr_path, consolidated=False).rename_vars(band_data=cn.KBA_pattern)
     watersheds_xr = xr.open_zarr(cn.watersheds_zarr_path, consolidated=False).rename_vars(band_data=cn.watersheds_pattern)
     BRA_biomes_xr = xr.open_zarr(cn.BRA_biomes_zarr_path, consolidated=False).rename_vars(band_data=cn.BRA_biomes_pattern)
-    # managed_land_CAN_xr = xr.open_zarr(cn.managed_land_CAN_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_CAN_pattern)
+    # managed_land_CAN_xr = xr.open_zarr(cn.managed_land_CAN_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_CAN_pattern)  # Alignment issues below, so not using it
     managed_land_USA_xr = xr.open_zarr(cn.managed_land_USA_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_USA_pattern)
 
     ds = xr.open_zarr(SOC_zarr_path, consolidated=False)
@@ -318,7 +318,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         KBA_aligned_subset = KBA_aligned.sel(x=slice(west, east), y=slice(north, south))
         watersheds_aligned_subset = watersheds_aligned.sel(x=slice(west, east), y=slice(north, south))
         BRA_biomes_aligned_subset = BRA_biomes_aligned.sel(x=slice(west, east), y=slice(north, south))
-        # managed_land_CAN_aligned_subset = managed_land_CAN_aligned.sel(x=slice(west, east), y=slice(north, south))
+        # managed_land_CAN_aligned_subset = managed_land_CAN_aligned.sel(x=slice(west, east), y=slice(north, south))  # Alignment issue below, so not using it
         managed_land_USA_aligned_subset = managed_land_USA_aligned.sel(x=slice(west, east), y=slice(north, south))
         # land_state_node_aligned_subset = land_state_node_aligned.sel(x=slice(west, east), y=slice(north, south))
         pixel_area_expanded_subset = pixel_area_expanded.sel(x=slice(west, east), y=slice(north, south))
@@ -395,20 +395,6 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         if "year" in composite_primary_da.dims:
             composite_primary_da = composite_primary_da.isel(year=0, drop=True)
 
-        main_logger.info(f"flux sizes: x={flux_cube_subset.sizes.get('x')}, y={flux_cube_subset.sizes.get('y')}")
-        # main_logger.info(f"CAN  sizes: x={managed_land_CAN_da.sizes.get('x')}, y={managed_land_CAN_da.sizes.get('y')}")
-        main_logger.info(f"USA  sizes: x={managed_land_USA_da.sizes.get('x')}, y={managed_land_USA_da.sizes.get('y')}")
-
-        main_logger.info(f"flux x[0], x[-1]: {flux_cube_subset.x.values[0]}, {flux_cube_subset.x.values[-1]}")
-        main_logger.info(f"CAN  x[0], x[-1]: {managed_land_CAN_da.x.values[0]}, {managed_land_CAN_da.x.values[-1]}")
-
-        main_logger.info(f"flux dx first few: {np.diff(flux_cube_subset.x.values[:5])}")
-        main_logger.info(f"CAN  dx first few: {np.diff(managed_land_CAN_da.x.values[:5])}")
-        main_logger.info(f"USA  dx first few: {np.diff(managed_land_USA_da.x.values[:5])}")
-
-        main_logger.info(f"flux unique x count: {len(np.unique(flux_cube_subset.x.values))}")
-        main_logger.info(f"CAN  unique x count: {len(np.unique(managed_land_CAN_da.x.values))}")
-
         # Final alignment
         main_logger.info(f"  Aligning {tile_id}: {uu.timestr()}")
         (flux_cube_subset,
@@ -421,7 +407,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
          KBA_da,
          watersheds_da,
          bra_da,
-         managed_land_CAN_da,
+         # managed_land_CAN_da,
          managed_land_USA_da,
          # land_state_node_aligned_subset,
          ) = xr.align(
@@ -435,7 +421,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
             KBA_da,
             watersheds_da,
             bra_da,
-            managed_land_CAN_da,
+            # managed_land_CAN_da,
             managed_land_USA_da,
             # land_state_node_aligned_subset,
             join="override"
