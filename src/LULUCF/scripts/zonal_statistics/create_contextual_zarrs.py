@@ -140,8 +140,6 @@ def main(cluster_name, layers_to_process, no_upload, log_note=None):
             'test_chunk': cn.managed_USA_test_chunk
         }
 
-    fs = fsspec.filesystem("s3", anon=False)
-
     main_logger.info(f"Contextual layers to zarr ({len(layers_to_zarr)} layers): {layers_to_zarr}")
 
     # Iterates through supplied contextual layers
@@ -173,13 +171,6 @@ def main(cluster_name, layers_to_process, no_upload, log_note=None):
         ### It works even for zarrs that do not have global coverage (e.g., Brazil biomes)
         ### From https://chatgpt.com/g/g-p-69399a7fcc808191b337d3fac695447c-afolu-flux-model/c/6986043f-c8b0-832c-837f-7329873aa948
 
-        # zarrs without time dimension have the variable name band_data
-        var_name = 'band_data'
-
-        # print(f"  Getting array for {test_chunk}")
-        zarr_mapper_band_data = fs.get_mapper(f"{values['zarr_dir']}/{var_name}")
-        zarr_array = zarr.open_array(zarr_mapper_band_data, mode="r")
-
         # Points to the Zarr group
         fs = fsspec.filesystem("s3", anon=False)
         zarr_store = fs.get_mapper(values['zarr_dir'])
@@ -201,11 +192,25 @@ def main(cluster_name, layers_to_process, no_upload, log_note=None):
         else:
             sys.exit("No x coordinate array")
 
+        main_logger.info(f"{layer_to_zarr} x shape: {x_coords.shape}")
+        main_logger.info(f"{layer_to_zarr} y shape: {y_coords.shape}")
+        main_logger.info(f"{layer_to_zarr} x first 5 diffs: {np.diff(x_coords[:5])}")
+        main_logger.info(f"{layer_to_zarr} y first 5 diffs: {np.diff(y_coords[:5])}")
+        main_logger.info(f"{layer_to_zarr} unique x count: {len(np.unique(x_coords))}")
+        main_logger.info(f"{layer_to_zarr} unique y count: {len(np.unique(y_coords))}")
+
         # Gets lat and long indices for chunk based on the indices of this zarr (as opposed to global zarr indices)
         lat_vals = y_coords  # usually descending
         lon_vals = x_coords  # usually ascending
         lat0, lat1 = zu.get_index_range(lat_vals, values['test_chunk'][3], values['test_chunk'][1], descending=True)
         lon0, lon1 = zu.get_index_range(lon_vals, values['test_chunk'][0], values['test_chunk'][2])
+
+        # zarrs without time dimension have the variable name band_data
+        var_name = 'band_data'
+
+        # print(f"  Getting array for {test_chunk}")
+        zarr_mapper_band_data = fs.get_mapper(f"{values['zarr_dir']}/{var_name}")
+        zarr_array = zarr.open_array(zarr_mapper_band_data, mode="r")
 
         # Array from zarr chunk
         zarr_chunk_array = zarr_array[lat0:lat1, lon0:lon1]

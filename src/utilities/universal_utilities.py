@@ -2050,7 +2050,9 @@ def get_cluster_info(client, cluster):
         worker_memory = "Unknown"
         # worker_type = "Unknown"
 
-    return worker_memory, n_workers, nthreads
+    dashboard_link = 'not yet determined'
+
+    return worker_memory, n_workers, nthreads, dashboard_link
 
 
 

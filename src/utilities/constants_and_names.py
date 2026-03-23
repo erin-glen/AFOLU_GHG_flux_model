@@ -1080,7 +1080,7 @@ watersheds_zarr_path = f"{contextual_zarr_path}river_basins/v2018/{watersheds_za
 watersheds_test_chunk = [29, -1, 30, 0]  # 7005 in upper and lower left corners, 7003 in upper and lower right corners; should have nearly full coverage (00N_020E)
 watersheds_pattern = 'watershed'
 
-managed_land_CAN_zarr_date = '20260219'
+managed_land_CAN_zarr_date = '20260322'
 managed_land_CAN_zarr_dtype = 'uint8'  # 1=managed, 2=unmanaged
 managed_land_CAN_geotif_path = "s3://gfw2-data/climate/jrc_managed_land_can__from_gfw-data-lake/v20260218/raster/epsg-4326/10/40000/managed_land_extent/geotiff/"
 managed_land_CAN_zarr_path = f"{contextual_zarr_path}jrc_managed_land_can/v20260218/{managed_land_CAN_zarr_date}_fillValue_removed/jrc_managed_land_can_{managed_land_CAN_zarr_date}.zarr"

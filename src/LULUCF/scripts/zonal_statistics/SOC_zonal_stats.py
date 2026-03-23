@@ -118,7 +118,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
                         cn.SOC_density_min_soil_extent_pattern, cn.SOC_change_min_soil_extent_pattern
                         ]
 
-    # TODO Use this when I rerun SOC and the zarr layers have units
+    # TODO Add this when I rerun SOC and the zarr layers have units
     # full_list_of_vars_with_units = [
     #     zu.add_units_year_to_pattern(var_name, 9999)[0]  # Dummy year since we don't need the year to access the datasets in the zarr, just add the units
     #     for var_name in full_list_of_vars
@@ -186,7 +186,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     KBA_xr = xr.open_zarr(cn.KBA_zarr_path, consolidated=False).rename_vars(band_data=cn.KBA_pattern)
     watersheds_xr = xr.open_zarr(cn.watersheds_zarr_path, consolidated=False).rename_vars(band_data=cn.watersheds_pattern)
     BRA_biomes_xr = xr.open_zarr(cn.BRA_biomes_zarr_path, consolidated=False).rename_vars(band_data=cn.BRA_biomes_pattern)
-    managed_land_CAN_xr = xr.open_zarr(cn.managed_land_CAN_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_CAN_pattern)
+    # managed_land_CAN_xr = xr.open_zarr(cn.managed_land_CAN_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_CAN_pattern)
     managed_land_USA_xr = xr.open_zarr(cn.managed_land_USA_zarr_path, consolidated=False).rename_vars(band_data=cn.managed_land_USA_pattern)
 
     ds = xr.open_zarr(SOC_zarr_path, consolidated=False)
@@ -204,7 +204,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     KBA_xr = zsu.round_coords(KBA_xr)
     watersheds_xr = zsu.round_coords(watersheds_xr)
     BRA_biomes_xr = zsu.round_coords(BRA_biomes_xr)
-    managed_land_CAN_xr = zsu.round_coords(managed_land_CAN_xr)
+    # managed_land_CAN_xr = zsu.round_coords(managed_land_CAN_xr)
     managed_land_USA_xr = zsu.round_coords(managed_land_USA_xr)
     # land_state_node = zsu.round_coords(ds[cn.land_state_pattern])
 
@@ -218,7 +218,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
     KBA_aligned = zsu.safe_crop(KBA_xr, reference)
     watersheds_aligned = zsu.safe_crop(watersheds_xr, reference)
     BRA_biomes_aligned = zsu.safe_crop(BRA_biomes_xr, reference)
-    managed_land_CAN_aligned = zsu.safe_crop(managed_land_CAN_xr, reference)
+    # managed_land_CAN_aligned = zsu.safe_crop(managed_land_CAN_xr, reference)
     managed_land_USA_aligned = zsu.safe_crop(managed_land_USA_xr, reference)
     # land_state_node_aligned = zsu.safe_crop(land_state_node, reference)
     ds_selected_analysis_vars_aligned = zsu.safe_crop(ds_selected_analysis_vars, reference)
@@ -318,7 +318,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         KBA_aligned_subset = KBA_aligned.sel(x=slice(west, east), y=slice(north, south))
         watersheds_aligned_subset = watersheds_aligned.sel(x=slice(west, east), y=slice(north, south))
         BRA_biomes_aligned_subset = BRA_biomes_aligned.sel(x=slice(west, east), y=slice(north, south))
-        managed_land_CAN_aligned_subset = managed_land_CAN_aligned.sel(x=slice(west, east), y=slice(north, south))
+        # managed_land_CAN_aligned_subset = managed_land_CAN_aligned.sel(x=slice(west, east), y=slice(north, south))
         managed_land_USA_aligned_subset = managed_land_USA_aligned.sel(x=slice(west, east), y=slice(north, south))
         # land_state_node_aligned_subset = land_state_node_aligned.sel(x=slice(west, east), y=slice(north, south))
         pixel_area_expanded_subset = pixel_area_expanded.sel(x=slice(west, east), y=slice(north, south))
@@ -363,18 +363,17 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         else:
             watersheds_da = watersheds_aligned_subset[cn.watersheds_pattern]
 
-        if BRA_biomes_aligned_subset[cn.BRA_biomes_pattern].sizes.get("x", 0) == 0 or BRA_biomes_aligned_subset[
-            cn.BRA_biomes_pattern].sizes.get("y", 0) == 0:
+        if BRA_biomes_aligned_subset[cn.BRA_biomes_pattern].sizes.get("x", 0) == 0 or BRA_biomes_aligned_subset[cn.BRA_biomes_pattern].sizes.get("y", 0) == 0:
             bra_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.BRA_biomes_pattern)
             main_logger.info(f"  {cn.BRA_biomes_pattern} not in {tile_id}. Creating xarray of all 0s.")
         else:
             bra_da = BRA_biomes_aligned_subset[cn.BRA_biomes_pattern]
 
-        if managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern].sizes.get("x", 0) == 0 or managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern].sizes.get("y", 0) == 0:
-            managed_land_CAN_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.managed_land_CAN_pattern)
-            main_logger.info(f"  {cn.managed_land_CAN_pattern} not in {tile_id}. Creating xarray of all 0s.")
-        else:
-            managed_land_CAN_da = managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern]
+        # if managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern].sizes.get("x", 0) == 0 or managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern].sizes.get("y", 0) == 0:
+        #     managed_land_CAN_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.managed_land_CAN_pattern)
+        #     main_logger.info(f"  {cn.managed_land_CAN_pattern} not in {tile_id}. Creating xarray of all 0s.")
+        # else:
+        #     managed_land_CAN_da = managed_land_CAN_aligned_subset[cn.managed_land_CAN_pattern]
 
         if managed_land_USA_aligned_subset[cn.managed_land_USA_pattern].sizes.get("x", 0) == 0 or managed_land_USA_aligned_subset[cn.managed_land_USA_pattern].sizes.get("y", 0) == 0:
             managed_land_USA_da = xr.zeros_like(flux_cube_subset.isel(analysis_layer=0, drop=True)).rename(cn.managed_land_USA_pattern)
@@ -395,6 +394,20 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
         # rather than the script of the other contextual layers.
         if "year" in composite_primary_da.dims:
             composite_primary_da = composite_primary_da.isel(year=0, drop=True)
+
+        main_logger.info(f"flux sizes: x={flux_cube_subset.sizes.get('x')}, y={flux_cube_subset.sizes.get('y')}")
+        # main_logger.info(f"CAN  sizes: x={managed_land_CAN_da.sizes.get('x')}, y={managed_land_CAN_da.sizes.get('y')}")
+        main_logger.info(f"USA  sizes: x={managed_land_USA_da.sizes.get('x')}, y={managed_land_USA_da.sizes.get('y')}")
+
+        main_logger.info(f"flux x[0], x[-1]: {flux_cube_subset.x.values[0]}, {flux_cube_subset.x.values[-1]}")
+        main_logger.info(f"CAN  x[0], x[-1]: {managed_land_CAN_da.x.values[0]}, {managed_land_CAN_da.x.values[-1]}")
+
+        main_logger.info(f"flux dx first few: {np.diff(flux_cube_subset.x.values[:5])}")
+        main_logger.info(f"CAN  dx first few: {np.diff(managed_land_CAN_da.x.values[:5])}")
+        main_logger.info(f"USA  dx first few: {np.diff(managed_land_USA_da.x.values[:5])}")
+
+        main_logger.info(f"flux unique x count: {len(np.unique(flux_cube_subset.x.values))}")
+        main_logger.info(f"CAN  unique x count: {len(np.unique(managed_land_CAN_da.x.values))}")
 
         # Final alignment
         main_logger.info(f"  Aligning {tile_id}: {uu.timestr()}")
@@ -441,7 +454,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
                 KBA_da,
                 watersheds_da,
                 bra_da,
-                managed_land_CAN_da,
+                # managed_land_CAN_da,
                 managed_land_USA_da,
                 flux_cube_subset["year"]
             ),
@@ -456,7 +469,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
                 cn.KBA_codes,
                 cn.watershed_codes,
                 cn.BRA_biomes_codes,
-                cn.managed_land_codes,  # For Canada
+                # cn.managed_land_codes,  # For Canada
                 cn.managed_land_codes,  # For USA
                 flux_cube_subset.year.values,
             ),
@@ -476,7 +489,7 @@ def main(cluster_name, input_date, model_type, no_upload, zonal_stats_descriptio
             cn.KBA_pattern,
             cn.watersheds_pattern,
             cn.BRA_biomes_pattern,
-            cn.managed_land_CAN_pattern,
+            # cn.managed_land_CAN_pattern,
             cn.managed_land_USA_pattern,
             'year'
         ]
