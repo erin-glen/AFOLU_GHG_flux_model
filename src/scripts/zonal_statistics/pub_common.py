@@ -724,6 +724,90 @@ def table_by_country_burned_state_sql(with_lookup: bool) -> str:
     ORDER BY base.interval_end, base.burned_MgCO2e DESC
     """
 
+def table_by_country_climate_component_period_sql(with_lookup: bool) -> str:
+    """
+    Country × climate × component table by inventory period.
+
+    Output columns:
+      - interval_end
+      - gadm_adm0[, country, iso3]
+      - climate_domain
+      - component (Drainage|Extraction|Fire)
+      - emissions_MgCO2e
+    """
+    select_l = (
+        ", COALESCE(l.country, CAST(base.gadm_adm0 AS VARCHAR)) AS country,"
+        " COALESCE(l.iso3, CAST(base.gadm_adm0 AS VARCHAR)) AS iso3"
+        if with_lookup else ""
+    )
+    join_l = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = base.gadm_adm0" if with_lookup else ""
+    return f"""
+    WITH drained_labeled AS (
+      SELECT
+        z.interval_end,
+        COALESCE(
+          TRY_CAST(z.gadm_adm0 AS INTEGER),
+          TRY_CAST(regexp_extract(CAST(z.gadm_adm0 AS VARCHAR), '(\\d+)', 1) AS INTEGER)
+        ) AS gadm_adm0,
+        COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
+        CASE
+          WHEN regexp_matches(lower(COALESCE(ctx.emissions_state, '')),
+                              '^(extraction|peat[_\\- ]?extraction|cutover).*$')
+          THEN 'Extraction'
+          ELSE 'Drainage'
+        END AS component,
+        SUM(CASE WHEN z.flux_type = 'drained_total_Mg_CO2e' THEN z.value ELSE 0 END) AS emissions_MgCO2e
+      FROM zs_drained z
+      LEFT JOIN drained_state_ctx AS ctx
+        ON (z.drained_state_meaning = ctx.meaning)
+        OR ({_rpad_sql('z.drained_state_nodes')} = ctx.key)
+      GROUP BY 1,2,3,4
+    ),
+    burned_base AS (
+      SELECT
+        z.interval_end,
+        COALESCE(
+          TRY_CAST(z.gadm_adm0 AS INTEGER),
+          TRY_CAST(regexp_extract(CAST(z.gadm_adm0 AS VARCHAR), '(\\d+)', 1) AS INTEGER)
+        ) AS gadm_adm0,
+        COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
+        'Fire' AS component,
+        SUM(CASE WHEN z.flux_type = 'burned_total_Mg_CO2e' THEN z.value ELSE 0 END) AS emissions_MgCO2e
+      FROM zs_burned z
+      LEFT JOIN burned_state_ctx AS ctx
+        ON (z.burned_state_meaning = ctx.meaning)
+        OR ({_rpad_sql('z.burned_state_nodes')} = ctx.key)
+      GROUP BY 1,2,3,4
+    ),
+    base AS (
+      SELECT
+        interval_end,
+        gadm_adm0,
+        climate_domain,
+        component,
+        SUM(emissions_MgCO2e) AS emissions_MgCO2e
+      FROM (
+        SELECT interval_end, gadm_adm0, climate_domain, component, emissions_MgCO2e
+        FROM drained_labeled
+        UNION ALL
+        SELECT interval_end, gadm_adm0, climate_domain, component, emissions_MgCO2e
+        FROM burned_base
+      ) unioned
+      GROUP BY 1,2,3,4
+      HAVING SUM(emissions_MgCO2e) <> 0
+    )
+    SELECT
+      base.interval_end,
+      base.gadm_adm0
+      {select_l},
+      base.climate_domain,
+      base.component,
+      base.emissions_MgCO2e
+    FROM base
+    {join_l}
+    ORDER BY base.interval_end, base.gadm_adm0, base.climate_domain, base.component
+    """
+
 def table_topn_country_sql(component: str, topn: int, with_lookup: bool) -> str:
     assert component in {"drained", "burned"}
     base  = "zs_drained" if component == "drained" else "zs_burned"

@@ -462,6 +462,24 @@ def _ensure_adm0_lookup(con: duckdb.DuckDBPyConnection, csv_path: Optional[str])
     df = pc.build_adm0_lookup_df()
     if df.empty:
         return False
+
+    # Fail fast if auto-build produced no usable country names (common when
+    # optional dependency `pycountry` is missing in the runtime environment).
+    country_norm = (
+        df["country"]
+        .astype("string")
+        .fillna("")
+        .str.strip()
+        .str.lower()
+    )
+    has_real_country = country_norm.isin(["", "nodata", "none", "nan"]).eq(False).any()
+    if not has_real_country:
+        raise RuntimeError(
+            "adm0_lookup auto-build did not resolve any country names. "
+            "Install `pycountry` (e.g., `pip install pycountry`) or pass "
+            "--adm0_lookup with columns: gadm_adm0,country,iso3."
+        )
+
     con.register("adm0_lookup", df)
     return True
 
@@ -756,6 +774,8 @@ def main(argv=None):
                   _join(out_tables_dir, "by_country_drained_state_period.csv"))
         _copy_sql(con, pc.table_by_country_burned_state_sql(with_lookup=have_lookup),
                   _join(out_tables_dir, "by_country_burned_state_period.csv"))
+        _copy_sql(con, pc.table_by_country_climate_component_period_sql(with_lookup=have_lookup),
+                  _join(out_tables_dir, "by_country_climate_component_period.csv"))
         _copy_sql(con, pc.table_topn_country_sql("drained", args.topn, have_lookup),
                   _join(out_tables_dir, f"top{args.topn}_by_country_drained.csv"))
         _copy_sql(con, pc.table_topn_country_sql("burned", args.topn, have_lookup),
