@@ -1459,6 +1459,16 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --interval_type five_year \
   --run_name zarr_test \
   --create_zarr 
+  
+python -m src.scripts.core_model.0_drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --chunk_shapefile_uri s3://gfw2-data/climate/AFOLU_flux_model/fishnet_1x1deg/wwf/fishnet/operational_landscapes_1x1.shp \
+  --chunk_size 1 \
+  --start_year 2001 \
+  --end_year 2024 \
+  --interval_type five_year \
+  --run_name wwf_operational \
+  --create_zarr 
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \

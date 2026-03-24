@@ -38,7 +38,7 @@ Apply public ACLs (default publishes containers + leaves):
 
 ```bash
 python -m src.scripts.postprocessing.gee_set_public \
-  --asset-root users/erineglen/organic_soils/wwf_run \
+  --asset-root users/erineglen/organic_soils/wwf_operational \
   --recursive
 ```
 

@@ -13,11 +13,11 @@ DATA_TYPES = list(cn.drainage_outputs_to_zarr)
 
 
 INVENTORY_PERIODS = [
-    "2001_2005",
-    "2006_2010",
-    "2011_2015",
-    "2016_2020"
-    # "2021_2024"
+    # "2001_2005",
+    # "2006_2010",
+    # "2011_2015",
+    # "2016_2020"
+    "2021_2024"
 ]
 
 version = cn.model_version_underscore

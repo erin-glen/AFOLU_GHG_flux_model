@@ -26,13 +26,13 @@ Important:
 
 ```bash
 python -m src.scripts.postprocessing.s3_to_GEE \
-  --run-name wwf_run \
-  --output-date 20260120 \
+  --run-name wwf_operational \
+  --output-date 20260215 \
   --inventory-periods all \
-  --datasets "drained burned" \
+  --datasets total_pixel \
   --include-pixel-outputs \
   --gee-root users/erineglen/organic_soils \
-  --gcs-root gs://MY_STAGING_BUCKET/organic_soils_stage \
+  --gcs-root gs://organic_soils \
   --include-ext .tif \
   --gee-upload-args="--pyramiding_policy=MEAN" \
   --skip-existing
@@ -61,8 +61,8 @@ If your data uses a different layout, override `--s3-template`.
 - Use `--inventory-periods` for five-year outputs (supports `all`, a single year
   like `2021`, or `start_end` labels) or `--years` to map years into inventory
   periods (annual intervals use the year directly).
-- Dataset aliases: use `drained`, `burned`, or `all` to expand to the
-  model output dataset names defined in `cn.drainage_outputs_to_zarr`.
+- Dataset aliases: use `drained`, `burned`, `total`, `total_pixel`, or `all`
+  to expand to model output dataset names defined in `cn.drainage_outputs_to_zarr`.
 - Use `--include-pixel-outputs` to include the per-pixel datasets created
   by `3_aggregate_soils_outputs` (e.g., `_pixel_` variants of `_ha_` outputs).
 - IMPORTANT: Do not delete staged GCS objects until EE ingestion tasks complete.
@@ -185,6 +185,12 @@ def parse_datasets(raw: str, dataset_catalog: Sequence[str]) -> List[str]:
             continue
         if token == "burned":
             expanded.extend([name for name in catalog if name.startswith("burned_")])
+            continue
+        if token in {"total", "totals"}:
+            expanded.extend([name for name in catalog if "_total_" in name])
+            continue
+        if token in {"total_pixel", "totals_pixel", "pixel_total", "pixel_totals"}:
+            expanded.extend([name for name in catalog if "_total_" in name and "_pixel_" in name])
             continue
         if token in catalog:
             expanded.append(token)
@@ -413,7 +419,7 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help=(
             "Dataset names to process (comma- or space-separated). "
-            "Use drained, burned, or all to expand to model output datasets."
+            "Use drained, burned, total, total_pixel, or all to expand to model output datasets."
         ),
     )
     parser.add_argument(
