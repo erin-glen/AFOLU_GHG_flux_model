@@ -61,7 +61,7 @@ import pandas as pd
 
 import src.scripts.zonal_statistics.pub_common as pc
 import src.scripts.zonal_statistics.pub_assets as pa
-from src.scripts.zonal_statistics.run_zonal_stats import (
+from src.scripts.zonal_statistics.zonal_stats_common import (
     build_interval_pairs,
     build_output_parquet,
 )

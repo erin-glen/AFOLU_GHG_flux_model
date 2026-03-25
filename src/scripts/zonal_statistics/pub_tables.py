@@ -46,7 +46,7 @@ from typing import Optional, List, Sequence, Iterable, Tuple
 import duckdb
 import pandas as pd
 
-from src.scripts.zonal_statistics.run_zonal_statistics import (
+from src.scripts.zonal_statistics.zonal_stats_common import (
     build_output_parquet,
     build_interval_pairs,
 )

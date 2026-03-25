@@ -41,7 +41,7 @@ import matplotlib.pyplot as plt
 
 import src.scripts.zonal_statistics.pub_common as pc
 from src.scripts.zonal_statistics import zonal_constants as zc
-from src.scripts.zonal_statistics.run_zonal_stats import (
+from src.scripts.zonal_statistics.zonal_stats_common import (
     build_output_parquet,
     build_interval_pairs,
 )

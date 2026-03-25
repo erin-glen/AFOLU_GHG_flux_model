@@ -42,6 +42,7 @@ from flox import ReindexArrayType, ReindexStrategy
 from flox.xarray import xarray_reduce
 
 from src.scripts.zonal_statistics import zonal_constants as zc
+from src.scripts.zonal_statistics.zonal_stats_common import build_output_parquet
 from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
@@ -109,9 +110,6 @@ def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
     if not use_sparse or ReindexStrategy is None or ReindexArrayType is None:
         return {}
     return {"reindex": ReindexStrategy(blockwise=False, array_type=ReindexArrayType.SPARSE_COO), "fill_value": 0}
-
-def build_output_parquet(model_version: str, run_name: str, run_date: str, interval: str) -> str:
-    return posixpath.join(ROOT, f"version_{model_version}", "zonal_stats", run_name, run_date, interval).rstrip("/") + "/"
 
 def _split_s3(path: str) -> tuple[str, str]:
     if not path.startswith("s3://"):
