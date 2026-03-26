@@ -62,9 +62,7 @@ python src/scripts/uncertainty/fscore_threshold_curves_bounds.py \
     --mapped-area 120.5 \
     --mapped-area-unit Mha \
     --bounds-threshold 0.23 \
-    --area-curve-table area_vs_threshold.csv \
-    --area-curve-threshold-column threshold \
-    --area-curve-area-column area_mha
+    --area-curve-table "/mnt/c/tmp/uncertainty/area_vs_threshold_dummy.csv"
 """
 
 from __future__ import annotations
