@@ -231,7 +231,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--run-date", default="20251120", help="YYYYMMDD for zonal-statistics steps.")
     p.add_argument("--interval-end-years", default="2024", help="Interval end year(s) for zonal-statistics.")
     p.add_argument("--model-version", default="0_9_7", help="Model version for zonal-statistics.")
-    p.add_argument("--log-dir", type=Path, default=Path("logs"), help="Directory for per-step logs.")
+    p.add_argument("--log-dir", type=Path, default=Path("../logs"), help="Directory for per-step logs.")
     p.add_argument("--dry-run", action="store_true", help="Print the commands without executing them.")
     p.add_argument("--continue-on-error", action="store_true", help="Keep going if a step fails.")
     p.add_argument("--skip", nargs="*", default=[], help="List of step labels to skip (substring match).")
