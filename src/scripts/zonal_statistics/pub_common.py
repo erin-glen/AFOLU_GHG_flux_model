@@ -757,8 +757,20 @@ def table_by_country_climate_component_period_sql(with_lookup: bool) -> str:
           THEN 'Extraction'
           ELSE 'Drainage'
         END AS component,
-        SUM(CASE WHEN z.flux_type = 'drained_total_Mg_CO2e' THEN z.value ELSE 0 END) AS flux_Mg_CO2e_yr,
-        SUM(CASE WHEN z.flux_type = 'area__ha' THEN z.value ELSE 0 END) AS area_ha
+        SUM(
+          CASE
+            WHEN z.flux_type = 'drained_total_Mg_CO2e'
+             AND COALESCE(ctx.drained_state, '') = 'drained'
+            THEN z.value ELSE 0
+          END
+        ) AS flux_Mg_CO2e_yr,
+        SUM(
+          CASE
+            WHEN z.flux_type = 'area__ha'
+             AND COALESCE(ctx.drained_state, '') = 'drained'
+            THEN z.value ELSE 0
+          END
+        ) AS area_ha
       FROM zs_drained z
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
