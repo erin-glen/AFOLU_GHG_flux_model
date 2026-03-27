@@ -775,7 +775,7 @@ def main(argv=None):
         _copy_sql(con, pc.table_by_country_burned_state_sql(with_lookup=have_lookup),
                   _join(out_tables_dir, "by_country_burned_state_period.csv"))
         _copy_sql(con, pc.table_by_country_climate_component_period_sql(with_lookup=have_lookup),
-                  _join(out_tables_dir, "by_country_climate_component_period.csv"))
+                  _join(out_tables_dir, "stats_for_lulucf_paper.csv"))
         _copy_sql(con, pc.table_topn_country_sql("drained", args.topn, have_lookup),
                   _join(out_tables_dir, f"top{args.topn}_by_country_drained.csv"))
         _copy_sql(con, pc.table_topn_country_sql("burned", args.topn, have_lookup),
