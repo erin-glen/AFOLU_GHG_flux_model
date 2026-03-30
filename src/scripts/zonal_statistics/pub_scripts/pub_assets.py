@@ -39,7 +39,7 @@ import duckdb
 import pandas as pd
 import matplotlib.pyplot as plt
 
-import src.scripts.zonal_statistics.pub_common as pc
+import src.scripts.zonal_statistics.pub_scripts.pub_common as pc
 from src.scripts.zonal_statistics import zonal_constants as zc
 from src.scripts.zonal_statistics.run_zonal_stats import (
     build_output_parquet,
