@@ -351,5 +351,5 @@ if __name__ == "__main__":
     )
 
 """
-python -m src.scripts.core_model.3_aggregate_soils_outputs -cn drainage_cluster --run_name ogh_sensitivity_500m_10 --output_date 20251118
+python -m src.scripts.core_model.02_aggregate_soils_outputs -cn drainage_cluster --run_name ogh_sensitivity_500m_10 --output_date 20251118
 """
