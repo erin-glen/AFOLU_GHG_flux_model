@@ -64,6 +64,11 @@ OUTPUT_BASE = "{root}/version_{model_version}"
 
 # Dataset manifest (per-pixel only for flux totals)
 DATASETS: Dict[str, Dict[str, Any]] = {
+    "emissions_state_nodes": {
+        "folder": "emissions_state",
+        "zarr": "emissions_state_node_{interval}.zarr",
+        "var": "emissions_state_nodes",
+    },
     "drained_state_nodes": {
         "folder": "drained_state",
         "zarr": "drained_state_node_{interval}.zarr",
@@ -456,21 +461,67 @@ def run(args: argparse.Namespace) -> None:
         paths = build_paths(interval, tile_pixels=args.tile_pixels, **OUTPUT_KW)
 
         logger.info(
-            "Interval %s inputs: drained_total=%s (unit=%s), burned_total=%s (unit=%s), drained_state=%s, burned_state=%s",
+            "Interval %s inputs: drained_total=%s (unit=%s), burned_total=%s (unit=%s), emissions_state=%s, drained_state=%s, burned_state=%s",
             interval,
             paths["drained_total"]["folder"], paths["drained_total"]["unit"],
             paths["burned_total"]["folder"], paths["burned_total"]["unit"],
+            paths["emissions_state_nodes"]["folder"],
             paths["drained_state_nodes"]["folder"], paths["burned_state_nodes"]["folder"],
         )
 
-        cached_uri_lists = {key: list_folder_uris(spec["folder"]) for key, spec in paths.items()}
+        cached_uri_lists = {}
         for key, spec in paths.items():
+            try:
+                cached_uri_lists[key] = list_folder_uris(spec["folder"])
+            except FileNotFoundError:
+                if key == "emissions_state_nodes":
+                    logger.warning(
+                        "Optional inputs for %s missing in interval %s; using legacy state nodes.",
+                        key,
+                        interval,
+                    )
+                    continue
+                raise
+        for key, spec in paths.items():
+            if key not in cached_uri_lists:
+                continue
             ensure_zarr_exists(cached_uri_lists[key], spec["zarr"], args.chunk_size)
 
         drained_total = open_zarr_region(paths["drained_total"]["zarr"], bbox, args.chunk_size)
         burned_total = open_zarr_region(paths["burned_total"]["zarr"], bbox, args.chunk_size)
-        drained_state_nodes = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
-        burned_state_nodes = open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
+
+        drained_state_nodes = None
+        burned_state_nodes = None
+        emissions_state_nodes = None
+
+        try:
+            emissions_state_nodes = open_zarr_region(
+                paths["emissions_state_nodes"]["zarr"], bbox, args.chunk_size
+            ).astype("uint32")
+        except Exception as exc:
+            logger.warning("emissions_state_nodes not available for %s (%s); falling back to legacy nodes.", interval, exc)
+
+        if emissions_state_nodes is not None:
+            decoded_drained, decoded_burned = zc.unpack_emissions_state_to_legacy(
+                emissions_state_nodes.values.astype(np.uint32, copy=False)
+            )
+            drained_state_nodes = xr.DataArray(
+                data=decoded_drained,
+                dims=emissions_state_nodes.dims,
+                coords=emissions_state_nodes.coords,
+            )
+            burned_state_nodes = xr.DataArray(
+                data=decoded_burned,
+                dims=emissions_state_nodes.dims,
+                coords=emissions_state_nodes.coords,
+            )
+        else:
+            drained_state_nodes = open_zarr_region(
+                paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size
+            ).astype("uint32")
+            burned_state_nodes = open_zarr_region(
+                paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size
+            ).astype("uint32")
 
         # Align everything to drained_state_nodes grid
         reference = drained_state_nodes
