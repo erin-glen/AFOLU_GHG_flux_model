@@ -835,6 +835,17 @@ def calculate_and_upload_drainage(
                 logger,
             )
 
+    # Unified packed state output (preserves drained + burned semantics in one raster)
+    drained_state_for_pack = outputs.get("drained_state")
+    burned_state_for_pack = outputs.get("burned_state")
+    if drained_state_for_pack is not None:
+        if burned_state_for_pack is None:
+            burned_state_for_pack = np.zeros_like(drained_state_for_pack, dtype=np.uint32)
+        outputs["emissions_state"] = zc.pack_emissions_state(
+            drained_state_for_pack.astype(np.uint32, copy=False),
+            burned_state_for_pack.astype(np.uint32, copy=False),
+        )
+
     # burned-area emissions are totals for the whole inventory period; convert
     # to annual values based on the number of years in the period
     interval_length = iv_end - iv_start + 1
@@ -897,7 +908,7 @@ def calculate_and_upload_drainage(
                 )
 
     # stats for outputs, with explicit layer categorization
-    drainage_classification_layers = ["drained_soil", "drained_state"]
+    drainage_classification_layers = ["drained_soil", "drained_state", "emissions_state"]
     burned_classification_layers = ["burned_state"]
     numeric_layers = ["burned_years_count"]
 

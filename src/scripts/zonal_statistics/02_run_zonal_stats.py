@@ -53,6 +53,7 @@ ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 OUTPUT_BASE = "{root}/version_{model_version}"
 
 DATASETS: Dict[str, Dict[str, Any]] = {
+    "emissions_state_nodes": {"zarr": "emissions_state_node_{interval}.zarr", "var": "emissions_state_nodes"},
     "drained_state_nodes": {"zarr": "drained_state_node_{interval}.zarr", "var": "drained_state_nodes"},
     "burned_state_nodes":  {"zarr": "burned_state_node_{interval}.zarr",  "var": "burned_state_nodes"},
     "drained_total":       {"zarr": "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr", "var": "drained_total"},
@@ -298,6 +299,8 @@ def run(args: argparse.Namespace) -> None:
     burned_fluxes = [k for k in selected_names if FLUX_SPECS.get(k, {}).get("group") == "burned"]
     drained_only_gases = set(drained_fluxes) == {"drained_co2", "drained_n2o"}
     required_names = set(selected_names)
+    if drained_fluxes or burned_fluxes:
+        required_names.add("emissions_state_nodes")
     if drained_fluxes:
         required_names.add("drained_state_nodes")
     if burned_fluxes:
@@ -339,6 +342,13 @@ def run(args: argparse.Namespace) -> None:
         for key in dataset_names:
             zpath = paths[key]["zarr"]
             if not zarr_exists(zpath):
+                if key == "emissions_state_nodes":
+                    logger.warning(
+                        "Optional dataset %s missing for %s; will fall back to legacy state nodes if available.",
+                        key,
+                        interval,
+                    )
+                    continue
                 raise FileNotFoundError(
                     f"Missing Zarr for {key}: {zpath}\n"
                     f"Build with: python -m src.scripts.zonal_statistics.01_build_zarr_caches "
@@ -352,12 +362,45 @@ def run(args: argparse.Namespace) -> None:
             zarr_data[key] = open_zarr_region(paths[key]["zarr"], bbox, args.chunk_size)
 
         drained_nodes_aligned = burned_nodes_aligned = None
-        if "drained_state_nodes" in paths:
-            drained_nodes_raw = open_zarr_region(paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
-            drained_nodes_aligned = align_auto(drained_nodes_raw, ref, tol, args.force_align)
-        if "burned_state_nodes" in paths:
-            burned_nodes_raw = open_zarr_region(paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size).astype("uint32")
-            burned_nodes_aligned = align_auto(burned_nodes_raw, ref, tol, args.force_align)
+        emissions_nodes_aligned = None
+        if "emissions_state_nodes" in paths:
+            try:
+                emissions_nodes_raw = open_zarr_region(
+                    paths["emissions_state_nodes"]["zarr"], bbox, args.chunk_size
+                ).astype("uint32")
+                emissions_nodes_aligned = align_auto(emissions_nodes_raw, ref, tol, args.force_align)
+            except Exception as exc:
+                logger.warning(
+                    "emissions_state_nodes unavailable for %s (%s); attempting legacy node inputs.",
+                    interval,
+                    exc,
+                )
+
+        if emissions_nodes_aligned is not None:
+            dec_drained, dec_burned = zc.unpack_emissions_state_to_legacy(
+                emissions_nodes_aligned.values.astype(np.uint32, copy=False)
+            )
+            drained_nodes_aligned = xr.DataArray(
+                data=dec_drained,
+                dims=emissions_nodes_aligned.dims,
+                coords=emissions_nodes_aligned.coords,
+            )
+            burned_nodes_aligned = xr.DataArray(
+                data=dec_burned,
+                dims=emissions_nodes_aligned.dims,
+                coords=emissions_nodes_aligned.coords,
+            )
+        else:
+            if "drained_state_nodes" in paths:
+                drained_nodes_raw = open_zarr_region(
+                    paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size
+                ).astype("uint32")
+                drained_nodes_aligned = align_auto(drained_nodes_raw, ref, tol, args.force_align)
+            if "burned_state_nodes" in paths:
+                burned_nodes_raw = open_zarr_region(
+                    paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size
+                ).astype("uint32")
+                burned_nodes_aligned = align_auto(burned_nodes_raw, ref, tol, args.force_align)
 
         # Smart alignment (skip if coords already match)
         adm0_aligned = align_auto(adm0, ref, tol, args.force_align)

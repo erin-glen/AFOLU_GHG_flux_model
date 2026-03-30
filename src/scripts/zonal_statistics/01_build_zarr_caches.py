@@ -99,6 +99,12 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         "var": "burned_state_nodes",
         "dtype": "uint32",
     },
+    "emissions_state_nodes": {
+        "folder": "emissions_state",
+        "zarr": "emissions_state_node_{interval}.zarr",
+        "var": "emissions_state_nodes",
+        "dtype": "uint32",
+    },
 }
 
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_name}/{run_date}/{interval}/"
