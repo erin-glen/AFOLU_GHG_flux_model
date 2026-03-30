@@ -189,6 +189,13 @@ def calculate_drainage_and_emissions(
             mangrove = mangrove_block[row, col]
             tidal_marsh = tidal_marsh_block[row, col]
 
+            # Descals oil palm overrides SDPT plantation subtype. Any
+            # Descals-positive pixel is treated as oil palm for plantation routing.
+            effective_plantation_type = (
+                oil_palm_code if descals_type > 0 else planted_forest_type
+            )
+            has_effective_plantation = effective_plantation_type > 0
+
             # default nutrient status by ecozone
             if ecozone == boreal_code:
                 nutrient = poor_nutrient_code
@@ -227,7 +234,7 @@ def calculate_drainage_and_emissions(
                 elif land_cover in (cropland_code, settlement_code):
                     node = nu.accrete_node(node, 3)
                     drained = True
-                elif planted_forest_type > 0 or descals_type > 0:
+                elif has_effective_plantation:
                     node = nu.accrete_node(node, 4)
                     drained = True
                 elif extraction > 0:
@@ -349,16 +356,16 @@ def calculate_drainage_and_emissions(
                     elif extraction > 0:
                         emission_node = nu.accrete_node(category_node, 1)
                         key = "tropical_extraction"
-                    elif planted_forest_type > 0:
+                    elif has_effective_plantation:
                         plantation_node = nu.accrete_node(category_node, 2)
                         emission_node = plantation_node
-                        if planted_forest_type == long_rotation_code:
+                        if effective_plantation_type == long_rotation_code:
                             emission_node = nu.accrete_node(plantation_node, 1)
                             key = "tropical_long_rotation"
-                        elif planted_forest_type == short_rotation_code:
+                        elif effective_plantation_type == short_rotation_code:
                             emission_node = nu.accrete_node(plantation_node, 2)
                             key = "tropical_short_rotation"
-                        elif planted_forest_type == oil_palm_code:
+                        elif effective_plantation_type == oil_palm_code:
                             emission_node = nu.accrete_node(plantation_node, 3)
                             key = "tropical_oil_palm"
                     elif land_cover == forest_code:
@@ -473,7 +480,7 @@ def calculate_drainage_and_emissions(
                         if soil_block[row, col] == 2:
                             if (
                                 land_cover == cropland_code
-                                or planted_forest_type > 0
+                                or has_effective_plantation
                             ):
                                 bkey = "tropical_drained_crop_or_plantation"
                                 burned_emission_node = nu.accrete_node(burned_emission_node, 1)
