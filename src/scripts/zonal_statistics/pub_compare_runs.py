@@ -362,36 +362,15 @@ def _partition_comparisons(
     return active, missing
 
 
-def _default_label(run_name: str) -> str:
-    label = run_name.replace("_", " ").replace("-", " ").strip()
-    return label or run_name
-
-
 def _parse_run_specs(entries: Sequence[str]) -> Mapping[str, RunSpec]:
     specs: dict[str, RunSpec] = {}
-    for entry in entries:
-        if "=" not in entry:
-            raise ValueError(f"Invalid --run specification (expected name=model_version:run_date): {entry}")
-        raw_name, rest = entry.split("=", 1)
-        run_name = raw_name.strip()
-        if not run_name:
-            raise ValueError(f"Invalid run name in --run specification: {entry}")
-
-        if "|" in rest:
-            config_part, label_part = rest.split("|", 1)
-            label = label_part.strip() or _default_label(run_name)
-        else:
-            config_part = rest
-            label = _default_label(run_name)
-
-        parts = [p.strip() for p in config_part.split(":") if p.strip()]
-        if len(parts) != 2:
-            raise ValueError(
-                "Invalid --run specification (expected model_version:run_date or model_version:run_date|Label): "
-                f"{entry}"
-            )
-        model_version, run_date = parts
-        specs[run_name] = RunSpec(run_name=run_name, model_version=model_version, run_date=run_date, label=label)
+    for run_name, model_version, run_date, label in pc.parse_run_entries(entries):
+        specs[run_name] = RunSpec(
+            run_name=run_name,
+            model_version=model_version,
+            run_date=run_date,
+            label=label,
+        )
     return specs
 
 

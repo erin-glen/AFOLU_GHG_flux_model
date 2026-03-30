@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 import hashlib
 from contextlib import contextmanager
-from typing import Optional, Sequence, List, Dict, Mapping
+from typing import Optional, Sequence, List, Dict, Mapping, Tuple
 
 import pandas as pd
 import matplotlib as mpl
@@ -282,6 +282,52 @@ def country_label(df: pd.DataFrame) -> pd.Series:
         iso = df["iso3"].astype("string")
         return iso.where(iso.str.len().fillna(0) > 0, df["gadm_adm0"].astype(str))
     return df["gadm_adm0"].astype(str)
+
+
+def default_run_label(run_name: str) -> str:
+    """Return a human-friendly default label for a run name."""
+    label = run_name.replace("_", " ").replace("-", " ").strip()
+    return label or run_name
+
+
+def parse_run_entries(entries: Sequence[str]) -> List[Tuple[str, str, str, str]]:
+    """
+    Parse CLI --run entries of the form:
+      run_name=model_version:run_date[|Custom Label]
+
+    Returns tuples of (run_name, model_version, run_date, label).
+    """
+    parsed: List[Tuple[str, str, str, str]] = []
+    for entry in entries:
+        if "=" not in entry:
+            raise ValueError(
+                f"Invalid --run spec (expected run_name=model_version:run_date[|Label]): {entry}"
+            )
+
+        raw_name, rest = entry.split("=", 1)
+        run_name = raw_name.strip()
+        if not run_name:
+            raise ValueError(f"Invalid run name in --run: {entry}")
+
+        if "|" in rest:
+            config_part, label_part = rest.split("|", 1)
+            label = label_part.strip() or default_run_label(run_name)
+        else:
+            config_part = rest
+            label = default_run_label(run_name)
+
+        parts = [p.strip() for p in config_part.split(":") if p.strip()]
+        if len(parts) != 2:
+            raise ValueError(
+                "Invalid --run spec (expected model_version:run_date or "
+                "model_version:run_date|Label): "
+                f"{entry}"
+            )
+
+        model_version, run_date = parts
+        parsed.append((run_name, model_version, run_date, label))
+
+    return parsed
 
 
 def _rpad_sql(expr: str) -> str:
