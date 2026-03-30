@@ -1,3 +1,10 @@
+"""Legacy helper to convert 1x1 per-hectare chunk outputs to per-pixel outputs.
+
+For the current production workflow, 10x10 aggregated outputs and zonal-stat
+Zarr caches are generated without requiring this script. Keep this module for
+backwards compatibility with analyses that still consume 1x1 per-pixel outputs.
+"""
+
 import argparse
 import concurrent.futures
 import dask
