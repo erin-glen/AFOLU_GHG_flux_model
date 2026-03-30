@@ -10,6 +10,7 @@ This orchestrator:
 
 Usage (examples):
   python run_standard_500m_pipeline.py
+  python run_standard_500m_pipeline.py --include-legacy-per-pixel-stage
   python run_standard_500m_pipeline.py --dry-run
   python run_standard_500m_pipeline.py --continue-on-error --skip 02_zonal_stats[gpd]
   python run_standard_500m_pipeline.py --shutdown-cluster
@@ -17,6 +18,8 @@ Usage (examples):
 Notes:
 - Duplicate --run_name arguments in the provided shell snippets were removed.
 - The cluster is left running by default; pass --shutdown-cluster to close it on exit.
+- The legacy per-pixel stage (step 2) is excluded by default because current
+  10x10 zonal workflows consume aggregated outputs and Zarr caches directly.
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ def build_commands(
     run_date: str = "20251120",
     interval_end_years: str = "2024",
     model_version: str = "0_9_7",
+    include_legacy_per_pixel_stage: bool = False,
 ) -> List[Tuple[str, List[str]]]:
     """Return the ordered list of (label, argv) commands to execute."""
 
@@ -86,24 +90,25 @@ def build_commands(
         )
     )
 
-    # --- 2) Per-pixel soils outputs ---
-    base2 = [
-        "python",
-        "-m",
-        "src.scripts.core_model.2_per_pixel_soils_outputs",
-        "--cluster_name",
-        "drainage_cluster",
-        "--chunk_size",
-        "1",
-        "--output_date",
-        output_date,
-    ]
-    cmds.append(
-        ("2_per_pixel_soils_outputs[gfw]", base2 + ["--run_name", "gfw_standard_model_500m"])
-    )
-    cmds.append(
-        ("2_per_pixel_soils_outputs[gpd]", base2 + ["--run_name", "gpd_standard_model_500m"])
-    )
+    # --- 2) Per-pixel soils outputs (legacy/optional) ---
+    if include_legacy_per_pixel_stage:
+        base2 = [
+            "python",
+            "-m",
+            "src.scripts.core_model.2_per_pixel_soils_outputs",
+            "--cluster_name",
+            "drainage_cluster",
+            "--chunk_size",
+            "1",
+            "--output_date",
+            output_date,
+        ]
+        cmds.append(
+            ("2_per_pixel_soils_outputs[gfw]", base2 + ["--run_name", "gfw_standard_model_500m"])
+        )
+        cmds.append(
+            ("2_per_pixel_soils_outputs[gpd]", base2 + ["--run_name", "gpd_standard_model_500m"])
+        )
 
     # --- 3) Aggregate soils outputs ---
     cmds.append(
@@ -227,7 +232,7 @@ def run_cmd(
 
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description="Run GFW+GPD 500m pipeline on one Coiled cluster.")
-    p.add_argument("--output-date", default="20251120", help="YYYYMMDD for per-pixel + aggregate steps.")
+    p.add_argument("--output-date", default="20251120", help="YYYYMMDD for aggregate steps (and optional legacy per-pixel step).")
     p.add_argument("--run-date", default="20251120", help="YYYYMMDD for zonal-statistics steps.")
     p.add_argument("--interval-end-years", default="2024", help="Interval end year(s) for zonal-statistics.")
     p.add_argument("--model-version", default="0_9_7", help="Model version for zonal-statistics.")
@@ -238,6 +243,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--no-cluster", action="store_true", help="Do not create/attach a Coiled cluster explicitly.")
     p.add_argument("--scheduler-address", default=None, help="Override DASK_SCHEDULER_ADDRESS for all steps.")
     p.add_argument("--shutdown-cluster", action="store_true", help="Close the Coiled cluster on exit.")
+    p.add_argument(
+        "--include-legacy-per-pixel-stage",
+        action="store_true",
+        help="Include 2_per_pixel_soils_outputs (legacy; not required for default 10x10 zonal workflow).",
+    )
     args = p.parse_args(argv)
 
     steps = build_commands(
@@ -245,6 +255,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         run_date=args.run_date,
         interval_end_years=args.interval_end_years,
         model_version=args.model_version,
+        include_legacy_per_pixel_stage=args.include_legacy_per_pixel_stage,
     )
 
     # Prepare environment
