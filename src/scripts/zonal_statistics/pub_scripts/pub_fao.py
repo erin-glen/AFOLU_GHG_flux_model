@@ -149,47 +149,16 @@ def _interval_pair_for_latest(years: Sequence[int]) -> Tuple[int, int]:
     return pairs[-1]
 
 
-def _default_label(run_name: str) -> str:
-    label = run_name.replace("_", " ").replace("-", " ").strip()
-    return label or run_name
-
-
 def _parse_run_specs(entries: Sequence[str]) -> list[RunSpec]:
-    specs: list[RunSpec] = []
-    for entry in entries:
-        if "=" not in entry:
-            raise ValueError(
-                f"Invalid --run spec (expected run_name=model_version:run_date[|Label]): {entry}"
-            )
-        raw_name, rest = entry.split("=", 1)
-        run_name = raw_name.strip()
-        if not run_name:
-            raise ValueError(f"Invalid run name in --run: {entry}")
-
-        if "|" in rest:
-            config_part, label_part = rest.split("|", 1)
-            label = label_part.strip() or _default_label(run_name)
-        else:
-            config_part = rest
-            label = _default_label(run_name)
-
-        parts = [p.strip() for p in config_part.split(":") if p.strip()]
-        if len(parts) != 2:
-            raise ValueError(
-                "Invalid --run spec (expected model_version:run_date or "
-                "model_version:run_date|Label): "
-                f"{entry}"
-            )
-        model_version, run_date = parts
-        specs.append(
-            RunSpec(
-                run_name=run_name,
-                model_version=model_version,
-                run_date=run_date,
-                label=label,
-            )
+    return [
+        RunSpec(
+            run_name=run_name,
+            model_version=model_version,
+            run_date=run_date,
+            label=label,
         )
-    return specs
+        for run_name, model_version, run_date, label in pc.parse_run_spec_entries(entries, spec_name="--run")
+    ]
 
 
 # ----------------------------- model (zonal stats) -----------------------------
