@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Build aligned Zarr caches for organic-soils zonal statistics (canonical grid = pixel_area).
+"""Prepare contextual Zarr inputs for organic-soils zonal statistics.
+
+This script still contains legacy model-output cache builders, but those are
+disabled by default because zonal statistics now reads flux/state layers
+directly from the drainage mega-zarr.
 
 python -m src.scripts.zonal_statistics.01_build_zarr_caches \
   --interval_end_years 2024 \
@@ -454,7 +458,19 @@ def run(args: argparse.Namespace) -> None:
         except Exception:
             pass
 
-    # 3) Build per-variable aligned Zarrs
+    if not args.include_legacy_model_output_caches:
+        logger.info(
+            "flm: Skipping legacy model-output cache materialization. "
+            "Contextual zarrs are ready and zonal stats should read mega-zarr directly."
+        )
+        uu.stage_duration(start_ts, uu.timestr(), stage)
+        if client:
+            client.close()
+        if cluster:
+            cluster.close()
+        return
+
+    # 3) Build per-variable aligned Zarrs (legacy compatibility mode)
     mapping = {end: (start, end) for start, end in cn.five_year_inventory_periods}
     interval_pairs = [mapping[y] for y in args.interval_end_years if y in mapping]
 
@@ -533,6 +549,11 @@ def main(argv=None):
                         help="'w' overwrite, 'w-' skip if exists (validate only).")
     parser.add_argument("--align_tolerance_fraction", type=float, default=0.49,
                         help="Fraction of one pixel as nearest reindex tolerance (default 0.49).")
+    parser.add_argument(
+        "--include_legacy_model_output_caches",
+        action="store_true",
+        help="Also build per-interval model-output zarr caches from GeoTIFF folders (legacy mode).",
+    )
     parser.add_argument("--debug", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run_local", action="store_true")

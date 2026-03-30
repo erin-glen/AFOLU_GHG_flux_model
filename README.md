@@ -10,6 +10,9 @@ The current workflow is:
 2. **Aggregate chunk outputs to 10x10 tiles** (`3_aggregate_soils_outputs`) from the model mega-zarr.
 3. **Run zonal stats** (`zonal_statistics/02_run_zonal_stats`) directly from the model mega-zarr.
 
+`zonal_statistics/01_build_zarr_caches` is now mainly for contextual-layer prep
+(`pixel_area`, `adm0`). Its legacy model-output cache build path is optional.
+
 ### Is `2_per_pixel_soils_outputs.py` still required?
 
 Usually **no** for the current zonal-statistics workflow.
