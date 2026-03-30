@@ -10,6 +10,9 @@ from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
 
 DATA_TYPES = list(cn.drainage_outputs_to_zarr)
+if "emissions_state" not in DATA_TYPES:
+    # Keep aggregation forward-compatible when constants lag behind model outputs.
+    DATA_TYPES.append("emissions_state")
 
 
 INVENTORY_PERIODS = [
@@ -267,7 +270,9 @@ def main(
         interval_type, output_pixel_resolution, run_name, output_date
     )
     output_folders_pixel = [
-        folder.replace("_ha_", "_pixel_") for folder in output_folders
+        folder.replace("_ha_", "_pixel_")
+        for folder in output_folders
+        if "_ha_" in folder
     ]
 
     if not no_upload:
