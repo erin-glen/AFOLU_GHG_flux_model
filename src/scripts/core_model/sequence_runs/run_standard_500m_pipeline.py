@@ -19,7 +19,7 @@ Notes:
 - Duplicate --run_name arguments in the provided shell snippets were removed.
 - The cluster is left running by default; pass --shutdown-cluster to close it on exit.
 - The legacy per-pixel stage (step 2) is excluded by default because current
-  10x10 zonal workflows consume aggregated outputs and Zarr caches directly.
+  10x10 zonal workflows consume the driver mega-zarr directly.
 """
 
 from __future__ import annotations
@@ -63,6 +63,7 @@ def build_commands(
         "--count_burned_years",
         "--interval_type",
         "five_year",
+        "--create_zarr",
     ]
 
     cmds.append(
@@ -144,27 +145,6 @@ def build_commands(
         )
     )
 
-    # --- Zonal statistics: build Zarr caches ---
-    base_zarr = [
-        "python",
-        "-m",
-        "src.scripts.zonal_statistics.01_build_zarr_caches",
-        "--interval_end_years",
-        str(interval_end_years),
-        "--cluster_name",
-        "drainage_cluster",
-        "--run_date",
-        run_date,
-        "--model_version",
-        model_version,
-        "--tile_pixels",
-        "40000",
-        "--chunk_size",
-        "8000",
-    ]
-    cmds.append(("01_build_zarr_caches[gfw]", base_zarr + ["--run_name", "gfw_standard_model_500m"]))
-    cmds.append(("01_build_zarr_caches[gpd]", base_zarr + ["--run_name", "gpd_standard_model_500m"]))
-
     # --- Zonal statistics: run zonal stats ---
     base_zstats = [
         "python",
@@ -178,6 +158,10 @@ def build_commands(
         run_date,
         "--model_version",
         model_version,
+        "--interval_type",
+        "five_year",
+        "--zarr_chunk_size_pixels",
+        "1",
         "--chunk_size",
         "10000",
         "--diagnostics",

@@ -25,7 +25,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
-import boto3
 import dask
 import dask.array as da
 import numpy as np
@@ -46,24 +45,24 @@ from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.utilities import log_utilities as lu
+from src.scripts.utilities import drainage_zarr_utilities as dzu
 
 # ------------------------------- config --------------------------------
 SPARSE_DEFAULT = True
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
-OUTPUT_BASE = "{root}/version_{model_version}"
 
 DATASETS: Dict[str, Dict[str, Any]] = {
-    "emissions_state_nodes": {"zarr": "emissions_state_node_{interval}.zarr", "var": "emissions_state_nodes"},
-    "drained_state_nodes": {"zarr": "drained_state_node_{interval}.zarr", "var": "drained_state_nodes"},
-    "burned_state_nodes":  {"zarr": "burned_state_node_{interval}.zarr",  "var": "burned_state_nodes"},
-    "drained_total":       {"zarr": "drained_total_Mg_CO2e_pixel_yr_{interval}.zarr", "var": "drained_total"},
-    "drained_co2":         {"zarr": "drained_co2_Mg_CO2_pixel_yr_{interval}.zarr", "var": "drained_co2"},
-    "drained_n2o":         {"zarr": "drained_n2o_Mg_CO2e_pixel_yr_{interval}.zarr", "var": "drained_n2o"},
-    "drained_total_co2":   {"zarr": "drained_total_co2_Mg_CO2_pixel_yr_{interval}.zarr", "var": "drained_total_co2"},
-    "drained_total_ch4":   {"zarr": "drained_total_ch4_Mg_CO2e_pixel_yr_{interval}.zarr", "var": "drained_total_ch4"},
-    "burned_total":        {"zarr": "burned_total_Mg_CO2e_pixel_yr_{interval}.zarr",  "var": "burned_total"},
-    "burned_total_co2":    {"zarr": "burned_total_co2_Mg_CO2_pixel_yr_{interval}.zarr",  "var": "burned_total_co2"},
-    "burned_total_ch4":    {"zarr": "burned_total_ch4_Mg_CO2e_pixel_yr_{interval}.zarr",  "var": "burned_total_ch4"},
+    "emissions_state_nodes": {"source_var": "emissions_state", "kind": "state", "state_alias": "emissions_state_nodes"},
+    "drained_state_nodes": {"source_var": "drained_state", "kind": "state", "state_alias": "drained_state_nodes"},
+    "burned_state_nodes":  {"source_var": "burned_state",  "kind": "state", "state_alias": "burned_state_nodes"},
+    "drained_total":       {"source_var": "drained_total_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"},
+    "drained_co2":         {"source_var": "drained_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"},
+    "drained_n2o":         {"source_var": "drained_n2o_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"},
+    "drained_total_co2":   {"source_var": "drained_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"},
+    "drained_total_ch4":   {"source_var": ["drained_ch4_land_Mg_CO2e_ha_yr", "drained_ch4_ditch_Mg_CO2e_ha_yr"], "kind": "flux_per_ha_yr_sum"},
+    "burned_total":        {"source_var": "burned_total_Mg_CO2e_ha_yr",  "kind": "flux_per_ha_yr"},
+    "burned_total_co2":    {"source_var": "burned_co2_Mg_CO2_ha_yr",  "kind": "flux_per_ha_yr"},
+    "burned_total_ch4":    {"source_var": "burned_ch4_Mg_CO2e_ha_yr",  "kind": "flux_per_ha_yr"},
 }
 
 FLUX_SPECS = {
@@ -76,8 +75,6 @@ FLUX_SPECS = {
     "burned_total_co2": {"code": 7, "label": "burned_total_co2_Mg_CO2", "group": "burned"},
     "burned_total_ch4": {"code": 8, "label": "burned_total_ch4_Mg_CO2e", "group": "burned"},
 }
-
-ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_name}/{run_date}/{interval}/"
 
 
 def ordered_dataset_keys(selected: Optional[List[str]]) -> List[str]:
@@ -114,22 +111,68 @@ def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
 def build_output_parquet(model_version: str, run_name: str, run_date: str, interval: str) -> str:
     return posixpath.join(ROOT, f"version_{model_version}", "zonal_stats", run_name, run_date, interval).rstrip("/") + "/"
 
-def _split_s3(path: str) -> tuple[str, str]:
-    if not path.startswith("s3://"):
-        raise ValueError(f"Expected s3:// path, got {path}")
-    bucket, key = path[5:].split("/", 1)
-    return bucket, key
+def resolve_mega_zarr_path(model_version: str, run_name: str, run_date: str, interval_type: str,
+                           zarr_chunk_size_pixels: Optional[int], logger: logging.Logger) -> str:
+    base_path = posixpath.join(ROOT, f"version_{model_version}", "mega_zarr")
+    model_type = run_name.split("_")[0]
+    if zarr_chunk_size_pixels is not None:
+        return dzu.create_mega_zarr_path(
+            base_path,
+            zarr_chunk_size_pixels,
+            interval_type,
+            model_type,
+            run_date,
+            logger,
+        )
 
-def zarr_exists(zarr_path: str) -> bool:
-    b, k = _split_s3(zarr_path.rstrip("/"))
-    s3 = boto3.client("s3")
-    for probe in ("zarr.json", ".zgroup"):
-        try:
-            s3.head_object(Bucket=b, Key=f"{k}/{probe}")
-            return True
-        except Exception:
-            continue
-    return False
+    fs = s3fs.S3FileSystem(anon=False)
+    prefix = posixpath.join(base_path, model_type, interval_type, "*_pixels", run_date, "mega.zarr")
+    matches = sorted(fs.glob(prefix))
+    if not matches:
+        raise FileNotFoundError(f"No mega-zarr found at pattern: s3://{prefix}")
+    if len(matches) > 1:
+        raise RuntimeError(f"Multiple mega-zarr candidates found ({len(matches)}). Pass --zarr_chunk_size_pixels.")
+    return f"s3://{matches[0].lstrip('/')}"
+
+
+def open_mega_zarr_region(path: str, year: int, bbox: Optional[List[float]], chunk_size: int) -> xr.Dataset:
+    dsx = xr.open_zarr(path, consolidated=None, storage_options={"anon": False})
+    if "year" not in dsx.coords:
+        raise ValueError(f"Mega-zarr missing year coordinate: {path}")
+    dsy = dsx.sel(year=year)
+    if bbox is not None:
+        west, south, east, north = bbox
+        x0, x1 = float(dsy.x.values[0]), float(dsy.x.values[-1])
+        y0, y1 = float(dsy.y.values[0]), float(dsy.y.values[-1])
+        x_slice = slice(min(west, east), max(west, east)) if x0 < x1 else slice(max(east, west), min(east, west))
+        y_slice = slice(min(south, north), max(south, north)) if y0 < y1 else slice(max(north, south), min(north, south))
+        dsy = dsy.sel(x=x_slice, y=y_slice)
+    chunk_dict = {d: chunk_size for d in ("x", "y") if d in dsy.dims}
+    if chunk_dict:
+        dsy = dsy.chunk(chunk_dict)
+    return dsy
+
+
+def dataset_from_mega(spec: Dict[str, Any], ds: xr.Dataset, pixel_area: xr.DataArray) -> xr.DataArray:
+    source_var = spec["source_var"]
+    kind = spec.get("kind")
+
+    if isinstance(source_var, list):
+        arr = None
+        for name in source_var:
+            if name not in ds:
+                raise KeyError(f"Missing expected variable in mega-zarr: {name}")
+            arr = ds[name] if arr is None else (arr + ds[name])
+    else:
+        if source_var not in ds:
+            raise KeyError(f"Missing expected variable in mega-zarr: {source_var}")
+        arr = ds[source_var]
+
+    if kind in {"flux_per_ha_yr", "flux_per_ha_yr_sum"}:
+        arr = arr * pixel_area * cn.m2_to_ha
+    if spec.get("state_alias"):
+        arr = arr.rename(spec["state_alias"])
+    return arr
 
 def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
     if isinstance(ds_or_da, xr.DataArray):
@@ -222,14 +265,6 @@ def _df_from_result(res: xr.DataArray, flux_map: Dict[int, str], interval_end: i
     df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000.0  # m² -> ha
     return df
 
-def build_zarr_paths(interval: str, dataset_names: Optional[List[str]] = None, **fmt_kw) -> Dict[str, Dict[str, Any]]:
-    zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **fmt_kw)
-    return {
-        name: {"zarr": zarr_base + spec["zarr"].format(interval=interval), "var": spec["var"]}
-        for name, spec in DATASETS.items()
-        if name in ordered_dataset_keys(dataset_names)
-    }
-
 def leak_ratio_check(drained: xr.DataArray, burned: xr.DataArray, adm0: xr.DataArray,
                      mode: str, threshold: float, logger: logging.Logger) -> None:
     """Compute flux-over-ocean leak ratio with selectable cost."""
@@ -293,21 +328,12 @@ def run(args: argparse.Namespace) -> None:
     logger.debug("Starting run with args: %s", args)
     logger.info("Diagnostics mode: %s | Force align: %s", args.diagnostics, args.force_align)
 
-    OUTPUT_KW = dict(root=ROOT, model_version=args.model_version, run_date=args.run_date, run_name=args.run_name)
     selected_names = ordered_dataset_keys(args.datasets)
     drained_fluxes = [k for k in selected_names if FLUX_SPECS.get(k, {}).get("group") == "drained"]
     burned_fluxes = [k for k in selected_names if FLUX_SPECS.get(k, {}).get("group") == "burned"]
     drained_only_gases = set(drained_fluxes) == {"drained_co2", "drained_n2o"}
-    required_names = set(selected_names)
-    if drained_fluxes or burned_fluxes:
-        required_names.add("emissions_state_nodes")
-    if drained_fluxes:
-        required_names.add("drained_state_nodes")
-    if burned_fluxes:
-        required_names.add("burned_state_nodes")
-    dataset_names = ordered_dataset_keys(list(required_names))
 
-    # Open contextual layers (built in Step 1)
+    # Open contextual layers
     adm0_zarr = adm0_zarr_path()
     adm0 = open_zarr_region(adm0_zarr, bbox, args.chunk_size).astype("uint32")
     pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).persist()
@@ -334,47 +360,31 @@ def run(args: argparse.Namespace) -> None:
     mapping = {end: (start, end) for start, end in cn.five_year_inventory_periods}
     interval_pairs = [mapping[y] for y in args.interval_end_years if y in mapping]
 
+    mega_zarr_path = resolve_mega_zarr_path(
+        args.model_version,
+        args.run_name,
+        args.run_date,
+        args.interval_type,
+        args.zarr_chunk_size_pixels,
+        logger,
+    )
+    logger.info("Using mega-zarr source: %s", mega_zarr_path)
+
     for interval_start_year, interval_end_year in interval_pairs:
         interval = f"{interval_start_year}_{interval_end_year}"
         logger.info("Processing interval %s : %s", interval, timestr())
 
-        paths = build_zarr_paths(interval, dataset_names=dataset_names, **OUTPUT_KW)
-        for key in dataset_names:
-            zpath = paths[key]["zarr"]
-            if not zarr_exists(zpath):
-                if key == "emissions_state_nodes":
-                    logger.warning(
-                        "Optional dataset %s missing for %s; will fall back to legacy state nodes if available.",
-                        key,
-                        interval,
-                    )
-                    continue
-                raise FileNotFoundError(
-                    f"Missing Zarr for {key}: {zpath}\n"
-                    f"Build with: python -m src.scripts.zonal_statistics.01_build_zarr_caches "
-                    f"--interval_end_years {interval_end_year} --run_date {args.run_date} "
-                    f"--model_version {args.model_version} --run_name {args.run_name} "
-                    f"--chunk_size {args.chunk_size}"
-                )
+        mega_ds = open_mega_zarr_region(mega_zarr_path, interval_end_year, bbox, args.chunk_size)
 
         zarr_data: Dict[str, xr.DataArray] = {}
         for key in drained_fluxes + burned_fluxes:
-            zarr_data[key] = open_zarr_region(paths[key]["zarr"], bbox, args.chunk_size)
+            zarr_data[key] = dataset_from_mega(DATASETS[key], mega_ds, pixel_area)
 
         drained_nodes_aligned = burned_nodes_aligned = None
         emissions_nodes_aligned = None
-        if "emissions_state_nodes" in paths:
-            try:
-                emissions_nodes_raw = open_zarr_region(
-                    paths["emissions_state_nodes"]["zarr"], bbox, args.chunk_size
-                ).astype("uint32")
-                emissions_nodes_aligned = align_auto(emissions_nodes_raw, ref, tol, args.force_align)
-            except Exception as exc:
-                logger.warning(
-                    "emissions_state_nodes unavailable for %s (%s); attempting legacy node inputs.",
-                    interval,
-                    exc,
-                )
+        if "emissions_state" in mega_ds:
+            emissions_nodes_raw = dataset_from_mega(DATASETS["emissions_state_nodes"], mega_ds, pixel_area).astype("uint32")
+            emissions_nodes_aligned = align_auto(emissions_nodes_raw, ref, tol, args.force_align)
 
         if emissions_nodes_aligned is not None:
             dec_drained, dec_burned = zc.unpack_emissions_state_to_legacy(
@@ -391,15 +401,11 @@ def run(args: argparse.Namespace) -> None:
                 coords=emissions_nodes_aligned.coords,
             )
         else:
-            if "drained_state_nodes" in paths:
-                drained_nodes_raw = open_zarr_region(
-                    paths["drained_state_nodes"]["zarr"], bbox, args.chunk_size
-                ).astype("uint32")
+            if "drained_state" in mega_ds:
+                drained_nodes_raw = dataset_from_mega(DATASETS["drained_state_nodes"], mega_ds, pixel_area).astype("uint32")
                 drained_nodes_aligned = align_auto(drained_nodes_raw, ref, tol, args.force_align)
-            if "burned_state_nodes" in paths:
-                burned_nodes_raw = open_zarr_region(
-                    paths["burned_state_nodes"]["zarr"], bbox, args.chunk_size
-                ).astype("uint32")
+            if "burned_state" in mega_ds:
+                burned_nodes_raw = dataset_from_mega(DATASETS["burned_state_nodes"], mega_ds, pixel_area).astype("uint32")
                 burned_nodes_aligned = align_auto(burned_nodes_raw, ref, tol, args.force_align)
 
         # Smart alignment (skip if coords already match)
@@ -498,6 +504,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Run organic-soils zonal statistics (per-pixel; robust alignment)")
     parser.add_argument("--model_version", required=True)
     parser.add_argument("--run_date", required=True)
+    parser.add_argument("--interval_type", default="five_year", choices=[cn.intervals_annual, cn.intervals_five_year])
+    parser.add_argument("--zarr_chunk_size_pixels", type=int, default=None,
+                        help="Chunk-size segment in mega-zarr path (e.g., 1). If omitted, auto-discovers unique *_pixels store.")
     parser.add_argument("--interval_end_years", nargs="+", type=int, required=True)
     parser.add_argument("--chunk_size", type=int, default=10000)
     parser.add_argument("--local_output", default="/tmp/zonal_stats")
