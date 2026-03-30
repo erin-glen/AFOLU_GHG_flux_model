@@ -724,7 +724,7 @@ def table_by_country_burned_state_sql(with_lookup: bool) -> str:
     ORDER BY base.interval_end, base.burned_MgCO2e DESC
     """
 
-def table_by_country_climate_component_period_sql(with_lookup: bool) -> str:
+def table_stats_for_lulucf_paper_sql(with_lookup: bool) -> str:
     """
     Country × climate × component table by inventory period.
 
@@ -733,7 +733,7 @@ def table_by_country_climate_component_period_sql(with_lookup: bool) -> str:
       - gadm_adm0[, country, iso3]
       - climate_domain
       - component (Drainage|Extraction|Fire)
-      - emissions_MgCO2e
+      - flux_Mg_CO2e_yr
     """
     select_l = (
         ", COALESCE(l.country, CAST(base.gadm_adm0 AS VARCHAR)) AS country,"
@@ -756,7 +756,7 @@ def table_by_country_climate_component_period_sql(with_lookup: bool) -> str:
           THEN 'Extraction'
           ELSE 'Drainage'
         END AS component,
-        SUM(CASE WHEN z.flux_type = 'drained_total_Mg_CO2e' THEN z.value ELSE 0 END) AS emissions_MgCO2e
+        SUM(CASE WHEN z.flux_type = 'drained_total_Mg_CO2e' THEN z.value ELSE 0 END) AS flux_Mg_CO2e_yr
       FROM zs_drained z
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
@@ -772,7 +772,7 @@ def table_by_country_climate_component_period_sql(with_lookup: bool) -> str:
         ) AS gadm_adm0,
         COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
         'Fire' AS component,
-        SUM(CASE WHEN z.flux_type = 'burned_total_Mg_CO2e' THEN z.value ELSE 0 END) AS emissions_MgCO2e
+        SUM(CASE WHEN z.flux_type = 'burned_total_Mg_CO2e' THEN z.value ELSE 0 END) AS flux_Mg_CO2e_yr
       FROM zs_burned z
       LEFT JOIN burned_state_ctx AS ctx
         ON (z.burned_state_meaning = ctx.meaning)
@@ -785,16 +785,16 @@ def table_by_country_climate_component_period_sql(with_lookup: bool) -> str:
         gadm_adm0,
         climate_domain,
         component,
-        SUM(emissions_MgCO2e) AS emissions_MgCO2e
+        SUM(flux_Mg_CO2e_yr) AS flux_Mg_CO2e_yr
       FROM (
-        SELECT interval_end, gadm_adm0, climate_domain, component, emissions_MgCO2e
+        SELECT interval_end, gadm_adm0, climate_domain, component, flux_Mg_CO2e_yr
         FROM drained_labeled
         UNION ALL
-        SELECT interval_end, gadm_adm0, climate_domain, component, emissions_MgCO2e
+        SELECT interval_end, gadm_adm0, climate_domain, component, flux_Mg_CO2e_yr
         FROM burned_base
       ) unioned
       GROUP BY 1,2,3,4
-      HAVING SUM(emissions_MgCO2e) <> 0
+      HAVING SUM(flux_Mg_CO2e_yr) <> 0
     )
     SELECT
       base.interval_end,
@@ -802,7 +802,7 @@ def table_by_country_climate_component_period_sql(with_lookup: bool) -> str:
       {select_l},
       base.climate_domain,
       base.component,
-      base.emissions_MgCO2e
+      base.flux_Mg_CO2e_yr
     FROM base
     {join_l}
     ORDER BY base.interval_end, base.gadm_adm0, base.climate_domain, base.component
