@@ -734,6 +734,7 @@ def table_stats_for_lulucf_paper_sql(with_lookup: bool) -> str:
       - climate_domain
       - component (Drainage|Extraction|Fire)
       - flux_Mg_CO2e_yr
+      - area_ha
     """
     select_l = (
         ", COALESCE(l.country, CAST(base.gadm_adm0 AS VARCHAR)) AS country,"
@@ -756,7 +757,8 @@ def table_stats_for_lulucf_paper_sql(with_lookup: bool) -> str:
           THEN 'Extraction'
           ELSE 'Drainage'
         END AS component,
-        SUM(CASE WHEN z.flux_type = 'drained_total_Mg_CO2e' THEN z.value ELSE 0 END) AS flux_Mg_CO2e_yr
+        SUM(CASE WHEN z.flux_type = 'drained_total_Mg_CO2e' THEN z.value ELSE 0 END) AS flux_Mg_CO2e_yr,
+        SUM(CASE WHEN z.flux_type = 'area__ha' THEN z.value ELSE 0 END) AS area_ha
       FROM zs_drained z
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
@@ -772,7 +774,8 @@ def table_stats_for_lulucf_paper_sql(with_lookup: bool) -> str:
         ) AS gadm_adm0,
         COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
         'Fire' AS component,
-        SUM(CASE WHEN z.flux_type = 'burned_total_Mg_CO2e' THEN z.value ELSE 0 END) AS flux_Mg_CO2e_yr
+        SUM(CASE WHEN z.flux_type = 'burned_total_Mg_CO2e' THEN z.value ELSE 0 END) AS flux_Mg_CO2e_yr,
+        SUM(CASE WHEN z.flux_type = 'area__ha' THEN z.value ELSE 0 END) AS area_ha
       FROM zs_burned z
       LEFT JOIN burned_state_ctx AS ctx
         ON (z.burned_state_meaning = ctx.meaning)
@@ -785,16 +788,17 @@ def table_stats_for_lulucf_paper_sql(with_lookup: bool) -> str:
         gadm_adm0,
         climate_domain,
         component,
-        SUM(flux_Mg_CO2e_yr) AS flux_Mg_CO2e_yr
+        SUM(flux_Mg_CO2e_yr) AS flux_Mg_CO2e_yr,
+        SUM(area_ha) AS area_ha
       FROM (
-        SELECT interval_end, gadm_adm0, climate_domain, component, flux_Mg_CO2e_yr
+        SELECT interval_end, gadm_adm0, climate_domain, component, flux_Mg_CO2e_yr, area_ha
         FROM drained_labeled
         UNION ALL
-        SELECT interval_end, gadm_adm0, climate_domain, component, flux_Mg_CO2e_yr
+        SELECT interval_end, gadm_adm0, climate_domain, component, flux_Mg_CO2e_yr, area_ha
         FROM burned_base
       ) unioned
       GROUP BY 1,2,3,4
-      HAVING SUM(flux_Mg_CO2e_yr) <> 0
+      HAVING SUM(flux_Mg_CO2e_yr) <> 0 OR SUM(area_ha) <> 0
     )
     SELECT
       base.interval_end,
@@ -802,7 +806,8 @@ def table_stats_for_lulucf_paper_sql(with_lookup: bool) -> str:
       {select_l},
       base.climate_domain,
       base.component,
-      base.flux_Mg_CO2e_yr
+      base.flux_Mg_CO2e_yr,
+      base.area_ha
     FROM base
     {join_l}
     ORDER BY base.interval_end, base.gadm_adm0, base.climate_domain, base.component
