@@ -114,7 +114,7 @@ def build_output_parquet(model_version: str, run_name: str, run_date: str, inter
 def resolve_mega_zarr_path(model_version: str, run_name: str, run_date: str, interval_type: str,
                            zarr_chunk_size_pixels: Optional[int], logger: logging.Logger) -> str:
     base_path = posixpath.join(ROOT, f"version_{model_version}", "mega_zarr")
-    model_type = run_name.split("_")[0]
+    model_type = run_name
     if zarr_chunk_size_pixels is not None:
         return dzu.create_mega_zarr_path(
             base_path,
