@@ -136,7 +136,21 @@ def resolve_mega_zarr_path(model_version: str, run_name: str, run_date: str, int
 
 
 def open_mega_zarr_region(path: str, year: int, bbox: Optional[List[float]], chunk_size: int) -> xr.Dataset:
-    dsx = xr.open_zarr(path, consolidated=None, storage_options={"anon": False})
+    try:
+        dsx = xr.open_zarr(path, consolidated=None, storage_options={"anon": False})
+    except AttributeError as exc:
+        # Compatibility fallback for certain xarray/zarr dtype combinations where
+        # decoding _FillValue on newer dtype objects raises:
+        #   AttributeError: '<dtype>' object has no attribute 'value'
+        if "has no attribute 'value'" not in str(exc):
+            raise
+        dsx = xr.open_zarr(
+            path,
+            consolidated=None,
+            storage_options={"anon": False},
+            decode_cf=False,
+            mask_and_scale=False,
+        )
     if "year" not in dsx.coords:
         raise ValueError(f"Mega-zarr missing year coordinate: {path}")
     dsy = dsx.sel(year=year)
@@ -185,7 +199,18 @@ def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
     return da_
 
 def open_zarr_region(path: str, bbox: Optional[List[float]], chunk_size: int) -> xr.DataArray:
-    dsx = xr.open_zarr(path, consolidated=None, storage_options={"anon": False})
+    try:
+        dsx = xr.open_zarr(path, consolidated=None, storage_options={"anon": False})
+    except AttributeError as exc:
+        if "has no attribute 'value'" not in str(exc):
+            raise
+        dsx = xr.open_zarr(
+            path,
+            consolidated=None,
+            storage_options={"anon": False},
+            decode_cf=False,
+            mask_and_scale=False,
+        )
     data_arr = _first_xy_var(dsx)
     if bbox is not None and {"x", "y"}.issubset(data_arr.dims):
         west, south, east, north = bbox
