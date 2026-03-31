@@ -384,6 +384,8 @@ def build_branch_manifest(
         "roi_mode": roi_meta["roi_mode"],
         "bounding_box": roi_meta["bounding_box"],
         "tile_ids": roi_meta["tile_ids"],
+        "adm0_zarr_path": adm0_zarr_path(),
+        "pixel_area_zarr_path": PIXEL_AREA_ZARR,
         # Informational-only metadata (not used for skip equivalence checks):
         "diagnostics": args.diagnostics,
     }
@@ -421,6 +423,27 @@ def write_local_completion_marker(local_dir: Path, marker: Dict[str, Any]) -> Pa
     marker_path.write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return marker_path
 
+def completion_marker_matches(
+    marker: Dict[str, Any],
+    *,
+    branch: str,
+    interval: str,
+    run_name: str,
+    run_date: str,
+    model_version: str,
+) -> bool:
+    uploaded_file_count = marker.get("uploaded_file_count")
+    return (
+        marker.get("success") is True
+        and marker.get("branch") == branch
+        and marker.get("interval") == interval
+        and marker.get("run_name") == run_name
+        and marker.get("run_date") == run_date
+        and marker.get("model_version") == model_version
+        and isinstance(uploaded_file_count, int)
+        and uploaded_file_count >= 1
+    )
+
 def manifests_match(existing: Dict[str, Any], current: Dict[str, Any]) -> bool:
     match_keys = [
         "model_version",
@@ -435,6 +458,8 @@ def manifests_match(existing: Dict[str, Any], current: Dict[str, Any]) -> bool:
         "roi_mode",
         "bounding_box",
         "tile_ids",
+        "adm0_zarr_path",
+        "pixel_area_zarr_path",
     ]
     return all(existing.get(key) == current.get(key) for key in match_keys)
 
@@ -606,7 +631,14 @@ def run(args: argparse.Namespace) -> None:
                             f"for interval {interval}. Use --overwrite_existing or a different destination."
                         )
                     completion_d = read_remote_completion_marker(fs_s3, dest_d)
-                    if completion_d is None or not completion_d.get("success", False):
+                    if completion_d is None or not completion_marker_matches(
+                        completion_d,
+                        branch="drained",
+                        interval=interval,
+                        run_name=args.run_name,
+                        run_date=args.run_date,
+                        model_version=args.model_version,
+                    ):
                         raise ValueError(
                             f"Existing drained output at {dest_d} appears incomplete for interval {interval} "
                             f"(missing/invalid completion marker). Use --overwrite_existing or clean the prefix."
@@ -621,7 +653,14 @@ def run(args: argparse.Namespace) -> None:
                             f"for interval {interval}. Use --overwrite_existing or a different destination."
                         )
                     completion_b = read_remote_completion_marker(fs_s3, dest_b)
-                    if completion_b is None or not completion_b.get("success", False):
+                    if completion_b is None or not completion_marker_matches(
+                        completion_b,
+                        branch="burned",
+                        interval=interval,
+                        run_name=args.run_name,
+                        run_date=args.run_date,
+                        model_version=args.model_version,
+                    ):
                         raise ValueError(
                             f"Existing burned output at {dest_b} appears incomplete for interval {interval} "
                             f"(missing/invalid completion marker). Use --overwrite_existing or clean the prefix."
