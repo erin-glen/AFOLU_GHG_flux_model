@@ -471,9 +471,15 @@ def convert_to_coord_dict(flox_result: xr.DataArray) -> dict:
     if hasattr(arr, "coords") and hasattr(arr, "data"):
         indices, values = arr.coords, arr.data
     else:
-        grid = np.indices(arr.shape)
-        indices = grid.reshape(len(arr.shape), -1)
-        values = arr.ravel()
+        arr_np = np.asarray(arr)
+        nz = np.nonzero(arr_np)
+        if len(nz) == 0 or nz[0].size == 0:
+            return {
+                dim: np.array([], dtype=flox_result.coords[dim].values.dtype)
+                for dim in dims
+            } | {"value": np.array([], dtype=arr_np.dtype)}
+        indices = nz
+        values = arr_np[nz]
     return {dim: flox_result.coords[dim].values[indices[i]] for i, dim in enumerate(dims)} | {"value": values}
 
 def _df_from_result(res: xr.DataArray, flux_map: Dict[int, str], interval_end: int) -> pd.DataFrame:
