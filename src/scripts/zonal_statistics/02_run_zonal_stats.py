@@ -20,6 +20,7 @@ python -m src.scripts.zonal_statistics.02_run_zonal_stats \
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -271,7 +272,7 @@ def delete_remote_prefix(fs_s3: s3fs.S3FileSystem, prefix: str) -> None:
 
 def build_exact_tile_mask(ref: xr.DataArray, tile_ids: List[str]) -> xr.DataArray:
     """Build exact union mask for the requested 10x10 tiles using selection slices."""
-    mask = xr.zeros_like(ref, dtype=bool)
+    tile_masks: List[xr.DataArray] = []
     for tile_id in tile_ids:
         try:
             west, south, east, north = uu.get_10x10_tile_bounds(tile_id)
@@ -284,13 +285,21 @@ def build_exact_tile_mask(ref: xr.DataArray, tile_ids: List[str]) -> xr.DataArra
         selected = ref.sel(x=x_slice, y=y_slice)
         if selected.sizes.get("x", 0) == 0 or selected.sizes.get("y", 0) == 0:
             raise ValueError(f"tile_id '{tile_id}' selects no pixels on the reference grid.")
-        tile_mask = xr.zeros_like(ref, dtype=bool)
-        tile_mask.loc[dict(x=selected.x, y=selected.y)] = True
-        mask = mask | tile_mask
-    selected_total = int(mask.sum().compute())
-    if selected_total == 0:
+        x_membership = xr.DataArray(
+            np.isin(ref.x.values, selected.x.values),
+            dims=("x",),
+            coords={"x": ref.x},
+        )
+        y_membership = xr.DataArray(
+            np.isin(ref.y.values, selected.y.values),
+            dims=("y",),
+            coords={"y": ref.y},
+        )
+        tile_mask = (x_membership & y_membership).transpose(*ref.dims)
+        tile_masks.append(tile_mask)
+    if not tile_masks:
         raise ValueError("No pixels selected by --tile_ids on the reference grid.")
-    return mask
+    return xr.concat(tile_masks, dim="tile").any(dim="tile")
 
 def _normalize_tile_ids(raw_tile_args: Optional[List[str]]) -> List[str]:
     tiles: List[str] = []
@@ -298,15 +307,24 @@ def _normalize_tile_ids(raw_tile_args: Optional[List[str]]) -> List[str]:
         tiles.extend(t.strip() for t in item.split(",") if t.strip())
     return tiles
 
-def _validate_interval_end_years(requested: List[int]) -> List[int]:
-    allowed = [end for _, end in cn.five_year_inventory_periods]
-    invalid = [y for y in requested if y not in set(allowed)]
+def resolve_interval_pairs(interval_type: str, requested_years: List[int]) -> List[Tuple[int, int]]:
+    if interval_type == cn.intervals_five_year:
+        pairs = list(cn.five_year_inventory_periods)
+    elif interval_type == cn.intervals_annual:
+        annual_ends = dzu.full_model_year_index(cn.intervals_annual)
+        pairs = [(year, year) for year in annual_ends]
+    else:
+        raise ValueError(f"Unsupported interval_type: {interval_type}")
+    mapping = {end: (start, end) for start, end in pairs}
+    allowed = [end for _, end in pairs]
+    requested_deduped = list(dict.fromkeys(requested_years))
+    invalid = [y for y in requested_deduped if y not in mapping]
     if invalid:
         raise ValueError(
-            f"Invalid interval_end_years: {invalid}. Allowed interval-end years: {allowed}"
+            f"Invalid interval_end_years for interval_type '{interval_type}': {invalid}. "
+            f"Allowed interval-end years: {allowed}"
         )
-    deduped_ordered = list(dict.fromkeys(requested))
-    return deduped_ordered
+    return [mapping[y] for y in requested_deduped]
 
 def _validate_flux_selection(selected_names: List[str]) -> Tuple[List[str], List[str]]:
     drained_fluxes = [k for k in selected_names if FLUX_SPECS.get(k, {}).get("group") == "drained"]
@@ -317,6 +335,45 @@ def _validate_flux_selection(selected_names: List[str]) -> Tuple[List[str], List
             "state-node datasets alone are not direct zonal-stats outputs."
         )
     return drained_fluxes, burned_fluxes
+
+def build_branch_manifest(
+    args: argparse.Namespace,
+    interval: str,
+    branch: str,
+    selected_fluxes: List[str],
+    drained_only_gases: bool,
+) -> Dict[str, Any]:
+    return {
+        "model_version": args.model_version,
+        "run_name": args.run_name,
+        "run_date": args.run_date,
+        "interval": interval,
+        "interval_type": args.interval_type,
+        "branch": branch,
+        "selected_fluxes": selected_fluxes,
+        "drained_only_gases": drained_only_gases,
+        "align_tolerance_fraction": args.align_tolerance_fraction,
+        "force_align": bool(args.force_align),
+        "diagnostics": args.diagnostics,
+    }
+
+def read_remote_manifest(fs_s3: s3fs.S3FileSystem, prefix: str) -> Optional[Dict[str, Any]]:
+    manifest_path = posixpath.join(prefix.rstrip("/"), "_zonal_stats_manifest.json")
+    try:
+        if not fs_s3.exists(manifest_path):
+            return None
+        with fs_s3.open(manifest_path, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+
+def write_local_manifest(local_dir: Path, manifest: Dict[str, Any]) -> Path:
+    manifest_path = local_dir / "_zonal_stats_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return manifest_path
+
+def manifests_match(existing: Dict[str, Any], current: Dict[str, Any]) -> bool:
+    return existing == current
 
 def convert_to_coord_dict(flox_result: xr.DataArray) -> dict:
     arr = flox_result.data
@@ -393,7 +450,7 @@ def run(args: argparse.Namespace) -> None:
     if args.bounding_box and args.tile_ids:
         raise ValueError("--bounding_box and --tile_ids are mutually exclusive.")
 
-    interval_end_years = _validate_interval_end_years(args.interval_end_years)
+    interval_pairs = resolve_interval_pairs(args.interval_type, args.interval_end_years)
     selected_names = ordered_dataset_keys(args.datasets)
     drained_fluxes, burned_fluxes = _validate_flux_selection(selected_names)
     drained_only_gases = set(drained_fluxes) == {"drained_co2", "drained_n2o"}
@@ -453,10 +510,6 @@ def run(args: argparse.Namespace) -> None:
         tol = float(args.align_tolerance_fraction) * dx
         exact_tile_mask = build_exact_tile_mask(ref, tiles) if tiles else None
 
-        # Intervals
-        mapping = {end: (start, end) for start, end in cn.five_year_inventory_periods}
-        interval_pairs = [mapping[y] for y in interval_end_years]
-
         mega_zarr_path = resolve_mega_zarr_path(
             args.model_version,
             args.run_name,
@@ -473,6 +526,8 @@ def run(args: argparse.Namespace) -> None:
             drained_subdir = "drained_co2_n2o" if drained_only_gases else "drained"
             dest_d = posixpath.join(dest_root.rstrip("/"), drained_subdir)
             dest_b = posixpath.join(dest_root.rstrip("/"), "burned")
+            manifest_d = build_branch_manifest(args, interval, "drained", drained_fluxes, drained_only_gases)
+            manifest_b = build_branch_manifest(args, interval, "burned", burned_fluxes, drained_only_gases)
 
             need_drained = bool(drained_fluxes)
             need_burned = bool(burned_fluxes)
@@ -480,10 +535,22 @@ def run(args: argparse.Namespace) -> None:
             burned_exists = need_burned and remote_prefix_has_parquet(fs_s3, dest_b)
             if not args.overwrite_existing:
                 if need_drained and drained_exists:
-                    logger.info("Skipping drained branch for interval %s; remote parquet exists at %s", interval, dest_d)
+                    existing_manifest_d = read_remote_manifest(fs_s3, dest_d)
+                    if existing_manifest_d is None or not manifests_match(existing_manifest_d, manifest_d):
+                        raise ValueError(
+                            f"Existing drained output at {dest_d} does not match current selection/config "
+                            f"for interval {interval}. Use --overwrite_existing or a different destination."
+                        )
+                    logger.info("Skipping drained branch for interval %s; remote parquet+manifest match at %s", interval, dest_d)
                     need_drained = False
                 if need_burned and burned_exists:
-                    logger.info("Skipping burned branch for interval %s; remote parquet exists at %s", interval, dest_b)
+                    existing_manifest_b = read_remote_manifest(fs_s3, dest_b)
+                    if existing_manifest_b is None or not manifests_match(existing_manifest_b, manifest_b):
+                        raise ValueError(
+                            f"Existing burned output at {dest_b} does not match current selection/config "
+                            f"for interval {interval}. Use --overwrite_existing or a different destination."
+                        )
+                    logger.info("Skipping burned branch for interval %s; remote parquet+manifest match at %s", interval, dest_b)
                     need_burned = False
                 if not need_drained and not need_burned:
                     logger.info("Skipping interval %s entirely; both requested outputs already exist remotely.", interval)
@@ -600,6 +667,7 @@ def run(args: argparse.Namespace) -> None:
                 local_d.mkdir(parents=True, exist_ok=True)
                 ds.write_dataset(pa.Table.from_pandas(df_d, preserve_index=False), base_dir=str(local_d),
                                  filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
+                write_local_manifest(local_d, manifest_d)
                 _upload_dir(fs_s3, local_d, dest_d)
                 logger.info("Uploaded drained interval %s → %s", interval, dest_d)
                 if not args.keep_local:
@@ -612,6 +680,7 @@ def run(args: argparse.Namespace) -> None:
                 local_b.mkdir(parents=True, exist_ok=True)
                 ds.write_dataset(pa.Table.from_pandas(df_b, preserve_index=False), base_dir=str(local_b),
                                  filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
+                write_local_manifest(local_b, manifest_b)
                 _upload_dir(fs_s3, local_b, dest_b)
                 logger.info("Uploaded burned interval %s → %s", interval, dest_b)
                 if not args.keep_local:
