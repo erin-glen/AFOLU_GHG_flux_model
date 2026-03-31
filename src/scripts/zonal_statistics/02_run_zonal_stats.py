@@ -305,7 +305,35 @@ def _normalize_tile_ids(raw_tile_args: Optional[List[str]]) -> List[str]:
     tiles: List[str] = []
     for item in raw_tile_args or []:
         tiles.extend(t.strip() for t in item.split(",") if t.strip())
-    return tiles
+    return sorted(set(tiles))
+
+def _normalize_bbox(raw_bbox: Optional[List[float]]) -> Optional[List[float]]:
+    if raw_bbox is None:
+        return None
+    west, south, east, north = [float(v) for v in raw_bbox]
+    return [min(west, east), min(south, north), max(west, east), max(south, north)]
+
+def normalized_roi_metadata(
+    tiles: List[str],
+    bbox: Optional[List[float]],
+) -> Dict[str, Any]:
+    if tiles:
+        return {
+            "roi_mode": "tile_ids",
+            "bounding_box": _normalize_bbox(bbox),
+            "tile_ids": tiles,
+        }
+    if bbox is not None:
+        return {
+            "roi_mode": "bounding_box",
+            "bounding_box": _normalize_bbox(bbox),
+            "tile_ids": None,
+        }
+    return {
+        "roi_mode": "global",
+        "bounding_box": None,
+        "tile_ids": None,
+    }
 
 def resolve_interval_pairs(interval_type: str, requested_years: List[int]) -> List[Tuple[int, int]]:
     if interval_type == cn.intervals_five_year:
@@ -341,7 +369,7 @@ def build_branch_manifest(
     interval: str,
     branch: str,
     selected_fluxes: List[str],
-    drained_only_gases: bool,
+    roi_meta: Dict[str, Any],
 ) -> Dict[str, Any]:
     return {
         "model_version": args.model_version,
@@ -351,9 +379,12 @@ def build_branch_manifest(
         "interval_type": args.interval_type,
         "branch": branch,
         "selected_fluxes": selected_fluxes,
-        "drained_only_gases": drained_only_gases,
         "align_tolerance_fraction": args.align_tolerance_fraction,
         "force_align": bool(args.force_align),
+        "roi_mode": roi_meta["roi_mode"],
+        "bounding_box": roi_meta["bounding_box"],
+        "tile_ids": roi_meta["tile_ids"],
+        # Informational-only metadata (not used for skip equivalence checks):
         "diagnostics": args.diagnostics,
     }
 
@@ -372,8 +403,40 @@ def write_local_manifest(local_dir: Path, manifest: Dict[str, Any]) -> Path:
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest_path
 
+def completion_marker_path(prefix: str) -> str:
+    return posixpath.join(prefix.rstrip("/"), "_COMPLETE.json")
+
+def read_remote_completion_marker(fs_s3: s3fs.S3FileSystem, prefix: str) -> Optional[Dict[str, Any]]:
+    marker_path = completion_marker_path(prefix)
+    try:
+        if not fs_s3.exists(marker_path):
+            return None
+        with fs_s3.open(marker_path, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+
+def write_local_completion_marker(local_dir: Path, marker: Dict[str, Any]) -> Path:
+    marker_path = local_dir / "_COMPLETE.json"
+    marker_path.write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return marker_path
+
 def manifests_match(existing: Dict[str, Any], current: Dict[str, Any]) -> bool:
-    return existing == current
+    match_keys = [
+        "model_version",
+        "run_name",
+        "run_date",
+        "interval",
+        "interval_type",
+        "branch",
+        "selected_fluxes",
+        "align_tolerance_fraction",
+        "force_align",
+        "roi_mode",
+        "bounding_box",
+        "tile_ids",
+    ]
+    return all(existing.get(key) == current.get(key) for key in match_keys)
 
 def convert_to_coord_dict(flox_result: xr.DataArray) -> dict:
     arr = flox_result.data
@@ -460,7 +523,7 @@ def run(args: argparse.Namespace) -> None:
     # ROI from bbox or union envelope of requested tiles (mask applied later for exact tile semantics).
     bbox: Optional[List[float]] = None
     if args.bounding_box:
-        bbox = [float(x) for x in args.bounding_box]
+        bbox = _normalize_bbox([float(x) for x in args.bounding_box])
     elif tiles:
         bounds = []
         for tile in tiles:
@@ -470,7 +533,8 @@ def run(args: argparse.Namespace) -> None:
                 raise ValueError(f"Could not resolve tile_id '{tile}': {exc}") from exc
         west = min(b[0] for b in bounds); south = min(b[1] for b in bounds)
         east = max(b[2] for b in bounds); north = max(b[3] for b in bounds)
-        bbox = [west, south, east, north]
+        bbox = _normalize_bbox([west, south, east, north])
+    roi_meta = normalized_roi_metadata(tiles, bbox)
 
     cluster = client = None
     run_local = bool(args.run_local)
@@ -526,8 +590,8 @@ def run(args: argparse.Namespace) -> None:
             drained_subdir = "drained_co2_n2o" if drained_only_gases else "drained"
             dest_d = posixpath.join(dest_root.rstrip("/"), drained_subdir)
             dest_b = posixpath.join(dest_root.rstrip("/"), "burned")
-            manifest_d = build_branch_manifest(args, interval, "drained", drained_fluxes, drained_only_gases)
-            manifest_b = build_branch_manifest(args, interval, "burned", burned_fluxes, drained_only_gases)
+            manifest_d = build_branch_manifest(args, interval, "drained", drained_fluxes, roi_meta)
+            manifest_b = build_branch_manifest(args, interval, "burned", burned_fluxes, roi_meta)
 
             need_drained = bool(drained_fluxes)
             need_burned = bool(burned_fluxes)
@@ -541,6 +605,12 @@ def run(args: argparse.Namespace) -> None:
                             f"Existing drained output at {dest_d} does not match current selection/config "
                             f"for interval {interval}. Use --overwrite_existing or a different destination."
                         )
+                    completion_d = read_remote_completion_marker(fs_s3, dest_d)
+                    if completion_d is None or not completion_d.get("success", False):
+                        raise ValueError(
+                            f"Existing drained output at {dest_d} appears incomplete for interval {interval} "
+                            f"(missing/invalid completion marker). Use --overwrite_existing or clean the prefix."
+                        )
                     logger.info("Skipping drained branch for interval %s; remote parquet+manifest match at %s", interval, dest_d)
                     need_drained = False
                 if need_burned and burned_exists:
@@ -549,6 +619,12 @@ def run(args: argparse.Namespace) -> None:
                         raise ValueError(
                             f"Existing burned output at {dest_b} does not match current selection/config "
                             f"for interval {interval}. Use --overwrite_existing or a different destination."
+                        )
+                    completion_b = read_remote_completion_marker(fs_s3, dest_b)
+                    if completion_b is None or not completion_b.get("success", False):
+                        raise ValueError(
+                            f"Existing burned output at {dest_b} appears incomplete for interval {interval} "
+                            f"(missing/invalid completion marker). Use --overwrite_existing or clean the prefix."
                         )
                     logger.info("Skipping burned branch for interval %s; remote parquet+manifest match at %s", interval, dest_b)
                     need_burned = False
@@ -668,7 +744,19 @@ def run(args: argparse.Namespace) -> None:
                 ds.write_dataset(pa.Table.from_pandas(df_d, preserve_index=False), base_dir=str(local_d),
                                  filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
                 write_local_manifest(local_d, manifest_d)
-                _upload_dir(fs_s3, local_d, dest_d)
+                uploaded_count = _upload_dir(fs_s3, local_d, dest_d)
+                marker_d = {
+                    "success": True,
+                    "branch": "drained",
+                    "interval": interval,
+                    "run_name": args.run_name,
+                    "run_date": args.run_date,
+                    "model_version": args.model_version,
+                    "uploaded_file_count": uploaded_count,
+                    "manifest_match_keys_version": 1,
+                }
+                local_marker_d = write_local_completion_marker(local_d, marker_d)
+                fs_s3.put(str(local_marker_d), completion_marker_path(dest_d))
                 logger.info("Uploaded drained interval %s → %s", interval, dest_d)
                 if not args.keep_local:
                     shutil.rmtree(local_d, ignore_errors=True)
@@ -681,7 +769,19 @@ def run(args: argparse.Namespace) -> None:
                 ds.write_dataset(pa.Table.from_pandas(df_b, preserve_index=False), base_dir=str(local_b),
                                  filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
                 write_local_manifest(local_b, manifest_b)
-                _upload_dir(fs_s3, local_b, dest_b)
+                uploaded_count = _upload_dir(fs_s3, local_b, dest_b)
+                marker_b = {
+                    "success": True,
+                    "branch": "burned",
+                    "interval": interval,
+                    "run_name": args.run_name,
+                    "run_date": args.run_date,
+                    "model_version": args.model_version,
+                    "uploaded_file_count": uploaded_count,
+                    "manifest_match_keys_version": 1,
+                }
+                local_marker_b = write_local_completion_marker(local_b, marker_b)
+                fs_s3.put(str(local_marker_b), completion_marker_path(dest_b))
                 logger.info("Uploaded burned interval %s → %s", interval, dest_b)
                 if not args.keep_local:
                     shutil.rmtree(local_b, ignore_errors=True)
