@@ -196,6 +196,42 @@ def _coerce_interval_end(df: pd.DataFrame) -> pd.Series:
     return pd.Series([pd.NA] * len(df))
 
 
+def _coerce_inventory_period_label(df: pd.DataFrame, period_labels: Mapping[int, str]) -> pd.Series:
+    """Best-effort normalize inventory-period labels to the selected run periods."""
+    out = pd.Series([pd.NA] * len(df), index=df.index, dtype="object")
+
+    # Direct end-year mapping from known year-like columns.
+    interval_end = _coerce_interval_end(df)
+    if interval_end.notna().any():
+        out = interval_end.astype("Int64").map(period_labels).astype("object")
+
+    # Optional explicit start/end columns from newer chunk-stats layouts.
+    start_col = next((c for c in ("interval_start", "interval_start_year", "period_start_year", "start_year") if c in df.columns), None)
+    end_col = next((c for c in ("interval_end", "interval_end_year", "period_end_year", "end_year", "inventory_year", "year") if c in df.columns), None)
+    if start_col and end_col:
+        starts = pd.to_numeric(df[start_col], errors="coerce")
+        ends = pd.to_numeric(df[end_col], errors="coerce")
+        start_end_map = {f"{label.split('-')[0]}-{y}": label for y, label in period_labels.items()}
+        key = starts.astype("Int64").astype("string") + "-" + ends.astype("Int64").astype("string")
+        se_labels = key.map(start_end_map)
+        out = out.where(out.notna(), se_labels)
+
+    # Parse string period columns (e.g., "2001_2005", "2001-2005", "2005").
+    token_col = next((c for c in ("years", "interval_label", "period", "inventory_period", "period_label") if c in df.columns), None)
+    if token_col:
+        token = df[token_col].astype(str).str.strip()
+        end_from_range = pd.to_numeric(
+            token.str.extract(r"(\d{4})\D+(\d{4})", expand=True)[1],
+            errors="coerce",
+        )
+        end_from_single = pd.to_numeric(token.str.extract(r"(\d{4})$", expand=False), errors="coerce")
+        end_year = end_from_range.where(end_from_range.notna(), end_from_single)
+        token_labels = end_year.astype("Int64").map(period_labels)
+        out = out.where(out.notna(), token_labels.astype("object"))
+
+    return out
+
+
 def _layer_totals_by_period(
     df: pd.DataFrame,
     layer_map: Mapping[str, str],
@@ -223,15 +259,7 @@ def _layer_totals_by_period(
 
     df = df.copy()
 
-    # Build a permissive mapping from any recognizable period token to the
-    # display label (e.g., "2001_2005" → "2001-2005", "2005" → "2001-2005").
-    period_label_map: dict[str, str] = {}
-    for end_year, label in period_labels.items():
-        period_label_map[str(end_year)] = label
-        period_label_map[label] = label
-        period_label_map[label.replace("-", "_")] = label
-
-    df["interval_end"] = _coerce_interval_end(df)
+    df[inv_col] = _coerce_inventory_period_label(df, period_labels)
 
     records: list[dict[str, object]] = []
     lower_layer = df[layer_col].astype(str).str.lower()
@@ -243,11 +271,6 @@ def _layer_totals_by_period(
             continue
         subset = subset.copy()
 
-        if "years" in subset.columns:
-            subset[inv_col] = subset["years"].astype(str).str.strip().map(period_label_map)
-        else:
-            subset = subset[subset["interval_end"].notna()].copy()
-            subset[inv_col] = subset["interval_end"].astype(int).map(period_labels)
         subset = subset[subset[inv_col].notna()]
         if subset.empty:
             continue
@@ -347,7 +370,7 @@ def _make_component_view(con: duckdb.DuckDBPyConnection, name: str,
     else:
         interval_expr = f"""
             TRY_CAST(
-                regexp_extract({filename_expr}, '([0-9]{{4}})_([0-9]{{4}})/(?:drained|burned)/', 2)
+                regexp_extract({filename_expr}, '([0-9]{{4}})_([0-9]{{4}})/(?:drained|drained_co2_n2o|burned)/', 2)
             AS INTEGER)
         """
 
@@ -699,6 +722,7 @@ def _make_base_prefixes(model_version: str, run_name: str, run_date: str,
 
 def _make_globs_for_components(base_prefixes: Sequence[str]) -> tuple[list[str], list[str]]:
     drained = [posixpath.join(bp, "drained", "*.parquet") for bp in base_prefixes]
+    drained += [posixpath.join(bp, "drained_co2_n2o", "*.parquet") for bp in base_prefixes]
     burned  = [posixpath.join(bp, "burned",  "*.parquet") for bp in base_prefixes]
     return drained, burned
 
