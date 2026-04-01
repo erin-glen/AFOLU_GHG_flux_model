@@ -336,6 +336,15 @@ def _count_globs(con: duckdb.DuckDBPyConnection, globs: Sequence[str]) -> int:
     union_sql = " UNION ALL ".join([f"SELECT * FROM glob('{g}')" for g in globs])
     return con.execute(f"SELECT COUNT(*) FROM ({union_sql})").fetchone()[0]
 
+def _existing_globs(con: duckdb.DuckDBPyConnection, globs: Sequence[str]) -> list[str]:
+    """Return only glob patterns that resolve to >=1 file."""
+    existing: list[str] = []
+    for g in globs:
+        n = con.execute(f"SELECT COUNT(*) FROM glob('{g}')").fetchone()[0]
+        if n > 0:
+            existing.append(g)
+    return existing
+
 def _read_parquet_list_sql(globs: Sequence[str]) -> str:
     if not globs:
         return "[]"
@@ -409,12 +418,23 @@ def _register_components(con: duckdb.DuckDBPyConnection,
                          drained_globs: Sequence[str], burned_globs: Sequence[str],
                          aws_region: Optional[str]):
     _ensure_httpfs(con, aws_region)
-    if _count_globs(con, drained_globs) == 0:
+    existing_drained = _existing_globs(con, drained_globs)
+    existing_burned = _existing_globs(con, burned_globs)
+    existing_drained_set = set(existing_drained)
+    existing_burned_set = set(existing_burned)
+    skipped_drained = [g for g in drained_globs if g not in existing_drained_set]
+    skipped_burned = [g for g in burned_globs if g not in existing_burned_set]
+    for g in skipped_drained:
+        print(f"[drained] Skipping missing layer: {g}")
+    for g in skipped_burned:
+        print(f"[burned] Skipping missing layer: {g}")
+
+    if not existing_drained:
         raise RuntimeError(f"[drained] No Parquet files found under: {drained_globs}")
-    if _count_globs(con, burned_globs) == 0:
+    if not existing_burned:
         raise RuntimeError(f"[burned] No Parquet files found under: {burned_globs}")
-    _make_component_view(con, "zs_drained", drained_globs, kind="drained")
-    _make_component_view(con, "zs_burned",  burned_globs,  kind="burned")
+    _make_component_view(con, "zs_drained", existing_drained, kind="drained")
+    _make_component_view(con, "zs_burned",  existing_burned,  kind="burned")
 
 # ----------------------------- Lookup registrations (driver-only) -----------------------------
 
