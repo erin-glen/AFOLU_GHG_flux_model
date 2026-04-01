@@ -959,13 +959,16 @@ def run(args: argparse.Namespace) -> None:
             )
 
             zarr_data: Dict[str, xr.DataArray] = {}
+            drained_fluxes_for_prepare = drained_fluxes if (need_drained or need_emissions) else []
+            burned_fluxes_for_prepare = burned_fluxes if (need_burned or need_emissions) else []
             logger.info(
-                "Branch flux preparation start: interval=%s drained_flux_keys=%s burned_flux_keys=%s",
-                interval, drained_fluxes if need_drained else [], burned_fluxes if need_burned else [],
+                "Branch flux preparation start: interval=%s drained_flux_keys=%s burned_flux_keys=%s combined_state=%s",
+                interval,
+                drained_fluxes_for_prepare,
+                burned_fluxes_for_prepare,
+                need_emissions,
             )
-            for key in drained_fluxes + burned_fluxes:
-                if (key in drained_fluxes and not need_drained) or (key in burned_fluxes and not need_burned):
-                    continue
+            for key in list(dict.fromkeys(drained_fluxes_for_prepare + burned_fluxes_for_prepare)):
                 zarr_data[key] = prepare_analysis_array(
                     DATASETS[key], key, mega_ds, ref, tol, args.force_align, mega_zarr_path=mega_zarr_path
                 ).astype("float32")
