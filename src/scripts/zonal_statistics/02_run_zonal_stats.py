@@ -52,6 +52,7 @@ from src.scripts.utilities import drainage_zarr_utilities as dzu
 # ------------------------------- config --------------------------------
 SPARSE_DEFAULT = True
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
+AREA_SCALE = np.float32(cn.m2_to_ha)
 
 DATASETS: Dict[str, Dict[str, Any]] = {
     "emissions_state_nodes": {"source_var": "emissions_state", "kind": "state", "state_alias": "emissions_state_nodes"},
@@ -222,7 +223,7 @@ def prepare_analysis_array(
     arr = dataset_from_mega(spec, ds, dataset_key=dataset_key, mega_zarr_path=mega_zarr_path)
     arr = align_auto(arr, ref, tol, force_align)
     if spec.get("kind") in {"flux_per_ha_yr", "flux_per_ha_yr_sum"}:
-        arr = arr * ref * cn.m2_to_ha
+        arr = (arr * ref * AREA_SCALE).astype("float32")
     return arr
 
 
@@ -336,6 +337,28 @@ def decode_emissions_state_to_legacy(
     drained = drained.assign_coords(emissions_nodes_aligned.coords).transpose(*emissions_nodes_aligned.dims)
     burned = burned.assign_coords(emissions_nodes_aligned.coords).transpose(*emissions_nodes_aligned.dims)
     return drained, burned
+
+
+def decode_emissions_state_branch(
+    emissions_nodes_aligned: xr.DataArray,
+    *,
+    branch: str,
+) -> xr.DataArray:
+    if branch not in {"drained", "burned"}:
+        raise ValueError(f"Unsupported branch for decode_emissions_state_branch: {branch}")
+
+    def _decode_one(x: np.ndarray) -> np.ndarray:
+        drained, burned = zc.unpack_emissions_state_to_legacy(x.astype(np.uint32, copy=False))
+        out = drained if branch == "drained" else burned
+        return out.astype(np.uint32, copy=False)
+
+    decoded = xr.apply_ufunc(
+        _decode_one,
+        emissions_nodes_aligned,
+        dask="parallelized",
+        output_dtypes=[np.uint32],
+    )
+    return decoded.assign_coords(emissions_nodes_aligned.coords).transpose(*emissions_nodes_aligned.dims)
 
 def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
     if isinstance(ds_or_da, xr.DataArray):
@@ -735,7 +758,7 @@ def run(args: argparse.Namespace) -> None:
         logger.info("Contextual layer open start: adm0=%s pixel_area=%s", adm0_zarr_path(), PIXEL_AREA_ZARR)
         adm0_zarr = adm0_zarr_path()
         adm0 = open_zarr_region(adm0_zarr, bbox, args.chunk_size).astype("uint32")
-        pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size)
+        pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).astype("float32")
         logger.info("Contextual layer open end: adm0 shape=%s pixel_area shape=%s", tuple(adm0.shape), tuple(pixel_area.shape))
 
         # Expected groups (exclude 0 → ocean)
@@ -890,6 +913,8 @@ def run(args: argparse.Namespace) -> None:
             drained_nodes_aligned = burned_nodes_aligned = None
             emissions_nodes_aligned = emissions_decoded = None
             logger.info("State raster preparation start: interval=%s need_drained=%s need_burned=%s", interval, need_drained, need_burned)
+            need_drained_from_emissions = bool(need_drained and ("drained_state" not in mega_ds))
+            need_burned_from_emissions = bool(need_burned and ("burned_state" not in mega_ds))
             if need_drained:
                 if "drained_state" in mega_ds:
                     drained_nodes_aligned = prepare_analysis_array(
@@ -902,9 +927,28 @@ def run(args: argparse.Namespace) -> None:
                         DATASETS["emissions_state_nodes"], "emissions_state_nodes", mega_ds, ref, tol, args.force_align,
                         mega_zarr_path=mega_zarr_path,
                     ).astype("uint32")
-                    emissions_decoded = decode_emissions_state_to_legacy(emissions_nodes_aligned)
-                    drained_nodes_aligned = emissions_decoded[0]
+                    if need_burned_from_emissions:
+                        logger.info(
+                            "Lazy emissions-state decode start: interval=%s target_branch=both source=emissions_state chunks=%s",
+                            interval, _chunk_structure(emissions_nodes_aligned),
+                        )
+                        emissions_decoded = decode_emissions_state_to_legacy(emissions_nodes_aligned)
+                        logger.info("Lazy emissions-state decode end: interval=%s target_branch=both", interval)
+                        drained_nodes_aligned = emissions_decoded[0]
+                    else:
+                        logger.info(
+                            "Lazy emissions-state decode start: interval=%s target_branch=drained source=emissions_state chunks=%s",
+                            interval, _chunk_structure(emissions_nodes_aligned),
+                        )
+                        drained_nodes_aligned = decode_emissions_state_branch(emissions_nodes_aligned, branch="drained")
+                        logger.info("Lazy emissions-state decode end: interval=%s target_branch=drained", interval)
                     logger.info("State raster source selected: interval=%s branch=drained source=derived:emissions_state", interval)
+                else:
+                    raise ValueError(
+                        "Unable to resolve required drained state raster. "
+                        f"interval='{interval}' branch='drained' mega_zarr_path='{mega_zarr_path}' "
+                        "missing_direct_state_var='drained_state' emissions_state_available=False"
+                    )
             if need_burned:
                 if "burned_state" in mega_ds:
                     burned_nodes_aligned = prepare_analysis_array(
@@ -919,9 +963,29 @@ def run(args: argparse.Namespace) -> None:
                                 DATASETS["emissions_state_nodes"], "emissions_state_nodes", mega_ds, ref, tol, args.force_align,
                                 mega_zarr_path=mega_zarr_path,
                             ).astype("uint32")
-                        emissions_decoded = decode_emissions_state_to_legacy(emissions_nodes_aligned)
-                    burned_nodes_aligned = emissions_decoded[1]
+                        if need_drained_from_emissions:
+                            logger.info(
+                                "Lazy emissions-state decode start: interval=%s target_branch=both source=emissions_state chunks=%s",
+                                interval, _chunk_structure(emissions_nodes_aligned),
+                            )
+                            emissions_decoded = decode_emissions_state_to_legacy(emissions_nodes_aligned)
+                            logger.info("Lazy emissions-state decode end: interval=%s target_branch=both", interval)
+                        else:
+                            logger.info(
+                                "Lazy emissions-state decode start: interval=%s target_branch=burned source=emissions_state chunks=%s",
+                                interval, _chunk_structure(emissions_nodes_aligned),
+                            )
+                            burned_nodes_aligned = decode_emissions_state_branch(emissions_nodes_aligned, branch="burned")
+                            logger.info("Lazy emissions-state decode end: interval=%s target_branch=burned", interval)
+                    if burned_nodes_aligned is None:
+                        burned_nodes_aligned = emissions_decoded[1]
                     logger.info("State raster source selected: interval=%s branch=burned source=derived:emissions_state", interval)
+                else:
+                    raise ValueError(
+                        "Unable to resolve required burned state raster. "
+                        f"interval='{interval}' branch='burned' mega_zarr_path='{mega_zarr_path}' "
+                        "missing_direct_state_var='burned_state' emissions_state_available=False"
+                    )
             logger.info("State raster preparation end: interval=%s", interval)
 
             # Smart alignment (skip if coords already match)
@@ -945,8 +1009,13 @@ def run(args: argparse.Namespace) -> None:
                     raise RuntimeError("drained_state_nodes dataset is required when processing drained fluxes")
                 with dask.annotate(label=f"reduce:drained:{interval}"):
                     flux_codes = [FLUX_SPECS[k]["code"] for k in drained_fluxes]
-                    cube_d = xr.concat([zarr_data[k] for k in drained_fluxes] + [ref], dim="flux_type").assign_coords(
+                    area_layer_d = ref if ref.dtype == np.float32 else ref.astype("float32")
+                    cube_d = xr.concat([zarr_data[k] for k in drained_fluxes] + [area_layer_d], dim="flux_type").assign_coords(
                         flux_type=("flux_type", flux_codes + [2])
+                    )
+                    logger.info(
+                        "Drained reduction dtypes: interval=%s branch=drained first_flux_dtype=%s area_dtype=%s cube_dtype=%s",
+                        interval, zarr_data[drained_fluxes[0]].dtype, area_layer_d.dtype, cube_d.dtype,
                     )
                     logger.info(
                         "Drained reduction start: interval=%s branch=drained flux_layers=%d cube_dims=%s cube_chunks=%s cube_numblocks=%s",
@@ -969,8 +1038,13 @@ def run(args: argparse.Namespace) -> None:
                     raise RuntimeError("burned_state_nodes dataset is required when processing burned fluxes")
                 with dask.annotate(label=f"reduce:burned:{interval}"):
                     flux_codes_b = [FLUX_SPECS[k]["code"] for k in burned_fluxes]
-                    cube_b = xr.concat([zarr_data[k] for k in burned_fluxes] + [ref], dim="flux_type").assign_coords(
+                    area_layer_b = ref if ref.dtype == np.float32 else ref.astype("float32")
+                    cube_b = xr.concat([zarr_data[k] for k in burned_fluxes] + [area_layer_b], dim="flux_type").assign_coords(
                         flux_type=("flux_type", flux_codes_b + [2])
+                    )
+                    logger.info(
+                        "Burned reduction dtypes: interval=%s branch=burned first_flux_dtype=%s area_dtype=%s cube_dtype=%s",
+                        interval, zarr_data[burned_fluxes[0]].dtype, area_layer_b.dtype, cube_b.dtype,
                     )
                     logger.info(
                         "Burned reduction start: interval=%s branch=burned flux_layers=%d cube_dims=%s cube_chunks=%s cube_numblocks=%s",
