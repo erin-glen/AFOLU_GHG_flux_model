@@ -165,7 +165,9 @@ def open_mega_zarr_region(path: str, year: int, bbox: Optional[List[float]], chu
     dsx = xr.open_zarr(path, consolidated=None, storage_options={"anon": False})
     if "year" not in dsx.coords:
         raise ValueError(f"Mega-zarr missing year coordinate: {path}")
-    dsy = dsx.sel(year=year)
+    dsy = dsx.sel(year=year, drop=True)
+    if "year" in dsy.coords and "year" not in dsy.dims:
+        dsy = dsy.reset_coords("year", drop=True)
     if bbox is not None:
         west, south, east, north = bbox
         x0, x1 = float(dsy.x.values[0]), float(dsy.x.values[-1])
@@ -224,6 +226,12 @@ def prepare_analysis_array(
     arr = align_auto(arr, ref, tol, force_align)
     if spec.get("kind") in {"flux_per_ha_yr", "flux_per_ha_yr_sum"}:
         arr = (arr * ref * AREA_SCALE).astype("float32")
+    return drop_scalar_year_coord(arr)
+
+
+def drop_scalar_year_coord(arr: xr.DataArray) -> xr.DataArray:
+    if "year" in arr.coords and "year" not in arr.dims:
+        return arr.reset_coords("year", drop=True)
     return arr
 
 
@@ -332,8 +340,11 @@ def decode_emissions_state_to_legacy(
         _decode,
         emissions_nodes_aligned,
         dask="parallelized",
+        output_core_dims=[[], []],
         output_dtypes=[np.uint32, np.uint32],
     )
+    drained = drained.rename("drained_state_nodes")
+    burned = burned.rename("burned_state_nodes")
     drained = drained.assign_coords(emissions_nodes_aligned.coords).transpose(*emissions_nodes_aligned.dims)
     burned = burned.assign_coords(emissions_nodes_aligned.coords).transpose(*emissions_nodes_aligned.dims)
     return drained, burned
@@ -358,7 +369,8 @@ def decode_emissions_state_branch(
         dask="parallelized",
         output_dtypes=[np.uint32],
     )
-    return decoded.assign_coords(emissions_nodes_aligned.coords).transpose(*emissions_nodes_aligned.dims)
+    decoded_name = "drained_state_nodes" if branch == "drained" else "burned_state_nodes"
+    return decoded.rename(decoded_name).assign_coords(emissions_nodes_aligned.coords).transpose(*emissions_nodes_aligned.dims)
 
 def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
     if isinstance(ds_or_da, xr.DataArray):
@@ -1010,7 +1022,22 @@ def run(args: argparse.Namespace) -> None:
                 with dask.annotate(label=f"reduce:drained:{interval}"):
                     flux_codes = [FLUX_SPECS[k]["code"] for k in drained_fluxes]
                     area_layer_d = ref if ref.dtype == np.float32 else ref.astype("float32")
-                    cube_d = xr.concat([zarr_data[k] for k in drained_fluxes] + [area_layer_d], dim="flux_type").assign_coords(
+                    area_layer_d = drop_scalar_year_coord(area_layer_d)
+                    logger.info(
+                        "Drained concat inputs: interval=%s branch=drained first_flux_dims=%s first_flux_coords=%s first_flux_dtype=%s area_dims=%s area_coords=%s area_dtype=%s",
+                        interval,
+                        zarr_data[drained_fluxes[0]].dims,
+                        list(zarr_data[drained_fluxes[0]].coords),
+                        zarr_data[drained_fluxes[0]].dtype,
+                        area_layer_d.dims,
+                        list(area_layer_d.coords),
+                        area_layer_d.dtype,
+                    )
+                    cube_d = xr.concat(
+                        [zarr_data[k] for k in drained_fluxes] + [area_layer_d],
+                        dim="flux_type",
+                        coords="minimal",
+                    ).assign_coords(
                         flux_type=("flux_type", flux_codes + [2])
                     )
                     logger.info(
@@ -1039,7 +1066,22 @@ def run(args: argparse.Namespace) -> None:
                 with dask.annotate(label=f"reduce:burned:{interval}"):
                     flux_codes_b = [FLUX_SPECS[k]["code"] for k in burned_fluxes]
                     area_layer_b = ref if ref.dtype == np.float32 else ref.astype("float32")
-                    cube_b = xr.concat([zarr_data[k] for k in burned_fluxes] + [area_layer_b], dim="flux_type").assign_coords(
+                    area_layer_b = drop_scalar_year_coord(area_layer_b)
+                    logger.info(
+                        "Burned concat inputs: interval=%s branch=burned first_flux_dims=%s first_flux_coords=%s first_flux_dtype=%s area_dims=%s area_coords=%s area_dtype=%s",
+                        interval,
+                        zarr_data[burned_fluxes[0]].dims,
+                        list(zarr_data[burned_fluxes[0]].coords),
+                        zarr_data[burned_fluxes[0]].dtype,
+                        area_layer_b.dims,
+                        list(area_layer_b.coords),
+                        area_layer_b.dtype,
+                    )
+                    cube_b = xr.concat(
+                        [zarr_data[k] for k in burned_fluxes] + [area_layer_b],
+                        dim="flux_type",
+                        coords="minimal",
+                    ).assign_coords(
                         flux_type=("flux_type", flux_codes_b + [2])
                     )
                     logger.info(
