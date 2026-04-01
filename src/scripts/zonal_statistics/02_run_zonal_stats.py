@@ -556,6 +556,11 @@ def build_branch_manifest(
     selected_fluxes: List[str],
     roi_meta: Dict[str, Any],
 ) -> Dict[str, Any]:
+    selected_flux_type_labels = [
+        zc.ZONAL_FLUX_LABELS_BY_KEY[k]
+        for k in selected_fluxes
+        if k in zc.ZONAL_FLUX_LABELS_BY_KEY
+    ]
     return {
         "model_version": args.model_version,
         "run_name": args.run_name,
@@ -564,6 +569,7 @@ def build_branch_manifest(
         "interval_type": args.interval_type,
         "branch": branch,
         "selected_fluxes": selected_fluxes,
+        "selected_flux_type_labels": selected_flux_type_labels,
         "align_tolerance_fraction": args.align_tolerance_fraction,
         "force_align": bool(args.force_align),
         "roi_mode": roi_meta["roi_mode"],

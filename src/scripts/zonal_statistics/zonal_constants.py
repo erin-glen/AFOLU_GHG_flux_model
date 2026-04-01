@@ -8,6 +8,17 @@ PAD_DIGITS = 8
 # downstream scripts (e.g., pub_common/pub_assets).
 STATE_CODE_PAD_DIGITS = PAD_DIGITS
 
+ZONAL_FLUX_LABELS_BY_KEY: dict[str, str] = {
+    "drained_total": "drained_total_Mg_CO2e",
+    "drained_co2": "drained_co2_Mg_CO2",
+    "drained_n2o": "drained_n2o_Mg_CO2e",
+    "drained_total_co2": "drained_total_co2_Mg_CO2",
+    "drained_total_ch4": "drained_total_ch4_Mg_CO2e",
+    "burned_total": "burned_total_Mg_CO2e",
+    "burned_total_co2": "burned_total_co2_Mg_CO2",
+    "burned_total_ch4": "burned_total_ch4_Mg_CO2e",
+}
+
 def _pad_right(code: str) -> str:
     """Right‑pad ``code`` with zeros to the standard length."""
     return code.ljust(PAD_DIGITS, "0")

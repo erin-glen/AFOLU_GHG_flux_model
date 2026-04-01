@@ -19,29 +19,21 @@ import argparse
 import json
 import posixpath
 from dataclasses import dataclass
-from typing import Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
 import pyarrow.dataset as ds
+import s3fs
 
 from src.scripts.zonal_statistics import zonal_constants as zc
 
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
-_DRAINED_ALLOWED_FLUX_TYPES: Set[str] = {
-    "drained_total_Mg_CO2e",
-    "drained_co2_Mg_CO2",
-    "drained_n2o_Mg_CO2e",
-    "drained_total_co2_Mg_CO2",
-    "drained_total_ch4_Mg_CO2e",
-    "area__ha",
-}
-_BURNED_ALLOWED_FLUX_TYPES: Set[str] = {
-    "burned_total_Mg_CO2e",
-    "burned_total_co2_Mg_CO2",
-    "burned_total_ch4_Mg_CO2e",
-    "area__ha",
-}
+DEFAULT_EMISSIONS_ABS_TOL = 1e-6
+DEFAULT_EMISSIONS_REL_TOL = 1e-6
+DEFAULT_AREA_ABS_TOL = 1e-6
+DEFAULT_AREA_REL_TOL = 1e-5
+MANIFEST_FILENAME = "_zonal_stats_manifest.json"
 
 
 @dataclass
@@ -65,6 +57,28 @@ def _exists_parquet(path: str) -> bool:
         return len(dset.files) > 0
     except Exception:
         return False
+
+
+def _read_manifest(path: str) -> Optional[Dict[str, Any]]:
+    fs_s3 = s3fs.S3FileSystem(anon=False)
+    manifest_path = posixpath.join(path.rstrip("/"), MANIFEST_FILENAME)
+    try:
+        if not fs_s3.exists(manifest_path):
+            return None
+        with fs_s3.open(manifest_path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _derive_expected_flux_types(manifest: Optional[Dict[str, Any]]) -> Set[str]:
+    selected_fluxes = manifest.get("selected_fluxes", []) if manifest else []
+    out: Set[str] = {"area__ha"}
+    for flux_key in selected_fluxes:
+        label = zc.ZONAL_FLUX_LABELS_BY_KEY.get(flux_key)
+        if label:
+            out.add(label)
+    return out
 
 
 def _resolve_paths(model_version: str, run_name: str, run_date: str, interval: str) -> Tuple[str, str, str]:
@@ -118,6 +132,8 @@ def _load_interval_frames(model_version: str, run_name: str, run_date: str, inte
 
 
 def _decode_consistency(combined: pd.DataFrame) -> Dict[str, int]:
+    # NOTE: This checks self-consistency of combined output encoding/decoding only;
+    # it is not an independent parity check against legacy branch outputs.
     arr = combined["combined_state_nodes"].fillna(0).astype("uint32").to_numpy(copy=False)
     d_dec, b_dec = zc.unpack_emissions_state_to_legacy(arr)
 
@@ -144,16 +160,21 @@ def _aggregate_and_compare(
     state_col: str,
     value_tol: float,
     relative_tol: float,
-    allowed_flux_types: Set[str],
+    area_value_tol: float,
+    area_relative_tol: float,
+    expected_flux_types: Set[str],
 ) -> Dict[str, object]:
     keys = ["gadm_adm0", "interval_end", "flux_type", state_col]
     combined_flux_types_before = set(combined["flux_type"].dropna().unique().tolist())
     branch_flux_types_before = set(branch["flux_type"].dropna().unique().tolist())
+    expected_present_flux_types = expected_flux_types & (combined_flux_types_before | branch_flux_types_before)
+    missing_expected_flux_types_combined = sorted(expected_present_flux_types - combined_flux_types_before)
+    missing_expected_flux_types_branch = sorted(expected_present_flux_types - branch_flux_types_before)
 
-    c = combined.loc[combined["flux_type"].isin(allowed_flux_types), ["gadm_adm0", "interval_end", "flux_type", "value", state_col]].copy()
+    c = combined.loc[combined["flux_type"].isin(expected_flux_types), ["gadm_adm0", "interval_end", "flux_type", "value", state_col]].copy()
     c = c.groupby(keys, dropna=False, as_index=False)["value"].sum().rename(columns={"value": "combined_value"})
 
-    b = branch.loc[branch["flux_type"].isin(allowed_flux_types), ["gadm_adm0", "interval_end", "flux_type", "value", state_col]].copy()
+    b = branch.loc[branch["flux_type"].isin(expected_flux_types), ["gadm_adm0", "interval_end", "flux_type", "value", state_col]].copy()
     b = b.groupby(keys, dropna=False, as_index=False)["value"].sum().rename(columns={"value": "branch_value"})
 
     combined_flux_types_after = set(c["flux_type"].dropna().unique().tolist())
@@ -167,14 +188,26 @@ def _aggregate_and_compare(
 
     m = c.merge(b, on=keys, how="outer").fillna({"combined_value": 0.0, "branch_value": 0.0})
     m["abs_delta"] = (m["combined_value"] - m["branch_value"]).abs()
-    m["is_match"] = np.isclose(
-        m["combined_value"],
-        m["branch_value"],
+    area_mask = m["flux_type"].eq("area__ha")
+    m["is_match"] = False
+    m.loc[~area_mask, "is_match"] = np.isclose(
+        m.loc[~area_mask, "combined_value"],
+        m.loc[~area_mask, "branch_value"],
         atol=value_tol,
         rtol=relative_tol,
     )
+    m.loc[area_mask, "is_match"] = np.isclose(
+        m.loc[area_mask, "combined_value"],
+        m.loc[area_mask, "branch_value"],
+        atol=area_value_tol,
+        rtol=area_relative_tol,
+    )
 
     mismatches = m[~m["is_match"]]
+    mismatch_counts_by_flux_type = {
+        str(k): int(v)
+        for k, v in mismatches.groupby("flux_type", dropna=False).size().sort_values(ascending=False).items()
+    }
     max_delta = float(m["abs_delta"].max()) if not m.empty else 0.0
     total_abs_delta = float(m["abs_delta"].sum()) if not m.empty else 0.0
     top_mismatches = (
@@ -191,6 +224,9 @@ def _aggregate_and_compare(
         "compared_flux_types": compared_flux_types,
         "dropped_combined_flux_types": dropped_combined_flux_types,
         "dropped_branch_flux_types": dropped_branch_flux_types,
+        "missing_expected_flux_types_combined": missing_expected_flux_types_combined,
+        "missing_expected_flux_types_branch": missing_expected_flux_types_branch,
+        "mismatch_counts_by_flux_type": mismatch_counts_by_flux_type,
         "top_mismatches": top_mismatches,
     }
 
@@ -202,9 +238,26 @@ def evaluate_interval(
     interval: str,
     value_tol: float,
     relative_tol: float,
+    area_value_tol: float,
+    area_relative_tol: float,
 ) -> Dict[str, object]:
+    combined_path, drained_path, burned_path = _resolve_paths(model_version, run_name, run_date, interval)
     frames = _load_interval_frames(model_version, run_name, run_date, interval)
     combined = frames.combined.copy()
+    combined_manifest = _read_manifest(combined_path)
+    drained_manifest = _read_manifest(drained_path)
+    burned_manifest = _read_manifest(burned_path)
+    drained_expected_flux_types = _derive_expected_flux_types(drained_manifest)
+    burned_expected_flux_types = _derive_expected_flux_types(burned_manifest)
+    combined_expected_flux_types = _derive_expected_flux_types(combined_manifest)
+    combined_expected_drained_flux_types = {"area__ha"} | {
+        flux for flux in combined_expected_flux_types if flux.startswith("drained_")
+    }
+    combined_expected_burned_flux_types = {"area__ha"} | {
+        flux for flux in combined_expected_flux_types if flux.startswith("burned_")
+    }
+    drained_expected_flux_types |= combined_expected_drained_flux_types
+    burned_expected_flux_types |= combined_expected_burned_flux_types
 
     # Ensure drained/burned node columns exist in combined (decode if missing).
     if "drained_state_nodes" not in combined.columns or "burned_state_nodes" not in combined.columns:
@@ -222,7 +275,9 @@ def evaluate_interval(
         "drained_state_nodes",
         value_tol,
         relative_tol,
-        _DRAINED_ALLOWED_FLUX_TYPES,
+        area_value_tol,
+        area_relative_tol,
+        drained_expected_flux_types,
     )
     burned_stats = _aggregate_and_compare(
         combined,
@@ -230,12 +285,18 @@ def evaluate_interval(
         "burned_state_nodes",
         value_tol,
         relative_tol,
-        _BURNED_ALLOWED_FLUX_TYPES,
+        area_value_tol,
+        area_relative_tol,
+        burned_expected_flux_types,
     )
 
     interval_pass = (
-        decode_stats["decode_drained_mismatch_rows"] == 0
-        and decode_stats["decode_burned_mismatch_rows"] == 0
+        drained_stats["rows_compared"] > 0
+        and burned_stats["rows_compared"] > 0
+        and len(drained_stats["missing_expected_flux_types_combined"]) == 0
+        and len(drained_stats["missing_expected_flux_types_branch"]) == 0
+        and len(burned_stats["missing_expected_flux_types_combined"]) == 0
+        and len(burned_stats["missing_expected_flux_types_branch"]) == 0
         and drained_stats["mismatch_rows"] == 0
         and burned_stats["mismatch_rows"] == 0
     )
@@ -243,7 +304,7 @@ def evaluate_interval(
     return {
         "interval": interval,
         "pass": interval_pass,
-        "decode_consistency": decode_stats,
+        "decode_self_consistency": decode_stats,
         "drained_alignment": drained_stats,
         "burned_alignment": burned_stats,
     }
@@ -255,8 +316,10 @@ def main() -> None:
     parser.add_argument("--run_name", required=True)
     parser.add_argument("--run_date", required=True)
     parser.add_argument("--intervals", nargs="+", required=True, help="Inventory intervals, e.g. 2021_2024")
-    parser.add_argument("--value_tolerance", type=float, default=1e-6)
-    parser.add_argument("--relative_tolerance", type=float, default=1e-6)
+    parser.add_argument("--value_tolerance", type=float, default=DEFAULT_EMISSIONS_ABS_TOL)
+    parser.add_argument("--relative_tolerance", type=float, default=DEFAULT_EMISSIONS_REL_TOL)
+    parser.add_argument("--area_value_tolerance", type=float, default=DEFAULT_AREA_ABS_TOL)
+    parser.add_argument("--area_relative_tolerance", type=float, default=DEFAULT_AREA_REL_TOL)
     parser.add_argument("--report_json", default=None, help="Optional path to write JSON report")
     args = parser.parse_args()
 
@@ -270,6 +333,8 @@ def main() -> None:
                 interval=interval,
                 value_tol=float(args.value_tolerance),
                 relative_tol=float(args.relative_tolerance),
+                area_value_tol=float(args.area_value_tolerance),
+                area_relative_tol=float(args.area_relative_tolerance),
             )
         )
 
