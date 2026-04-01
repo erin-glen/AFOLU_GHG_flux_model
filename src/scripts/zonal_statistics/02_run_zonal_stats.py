@@ -679,6 +679,18 @@ def _df_from_result(res: xr.DataArray, flux_map: Dict[int, str], interval_end: i
         df["burned_state_meaning"] = (
             df["burned_state_nodes"].astype("string").str.zfill(8).map(zc.BURNED_STATE_NODE_MEANINGS)
         )
+    if "emissions_state_nodes" in df.columns:
+        df["combined_state_nodes"] = df["emissions_state_nodes"].astype("uint32", copy=False)
+        packed = df["emissions_state_nodes"].fillna(0).astype("uint32").to_numpy(copy=False)
+        drained_nodes, burned_nodes = zc.unpack_emissions_state_to_legacy(packed)
+        df["drained_state_nodes"] = drained_nodes.astype("uint32", copy=False)
+        df["burned_state_nodes"] = burned_nodes.astype("uint32", copy=False)
+        df["drained_state_meaning"] = (
+            df["drained_state_nodes"].astype("string").str.zfill(8).map(zc.DRAINED_STATE_NODE_MEANINGS)
+        )
+        df["burned_state_meaning"] = (
+            df["burned_state_nodes"].astype("string").str.zfill(8).map(zc.BURNED_STATE_NODE_MEANINGS)
+        )
     df["interval_end"] = interval_end
     df.loc[df["flux_type"].eq("area__ha"), "value"] = df["value"] / 10000.0  # m² -> ha
     return df
@@ -777,6 +789,21 @@ def run(args: argparse.Namespace) -> None:
         gadm_adm0_ids = np.array([i for i in zc.GADM_ADM0_IDS if i > 0], dtype=np.uint32)
         drained_codes_arr = np.array(sorted({0, *map(int, zc.ALL_DRAINED_STATE_CODES)}), dtype=np.uint32)
         burned_codes_arr  = np.array(sorted({0, *map(int, zc.ALL_BURNED_STATE_CODES)}),  dtype=np.uint32)
+        drained_state_ids = range(0, len(zc.DRAINED_STATE_ID_TO_CODE) + 1)
+        burned_state_ids = range(0, len(zc.BURNED_STATE_ID_TO_CODE) + 1)
+        emissions_codes_arr = np.array(
+            sorted({
+                np.uint32(
+                    np.uint32(d_id)
+                    | np.uint32(b_id << zc.EMISSIONS_STATE_BURNED_SHIFT)
+                    | (np.uint32(1 << zc.EMISSIONS_STATE_HAS_DRAINED_BIT) if d_id > 0 else np.uint32(0))
+                    | (np.uint32(1 << zc.EMISSIONS_STATE_HAS_BURNED_BIT) if b_id > 0 else np.uint32(0))
+                )
+                for d_id in drained_state_ids
+                for b_id in burned_state_ids
+            }),
+            dtype=np.uint32,
+        )
 
         # Local staging
         local_arrow = pafs.LocalFileSystem()
@@ -784,6 +811,7 @@ def run(args: argparse.Namespace) -> None:
         base_dir_root.mkdir(parents=True, exist_ok=True)
         base_dir_drained = base_dir_root / "drained"
         base_dir_burned = base_dir_root / "burned"
+        base_dir_combined = base_dir_root / "combined_state"
         fs_s3 = s3fs.S3FileSystem(anon=False)
 
         # Canonical reference grid = pixel_area
@@ -821,13 +849,17 @@ def run(args: argparse.Namespace) -> None:
             drained_subdir = "drained_co2_n2o" if drained_only_gases else "drained"
             dest_d = posixpath.join(dest_root.rstrip("/"), drained_subdir)
             dest_b = posixpath.join(dest_root.rstrip("/"), "burned")
+            dest_e = posixpath.join(dest_root.rstrip("/"), "combined_state")
             manifest_d = build_branch_manifest(args, interval, "drained", drained_fluxes, roi_meta)
             manifest_b = build_branch_manifest(args, interval, "burned", burned_fluxes, roi_meta)
+            manifest_e = build_branch_manifest(args, interval, "combined_state", drained_fluxes + burned_fluxes, roi_meta)
 
             need_drained = bool(drained_fluxes)
             need_burned = bool(burned_fluxes)
+            need_emissions = bool(drained_fluxes or burned_fluxes)
             drained_exists = need_drained and remote_prefix_has_parquet(fs_s3, dest_d)
             burned_exists = need_burned and remote_prefix_has_parquet(fs_s3, dest_b)
+            emissions_exists = need_emissions and remote_prefix_has_parquet(fs_s3, dest_e)
             if not args.overwrite_existing:
                 if need_drained and drained_exists:
                     existing_manifest_d = read_remote_manifest(fs_s3, dest_d)
@@ -873,8 +905,30 @@ def run(args: argparse.Namespace) -> None:
                         )
                     logger.info("Skipping burned branch for interval %s; remote parquet+manifest match at %s", interval, dest_b)
                     need_burned = False
-                if not need_drained and not need_burned:
-                    logger.info("Skipping interval %s entirely; both requested outputs already exist remotely.", interval)
+                if need_emissions and emissions_exists:
+                    existing_manifest_e = read_remote_manifest(fs_s3, dest_e)
+                    if existing_manifest_e is None or not manifests_match(existing_manifest_e, manifest_e):
+                        raise ValueError(
+                            f"Existing combined_state output at {dest_e} does not match current selection/config "
+                            f"for interval {interval}. Use --overwrite_existing or a different destination."
+                        )
+                    completion_e = read_remote_completion_marker(fs_s3, dest_e)
+                    if completion_e is None or not completion_marker_matches(
+                        completion_e,
+                        branch="combined_state",
+                        interval=interval,
+                        run_name=args.run_name,
+                        run_date=args.run_date,
+                        model_version=args.model_version,
+                    ):
+                        raise ValueError(
+                            f"Existing combined_state output at {dest_e} appears incomplete for interval {interval} "
+                            f"(missing/invalid completion marker). Use --overwrite_existing or clean the prefix."
+                        )
+                    logger.info("Skipping combined_state branch for interval %s; remote parquet+manifest match at %s", interval, dest_e)
+                    need_emissions = False
+                if not need_drained and not need_burned and not need_emissions:
+                    logger.info("Skipping interval %s entirely; all requested outputs already exist remotely.", interval)
                     continue
             else:
                 if need_drained and drained_exists:
@@ -883,6 +937,9 @@ def run(args: argparse.Namespace) -> None:
                 if need_burned and burned_exists:
                     logger.info("Overwriting burned branch for interval %s by deleting remote prefix %s", interval, dest_b)
                     delete_remote_prefix(fs_s3, dest_b)
+                if need_emissions and emissions_exists:
+                    logger.info("Overwriting combined_state branch for interval %s by deleting remote prefix %s", interval, dest_e)
+                    delete_remote_prefix(fs_s3, dest_e)
 
             logger.info("Processing interval %s : %s", interval, timestr())
 
@@ -898,8 +955,15 @@ def run(args: argparse.Namespace) -> None:
                 validation_keys.extend(burned_fluxes)
                 if "burned_state" in mega_ds:
                     validation_keys.append("burned_state_nodes")
+            if need_emissions:
+                validation_keys.extend(drained_fluxes + burned_fluxes)
             if (need_drained and "drained_state" not in mega_ds) or (need_burned and "burned_state" not in mega_ds):
                 validation_keys.append("emissions_state_nodes")
+            if need_emissions and "emissions_state" not in mega_ds:
+                if "drained_state" in mega_ds and "burned_state" in mega_ds:
+                    validation_keys.extend(["drained_state_nodes", "burned_state_nodes"])
+                else:
+                    validation_keys.append("emissions_state_nodes")
             validation_keys = list(dict.fromkeys(validation_keys))
             validate_selected_sources(
                 mega_ds,
@@ -910,13 +974,16 @@ def run(args: argparse.Namespace) -> None:
             )
 
             zarr_data: Dict[str, xr.DataArray] = {}
+            drained_fluxes_for_prepare = drained_fluxes if (need_drained or need_emissions) else []
+            burned_fluxes_for_prepare = burned_fluxes if (need_burned or need_emissions) else []
             logger.info(
-                "Branch flux preparation start: interval=%s drained_flux_keys=%s burned_flux_keys=%s",
-                interval, drained_fluxes if need_drained else [], burned_fluxes if need_burned else [],
+                "Branch flux preparation start: interval=%s drained_flux_keys=%s burned_flux_keys=%s combined_state=%s",
+                interval,
+                drained_fluxes_for_prepare,
+                burned_fluxes_for_prepare,
+                need_emissions,
             )
-            for key in drained_fluxes + burned_fluxes:
-                if (key in drained_fluxes and not need_drained) or (key in burned_fluxes and not need_burned):
-                    continue
+            for key in list(dict.fromkeys(drained_fluxes_for_prepare + burned_fluxes_for_prepare)):
                 zarr_data[key] = prepare_analysis_array(
                     DATASETS[key], key, mega_ds, ref, tol, args.force_align, mega_zarr_path=mega_zarr_path
                 ).astype("float32")
@@ -999,6 +1066,46 @@ def run(args: argparse.Namespace) -> None:
                         "missing_direct_state_var='burned_state' emissions_state_available=False"
                     )
             logger.info("State raster preparation end: interval=%s", interval)
+
+            emissions_nodes_for_reduce = emissions_nodes_aligned
+            if need_emissions and emissions_nodes_for_reduce is None:
+                if "emissions_state" in mega_ds:
+                    emissions_nodes_for_reduce = prepare_analysis_array(
+                        DATASETS["emissions_state_nodes"], "emissions_state_nodes", mega_ds, ref, tol, args.force_align,
+                        mega_zarr_path=mega_zarr_path,
+                    ).astype("uint32")
+                    logger.info("State raster source selected: interval=%s branch=combined_state source=direct:emissions_state", interval)
+                elif ("drained_state" in mega_ds) and ("burned_state" in mega_ds):
+                    drained_for_pack = (
+                        drained_nodes_aligned
+                        if drained_nodes_aligned is not None
+                        else prepare_analysis_array(
+                            DATASETS["drained_state_nodes"], "drained_state_nodes", mega_ds, ref, tol, args.force_align,
+                            mega_zarr_path=mega_zarr_path,
+                        ).astype("uint32")
+                    )
+                    burned_for_pack = (
+                        burned_nodes_aligned
+                        if burned_nodes_aligned is not None
+                        else prepare_analysis_array(
+                            DATASETS["burned_state_nodes"], "burned_state_nodes", mega_ds, ref, tol, args.force_align,
+                            mega_zarr_path=mega_zarr_path,
+                        ).astype("uint32")
+                    )
+                    emissions_nodes_for_reduce = xr.apply_ufunc(
+                        zc.pack_emissions_state,
+                        drained_for_pack,
+                        burned_for_pack,
+                        dask="parallelized",
+                        output_dtypes=[np.uint32],
+                    ).rename("emissions_state_nodes")
+                    logger.info("State raster source selected: interval=%s branch=combined_state source=derived:pack(drained_state,burned_state)", interval)
+                else:
+                    raise ValueError(
+                        "Unable to resolve required emissions state raster. "
+                        f"interval='{interval}' branch='combined_state' mega_zarr_path='{mega_zarr_path}' "
+                        "requires emissions_state or (drained_state and burned_state)"
+                    )
 
             # Smart alignment (skip if coords already match)
             adm0_aligned = align_auto(adm0, ref, tol, args.force_align)
@@ -1104,6 +1211,37 @@ def run(args: argparse.Namespace) -> None:
             else:
                 df_b = None
 
+            if need_emissions:
+                if emissions_nodes_for_reduce is None:
+                    raise RuntimeError("emissions_state_nodes dataset is required when processing combined_state branch")
+                with dask.annotate(label=f"reduce:combined_state:{interval}"):
+                    emissions_flux_keys = drained_fluxes + burned_fluxes
+                    flux_codes_e = [FLUX_SPECS[k]["code"] for k in emissions_flux_keys]
+                    area_layer_e = ref if ref.dtype == np.float32 else ref.astype("float32")
+                    area_layer_e = drop_scalar_year_coord(area_layer_e)
+                    cube_e = xr.concat(
+                        [zarr_data[k] for k in emissions_flux_keys] + [area_layer_e],
+                        dim="flux_type",
+                        coords="minimal",
+                    ).assign_coords(
+                        flux_type=("flux_type", flux_codes_e + [2])
+                    )
+                    logger.info(
+                        "Emissions-state reduction start: interval=%s flux_layers=%d cube_dims=%s cube_chunks=%s cube_numblocks=%s",
+                        interval, len(emissions_flux_keys), dict(cube_e.sizes), _chunk_structure(cube_e), getattr(cube_e.data, "numblocks", None),
+                    )
+                    res_e = xarray_reduce(
+                        cube_e, adm0_aligned, emissions_nodes_for_reduce, func="sum",
+                        expected_groups=(gadm_adm0_ids, emissions_codes_arr),
+                        where=where_mask, **flox_sparse_reindex_kwargs(not args.no_sparse),
+                    ).compute()
+                    logger.info("Emissions-state reduction end: interval=%s", interval)
+                flux_map_e = {FLUX_SPECS[k]["code"]: FLUX_SPECS[k]["label"] for k in emissions_flux_keys}
+                flux_map_e[2] = "area__ha"
+                df_e = _df_from_result(res_e, flux_map_e, interval_end_year)
+            else:
+                df_e = None
+
             # Write local Parquet (per interval)
             import shutil
             if df_d is not None:
@@ -1155,6 +1293,31 @@ def run(args: argparse.Namespace) -> None:
                 logger.info("Uploaded burned interval %s → %s", interval, dest_b)
                 if not args.keep_local:
                     shutil.rmtree(local_b, ignore_errors=True)
+
+            if df_e is not None:
+                local_e = base_dir_combined / interval
+                if local_e.exists():
+                    shutil.rmtree(local_e, ignore_errors=True)
+                local_e.mkdir(parents=True, exist_ok=True)
+                ds.write_dataset(pa.Table.from_pandas(df_e, preserve_index=False), base_dir=str(local_e),
+                                 filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
+                write_local_manifest(local_e, manifest_e)
+                uploaded_count = _upload_dir(fs_s3, local_e, dest_e)
+                marker_e = {
+                    "success": True,
+                    "branch": "combined_state",
+                    "interval": interval,
+                    "run_name": args.run_name,
+                    "run_date": args.run_date,
+                    "model_version": args.model_version,
+                    "uploaded_file_count": uploaded_count,
+                    "manifest_match_keys_version": 1,
+                }
+                local_marker_e = write_local_completion_marker(local_e, marker_e)
+                fs_s3.put(str(local_marker_e), completion_marker_path(dest_e))
+                logger.info("Uploaded combined_state interval %s → %s", interval, dest_e)
+                if not args.keep_local:
+                    shutil.rmtree(local_e, ignore_errors=True)
 
         if not args.keep_local:
             import shutil

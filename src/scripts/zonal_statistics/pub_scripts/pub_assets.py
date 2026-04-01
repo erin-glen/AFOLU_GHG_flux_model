@@ -439,13 +439,17 @@ def _register_components(con: duckdb.DuckDBPyConnection,
 # ----------------------------- Lookup registrations (driver-only) -----------------------------
 
 def _register_state_context_views(con: duckdb.DuckDBPyConnection):
-    """Small in-memory lookups from zonal_constants: drained_state_ctx, burned_state_ctx."""
+    """Small in-memory lookups from zonal_constants: drained_state_ctx, burned_state_ctx.
+
+    Note: use `combined_state` as the preferred semantic label for the unified state
+    concept; keep `emissions_state` as a compatibility alias for older SQL helpers.
+    """
     # drained
     d_rows = []
     for key, meaning in zc.DRAINED_STATE_NODE_MEANINGS.items():
         climate_domain = None
         drained_state = None
-        emissions_state = None
+        combined_state = None
         if "__" in meaning:
             left, right = meaning.split("__", 1)
             drained_state = left
@@ -453,11 +457,11 @@ def _register_state_context_views(con: duckdb.DuckDBPyConnection):
                 dom, rest = right.split("_", 1)
                 if dom in {"boreal", "temperate", "tropical"}:
                     climate_domain = dom
-                    emissions_state = rest
+                    combined_state = rest
                 else:
-                    emissions_state = right
+                    combined_state = right
             else:
-                emissions_state = right
+                combined_state = right
         else:
             drained_state = meaning
         d_rows.append({
@@ -465,7 +469,8 @@ def _register_state_context_views(con: duckdb.DuckDBPyConnection):
             "meaning": f"{meaning}",
             "climate_domain": climate_domain,
             "drained_state": drained_state,
-            "emissions_state": emissions_state,
+            "combined_state": combined_state,
+            "emissions_state": combined_state,
         })
     con.register("drained_state_ctx", pd.DataFrame(d_rows))
 
@@ -474,21 +479,22 @@ def _register_state_context_views(con: duckdb.DuckDBPyConnection):
     for key, meaning in zc.BURNED_STATE_NODE_MEANINGS.items():
         climate_domain = None
         burned_state = None
-        emissions_state = None
+        combined_state = None
         if "__" in meaning:
             dom, state = meaning.split("__", 1)
             climate_domain = dom
             burned_state = state
-            emissions_state = state
+            combined_state = state
         else:
             burned_state = meaning
-            emissions_state = meaning
+            combined_state = meaning
         b_rows.append({
             "key": f"{key}",
             "meaning": f"{meaning}",
             "climate_domain": climate_domain,
             "burned_state": burned_state,
-            "emissions_state": emissions_state,
+            "combined_state": combined_state,
+            "emissions_state": combined_state,
         })
     con.register("burned_state_ctx", pd.DataFrame(b_rows))
 
