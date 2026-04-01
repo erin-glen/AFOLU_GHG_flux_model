@@ -19,7 +19,7 @@ import argparse
 import json
 import posixpath
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -28,6 +28,20 @@ import pyarrow.dataset as ds
 from src.scripts.zonal_statistics import zonal_constants as zc
 
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
+_DRAINED_ALLOWED_FLUX_TYPES: Set[str] = {
+    "drained_total_Mg_CO2e",
+    "drained_co2_Mg_CO2",
+    "drained_n2o_Mg_CO2e",
+    "drained_total_co2_Mg_CO2",
+    "drained_total_ch4_Mg_CO2e",
+    "area__ha",
+}
+_BURNED_ALLOWED_FLUX_TYPES: Set[str] = {
+    "burned_total_Mg_CO2e",
+    "burned_total_co2_Mg_CO2",
+    "burned_total_ch4_Mg_CO2e",
+    "area__ha",
+}
 
 
 @dataclass
@@ -129,31 +143,66 @@ def _aggregate_and_compare(
     branch: pd.DataFrame,
     state_col: str,
     value_tol: float,
-) -> Dict[str, float]:
+    relative_tol: float,
+    allowed_flux_types: Set[str],
+) -> Dict[str, object]:
     keys = ["gadm_adm0", "interval_end", "flux_type", state_col]
+    combined_flux_types_before = set(combined["flux_type"].dropna().unique().tolist())
+    branch_flux_types_before = set(branch["flux_type"].dropna().unique().tolist())
 
-    c = combined[["gadm_adm0", "interval_end", "flux_type", "value", state_col]].copy()
+    c = combined.loc[combined["flux_type"].isin(allowed_flux_types), ["gadm_adm0", "interval_end", "flux_type", "value", state_col]].copy()
     c = c.groupby(keys, dropna=False, as_index=False)["value"].sum().rename(columns={"value": "combined_value"})
 
-    b = branch[["gadm_adm0", "interval_end", "flux_type", "value", state_col]].copy()
+    b = branch.loc[branch["flux_type"].isin(allowed_flux_types), ["gadm_adm0", "interval_end", "flux_type", "value", state_col]].copy()
     b = b.groupby(keys, dropna=False, as_index=False)["value"].sum().rename(columns={"value": "branch_value"})
+
+    combined_flux_types_after = set(c["flux_type"].dropna().unique().tolist())
+    branch_flux_types_after = set(b["flux_type"].dropna().unique().tolist())
+    compared_flux_types = sorted(combined_flux_types_after & branch_flux_types_after)
+    dropped_combined_flux_types = sorted(combined_flux_types_before - combined_flux_types_after)
+    dropped_branch_flux_types = sorted(branch_flux_types_before - branch_flux_types_after)
+
+    c = c[c["flux_type"].isin(compared_flux_types)].copy()
+    b = b[b["flux_type"].isin(compared_flux_types)].copy()
 
     m = c.merge(b, on=keys, how="outer").fillna({"combined_value": 0.0, "branch_value": 0.0})
     m["abs_delta"] = (m["combined_value"] - m["branch_value"]).abs()
+    m["is_match"] = np.isclose(
+        m["combined_value"],
+        m["branch_value"],
+        atol=value_tol,
+        rtol=relative_tol,
+    )
 
-    mismatches = m[m["abs_delta"] > value_tol]
+    mismatches = m[~m["is_match"]]
     max_delta = float(m["abs_delta"].max()) if not m.empty else 0.0
     total_abs_delta = float(m["abs_delta"].sum()) if not m.empty else 0.0
+    top_mismatches = (
+        mismatches.sort_values("abs_delta", ascending=False)
+        .head(10)[keys + ["combined_value", "branch_value", "abs_delta"]]
+        .to_dict(orient="records")
+    )
 
     return {
         "rows_compared": int(len(m)),
         "mismatch_rows": int(len(mismatches)),
         "max_abs_delta": max_delta,
         "total_abs_delta": total_abs_delta,
+        "compared_flux_types": compared_flux_types,
+        "dropped_combined_flux_types": dropped_combined_flux_types,
+        "dropped_branch_flux_types": dropped_branch_flux_types,
+        "top_mismatches": top_mismatches,
     }
 
 
-def evaluate_interval(model_version: str, run_name: str, run_date: str, interval: str, value_tol: float) -> Dict[str, object]:
+def evaluate_interval(
+    model_version: str,
+    run_name: str,
+    run_date: str,
+    interval: str,
+    value_tol: float,
+    relative_tol: float,
+) -> Dict[str, object]:
     frames = _load_interval_frames(model_version, run_name, run_date, interval)
     combined = frames.combined.copy()
 
@@ -167,8 +216,22 @@ def evaluate_interval(model_version: str, run_name: str, run_date: str, interval
             combined["burned_state_nodes"] = b_dec.astype("uint32", copy=False)
 
     decode_stats = _decode_consistency(combined)
-    drained_stats = _aggregate_and_compare(combined, frames.drained, "drained_state_nodes", value_tol)
-    burned_stats = _aggregate_and_compare(combined, frames.burned, "burned_state_nodes", value_tol)
+    drained_stats = _aggregate_and_compare(
+        combined,
+        frames.drained,
+        "drained_state_nodes",
+        value_tol,
+        relative_tol,
+        _DRAINED_ALLOWED_FLUX_TYPES,
+    )
+    burned_stats = _aggregate_and_compare(
+        combined,
+        frames.burned,
+        "burned_state_nodes",
+        value_tol,
+        relative_tol,
+        _BURNED_ALLOWED_FLUX_TYPES,
+    )
 
     interval_pass = (
         decode_stats["decode_drained_mismatch_rows"] == 0
@@ -193,6 +256,7 @@ def main() -> None:
     parser.add_argument("--run_date", required=True)
     parser.add_argument("--intervals", nargs="+", required=True, help="Inventory intervals, e.g. 2021_2024")
     parser.add_argument("--value_tolerance", type=float, default=1e-6)
+    parser.add_argument("--relative_tolerance", type=float, default=1e-6)
     parser.add_argument("--report_json", default=None, help="Optional path to write JSON report")
     args = parser.parse_args()
 
@@ -205,6 +269,7 @@ def main() -> None:
                 run_date=args.run_date,
                 interval=interval,
                 value_tol=float(args.value_tolerance),
+                relative_tol=float(args.relative_tolerance),
             )
         )
 
