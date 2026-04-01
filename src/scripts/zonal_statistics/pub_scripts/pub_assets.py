@@ -18,11 +18,11 @@ Outputs mirror the main drivers and are organized under::
 Usage examples:
   cd /mnt/c/gis/git/AFOLU_GHG_flux_model
 
-  python -m src.scripts.zonal_statistics.pub_assets \
-    --model_version 0_9_7 \
-    --run_name ogh_sensitivity_500m_10 \
-    --run_date 20251118 \
-    --years 2005 2010 2015 2020 2024 \
+  python -m src.scripts.zonal_statistics.pub_scripts.pub_assets \
+    --model_version 0_1_1 \
+    --run_name zarr_test \
+    --run_date 20260330 \
+    --years 2024 \
     --topn 10
 """
 
