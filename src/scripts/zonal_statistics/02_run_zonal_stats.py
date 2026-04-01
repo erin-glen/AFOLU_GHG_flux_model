@@ -20,6 +20,7 @@ python -m src.scripts.zonal_statistics.02_run_zonal_stats \
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import logging
 import sys
@@ -130,6 +131,29 @@ def resolve_mega_zarr_path(model_version: str, run_name: str, run_date: str, int
     prefix = posixpath.join(base_path, model_type, interval_type, "*_pixels", run_date, "mega.zarr")
     matches = sorted(fs.glob(prefix))
     if not matches:
+        logger.error(
+            "Mega-zarr discovery failed: model_version=%s run_name=%s run_date=%s interval_type=%s searched_glob=s3://%s",
+            model_version, run_name, run_date, interval_type, prefix,
+        )
+        try:
+            sibling_prefix = posixpath.join(base_path, model_type, interval_type, "*_pixels")
+            sibling_matches = sorted(fs.glob(sibling_prefix))
+            if sibling_matches:
+                logger.error(
+                    "Mega-zarr sibling chunk-size directories sample (%d total): %s",
+                    len(sibling_matches),
+                    [f"s3://{m.lstrip('/')}" for m in sibling_matches[:5]],
+                )
+            run_date_prefix = posixpath.join(base_path, model_type, interval_type, "*_pixels", "*", "mega.zarr")
+            run_date_matches = sorted(fs.glob(run_date_prefix))
+            if run_date_matches:
+                logger.error(
+                    "Mega-zarr sibling run-date stores sample (%d total): %s",
+                    len(run_date_matches),
+                    [f"s3://{m.lstrip('/')}" for m in run_date_matches[:5]],
+                )
+        except Exception as exc:
+            logger.warning("Unable to list sibling mega-zarr candidates for diagnostics: %s", exc)
         raise FileNotFoundError(f"No mega-zarr found at pattern: s3://{prefix}")
     if len(matches) > 1:
         raise RuntimeError(f"Multiple mega-zarr candidates found ({len(matches)}). Pass --zarr_chunk_size_pixels.")
@@ -154,7 +178,13 @@ def open_mega_zarr_region(path: str, year: int, bbox: Optional[List[float]], chu
     return dsy
 
 
-def dataset_from_mega(spec: Dict[str, Any], ds: xr.Dataset) -> xr.DataArray:
+def dataset_from_mega(
+    spec: Dict[str, Any],
+    ds: xr.Dataset,
+    *,
+    dataset_key: str = "unknown",
+    mega_zarr_path: Optional[str] = None,
+) -> xr.DataArray:
     """Extract a raw dataset array from the mega-zarr (no alignment/scaling)."""
     source_var = spec["source_var"]
 
@@ -162,11 +192,17 @@ def dataset_from_mega(spec: Dict[str, Any], ds: xr.Dataset) -> xr.DataArray:
         arr = None
         for name in source_var:
             if name not in ds:
-                raise KeyError(f"Missing expected variable in mega-zarr: {name}")
+                raise KeyError(
+                    f"Missing mega-zarr source variable for dataset_key='{dataset_key}': "
+                    f"source_var='{name}' path='{mega_zarr_path or 'unknown'}'"
+                )
             arr = ds[name] if arr is None else (arr + ds[name])
     else:
         if source_var not in ds:
-            raise KeyError(f"Missing expected variable in mega-zarr: {source_var}")
+            raise KeyError(
+                f"Missing mega-zarr source variable for dataset_key='{dataset_key}': "
+                f"source_var='{source_var}' path='{mega_zarr_path or 'unknown'}'"
+            )
         arr = ds[source_var]
 
     if spec.get("state_alias"):
@@ -175,17 +211,131 @@ def dataset_from_mega(spec: Dict[str, Any], ds: xr.Dataset) -> xr.DataArray:
 
 def prepare_analysis_array(
     spec: Dict[str, Any],
+    dataset_key: str,
     ds: xr.Dataset,
     ref: xr.DataArray,
     tol: float,
     force_align: bool,
+    mega_zarr_path: Optional[str] = None,
 ) -> xr.DataArray:
     """Extract, align to canonical grid, and apply per-ha -> per-pixel scaling when needed."""
-    arr = dataset_from_mega(spec, ds)
+    arr = dataset_from_mega(spec, ds, dataset_key=dataset_key, mega_zarr_path=mega_zarr_path)
     arr = align_auto(arr, ref, tol, force_align)
     if spec.get("kind") in {"flux_per_ha_yr", "flux_per_ha_yr_sum"}:
         arr = arr * ref * cn.m2_to_ha
     return arr
+
+
+def _chunk_structure(arr: xr.DataArray) -> Optional[Tuple[Tuple[int, ...], ...]]:
+    chunks = getattr(arr.data, "chunks", None)
+    return chunks
+
+
+def _num_chunks(arr: xr.DataArray) -> Optional[int]:
+    nblocks = getattr(arr.data, "numblocks", None)
+    if nblocks is None:
+        chunks = _chunk_structure(arr)
+        if chunks is None:
+            return None
+        count = 1
+        for axis in chunks:
+            count *= len(axis)
+        return int(count)
+    count = 1
+    for axis in nblocks:
+        count *= int(axis)
+    return int(count)
+
+
+def maybe_persist_reference(
+    ref: xr.DataArray,
+    *,
+    client,
+    logger: logging.Logger,
+    allow_persist: bool,
+    max_chunks: int = 512,
+) -> xr.DataArray:
+    chunk_structure = _chunk_structure(ref)
+    total_chunks = _num_chunks(ref)
+    logger.info(
+        "Reference grid diagnostics: shape=%s chunks=%s total_chunks=%s allow_persist=%s",
+        tuple(ref.shape), chunk_structure, total_chunks, allow_persist,
+    )
+    if not allow_persist:
+        logger.info("Reference grid persist decision: left lazy (persist disabled).")
+        return ref
+    if total_chunks is None:
+        logger.info("Reference grid persist decision: left lazy (non-dask reference or unknown chunks).")
+        return ref
+    if total_chunks > max_chunks:
+        logger.info(
+            "Reference grid persist decision: left lazy (chunk count %s exceeds max_chunks=%s).",
+            total_chunks, max_chunks,
+        )
+        return ref
+    logger.info("Reference grid persist decision: persisting (chunk count %s <= max_chunks=%s).", total_chunks, max_chunks)
+    _ = client
+    return ref.persist()
+
+
+def validate_selected_sources(
+    mega_ds: xr.Dataset,
+    selected_dataset_keys: List[str],
+    *,
+    mega_zarr_path: str,
+    interval: str,
+    logger: logging.Logger,
+) -> None:
+    required_vars: set[str] = set()
+    dataset_to_required: Dict[str, List[str]] = {}
+    for key in selected_dataset_keys:
+        spec = DATASETS[key]
+        src = spec["source_var"]
+        src_vars = list(src) if isinstance(src, list) else [src]
+        dataset_to_required[key] = src_vars
+        required_vars.update(src_vars)
+
+    available_vars = sorted(list(mega_ds.data_vars))
+    missing = sorted(var for var in required_vars if var not in mega_ds)
+    logger.info(
+        "Validating selected mega-zarr sources: interval=%s selected_keys=%s required_source_vars=%s available_var_count=%d",
+        interval, selected_dataset_keys, sorted(required_vars), len(available_vars),
+    )
+    if not missing:
+        return
+
+    failed_dataset_keys = sorted(
+        key for key, vars_needed in dataset_to_required.items()
+        if any(v in missing for v in vars_needed)
+    )
+    suggestions = {
+        m: difflib.get_close_matches(m, available_vars, n=3, cutoff=0.6)
+        for m in missing
+    }
+    raise ValueError(
+        "Missing required mega-zarr source variables for zonal stats. "
+        f"interval='{interval}' mega_zarr_path='{mega_zarr_path}' "
+        f"dataset_keys={failed_dataset_keys} missing_source_vars={missing} "
+        f"available_var_sample={available_vars[:20]} suggestions={suggestions}"
+    )
+
+
+def decode_emissions_state_to_legacy(
+    emissions_nodes_aligned: xr.DataArray,
+) -> tuple[xr.DataArray, xr.DataArray]:
+    def _decode(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        drained, burned = zc.unpack_emissions_state_to_legacy(x.astype(np.uint32, copy=False))
+        return drained.astype(np.uint32, copy=False), burned.astype(np.uint32, copy=False)
+
+    drained, burned = xr.apply_ufunc(
+        _decode,
+        emissions_nodes_aligned,
+        dask="parallelized",
+        output_dtypes=[np.uint32, np.uint32],
+    )
+    drained = drained.assign_coords(emissions_nodes_aligned.coords).transpose(*emissions_nodes_aligned.dims)
+    burned = burned.assign_coords(emissions_nodes_aligned.coords).transpose(*emissions_nodes_aligned.dims)
+    return drained, burned
 
 def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
     if isinstance(ds_or_da, xr.DataArray):
@@ -582,9 +732,11 @@ def run(args: argparse.Namespace) -> None:
         logger.info("Diagnostics mode: %s | Force align: %s", args.diagnostics, args.force_align)
 
         # Open contextual layers
+        logger.info("Contextual layer open start: adm0=%s pixel_area=%s", adm0_zarr_path(), PIXEL_AREA_ZARR)
         adm0_zarr = adm0_zarr_path()
         adm0 = open_zarr_region(adm0_zarr, bbox, args.chunk_size).astype("uint32")
-        pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).persist()
+        pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size)
+        logger.info("Contextual layer open end: adm0 shape=%s pixel_area shape=%s", tuple(adm0.shape), tuple(pixel_area.shape))
 
         # Expected groups (exclude 0 → ocean)
         gadm_adm0_ids = np.array([i for i in zc.GADM_ADM0_IDS if i > 0], dtype=np.uint32)
@@ -600,7 +752,20 @@ def run(args: argparse.Namespace) -> None:
         fs_s3 = s3fs.S3FileSystem(anon=False)
 
         # Canonical reference grid = pixel_area
-        ref = pixel_area
+        ref = maybe_persist_reference(
+            pixel_area,
+            client=client,
+            logger=logger,
+            allow_persist=bool(args.persist_reference),
+            max_chunks=int(args.persist_reference_max_chunks),
+        )
+        ref_chunks = _num_chunks(ref)
+        if (not bbox) and (not tiles) and ref_chunks is not None and ref_chunks >= int(args.full_domain_chunk_warn_threshold):
+            logger.warning(
+                "High-risk full-domain mode detected: no --bounding_box and no --tile_ids with reference chunk count=%s. "
+                "One-shot full-domain interval reduction can be high-memory/high-graph-risk; bounded ROI is safer for debugging.",
+                ref_chunks,
+            )
         dx = pixel_step(ref)
         tol = float(args.align_tolerance_fraction) * dx
         exact_tile_mask = build_exact_tile_mask(ref, tiles) if tiles else None
@@ -686,44 +851,78 @@ def run(args: argparse.Namespace) -> None:
 
             logger.info("Processing interval %s : %s", interval, timestr())
 
+            logger.info("Mega-zarr open start: interval=%s year=%s path=%s", interval, interval_end_year, mega_zarr_path)
             mega_ds = open_mega_zarr_region(mega_zarr_path, interval_end_year, bbox, args.chunk_size)
+            logger.info("Mega-zarr open end: interval=%s vars=%d dims=%s", interval, len(mega_ds.data_vars), dict(mega_ds.sizes))
+            validation_keys = []
+            if need_drained:
+                validation_keys.extend(drained_fluxes)
+                if "drained_state" in mega_ds:
+                    validation_keys.append("drained_state_nodes")
+            if need_burned:
+                validation_keys.extend(burned_fluxes)
+                if "burned_state" in mega_ds:
+                    validation_keys.append("burned_state_nodes")
+            if (need_drained and "drained_state" not in mega_ds) or (need_burned and "burned_state" not in mega_ds):
+                validation_keys.append("emissions_state_nodes")
+            validation_keys = list(dict.fromkeys(validation_keys))
+            validate_selected_sources(
+                mega_ds,
+                validation_keys,
+                mega_zarr_path=mega_zarr_path,
+                interval=interval,
+                logger=logger,
+            )
 
             zarr_data: Dict[str, xr.DataArray] = {}
+            logger.info(
+                "Branch flux preparation start: interval=%s drained_flux_keys=%s burned_flux_keys=%s",
+                interval, drained_fluxes if need_drained else [], burned_fluxes if need_burned else [],
+            )
             for key in drained_fluxes + burned_fluxes:
                 if (key in drained_fluxes and not need_drained) or (key in burned_fluxes and not need_burned):
                     continue
-                zarr_data[key] = prepare_analysis_array(DATASETS[key], mega_ds, ref, tol, args.force_align).astype("float32")
+                zarr_data[key] = prepare_analysis_array(
+                    DATASETS[key], key, mega_ds, ref, tol, args.force_align, mega_zarr_path=mega_zarr_path
+                ).astype("float32")
+            logger.info("Branch flux preparation end: interval=%s prepared_flux_layers=%s", interval, sorted(zarr_data.keys()))
 
             drained_nodes_aligned = burned_nodes_aligned = None
-            emissions_nodes_aligned = None
-            if "emissions_state" in mega_ds and (need_drained or need_burned):
-                emissions_nodes_aligned = prepare_analysis_array(
-                    DATASETS["emissions_state_nodes"], mega_ds, ref, tol, args.force_align
-                ).astype("uint32")
-
-            if emissions_nodes_aligned is not None:
-                dec_drained, dec_burned = zc.unpack_emissions_state_to_legacy(
-                    emissions_nodes_aligned.values.astype(np.uint32, copy=False)
-                )
-                drained_nodes_aligned = xr.DataArray(
-                    data=dec_drained,
-                    dims=emissions_nodes_aligned.dims,
-                    coords=emissions_nodes_aligned.coords,
-                )
-                burned_nodes_aligned = xr.DataArray(
-                    data=dec_burned,
-                    dims=emissions_nodes_aligned.dims,
-                    coords=emissions_nodes_aligned.coords,
-                )
-            else:
-                if need_drained and "drained_state" in mega_ds:
+            emissions_nodes_aligned = emissions_decoded = None
+            logger.info("State raster preparation start: interval=%s need_drained=%s need_burned=%s", interval, need_drained, need_burned)
+            if need_drained:
+                if "drained_state" in mega_ds:
                     drained_nodes_aligned = prepare_analysis_array(
-                        DATASETS["drained_state_nodes"], mega_ds, ref, tol, args.force_align
+                        DATASETS["drained_state_nodes"], "drained_state_nodes", mega_ds, ref, tol, args.force_align,
+                        mega_zarr_path=mega_zarr_path,
                     ).astype("uint32")
-                if need_burned and "burned_state" in mega_ds:
+                    logger.info("State raster source selected: interval=%s branch=drained source=direct:drained_state", interval)
+                elif "emissions_state" in mega_ds:
+                    emissions_nodes_aligned = prepare_analysis_array(
+                        DATASETS["emissions_state_nodes"], "emissions_state_nodes", mega_ds, ref, tol, args.force_align,
+                        mega_zarr_path=mega_zarr_path,
+                    ).astype("uint32")
+                    emissions_decoded = decode_emissions_state_to_legacy(emissions_nodes_aligned)
+                    drained_nodes_aligned = emissions_decoded[0]
+                    logger.info("State raster source selected: interval=%s branch=drained source=derived:emissions_state", interval)
+            if need_burned:
+                if "burned_state" in mega_ds:
                     burned_nodes_aligned = prepare_analysis_array(
-                        DATASETS["burned_state_nodes"], mega_ds, ref, tol, args.force_align
+                        DATASETS["burned_state_nodes"], "burned_state_nodes", mega_ds, ref, tol, args.force_align,
+                        mega_zarr_path=mega_zarr_path,
                     ).astype("uint32")
+                    logger.info("State raster source selected: interval=%s branch=burned source=direct:burned_state", interval)
+                elif "emissions_state" in mega_ds:
+                    if emissions_decoded is None:
+                        if emissions_nodes_aligned is None:
+                            emissions_nodes_aligned = prepare_analysis_array(
+                                DATASETS["emissions_state_nodes"], "emissions_state_nodes", mega_ds, ref, tol, args.force_align,
+                                mega_zarr_path=mega_zarr_path,
+                            ).astype("uint32")
+                        emissions_decoded = decode_emissions_state_to_legacy(emissions_nodes_aligned)
+                    burned_nodes_aligned = emissions_decoded[1]
+                    logger.info("State raster source selected: interval=%s branch=burned source=derived:emissions_state", interval)
+            logger.info("State raster preparation end: interval=%s", interval)
 
             # Smart alignment (skip if coords already match)
             adm0_aligned = align_auto(adm0, ref, tol, args.force_align)
@@ -749,11 +948,16 @@ def run(args: argparse.Namespace) -> None:
                     cube_d = xr.concat([zarr_data[k] for k in drained_fluxes] + [ref], dim="flux_type").assign_coords(
                         flux_type=("flux_type", flux_codes + [2])
                     )
+                    logger.info(
+                        "Drained reduction start: interval=%s branch=drained flux_layers=%d cube_dims=%s cube_chunks=%s cube_numblocks=%s",
+                        interval, len(drained_fluxes), dict(cube_d.sizes), _chunk_structure(cube_d), getattr(cube_d.data, "numblocks", None),
+                    )
                     res_d = xarray_reduce(
                         cube_d, adm0_aligned, drained_nodes_aligned, func="sum",
                         expected_groups=(gadm_adm0_ids, drained_codes_arr),
                         where=where_mask, **flox_sparse_reindex_kwargs(not args.no_sparse),
                     ).compute()
+                    logger.info("Drained reduction end: interval=%s", interval)
                 flux_map = {FLUX_SPECS[k]["code"]: FLUX_SPECS[k]["label"] for k in drained_fluxes}
                 flux_map[2] = "area__ha"
                 df_d = _df_from_result(res_d, flux_map, interval_end_year)
@@ -768,11 +972,16 @@ def run(args: argparse.Namespace) -> None:
                     cube_b = xr.concat([zarr_data[k] for k in burned_fluxes] + [ref], dim="flux_type").assign_coords(
                         flux_type=("flux_type", flux_codes_b + [2])
                     )
+                    logger.info(
+                        "Burned reduction start: interval=%s branch=burned flux_layers=%d cube_dims=%s cube_chunks=%s cube_numblocks=%s",
+                        interval, len(burned_fluxes), dict(cube_b.sizes), _chunk_structure(cube_b), getattr(cube_b.data, "numblocks", None),
+                    )
                     res_b = xarray_reduce(
                         cube_b, adm0_aligned, burned_nodes_aligned, func="sum",
                         expected_groups=(gadm_adm0_ids, burned_codes_arr),
                         where=where_mask, **flox_sparse_reindex_kwargs(not args.no_sparse),
                     ).compute()
+                    logger.info("Burned reduction end: interval=%s", interval)
                 flux_map_b = {FLUX_SPECS[k]["code"]: FLUX_SPECS[k]["label"] for k in burned_fluxes}
                 flux_map_b[2] = "area__ha"
                 df_b = _df_from_result(res_b, flux_map_b, interval_end_year)
@@ -867,6 +1076,12 @@ def main(argv=None):
                         help="Flux-over-ocean QA: 'off' (fast, default), 'basic' (sampled), 'full' (slow).")
     parser.add_argument("--force_align", action="store_true",
                         help="Always reindex to pixel_area even if coords already match.")
+    parser.add_argument("--persist_reference", action="store_true",
+                        help="Optionally persist reference pixel_area when chunk count is modest.")
+    parser.add_argument("--persist_reference_max_chunks", type=int, default=512,
+                        help="Maximum reference chunk count eligible for --persist_reference (default: 512).")
+    parser.add_argument("--full_domain_chunk_warn_threshold", type=int, default=1024,
+                        help="Warn in global mode when reference chunk count exceeds this threshold (default: 1024).")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run_local", action="store_true")
     mode.add_argument("--cluster_name", default="zonal_stats")
