@@ -50,7 +50,7 @@ python -m src.scripts.zonal_statistics.parquet_to_csv \
 
 """
 python -m src.scripts.zonal_statistics.parquet_to_csv \
--p s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/zonal_stats/ogh_sensitivity_500m_10/20251118/2021_2024/drained/part-0.parquet \
--c s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_9_7/zonal_stats/ogh_sensitivity_500m_10/20251118/2021_2024/drained/drained.csv
+-p s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_1_1/zonal_stats/zarr_test/20260330/2021_2024/drained/part-0.parquet \
+-c s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_0_1_1/zonal_stats/zarr_test/20260330/2021_2024/drained/drained.csv
 
 """

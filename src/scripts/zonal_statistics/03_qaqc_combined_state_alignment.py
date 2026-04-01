@@ -7,9 +7,9 @@ proceeding with deprecation of legacy state-node outputs.
 
 Example:
 python -m src.scripts.zonal_statistics.03_qaqc_combined_state_alignment \
-  --model_version 0_9_7 \
-  --run_name ogh_standard_model \
-  --run_date 20251118 \
+  --model_version 0_1_1 \
+  --run_name zarr_test \
+  --run_date 20260330 \
   --intervals 2021_2024
 """
 

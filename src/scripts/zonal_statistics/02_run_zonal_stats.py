@@ -789,30 +789,6 @@ def run(args: argparse.Namespace) -> None:
         gadm_adm0_ids = np.array([i for i in zc.GADM_ADM0_IDS if i > 0], dtype=np.uint32)
         drained_codes_arr = np.array(sorted({0, *map(int, zc.ALL_DRAINED_STATE_CODES)}), dtype=np.uint32)
         burned_codes_arr  = np.array(sorted({0, *map(int, zc.ALL_BURNED_STATE_CODES)}),  dtype=np.uint32)
-        emissions_codes_arr = np.array(
-            sorted({
-                np.uint32(0),
-                *(
-                    np.uint32(did) | np.uint32(1 << zc.EMISSIONS_STATE_HAS_DRAINED_BIT)
-                    for did in zc.DRAINED_STATE_CODE_TO_ID.values()
-                ),
-                *(
-                    (np.uint32(bid) << np.uint32(zc.EMISSIONS_STATE_BURNED_SHIFT))
-                    | np.uint32(1 << zc.EMISSIONS_STATE_HAS_BURNED_BIT)
-                    for bid in zc.BURNED_STATE_CODE_TO_ID.values()
-                ),
-                *(
-                    np.uint32(did)
-                    | (np.uint32(bid) << np.uint32(zc.EMISSIONS_STATE_BURNED_SHIFT))
-                    | np.uint32(1 << zc.EMISSIONS_STATE_HAS_DRAINED_BIT)
-                    | np.uint32(1 << zc.EMISSIONS_STATE_HAS_BURNED_BIT)
-                    for did in zc.DRAINED_STATE_CODE_TO_ID.values()
-                    for bid in zc.BURNED_STATE_CODE_TO_ID.values()
-                ),
-            }),
-            dtype=np.uint32,
-        )
-
         # Local staging
         local_arrow = pafs.LocalFileSystem()
         base_dir_root = Path(args.local_output).expanduser().resolve()
@@ -1240,7 +1216,6 @@ def run(args: argparse.Namespace) -> None:
                     )
                     res_e = xarray_reduce(
                         cube_e, adm0_aligned, emissions_nodes_for_reduce, func="sum",
-                        expected_groups=(gadm_adm0_ids, emissions_codes_arr),
                         where=where_mask, **flox_sparse_reindex_kwargs(not args.no_sparse),
                     ).compute()
                     logger.info("Emissions-state reduction end: interval=%s", interval)
