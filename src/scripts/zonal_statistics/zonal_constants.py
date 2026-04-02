@@ -134,19 +134,19 @@ ALL_DRAINED_STATE_CODES = frozenset(DRAINED_STATE_NODE_MEANINGS.keys())
 ALL_BURNED_STATE_CODES = frozenset(BURNED_STATE_NODE_MEANINGS.keys())
 
 # ---------------------------------------------------------------------
-# Unified emissions-state packing (uint32)
+# Unified combined-state packing (uint32)
 # ---------------------------------------------------------------------
 # bits 0-7: drained_state_id
 # bits 8-11: burned_state_id
 # bit 12: has_drainage_component
 # bit 13: has_burned_component
-EMISSIONS_STATE_DRAINED_BITS = 8
-EMISSIONS_STATE_BURNED_BITS = 4
-EMISSIONS_STATE_DRAINED_MASK = (1 << EMISSIONS_STATE_DRAINED_BITS) - 1
-EMISSIONS_STATE_BURNED_MASK = (1 << EMISSIONS_STATE_BURNED_BITS) - 1
-EMISSIONS_STATE_BURNED_SHIFT = EMISSIONS_STATE_DRAINED_BITS
-EMISSIONS_STATE_HAS_DRAINED_BIT = 12
-EMISSIONS_STATE_HAS_BURNED_BIT = 13
+COMBINED_STATE_DRAINED_BITS = 8
+COMBINED_STATE_BURNED_BITS = 4
+COMBINED_STATE_DRAINED_MASK = (1 << COMBINED_STATE_DRAINED_BITS) - 1
+COMBINED_STATE_BURNED_MASK = (1 << COMBINED_STATE_BURNED_BITS) - 1
+COMBINED_STATE_BURNED_SHIFT = COMBINED_STATE_DRAINED_BITS
+COMBINED_STATE_HAS_DRAINED_BIT = 12
+COMBINED_STATE_HAS_BURNED_BIT = 13
 
 _SORTED_DRAINED_CODES = sorted(ALL_DRAINED_STATE_CODES)
 _SORTED_BURNED_CODES = sorted(ALL_BURNED_STATE_CODES)
@@ -157,36 +157,36 @@ DRAINED_STATE_ID_TO_CODE = {idx: code for code, idx in DRAINED_STATE_CODE_TO_ID.
 BURNED_STATE_ID_TO_CODE = {idx: code for code, idx in BURNED_STATE_CODE_TO_ID.items()}
 
 
-def pack_emissions_state(drained_code: np.ndarray, burned_code: np.ndarray) -> np.ndarray:
-    """Pack drained/burned node-code rasters into one uint32 emissions-state raster."""
+def pack_combined_state(drained_code: np.ndarray, burned_code: np.ndarray) -> np.ndarray:
+    """Pack drained/burned node-code rasters into one uint32 combined-state raster."""
     out = np.zeros(drained_code.shape, dtype=np.uint32)
     for code_str, idx in DRAINED_STATE_CODE_TO_ID.items():
         code = np.uint32(int(code_str))
         mask = drained_code == code
         if np.any(mask):
             out[mask] |= np.uint32(idx)
-            out[mask] |= np.uint32(1 << EMISSIONS_STATE_HAS_DRAINED_BIT)
+            out[mask] |= np.uint32(1 << COMBINED_STATE_HAS_DRAINED_BIT)
 
     for code_str, idx in BURNED_STATE_CODE_TO_ID.items():
         code = np.uint32(int(code_str))
         mask = burned_code == code
         if np.any(mask):
-            out[mask] |= np.uint32(idx << EMISSIONS_STATE_BURNED_SHIFT)
-            out[mask] |= np.uint32(1 << EMISSIONS_STATE_HAS_BURNED_BIT)
+            out[mask] |= np.uint32(idx << COMBINED_STATE_BURNED_SHIFT)
+            out[mask] |= np.uint32(1 << COMBINED_STATE_HAS_BURNED_BIT)
 
     return out
 
 
-def unpack_emissions_state_to_legacy(emissions_state: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Decode emissions-state raster back to drained/burned node-code rasters (uint32)."""
-    drained_id = (emissions_state & np.uint32(EMISSIONS_STATE_DRAINED_MASK)).astype(np.uint16)
+def unpack_combined_state_to_legacy(combined_state: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Decode combined-state raster back to drained/burned node-code rasters (uint32)."""
+    drained_id = (combined_state & np.uint32(COMBINED_STATE_DRAINED_MASK)).astype(np.uint16)
     burned_id = (
-        (emissions_state >> np.uint32(EMISSIONS_STATE_BURNED_SHIFT))
-        & np.uint32(EMISSIONS_STATE_BURNED_MASK)
+        (combined_state >> np.uint32(COMBINED_STATE_BURNED_SHIFT))
+        & np.uint32(COMBINED_STATE_BURNED_MASK)
     ).astype(np.uint16)
 
-    drained_out = np.zeros(emissions_state.shape, dtype=np.uint32)
-    burned_out = np.zeros(emissions_state.shape, dtype=np.uint32)
+    drained_out = np.zeros(combined_state.shape, dtype=np.uint32)
+    burned_out = np.zeros(combined_state.shape, dtype=np.uint32)
 
     for idx, code_str in DRAINED_STATE_ID_TO_CODE.items():
         mask = drained_id == np.uint16(idx)
@@ -198,6 +198,48 @@ def unpack_emissions_state_to_legacy(emissions_state: np.ndarray) -> tuple[np.nd
             burned_out[mask] = np.uint32(int(code_str))
 
     return drained_out, burned_out
+
+# Import-time bit-space assertions for packed combined-state ids.
+assert len(DRAINED_STATE_CODE_TO_ID) <= (1 << COMBINED_STATE_DRAINED_BITS), (
+    "drained state registry exceeds 8-bit packed id capacity"
+)
+assert len(BURNED_STATE_CODE_TO_ID) <= (1 << COMBINED_STATE_BURNED_BITS), (
+    "burned state registry exceeds 4-bit packed id capacity"
+)
+
+COMBINED_STATE_GROUP_VALUES = np.array(
+    sorted(
+        {
+            0,
+            *[
+                int(pack_combined_state(
+                    np.array([[np.uint32(int(d_code))]], dtype=np.uint32),
+                    np.array([[np.uint32(int(b_code))]], dtype=np.uint32),
+                )[0, 0])
+                for d_code in ["0", *sorted(ALL_DRAINED_STATE_CODES)]
+                for b_code in ["0", *sorted(ALL_BURNED_STATE_CODES)]
+            ],
+        }
+    ),
+    dtype=np.uint32,
+)
+
+# One-release compatibility aliases (temporary).
+EMISSIONS_STATE_DRAINED_BITS = COMBINED_STATE_DRAINED_BITS
+EMISSIONS_STATE_BURNED_BITS = COMBINED_STATE_BURNED_BITS
+EMISSIONS_STATE_DRAINED_MASK = COMBINED_STATE_DRAINED_MASK
+EMISSIONS_STATE_BURNED_MASK = COMBINED_STATE_BURNED_MASK
+EMISSIONS_STATE_BURNED_SHIFT = COMBINED_STATE_BURNED_SHIFT
+EMISSIONS_STATE_HAS_DRAINED_BIT = COMBINED_STATE_HAS_DRAINED_BIT
+EMISSIONS_STATE_HAS_BURNED_BIT = COMBINED_STATE_HAS_BURNED_BIT
+
+
+def pack_emissions_state(drained_code: np.ndarray, burned_code: np.ndarray) -> np.ndarray:
+    return pack_combined_state(drained_code, burned_code)
+
+
+def unpack_emissions_state_to_legacy(combined_state: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    return unpack_combined_state_to_legacy(combined_state)
 
 GADM_ADM0_IDS = np.array(sorted({
     0, 4, 8, 10, 12, 16, 20, 24, 28, 31, 32, 36,

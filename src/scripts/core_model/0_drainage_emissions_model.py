@@ -841,7 +841,7 @@ def calculate_and_upload_drainage(
     if drained_state_for_pack is not None:
         if burned_state_for_pack is None:
             burned_state_for_pack = np.zeros_like(drained_state_for_pack, dtype=np.uint32)
-        outputs["emissions_state"] = zc.pack_emissions_state(
+        outputs["combined_state"] = zc.pack_combined_state(
             drained_state_for_pack.astype(np.uint32, copy=False),
             burned_state_for_pack.astype(np.uint32, copy=False),
         )
@@ -908,7 +908,7 @@ def calculate_and_upload_drainage(
                 )
 
     # stats for outputs, with explicit layer categorization
-    drainage_classification_layers = ["drained_soil", "drained_state", "emissions_state"]
+    drainage_classification_layers = ["drained_soil", "drained_state", "combined_state"]
     burned_classification_layers = ["burned_state"]
     numeric_layers = ["burned_years_count"]
 

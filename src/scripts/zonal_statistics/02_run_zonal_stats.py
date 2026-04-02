@@ -55,7 +55,7 @@ ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 AREA_SCALE = np.float32(cn.m2_to_ha)
 
 DATASETS: Dict[str, Dict[str, Any]] = {
-    "emissions_state_nodes": {"source_var": "emissions_state", "kind": "state", "state_alias": "emissions_state_nodes"},
+    "combined_state_nodes": {"source_var": "combined_state", "kind": "state", "state_alias": "combined_state_nodes"},
     "drained_state_nodes": {"source_var": "drained_state", "kind": "state", "state_alias": "drained_state_nodes"},
     "burned_state_nodes":  {"source_var": "burned_state",  "kind": "state", "state_alias": "burned_state_nodes"},
     "drained_total":       {"source_var": "drained_total_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"},
@@ -329,48 +329,48 @@ def validate_selected_sources(
     )
 
 
-def decode_emissions_state_to_legacy(
-    emissions_nodes_aligned: xr.DataArray,
+def decode_combined_state_to_legacy(
+    combined_nodes_aligned: xr.DataArray,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     def _decode(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        drained, burned = zc.unpack_emissions_state_to_legacy(x.astype(np.uint32, copy=False))
+        drained, burned = zc.unpack_combined_state_to_legacy(x.astype(np.uint32, copy=False))
         return drained.astype(np.uint32, copy=False), burned.astype(np.uint32, copy=False)
 
     drained, burned = xr.apply_ufunc(
         _decode,
-        emissions_nodes_aligned,
+        combined_nodes_aligned,
         dask="parallelized",
         output_core_dims=[[], []],
         output_dtypes=[np.uint32, np.uint32],
     )
     drained = drained.rename("drained_state_nodes")
     burned = burned.rename("burned_state_nodes")
-    drained = drained.assign_coords(emissions_nodes_aligned.coords).transpose(*emissions_nodes_aligned.dims)
-    burned = burned.assign_coords(emissions_nodes_aligned.coords).transpose(*emissions_nodes_aligned.dims)
+    drained = drained.assign_coords(combined_nodes_aligned.coords).transpose(*combined_nodes_aligned.dims)
+    burned = burned.assign_coords(combined_nodes_aligned.coords).transpose(*combined_nodes_aligned.dims)
     return drained, burned
 
 
-def decode_emissions_state_branch(
-    emissions_nodes_aligned: xr.DataArray,
+def decode_combined_state_branch(
+    combined_nodes_aligned: xr.DataArray,
     *,
     branch: str,
 ) -> xr.DataArray:
     if branch not in {"drained", "burned"}:
-        raise ValueError(f"Unsupported branch for decode_emissions_state_branch: {branch}")
+        raise ValueError(f"Unsupported branch for decode_combined_state_branch: {branch}")
 
     def _decode_one(x: np.ndarray) -> np.ndarray:
-        drained, burned = zc.unpack_emissions_state_to_legacy(x.astype(np.uint32, copy=False))
+        drained, burned = zc.unpack_combined_state_to_legacy(x.astype(np.uint32, copy=False))
         out = drained if branch == "drained" else burned
         return out.astype(np.uint32, copy=False)
 
     decoded = xr.apply_ufunc(
         _decode_one,
-        emissions_nodes_aligned,
+        combined_nodes_aligned,
         dask="parallelized",
         output_dtypes=[np.uint32],
     )
     decoded_name = "drained_state_nodes" if branch == "drained" else "burned_state_nodes"
-    return decoded.rename(decoded_name).assign_coords(emissions_nodes_aligned.coords).transpose(*emissions_nodes_aligned.dims)
+    return decoded.rename(decoded_name).assign_coords(combined_nodes_aligned.coords).transpose(*combined_nodes_aligned.dims)
 
 def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
     if isinstance(ds_or_da, xr.DataArray):
@@ -685,10 +685,10 @@ def _df_from_result(res: xr.DataArray, flux_map: Dict[int, str], interval_end: i
         df["burned_state_meaning"] = (
             df["burned_state_nodes"].astype("string").str.zfill(8).map(zc.BURNED_STATE_NODE_MEANINGS)
         )
-    if "emissions_state_nodes" in df.columns:
-        df["combined_state_nodes"] = df["emissions_state_nodes"].astype("uint32", copy=False)
-        packed = df["emissions_state_nodes"].fillna(0).astype("uint32").to_numpy(copy=False)
-        drained_nodes, burned_nodes = zc.unpack_emissions_state_to_legacy(packed)
+    if "combined_state_nodes" in df.columns:
+        df["combined_state_nodes"] = df["combined_state_nodes"].astype("uint32", copy=False)
+        packed = df["combined_state_nodes"].fillna(0).astype("uint32").to_numpy(copy=False)
+        drained_nodes, burned_nodes = zc.unpack_combined_state_to_legacy(packed)
         df["drained_state_nodes"] = drained_nodes.astype("uint32", copy=False)
         df["burned_state_nodes"] = burned_nodes.astype("uint32", copy=False)
         df["drained_state_meaning"] = (
@@ -795,6 +795,7 @@ def run(args: argparse.Namespace) -> None:
         gadm_adm0_ids = np.array([i for i in zc.GADM_ADM0_IDS if i > 0], dtype=np.uint32)
         drained_codes_arr = np.array(sorted({0, *map(int, zc.ALL_DRAINED_STATE_CODES)}), dtype=np.uint32)
         burned_codes_arr  = np.array(sorted({0, *map(int, zc.ALL_BURNED_STATE_CODES)}),  dtype=np.uint32)
+        combined_state_codes_arr = zc.COMBINED_STATE_GROUP_VALUES.astype(np.uint32, copy=False)
         # Local staging
         local_arrow = pafs.LocalFileSystem()
         base_dir_root = Path(args.local_output).expanduser().resolve()
@@ -948,12 +949,12 @@ def run(args: argparse.Namespace) -> None:
             if need_emissions:
                 validation_keys.extend(drained_fluxes + burned_fluxes)
             if (need_drained and "drained_state" not in mega_ds) or (need_burned and "burned_state" not in mega_ds):
-                validation_keys.append("emissions_state_nodes")
-            if need_emissions and "emissions_state" not in mega_ds:
+                validation_keys.append("combined_state_nodes")
+            if need_emissions and ("combined_state" not in mega_ds and "emissions_state" not in mega_ds):
                 if "drained_state" in mega_ds and "burned_state" in mega_ds:
                     validation_keys.extend(["drained_state_nodes", "burned_state_nodes"])
                 else:
-                    validation_keys.append("emissions_state_nodes")
+                    validation_keys.append("combined_state_nodes")
             validation_keys = list(dict.fromkeys(validation_keys))
             validate_selected_sources(
                 mega_ds,
@@ -980,7 +981,7 @@ def run(args: argparse.Namespace) -> None:
             logger.info("Branch flux preparation end: interval=%s prepared_flux_layers=%s", interval, sorted(zarr_data.keys()))
 
             drained_nodes_aligned = burned_nodes_aligned = None
-            emissions_nodes_aligned = emissions_decoded = None
+            combined_nodes_aligned = combined_decoded = None
             logger.info("State raster preparation start: interval=%s need_drained=%s need_burned=%s", interval, need_drained, need_burned)
             need_drained_from_emissions = bool(need_drained and ("drained_state" not in mega_ds))
             need_burned_from_emissions = bool(need_burned and ("burned_state" not in mega_ds))
@@ -991,27 +992,29 @@ def run(args: argparse.Namespace) -> None:
                         mega_zarr_path=mega_zarr_path,
                     ).astype("uint32")
                     logger.info("State raster source selected: interval=%s branch=drained source=direct:drained_state", interval)
-                elif "emissions_state" in mega_ds:
-                    emissions_nodes_aligned = prepare_analysis_array(
-                        DATASETS["emissions_state_nodes"], "emissions_state_nodes", mega_ds, ref, tol, args.force_align,
+                elif ("combined_state" in mega_ds) or ("emissions_state" in mega_ds):
+                    combined_source_var = "combined_state" if "combined_state" in mega_ds else "emissions_state"
+                    combined_nodes_aligned = prepare_analysis_array(
+                        {**DATASETS["combined_state_nodes"], "source_var": combined_source_var},
+                        "combined_state_nodes", mega_ds, ref, tol, args.force_align,
                         mega_zarr_path=mega_zarr_path,
                     ).astype("uint32")
                     if need_burned_from_emissions:
                         logger.info(
-                            "Lazy emissions-state decode start: interval=%s target_branch=both source=emissions_state chunks=%s",
-                            interval, _chunk_structure(emissions_nodes_aligned),
+                            "Lazy combined-state decode start: interval=%s target_branch=both source=%s chunks=%s",
+                            interval, combined_source_var, _chunk_structure(combined_nodes_aligned),
                         )
-                        emissions_decoded = decode_emissions_state_to_legacy(emissions_nodes_aligned)
-                        logger.info("Lazy emissions-state decode end: interval=%s target_branch=both", interval)
-                        drained_nodes_aligned = emissions_decoded[0]
+                        combined_decoded = decode_combined_state_to_legacy(combined_nodes_aligned)
+                        logger.info("Lazy combined-state decode end: interval=%s target_branch=both", interval)
+                        drained_nodes_aligned = combined_decoded[0]
                     else:
                         logger.info(
-                            "Lazy emissions-state decode start: interval=%s target_branch=drained source=emissions_state chunks=%s",
-                            interval, _chunk_structure(emissions_nodes_aligned),
+                            "Lazy combined-state decode start: interval=%s target_branch=drained source=%s chunks=%s",
+                            interval, combined_source_var, _chunk_structure(combined_nodes_aligned),
                         )
-                        drained_nodes_aligned = decode_emissions_state_branch(emissions_nodes_aligned, branch="drained")
-                        logger.info("Lazy emissions-state decode end: interval=%s target_branch=drained", interval)
-                    logger.info("State raster source selected: interval=%s branch=drained source=derived:emissions_state", interval)
+                        drained_nodes_aligned = decode_combined_state_branch(combined_nodes_aligned, branch="drained")
+                        logger.info("Lazy combined-state decode end: interval=%s target_branch=drained", interval)
+                    logger.info("State raster source selected: interval=%s branch=drained source=derived:%s", interval, combined_source_var)
                 else:
                     raise ValueError(
                         "Unable to resolve required drained state raster. "
@@ -1025,30 +1028,32 @@ def run(args: argparse.Namespace) -> None:
                         mega_zarr_path=mega_zarr_path,
                     ).astype("uint32")
                     logger.info("State raster source selected: interval=%s branch=burned source=direct:burned_state", interval)
-                elif "emissions_state" in mega_ds:
-                    if emissions_decoded is None:
-                        if emissions_nodes_aligned is None:
-                            emissions_nodes_aligned = prepare_analysis_array(
-                                DATASETS["emissions_state_nodes"], "emissions_state_nodes", mega_ds, ref, tol, args.force_align,
+                elif ("combined_state" in mega_ds) or ("emissions_state" in mega_ds):
+                    combined_source_var = "combined_state" if "combined_state" in mega_ds else "emissions_state"
+                    if combined_decoded is None:
+                        if combined_nodes_aligned is None:
+                            combined_nodes_aligned = prepare_analysis_array(
+                                {**DATASETS["combined_state_nodes"], "source_var": combined_source_var},
+                                "combined_state_nodes", mega_ds, ref, tol, args.force_align,
                                 mega_zarr_path=mega_zarr_path,
                             ).astype("uint32")
                         if need_drained_from_emissions:
                             logger.info(
-                                "Lazy emissions-state decode start: interval=%s target_branch=both source=emissions_state chunks=%s",
-                                interval, _chunk_structure(emissions_nodes_aligned),
+                                "Lazy combined-state decode start: interval=%s target_branch=both source=%s chunks=%s",
+                                interval, combined_source_var, _chunk_structure(combined_nodes_aligned),
                             )
-                            emissions_decoded = decode_emissions_state_to_legacy(emissions_nodes_aligned)
-                            logger.info("Lazy emissions-state decode end: interval=%s target_branch=both", interval)
+                            combined_decoded = decode_combined_state_to_legacy(combined_nodes_aligned)
+                            logger.info("Lazy combined-state decode end: interval=%s target_branch=both", interval)
                         else:
                             logger.info(
-                                "Lazy emissions-state decode start: interval=%s target_branch=burned source=emissions_state chunks=%s",
-                                interval, _chunk_structure(emissions_nodes_aligned),
+                                "Lazy combined-state decode start: interval=%s target_branch=burned source=%s chunks=%s",
+                                interval, combined_source_var, _chunk_structure(combined_nodes_aligned),
                             )
-                            burned_nodes_aligned = decode_emissions_state_branch(emissions_nodes_aligned, branch="burned")
-                            logger.info("Lazy emissions-state decode end: interval=%s target_branch=burned", interval)
+                            burned_nodes_aligned = decode_combined_state_branch(combined_nodes_aligned, branch="burned")
+                            logger.info("Lazy combined-state decode end: interval=%s target_branch=burned", interval)
                     if burned_nodes_aligned is None:
-                        burned_nodes_aligned = emissions_decoded[1]
-                    logger.info("State raster source selected: interval=%s branch=burned source=derived:emissions_state", interval)
+                        burned_nodes_aligned = combined_decoded[1]
+                    logger.info("State raster source selected: interval=%s branch=burned source=derived:%s", interval, combined_source_var)
                 else:
                     raise ValueError(
                         "Unable to resolve required burned state raster. "
@@ -1057,14 +1062,16 @@ def run(args: argparse.Namespace) -> None:
                     )
             logger.info("State raster preparation end: interval=%s", interval)
 
-            emissions_nodes_for_reduce = emissions_nodes_aligned
-            if need_emissions and emissions_nodes_for_reduce is None:
-                if "emissions_state" in mega_ds:
-                    emissions_nodes_for_reduce = prepare_analysis_array(
-                        DATASETS["emissions_state_nodes"], "emissions_state_nodes", mega_ds, ref, tol, args.force_align,
+            combined_nodes_for_reduce = combined_nodes_aligned
+            if need_emissions and combined_nodes_for_reduce is None:
+                if ("combined_state" in mega_ds) or ("emissions_state" in mega_ds):
+                    combined_source_var = "combined_state" if "combined_state" in mega_ds else "emissions_state"
+                    combined_nodes_for_reduce = prepare_analysis_array(
+                        {**DATASETS["combined_state_nodes"], "source_var": combined_source_var},
+                        "combined_state_nodes", mega_ds, ref, tol, args.force_align,
                         mega_zarr_path=mega_zarr_path,
                     ).astype("uint32")
-                    logger.info("State raster source selected: interval=%s branch=combined_state source=direct:emissions_state", interval)
+                    logger.info("State raster source selected: interval=%s branch=combined_state source=direct:%s", interval, combined_source_var)
                 elif ("drained_state" in mega_ds) and ("burned_state" in mega_ds):
                     drained_for_pack = (
                         drained_nodes_aligned
@@ -1082,19 +1089,19 @@ def run(args: argparse.Namespace) -> None:
                             mega_zarr_path=mega_zarr_path,
                         ).astype("uint32")
                     )
-                    emissions_nodes_for_reduce = xr.apply_ufunc(
-                        zc.pack_emissions_state,
+                    combined_nodes_for_reduce = xr.apply_ufunc(
+                        zc.pack_combined_state,
                         drained_for_pack,
                         burned_for_pack,
                         dask="parallelized",
                         output_dtypes=[np.uint32],
-                    ).rename("emissions_state_nodes")
+                    ).rename("combined_state_nodes")
                     logger.info("State raster source selected: interval=%s branch=combined_state source=derived:pack(drained_state,burned_state)", interval)
                 else:
                     raise ValueError(
                         "Unable to resolve required emissions state raster. "
                         f"interval='{interval}' branch='combined_state' mega_zarr_path='{mega_zarr_path}' "
-                        "requires emissions_state or (drained_state and burned_state)"
+                        "requires combined_state or legacy emissions_state or (drained_state and burned_state)"
                     )
 
             # Smart alignment (skip if coords already match)
@@ -1202,8 +1209,8 @@ def run(args: argparse.Namespace) -> None:
                 df_b = None
 
             if need_emissions:
-                if emissions_nodes_for_reduce is None:
-                    raise RuntimeError("emissions_state_nodes dataset is required when processing combined_state branch")
+                if combined_nodes_for_reduce is None:
+                    raise RuntimeError("combined_state_nodes dataset is required when processing combined_state branch")
                 with dask.annotate(label=f"reduce:combined_state:{interval}"):
                     emissions_flux_keys = drained_fluxes + burned_fluxes
                     flux_codes_e = [FLUX_SPECS[k]["code"] for k in emissions_flux_keys]
@@ -1217,14 +1224,15 @@ def run(args: argparse.Namespace) -> None:
                         flux_type=("flux_type", flux_codes_e + [2])
                     )
                     logger.info(
-                        "Emissions-state reduction start: interval=%s flux_layers=%d cube_dims=%s cube_chunks=%s cube_numblocks=%s",
+                        "Combined-state reduction start: interval=%s flux_layers=%d cube_dims=%s cube_chunks=%s cube_numblocks=%s",
                         interval, len(emissions_flux_keys), dict(cube_e.sizes), _chunk_structure(cube_e), getattr(cube_e.data, "numblocks", None),
                     )
                     res_e = xarray_reduce(
-                        cube_e, adm0_aligned, emissions_nodes_for_reduce, func="sum",
+                        cube_e, adm0_aligned, combined_nodes_for_reduce, func="sum",
+                        expected_groups=(gadm_adm0_ids, combined_state_codes_arr),
                         where=where_mask, **flox_sparse_reindex_kwargs(not args.no_sparse),
                     ).compute()
-                    logger.info("Emissions-state reduction end: interval=%s", interval)
+                    logger.info("Combined-state reduction end: interval=%s", interval)
                 flux_map_e = {FLUX_SPECS[k]["code"]: FLUX_SPECS[k]["label"] for k in emissions_flux_keys}
                 flux_map_e[2] = "area__ha"
                 df_e = _df_from_result(res_e, flux_map_e, interval_end_year)

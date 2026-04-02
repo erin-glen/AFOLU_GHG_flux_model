@@ -75,7 +75,7 @@ Decoding logic is deterministic and cheap (`bitwise and` / `shift`), so zonal an
 
 ## 2) Backward compatibility strategy
 
-- Keep legacy fields as aliases for one release cycle (`drained_state`, `burned_state`) while introducing new `emissions_state` (or similar), then deprecate.
+- Keep legacy fields as aliases for one release cycle (`drained_state`, `burned_state`) while introducing new `combined_state` (or similar), then deprecate.
 - Update zonal and publication scripts to support both schemas during transition.
 
 ## Risks and potential issues
@@ -110,13 +110,13 @@ Decoding logic is deterministic and cheap (`bitwise and` / `shift`), so zonal an
 
 ### Phase 1 — Dual-write in core model
 
-1. In `0_drainage_emissions_model.py`, compute and output new `emissions_state` alongside existing `drained_state` and `burned_state`.
+1. In `0_drainage_emissions_model.py`, compute and output new `combined_state` alongside existing `drained_state` and `burned_state`.
 2. Add validation against a new unified state mapping in `zonal_constants.py`.
-3. Extend `constants_and_names.py` output lists and dtype maps with `emissions_state`.
+3. Extend `constants_and_names.py` output lists and dtype maps with `combined_state`.
 
 ### Phase 2 — Zonal pipeline compatibility
 
-1. Update zarr cache builders/runners to prefer `emissions_state_nodes` when present.
+1. Update zarr cache builders/runners to prefer `combined_state_nodes` when present.
 2. Keep fallback support for legacy drained/burned nodes.
 3. Add a compatibility transform that can reconstruct coarse drained/burned classes from unified state where possible.
 
@@ -124,8 +124,8 @@ Decoding logic is deterministic and cheap (`bitwise and` / `shift`), so zonal an
 
 1. Refactor context view registration (`pub_assets.py` / `pub_tables.py`) to derive one state context view.
 2. Replace separate by-drained/by-burned exports with:
-   - `by_emissions_state_period.csv`
-   - `by_country_emissions_state_period.csv`
+   - `by_combined_state_period.csv`
+   - `by_country_combined_state_period.csv`
 3. Keep legacy exports (`by_drained_state_*`, `by_burned_state_*`) generated from compatibility logic for one full release window to support QA/QC.
 
 ### Phase 4 — Validation and cutover
@@ -153,7 +153,7 @@ Decoding logic is deterministic and cheap (`bitwise and` / `shift`), so zonal an
 ## Suggested immediate next steps
 
 1. Draft unified ontology in `zonal_constants.py` (no wiring yet).
-2. Implement dual-write of `emissions_state` in core model.
+2. Implement dual-write of `combined_state` in core model.
 3. Add compatibility loading in zonal cache/runners.
 4. Execute one trial interval and compare outputs before deprecating legacy state columns.
 

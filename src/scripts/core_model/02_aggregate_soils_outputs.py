@@ -10,9 +10,9 @@ from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
 
 DATA_TYPES = list(cn.drainage_outputs_to_zarr)
-if "emissions_state" not in DATA_TYPES:
+if "combined_state" not in DATA_TYPES:
     # Keep aggregation forward-compatible when constants lag behind model outputs.
-    DATA_TYPES.append("emissions_state")
+    DATA_TYPES.append("combined_state")
 
 
 INVENTORY_PERIODS = [
@@ -80,7 +80,16 @@ def create_10x10_outputs_from_zarr(
     chunk_px = uu.calc_chunk_length_pixels(bounds)
     bstr = uu.boundstr(bounds)
 
-    data_per_ha = load_zarr_window(zarr_path, dataset, bounds, year_idx)
+    dataset_for_read = dataset
+    try:
+        data_per_ha = load_zarr_window(zarr_path, dataset_for_read, bounds, year_idx)
+    except Exception:
+        if dataset == "combined_state":
+            dataset_for_read = "emissions_state"
+            logger.warning("Legacy input naming used for archived store: emissions_state -> combined_state")
+            data_per_ha = load_zarr_window(zarr_path, dataset_for_read, bounds, year_idx)
+        else:
+            raise
     has_data = np.any(np.isfinite(data_per_ha) & (data_per_ha != 0))
     if not has_data:
         logger.info(

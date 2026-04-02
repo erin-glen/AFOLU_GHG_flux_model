@@ -103,10 +103,10 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         "var": "burned_state_nodes",
         "dtype": "uint32",
     },
-    "emissions_state_nodes": {
-        "folder": "emissions_state",
-        "zarr": "emissions_state_node_{interval}.zarr",
-        "var": "emissions_state_nodes",
+    "combined_state_nodes": {
+        "folder": "combined_state",
+        "zarr": "combined_state_node_{interval}.zarr",
+        "var": "combined_state_nodes",
         "dtype": "uint32",
     },
 }
@@ -496,7 +496,18 @@ def run(args: argparse.Namespace) -> None:
                 remove_store_recursively(zpath)
 
             # Open inputs
-            tiffs = list_folder_uris(folder)
+            try:
+                tiffs = list_folder_uris(folder)
+            except FileNotFoundError:
+                if key == "combined_state_nodes":
+                    legacy_folder = folder.replace("/combined_state/", "/emissions_state/")
+                    logger.warning(
+                        "flm: canonical combined_state cache input missing; using legacy archived folder %s",
+                        legacy_folder,
+                    )
+                    tiffs = list_folder_uris(legacy_folder)
+                else:
+                    raise
             if not tiffs:
                 raise FileNotFoundError(f"No GeoTIFFs found under {folder}")
             logger.info("flm:   • %d TIFF(s) found", len(tiffs))
