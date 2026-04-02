@@ -27,17 +27,20 @@ if "combined_state" not in DATA_TYPES:
     DATA_TYPES.append("combined_state")
 
 
-INVENTORY_PERIODS = [
-    # "2001_2005",
-    # "2006_2010",
-    # "2011_2015",
-    # "2016_2020"
-    "2021_2024"
-]
-
 version = cn.model_version_underscore
 BASE_URL = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_{version}"
 DEFAULT_OUTPUT_DATE = "20251007"
+
+
+def get_inventory_periods(interval_type: str) -> list[str]:
+    """Return inventory period labels for the selected interval type."""
+    if interval_type == cn.intervals_annual:
+        last_year = cn.five_year_inventory_periods[-1][1]
+        return [
+            f"{year}_{year}"
+            for year in range(cn.annual_land_cover_start_year, last_year + 1)
+        ]
+    return [f"{start}_{end}" for start, end in cn.five_year_inventory_periods]
 
 
 def get_output_folders(
@@ -48,8 +51,9 @@ def get_output_folders(
 ) -> list:
     """Return list of S3 folders for organic soil outputs."""
     interval_folder = f"{interval_type}_intervals"
+    inventory_periods = get_inventory_periods(interval_type)
     paths = []
-    for period in INVENTORY_PERIODS:
+    for period in inventory_periods:
         for dtype in DATA_TYPES:
             path = (
                 f"{BASE_URL}/{dtype}/{run_name}/"
@@ -57,10 +61,6 @@ def get_output_folders(
             )
             paths.append(path)
     return paths
-
-
-def build_period_lookup() -> dict[int, str]:
-    return {end: f"{start}_{end}" for start, end in cn.five_year_inventory_periods}
 
 
 def build_year_indices(interval_type: str) -> tuple[list[int], dict[int, int]]:
@@ -248,7 +248,7 @@ def main(
     chunk_size_pixels = int(pixel_resolution.replace("_pixels", ""))
     output_pixel_resolution = f"{cn.full_raster_dims}_pixels"
     year_index, year_lookup = build_year_indices(interval_type)
-    period_lookup = build_period_lookup()
+    inventory_periods = get_inventory_periods(interval_type)
 
     zarr_path = dzu.create_mega_zarr_path(
         cn.drainage_outputs_path_mega_zarr,
@@ -266,7 +266,7 @@ def main(
 
     tasks = []
     for dataset in DATA_TYPES:
-        for period in INVENTORY_PERIODS:
+        for period in inventory_periods:
             end_year = int(period.split("_")[-1])
             year_idx = year_lookup.get(end_year)
             if year_idx is None:
@@ -278,7 +278,7 @@ def main(
                         dataset,
                         year_idx,
                         year_index[year_idx],
-                        period_lookup.get(end_year, period),
+                        period,
                         tile_id,
                         zarr_path,
                         interval_type,
