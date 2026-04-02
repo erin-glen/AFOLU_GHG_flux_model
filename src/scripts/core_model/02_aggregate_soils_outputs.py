@@ -1,3 +1,15 @@
+"""
+02_aggregate_soils_outputs.py
+Aggregate chunk-level organic-soils model outputs to 10x10 degree tiles.
+
+Reads per-dataset slices from the global mega-zarr and writes GeoTIFFs to S3
+under ``{BASE_URL}/{dataset}/...``.  The canonical packed-state dataset is
+``combined_state``; archived mega-zarr stores that still use the legacy name
+``emissions_state`` are handled via a read-time fallback (see
+``create_10x10_outputs_from_zarr``).  New outputs always use the canonical
+``combined_state`` path.
+"""
+
 import argparse
 import dask
 import fsspec
@@ -76,6 +88,21 @@ def create_10x10_outputs_from_zarr(
     no_upload: bool,
     logger,
 ):
+    """Read a single dataset/tile/period slice from the mega-zarr and write 10x10 GeoTIFFs.
+
+    Output path contract
+    --------------------
+    New outputs are written under ``{BASE_URL}/{dataset}/...`` where *dataset*
+    is the canonical name (e.g. ``combined_state``).  No new outputs are ever
+    written under the legacy ``emissions_state`` path.
+
+    Legacy read fallback
+    --------------------
+    When *dataset* is ``combined_state`` and the mega-zarr does not contain that
+    variable (i.e. the store predates the rename), the function falls back to
+    reading ``emissions_state`` and emits a warning.  The output is still
+    published under the canonical ``combined_state`` path.
+    """
     bounds = uu.get_10x10_tile_bounds(tile_id)
     chunk_px = uu.calc_chunk_length_pixels(bounds)
     bstr = uu.boundstr(bounds)
