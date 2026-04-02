@@ -400,40 +400,41 @@ def calculate_drainage_and_emissions(
                         vals, missing = lookup_efs(key, drainage_table, coastal_code)
                     else:
                         missing = True
-                ef_co2 = vals[0]
-                ef_n2o = vals[1]
-                ef_ch4_land = vals[2]
-                ef_ch4_ditch = vals[3]
-                ef_co2_offsite = vals[4]
-                frac_ditch = vals[5]
+                if not missing:
+                    ef_co2 = vals[0]
+                    ef_n2o = vals[1]
+                    ef_ch4_land = vals[2]
+                    ef_ch4_ditch = vals[3]
+                    ef_co2_offsite = vals[4]
+                    frac_ditch = vals[5]
 
-                # calculate drainage emissions ---------------------------
-                (
-                    co2_em,
-                    n2o_co2e,
-                    ch4_land_co2e,
-                    ch4_ditch_co2e,
-                    co2_off,
-                    total_co2e,
-                ) = nu.calculate_drainage_emissions_co2e(
-                    ef_co2,
-                    ef_n2o,
-                    ef_ch4_land,
-                    ef_ch4_ditch,
-                    ef_co2_offsite,
-                    frac_ditch,
-                    c_to_co2,
-                    n2o_n_to_n2o,
-                    gwp_n2o,
-                    gwp_ch4,
-                )
+                    # calculate drainage emissions ---------------------------
+                    (
+                        co2_em,
+                        n2o_co2e,
+                        ch4_land_co2e,
+                        ch4_ditch_co2e,
+                        co2_off,
+                        total_co2e,
+                    ) = nu.calculate_drainage_emissions_co2e(
+                        ef_co2,
+                        ef_n2o,
+                        ef_ch4_land,
+                        ef_ch4_ditch,
+                        ef_co2_offsite,
+                        frac_ditch,
+                        c_to_co2,
+                        n2o_n_to_n2o,
+                        gwp_n2o,
+                        gwp_ch4,
+                    )
 
-                drained_co2_out[row, col] = co2_em
-                drained_n2o_out[row, col] = n2o_co2e
-                drained_ch4_land_out[row, col] = ch4_land_co2e
-                drained_ch4_ditch_out[row, col] = ch4_ditch_co2e
-                drained_co2_offsite_out[row, col] = co2_off
-                drained_total_co2e_out[row, col] = total_co2e
+                    drained_co2_out[row, col] = co2_em
+                    drained_n2o_out[row, col] = n2o_co2e
+                    drained_ch4_land_out[row, col] = ch4_land_co2e
+                    drained_ch4_ditch_out[row, col] = ch4_ditch_co2e
+                    drained_co2_offsite_out[row, col] = co2_off
+                    drained_total_co2e_out[row, col] = total_co2e
 
             if emission_node > 0:
                 node = nu.accrete_node(node, emission_node)
