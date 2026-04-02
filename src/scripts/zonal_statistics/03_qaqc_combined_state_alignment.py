@@ -135,7 +135,7 @@ def _decode_consistency(combined: pd.DataFrame) -> Dict[str, int]:
     # NOTE: This checks self-consistency of combined output encoding/decoding only;
     # it is not an independent parity check against legacy branch outputs.
     arr = combined["combined_state_nodes"].fillna(0).astype("uint32").to_numpy(copy=False)
-    d_dec, b_dec = zc.unpack_emissions_state_to_legacy(arr)
+    d_dec, b_dec = zc.unpack_combined_state_to_legacy(arr)
 
     out = {
         "combined_rows": int(len(combined)),
@@ -262,7 +262,7 @@ def evaluate_interval(
     # Ensure drained/burned node columns exist in combined (decode if missing).
     if "drained_state_nodes" not in combined.columns or "burned_state_nodes" not in combined.columns:
         arr = combined["combined_state_nodes"].fillna(0).astype("uint32").to_numpy(copy=False)
-        d_dec, b_dec = zc.unpack_emissions_state_to_legacy(arr)
+        d_dec, b_dec = zc.unpack_combined_state_to_legacy(arr)
         if "drained_state_nodes" not in combined.columns:
             combined["drained_state_nodes"] = d_dec.astype("uint32", copy=False)
         if "burned_state_nodes" not in combined.columns:

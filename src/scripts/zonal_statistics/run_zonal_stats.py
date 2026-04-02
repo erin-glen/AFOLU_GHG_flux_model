@@ -64,10 +64,10 @@ OUTPUT_BASE = "{root}/version_{model_version}"
 
 # Dataset manifest (per-pixel only for flux totals)
 DATASETS: Dict[str, Dict[str, Any]] = {
-    "emissions_state_nodes": {
-        "folder": "emissions_state",
-        "zarr": "emissions_state_node_{interval}.zarr",
-        "var": "emissions_state_nodes",
+    "combined_state_nodes": {
+        "folder": "combined_state",
+        "zarr": "combined_state_node_{interval}.zarr",
+        "var": "combined_state_nodes",
     },
     "drained_state_nodes": {
         "folder": "drained_state",
@@ -461,11 +461,11 @@ def run(args: argparse.Namespace) -> None:
         paths = build_paths(interval, tile_pixels=args.tile_pixels, **OUTPUT_KW)
 
         logger.info(
-            "Interval %s inputs: drained_total=%s (unit=%s), burned_total=%s (unit=%s), emissions_state=%s, drained_state=%s, burned_state=%s",
+            "Interval %s inputs: drained_total=%s (unit=%s), burned_total=%s (unit=%s), combined_state=%s, drained_state=%s, burned_state=%s",
             interval,
             paths["drained_total"]["folder"], paths["drained_total"]["unit"],
             paths["burned_total"]["folder"], paths["burned_total"]["unit"],
-            paths["emissions_state_nodes"]["folder"],
+            paths["combined_state_nodes"]["folder"],
             paths["drained_state_nodes"]["folder"], paths["burned_state_nodes"]["folder"],
         )
 
@@ -474,7 +474,7 @@ def run(args: argparse.Namespace) -> None:
             try:
                 cached_uri_lists[key] = list_folder_uris(spec["folder"])
             except FileNotFoundError:
-                if key == "emissions_state_nodes":
+                if key == "combined_state_nodes":
                     logger.warning(
                         "Optional inputs for %s missing in interval %s; using legacy state nodes.",
                         key,
@@ -492,28 +492,38 @@ def run(args: argparse.Namespace) -> None:
 
         drained_state_nodes = None
         burned_state_nodes = None
-        emissions_state_nodes = None
+        combined_state_nodes = None
 
         try:
-            emissions_state_nodes = open_zarr_region(
-                paths["emissions_state_nodes"]["zarr"], bbox, args.chunk_size
+            combined_state_nodes = open_zarr_region(
+                paths["combined_state_nodes"]["zarr"], bbox, args.chunk_size
             ).astype("uint32")
         except Exception as exc:
-            logger.warning("emissions_state_nodes not available for %s (%s); falling back to legacy nodes.", interval, exc)
+            logger.warning("combined_state_nodes not available for %s (%s); trying legacy emissions_state cache.", interval, exc)
+            legacy_spec = dict(paths["combined_state_nodes"])
+            legacy_spec["folder"] = legacy_spec["folder"].replace("/combined_state/", "/emissions_state/")
+            legacy_spec["zarr"] = legacy_spec["zarr"].replace("combined_state_node_", "emissions_state_node_")
+            try:
+                combined_state_nodes = open_zarr_region(
+                    legacy_spec["zarr"], bbox, args.chunk_size
+                ).astype("uint32")
+                logger.warning("Using archived legacy emissions_state cache for interval %s", interval)
+            except Exception:
+                combined_state_nodes = None
 
-        if emissions_state_nodes is not None:
-            decoded_drained, decoded_burned = zc.unpack_emissions_state_to_legacy(
-                emissions_state_nodes.values.astype(np.uint32, copy=False)
+        if combined_state_nodes is not None:
+            decoded_drained, decoded_burned = zc.unpack_combined_state_to_legacy(
+                combined_state_nodes.values.astype(np.uint32, copy=False)
             )
             drained_state_nodes = xr.DataArray(
                 data=decoded_drained,
-                dims=emissions_state_nodes.dims,
-                coords=emissions_state_nodes.coords,
+                dims=combined_state_nodes.dims,
+                coords=combined_state_nodes.coords,
             )
             burned_state_nodes = xr.DataArray(
                 data=decoded_burned,
-                dims=emissions_state_nodes.dims,
-                coords=emissions_state_nodes.coords,
+                dims=combined_state_nodes.dims,
+                coords=combined_state_nodes.coords,
             )
         else:
             drained_state_nodes = open_zarr_region(
