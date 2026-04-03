@@ -19,8 +19,9 @@ Key points
   plus area (Area) -> ha -> Mha (also averaged over the same window).
 
 * Land-use comparability:
-    - We classify model pixels from *emissions_state* using
-      `pc._reclass_emissions_state`.
+    - We classify model pixels from the unified state semantics exposed via the
+      `emissions_state` compatibility label (derived from combined-state routing)
+      using `pc._reclass_emissions_state`.
     - For this FAO comparison we explicitly fold **Oil Palm into Cropland**:
           "Oil Palm" -> "Cropland"
     - We then restrict to LandUse in {"Cropland", "Grassland"}.
@@ -293,7 +294,8 @@ def _compute_model_metrics_for_run(
     CO₂, N₂O, total area, and land-use split.
 
     Land-use classification:
-      - Based on emissions_state via pc._reclass_emissions_state.
+      - Based on unified-state semantics exposed as `emissions_state` via
+        pc._reclass_emissions_state.
       - "Oil Palm" is explicitly folded into "Cropland" for FAO comparison.
       - Filtered to LandUse in {"Cropland", "Grassland"}.
     """
@@ -312,7 +314,8 @@ def _compute_model_metrics_for_run(
 
     latest_year = int(df["interval_end"].max())
 
-    # Land-use classification from emissions_state (NOT drained_state)
+    # Land-use classification from unified-state semantics exposed as
+    # `emissions_state` (NOT drained_state)
     df = df.copy()
     df["LandUse_raw"] = df["emissions_state"].apply(pc._reclass_emissions_state)
 
